@@ -1,0 +1,205 @@
+use super::command::ProcessRunner;
+use super::compose::{DockerCompose, HealthProbe, ServiceStatus};
+use super::state::{
+    ApiToken, LocalBackendError, ManagedStackPaths, ManagedStackState, ProvisioningState,
+    RuntimeSecrets, SeedAccount, StackKind,
+};
+
+/// Redacted result returned to the GUI after the managed stack reaches its
+/// final provisioning state. The API token is intentionally absent because it
+/// is already stored through the canonical Sacrum config path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProvisioningResult {
+    pub backend_url: String,
+    pub provisioning_state: ProvisioningState,
+    pub services: Vec<ServiceStatus>,
+}
+
+impl<R, H> DockerCompose<R, H>
+where
+    R: ProcessRunner,
+    H: HealthProbe,
+{
+    /// Provision a fresh GUI-managed stack. Runtime secrets and the generated
+    /// API token are persisted before Docker is started, so a retry after any
+    /// partial failure reuses the same values and database volume.
+    pub async fn provision_fresh(
+        &self,
+        paths: &ManagedStackPaths,
+        state: &mut ManagedStackState,
+        account: SeedAccount,
+    ) -> Result<ProvisioningResult, LocalBackendError> {
+        if state.kind != StackKind::Managed {
+            return Err(LocalBackendError::InvalidState(
+                "fresh local provisioning cannot modify an adopted development stack".to_string(),
+            ));
+        }
+        if state.provisioning_state == ProvisioningState::Ready {
+            return Err(LocalBackendError::InvalidState(
+                "local backend is already provisioned; normal startup must not reseed it"
+                    .to_string(),
+            ));
+        }
+
+        if let Err(error) = paths.install_assets() {
+            return Err(record_failed_state(paths, state, error));
+        }
+
+        let runtime_secrets = match ensure_runtime_secrets(paths, state.kind) {
+            Ok(secrets) => secrets,
+            Err(error) => return Err(record_failed_state(paths, state, error)),
+        };
+        let api_token = match ensure_api_token(paths) {
+            Ok(token) => token,
+            Err(error) => return Err(record_failed_state(paths, state, error)),
+        };
+
+        let services = match self.start_and_wait_until_healthy(paths, state).await {
+            Ok(services) => services,
+            Err(error) => return Err(error),
+        };
+
+        let seed_result = self.run_seeder(paths, state, &account, &api_token).await;
+        drop(account);
+        if let Err(error) = seed_result {
+            return Err(record_failed_state(paths, state, error));
+        }
+
+        if let Err(error) = persist_local_client_config(&state.backend_url(), &api_token) {
+            return Err(record_failed_state(paths, state, error));
+        }
+
+        state.provisioning_state = ProvisioningState::Ready;
+        if let Err(error) = paths.save_state(state) {
+            return Err(record_failed_state(paths, state, error));
+        }
+
+        // Keep this binding live through the seeding/configuration sequence so
+        // the compiler cannot optimize the runtime secret read away before the
+        // Compose operation is complete. It is never returned or serialized.
+        drop(runtime_secrets);
+
+        Ok(ProvisioningResult {
+            backend_url: state.backend_url(),
+            provisioning_state: state.provisioning_state,
+            services,
+        })
+    }
+}
+
+fn ensure_runtime_secrets(
+    paths: &ManagedStackPaths,
+    kind: StackKind,
+) -> Result<RuntimeSecrets, LocalBackendError> {
+    if paths.secrets_file.is_file() {
+        paths.load_runtime_secrets(kind)
+    } else {
+        let proposed = RuntimeSecrets::generate()?;
+        paths.ensure_runtime_secrets(&proposed, kind)
+    }
+}
+
+fn ensure_api_token(paths: &ManagedStackPaths) -> Result<ApiToken, LocalBackendError> {
+    if paths.api_token_file.is_file() {
+        paths.load_api_token()
+    } else {
+        let proposed = ApiToken::generate()?;
+        paths.ensure_api_token(&proposed)
+    }
+}
+
+fn record_failed_state(
+    paths: &ManagedStackPaths,
+    state: &mut ManagedStackState,
+    error: LocalBackendError,
+) -> LocalBackendError {
+    state.provisioning_state = ProvisioningState::Failed;
+    match paths.save_state(state) {
+        Ok(()) => error,
+        Err(save_error) => LocalBackendError::InvalidState(format!(
+            "{error}; additionally could not record failed provisioning state: {save_error}"
+        )),
+    }
+}
+
+fn persist_local_client_config(
+    backend_url: &str,
+    api_token: &ApiToken,
+) -> Result<(), LocalBackendError> {
+    let parsed = url::Url::parse(backend_url).map_err(|error| {
+        LocalBackendError::InvalidState(format!("local backend URL is invalid: {error}"))
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(LocalBackendError::InvalidState(
+            "local backend URL must include an HTTP(S) scheme and host".to_string(),
+        ));
+    }
+
+    let mut config = vertebrae_sacrum_client::load_config_file().map_err(|error| {
+        LocalBackendError::InvalidState(format!("could not load Sacrum client config: {error}"))
+    })?;
+    config.sacrum.url = backend_url.trim_end_matches('/').to_string();
+    config.sacrum.token = Some(api_token.as_str().to_string());
+    vertebrae_sacrum_client::save_config_file(&config).map_err(|error| {
+        LocalBackendError::InvalidState(format!("could not persist Sacrum client config: {error}"))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::compose::test_support::*;
+    use super::*;
+    use crate::local_backend::command::CommandOutput;
+
+    #[test]
+    fn failed_state_recording_does_not_include_runtime_secrets() {
+        let (_temp, paths, mut state) = stack_fixture(StackKind::Managed);
+        let error = record_failed_state(
+            &paths,
+            &mut state,
+            LocalBackendError::CommandFailed {
+                action: "seed local Sacrum account".to_string(),
+                status: "1".to_string(),
+                output: "safe diagnostic".to_string(),
+            },
+        );
+
+        assert!(error.to_string().contains("safe diagnostic"));
+        assert_eq!(state.provisioning_state, ProvisioningState::Failed);
+        let persisted = paths
+            .load_state()
+            .expect("load state")
+            .expect("state exists");
+        assert_eq!(persisted.provisioning_state, ProvisioningState::Failed);
+        let json = std::fs::read_to_string(paths.state_file).expect("read state");
+        assert!(!json.contains("POSTGRES_PASSWORD"));
+        assert!(!json.contains("SECRET_KEY_BASE"));
+    }
+
+    #[test]
+    fn local_client_config_rejects_non_http_urls_before_persisting() {
+        let token = ApiToken::new(format!("sac_{}", "a".repeat(64))).expect("valid token");
+        let error = persist_local_client_config("file:///tmp/backend", &token)
+            .expect_err("file URL must not be configured");
+        assert!(error.to_string().contains("HTTP(S)"));
+    }
+
+    #[tokio::test]
+    async fn adopted_stacks_cannot_enter_the_fresh_provisioning_flow() {
+        let (_temp, paths, mut state) = stack_fixture(StackKind::AdoptedLegacy);
+        let account =
+            SeedAccount::new("person@example.test", "person", "password").expect("valid account");
+        let controller = controller(
+            MockRunner::with_outputs([CommandOutput::success("unused")]),
+            MockHealth::default(),
+        );
+
+        let error = controller
+            .provision_fresh(&paths, &mut state, account)
+            .await
+            .expect_err("adopted stack must not be fresh provisioned");
+
+        assert!(error.to_string().contains("adopted development stack"));
+        assert_eq!(state.provisioning_state, ProvisioningState::Unverified);
+    }
+}

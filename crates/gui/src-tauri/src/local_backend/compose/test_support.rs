@@ -15,32 +15,32 @@ use crate::local_backend::state::{
     RuntimeSecrets, StackKind,
 };
 
-pub(super) const DIGEST_IMAGE: &str =
+pub(crate) const DIGEST_IMAGE: &str =
     "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 #[derive(Clone, Default)]
-pub(super) struct MockRunner {
+pub(crate) struct MockRunner {
     requests: Arc<Mutex<Vec<CommandRequest>>>,
     outputs: Arc<Mutex<VecDeque<CommandOutput>>>,
 }
 
 impl MockRunner {
-    pub(super) fn with_outputs(outputs: impl IntoIterator<Item = CommandOutput>) -> Self {
+    pub(crate) fn with_outputs(outputs: impl IntoIterator<Item = CommandOutput>) -> Self {
         Self {
             requests: Arc::default(),
             outputs: Arc::new(Mutex::new(outputs.into_iter().collect())),
         }
     }
 
-    pub(super) fn after_prerequisites(outputs: impl IntoIterator<Item = CommandOutput>) -> Self {
+    pub(crate) fn after_prerequisites(outputs: impl IntoIterator<Item = CommandOutput>) -> Self {
         Self::with_outputs(prerequisites().into_iter().chain(outputs))
     }
 
-    pub(super) fn requests(&self) -> Vec<CommandRequest> {
+    pub(crate) fn requests(&self) -> Vec<CommandRequest> {
         self.requests.lock().expect("requests lock").clone()
     }
 
-    pub(super) fn push_outputs(&self, outputs: impl IntoIterator<Item = CommandOutput>) {
+    pub(crate) fn push_outputs(&self, outputs: impl IntoIterator<Item = CommandOutput>) {
         self.outputs.lock().expect("outputs lock").extend(outputs);
     }
 }
@@ -59,12 +59,12 @@ impl ProcessRunner for MockRunner {
 }
 
 #[derive(Clone, Default)]
-pub(super) struct MockHealth {
+pub(crate) struct MockHealth {
     results: Arc<Mutex<VecDeque<bool>>>,
 }
 
 impl MockHealth {
-    pub(super) fn with_results(results: impl IntoIterator<Item = bool>) -> Self {
+    pub(crate) fn with_results(results: impl IntoIterator<Item = bool>) -> Self {
         Self {
             results: Arc::new(Mutex::new(results.into_iter().collect())),
         }
@@ -82,11 +82,11 @@ impl HealthProbe for MockHealth {
     }
 }
 
-pub(super) fn docker_target() -> DockerTarget {
+pub(crate) fn docker_target() -> DockerTarget {
     DockerTarget::new("desktop-linux", "unix:///tmp/docker.sock").expect("local target")
 }
 
-pub(super) fn controller(
+pub(crate) fn controller(
     runner: MockRunner,
     health: MockHealth,
 ) -> DockerCompose<MockRunner, MockHealth> {
@@ -98,7 +98,7 @@ pub(super) fn controller(
     )
 }
 
-pub(super) fn stack_fixture(
+pub(crate) fn stack_fixture(
     kind: StackKind,
 ) -> (tempfile::TempDir, ManagedStackPaths, ManagedStackState) {
     let temp = tempfile::tempdir().expect("temp dir");
@@ -135,7 +135,7 @@ pub(super) fn stack_fixture(
     (temp, paths, state)
 }
 
-pub(super) fn prerequisites() -> [CommandOutput; 3] {
+pub(crate) fn prerequisites() -> [CommandOutput; 3] {
     [
         CommandOutput::success("unix:///tmp/docker.sock"),
         CommandOutput::success("28.0.0"),
@@ -143,7 +143,7 @@ pub(super) fn prerequisites() -> [CommandOutput; 3] {
     ]
 }
 
-pub(super) fn legacy_outputs(inspect: Option<String>) -> Vec<CommandOutput> {
+pub(crate) fn legacy_outputs(inspect: Option<String>) -> Vec<CommandOutput> {
     let mut outputs = prerequisites().to_vec();
     if let Some(inspect) = inspect {
         outputs.extend([
@@ -162,7 +162,7 @@ pub(super) fn legacy_outputs(inspect: Option<String>) -> Vec<CommandOutput> {
     outputs
 }
 
-pub(super) async fn detect_legacy(
+pub(crate) async fn detect_legacy(
     outputs: impl IntoIterator<Item = CommandOutput>,
 ) -> Result<LegacyStackDetection, LocalBackendError> {
     controller(
@@ -173,7 +173,7 @@ pub(super) async fn detect_legacy(
     .await
 }
 
-pub(super) async fn postgres_exec(
+pub(crate) async fn postgres_exec(
     controller: &DockerCompose<SystemProcessRunner, ReqwestHealthProbe>,
     paths: &ManagedStackPaths,
     state: &ManagedStackState,
@@ -194,11 +194,11 @@ pub(super) async fn postgres_exec(
         .await
 }
 
-pub(super) fn legacy_inspect_json(postgres_image: &str, volume: &str) -> String {
+pub(crate) fn legacy_inspect_json(postgres_image: &str, volume: &str) -> String {
     legacy_inspect_json_with(postgres_image, volume, "")
 }
 
-pub(super) fn legacy_inspect_json_with(
+pub(crate) fn legacy_inspect_json_with(
     postgres_image: &str,
     volume: &str,
     host_ip: &str,
@@ -226,6 +226,6 @@ pub(super) fn legacy_inspect_json_with(
     format!("{postgres}\n{sacrum}\n")
 }
 
-pub(super) fn legacy_volume_inspect(project: &str, volume: &str) -> String {
+pub(crate) fn legacy_volume_inspect(project: &str, volume: &str) -> String {
     format!(r#"{{"Name":"vertebrae-dev_pgdata","Project":"{project}","Volume":"{volume}"}}"#)
 }

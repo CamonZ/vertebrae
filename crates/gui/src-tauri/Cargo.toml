@@ -71,6 +71,7 @@ ed25519-dalek = "2"
 fs2 = "0.4"
 getrandom = "0.2"
 sha2 = "0.10"
+zeroize = "1"
 
 # WebSocket support for Phoenix channels
 tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }

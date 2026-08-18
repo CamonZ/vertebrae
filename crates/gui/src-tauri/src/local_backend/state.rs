@@ -7,6 +7,7 @@ use std::io::{self, Write};
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 const COMPOSE_ASSET: &str = include_str!("assets/compose.yaml");
 const SEED_ASSET: &str = include_str!("assets/seed.exs");
@@ -104,6 +105,141 @@ pub enum ProvisioningState {
     Ready,
     Failed,
     Unverified,
+}
+
+/// A generated Sacrum API token. Its debug representation never reveals the
+/// token, which keeps structured diagnostics safe to log.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ApiToken(String);
+
+impl ApiToken {
+    pub fn generate() -> Result<Self, LocalBackendError> {
+        let mut entropy = [0_u8; 32];
+        getrandom::getrandom(&mut entropy)
+            .map_err(|error| LocalBackendError::SecretGeneration(error.to_string()))?;
+        Self::new(format!("sac_{}", to_hex(&entropy)))
+    }
+
+    pub fn new(value: impl Into<String>) -> Result<Self, LocalBackendError> {
+        let token = Self(value.into());
+        if !token.0.strip_prefix("sac_").is_some_and(|suffix| {
+            suffix.len() == 64 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) {
+            return Err(LocalBackendError::InvalidState(
+                "local API token must use the sac_ prefix and contain 32 bytes of hex entropy"
+                    .to_string(),
+            ));
+        }
+        Ok(token)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn redact(&self, text: &str) -> String {
+        text.replace(self.as_str(), "[redacted]")
+    }
+}
+
+impl fmt::Debug for ApiToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("ApiToken")
+            .field(&"[redacted]")
+            .finish()
+    }
+}
+
+impl Drop for ApiToken {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+/// User-provided account data used only by the one-shot local seeder.
+///
+/// This type is deliberately not serializable and redacts its password from
+/// debug output. The password is zeroized when the value is dropped.
+pub struct SeedAccount {
+    email: String,
+    username: String,
+    password: String,
+}
+
+impl SeedAccount {
+    pub fn new(
+        email: impl Into<String>,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Result<Self, LocalBackendError> {
+        let account = Self {
+            email: email.into(),
+            username: username.into(),
+            password: password.into(),
+        };
+        account.validate()?;
+        Ok(account)
+    }
+
+    pub fn email(&self) -> &str {
+        &self.email
+    }
+
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
+    pub(crate) fn password(&self) -> &str {
+        &self.password
+    }
+
+    pub(crate) fn redact(&self, text: &str) -> String {
+        text.replace(self.password(), "[redacted]")
+    }
+
+    fn validate(&self) -> Result<(), LocalBackendError> {
+        if self.email.trim().is_empty() || self.username.trim().is_empty() {
+            return Err(LocalBackendError::InvalidState(
+                "local account email and username are required".to_string(),
+            ));
+        }
+        if self.password.is_empty() {
+            return Err(LocalBackendError::InvalidState(
+                "local account password is required".to_string(),
+            ));
+        }
+        if [&self.email, &self.username, &self.password]
+            .iter()
+            .any(|value| {
+                value
+                    .bytes()
+                    .any(|byte| byte == b'\0' || byte == b'\n' || byte == b'\r')
+            })
+        {
+            return Err(LocalBackendError::InvalidState(
+                "local account values must not contain NUL or line-break characters".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for SeedAccount {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SeedAccount")
+            .field("email", &self.email)
+            .field("username", &self.username)
+            .field("password", &"[redacted]")
+            .finish()
+    }
+}
+
+impl Drop for SeedAccount {
+    fn drop(&mut self) {
+        self.password.zeroize();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,12 +600,20 @@ impl fmt::Debug for RuntimeSecrets {
     }
 }
 
+impl Drop for RuntimeSecrets {
+    fn drop(&mut self) {
+        self.postgres_password.zeroize();
+        self.secret_key_base.zeroize();
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedStackPaths {
     pub root: PathBuf,
     pub compose_file: PathBuf,
     pub seed_file: PathBuf,
     pub secrets_file: PathBuf,
+    pub api_token_file: PathBuf,
     pub state_file: PathBuf,
 }
 
@@ -486,6 +630,7 @@ impl ManagedStackPaths {
             compose_file: root.join("compose.yaml"),
             seed_file: root.join("seed.exs"),
             secrets_file: root.join("runtime.env"),
+            api_token_file: root.join("api-token"),
             state_file: root.join("state.json"),
             root,
         }
@@ -541,6 +686,41 @@ impl ManagedStackPaths {
         let content = fs::read_to_string(&self.secrets_file)
             .map_err(|source| file_error("read", &self.secrets_file, source))?;
         RuntimeSecrets::from_env_file(&content, kind)
+    }
+
+    pub fn ensure_api_token(&self, proposed: &ApiToken) -> Result<ApiToken, LocalBackendError> {
+        ensure_private_directory(&self.root)?;
+        if self.api_token_file.exists() {
+            return self.load_api_token();
+        }
+
+        let temp = write_temp_file(&self.api_token_file, proposed.as_str().as_bytes(), 0o600)?;
+        match fs::hard_link(&temp, &self.api_token_file) {
+            Ok(()) => {
+                remove_temp(&temp);
+                sync_parent(&self.api_token_file)?;
+                Ok(proposed.clone())
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                remove_temp(&temp);
+                self.load_api_token()
+            }
+            Err(source) => {
+                remove_temp(&temp);
+                Err(file_error(
+                    "persist local API token",
+                    &self.api_token_file,
+                    source,
+                ))
+            }
+        }
+    }
+
+    pub fn load_api_token(&self) -> Result<ApiToken, LocalBackendError> {
+        set_mode(&self.api_token_file, 0o600)?;
+        let content = fs::read_to_string(&self.api_token_file)
+            .map_err(|source| file_error("read", &self.api_token_file, source))?;
+        ApiToken::new(content.trim_end_matches(['\r', '\n']))
     }
 
     pub fn save_state(&self, state: &ManagedStackState) -> Result<(), LocalBackendError> {
@@ -872,6 +1052,61 @@ mod tests {
             .to_env_file()
             .chars()
             .all(|character| !matches!(character, '/' | '+')));
+    }
+
+    #[test]
+    fn generated_api_tokens_are_sac_prefixed_and_distinct() {
+        let first = ApiToken::generate().expect("generate first API token");
+        let second = ApiToken::generate().expect("generate second API token");
+
+        assert!(first.as_str().starts_with("sac_"));
+        assert_eq!(first.as_str().len(), 68);
+        assert!(first.as_str()[4..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(first, second);
+        assert_eq!(format!("{first:?}"), "ApiToken(\"[redacted]\")");
+    }
+
+    #[test]
+    fn api_token_is_persisted_once_with_owner_only_permissions() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let paths = ManagedStackPaths::from_data_dir(temp.path());
+        let first = ApiToken::new(format!("sac_{}", "a".repeat(64))).expect("valid token");
+        let second = ApiToken::new(format!("sac_{}", "b".repeat(64))).expect("valid token");
+
+        assert_eq!(
+            paths.ensure_api_token(&first).expect("persist token"),
+            first
+        );
+        assert_eq!(paths.ensure_api_token(&second).expect("reuse token"), first);
+        assert_eq!(paths.load_api_token().expect("load token"), first);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&paths.api_token_file)
+                    .expect("token metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn seed_account_rejects_unsafe_values_and_redacts_password() {
+        let account = SeedAccount::new("user@example.test", "user", "correct horse battery staple")
+            .expect("valid account");
+        assert_eq!(account.email(), "user@example.test");
+        assert_eq!(account.username(), "user");
+        assert!(!format!("{account:?}").contains("correct horse"));
+        assert!(!account
+            .redact("password=correct horse battery staple")
+            .contains("correct horse"));
+        assert!(SeedAccount::new("user\n@example.test", "user", "password").is_err());
     }
 
     #[test]

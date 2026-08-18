@@ -5,7 +5,8 @@ use std::time::Duration;
 use super::DockerCompose;
 use crate::local_backend::command::{CommandOutput, CommandRequest, ProcessRunner};
 use crate::local_backend::state::{
-    DockerTarget, LocalBackendError, ManagedStackPaths, ManagedStackState, RuntimeSecrets,
+    ApiToken, DockerTarget, LocalBackendError, ManagedStackPaths, ManagedStackState,
+    RuntimeSecrets, SeedAccount, StackKind,
 };
 
 pub(super) const QUICK_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -252,6 +253,43 @@ where
         output.stderr = secrets.redact(&output.stderr);
         Ok(output)
     }
+
+    /// Run the idempotent seed script as a one-shot Compose service. Account
+    /// credentials are supplied through the child process environment only;
+    /// they are never added to command arguments or persisted in the stack.
+    pub async fn run_seeder(
+        &self,
+        paths: &ManagedStackPaths,
+        state: &ManagedStackState,
+        account: &SeedAccount,
+        api_token: &ApiToken,
+    ) -> Result<(), LocalBackendError> {
+        if state.kind != StackKind::Managed {
+            return Err(LocalBackendError::InvalidState(
+                "the fresh local seeder must not run for an adopted development stack".to_string(),
+            ));
+        }
+        let secrets = self.validate_stack_files(paths, state)?;
+        let request = self
+            .compose_request(
+                paths,
+                state,
+                "seed local Sacrum account",
+                ["run", "--rm", "--no-deps", "seeder"],
+                self.reconcile_timeout,
+            )
+            .with_env([
+                ("SEED_EMAIL", account.email()),
+                ("SEED_USERNAME", account.username()),
+                ("SEED_PASSWORD", account.password()),
+                ("SEED_TOKEN", api_token.as_str()),
+            ]);
+
+        self.checked_stack(request, &secrets)
+            .await
+            .map(|_| ())
+            .map_err(|error| redact_seed_error(error, account, api_token))
+    }
 }
 
 async fn resolve_docker_target<R: ProcessRunner>(
@@ -331,11 +369,24 @@ fn redact_command_error(
     error
 }
 
+fn redact_seed_error(
+    mut error: LocalBackendError,
+    account: &SeedAccount,
+    api_token: &ApiToken,
+) -> LocalBackendError {
+    if let LocalBackendError::CommandFailed { output, .. }
+    | LocalBackendError::CommandTimedOut { output, .. } = &mut error
+    {
+        *output = account.redact(&api_token.redact(output));
+    }
+    error
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::test_support::*;
     use super::*;
-    use crate::local_backend::state::StackKind;
+    use crate::local_backend::state::{ApiToken, SeedAccount, StackKind};
     #[tokio::test]
     async fn controller_resolves_a_local_context_and_neutralizes_ambient_overrides() {
         let runner = MockRunner::with_outputs([
@@ -470,7 +521,70 @@ mod tests {
 
         let message = error.to_string();
         assert_eq!(message.matches("[redacted]").count(), 2, "{message}");
-        assert!(!message.contains(&postgres_password), "{message}");
-        assert!(!message.contains(&secret_key_base), "{message}");
+        assert!(!message.contains(postgres_password), "{message}");
+        assert!(!message.contains(secret_key_base), "{message}");
+    }
+
+    #[tokio::test]
+    async fn seeder_receives_credentials_only_as_environment_values() {
+        let (_temp, paths, state) = stack_fixture(StackKind::Managed);
+        let account = SeedAccount::new("person@example.test", "person", "account-password")
+            .expect("valid account");
+        let token = ApiToken::new(format!("sac_{}", "a".repeat(64))).expect("valid token");
+        let runner =
+            MockRunner::with_outputs([CommandOutput::success("Local Sacrum account is ready.")]);
+        let controller = controller(runner.clone(), MockHealth::default());
+
+        controller
+            .run_seeder(&paths, &state, &account, &token)
+            .await
+            .expect("run one-shot seeder");
+
+        let request = &runner.requests()[0];
+        assert!(request.args_as_strings().ends_with(&[
+            "run".to_string(),
+            "--rm".to_string(),
+            "--no-deps".to_string(),
+            "seeder".to_string(),
+        ]));
+        assert_eq!(
+            request.env_value("SEED_EMAIL").unwrap(),
+            "person@example.test"
+        );
+        assert_eq!(request.env_value("SEED_USERNAME").unwrap(), "person");
+        assert_eq!(
+            request.env_value("SEED_PASSWORD").unwrap(),
+            "account-password"
+        );
+        assert_eq!(request.env_value("SEED_TOKEN").unwrap(), token.as_str());
+        assert!(request.args_as_strings().iter().all(|argument| {
+            !argument.contains("account-password") && !argument.contains(token.as_str())
+        }));
+    }
+
+    #[tokio::test]
+    async fn seeder_failures_redact_account_password_and_api_token() {
+        let (_temp, paths, state) = stack_fixture(StackKind::Managed);
+        let account = SeedAccount::new("person@example.test", "person", "account-password")
+            .expect("valid account");
+        let token = ApiToken::new(format!("sac_{}", "b".repeat(64))).expect("valid token");
+        let runner = MockRunner::with_outputs([CommandOutput::failure(
+            1,
+            format!(
+                "SEED_PASSWORD={} SEED_TOKEN={}",
+                account.password(),
+                token.as_str()
+            ),
+        )]);
+        let controller = controller(runner, MockHealth::default());
+
+        let error = controller
+            .run_seeder(&paths, &state, &account, &token)
+            .await
+            .expect_err("seed should fail");
+        let message = error.to_string();
+        assert!(!message.contains(account.password()), "{message}");
+        assert!(!message.contains(token.as_str()), "{message}");
+        assert_eq!(message.matches("[redacted]").count(), 2, "{message}");
     }
 }
