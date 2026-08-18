@@ -523,23 +523,12 @@ where
         ];
         inspect_args.extend(ids.iter().map(OsString::from));
         let inspected = self
-            .runner
-            .run(self.docker_request(
+            .checked(self.docker_request(
                 "inspect vertebrae-dev containers",
                 inspect_args,
                 self.quick_timeout,
             ))
             .await?;
-        if !inspected.success {
-            return Err(LocalBackendError::CommandFailed {
-                action: "inspect vertebrae-dev containers".to_string(),
-                status: inspected
-                    .exit_code
-                    .map(|code| code.to_string())
-                    .unwrap_or_else(|| "terminated".to_string()),
-                output: inspected.summary(),
-            });
-        }
         if inspected.truncated {
             return Ok(LegacyStackDetection::Unsafe(
                 "Docker container metadata exceeded the inspection limit".to_string(),
@@ -585,7 +574,7 @@ where
             return Err(LocalBackendError::AdoptionNotConfirmed);
         }
         let current = self.detect_legacy_stack().await?;
-        if !legacy_evidence_matches(detection, &current) {
+        if detection != &current {
             return Err(LocalBackendError::UnsafeLegacyStack(
                 "Docker state changed after adoption was offered".to_string(),
             ));
@@ -839,63 +828,44 @@ where
         request: CommandRequest,
         secrets: &RuntimeSecrets,
     ) -> Result<CommandOutput, LocalBackendError> {
-        match self.checked(request).await {
-            Ok(mut output) => {
-                output.stdout = secrets.redact(&output.stdout);
-                output.stderr = secrets.redact(&output.stderr);
-                Ok(output)
-            }
-            Err(LocalBackendError::CommandFailed {
-                action,
-                status,
-                output,
-            }) => Err(LocalBackendError::CommandFailed {
-                action,
-                status,
-                output: secrets.redact(&output),
-            }),
-            Err(LocalBackendError::CommandTimedOut {
-                action,
-                timeout_seconds,
-                output,
-            }) => Err(LocalBackendError::CommandTimedOut {
-                action,
-                timeout_seconds,
-                output: secrets.redact(&output),
-            }),
-            Err(error) => Err(error),
-        }
+        let mut output = self
+            .checked(request)
+            .await
+            .map_err(|error| redact_command_error(error, secrets))?;
+        output.stdout = secrets.redact(&output.stdout);
+        output.stderr = secrets.redact(&output.stderr);
+        Ok(output)
     }
 }
 
-fn legacy_evidence_matches(offered: &LegacyStackDetection, current: &LegacyStackDetection) -> bool {
-    match (offered, current) {
-        (LegacyStackDetection::Compatible(offered), LegacyStackDetection::Compatible(current)) => {
-            offered == current
+fn redact_command_error(
+    mut error: LocalBackendError,
+    secrets: &RuntimeSecrets,
+) -> LocalBackendError {
+    match &mut error {
+        LocalBackendError::CommandFailed { output, .. }
+        | LocalBackendError::CommandTimedOut { output, .. } => {
+            *output = secrets.redact(output);
         }
-        (LegacyStackDetection::HostPortRequired, LegacyStackDetection::HostPortRequired) => true,
-        (LegacyStackDetection::Absent, LegacyStackDetection::Absent) => true,
-        (LegacyStackDetection::Unsafe(offered), LegacyStackDetection::Unsafe(current)) => {
-            offered == current
-        }
-        _ => false,
+        _ => {}
     }
+    error
 }
 
 fn classify_port_error(error: LocalBackendError, port: u16) -> LocalBackendError {
     match error {
-        LocalBackendError::CommandFailed { output, .. }
-            if output
-                .to_ascii_lowercase()
-                .contains("port is already allocated")
-                || output
-                    .to_ascii_lowercase()
-                    .contains("address already in use") =>
-        {
+        LocalBackendError::CommandFailed { output, .. } if port_conflict(&output) => {
             LocalBackendError::PortUnavailable { port, output }
         }
         error => error,
     }
+}
+
+fn port_conflict(output: &str) -> bool {
+    let output = output.to_ascii_lowercase();
+    ["port is already allocated", "address already in use"]
+        .iter()
+        .any(|message| output.contains(message))
 }
 
 #[derive(Deserialize)]
@@ -1050,7 +1020,7 @@ fn validate_legacy_containers(
 
 #[cfg(test)]
 mod tests {
-    use super::super::state::select_host_port;
+    use super::super::state::{select_host_port, ProvisioningState};
     use super::*;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
@@ -1070,6 +1040,10 @@ mod tests {
                 requests: Arc::default(),
                 outputs: Arc::new(Mutex::new(outputs.into_iter().collect())),
             }
+        }
+
+        fn after_prerequisites(outputs: impl IntoIterator<Item = CommandOutput>) -> Self {
+            Self::with_outputs(prerequisites().into_iter().chain(outputs))
         }
 
         fn requests(&self) -> Vec<CommandRequest> {
@@ -1132,44 +1106,45 @@ mod tests {
     }
 
     fn ready_stack() -> (tempfile::TempDir, ManagedStackPaths, ManagedStackState) {
-        let temp = tempfile::tempdir().expect("temp dir");
-        let paths = ManagedStackPaths::from_data_dir(temp.path());
-        let state = ManagedStackState::fresh(
-            DIGEST_IMAGE,
-            4400,
-            BackendImageChannel::BackendRelease,
-            docker_target(),
-        )
-        .expect("valid state");
-        paths.install_assets().expect("install assets");
-        paths
-            .ensure_runtime_secrets(
-                &RuntimeSecrets::new(
-                    "postgres-password-0123456789abcdef0123456789abcdef",
-                    "secret-key-base-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-                )
-                .expect("valid secrets"),
-                state.kind,
-            )
-            .expect("persist secrets");
-        (temp, paths, state)
+        stack_fixture(StackKind::Managed)
     }
 
     fn adopted_stack() -> (tempfile::TempDir, ManagedStackPaths, ManagedStackState) {
+        stack_fixture(StackKind::AdoptedLegacy)
+    }
+
+    fn stack_fixture(kind: StackKind) -> (tempfile::TempDir, ManagedStackPaths, ManagedStackState) {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = ManagedStackPaths::from_data_dir(temp.path());
-        let state = ManagedStackState::adopted_legacy(
-            DIGEST_IMAGE,
-            4400,
-            "",
-            BackendImageChannel::BackendRelease,
-            docker_target(),
-        )
-        .expect("valid adopted state");
+        let (state, secrets) = match kind {
+            StackKind::Managed => (
+                ManagedStackState::fresh(
+                    DIGEST_IMAGE,
+                    4400,
+                    BackendImageChannel::BackendRelease,
+                    docker_target(),
+                ),
+                RuntimeSecrets::new(
+                    "postgres-password-0123456789abcdef0123456789abcdef",
+                    "secret-key-base-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                ),
+            ),
+            StackKind::AdoptedLegacy => (
+                ManagedStackState::adopted_legacy(
+                    DIGEST_IMAGE,
+                    4400,
+                    "",
+                    BackendImageChannel::BackendRelease,
+                    docker_target(),
+                ),
+                Ok(RuntimeSecrets::legacy_development()),
+            ),
+        };
+        let state = state.expect("valid state");
         paths.install_assets().expect("install assets");
         paths
-            .ensure_runtime_secrets(&RuntimeSecrets::legacy_development(), state.kind)
-            .expect("persist legacy secrets");
+            .ensure_runtime_secrets(&secrets.expect("valid secrets"), state.kind)
+            .expect("persist secrets");
         (temp, paths, state)
     }
 
@@ -1202,6 +1177,47 @@ mod tests {
                 CommandOutput::success(legacy_volume_inspect("vertebrae-dev", "pgdata")),
             ])
             .collect()
+    }
+
+    async fn detect_legacy(
+        outputs: impl IntoIterator<Item = CommandOutput>,
+    ) -> Result<LegacyStackDetection, LocalBackendError> {
+        controller(
+            MockRunner::after_prerequisites(outputs),
+            MockHealth::default(),
+        )
+        .detect_legacy_stack()
+        .await
+    }
+
+    async fn postgres_exec(
+        controller: &DockerCompose<SystemProcessRunner, ReqwestHealthProbe>,
+        paths: &ManagedStackPaths,
+        state: &ManagedStackState,
+        secrets: &RuntimeSecrets,
+        action: &str,
+        psql_args: &[&str],
+    ) -> Result<CommandOutput, LocalBackendError> {
+        let mut args: Vec<OsString> = [
+            "exec",
+            "--no-TTY",
+            "postgres",
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "sacrum_prod",
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect();
+        args.extend(psql_args.iter().map(OsString::from));
+        controller
+            .checked_stack(
+                controller.compose_request(paths, state, action, args, Duration::from_secs(30)),
+                secrets,
+            )
+            .await
     }
 
     #[tokio::test]
@@ -1281,13 +1297,13 @@ mod tests {
         let (_temp, paths, mut state) = ready_stack();
         let postgres_volume = state.postgres_volume();
         let status_json = r#"[{"Name":"vertebrae-local-postgres-1","Service":"postgres","State":"running","Health":"healthy","ExitCode":0},{"Name":"vertebrae-local-sacrum-1","Service":"sacrum","State":"running","Health":"healthy","ExitCode":0}]"#;
-        let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
+        let runner = MockRunner::after_prerequisites([
             CommandOutput::success(""),
             CommandOutput::success(""),
             CommandOutput::success(""),
             CommandOutput::success(format!("{postgres_volume}\n")),
             CommandOutput::success(status_json),
-        ]));
+        ]);
         let controller = controller(runner.clone(), MockHealth::default());
 
         let status = controller
@@ -1313,28 +1329,19 @@ mod tests {
             "postgres".to_string(),
             "sacrum".to_string(),
         ]));
-        assert_eq!(
-            up.env_value("POSTGRES_IMAGE_REF"),
-            Some(std::ffi::OsStr::new("postgres:18-alpine"))
-        );
-        assert_eq!(
-            up.env_value("POSTGRES_VOLUME"),
-            Some(std::ffi::OsStr::new(&postgres_volume))
-        );
-        assert_eq!(
-            up.env_value("POSTGRES_VOLUME_EXTERNAL"),
-            Some(std::ffi::OsStr::new("false"))
-        );
-        assert_eq!(
-            up.env_value("POSTGRES_DATA_PATH"),
-            Some(std::ffi::OsStr::new("/var/lib/postgresql"))
-        );
-        assert_eq!(up.env_value("POSTGRES_PASSWORD"), None);
-        assert_eq!(up.env_value("SECRET_KEY_BASE"), None);
-        assert!(up.removes_env("POSTGRES_PASSWORD"));
-        assert!(up.removes_env("SECRET_KEY_BASE"));
-        assert!(up.removes_env("DOCKER_HOST"));
-        assert!(up.removes_env("DOCKER_CONTEXT"));
+        for (name, value) in [
+            ("POSTGRES_IMAGE_REF", "postgres:18-alpine"),
+            ("POSTGRES_VOLUME", postgres_volume.as_str()),
+            ("POSTGRES_VOLUME_EXTERNAL", "false"),
+            ("POSTGRES_DATA_PATH", "/var/lib/postgresql"),
+            ("SACRUM_BIND_PREFIX", "127.0.0.1:"),
+        ] {
+            assert_eq!(up.env_value(name), Some(std::ffi::OsStr::new(value)));
+        }
+        for name in ["POSTGRES_PASSWORD", "SECRET_KEY_BASE"] {
+            assert_eq!(up.env_value(name), None);
+            assert!(up.removes_env(name));
+        }
         for name in DOCKER_ENV_REMOVE {
             assert!(up.removes_env(name), "{name} must be sanitized");
         }
@@ -1345,34 +1352,12 @@ mod tests {
                         .args_as_strings()
                         .starts_with(&["--context".to_string(), "desktop-linux".to_string()]))
         }));
-        assert_eq!(
-            up.env_value("SACRUM_BIND_PREFIX"),
-            Some(std::ffi::OsStr::new("127.0.0.1:"))
-        );
         assert!(requests.iter().all(|request| {
             !request
                 .args_as_strings()
                 .iter()
                 .any(|argument| argument == "down")
         }));
-    }
-
-    #[tokio::test]
-    async fn unavailable_compose_fails_before_stack_commands() {
-        let runner = MockRunner::with_outputs([
-            CommandOutput::success("unix:///tmp/docker.sock"),
-            CommandOutput::success("28.0.0"),
-            CommandOutput::failure(1, "compose is not a docker command"),
-        ]);
-        let controller = controller(runner.clone(), MockHealth::default());
-
-        let error = controller
-            .check_prerequisites()
-            .await
-            .expect_err("compose should be unavailable");
-
-        assert!(matches!(error, LocalBackendError::ComposeUnavailable(_)));
-        assert_eq!(runner.requests().len(), 3);
     }
 
     #[tokio::test]
@@ -1399,75 +1384,82 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn daemon_permission_and_connectivity_failures_are_distinct() {
-        for (message, permission_denied) in [
-            ("permission denied while connecting to Docker", true),
-            ("Cannot connect to the Docker daemon", false),
+    async fn prerequisite_failures_are_classified() {
+        for (outputs, expected) in [
+            (
+                vec![
+                    CommandOutput::success("unix:///tmp/docker.sock"),
+                    CommandOutput::success("28.0.0"),
+                    CommandOutput::failure(1, "compose is not a docker command"),
+                ],
+                "compose",
+            ),
+            (
+                vec![
+                    CommandOutput::success("unix:///tmp/docker.sock"),
+                    CommandOutput::failure(1, "permission denied while connecting to Docker"),
+                ],
+                "permission",
+            ),
+            (
+                vec![
+                    CommandOutput::success("unix:///tmp/docker.sock"),
+                    CommandOutput::failure(1, "Cannot connect to the Docker daemon"),
+                ],
+                "unreachable",
+            ),
         ] {
-            let runner = MockRunner::with_outputs([
-                CommandOutput::success("unix:///tmp/docker.sock"),
-                CommandOutput::failure(1, message),
-            ]);
-            let controller = controller(runner, MockHealth::default());
-
-            let error = controller
+            let error = controller(MockRunner::with_outputs(outputs), MockHealth::default())
                 .check_prerequisites()
                 .await
-                .expect_err("daemon check must fail");
-
-            assert_eq!(
-                matches!(error, LocalBackendError::DockerDaemonPermissionDenied(_)),
-                permission_denied
-            );
-            assert_eq!(
-                matches!(error, LocalBackendError::DockerDaemonUnreachable(_)),
-                !permission_denied
-            );
+                .expect_err("prerequisite must fail");
+            assert!(match expected {
+                "compose" => matches!(error, LocalBackendError::ComposeUnavailable(_)),
+                "permission" => matches!(error, LocalBackendError::DockerDaemonPermissionDenied(_)),
+                _ => matches!(error, LocalBackendError::DockerDaemonUnreachable(_)),
+            });
         }
     }
 
     #[tokio::test]
-    async fn previously_created_managed_state_refuses_a_missing_volume() {
-        let (_temp, paths, mut state) = ready_stack();
-        state.provisioning_state = super::super::state::ProvisioningState::Failed;
-        state.postgres_volume_initialized = true;
-        let runner = MockRunner::with_outputs(
-            prerequisites()
-                .into_iter()
-                .chain([CommandOutput::success("")]),
-        );
-        let controller = controller(runner.clone(), MockHealth::default());
+    async fn initialized_stacks_refuse_a_missing_volume() {
+        for kind in [StackKind::Managed, StackKind::AdoptedLegacy] {
+            let (_temp, paths, mut state) = stack_fixture(kind);
+            state.postgres_volume_initialized = true;
+            if kind == StackKind::Managed {
+                state.provisioning_state = ProvisioningState::Failed;
+            }
+            let runner = MockRunner::after_prerequisites([CommandOutput::success("")]);
+            let controller = controller(runner.clone(), MockHealth::default());
 
-        let error = controller
-            .up_detached(&paths, &mut state)
-            .await
-            .expect_err("missing durable data must not be recreated");
+            let error = controller
+                .up_detached(&paths, &mut state)
+                .await
+                .expect_err("missing durable data must not be recreated");
 
-        assert!(matches!(
-            error,
-            LocalBackendError::PersistentVolumeUnavailable { volume, .. }
-                if volume == state.postgres_volume()
-        ));
-        assert!(runner.requests().iter().all(|request| {
-            !request
-                .args_as_strings()
-                .iter()
-                .any(|argument| argument == "up")
-        }));
+            assert!(matches!(
+                error,
+                LocalBackendError::PersistentVolumeUnavailable { volume, .. }
+                    if volume == state.postgres_volume()
+            ));
+            assert!(runner.requests().iter().all(|request| {
+                !request
+                    .args_as_strings()
+                    .iter()
+                    .any(|argument| argument == "up")
+            }));
+        }
     }
 
     #[tokio::test]
     async fn provisioning_failure_before_volume_creation_remains_retryable() {
-        for provisioning_state in [
-            super::super::state::ProvisioningState::InProgress,
-            super::super::state::ProvisioningState::Failed,
-        ] {
+        for provisioning_state in [ProvisioningState::InProgress, ProvisioningState::Failed] {
             let (_temp, paths, mut state) = ready_stack();
             state.provisioning_state = provisioning_state;
-            let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
+            let runner = MockRunner::after_prerequisites([
                 CommandOutput::success(""),
                 CommandOutput::failure(1, "retry reached Compose validation"),
-            ]));
+            ]);
             let controller = controller(runner.clone(), MockHealth::default());
 
             let error = controller
@@ -1491,13 +1483,13 @@ mod tests {
     async fn adopted_mutation_requires_the_compatible_external_volume() {
         let (_temp, paths, mut state) = adopted_stack();
         let status_json = r#"[{"Name":"vertebrae-dev-postgres-1","Service":"postgres","State":"running","Health":"healthy","ExitCode":0}]"#;
-        let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
+        let runner = MockRunner::after_prerequisites([
             CommandOutput::success("vertebrae-dev_pgdata\n"),
             CommandOutput::success(legacy_volume_inspect("vertebrae-dev", "pgdata")),
             CommandOutput::success(""),
             CommandOutput::success(""),
             CommandOutput::success(status_json),
-        ]));
+        ]);
         let controller = controller(runner.clone(), MockHealth::default());
 
         controller
@@ -1507,59 +1499,26 @@ mod tests {
 
         let requests = runner.requests();
         let up = &requests[6];
-        assert_eq!(
-            up.env_value("POSTGRES_VOLUME"),
-            Some(std::ffi::OsStr::new("vertebrae-dev_pgdata"))
-        );
-        assert_eq!(
-            up.env_value("POSTGRES_VOLUME_EXTERNAL"),
-            Some(std::ffi::OsStr::new("true"))
-        );
-        assert_eq!(
-            up.env_value("POSTGRES_IMAGE_REF"),
-            Some(std::ffi::OsStr::new("postgres:17-alpine"))
-        );
-    }
-
-    #[tokio::test]
-    async fn adopted_mutation_refuses_a_missing_volume() {
-        let (_temp, paths, mut state) = adopted_stack();
-        let runner = MockRunner::with_outputs(
-            prerequisites()
-                .into_iter()
-                .chain([CommandOutput::success("")]),
-        );
-        let controller = controller(runner.clone(), MockHealth::default());
-
-        let error = controller
-            .up_detached(&paths, &mut state)
-            .await
-            .expect_err("missing legacy volume must not be recreated");
-
-        assert!(matches!(
-            error,
-            LocalBackendError::PersistentVolumeUnavailable { volume, .. }
-                if volume == LEGACY_VOLUME
-        ));
-        assert!(runner.requests().iter().all(|request| {
-            !request
-                .args_as_strings()
-                .iter()
-                .any(|argument| argument == "up")
-        }));
+        for (name, value) in [
+            ("POSTGRES_VOLUME", "vertebrae-dev_pgdata"),
+            ("POSTGRES_VOLUME_EXTERNAL", "true"),
+            ("POSTGRES_IMAGE_REF", "postgres:17-alpine"),
+        ] {
+            assert_eq!(up.env_value(name), Some(std::ffi::OsStr::new(value)));
+        }
     }
 
     #[tokio::test]
     async fn allocated_port_has_a_structured_error() {
         let (_temp, paths, mut state) = ready_stack();
-        let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
+        let runner = MockRunner::after_prerequisites([
             CommandOutput::success(""),
             CommandOutput::success(""),
             CommandOutput::failure(
                 1,
                 "Bind for 127.0.0.1:4400 failed: port is already allocated",
             ),
-        ]));
+        ]);
         let controller = controller(runner, MockHealth::default());
 
         let error = controller
@@ -1628,24 +1587,19 @@ mod tests {
     #[tokio::test]
     async fn compose_failure_redacts_persisted_secrets() {
         let (_temp, paths, mut state) = ready_stack();
-        let postgres_password = paths
+        let secrets = paths
             .load_runtime_secrets(state.kind)
-            .expect("load secrets")
-            .postgres_password()
-            .to_string();
-        let secret_key_base = paths
-            .load_runtime_secrets(state.kind)
-            .expect("load secrets")
-            .secret_key_base()
-            .to_string();
-        let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
+            .expect("load secrets");
+        let postgres_password = secrets.postgres_password();
+        let secret_key_base = secrets.secret_key_base();
+        let runner = MockRunner::after_prerequisites([
             CommandOutput::success(""),
             CommandOutput::failure(
                 1,
                 format!("POSTGRES_PASSWORD={postgres_password} SECRET_KEY_BASE={secret_key_base}"),
             ),
-        ]));
-        let controller = controller(runner.clone(), MockHealth::default());
+        ]);
+        let controller = controller(runner, MockHealth::default());
 
         let error = controller
             .up_detached(&paths, &mut state)
@@ -1656,11 +1610,6 @@ mod tests {
         assert_eq!(message.matches("[redacted]").count(), 2, "{message}");
         assert!(!message.contains(&postgres_password), "{message}");
         assert!(!message.contains(&secret_key_base), "{message}");
-        let request = &runner.requests()[4];
-        assert_eq!(request.env_value("POSTGRES_PASSWORD"), None);
-        assert_eq!(request.env_value("SECRET_KEY_BASE"), None);
-        assert!(request.removes_env("POSTGRES_PASSWORD"));
-        assert!(request.removes_env("SECRET_KEY_BASE"));
     }
 
     #[tokio::test]
@@ -1668,17 +1617,10 @@ mod tests {
         let mut inspect =
             CommandOutput::success(legacy_inspect_json(LEGACY_POSTGRES_IMAGE, LEGACY_VOLUME));
         inspect.truncated = true;
-        let runner = MockRunner::with_outputs(
-            prerequisites()
-                .into_iter()
-                .chain([CommandOutput::success("postgres-id\nsacrum-id\n"), inspect]),
-        );
-        let controller = controller(runner, MockHealth::default());
-
-        let detection = controller
-            .detect_legacy_stack()
-            .await
-            .expect("detect legacy");
+        let detection =
+            detect_legacy([CommandOutput::success("postgres-id\nsacrum-id\n"), inspect])
+                .await
+                .expect("detect legacy");
 
         assert!(matches!(
             detection,
@@ -1733,53 +1675,50 @@ mod tests {
             .await
             .expect("adopt preserved volume");
         assert_eq!(state.host_port, 4400);
-        assert_eq!(
-            state.provisioning_state,
-            super::super::state::ProvisioningState::Unverified
-        );
+        assert_eq!(state.provisioning_state, ProvisioningState::Unverified);
         assert_eq!(state.sacrum_bind_host, "");
         assert_eq!(state.postgres_image_ref(), LEGACY_POSTGRES_IMAGE);
     }
 
     #[tokio::test]
-    async fn unrelated_same_named_volume_is_unsafe() {
-        let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
-            CommandOutput::success(""),
-            CommandOutput::success("vertebrae-dev_pgdata\n"),
-            CommandOutput::success(legacy_volume_inspect("manual", "pgdata")),
-        ]));
-        let controller = controller(runner, MockHealth::default());
-
-        let detection = controller
-            .detect_legacy_stack()
-            .await
-            .expect("detect unsafe volume");
-
-        assert!(matches!(
-            detection,
-            LegacyStackDetection::Unsafe(reason) if reason.contains("expected Compose")
-        ));
-    }
-
-    #[tokio::test]
-    async fn unsupported_legacy_host_binding_is_rejected() {
-        let inspect =
-            legacy_inspect_json_with(LEGACY_POSTGRES_IMAGE, LEGACY_VOLUME, "192.168.1.10");
-        let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
-            CommandOutput::success("postgres-id\nsacrum-id\n"),
-            CommandOutput::success(inspect),
-        ]));
-        let controller = controller(runner, MockHealth::default());
-
-        let detection = controller
-            .detect_legacy_stack()
-            .await
-            .expect("detect unsafe binding");
-
-        assert!(matches!(
-            detection,
-            LegacyStackDetection::Unsafe(reason) if reason.contains("192.168.1.10")
-        ));
+    async fn incompatible_legacy_resources_are_unsafe() {
+        for (outputs, expected) in [
+            (
+                vec![
+                    CommandOutput::success(""),
+                    CommandOutput::success("vertebrae-dev_pgdata\n"),
+                    CommandOutput::success(legacy_volume_inspect("manual", "pgdata")),
+                ],
+                "expected Compose",
+            ),
+            (
+                vec![
+                    CommandOutput::success("postgres-id\nsacrum-id\n"),
+                    CommandOutput::success(legacy_inspect_json_with(
+                        LEGACY_POSTGRES_IMAGE,
+                        LEGACY_VOLUME,
+                        "192.168.1.10",
+                    )),
+                ],
+                "192.168.1.10",
+            ),
+            (
+                vec![
+                    CommandOutput::success("postgres-id\nsacrum-id\n"),
+                    CommandOutput::success(legacy_inspect_json(
+                        "postgres:18-alpine",
+                        LEGACY_VOLUME,
+                    )),
+                ],
+                "postgres:17-alpine",
+            ),
+        ] {
+            let detection = detect_legacy(outputs).await.expect("detect unsafe legacy");
+            assert!(matches!(
+                detection,
+                LegacyStackDetection::Unsafe(reason) if reason.contains(expected)
+            ));
+        }
     }
 
     #[tokio::test]
@@ -1834,10 +1773,7 @@ mod tests {
         assert_eq!(state.postgres_image_ref(), "postgres:17-alpine");
         assert_eq!(state.host_port, 4400);
         assert_eq!(state.sacrum_bind_host, "");
-        assert_eq!(
-            state.provisioning_state,
-            super::super::state::ProvisioningState::Unverified
-        );
+        assert_eq!(state.provisioning_state, ProvisioningState::Unverified);
         assert_eq!(
             paths
                 .load_runtime_secrets(StackKind::AdoptedLegacy)
@@ -1883,29 +1819,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_stack_with_a_postgres_image_mismatch_is_left_untouched() {
-        let inspect = legacy_inspect_json("postgres:18-alpine", LEGACY_VOLUME);
-        let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
-            CommandOutput::success("postgres-id\nsacrum-id\n"),
-            CommandOutput::success(inspect),
-        ]));
-        let controller = controller(runner, MockHealth::default());
-        let temp = tempfile::tempdir().expect("temp dir");
-        let paths = ManagedStackPaths::from_data_dir(temp.path());
-
-        let detection = controller
-            .detect_legacy_stack()
-            .await
-            .expect("detect unsafe legacy");
-
-        assert!(matches!(
-            detection,
-            LegacyStackDetection::Unsafe(reason) if reason.contains("postgres:17-alpine")
-        ));
-        assert!(!paths.root.exists());
-    }
-
-    #[tokio::test]
     #[ignore = "requires Docker and VERTEBRAE_TEST_SACRUM_IMAGE_REF"]
     async fn docker_smoke_stack_survives_controller_recreation_and_reuses_volume() {
         let image_ref = std::env::var("VERTEBRAE_TEST_SACRUM_IMAGE_REF")
@@ -1942,31 +1855,20 @@ mod tests {
             first_controller.wait_until_healthy(&paths, &state).await?;
             let first_status = first_controller.status(&paths, &state).await?;
             let secrets = paths.load_runtime_secrets(state.kind)?;
-            first_controller
-                .checked_stack(
-                    first_controller.compose_request(
-                        &paths,
-                        &state,
-                        "write smoke-test sentinel",
-                        [
-                            "exec",
-                            "--no-TTY",
-                            "postgres",
-                            "psql",
-                            "-U",
-                            "postgres",
-                            "-d",
-                            "sacrum_prod",
-                            "-v",
-                            "ON_ERROR_STOP=1",
-                            "-c",
-                            "CREATE TABLE IF NOT EXISTS vertebrae_smoke_sentinel (value text PRIMARY KEY); INSERT INTO vertebrae_smoke_sentinel VALUES ('survived') ON CONFLICT DO NOTHING;",
-                        ],
-                        Duration::from_secs(30),
-                    ),
-                    &secrets,
-                )
-                .await?;
+            postgres_exec(
+                &first_controller,
+                &paths,
+                &state,
+                &secrets,
+                "write smoke-test sentinel",
+                &[
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-c",
+                    "CREATE TABLE IF NOT EXISTS vertebrae_smoke_sentinel (value text PRIMARY KEY); INSERT INTO vertebrae_smoke_sentinel VALUES ('survived') ON CONFLICT DO NOTHING;",
+                ],
+            )
+            .await?;
 
             let second_controller = DockerCompose::system_for(state.docker_target.clone())?
                 .with_timeouts(
@@ -1978,29 +1880,18 @@ mod tests {
             second_controller.up_detached(&paths, &mut state).await?;
             second_controller.wait_until_healthy(&paths, &state).await?;
             let second_status = second_controller.status(&paths, &state).await?;
-            let sentinel = second_controller
-                .checked_stack(
-                    second_controller.compose_request(
-                        &paths,
-                        &state,
-                        "read smoke-test sentinel",
-                        [
-                            "exec",
-                            "--no-TTY",
-                            "postgres",
-                            "psql",
-                            "-U",
-                            "postgres",
-                            "-d",
-                            "sacrum_prod",
-                            "-tAc",
-                            "SELECT value FROM vertebrae_smoke_sentinel WHERE value = 'survived';",
-                        ],
-                        Duration::from_secs(30),
-                    ),
-                    &secrets,
-                )
-                .await?;
+            let sentinel = postgres_exec(
+                &second_controller,
+                &paths,
+                &state,
+                &secrets,
+                "read smoke-test sentinel",
+                &[
+                    "-tAc",
+                    "SELECT value FROM vertebrae_smoke_sentinel WHERE value = 'survived';",
+                ],
+            )
+            .await?;
             let volume = second_controller
                 .checked(second_controller.docker_request(
                     "inspect smoke-test volume",

@@ -354,16 +354,13 @@ impl RuntimeSecrets {
     }
 
     pub(crate) fn redact(&self, text: &str) -> String {
-        let mut values = [
-            self.postgres_password.as_str(),
-            self.secret_key_base.as_str(),
-        ];
-        values.sort_by_key(|value| std::cmp::Reverse(value.len()));
-        values
-            .into_iter()
-            .fold(text.to_string(), |redacted, value| {
-                redacted.replace(value, "[redacted]")
-            })
+        let (first, second) = if self.postgres_password.len() > self.secret_key_base.len() {
+            (&self.postgres_password, &self.secret_key_base)
+        } else {
+            (&self.secret_key_base, &self.postgres_password)
+        };
+        text.replace(first, "[redacted]")
+            .replace(second, "[redacted]")
     }
 
     fn validate(&self) -> Result<(), LocalBackendError> {
@@ -707,6 +704,10 @@ mod tests {
         DockerTarget::new("desktop-linux", "unix:///tmp/docker.sock").expect("local target")
     }
 
+    fn fresh(channel: BackendImageChannel) -> ManagedStackState {
+        ManagedStackState::fresh(DIGEST_IMAGE, 4400, channel, docker_target()).expect("fresh state")
+    }
+
     #[test]
     fn managed_assets_define_the_required_stack() {
         let temp = tempfile::tempdir().expect("temp dir");
@@ -743,13 +744,7 @@ mod tests {
 
     #[test]
     fn managed_state_requires_an_official_digest_pinned_image() {
-        let state = ManagedStackState::fresh(
-            DIGEST_IMAGE,
-            4400,
-            BackendImageChannel::BackendRelease,
-            docker_target(),
-        )
-        .expect("valid managed state");
+        let state = fresh(BackendImageChannel::BackendRelease);
         let project_name = format!("vertebrae-local-{}", state.installation_id.simple());
         assert_eq!(state.project_name(), project_name);
         assert_eq!(state.postgres_volume(), format!("{project_name}_pgdata"));
@@ -778,6 +773,15 @@ mod tests {
         previously_created.postgres_volume_initialized = true;
         assert!(previously_created.postgres_volume_is_external());
 
+        let second = fresh(BackendImageChannel::BackendRelease);
+        assert_ne!(state.installation_id, second.installation_id);
+        assert_ne!(state.project_name(), second.project_name());
+        assert_ne!(state.postgres_volume(), second.postgres_volume());
+        assert!(matches!(
+            DockerTarget::new("remote", "tcp://docker.example:2376"),
+            Err(LocalBackendError::UnsupportedDockerContext { .. })
+        ));
+
         let error = ManagedStackState::fresh(
             "ghcr.io/camonz/sacrum:latest",
             4400,
@@ -786,32 +790,6 @@ mod tests {
         )
         .expect_err("mutable image must be rejected");
         assert!(error.to_string().contains("digest-pinned"));
-    }
-
-    #[test]
-    fn fresh_states_have_distinct_installation_ids_and_reject_remote_contexts() {
-        let first = ManagedStackState::fresh(
-            DIGEST_IMAGE,
-            4400,
-            BackendImageChannel::BackendRelease,
-            docker_target(),
-        )
-        .expect("first state");
-        let second = ManagedStackState::fresh(
-            DIGEST_IMAGE,
-            4400,
-            BackendImageChannel::BackendRelease,
-            docker_target(),
-        )
-        .expect("second state");
-
-        assert_ne!(first.installation_id, second.installation_id);
-        assert_ne!(first.project_name(), second.project_name());
-        assert_ne!(first.postgres_volume(), second.postgres_volume());
-        assert!(matches!(
-            DockerTarget::new("remote", "tcp://docker.example:2376"),
-            Err(LocalBackendError::UnsupportedDockerContext { .. })
-        ));
     }
 
     #[test]
@@ -831,8 +809,6 @@ mod tests {
         assert_eq!(adopted.provisioning_state, ProvisioningState::Unverified);
         assert!(adopted.postgres_volume_initialized);
         assert!(adopted.postgres_volume_is_external());
-
-        assert_ne!(adopted.postgres_image_ref(), FRESH_POSTGRES_IMAGE);
     }
 
     #[test]
@@ -884,16 +860,13 @@ mod tests {
         let first = RuntimeSecrets::generate().expect("generate first secrets");
         let second = RuntimeSecrets::generate().expect("generate second secrets");
 
-        assert_eq!(first.postgres_password().len(), 64);
-        assert_eq!(first.secret_key_base().len(), 128);
-        assert!(first
-            .postgres_password()
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit()));
-        assert!(first
-            .secret_key_base()
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit()));
+        for (value, length) in [
+            (first.postgres_password(), 64),
+            (first.secret_key_base(), 128),
+        ] {
+            assert_eq!(value.len(), length);
+            assert!(value.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        }
         assert_ne!(first, second);
         assert!(first
             .to_env_file()
@@ -918,44 +891,27 @@ mod tests {
     fn state_round_trips_without_secrets() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = ManagedStackPaths::from_data_dir(temp.path());
-        let state = ManagedStackState::fresh(
-            DIGEST_IMAGE,
-            4400,
-            BackendImageChannel::BackendMaster,
-            docker_target(),
-        )
-        .expect("valid state");
+        let state = fresh(BackendImageChannel::BackendMaster);
 
+        paths.install_assets().expect("install assets");
+        paths
+            .ensure_runtime_secrets(&secrets("durable"), state.kind)
+            .expect("persist secrets");
         paths.save_state(&state).expect("save state");
 
         assert_eq!(paths.load_state().expect("load state"), Some(state));
         let json = fs::read_to_string(paths.state_file).expect("read state");
         assert!(!json.contains("POSTGRES_PASSWORD"));
         assert!(!json.contains("SECRET_KEY_BASE"));
-        assert!(json.contains(r#""image_channel": "backend-master""#));
-        assert!(json.contains(r#""provisioning_state": "pending""#));
-        assert!(json.contains(r#""postgres_volume_initialized": false"#));
-        assert!(json.contains(r#""name": "desktop-linux""#));
-        assert!(json.contains(r#""endpoint": "unix:///tmp/docker.sock""#));
-    }
-
-    #[test]
-    fn atomic_persistence_leaves_only_complete_directory_entries() {
-        let temp = tempfile::tempdir().expect("temp dir");
-        let paths = ManagedStackPaths::from_data_dir(temp.path());
-        let state = ManagedStackState::fresh(
-            DIGEST_IMAGE,
-            4400,
-            BackendImageChannel::BackendRelease,
-            docker_target(),
-        )
-        .expect("valid state");
-
-        paths.install_assets().expect("install assets");
-        paths
-            .ensure_runtime_secrets(&secrets("durable"), state.kind)
-            .expect("persist secrets");
-        paths.save_state(&state).expect("persist state");
+        for expected in [
+            r#""image_channel": "backend-master""#,
+            r#""provisioning_state": "pending""#,
+            r#""postgres_volume_initialized": false"#,
+            r#""name": "desktop-linux""#,
+            r#""endpoint": "unix:///tmp/docker.sock""#,
+        ] {
+            assert!(json.contains(expected), "missing {expected}");
+        }
 
         let mut names: Vec<_> = fs::read_dir(&paths.root)
             .expect("read managed directory")

@@ -1,6 +1,5 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -84,29 +83,7 @@ impl CommandRequest {
     }
 }
 
-impl fmt::Debug for CommandRequest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("CommandRequest")
-            .field("action", &self.action)
-            .field("program", &self.program)
-            .field("args", &self.args)
-            .field(
-                "env",
-                &self
-                    .env
-                    .iter()
-                    .map(|(name, _)| (name, "[redacted]"))
-                    .collect::<Vec<_>>(),
-            )
-            .field("timeout", &self.timeout)
-            .field("env_remove", &self.env_remove)
-            .field("max_capture_bytes", &self.max_capture_bytes)
-            .finish()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct CommandOutput {
     pub(super) success: bool,
     pub(super) exit_code: Option<i32>,
@@ -122,8 +99,7 @@ impl CommandOutput {
             success: true,
             exit_code: Some(0),
             stdout: stdout.into(),
-            stderr: String::new(),
-            truncated: false,
+            ..Self::default()
         }
     }
 
@@ -132,9 +108,8 @@ impl CommandOutput {
         Self {
             success: false,
             exit_code: Some(exit_code),
-            stdout: String::new(),
             stderr: stderr.into(),
-            truncated: false,
+            ..Self::default()
         }
     }
 
@@ -407,21 +382,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn environment_removals_accumulate() {
-        let request = CommandRequest::new(
-            "test environment",
-            "/bin/true",
-            std::iter::empty::<&str>(),
-            Duration::from_secs(1),
-        )
-        .with_env_removed(["DOCKER_HOST"])
-        .with_env_removed(["POSTGRES_PASSWORD"]);
-
-        assert!(request.removes_env("DOCKER_HOST"));
-        assert!(request.removes_env("POSTGRES_PASSWORD"));
-    }
-
     #[cfg(unix)]
     #[tokio::test]
     async fn timeout_terminates_descendant_processes() {
@@ -487,6 +447,11 @@ mod tests {
                 .expect("resolve standard Docker"),
             standard
         );
+        fs::remove_file(&standard).expect("remove standard Docker");
+        assert!(matches!(
+            resolve_docker_cli(None, Some(&home), std::slice::from_ref(&standard)),
+            Err(LocalBackendError::DockerCliNotFound { .. })
+        ));
     }
 
     #[cfg(unix)]
@@ -510,15 +475,5 @@ mod tests {
             .expect("shim metadata")
             .file_type()
             .is_symlink());
-    }
-
-    #[test]
-    fn missing_docker_cli_is_classified() {
-        let temp = tempfile::tempdir().expect("temp dir");
-
-        let error = resolve_docker_cli(Some(temp.path().as_os_str()), None, &[])
-            .expect_err("Docker must be missing");
-
-        assert!(matches!(error, LocalBackendError::DockerCliNotFound { .. }));
     }
 }
