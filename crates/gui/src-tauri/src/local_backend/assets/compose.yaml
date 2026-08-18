@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: "${POSTGRES_IMAGE_REF:-postgres:18-alpine}"
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_wal_senders=10
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
+      POSTGRES_DB: sacrum_prod
+    volumes:
+      - "pgdata:${POSTGRES_DATA_PATH:?}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sacrum_prod"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  sacrum:
+    image: "${SACRUM_IMAGE_REF:?}"
+    user: root
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "ecto://postgres:${POSTGRES_PASSWORD:?}@postgres/sacrum_prod"
+      SECRET_KEY_BASE: "${SECRET_KEY_BASE:?}"
+      PHX_HOST: localhost
+      PHX_SERVER: "true"
+      PORT: "4000"
+    ports:
+      - "${SACRUM_BIND_PREFIX}${SACRUM_HOST_PORT:?}:4000"
+    entrypoint: ["/bin/sh", "-c", "chmod -R a+x /app/bin && /app/bin/migrate && exec /app/bin/server"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:4000/healthz"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 12
+    restart: unless-stopped
+
+  seeder:
+    image: "${SACRUM_IMAGE_REF:?}"
+    user: root
+    depends_on:
+      sacrum:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "ecto://postgres:${POSTGRES_PASSWORD:?}@postgres/sacrum_prod"
+      SECRET_KEY_BASE: "${SECRET_KEY_BASE:?}"
+      SEED_EMAIL: "${SEED_EMAIL:-}"
+      SEED_USERNAME: "${SEED_USERNAME:-}"
+      SEED_PASSWORD: "${SEED_PASSWORD:-}"
+      SEED_TOKEN: "${SEED_TOKEN:-}"
+    volumes:
+      - "${SEED_SCRIPT_PATH:?}:/seed.exs:ro"
+    entrypoint: ["/bin/sh", "-c", "chmod -R a+x /app/bin && /app/bin/sacrum eval \"$$(cat /seed.exs)\""]
+
+volumes:
+  pgdata:
+    name: "${POSTGRES_VOLUME:?}"
+    external: ${POSTGRES_VOLUME_EXTERNAL:?}
