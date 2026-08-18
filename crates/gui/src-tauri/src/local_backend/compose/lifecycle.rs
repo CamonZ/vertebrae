@@ -223,7 +223,9 @@ fn classify_port_error(error: LocalBackendError, port: u16) -> LocalBackendError
 
 fn port_conflict(output: &str) -> bool {
     let output = output.to_ascii_lowercase();
-    output.contains("port is already allocated") || output.contains("address already in use")
+    output.contains("port is already allocated")
+        || output.contains("address already in use")
+        || (output.contains("bind for") && output.contains("port"))
 }
 
 #[derive(Deserialize)]

@@ -184,6 +184,27 @@ mod tests {
         assert!(error.to_string().contains("HTTP(S)"));
     }
 
+    #[test]
+    fn retry_reuses_persisted_runtime_secrets_and_api_token() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let paths = ManagedStackPaths::from_data_dir(temp.path());
+        let first_runtime =
+            ensure_runtime_secrets(&paths, StackKind::Managed).expect("persist runtime secrets");
+        let first_token = ensure_api_token(&paths).expect("persist API token");
+
+        let second_runtime =
+            ensure_runtime_secrets(&paths, StackKind::Managed).expect("reuse runtime secrets");
+        let second_token = ensure_api_token(&paths).expect("reuse API token");
+
+        assert_eq!(first_runtime, second_runtime);
+        assert_eq!(first_token, second_token);
+        let runtime_file = std::fs::read_to_string(paths.secrets_file).expect("read runtime file");
+        let token_file = std::fs::read_to_string(paths.api_token_file).expect("read token file");
+        assert!(!runtime_file.contains("account-password"));
+        assert!(!token_file.contains("password"));
+        assert!(!runtime_file.contains(first_token.as_str()));
+    }
+
     #[tokio::test]
     async fn adopted_stacks_cannot_enter_the_fresh_provisioning_flow() {
         let (_temp, paths, mut state) = stack_fixture(StackKind::AdoptedLegacy);
