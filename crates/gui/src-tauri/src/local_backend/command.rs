@@ -23,7 +23,6 @@ pub(crate) struct CommandRequest {
     pub(super) env_remove: Vec<OsString>,
     pub(super) timeout: Duration,
     pub(super) max_capture_bytes: usize,
-    pub(super) sensitive_output: bool,
 }
 
 impl CommandRequest {
@@ -41,7 +40,6 @@ impl CommandRequest {
             env_remove: Vec::new(),
             timeout,
             max_capture_bytes: DEFAULT_CAPTURE_BYTES,
-            sensitive_output: false,
         }
     }
 
@@ -53,11 +51,6 @@ impl CommandRequest {
         self
     }
 
-    pub fn with_sensitive_output(mut self) -> Self {
-        self.sensitive_output = true;
-        self
-    }
-
     pub fn with_env(
         mut self,
         env: impl IntoIterator<Item = (impl Into<OsString>, impl Into<OsString>)>,
@@ -66,11 +59,6 @@ impl CommandRequest {
             .into_iter()
             .map(|(name, value)| (name.into(), value.into()))
             .collect();
-        self
-    }
-
-    pub fn with_capture_limit(mut self, max_capture_bytes: usize) -> Self {
-        self.max_capture_bytes = max_capture_bytes;
         self
     }
 
@@ -114,19 +102,17 @@ impl fmt::Debug for CommandRequest {
             .field("timeout", &self.timeout)
             .field("env_remove", &self.env_remove)
             .field("max_capture_bytes", &self.max_capture_bytes)
-            .field("sensitive_output", &self.sensitive_output)
             .finish()
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CommandOutput {
     pub(super) success: bool,
     pub(super) exit_code: Option<i32>,
     pub(super) stdout: String,
     pub(super) stderr: String,
     pub(super) truncated: bool,
-    sensitive: bool,
 }
 
 impl CommandOutput {
@@ -138,7 +124,6 @@ impl CommandOutput {
             stdout: stdout.into(),
             stderr: String::new(),
             truncated: false,
-            sensitive: false,
         }
     }
 
@@ -150,14 +135,10 @@ impl CommandOutput {
             stdout: String::new(),
             stderr: stderr.into(),
             truncated: false,
-            sensitive: false,
         }
     }
 
     pub fn summary(&self) -> String {
-        if self.sensitive {
-            return "[sensitive output omitted]".to_string();
-        }
         let stdout = self.stdout.trim();
         let stderr = self.stderr.trim();
         let mut summary = match (stdout.is_empty(), stderr.is_empty()) {
@@ -170,27 +151,6 @@ impl CommandOutput {
             summary.push_str("\n[output truncated]");
         }
         summary
-    }
-}
-
-impl fmt::Debug for CommandOutput {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = formatter.debug_struct("CommandOutput");
-        debug
-            .field("success", &self.success)
-            .field("exit_code", &self.exit_code)
-            .field("truncated", &self.truncated)
-            .field("sensitive", &self.sensitive);
-        if self.sensitive {
-            debug
-                .field("stdout", &"[sensitive output omitted]")
-                .field("stderr", &"[sensitive output omitted]");
-        } else {
-            debug
-                .field("stdout", &self.stdout)
-                .field("stderr", &self.stderr);
-        }
-        debug.finish()
     }
 }
 
@@ -252,7 +212,6 @@ impl ProcessRunner for SystemProcessRunner {
                     stdout: stdout.text,
                     stderr: stderr.text,
                     truncated: stdout.truncated || stderr.truncated,
-                    sensitive: request.sensitive_output,
                 };
                 return Err(LocalBackendError::CommandTimedOut {
                     action: request.action,
@@ -269,7 +228,6 @@ impl ProcessRunner for SystemProcessRunner {
             stdout: stdout.text,
             stderr: stderr.text,
             truncated: stdout.truncated || stderr.truncated,
-            sensitive: request.sensitive_output,
         })
     }
 }
@@ -447,25 +405,6 @@ mod tests {
             error,
             LocalBackendError::CommandTimedOut { action, .. } if action == "slow command"
         ));
-    }
-
-    #[tokio::test]
-    async fn sensitive_output_is_omitted_from_errors_and_debug_output() {
-        let secret = "POSTGRES_PASSWORD=must-not-escape";
-        let request = CommandRequest::new(
-            "sensitive command",
-            "/bin/sh",
-            ["-c", &format!("printf '{secret}' >&2; exit 1")],
-            Duration::from_secs(2),
-        )
-        .with_sensitive_output();
-
-        let output = SystemProcessRunner.run(request).await.expect("run command");
-
-        assert!(!output.success);
-        assert!(output.stderr.contains(secret));
-        assert_eq!(output.summary(), "[sensitive output omitted]");
-        assert!(!format!("{output:?}").contains(secret));
     }
 
     #[test]

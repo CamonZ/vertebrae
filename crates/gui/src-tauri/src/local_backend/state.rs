@@ -14,6 +14,9 @@ pub(crate) const LEGACY_PROJECT: &str = "vertebrae-dev";
 pub(crate) const LEGACY_VOLUME: &str = "vertebrae-dev_pgdata";
 pub(crate) const FRESH_POSTGRES_IMAGE: &str = "postgres:18-alpine";
 pub(crate) const LEGACY_POSTGRES_IMAGE: &str = "postgres:17-alpine";
+const LEGACY_POSTGRES_PASSWORD: &str = "postgres";
+const LEGACY_SECRET_KEY_BASE: &str =
+    "dev-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-app";
 
 #[derive(Debug, thiserror::Error)]
 pub enum LocalBackendError {
@@ -75,8 +78,8 @@ pub enum LocalBackendError {
     UnsafeLegacyStack(String),
     #[error("Adopting the vertebrae-dev stack requires explicit confirmation")]
     AdoptionNotConfirmed,
-    #[error("The preserved vertebrae-dev volume requires its prior port and runtime secrets")]
-    LegacyRuntimeDetailsRequired,
+    #[error("The preserved vertebrae-dev volume requires its prior host port")]
+    LegacyHostPortRequired,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -335,16 +338,11 @@ impl RuntimeSecrets {
         Ok(secrets)
     }
 
-    pub(crate) fn legacy(
-        postgres_password: impl Into<String>,
-        secret_key_base: impl Into<String>,
-    ) -> Result<Self, LocalBackendError> {
-        let secrets = Self {
-            postgres_password: postgres_password.into(),
-            secret_key_base: secret_key_base.into(),
-        };
-        secrets.validate_environment_values()?;
-        Ok(secrets)
+    pub(crate) fn legacy_development() -> Self {
+        Self {
+            postgres_password: LEGACY_POSTGRES_PASSWORD.to_string(),
+            secret_key_base: LEGACY_SECRET_KEY_BASE.to_string(),
+        }
     }
 
     pub fn postgres_password(&self) -> &str {
@@ -442,7 +440,19 @@ impl RuntimeSecrets {
         })?;
         match kind {
             StackKind::Managed => Self::new(postgres_password, secret_key_base),
-            StackKind::AdoptedLegacy => Self::legacy(postgres_password, secret_key_base),
+            StackKind::AdoptedLegacy => {
+                let secrets = Self {
+                    postgres_password,
+                    secret_key_base,
+                };
+                if secrets != Self::legacy_development() {
+                    return Err(LocalBackendError::InvalidState(
+                        "adopted runtime.env does not match the development stack credentials"
+                            .to_string(),
+                    ));
+                }
+                Ok(secrets)
+            }
         }
     }
 }
@@ -965,7 +975,7 @@ mod tests {
     }
 
     #[test]
-    fn persisted_fresh_secrets_remain_uri_safe() {
+    fn persisted_secrets_must_match_their_stack_contract() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = ManagedStackPaths::from_data_dir(temp.path());
         ensure_private_directory(&paths.root).expect("create root");
@@ -979,12 +989,18 @@ mod tests {
             .load_runtime_secrets(StackKind::Managed)
             .expect_err("fresh secrets must stay URI safe");
         assert!(error.to_string().contains("URI-unreserved"));
+        let error = paths
+            .load_runtime_secrets(StackKind::AdoptedLegacy)
+            .expect_err("arbitrary adopted secrets must be rejected");
+        assert!(error.to_string().contains("development stack credentials"));
+
+        let development = RuntimeSecrets::legacy_development();
+        fs::write(&paths.secrets_file, development.to_env_file()).expect("write fixed runtime.env");
         assert_eq!(
             paths
                 .load_runtime_secrets(StackKind::AdoptedLegacy)
-                .expect("legacy values remain importable")
-                .postgres_password(),
-            "legacy/password+with=padding"
+                .expect("load fixed development secrets"),
+            development
         );
     }
 

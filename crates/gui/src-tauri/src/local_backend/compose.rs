@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -20,8 +19,7 @@ const RECONCILE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(120);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const MINIMUM_SAFE_ENGINE_MAJOR: u64 = 28;
-const INSPECT_CAPTURE_BYTES: usize = 256 * 1024;
-const LEGACY_INSPECT_FORMAT: &str = r#"{"Image":{{json .Config.Image}},"Env":{{json .Config.Env}},"Project":{{json (index .Config.Labels "com.docker.compose.project")}},"Service":{{json (index .Config.Labels "com.docker.compose.service")}},"PortBindings":{{json .HostConfig.PortBindings}},"Mounts":{{json .Mounts}}}"#;
+const LEGACY_INSPECT_FORMAT: &str = r#"{"Image":{{json .Config.Image}},"Project":{{json (index .Config.Labels "com.docker.compose.project")}},"Service":{{json (index .Config.Labels "com.docker.compose.service")}},"PortBindings":{{json .HostConfig.PortBindings}},"Mounts":{{json .Mounts}}}"#;
 const LEGACY_VOLUME_INSPECT_FORMAT: &str = r#"{"Name":{{json .Name}},"Project":{{json (index .Labels "com.docker.compose.project")}},"Volume":{{json (index .Labels "com.docker.compose.volume")}}}"#;
 const DOCKER_ENV_REMOVE: [&str; 8] = [
     "DOCKER_API_VERSION",
@@ -75,63 +73,17 @@ pub struct ServiceStatus {
     pub exit_code: Option<i32>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyStackCandidate {
     pub host_port: u16,
     bind_host: String,
-    secrets: RuntimeSecrets,
-}
-
-impl fmt::Debug for LegacyStackCandidate {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("LegacyStackCandidate")
-            .field("host_port", &self.host_port)
-            .field("bind_host", &self.bind_host)
-            .field("secrets", &"[redacted]")
-            .finish()
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct LegacyRuntimeDetails {
-    host_port: u16,
-    secrets: RuntimeSecrets,
-}
-
-impl LegacyRuntimeDetails {
-    pub fn new(
-        host_port: u16,
-        postgres_password: impl Into<String>,
-        secret_key_base: impl Into<String>,
-    ) -> Result<Self, LocalBackendError> {
-        if host_port == 0 {
-            return Err(LocalBackendError::InvalidState(
-                "legacy host port must be between 1 and 65535".to_string(),
-            ));
-        }
-        Ok(Self {
-            host_port,
-            secrets: RuntimeSecrets::legacy(postgres_password, secret_key_base)?,
-        })
-    }
-}
-
-impl fmt::Debug for LegacyRuntimeDetails {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("LegacyRuntimeDetails")
-            .field("host_port", &self.host_port)
-            .field("secrets", &"[redacted]")
-            .finish()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LegacyStackDetection {
     Absent,
     Compatible(LegacyStackCandidate),
-    RuntimeDetailsRequired,
+    HostPortRequired,
     Unsafe(String),
 }
 
@@ -559,7 +511,7 @@ where
         if ids.is_empty() {
             return Ok(match self.legacy_volume_status().await? {
                 LegacyVolumeStatus::Absent => LegacyStackDetection::Absent,
-                LegacyVolumeStatus::Compatible => LegacyStackDetection::RuntimeDetailsRequired,
+                LegacyVolumeStatus::Compatible => LegacyStackDetection::HostPortRequired,
                 LegacyVolumeStatus::Unsafe(reason) => LegacyStackDetection::Unsafe(reason),
             });
         }
@@ -572,17 +524,12 @@ where
         inspect_args.extend(ids.iter().map(OsString::from));
         let inspected = self
             .runner
-            .run(
-                self.docker_request(
-                    "inspect vertebrae-dev containers",
-                    inspect_args,
-                    self.quick_timeout,
-                )
-                .with_capture_limit(INSPECT_CAPTURE_BYTES)
-                .with_sensitive_output(),
-            )
-            .await
-            .map_err(sanitize_sensitive_command_error)?;
+            .run(self.docker_request(
+                "inspect vertebrae-dev containers",
+                inspect_args,
+                self.quick_timeout,
+            ))
+            .await?;
         if !inspected.success {
             return Err(LocalBackendError::CommandFailed {
                 action: "inspect vertebrae-dev containers".to_string(),
@@ -590,7 +537,7 @@ where
                     .exit_code
                     .map(|code| code.to_string())
                     .unwrap_or_else(|| "terminated".to_string()),
-                output: "[sensitive output omitted]".to_string(),
+                output: inspected.summary(),
             });
         }
         if inspected.truncated {
@@ -629,7 +576,7 @@ where
         &self,
         paths: &ManagedStackPaths,
         detection: &LegacyStackDetection,
-        runtime_details: Option<&LegacyRuntimeDetails>,
+        legacy_host_port: Option<u16>,
         sacrum_image_ref: impl Into<String>,
         image_channel: BackendImageChannel,
         confirmed: bool,
@@ -645,13 +592,13 @@ where
         }
         let candidate = match &current {
             LegacyStackDetection::Compatible(candidate) => candidate.clone(),
-            LegacyStackDetection::RuntimeDetailsRequired => {
-                let details =
-                    runtime_details.ok_or(LocalBackendError::LegacyRuntimeDetailsRequired)?;
+            LegacyStackDetection::HostPortRequired => {
+                let host_port = legacy_host_port
+                    .filter(|host_port| *host_port != 0)
+                    .ok_or(LocalBackendError::LegacyHostPortRequired)?;
                 LegacyStackCandidate {
-                    host_port: details.host_port,
+                    host_port,
                     bind_host: String::new(),
-                    secrets: details.secrets.clone(),
                 }
             }
             LegacyStackDetection::Unsafe(reason) => {
@@ -663,6 +610,7 @@ where
                 ));
             }
         };
+        let legacy_secrets = RuntimeSecrets::legacy_development();
         if let Some(existing) = paths.load_state()? {
             if existing.kind != StackKind::AdoptedLegacy {
                 return Err(LocalBackendError::UnsafeLegacyStack(
@@ -674,16 +622,17 @@ where
                     "saved Docker context does not match the adoption target".to_string(),
                 ));
             }
-            if paths.load_runtime_secrets(StackKind::AdoptedLegacy)? != candidate.secrets {
+            if paths.load_runtime_secrets(StackKind::AdoptedLegacy)? != legacy_secrets {
                 return Err(LocalBackendError::UnsafeLegacyStack(
-                    "saved runtime secrets do not match the detected legacy containers".to_string(),
+                    "saved runtime secrets do not match the supported development stack"
+                        .to_string(),
                 ));
             }
             return Ok(existing);
         }
 
         if paths.secrets_file.exists()
-            && paths.load_runtime_secrets(StackKind::AdoptedLegacy)? != candidate.secrets
+            && paths.load_runtime_secrets(StackKind::AdoptedLegacy)? != legacy_secrets
         {
             return Err(LocalBackendError::UnsafeLegacyStack(
                 "an unrelated runtime secrets file already exists".to_string(),
@@ -697,7 +646,7 @@ where
             self.target.clone(),
         )?;
         paths.install_assets()?;
-        paths.ensure_runtime_secrets(&candidate.secrets, StackKind::AdoptedLegacy)?;
+        paths.ensure_runtime_secrets(&legacy_secrets, StackKind::AdoptedLegacy)?;
         paths.save_state(&state)?;
         Ok(state)
     }
@@ -924,10 +873,7 @@ fn legacy_evidence_matches(offered: &LegacyStackDetection, current: &LegacyStack
         (LegacyStackDetection::Compatible(offered), LegacyStackDetection::Compatible(current)) => {
             offered == current
         }
-        (
-            LegacyStackDetection::RuntimeDetailsRequired,
-            LegacyStackDetection::RuntimeDetailsRequired,
-        ) => true,
+        (LegacyStackDetection::HostPortRequired, LegacyStackDetection::HostPortRequired) => true,
         (LegacyStackDetection::Absent, LegacyStackDetection::Absent) => true,
         (LegacyStackDetection::Unsafe(offered), LegacyStackDetection::Unsafe(current)) => {
             offered == current
@@ -948,28 +894,6 @@ fn classify_port_error(error: LocalBackendError, port: u16) -> LocalBackendError
         {
             LocalBackendError::PortUnavailable { port, output }
         }
-        error => error,
-    }
-}
-
-fn sanitize_sensitive_command_error(error: LocalBackendError) -> LocalBackendError {
-    match error {
-        LocalBackendError::CommandFailed { action, status, .. } => {
-            LocalBackendError::CommandFailed {
-                action,
-                status,
-                output: "[sensitive output omitted]".to_string(),
-            }
-        }
-        LocalBackendError::CommandTimedOut {
-            action,
-            timeout_seconds,
-            ..
-        } => LocalBackendError::CommandTimedOut {
-            action,
-            timeout_seconds,
-            output: "[sensitive output omitted]".to_string(),
-        },
         error => error,
     }
 }
@@ -1015,8 +939,6 @@ fn parse_service_statuses(output: &str) -> Result<Vec<ServiceStatus>, LocalBacke
 #[serde(rename_all = "PascalCase")]
 struct LegacyContainerInspect {
     image: String,
-    #[serde(default)]
-    env: Vec<String>,
     project: String,
     service: String,
     #[serde(default)]
@@ -1100,24 +1022,6 @@ fn validate_legacy_containers(
         );
     }
 
-    let postgres_env = environment_map(&postgres.env)?;
-    if postgres_env.get("POSTGRES_USER").map(String::as_str) != Some("postgres")
-        || postgres_env.get("POSTGRES_DB").map(String::as_str) != Some("sacrum_prod")
-    {
-        return Err("postgres user or database does not match the supported contract".to_string());
-    }
-    let postgres_password = postgres_env
-        .get("POSTGRES_PASSWORD")
-        .ok_or_else(|| "postgres has no POSTGRES_PASSWORD".to_string())?;
-    let sacrum_env = environment_map(&sacrum.env)?;
-    let secret_key_base = sacrum_env
-        .get("SECRET_KEY_BASE")
-        .ok_or_else(|| "sacrum has no SECRET_KEY_BASE".to_string())?;
-    let expected_database_url = format!("ecto://postgres:{postgres_password}@postgres/sacrum_prod");
-    if sacrum_env.get("DATABASE_URL") != Some(&expected_database_url) {
-        return Err("sacrum DATABASE_URL does not match the legacy postgres service".to_string());
-    }
-
     let bindings = sacrum
         .port_bindings
         .get("4000/tcp")
@@ -1138,31 +1042,10 @@ fn validate_legacy_containers(
             "sacrum has an unsupported host binding address '{bind_host}'"
         ));
     }
-    let secrets = RuntimeSecrets::legacy(postgres_password, secret_key_base)
-        .map_err(|error| error.to_string())?;
     Ok(LegacyStackCandidate {
         host_port,
         bind_host,
-        secrets,
     })
-}
-
-fn environment_map(values: &[String]) -> Result<HashMap<String, String>, String> {
-    let mut environment = HashMap::new();
-    for value in values {
-        let (name, value) = value
-            .split_once('=')
-            .ok_or_else(|| "a container environment entry is malformed".to_string())?;
-        if environment
-            .insert(name.to_string(), value.to_string())
-            .is_some()
-        {
-            return Err(format!(
-                "container environment contains duplicate key '{name}'"
-            ));
-        }
-    }
-    Ok(environment)
 }
 
 #[cfg(test)]
@@ -1285,14 +1168,7 @@ mod tests {
         .expect("valid adopted state");
         paths.install_assets().expect("install assets");
         paths
-            .ensure_runtime_secrets(
-                &RuntimeSecrets::legacy(
-                    "postgres",
-                    "dev-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-app",
-                )
-                .expect("valid legacy secrets"),
-                state.kind,
-            )
+            .ensure_runtime_secrets(&RuntimeSecrets::legacy_development(), state.kind)
             .expect("persist legacy secrets");
         (temp, paths, state)
     }
@@ -1788,80 +1664,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn large_projected_legacy_metadata_is_not_limited_to_default_capture_size() {
-        let inspect = legacy_inspect_json_with(
-            LEGACY_POSTGRES_IMAGE,
-            LEGACY_VOLUME,
-            "127.0.0.1",
-            Some(format!("IRRELEVANT={}", "x".repeat(32 * 1024))),
-        );
-        let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
-            CommandOutput::success("postgres-id\nsacrum-id\n"),
-            CommandOutput::success(inspect),
-            CommandOutput::success("vertebrae-dev_pgdata\n"),
-            CommandOutput::success(legacy_volume_inspect("vertebrae-dev", "pgdata")),
-        ]));
-        let controller = controller(runner.clone(), MockHealth::default());
-
-        let detection = controller
-            .detect_legacy_stack()
-            .await
-            .expect("detect legacy");
-
-        let LegacyStackDetection::Compatible(candidate) = detection else {
-            panic!("expected compatible legacy stack");
-        };
-        assert_eq!(candidate.bind_host, "127.0.0.1");
-        let inspect_request = &runner.requests()[4];
-        assert_eq!(inspect_request.max_capture_bytes, INSPECT_CAPTURE_BYTES);
-        assert!(inspect_request.sensitive_output);
-        let args = inspect_request.args_as_strings();
-        assert_eq!(args[2], "inspect");
-        assert_eq!(args[3], "--format");
-        assert_eq!(args[4], LEGACY_INSPECT_FORMAT);
-    }
-
-    #[test]
-    fn legacy_inspection_errors_omit_sensitive_output() {
-        let secret = "SECRET_KEY_BASE=must-not-escape";
-        for error in [
-            LocalBackendError::CommandFailed {
-                action: "inspect".to_string(),
-                status: "1".to_string(),
-                output: secret.to_string(),
-            },
-            LocalBackendError::CommandTimedOut {
-                action: "inspect".to_string(),
-                timeout_seconds: 30,
-                output: secret.to_string(),
-            },
-        ] {
-            let message = sanitize_sensitive_command_error(error).to_string();
-            assert!(!message.contains(secret));
-            assert!(message.contains("[sensitive output omitted]"));
-        }
-    }
-
-    #[tokio::test]
-    async fn failed_legacy_inspection_omits_docker_output() {
-        let secret = "SECRET_KEY_BASE=must-not-escape";
-        let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
-            CommandOutput::success("postgres-id\nsacrum-id\n"),
-            CommandOutput::failure(1, secret),
-        ]));
-        let controller = controller(runner, MockHealth::default());
-
-        let error = controller
-            .detect_legacy_stack()
-            .await
-            .expect_err("failed inspection must be reported");
-
-        let message = error.to_string();
-        assert!(!message.contains(secret));
-        assert!(message.contains("[sensitive output omitted]"));
-    }
-
-    #[tokio::test]
     async fn truncated_legacy_metadata_is_rejected() {
         let mut inspect =
             CommandOutput::success(legacy_inspect_json(LEGACY_POSTGRES_IMAGE, LEGACY_VOLUME));
@@ -1885,7 +1687,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preserved_labeled_volume_requires_explicit_runtime_details() {
+    async fn preserved_labeled_volume_requires_only_an_explicit_host_port() {
         let runner = MockRunner::with_outputs(volume_only_legacy_outputs());
         let controller = controller(runner.clone(), MockHealth::default());
         let temp = tempfile::tempdir().expect("temp dir");
@@ -1896,10 +1698,7 @@ mod tests {
             .await
             .expect("detect preserved volume");
 
-        assert!(matches!(
-            detection,
-            LegacyStackDetection::RuntimeDetailsRequired
-        ));
+        assert!(matches!(detection, LegacyStackDetection::HostPortRequired));
         runner.push_outputs(volume_only_legacy_outputs());
         let error = controller
             .adopt_legacy_stack(
@@ -1911,11 +1710,8 @@ mod tests {
                 true,
             )
             .await
-            .expect_err("runtime details are required");
-        assert!(matches!(
-            error,
-            LocalBackendError::LegacyRuntimeDetailsRequired
-        ));
+            .expect_err("host port is required");
+        assert!(matches!(error, LocalBackendError::LegacyHostPortRequired));
         assert!(!paths.root.exists());
         assert!(runner.requests().iter().all(|request| {
             request
@@ -1924,18 +1720,12 @@ mod tests {
                 .all(|argument| !matches!(argument.as_str(), "up" | "down" | "rm"))
         }));
 
-        let details = LegacyRuntimeDetails::new(
-            4400,
-            "postgres",
-            "dev-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-app",
-        )
-        .expect("valid legacy details");
         runner.push_outputs(volume_only_legacy_outputs());
         let state = controller
             .adopt_legacy_stack(
                 &paths,
                 &detection,
-                Some(&details),
+                Some(4400),
                 DIGEST_IMAGE,
                 BackendImageChannel::BackendRelease,
                 true,
@@ -1974,7 +1764,7 @@ mod tests {
     #[tokio::test]
     async fn unsupported_legacy_host_binding_is_rejected() {
         let inspect =
-            legacy_inspect_json_with(LEGACY_POSTGRES_IMAGE, LEGACY_VOLUME, "192.168.1.10", None);
+            legacy_inspect_json_with(LEGACY_POSTGRES_IMAGE, LEGACY_VOLUME, "192.168.1.10");
         let runner = MockRunner::with_outputs(prerequisites().into_iter().chain([
             CommandOutput::success("postgres-id\nsacrum-id\n"),
             CommandOutput::success(inspect),
@@ -1994,6 +1784,8 @@ mod tests {
 
     #[tokio::test]
     async fn compatible_legacy_stack_is_adopted_without_changing_its_v17_volume() {
+        assert!(!LEGACY_INSPECT_FORMAT.contains("Env"));
+        assert!(!LEGACY_INSPECT_FORMAT.contains("Config.Env"));
         let inspect = legacy_inspect_json(LEGACY_POSTGRES_IMAGE, LEGACY_VOLUME);
         let runner = MockRunner::with_outputs(running_legacy_outputs(inspect.clone()));
         let controller = controller(runner.clone(), MockHealth::default());
@@ -2049,9 +1841,8 @@ mod tests {
         assert_eq!(
             paths
                 .load_runtime_secrets(StackKind::AdoptedLegacy)
-                .expect("load adopted secrets")
-                .postgres_password(),
-            "postgres"
+                .expect("load adopted secrets"),
+            RuntimeSecrets::legacy_development()
         );
     }
 
@@ -2261,24 +2052,12 @@ mod tests {
     }
 
     fn legacy_inspect_json(postgres_image: &str, volume: &str) -> String {
-        legacy_inspect_json_with(postgres_image, volume, "", None)
+        legacy_inspect_json_with(postgres_image, volume, "")
     }
 
-    fn legacy_inspect_json_with(
-        postgres_image: &str,
-        volume: &str,
-        host_ip: &str,
-        extra_environment: Option<String>,
-    ) -> String {
-        let mut postgres_environment = vec![
-            "POSTGRES_USER=postgres".to_string(),
-            "POSTGRES_PASSWORD=postgres".to_string(),
-            "POSTGRES_DB=sacrum_prod".to_string(),
-        ];
-        postgres_environment.extend(extra_environment);
+    fn legacy_inspect_json_with(postgres_image: &str, volume: &str, host_ip: &str) -> String {
         let postgres = serde_json::json!({
             "Image": postgres_image,
-            "Env": postgres_environment,
             "Project": "vertebrae-dev",
             "Service": "postgres",
             "PortBindings": {},
@@ -2290,10 +2069,6 @@ mod tests {
         });
         let sacrum = serde_json::json!({
             "Image": "ghcr.io/camonz/sacrum:latest",
-            "Env": [
-                "DATABASE_URL=ecto://postgres:postgres@postgres/sacrum_prod",
-                "SECRET_KEY_BASE=dev-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-app"
-            ],
             "Project": "vertebrae-dev",
             "Service": "sacrum",
             "PortBindings": {
