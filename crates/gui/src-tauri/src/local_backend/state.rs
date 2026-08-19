@@ -384,10 +384,10 @@ impl SeedAccount {
         let mut entropy = [0_u8; 32];
         getrandom::getrandom(&mut entropy)
             .map_err(|error| LocalBackendError::SecretGeneration(error.to_string()))?;
-        let suffix = installation_id.simple();
+        let suffix = installation_id.simple().to_string();
         Self::new(
             format!("local-{suffix}@vertebrae.local"),
-            format!("local-{suffix}"),
+            format!("local_{}", &suffix[..24]),
             to_hex(&entropy),
         )
     }
@@ -1330,7 +1330,12 @@ mod tests {
         assert_ne!(first.username(), second.username());
         assert_ne!(first.password(), second.password());
         assert!(first.email().ends_with("@vertebrae.local"));
-        assert!(first.username().starts_with("local-"));
+        assert!(first.username().starts_with("local_"));
+        assert!(first.username().len() <= 30);
+        assert!(first
+            .username()
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'));
         assert_eq!(first.password().len(), 64);
     }
 
