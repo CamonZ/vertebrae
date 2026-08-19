@@ -375,6 +375,7 @@ mod tests {
             "async sendLocalChatMessage(",
             "async closeLocalChatSession(",
             "async inferLocalChatSessionTitle(",
+            "async setupLocalBackend(",
         ] {
             assert!(
                 bindings.contains(command),
@@ -390,6 +391,10 @@ mod tests {
             bindings.contains("localChatSessionInitEvent: LocalChatSessionInitEvent"),
             "generated bindings should include the neutral local chat init event"
         );
+        assert!(
+            bindings.contains("localBackendProgressEvent: LocalBackendProgressEvent"),
+            "generated bindings should include local backend progress events"
+        );
         for ty in [
             "export type LocalChatHarnessKind",
             "export type LocalChatHarnessCatalog",
@@ -397,6 +402,8 @@ mod tests {
             "export type InferLocalChatSessionTitleInput",
             "export type InferLocalChatSessionTitleOutput",
             "export type LocalChatSessionError",
+            "export type LocalBackendProgressEvent",
+            "export type LocalBackendSetupResult",
         ] {
             assert!(
                 bindings.contains(ty),
