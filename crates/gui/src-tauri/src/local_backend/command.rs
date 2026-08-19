@@ -54,10 +54,10 @@ impl CommandRequest {
         mut self,
         env: impl IntoIterator<Item = (impl Into<OsString>, impl Into<OsString>)>,
     ) -> Self {
-        self.env = env
-            .into_iter()
-            .map(|(name, value)| (name.into(), value.into()))
-            .collect();
+        self.env.extend(
+            env.into_iter()
+                .map(|(name, value)| (name.into(), value.into())),
+        );
         self
     }
 

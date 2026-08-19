@@ -550,6 +550,10 @@ mod tests {
             "account-password"
         );
         assert_eq!(request.env_value("SEED_TOKEN").unwrap(), token.as_str());
+        assert_eq!(
+            request.env_value("POSTGRES_DATA_PATH").unwrap(),
+            "/var/lib/postgresql"
+        );
         assert!(request.args_as_strings().iter().all(|argument| {
             !argument.contains("account-password") && !argument.contains(token.as_str())
         }));
