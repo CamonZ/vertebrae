@@ -115,7 +115,7 @@ where
                 self.compose_request(
                     paths,
                     state,
-                    "start local Sacrum",
+                    "start local backend",
                     ["up", "--detach", "--pull", "missing", "postgres", "sacrum"],
                     self.reconcile_timeout,
                 ),

@@ -78,7 +78,7 @@ pub enum LocalBackendError {
         timeout_seconds: u64,
         output: String,
     },
-    #[error("Sacrum did not become healthy at {url} within {timeout_seconds} seconds: {logs}")]
+    #[error("The local backend did not become healthy at {url} within {timeout_seconds} seconds: {logs}")]
     HealthTimedOut {
         url: String,
         timeout_seconds: u64,
@@ -145,13 +145,13 @@ impl LocalBackendError {
             Self::PortUnavailable { .. } => (
                 "local_port_unavailable",
                 true,
-                "The local Sacrum port is already in use. Stop the conflicting process or choose another local port, then retry.",
+                "The local backend port is already in use. Stop the conflicting process or choose another local port, then retry.",
             ),
             Self::HealthTimedOut { logs, .. } => {
                 let hint = if logs.to_ascii_lowercase().contains("postgres") {
-                    "PostgreSQL or Sacrum did not become ready. Review the redacted service details, confirm Docker has enough resources, and retry; existing data is preserved."
+                    "PostgreSQL or the local backend did not become ready. Review the redacted service details, confirm Docker has enough resources, and retry; existing data is preserved."
                 } else {
-                    "Sacrum did not become healthy. Review the redacted service details, confirm Docker has enough resources, and retry; existing data is preserved."
+                    "The local backend did not become healthy. Review the redacted service details, confirm Docker has enough resources, and retry; existing data is preserved."
                 };
                 ("sacrum_health_timeout", true, hint)
             }
@@ -206,7 +206,7 @@ fn classify_command_failure(action: &str, output: &str) -> (&'static str, bool, 
         return (
             "local_port_unavailable",
             true,
-            "The local Sacrum port is already in use. Stop the conflicting process or choose another local port, then retry.",
+            "The local backend port is already in use. Stop the conflicting process or choose another local port, then retry.",
         );
     }
     if normalized.contains("pull")
@@ -216,21 +216,21 @@ fn classify_command_failure(action: &str, output: &str) -> (&'static str, bool, 
         return (
             "sacrum_image_unavailable",
             true,
-            "Docker could not pull the pinned Sacrum image. Check network access and registry authentication, then retry without deleting the database volume.",
+            "Docker could not pull the pinned local backend image. Check network access and registry authentication, then retry without deleting the database volume.",
         );
     }
     if normalized.contains("migrat") {
         return (
             "sacrum_migration_failed",
             true,
-            "Sacrum migrations did not complete. Review the redacted migration output, fix the backend issue, and retry; the database volume is preserved.",
+            "Local backend migrations did not complete. Review the redacted migration output, fix the backend issue, and retry; the database volume is preserved.",
         );
     }
     if normalized.contains("pg_isready") || normalized.contains("postgres") {
         return (
             "postgres_readiness_failed",
             true,
-            "PostgreSQL did not become ready for Sacrum. Check Docker resources and the redacted database output, then retry without recreating the volume.",
+            "PostgreSQL did not become ready for the local backend. Check Docker resources and the redacted database output, then retry without recreating the volume.",
         );
     }
     if normalized.contains("compose") || action.contains("Docker") {
@@ -275,6 +275,8 @@ fn redact_diagnostic_detail(detail: &str) -> String {
         }
     }
     redacted
+        .replace("Sacrum", "backend")
+        .replace("sacrum", "backend")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -638,7 +640,7 @@ impl ManagedStackState {
         };
         if !bind_host_valid {
             return Err(LocalBackendError::InvalidState(
-                "Sacrum bind host does not match the stack kind".to_string(),
+                "Backend bind host does not match the stack kind".to_string(),
             ));
         }
         let digest = self
@@ -646,12 +648,12 @@ impl ManagedStackState {
             .strip_prefix("ghcr.io/camonz/sacrum@sha256:")
             .ok_or_else(|| {
                 LocalBackendError::InvalidState(
-                    "Sacrum image must be the official digest-pinned image".to_string(),
+                    "Backend image must be the official digest-pinned image".to_string(),
                 )
             })?;
         if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(LocalBackendError::InvalidState(
-                "Sacrum image digest must contain 64 hexadecimal characters".to_string(),
+                "Backend image digest must contain 64 hexadecimal characters".to_string(),
             ));
         }
         Ok(())
@@ -1392,11 +1394,15 @@ mod tests {
         let error = LocalBackendError::CommandFailed {
             action: "seed local Sacrum account".to_string(),
             status: "1".to_string(),
-            output: "SEED_PASSWORD=raw-password SEED_TOKEN=raw-token".to_string(),
+            output:
+                "SacrumWeb.Endpoint sacrum_cdc_slot SEED_PASSWORD=raw-password SEED_TOKEN=raw-token"
+                    .to_string(),
         };
         let diagnostic = error.diagnostic();
 
         assert_eq!(diagnostic.code, "seeder_failed");
+        assert!(!diagnostic.message.contains("Sacrum"));
+        assert!(!diagnostic.message.contains("sacrum"));
         assert!(!diagnostic.message.contains("raw-password"));
         assert!(!diagnostic.message.contains("raw-token"));
         assert_eq!(diagnostic.message.matches("[redacted]").count(), 2);

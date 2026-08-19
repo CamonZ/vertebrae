@@ -291,7 +291,7 @@ function AgentBody({
         ) : (
           <span className="ev-ember" />
         )}
-        {speaker || "sacrum"}
+        {speaker || "Backend"}
         {model ? <span className="model">{model}</span> : null}
       </div>
       {tools.length ? (

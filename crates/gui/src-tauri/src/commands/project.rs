@@ -62,7 +62,7 @@ pub async fn save_sacrum_settings(
         .filter(|token| !token.is_empty());
     if trimmed_token.is_empty() && existing_token.is_none() {
         return Err(CommandError {
-            message: "Sacrum API token is required".to_string(),
+            message: "Backend API token is required".to_string(),
         });
     }
     if !trimmed_token.is_empty() {
@@ -120,7 +120,7 @@ pub(crate) async fn initialize_project_inner(
         .map(str::trim)
         .filter(|token| !token.is_empty())
         .ok_or_else(|| CommandError {
-            message: "No API token found. Save Sacrum settings before initializing a project."
+            message: "No API token found. Save backend settings before initializing a project."
                 .to_string(),
         })?
         .to_string();
@@ -178,16 +178,16 @@ pub(crate) fn configured_sacrum_url(
 
 pub(crate) fn validate_sacrum_url(url: &str) -> Result<(), CommandError> {
     let parsed = url::Url::parse(url).map_err(|_| CommandError {
-        message: "Sacrum URL must be a valid HTTP or HTTPS URL".to_string(),
+        message: "Backend URL must be a valid HTTP or HTTPS URL".to_string(),
     })?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err(CommandError {
-            message: "Sacrum URL must be a valid HTTP or HTTPS URL".to_string(),
+            message: "Backend URL must be a valid HTTP or HTTPS URL".to_string(),
         });
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(CommandError {
-            message: "Sacrum URL must not contain embedded credentials".to_string(),
+            message: "Backend URL must not contain embedded credentials".to_string(),
         });
     }
     Ok(())
@@ -197,7 +197,7 @@ pub(crate) fn validate_sacrum_token(token: &str) -> Result<(), CommandError> {
     if token.bytes().any(|byte| byte < 0x20 || byte == 0x7f) {
         return Err(CommandError {
             message:
-                "Sacrum API token contains characters that cannot be sent in an Authorization header"
+                "Backend API token contains characters that cannot be sent in an Authorization header"
                     .to_string(),
         });
     }
@@ -268,7 +268,7 @@ async fn get_or_create_project(
         )
         .await
         .map_err(|e| CommandError {
-            message: format!("Failed to list projects from Sacrum: {}", e),
+            message: format!("Failed to list projects from backend: {}", e),
         })?;
 
     if let Some(project) = projects.iter().find(|p| p.slug == slug) {
@@ -286,7 +286,7 @@ async fn get_or_create_project(
         )
         .await
         .map_err(|e| CommandError {
-            message: format!("Failed to create project in Sacrum: {}", e),
+            message: format!("Failed to create project in backend: {}", e),
         })?;
 
     Ok((project, true))
@@ -393,7 +393,7 @@ pub async fn set_current_project(
             Ok(config) => Some(config),
             Err(e) => {
                 return Err(CommandError {
-                    message: format!("Failed to load Sacrum configuration: {}", e),
+                    message: format!("Failed to load backend configuration: {}", e),
                 });
             }
         }

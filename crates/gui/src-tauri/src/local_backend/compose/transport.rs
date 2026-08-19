@@ -267,7 +267,7 @@ where
             .compose_request(
                 paths,
                 state,
-                "seed local Sacrum account",
+                "seed local backend account",
                 ["run", "--rm", "--no-deps", "seeder"],
                 self.reconcile_timeout,
             )

@@ -124,7 +124,7 @@ pub async fn setup_local_backend(
 fn configured_api_token() -> Result<ApiToken, LocalBackendError> {
     let config = vertebrae_sacrum_client::load_config_file().map_err(|error| {
         LocalBackendError::InvalidState(format!(
-            "could not load the configured Sacrum token for adoption: {error}"
+            "could not load the configured backend token for adoption: {error}"
         ))
     })?;
     let token = config
@@ -158,19 +158,19 @@ fn emit_progress(app_handle: &AppHandle, stage: ProvisioningStage) {
     let (stage, message) = match stage {
         ProvisioningStage::Pulling => (
             LocalBackendProgressStage::Pulling,
-            "Pulling the local Sacrum and PostgreSQL images...",
+            "Pulling the local backend and PostgreSQL images...",
         ),
         ProvisioningStage::Migrating => (
             LocalBackendProgressStage::Migrating,
-            "Applying Sacrum database migrations...",
+            "Applying backend database migrations...",
         ),
         ProvisioningStage::Health => (
             LocalBackendProgressStage::Health,
-            "Waiting for Sacrum health checks...",
+            "Waiting for backend health checks...",
         ),
         ProvisioningStage::Seeding => (
             LocalBackendProgressStage::Seeding,
-            "Creating the local Sacrum account...",
+            "Creating the local backend account...",
         ),
     };
     let _ = app_handle.emit(

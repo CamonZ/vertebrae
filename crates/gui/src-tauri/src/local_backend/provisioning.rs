@@ -193,12 +193,12 @@ pub(crate) fn persist_local_client_config(
     }
 
     let mut config = vertebrae_sacrum_client::load_config_file().map_err(|error| {
-        LocalBackendError::InvalidState(format!("could not load Sacrum client config: {error}"))
+        LocalBackendError::InvalidState(format!("could not load backend client config: {error}"))
     })?;
     config.sacrum.url = backend_url.trim_end_matches('/').to_string();
     config.sacrum.token = Some(api_token.as_str().to_string());
     vertebrae_sacrum_client::save_config_file(&config).map_err(|error| {
-        LocalBackendError::InvalidState(format!("could not persist Sacrum client config: {error}"))
+        LocalBackendError::InvalidState(format!("could not persist backend client config: {error}"))
     })
 }
 
@@ -215,7 +215,7 @@ mod tests {
             &paths,
             &mut state,
             LocalBackendError::CommandFailed {
-                action: "seed local Sacrum account".to_string(),
+                action: "seed local backend account".to_string(),
                 status: "1".to_string(),
                 output: "safe diagnostic".to_string(),
             },
