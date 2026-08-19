@@ -6,8 +6,8 @@ use super::legacy::LegacyVolumeStatus;
 use super::DockerCompose;
 use crate::local_backend::command::ProcessRunner;
 use crate::local_backend::state::{
-    LocalBackendError, ManagedStackPaths, ManagedStackState, RuntimeSecrets, StackKind,
-    LEGACY_VOLUME,
+    LocalBackendError, ManagedStackPaths, ManagedStackState, ProvisioningStage, RuntimeSecrets,
+    StackKind, LEGACY_VOLUME,
 };
 
 pub(super) const RECONCILE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -34,6 +34,20 @@ where
     where
         H: super::health::HealthProbe,
     {
+        self.start_and_wait_until_healthy_with_progress(paths, state, |_| {})
+            .await
+    }
+
+    pub async fn start_and_wait_until_healthy_with_progress<F>(
+        &self,
+        paths: &ManagedStackPaths,
+        state: &mut ManagedStackState,
+        progress: F,
+    ) -> Result<Vec<ServiceStatus>, LocalBackendError>
+    where
+        H: super::health::HealthProbe,
+        F: Fn(ProvisioningStage) + Send + Sync,
+    {
         if state.kind != StackKind::Managed {
             return Err(LocalBackendError::InvalidState(
                 "fresh provisioning cannot start an adopted development stack".to_string(),
@@ -44,7 +58,10 @@ where
         paths.save_state(state)?;
 
         let result = async {
+            progress(ProvisioningStage::Pulling);
             self.up_detached(paths, state).await?;
+            progress(ProvisioningStage::Migrating);
+            progress(ProvisioningStage::Health);
             self.wait_until_healthy(paths, state).await?;
             let secrets = self.validate_stack_files(paths, state)?;
             self.status_without_prerequisite(paths, state, &secrets)
@@ -263,6 +280,8 @@ fn parse_service_statuses(output: &str) -> Result<Vec<ServiceStatus>, LocalBacke
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use super::super::test_support::*;
     use super::super::transport::{DOCKER_ENV_REMOVE, QUICK_COMMAND_TIMEOUT};
     use super::*;
@@ -286,12 +305,24 @@ mod tests {
             CommandOutput::success(status_json),
         ]);
         let controller = controller(runner, MockHealth::with_results([true]));
+        let stages = Arc::new(Mutex::new(Vec::new()));
+        let captured_stages = stages.clone();
 
         let status = controller
-            .start_and_wait_until_healthy(&paths, &mut state)
+            .start_and_wait_until_healthy_with_progress(&paths, &mut state, move |stage| {
+                captured_stages.lock().expect("stages lock").push(stage);
+            })
             .await
             .expect("managed stack should become healthy");
 
+        assert_eq!(
+            *stages.lock().expect("stages lock"),
+            vec![
+                ProvisioningStage::Pulling,
+                ProvisioningStage::Migrating,
+                ProvisioningStage::Health,
+            ]
+        );
         assert_eq!(state.provisioning_state, ProvisioningState::InProgress);
         assert_eq!(paths.load_state().expect("load state"), Some(state));
         assert_eq!(status.len(), 2);

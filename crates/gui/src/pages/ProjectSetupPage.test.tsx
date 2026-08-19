@@ -19,6 +19,8 @@ const {
   mockSetCurrentProject,
   mockSacrumConfigStatus,
   mockSaveSacrumSettings,
+  mockSetupLocalBackend,
+  mockLocalBackendProgressListen,
   mockInitializeProject,
   mockRemoveProject,
   mockNavigate,
@@ -28,6 +30,8 @@ const {
   mockSetCurrentProject: vi.fn(),
   mockSacrumConfigStatus: vi.fn(),
   mockSaveSacrumSettings: vi.fn(),
+  mockSetupLocalBackend: vi.fn(),
+  mockLocalBackendProgressListen: vi.fn(),
   mockInitializeProject: vi.fn(),
   mockRemoveProject: vi.fn(),
   mockNavigate: vi.fn(),
@@ -52,8 +56,14 @@ vi.mock("../bindings", () => ({
     setCurrentProject: (...args: unknown[]) => mockSetCurrentProject(...args),
     sacrumConfigStatus: (...args: unknown[]) => mockSacrumConfigStatus(...args),
     saveSacrumSettings: (...args: unknown[]) => mockSaveSacrumSettings(...args),
+    setupLocalBackend: (...args: unknown[]) => mockSetupLocalBackend(...args),
     initializeProject: (...args: unknown[]) => mockInitializeProject(...args),
     removeProject: (...args: unknown[]) => mockRemoveProject(...args),
+  },
+  events: {
+    localBackendProgressEvent: {
+      listen: (...args: unknown[]) => mockLocalBackendProgressListen(...args),
+    },
   },
 }));
 
@@ -114,6 +124,15 @@ describe("ProjectSetupPage", () => {
     mockInitializeProject.mockResolvedValue(initializedProject);
     mockRemoveProject.mockResolvedValue({ status: "ok", data: null });
     mockOpen.mockResolvedValue("/tmp/new-project");
+    mockSetupLocalBackend.mockResolvedValue({
+      status: "ok",
+      data: {
+        status: "ready",
+        backend_url: "http://127.0.0.1:4400",
+        adoption_message: null,
+      },
+    });
+    mockLocalBackendProgressListen.mockResolvedValue(() => {});
   });
 
   it("resets project-scoped query cache after switching projects and before navigation", async () => {
@@ -268,6 +287,99 @@ describe("ProjectSetupPage", () => {
     expect(mockSaveSacrumSettings).toHaveBeenCalledWith(
       "https://sacrum.example.test/graphql",
       ""
+    );
+  });
+
+  it("provisions a local backend before initializing the project and clears the password", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockLocalBackendProgressListen.mockImplementation(async (callback) => {
+      callback({
+        payload: {
+          stage: "pulling",
+          message: "Pulling the local Sacrum and PostgreSQL images...",
+        },
+      });
+      return () => {};
+    });
+
+    render(<ProjectSetupPage />);
+
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.type(
+      screen.getByLabelText("Sacrum email"),
+      "person@example.test"
+    );
+    await userEvent.type(screen.getByLabelText("Sacrum username"), "person");
+    await userEvent.type(screen.getByLabelText("Sacrum password"), "secret");
+    expect(
+      await screen.findByTestId("local-backend-progress")
+    ).toHaveTextContent("Pulling");
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Sacrum password")).not.toBeInTheDocument();
+    expect(mockSetupLocalBackend).toHaveBeenCalledWith(
+      "person@example.test",
+      "person",
+      "secret",
+      false
+    );
+    expect(mockSaveSacrumSettings).not.toHaveBeenCalled();
+    expect(mockInitializeProject).toHaveBeenCalledWith(
+      "/tmp/new-project",
+      "new-project"
+    );
+  });
+
+  it("requires adoption confirmation before handing off to project initialization", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockSetupLocalBackend
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          status: "adoption_required",
+          backend_url: null,
+          adoption_message: "Adopt the compatible vertebrae-dev stack.",
+        },
+      })
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          status: "ready",
+          backend_url: "http://127.0.0.1:4400",
+          adoption_message: null,
+        },
+      });
+
+    render(<ProjectSetupPage />);
+
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.type(
+      screen.getByLabelText("Sacrum email"),
+      "person@example.test"
+    );
+    await userEvent.type(screen.getByLabelText("Sacrum username"), "person");
+    await userEvent.type(screen.getByLabelText("Sacrum password"), "secret");
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
+      "Adopt the compatible vertebrae-dev stack."
+    );
+    expect(mockInitializeProject).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Sacrum password")).toHaveValue("");
+
+    await userEvent.type(screen.getByLabelText("Sacrum password"), "secret");
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
+    expect(mockSetupLocalBackend).toHaveBeenLastCalledWith(
+      "person@example.test",
+      "person",
+      "secret",
+      true
     );
   });
 

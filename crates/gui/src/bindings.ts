@@ -72,6 +72,30 @@ export const commands = {
     }
   },
   /**
+   * Provision or adopt the GUI-owned local Sacrum backend.
+   */
+  async setupLocalBackend(
+    email: string,
+    username: string,
+    password: string,
+    adoptLegacy: boolean
+  ): Promise<Result<LocalBackendSetupResult, CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("setup_local_backend", {
+          email,
+          username,
+          password,
+          adoptLegacy,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  /**
    * Initialize a local project from the GUI without shelling out to `vtb init`.
    */
   async initializeProject(
@@ -1430,6 +1454,7 @@ export const commands = {
 
 export const events = __makeEvents__<{
   artifactChangedEvent: ArtifactChangedEvent;
+  localBackendProgressEvent: LocalBackendProgressEvent;
   localChatCompactionEvent: LocalChatCompactionEvent;
   localChatFileChangeEvent: LocalChatFileChangeEvent;
   localChatSessionEndEvent: LocalChatSessionEndEvent;
@@ -1456,6 +1481,7 @@ export const events = __makeEvents__<{
   workflowTransitionChangedEvent: WorkflowTransitionChangedEvent;
 }>({
   artifactChangedEvent: "artifact-changed-event",
+  localBackendProgressEvent: "local-backend-progress-event",
   localChatCompactionEvent: "local-chat-compaction-event",
   localChatFileChangeEvent: "local-chat-file-change-event",
   localChatSessionEndEvent: "local-chat-session-end-event",
@@ -1727,6 +1753,21 @@ export type InitializeProjectResult = {
    */
   project_created: boolean;
 };
+export type LocalBackendProgressEvent = {
+  stage: LocalBackendProgressStage;
+  message: string;
+};
+export type LocalBackendProgressStage =
+  | "pulling"
+  | "migrating"
+  | "health"
+  | "seeding";
+export type LocalBackendSetupResult = {
+  status: LocalBackendSetupStatus;
+  backend_url: string | null;
+  adoption_message: string | null;
+};
+export type LocalBackendSetupStatus = "ready" | "adoption_required";
 /**
  * Aggregate snapshot of installation state returned from both
  * `installation_status()` and `install_components()`.

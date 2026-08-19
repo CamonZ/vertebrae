@@ -15,6 +15,8 @@ pub(crate) const LEGACY_PROJECT: &str = "vertebrae-dev";
 pub(crate) const LEGACY_VOLUME: &str = "vertebrae-dev_pgdata";
 pub(crate) const FRESH_POSTGRES_IMAGE: &str = "postgres:18-alpine";
 pub(crate) const LEGACY_POSTGRES_IMAGE: &str = "postgres:17-alpine";
+pub(crate) const LOCAL_SACRUM_IMAGE_REF: &str =
+    "ghcr.io/camonz/sacrum@sha256:9a028d0d22543762644149ef1f3042706af7f5ab38f6b3df287f1a82bd495f6f";
 const LEGACY_POSTGRES_PASSWORD: &str = "postgres";
 const LEGACY_SECRET_KEY_BASE: &str =
     "dev-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-app";
@@ -297,6 +299,14 @@ pub enum ProvisioningState {
     Ready,
     Failed,
     Unverified,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProvisioningStage {
+    Pulling,
+    Migrating,
+    Health,
+    Seeding,
 }
 
 /// API token whose debug representation is redacted.

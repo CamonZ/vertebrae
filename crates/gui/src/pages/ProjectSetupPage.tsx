@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   commands,
+  events,
   InitializeProjectResult,
+  LocalBackendProgressEvent,
   SavedProject,
   SacrumConfigStatus,
 } from "../bindings";
@@ -57,6 +59,13 @@ export function ProjectSetupPage() {
   const [projectName, setProjectName] = useState("");
   const [sacrumUrl, setSacrumUrl] = useState("");
   const [sacrumToken, setSacrumToken] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
+  const [accountUsername, setAccountUsername] = useState("");
+  const [accountPassword, setAccountPassword] = useState("");
+  const [localProgress, setLocalProgress] =
+    useState<LocalBackendProgressEvent | null>(null);
+  const [localAdoptionRequired, setLocalAdoptionRequired] = useState(false);
+  const [isProvisioningLocal, setIsProvisioningLocal] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [sacrumStatusRetryKey, setSacrumStatusRetryKey] = useState(0);
   const [isInitializing, setIsInitializing] = useState(false);
@@ -72,6 +81,7 @@ export function ProjectSetupPage() {
       if (result.status === "ok") {
         setProjects(result.data);
         if (result.data.length === 0) {
+          setBackendChoice(null);
           setSetupView("backend");
         }
       } else {
@@ -121,6 +131,26 @@ export function ProjectSetupPage() {
       cancelled = true;
     };
   }, [backendChoice, sacrumStatus, sacrumStatusRetryKey, setupView]);
+
+  useEffect(() => {
+    if (setupView !== "project" || backendChoice !== "local") return;
+
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void events.localBackendProgressEvent
+      .listen((event) => {
+        if (!cancelled) setLocalProgress(event.payload);
+      })
+      .then((cleanup) => {
+        if (cancelled) cleanup();
+        else unlisten = cleanup;
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [backendChoice, setupView]);
 
   // Handle selecting a project
   const handleSelectProject = async (project: SavedProject) => {
@@ -188,13 +218,6 @@ export function ProjectSetupPage() {
       sacrumUrl.trim() !== sacrumStatus.url);
 
   const handleProjectContinue = async () => {
-    if (backendChoice === "local") {
-      setFormError(
-        "Local backend setup is not available until the local setup step is complete."
-      );
-      return;
-    }
-
     const trimmedName = projectName.trim();
     const trimmedUrl = sacrumUrl.trim();
     const trimmedToken = sacrumToken.trim();
@@ -207,10 +230,74 @@ export function ProjectSetupPage() {
       setFormError("Project name is required.");
       return;
     }
-    if (!trimmedUrl) {
+    if (backendChoice === "remote" && !trimmedUrl) {
       setFormError("Sacrum URL is required.");
       return;
     }
+
+    if (backendChoice === "local") {
+      const trimmedEmail = accountEmail.trim();
+      const trimmedUsername = accountUsername.trim();
+      if (!trimmedEmail || !trimmedUsername || !accountPassword) {
+        setFormError("Email, username, and password are required.");
+        return;
+      }
+
+      setFormError(null);
+      setLocalProgress(null);
+      setIsProvisioningLocal(true);
+      try {
+        const result = await commands.setupLocalBackend(
+          trimmedEmail,
+          trimmedUsername,
+          accountPassword,
+          localAdoptionRequired
+        );
+        if (result.status === "error") {
+          setFormError(result.error.message);
+          return;
+        }
+        if (result.data.status === "adoption_required") {
+          setLocalAdoptionRequired(true);
+          setFormError(
+            result.data.adoption_message ??
+              "A compatible vertebrae-dev backend was detected. Confirm adoption to continue."
+          );
+          return;
+        }
+
+        setLocalAdoptionRequired(false);
+        setAccountPassword("");
+        setIsInitializing(true);
+        setInitializeResult(null);
+        const initResult = await commands.initializeProject(
+          selectedPath,
+          trimmedName
+        );
+        if (initResult.status === "error") {
+          setFormError(initResult.error.message);
+          return;
+        }
+        setInitializeResult(initResult.data);
+        const selectResult = await commands.setCurrentProject(
+          initResult.data.slug
+        );
+        if (selectResult.status === "error") {
+          setFormError(selectResult.error.message);
+          return;
+        }
+        resetProjectScopedStores();
+        setSetupView("ignition");
+      } catch (e) {
+        setFormError(`Failed to set up local backend: ${e}`);
+      } finally {
+        setAccountPassword("");
+        setIsProvisioningLocal(false);
+        setIsInitializing(false);
+      }
+      return;
+    }
+
     if (!sacrumStatus) {
       setFormError("Sacrum settings are required before continuing.");
       return;
@@ -364,7 +451,7 @@ export function ProjectSetupPage() {
           <button
             onClick={() => setSetupView("saved")}
             className={secondaryButtonClass}
-            disabled={isSavingSettings}
+            disabled={isSavingSettings || isProvisioningLocal}
           >
             Back
           </button>
@@ -372,7 +459,7 @@ export function ProjectSetupPage() {
           <button
             onClick={() => setSetupView("backend")}
             className={secondaryButtonClass}
-            disabled={isSavingSettings}
+            disabled={isSavingSettings || isProvisioningLocal}
             data-testid="project-back-backend"
           >
             Back
@@ -381,12 +468,21 @@ export function ProjectSetupPage() {
         <button
           onClick={handleProjectContinue}
           className={primaryButtonClass}
-          disabled={isLoadingSacrumStatus || isSavingSettings || isInitializing}
+          disabled={
+            isLoadingSacrumStatus ||
+            isSavingSettings ||
+            isInitializing ||
+            isProvisioningLocal
+          }
           data-testid="project-phase-continue"
         >
-          {isSavingSettings || isInitializing
-            ? "Creating..."
-            : "Create project"}
+          {isProvisioningLocal
+            ? "Setting up..."
+            : isSavingSettings || isInitializing
+              ? "Creating..."
+              : localAdoptionRequired
+                ? "Adopt backend"
+                : "Create project"}
         </button>
       </>
     ) : setupView === "ignition" ? (
@@ -452,18 +548,47 @@ export function ProjectSetupPage() {
           data-testid="project-phase-error"
         >
           <span>{formError}</span>
-          {setupView === "project" && !sacrumStatus && (
-            <button
-              onClick={handleRetrySacrumStatus}
-              className={secondaryButtonClass}
-              disabled={isLoadingSacrumStatus}
-              data-testid="sacrum-status-retry"
-            >
-              Retry
-            </button>
-          )}
+          {setupView === "project" &&
+            backendChoice === "remote" &&
+            !sacrumStatus && (
+              <button
+                onClick={handleRetrySacrumStatus}
+                className={secondaryButtonClass}
+                disabled={isLoadingSacrumStatus}
+                data-testid="sacrum-status-retry"
+              >
+                Retry
+              </button>
+            )}
         </div>
       )}
+
+      {setupView === "project" &&
+        backendChoice === "local" &&
+        localProgress && (
+          <div
+            className="mb-4 rounded-lg border border-border bg-bg-2 p-3"
+            data-testid="local-backend-progress"
+          >
+            <div className="text-sm font-medium text-fg">
+              {localProgress.message}
+            </div>
+            <div className="mt-2 grid grid-cols-4 gap-1 text-[0.65rem] uppercase tracking-[0.12em] text-fg-mute">
+              {(["pulling", "migrating", "health", "seeding"] as const).map(
+                (stage) => (
+                  <span
+                    key={stage}
+                    className={
+                      stage === localProgress.stage ? "text-accent" : ""
+                    }
+                  >
+                    {stage}
+                  </span>
+                )
+              )}
+            </div>
+          </div>
+        )}
 
       {/* Loading state */}
       {isLoading && (
@@ -612,11 +737,58 @@ export function ProjectSetupPage() {
           )}
 
           {backendChoice === "local" && (
-            <div className="fr-callout">
-              <span>
-                Vertebrae will provision the local backend after you continue.
-              </span>
-            </div>
+            <>
+              <div className="space-y-4">
+                <div className="fr-field">
+                  <label htmlFor="local-account-email">Sacrum email</label>
+                  <input
+                    id="local-account-email"
+                    className="fr-input"
+                    type="email"
+                    value={accountEmail}
+                    onChange={(e) => {
+                      setAccountEmail(e.target.value);
+                      setFormError(null);
+                    }}
+                  />
+                </div>
+                <div className="fr-field">
+                  <label htmlFor="local-account-username">
+                    Sacrum username
+                  </label>
+                  <input
+                    id="local-account-username"
+                    className="fr-input"
+                    value={accountUsername}
+                    onChange={(e) => {
+                      setAccountUsername(e.target.value);
+                      setFormError(null);
+                    }}
+                  />
+                </div>
+                <div className="fr-field">
+                  <label htmlFor="local-account-password">
+                    Sacrum password
+                  </label>
+                  <input
+                    id="local-account-password"
+                    className="fr-input"
+                    type="password"
+                    value={accountPassword}
+                    onChange={(e) => {
+                      setAccountPassword(e.target.value);
+                      setFormError(null);
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="fr-callout">
+                <span>
+                  Vertebrae will provision the local backend after you continue.
+                  It generates and stores backend secrets automatically.
+                </span>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -652,6 +824,8 @@ export function ProjectSetupPage() {
             }`}
             onClick={() => {
               setBackendChoice("local");
+              setLocalAdoptionRequired(false);
+              setLocalProgress(null);
               setFormError(null);
             }}
             data-testid="backend-choice-local"
