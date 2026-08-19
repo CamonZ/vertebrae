@@ -666,7 +666,7 @@ export function ProjectSetupPage() {
             <input
               id="project-name"
               className="fr-input"
-              placeholder="e.g. cervical"
+              placeholder="e.g. my-project"
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
             />
