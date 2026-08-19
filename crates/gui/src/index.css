@@ -5,8 +5,9 @@
 @import "tailwindcss";
 
 /* =============================================================================
-   VERTEBRAE · HEARTH — Warm dark identity
-   Copper accent on warm neutrals, serif moments via Newsreader, mono via JetBrains.
+   VERTEBRAE · HEARTH — Neutral dark identity
+   Copper accent on neutral charcoal surfaces, serif moments via Newsreader, mono
+   via JetBrains.
    Five step types: execute / eval / route / human_review / wait_for_children.
    Tokens are layered: Hearth primitives (--color-*, --spacing-*, --radius-*)
    are the single source of truth and own all values; the docs/design v2 adapter
@@ -16,36 +17,36 @@
 
 @theme {
   /* ---------------------------------------------------------------------------
-     HEARTH PRIMITIVES — warm dark by default. .light overrides below.
+     HEARTH PRIMITIVES — neutral dark by default. .light overrides below.
      --------------------------------------------------------------------------- */
 
-  /* Surfaces — warm ink, six steps. Never blue, never gray. */
-  --color-bg: #100e0c;
-  --color-bg-1: #181513;
-  --color-bg-2: #221d1a;
-  --color-bg-3: #2c2622;
-  --color-bg-4: #38312c;
-  /* Hover wash — a faint cream veil over a surface. Real themed token (see the
-     .light override below), not an alias. */
-  --color-bg-hover: rgba(232, 229, 221, 0.04);
+  /* Surfaces — neutral charcoal, five steps from near-black to raised. */
+  --color-bg: #0a0a0a;
+  --color-bg-1: #111111;
+  --color-bg-2: #161616;
+  --color-bg-3: #1f1f1f;
+  --color-bg-4: #2a2a2a;
+  /* Hover wash — a faint off-white veil over a surface. Real themed token (see
+     the .light override below), not an alias. */
+  --color-bg-hover: rgba(244, 241, 236, 0.04);
 
   /* Task-row hover fill — a PLAIN pre-resolved color (== color-mix(in oklch,
      --color-bg-1 60%, --color-bg)). Kept plain rather than a live color-mix()
      because WKWebView flashes a wrong (cool/blue) intermediate when it animates
      a background TO a color-mix() value; a legacy sRGB hex animates cleanly. */
-  --row-hover: #151210;
+  --row-hover: #0e0e0e;
 
-  /* Text — warm neutral cream, five steps to ghost */
-  --color-fg: #e8e5dd;
-  --color-fg-soft: #ccc8c0;
-  --color-fg-mute: #9c988e;
-  --color-fg-faint: #645f57;
-  --color-fg-ghost: #45413c;
+  /* Text — warm off-white neutrals, five steps to ghost. */
+  --color-fg: #f4f1ec;
+  --color-fg-soft: #b8b5af;
+  --color-fg-mute: #6f6c66;
+  --color-fg-faint: #4a4742;
+  --color-fg-ghost: #2a2a2a;
 
-  /* Lines */
-  --color-line: #2c2622;
-  --color-line-soft: #221d1a;
-  --color-line-strong: #463f38;
+  /* Lines — neutral steps shared with the surface ramp. */
+  --color-line: #1f1f1f;
+  --color-line-soft: #161616;
+  --color-line-strong: #2a2a2a;
   /* Semantic aliases for the `border-border` / `border-border-focus` (and
      `ring-border-focus`) utilities. Resolve through the line tokens so they
      follow the .light override automatically; without them Tailwind v4 falls
@@ -57,11 +58,11 @@
   --color-accent: oklch(0.74 0.18 40);
   --color-accent-deep: oklch(0.58 0.18 35);
   --color-accent-mute: oklch(0.52 0.12 38);
-  /* Subtle warm ember tint — design's `--accent-wash`. Low chroma (0.05) and a
-     small lightness lift over `--color-bg` so selection/active states tint a
-     surface rather than slab it. Used by the rail active item, selected task
-     rows, badges, chips, and focus rings. */
-  --color-accent-wash: oklch(0.22 0.05 38);
+  /* Neutral selection wash — ordinary selection/hover surfaces stay tonal;
+     copper remains available through the accent and intentional semantic washes.
+     Used by the rail active item, selected task rows, badges, chips, and focus
+     rings. */
+  --color-accent-wash: #1f1f1f;
   --color-accent-glow: rgba(230, 130, 80, 0.22);
 
   /* Status — four semantic states, each with a wash background variant */
