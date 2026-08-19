@@ -5,9 +5,7 @@ use super::state::{
     RuntimeSecrets, SeedAccount, StackKind,
 };
 
-/// Redacted result returned to the GUI after the managed stack reaches its
-/// final provisioning state. The API token is intentionally absent because it
-/// is already stored through the canonical Sacrum config path.
+/// Provisioning result without the API token, which is persisted in the canonical config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisioningResult {
     pub backend_url: String,
@@ -20,9 +18,7 @@ where
     R: ProcessRunner,
     H: HealthProbe,
 {
-    /// Provision a fresh GUI-managed stack. Runtime secrets and the generated
-    /// API token are persisted before Docker is started, so a retry after any
-    /// partial failure reuses the same values and database volume.
+    /// Persist secrets and the API token before starting Docker so retries reuse them.
     pub async fn provision_fresh(
         &self,
         paths: &ManagedStackPaths,
@@ -45,10 +41,9 @@ where
             return Err(record_failed_state(paths, state, error));
         }
 
-        let runtime_secrets = match ensure_runtime_secrets(paths, state.kind) {
-            Ok(secrets) => secrets,
-            Err(error) => return Err(record_failed_state(paths, state, error)),
-        };
+        if let Err(error) = ensure_runtime_secrets(paths, state.kind) {
+            return Err(record_failed_state(paths, state, error));
+        }
         let api_token = match ensure_api_token(paths) {
             Ok(token) => token,
             Err(error) => return Err(record_failed_state(paths, state, error)),
@@ -73,11 +68,6 @@ where
         if let Err(error) = paths.save_state(state) {
             return Err(record_failed_state(paths, state, error));
         }
-
-        // Keep this binding live through the seeding/configuration sequence so
-        // the compiler cannot optimize the runtime secret read away before the
-        // Compose operation is complete. It is never returned or serialized.
-        drop(runtime_secrets);
 
         Ok(ProvisioningResult {
             backend_url: state.backend_url(),

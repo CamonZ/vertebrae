@@ -254,9 +254,7 @@ where
         Ok(output)
     }
 
-    /// Run the idempotent seed script as a one-shot Compose service. Account
-    /// credentials are supplied through the child process environment only;
-    /// they are never added to command arguments or persisted in the stack.
+    /// Credentials stay in the child process environment and are not persisted.
     pub async fn run_seeder(
         &self,
         paths: &ManagedStackPaths,

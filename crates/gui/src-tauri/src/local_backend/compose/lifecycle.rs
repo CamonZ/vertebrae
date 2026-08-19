@@ -26,10 +26,6 @@ impl<R, H> DockerCompose<R, H>
 where
     R: ProcessRunner,
 {
-    /// Start a managed stack and wait for the image's migration entrypoint and
-    /// health check to finish. The database volume and runtime secrets are
-    /// deliberately left in place when this operation fails so callers can
-    /// retry without changing the database contract.
     pub async fn start_and_wait_until_healthy(
         &self,
         paths: &ManagedStackPaths,

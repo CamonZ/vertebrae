@@ -91,9 +91,7 @@ pub enum LocalBackendError {
 }
 
 impl LocalBackendError {
-    /// Convert an internal provisioning failure into a stable, actionable
-    /// message suitable for GUI display. Callers should use this projection
-    /// instead of formatting the error's debug representation.
+    /// Build a stable, redacted diagnostic for GUI display.
     pub fn diagnostic(&self) -> LocalBackendDiagnostic {
         let detail = redact_diagnostic_detail(&self.to_string());
         let (code, retryable, hint) = match self {
@@ -301,8 +299,7 @@ pub enum ProvisioningState {
     Unverified,
 }
 
-/// A generated Sacrum API token. Its debug representation never reveals the
-/// token, which keeps structured diagnostics safe to log.
+/// API token whose debug representation is redacted.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ApiToken(String);
 
@@ -351,10 +348,7 @@ impl Drop for ApiToken {
     }
 }
 
-/// User-provided account data used only by the one-shot local seeder.
-///
-/// This type is deliberately not serializable and redacts its password from
-/// debug output. The password is zeroized when the value is dropped.
+/// Seeder account data; the password is redacted and zeroized on drop.
 pub struct SeedAccount {
     email: String,
     username: String,
