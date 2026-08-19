@@ -70,6 +70,13 @@ const initializedProject = {
   },
 };
 
+async function chooseRemoteBackend() {
+  expect(await screen.findByTestId("backend-choice")).toBeInTheDocument();
+  await userEvent.click(screen.getByTestId("backend-choice-remote"));
+  await userEvent.click(screen.getByTestId("backend-choice-continue"));
+  expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+}
+
 describe("ProjectSetupPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -193,7 +200,36 @@ describe("ProjectSetupPage", () => {
       expect(mockRemoveProject).toHaveBeenCalledWith("new-project");
     });
     expect(mockSetCurrentProject).not.toHaveBeenCalled();
-    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    expect(await screen.findByTestId("backend-choice")).toBeInTheDocument();
+  });
+
+  it("requires an explicit backend choice and preserves project fields", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+
+    render(<ProjectSetupPage />);
+
+    expect(await screen.findByTestId("backend-choice")).toBeInTheDocument();
+    expect(screen.getByTestId("backend-choice-continue")).toBeDisabled();
+    expect(mockSacrumConfigStatus).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    expect(await screen.findByTestId("project-phase-form")).toHaveTextContent(
+      "Docker-hosted local backend"
+    );
+    await userEvent.type(
+      screen.getByLabelText("Project name"),
+      "first-project"
+    );
+    await userEvent.click(screen.getByTestId("project-back-backend"));
+    expect(await screen.findByTestId("backend-choice")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("backend-choice-remote"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    expect(await screen.findByLabelText("Project name")).toHaveValue(
+      "first-project"
+    );
+    expect(mockSacrumConfigStatus).toHaveBeenCalledTimes(1);
   });
 
   it("collects folder and project name without showing Sacrum fields when config is complete", async () => {
@@ -230,9 +266,9 @@ describe("ProjectSetupPage", () => {
 
     render(<ProjectSetupPage />);
 
-    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    await chooseRemoteBackend();
     expect(screen.getByTestId("first-run-progress")).toHaveTextContent(
-      "Step 1 of 2"
+      "Step 2 of 3"
     );
     await userEvent.click(screen.getByTestId("project-folder-choose"));
 
@@ -280,6 +316,7 @@ describe("ProjectSetupPage", () => {
 
     render(<ProjectSetupPage />);
 
+    await chooseRemoteBackend();
     expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
       "Sacrum config unavailable"
     );
@@ -314,7 +351,7 @@ describe("ProjectSetupPage", () => {
 
     render(<ProjectSetupPage />);
 
-    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    await chooseRemoteBackend();
     await userEvent.click(screen.getByTestId("project-folder-choose"));
     await userEvent.type(
       screen.getByLabelText("Sacrum API token"),
@@ -349,7 +386,7 @@ describe("ProjectSetupPage", () => {
       .mockResolvedValueOnce(initializedProject);
 
     render(<ProjectSetupPage />);
-    await screen.findByTestId("project-phase-form");
+    await chooseRemoteBackend();
     await userEvent.click(screen.getByTestId("project-folder-choose"));
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
@@ -378,7 +415,7 @@ describe("ProjectSetupPage", () => {
 
     render(<ProjectSetupPage />);
 
-    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    await chooseRemoteBackend();
     await userEvent.click(screen.getByTestId("project-folder-choose"));
     await userEvent.clear(screen.getByLabelText("Project name"));
     await userEvent.type(screen.getByLabelText("Project name"), "Ørsted");
