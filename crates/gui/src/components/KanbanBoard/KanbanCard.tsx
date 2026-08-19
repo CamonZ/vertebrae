@@ -33,12 +33,12 @@ export function KanbanCard({
   const isEpic = task.level === "epic";
   const showLeftBar = isSelected || isRunning;
 
-  // Background by state. Selected uses the shared accent-wash (same as the Tasks
-  // list / Run Console selected rows); running keeps the live gradient. Resting
+  // Background by state. Selected uses the shared neutral selection surface
+  // (same as the Tasks list / Run Console selected rows); running keeps the live gradient. Resting
   // is left to a class so `hover:` can override it (an inline style could not).
   // The step-kind hue lives only in the 2px top bar (borderTopColor).
   const stateBackground = isSelected
-    ? "var(--color-accent-wash)"
+    ? "var(--color-selection)"
     : isRunning
       ? "linear-gradient(135deg, var(--color-accent-wash), var(--color-bg-2) 50%)"
       : undefined;

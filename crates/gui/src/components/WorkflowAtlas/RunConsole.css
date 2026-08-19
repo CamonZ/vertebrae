@@ -254,7 +254,7 @@
   border-color: color-mix(in oklch, var(--fg) 9%, transparent);
 }
 .rc-row.sel {
-  background: var(--accent-wash);
+  background: var(--selection);
 }
 /* Selected: a 3px accent left bar — the same selection signal the Tasks list
    rows and Kanban cards use. No border, no glow, no bar at rest. */

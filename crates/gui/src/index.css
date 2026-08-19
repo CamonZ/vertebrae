@@ -36,7 +36,11 @@
      a background TO a color-mix() value; a legacy sRGB hex animates cleanly. */
   --row-hover: #0e0e0e;
 
-  /* Text — warm off-white neutrals, five steps to ghost. */
+  /* Neutral selected surface. Persistent selection is a value change; copper
+     remains reserved for the indicator, active-run, and focus signals. */
+  --color-selection: #1f1f1f;
+
+  /* Text — off-white neutrals, five steps to ghost. */
   --color-fg: #f4f1ec;
   --color-fg-soft: #b8b5af;
   --color-fg-mute: #6f6c66;
@@ -58,11 +62,9 @@
   --color-accent: oklch(0.74 0.18 40);
   --color-accent-deep: oklch(0.58 0.18 35);
   --color-accent-mute: oklch(0.52 0.12 38);
-  /* Neutral selection wash — ordinary selection/hover surfaces stay tonal;
-     copper remains available through the accent and intentional semantic washes.
-     Used by the rail active item, selected task rows, badges, chips, and focus
-     rings. */
-  --color-accent-wash: #1f1f1f;
+  /* Subtle ember tint for intentional accent surfaces such as badges and chips;
+     ordinary selection uses --color-selection instead. */
+  --color-accent-wash: oklch(0.22 0.03 38);
   --color-accent-glow: rgba(230, 130, 80, 0.22);
 
   /* Status — four semantic states, each with a wash background variant */
@@ -203,6 +205,7 @@
   --bg-2: var(--color-bg-2);
   --bg-3: var(--color-bg-3);
   --bg-4: var(--color-bg-4);
+  --selection: var(--color-selection);
 
   /* Text */
   --fg: var(--color-fg);
@@ -364,6 +367,7 @@
   --color-bg-2: #e9e3d3;
   --color-bg-3: #dcd4c1;
   --color-bg-4: #cac0a8;
+  --color-selection: oklch(0.95 0.03 50);
 
   --color-fg: #1a1a20;
   --color-fg-soft: #3a3a44;
@@ -1490,7 +1494,7 @@ html.light ::selection {
 }
 
 .data-row--selected {
-  background-color: var(--color-accent-wash);
+  background-color: var(--color-selection);
   border-left: 2px solid var(--color-accent);
 }
 
@@ -3083,7 +3087,7 @@ html.light ::selection {
 }
 
 .tasks-v2 .t-row.sel {
-  background: var(--accent-wash);
+  background: var(--selection);
 }
 
 .tasks-v2 .t-row.sel::before {
