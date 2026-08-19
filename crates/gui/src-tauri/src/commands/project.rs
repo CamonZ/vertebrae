@@ -38,26 +38,39 @@ pub async fn sacrum_config_status() -> Result<SacrumConfigStatus, CommandError> 
     })
 }
 
-/// Persist Sacrum settings to the shared config.toml.
+/// Persist remote Sacrum settings to the shared config.toml.
 #[tauri::command]
 #[specta::specta]
-pub async fn save_sacrum_settings(token: String) -> Result<SacrumConfigStatus, CommandError> {
+pub async fn save_sacrum_settings(
+    url: String,
+    token: String,
+) -> Result<SacrumConfigStatus, CommandError> {
     log::info!("save_sacrum_settings called");
 
-    let trimmed_token = token.trim();
-    if trimmed_token.is_empty() {
-        return Err(CommandError {
-            message: "Sacrum API token is required".to_string(),
-        });
-    }
-    validate_sacrum_token(trimmed_token)?;
+    let trimmed_url = url.trim();
+    validate_sacrum_url(trimmed_url)?;
 
+    let trimmed_token = token.trim();
     let mut config_file =
         vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
             message: format!("Failed to load config file: {}", e),
         })?;
-    config_file.sacrum.url = configured_sacrum_url(&config_file);
-    config_file.sacrum.token = Some(trimmed_token.to_string());
+    let existing_token = config_file
+        .sacrum
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty());
+    if trimmed_token.is_empty() && existing_token.is_none() {
+        return Err(CommandError {
+            message: "Sacrum API token is required".to_string(),
+        });
+    }
+    if !trimmed_token.is_empty() {
+        validate_sacrum_token(trimmed_token)?;
+        config_file.sacrum.token = Some(trimmed_token.to_string());
+    }
+    config_file.sacrum.url = trimmed_url.to_string();
 
     vertebrae_sacrum_client::save_config_file(&config_file).map_err(|e| CommandError {
         message: format!("Failed to save config file: {}", e),
@@ -162,6 +175,23 @@ pub(crate) fn configured_sacrum_url(
     } else {
         trimmed_url.to_string()
     }
+}
+
+pub(crate) fn validate_sacrum_url(url: &str) -> Result<(), CommandError> {
+    let parsed = url::Url::parse(url).map_err(|_| CommandError {
+        message: "Sacrum URL must be a valid HTTP or HTTPS URL".to_string(),
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(CommandError {
+            message: "Sacrum URL must be a valid HTTP or HTTPS URL".to_string(),
+        });
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(CommandError {
+            message: "Sacrum URL must not contain embedded credentials".to_string(),
+        });
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_sacrum_token(token: &str) -> Result<(), CommandError> {
@@ -673,12 +703,18 @@ mod tests {
         assert!(!initial.has_token);
         assert_eq!(initial.url, "https://vertebrae.dev");
 
-        let empty = save_sacrum_settings("  ".to_string()).await.unwrap_err();
+        let empty =
+            save_sacrum_settings("https://custom.example.test".to_string(), "  ".to_string())
+                .await
+                .unwrap_err();
         assert!(empty.message.contains("required"));
 
-        let invalid = save_sacrum_settings("bad\ntoken".to_string())
-            .await
-            .unwrap_err();
+        let invalid = save_sacrum_settings(
+            "https://custom.example.test".to_string(),
+            "bad\ntoken".to_string(),
+        )
+        .await
+        .unwrap_err();
         assert!(invalid.message.contains("Authorization header"));
         assert!(
             !vertebrae_sacrum_client::config_path()
@@ -698,19 +734,47 @@ mod tests {
         let custom_status = sacrum_config_status().await.unwrap();
         assert_eq!(custom_status.url, "https://custom.example.test");
 
-        let status = save_sacrum_settings(" sac_valid-token ".to_string())
-            .await
-            .unwrap();
+        let status = save_sacrum_settings(
+            " https://remote.example.test/api ".to_string(),
+            " sac_valid-token ".to_string(),
+        )
+        .await
+        .unwrap();
         assert!(status.config_exists);
         assert!(status.has_token);
-        assert_eq!(status.url, "https://custom.example.test");
+        assert_eq!(status.url, "https://remote.example.test/api");
 
         let status_json = serde_json::to_value(&status).unwrap();
         assert!(status_json.get("token").is_none());
 
         let config = vertebrae_sacrum_client::load_config_file().unwrap();
         assert_eq!(config.sacrum.token.as_deref(), Some("sac_valid-token"));
-        assert_eq!(config.sacrum.url, "https://custom.example.test");
+        assert_eq!(config.sacrum.url, "https://remote.example.test/api");
+
+        let preserved = save_sacrum_settings(
+            "https://remote.example.test/next".to_string(),
+            "  ".to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(preserved.url, "https://remote.example.test/next");
+        let config = vertebrae_sacrum_client::load_config_file().unwrap();
+        assert_eq!(config.sacrum.token.as_deref(), Some("sac_valid-token"));
+    }
+
+    #[test]
+    fn validate_sacrum_url_rejects_non_http_and_embedded_credentials() {
+        for invalid in [
+            "",
+            "localhost:4000",
+            "ftp://sacrum.example.test",
+            "https://user:password@sacrum.example.test",
+        ] {
+            assert!(validate_sacrum_url(invalid).is_err(), "{invalid}");
+        }
+
+        validate_sacrum_url("http://127.0.0.1:4400/graphql").unwrap();
+        validate_sacrum_url("https://sacrum.example.test").unwrap();
     }
 
     #[tokio::test]

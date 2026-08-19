@@ -58,12 +58,13 @@ export const commands = {
    * Persist Sacrum settings to the shared config.toml.
    */
   async saveSacrumSettings(
+    url: string,
     token: string
   ): Promise<Result<SacrumConfigStatus, CommandError>> {
     try {
       return {
         status: "ok",
-        data: await TAURI_INVOKE("save_sacrum_settings", { token }),
+        data: await TAURI_INVOKE("save_sacrum_settings", { url, token }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;

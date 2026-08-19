@@ -55,6 +55,7 @@ export function ProjectSetupPage() {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [selectedPath, setSelectedPath] = useState("");
   const [projectName, setProjectName] = useState("");
+  const [sacrumUrl, setSacrumUrl] = useState("");
   const [sacrumToken, setSacrumToken] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [sacrumStatusRetryKey, setSacrumStatusRetryKey] = useState(0);
@@ -100,6 +101,7 @@ export function ProjectSetupPage() {
         if (cancelled) return;
         if (result.status === "ok") {
           setSacrumStatus(result.data);
+          setSacrumUrl(result.data.url);
         } else {
           setFormError(result.error.message);
         }
@@ -181,7 +183,9 @@ export function ProjectSetupPage() {
 
   const needsSacrumSettings =
     sacrumStatus !== null &&
-    (!sacrumStatus.config_exists || !sacrumStatus.has_token);
+    (!sacrumStatus.config_exists ||
+      !sacrumStatus.has_token ||
+      sacrumUrl.trim() !== sacrumStatus.url);
 
   const handleProjectContinue = async () => {
     if (backendChoice === "local") {
@@ -192,6 +196,7 @@ export function ProjectSetupPage() {
     }
 
     const trimmedName = projectName.trim();
+    const trimmedUrl = sacrumUrl.trim();
     const trimmedToken = sacrumToken.trim();
 
     if (!selectedPath) {
@@ -202,11 +207,15 @@ export function ProjectSetupPage() {
       setFormError("Project name is required.");
       return;
     }
+    if (!trimmedUrl) {
+      setFormError("Sacrum URL is required.");
+      return;
+    }
     if (!sacrumStatus) {
       setFormError("Sacrum settings are required before continuing.");
       return;
     }
-    if (needsSacrumSettings && !trimmedToken) {
+    if (!sacrumStatus.has_token && !trimmedToken) {
       setFormError("Sacrum API token is required.");
       return;
     }
@@ -216,9 +225,13 @@ export function ProjectSetupPage() {
     setFormError(null);
     try {
       if (needsSacrumSettings) {
-        const result = await commands.saveSacrumSettings(trimmedToken);
+        const result = await commands.saveSacrumSettings(
+          trimmedUrl,
+          trimmedToken
+        );
         if (result.status === "ok") {
           setSacrumStatus(result.data);
+          setSacrumUrl(result.data.url);
           setSacrumToken("");
         } else {
           setFormError(result.error.message);
@@ -560,20 +573,42 @@ export function ProjectSetupPage() {
             </div>
           )}
 
-          {backendChoice === "remote" && needsSacrumSettings && (
-            <div className="fr-field">
-              <label htmlFor="sacrum-token">Sacrum API token</label>
-              <input
-                id="sacrum-token"
-                className="fr-input"
-                type="password"
-                value={sacrumToken}
-                onChange={(e) => {
-                  setSacrumToken(e.target.value);
-                  setFormError(null);
-                }}
-              />
-            </div>
+          {backendChoice === "remote" && sacrumStatus && (
+            <>
+              <div className="fr-field">
+                <label htmlFor="sacrum-url">Sacrum URL</label>
+                <input
+                  id="sacrum-url"
+                  className="fr-input"
+                  type="url"
+                  value={sacrumUrl}
+                  onChange={(e) => {
+                    setSacrumUrl(e.target.value);
+                    setFormError(null);
+                  }}
+                />
+              </div>
+              {(!sacrumStatus.has_token || needsSacrumSettings) && (
+                <div className="fr-field">
+                  <label htmlFor="sacrum-token">Sacrum API token</label>
+                  <input
+                    id="sacrum-token"
+                    className="fr-input"
+                    type="password"
+                    placeholder={
+                      sacrumStatus.has_token
+                        ? "Leave blank to keep current token"
+                        : undefined
+                    }
+                    value={sacrumToken}
+                    onChange={(e) => {
+                      setSacrumToken(e.target.value);
+                      setFormError(null);
+                    }}
+                  />
+                </div>
+              )}
+            </>
           )}
 
           {backendChoice === "local" && (

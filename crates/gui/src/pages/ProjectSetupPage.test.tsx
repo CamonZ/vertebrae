@@ -252,6 +252,25 @@ describe("ProjectSetupPage", () => {
     expect(screen.getByText("/tmp/new-project")).toBeInTheDocument();
   });
 
+  it("saves a changed remote URL while preserving an existing token", async () => {
+    render(<ProjectSetupPage />);
+
+    await userEvent.click(await screen.findByTestId("setup-add-project"));
+    const url = await screen.findByLabelText("Sacrum URL");
+    expect(url).toHaveValue("http://localhost:4000");
+
+    await userEvent.clear(url);
+    await userEvent.type(url, "https://sacrum.example.test/graphql");
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
+    expect(mockSaveSacrumSettings).toHaveBeenCalledWith(
+      "https://sacrum.example.test/graphql",
+      ""
+    );
+  });
+
   it("saves missing Sacrum settings and initializes directly into the ready state", async () => {
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSacrumConfigStatus.mockResolvedValue({
@@ -288,7 +307,10 @@ describe("ProjectSetupPage", () => {
     expect(await screen.findByTestId("ignition-screen")).toHaveTextContent(
       "/tmp/new-project"
     );
-    expect(mockSaveSacrumSettings).toHaveBeenCalledWith("sac_test");
+    expect(mockSaveSacrumSettings).toHaveBeenCalledWith(
+      "http://localhost:4000",
+      "sac_test"
+    );
     expect(mockInitializeProject).toHaveBeenCalledWith(
       "/tmp/new-project",
       "new-project"
@@ -372,7 +394,10 @@ describe("ProjectSetupPage", () => {
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
-    expect(mockSaveSacrumSettings).toHaveBeenLastCalledWith("sac_valid-token");
+    expect(mockSaveSacrumSettings).toHaveBeenLastCalledWith(
+      "http://localhost:4000",
+      "sac_valid-token"
+    );
     expect(mockSetCurrentProject).toHaveBeenCalledWith("new-project");
   });
 
