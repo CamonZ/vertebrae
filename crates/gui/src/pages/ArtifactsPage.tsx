@@ -117,7 +117,7 @@ export function ArtifactsPage() {
                   role="option"
                   aria-selected={selected}
                   onClick={() => selectArtifact(artifact)}
-                    className={`relative mb-1 flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors ${
+                  className={`relative mb-1 flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors ${
                     selected
                       ? "bg-[var(--color-selection)] text-fg before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:bg-[var(--color-accent)] before:content-['']"
                       : "hover:bg-bg-1 text-fg"
