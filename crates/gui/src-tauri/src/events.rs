@@ -4,7 +4,6 @@ use tauri_specta::Event;
 
 use crate::types;
 
-/// Progress emitted while the GUI-owned local Sacrum stack is provisioned.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct LocalBackendProgressEvent {
     pub stage: LocalBackendProgressStage,

@@ -9,7 +9,6 @@ use crate::local_backend::state::{
 };
 use tauri::{AppHandle, Emitter};
 
-/// Result of the GUI-owned local backend setup command.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct LocalBackendSetupResult {
     pub status: LocalBackendSetupStatus,

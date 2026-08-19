@@ -72,7 +72,6 @@ export function ProjectSetupPage() {
   const [initializeResult, setInitializeResult] =
     useState<InitializeProjectResult | null>(null);
 
-  // Load projects on mount
   const loadProjects = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -152,7 +151,6 @@ export function ProjectSetupPage() {
     };
   }, [backendChoice, setupView]);
 
-  // Handle selecting a project
   const handleSelectProject = async (project: SavedProject) => {
     setIsLoading(true);
     setError(null);
@@ -376,7 +374,6 @@ export function ProjectSetupPage() {
     navigate("/");
   };
 
-  // Handle removing a project
   const handleRemoveProject = async (
     e: React.MouseEvent,
     project: SavedProject

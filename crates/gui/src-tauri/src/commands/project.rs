@@ -38,7 +38,6 @@ pub async fn sacrum_config_status() -> Result<SacrumConfigStatus, CommandError> 
     })
 }
 
-/// Persist remote Sacrum settings to the shared config.toml.
 #[tauri::command]
 #[specta::specta]
 pub async fn save_sacrum_settings(
