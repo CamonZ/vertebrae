@@ -59,9 +59,6 @@ export function ProjectSetupPage() {
   const [projectName, setProjectName] = useState("");
   const [sacrumUrl, setSacrumUrl] = useState("");
   const [sacrumToken, setSacrumToken] = useState("");
-  const [accountEmail, setAccountEmail] = useState("");
-  const [accountUsername, setAccountUsername] = useState("");
-  const [accountPassword, setAccountPassword] = useState("");
   const [localProgress, setLocalProgress] =
     useState<LocalBackendProgressEvent | null>(null);
   const [localAdoptionRequired, setLocalAdoptionRequired] = useState(false);
@@ -234,23 +231,11 @@ export function ProjectSetupPage() {
     }
 
     if (backendChoice === "local") {
-      const trimmedEmail = accountEmail.trim();
-      const trimmedUsername = accountUsername.trim();
-      if (!trimmedEmail || !trimmedUsername || !accountPassword) {
-        setFormError("Email, username, and password are required.");
-        return;
-      }
-
       setFormError(null);
       setLocalProgress(null);
       setIsProvisioningLocal(true);
       try {
-        const result = await commands.setupLocalBackend(
-          trimmedEmail,
-          trimmedUsername,
-          accountPassword,
-          localAdoptionRequired
-        );
+        const result = await commands.setupLocalBackend(localAdoptionRequired);
         if (result.status === "error") {
           setFormError(result.error.message);
           return;
@@ -265,7 +250,6 @@ export function ProjectSetupPage() {
         }
 
         setLocalAdoptionRequired(false);
-        setAccountPassword("");
         setIsInitializing(true);
         setInitializeResult(null);
         const initResult = await commands.initializeProject(
@@ -289,7 +273,6 @@ export function ProjectSetupPage() {
       } catch (e) {
         setFormError(`Failed to set up local backend: ${e}`);
       } finally {
-        setAccountPassword("");
         setIsProvisioningLocal(false);
         setIsInitializing(false);
       }
@@ -735,54 +718,11 @@ export function ProjectSetupPage() {
 
           {backendChoice === "local" && (
             <>
-              <div className="space-y-4">
-                <div className="fr-field">
-                  <label htmlFor="local-account-email">Sacrum email</label>
-                  <input
-                    id="local-account-email"
-                    className="fr-input"
-                    type="email"
-                    value={accountEmail}
-                    onChange={(e) => {
-                      setAccountEmail(e.target.value);
-                      setFormError(null);
-                    }}
-                  />
-                </div>
-                <div className="fr-field">
-                  <label htmlFor="local-account-username">
-                    Sacrum username
-                  </label>
-                  <input
-                    id="local-account-username"
-                    className="fr-input"
-                    value={accountUsername}
-                    onChange={(e) => {
-                      setAccountUsername(e.target.value);
-                      setFormError(null);
-                    }}
-                  />
-                </div>
-                <div className="fr-field">
-                  <label htmlFor="local-account-password">
-                    Sacrum password
-                  </label>
-                  <input
-                    id="local-account-password"
-                    className="fr-input"
-                    type="password"
-                    value={accountPassword}
-                    onChange={(e) => {
-                      setAccountPassword(e.target.value);
-                      setFormError(null);
-                    }}
-                  />
-                </div>
-              </div>
               <div className="fr-callout">
                 <span>
                   Vertebrae will provision the local backend after you continue.
-                  It generates and stores backend secrets automatically.
+                  It generates the backend account and stores its connection
+                  settings automatically.
                 </span>
               </div>
             </>

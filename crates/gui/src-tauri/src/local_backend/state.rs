@@ -380,6 +380,18 @@ impl SeedAccount {
         Ok(account)
     }
 
+    pub fn generated_for_installation(installation_id: Uuid) -> Result<Self, LocalBackendError> {
+        let mut entropy = [0_u8; 32];
+        getrandom::getrandom(&mut entropy)
+            .map_err(|error| LocalBackendError::SecretGeneration(error.to_string()))?;
+        let suffix = installation_id.simple();
+        Self::new(
+            format!("local-{suffix}@vertebrae.local"),
+            format!("local-{suffix}"),
+            to_hex(&entropy),
+        )
+    }
+
     pub fn email(&self) -> &str {
         &self.email
     }
@@ -1305,6 +1317,21 @@ mod tests {
             .redact("password=correct horse battery staple")
             .contains("correct horse"));
         assert!(SeedAccount::new("user\n@example.test", "user", "password").is_err());
+    }
+
+    #[test]
+    fn generated_account_is_unique_and_valid() {
+        let first = SeedAccount::generated_for_installation(Uuid::new_v4())
+            .expect("generate first account");
+        let second = SeedAccount::generated_for_installation(Uuid::new_v4())
+            .expect("generate second account");
+
+        assert_ne!(first.email(), second.email());
+        assert_ne!(first.username(), second.username());
+        assert_ne!(first.password(), second.password());
+        assert!(first.email().ends_with("@vertebrae.local"));
+        assert!(first.username().starts_with("local-"));
+        assert_eq!(first.password().len(), 64);
     }
 
     #[test]

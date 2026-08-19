@@ -290,7 +290,7 @@ describe("ProjectSetupPage", () => {
     );
   });
 
-  it("provisions a local backend before initializing the project and clears the password", async () => {
+  it("provisions a local backend without collecting account credentials", async () => {
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockLocalBackendProgressListen.mockImplementation(async (callback) => {
       callback({
@@ -307,25 +307,16 @@ describe("ProjectSetupPage", () => {
     await userEvent.click(await screen.findByTestId("backend-choice-local"));
     await userEvent.click(screen.getByTestId("backend-choice-continue"));
     await userEvent.click(screen.getByTestId("project-folder-choose"));
-    await userEvent.type(
-      screen.getByLabelText("Sacrum email"),
-      "person@example.test"
-    );
-    await userEvent.type(screen.getByLabelText("Sacrum username"), "person");
-    await userEvent.type(screen.getByLabelText("Sacrum password"), "secret");
+    expect(screen.queryByLabelText("Sacrum email")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Sacrum username")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Sacrum password")).not.toBeInTheDocument();
     expect(
       await screen.findByTestId("local-backend-progress")
     ).toHaveTextContent("Pulling");
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Sacrum password")).not.toBeInTheDocument();
-    expect(mockSetupLocalBackend).toHaveBeenCalledWith(
-      "person@example.test",
-      "person",
-      "secret",
-      false
-    );
+    expect(mockSetupLocalBackend).toHaveBeenCalledWith(false);
     expect(mockSaveSacrumSettings).not.toHaveBeenCalled();
     expect(mockInitializeProject).toHaveBeenCalledWith(
       "/tmp/new-project",
@@ -358,29 +349,16 @@ describe("ProjectSetupPage", () => {
     await userEvent.click(await screen.findByTestId("backend-choice-local"));
     await userEvent.click(screen.getByTestId("backend-choice-continue"));
     await userEvent.click(screen.getByTestId("project-folder-choose"));
-    await userEvent.type(
-      screen.getByLabelText("Sacrum email"),
-      "person@example.test"
-    );
-    await userEvent.type(screen.getByLabelText("Sacrum username"), "person");
-    await userEvent.type(screen.getByLabelText("Sacrum password"), "secret");
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
       "Adopt the compatible vertebrae-dev stack."
     );
     expect(mockInitializeProject).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Sacrum password")).toHaveValue("");
 
-    await userEvent.type(screen.getByLabelText("Sacrum password"), "secret");
     await userEvent.click(screen.getByTestId("project-phase-continue"));
     expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
-    expect(mockSetupLocalBackend).toHaveBeenLastCalledWith(
-      "person@example.test",
-      "person",
-      "secret",
-      true
-    );
+    expect(mockSetupLocalBackend).toHaveBeenLastCalledWith(true);
   });
 
   it("saves missing Sacrum settings and initializes directly into the ready state", async () => {

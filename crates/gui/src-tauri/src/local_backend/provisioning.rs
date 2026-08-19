@@ -98,7 +98,7 @@ where
         &self,
         paths: &ManagedStackPaths,
         state: &mut ManagedStackState,
-        account: SeedAccount,
+        configured_token: ApiToken,
         progress: F,
     ) -> Result<ProvisioningResult, LocalBackendError>
     where
@@ -115,7 +115,7 @@ where
         if let Err(error) = ensure_runtime_secrets(paths, state.kind) {
             return Err(record_failed_state(paths, state, error));
         }
-        let api_token = match ensure_api_token(paths) {
+        let api_token = match paths.ensure_api_token(&configured_token) {
             Ok(token) => token,
             Err(error) => return Err(record_failed_state(paths, state, error)),
         };
@@ -123,12 +123,9 @@ where
         let result = async {
             progress(ProvisioningStage::Pulling);
             self.up_detached(paths, state).await?;
-            progress(ProvisioningStage::Migrating);
             progress(ProvisioningStage::Health);
             self.wait_until_healthy(paths, state).await?;
             let services = self.status(paths, state).await?;
-            progress(ProvisioningStage::Seeding);
-            self.run_seeder(paths, state, &account, &api_token).await?;
             persist_local_client_config(&state.backend_url(), &api_token)?;
             state.provisioning_state = ProvisioningState::Ready;
             paths.save_state(state)?;
@@ -139,7 +136,6 @@ where
             })
         }
         .await;
-        drop(account);
 
         match result {
             Ok(result) => Ok(result),

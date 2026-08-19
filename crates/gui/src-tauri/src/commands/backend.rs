@@ -4,7 +4,7 @@ use crate::events::{LocalBackendProgressEvent, LocalBackendProgressStage};
 use crate::local_backend::compose::{DockerCompose, LegacyStackDetection};
 use crate::local_backend::provisioning::{self, ProvisioningResult};
 use crate::local_backend::state::{
-    BackendImageChannel, LocalBackendError, ManagedStackPaths, ManagedStackState,
+    ApiToken, BackendImageChannel, LocalBackendError, ManagedStackPaths, ManagedStackState,
     ProvisioningStage, ProvisioningState, SeedAccount, StackKind, LOCAL_SACRUM_IMAGE_REF,
 };
 use tauri::{AppHandle, Emitter};
@@ -29,12 +29,8 @@ pub enum LocalBackendSetupStatus {
 #[specta::specta]
 pub async fn setup_local_backend(
     app_handle: AppHandle,
-    email: String,
-    username: String,
-    password: String,
     adopt_legacy: bool,
 ) -> Result<LocalBackendSetupResult, CommandError> {
-    let account = SeedAccount::new(email, username, password).map_err(local_backend_error)?;
     let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
     let compose = DockerCompose::system().await.map_err(local_backend_error)?;
     let detection = compose
@@ -104,15 +100,17 @@ pub async fn setup_local_backend(
         let api_token = provisioning::ensure_api_token(&paths).map_err(local_backend_error)?;
         provisioning::persist_local_client_config(&state.backend_url(), &api_token)
             .map_err(local_backend_error)?;
-        drop(account);
         return Ok(ready_result(state.backend_url()));
     }
 
     let result = if state.kind == StackKind::AdoptedLegacy {
+        let api_token = configured_api_token().map_err(local_backend_error)?;
         compose
-            .provision_adopted(&paths, &mut state, account, progress)
+            .provision_adopted(&paths, &mut state, api_token, progress)
             .await
     } else {
+        let account = SeedAccount::generated_for_installation(state.installation_id)
+            .map_err(local_backend_error)?;
         compose
             .provision_fresh_with_progress(&paths, &mut state, account, progress)
             .await
@@ -121,6 +119,27 @@ pub async fn setup_local_backend(
     result
         .map(ready_result_from_provisioning)
         .map_err(local_backend_error)
+}
+
+fn configured_api_token() -> Result<ApiToken, LocalBackendError> {
+    let config = vertebrae_sacrum_client::load_config_file().map_err(|error| {
+        LocalBackendError::InvalidState(format!(
+            "could not load the configured Sacrum token for adoption: {error}"
+        ))
+    })?;
+    let token = config
+        .sacrum
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| {
+            LocalBackendError::InvalidState(
+                "adopting an existing local backend requires an API token in config.toml"
+                    .to_string(),
+            )
+        })?;
+    ApiToken::new(token.to_string())
 }
 
 fn ready_result_from_provisioning(result: ProvisioningResult) -> LocalBackendSetupResult {

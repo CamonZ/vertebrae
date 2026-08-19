@@ -73,20 +73,12 @@ export const commands = {
    * connection settings before project initialization begins.
    */
   async setupLocalBackend(
-    email: string,
-    username: string,
-    password: string,
     adoptLegacy: boolean
   ): Promise<Result<LocalBackendSetupResult, CommandError>> {
     try {
       return {
         status: "ok",
-        data: await TAURI_INVOKE("setup_local_backend", {
-          email,
-          username,
-          password,
-          adoptLegacy,
-        }),
+        data: await TAURI_INVOKE("setup_local_backend", { adoptLegacy }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;
