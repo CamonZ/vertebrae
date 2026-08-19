@@ -10,6 +10,7 @@
 use crate::error::{SacrumClientError, SacrumClientResult};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Configuration for Sacrum client
@@ -345,15 +346,71 @@ pub fn save_config_file(config: &VertebraeConfigFile) -> SacrumClientResult<()> 
         SacrumClientError::ConfigError(format!("Failed to serialize config: {}", e))
     })?;
 
-    std::fs::write(&path, content).map_err(|e| {
-        SacrumClientError::ConfigError(format!(
-            "Failed to write config file at {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
+    write_config_atomically(&path, content.as_bytes())?;
 
     Ok(())
+}
+
+fn write_config_atomically(path: &Path, content: &[u8]) -> SacrumClientResult<()> {
+    let parent = path.parent().ok_or_else(|| {
+        SacrumClientError::ConfigError(format!(
+            "Failed to write config file at {}: no parent directory",
+            path.display()
+        ))
+    })?;
+    let temp = parent.join(format!(".config.toml.{}.tmp", uuid::Uuid::new_v4()));
+
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temp).map_err(|error| {
+            SacrumClientError::ConfigError(format!(
+                "Failed to write config file at {}: {}",
+                path.display(),
+                error
+            ))
+        })?;
+        file.write_all(content)
+            .and_then(|()| file.sync_all())
+            .map_err(|error| {
+                SacrumClientError::ConfigError(format!(
+                    "Failed to write config file at {}: {}",
+                    path.display(),
+                    error
+                ))
+            })?;
+        std::fs::rename(&temp, path).map_err(|error| {
+            SacrumClientError::ConfigError(format!(
+                "Failed to replace config file at {}: {}",
+                path.display(),
+                error
+            ))
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(
+                |error| {
+                    SacrumClientError::ConfigError(format!(
+                        "Failed to set permissions on config file at {}: {}",
+                        path.display(),
+                        error
+                    ))
+                },
+            )?;
+        }
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
 }
 
 /// Register a project in the global config file.
@@ -631,6 +688,31 @@ path = "/Users/test/other"
         let config: VertebraeConfigFile = toml::from_str(toml_str).unwrap();
         assert_eq!(config.sacrum.token.as_deref(), Some("sac_mytoken"));
         assert_eq!(config.projects.len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_writer_replaces_atomically_with_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let path = temp.path().join("config.toml");
+        write_config_atomically(&path, b"[sacrum]\nurl = \"http://127.0.0.1:4400\"\n")
+            .expect("write config");
+
+        assert_eq!(
+            std::fs::metadata(&path)
+                .expect("config metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert!(
+            std::fs::read_dir(temp.path())
+                .expect("read config directory")
+                .all(|entry| entry.expect("directory entry").file_name() == "config.toml")
+        );
     }
 
     /// Helper: build a VertebraeConfigFile with a token and a project whose path

@@ -7,6 +7,7 @@ use std::io::{self, Write};
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 const COMPOSE_ASSET: &str = include_str!("assets/compose.yaml");
 const SEED_ASSET: &str = include_str!("assets/seed.exs");
@@ -17,6 +18,13 @@ pub(crate) const LEGACY_POSTGRES_IMAGE: &str = "postgres:17-alpine";
 const LEGACY_POSTGRES_PASSWORD: &str = "postgres";
 const LEGACY_SECRET_KEY_BASE: &str =
     "dev-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix-app";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalBackendDiagnostic {
+    pub code: String,
+    pub retryable: bool,
+    pub message: String,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum LocalBackendError {
@@ -82,6 +90,191 @@ pub enum LocalBackendError {
     LegacyHostPortRequired,
 }
 
+impl LocalBackendError {
+    /// Build a stable, redacted diagnostic for GUI display.
+    pub fn diagnostic(&self) -> LocalBackendDiagnostic {
+        let detail = redact_diagnostic_detail(&self.to_string());
+        let (code, retryable, hint) = match self {
+            Self::DataDirectory(_) | Self::FileSystem { .. } => (
+                "local_setup_persistence",
+                true,
+                "Vertebrae could not persist local setup data. Check the application-data directory permissions and available disk space, then retry.",
+            ),
+            Self::SecretGeneration(_) => (
+                "secure_randomness",
+                true,
+                "The operating system did not provide secure randomness. Retry local setup after checking the system entropy source.",
+            ),
+            Self::DockerCliNotFound { .. } => (
+                "docker_unavailable",
+                false,
+                "Docker was not found. Install Docker Desktop or Docker Engine, start it, and retry local setup.",
+            ),
+            Self::DockerDaemonUnreachable(_) => (
+                "docker_daemon_unreachable",
+                true,
+                "Docker is not reachable. Start Docker and verify that the selected local context is running, then retry.",
+            ),
+            Self::DockerDaemonPermissionDenied(_) => (
+                "docker_permission_denied",
+                false,
+                "The current user cannot access Docker. Fix Docker socket permissions or membership, then retry local setup.",
+            ),
+            Self::UnsupportedDockerContext { .. } | Self::DockerContextChanged { .. } => (
+                "docker_context_invalid",
+                true,
+                "The selected Docker context is not a supported local endpoint. Select a running local Docker context and retry.",
+            ),
+            Self::ComposeUnavailable(_) => (
+                "docker_compose_unavailable",
+                false,
+                "Docker Compose is unavailable. Install or enable the Docker Compose plugin, then retry local setup.",
+            ),
+            Self::UnsupportedEngineVersion { .. } => (
+                "docker_engine_unsupported",
+                false,
+                "The Docker Engine is too old for safe loopback publishing. Upgrade Docker and retry local setup.",
+            ),
+            Self::PersistentVolumeUnavailable { .. } => (
+                "persistent_volume_unavailable",
+                false,
+                "The existing database volume is unavailable or has unexpected metadata. Restore the named volume or correct the Docker context; Vertebrae will not delete or recreate it automatically.",
+            ),
+            Self::PortUnavailable { .. } => (
+                "local_port_unavailable",
+                true,
+                "The local Sacrum port is already in use. Stop the conflicting process or choose another local port, then retry.",
+            ),
+            Self::HealthTimedOut { logs, .. } => {
+                let hint = if logs.to_ascii_lowercase().contains("postgres") {
+                    "PostgreSQL or Sacrum did not become ready. Review the redacted service details, confirm Docker has enough resources, and retry; existing data is preserved."
+                } else {
+                    "Sacrum did not become healthy. Review the redacted service details, confirm Docker has enough resources, and retry; existing data is preserved."
+                };
+                ("sacrum_health_timeout", true, hint)
+            }
+            Self::CommandFailed { action, output, .. }
+            | Self::CommandTimedOut { action, output, .. } => {
+                classify_command_failure(action, output)
+            }
+            Self::InvalidState(_) => (
+                "local_setup_state_invalid",
+                false,
+                "Local backend setup state is invalid. Do not remove the database volume; inspect the redacted setup error and repair the reported file or context before retrying.",
+            ),
+            Self::UnsafeLegacyStack(_) => (
+                "legacy_stack_unsafe",
+                false,
+                "The existing vertebrae-dev stack does not match the supported development layout. It was left untouched; inspect it before choosing adoption.",
+            ),
+            Self::AdoptionNotConfirmed => (
+                "legacy_adoption_not_confirmed",
+                false,
+                "Adopting the existing development stack requires explicit confirmation.",
+            ),
+            Self::LegacyHostPortRequired => (
+                "legacy_host_port_required",
+                false,
+                "The preserved development volume requires its existing host port. Provide that port to adopt the stack without changing its data.",
+            ),
+        };
+
+        LocalBackendDiagnostic {
+            code: code.to_string(),
+            retryable,
+            message: format!("{hint} Details: {detail}"),
+        }
+    }
+
+    pub fn actionable_message(&self) -> String {
+        self.diagnostic().message
+    }
+}
+
+fn classify_command_failure(action: &str, output: &str) -> (&'static str, bool, &'static str) {
+    let normalized = format!("{action} {output}").to_ascii_lowercase();
+    if normalized.contains("seed") {
+        return (
+            "seeder_failed",
+            true,
+            "The local account seeder failed. The stack and database were preserved; correct the reported account or backend issue and retry with the same account details.",
+        );
+    }
+    if port_conflict(output) {
+        return (
+            "local_port_unavailable",
+            true,
+            "The local Sacrum port is already in use. Stop the conflicting process or choose another local port, then retry.",
+        );
+    }
+    if normalized.contains("pull")
+        || normalized.contains("manifest unknown")
+        || normalized.contains("unauthorized")
+    {
+        return (
+            "sacrum_image_unavailable",
+            true,
+            "Docker could not pull the pinned Sacrum image. Check network access and registry authentication, then retry without deleting the database volume.",
+        );
+    }
+    if normalized.contains("migrat") {
+        return (
+            "sacrum_migration_failed",
+            true,
+            "Sacrum migrations did not complete. Review the redacted migration output, fix the backend issue, and retry; the database volume is preserved.",
+        );
+    }
+    if normalized.contains("pg_isready") || normalized.contains("postgres") {
+        return (
+            "postgres_readiness_failed",
+            true,
+            "PostgreSQL did not become ready for Sacrum. Check Docker resources and the redacted database output, then retry without recreating the volume.",
+        );
+    }
+    if normalized.contains("compose") || action.contains("Docker") {
+        return (
+            "docker_operation_failed",
+            true,
+            "Docker could not complete the local backend operation. Review the redacted command details, fix the Docker issue, and retry.",
+        );
+    }
+    (
+        "local_backend_operation_failed",
+        true,
+        "Local backend setup failed. Review the redacted command details, fix the reported issue, and retry; persisted secrets and data are preserved.",
+    )
+}
+
+fn port_conflict(output: &str) -> bool {
+    let normalized = output.to_ascii_lowercase();
+    normalized.contains("port is already allocated")
+        || normalized.contains("address already in use")
+        || (normalized.contains("bind for") && normalized.contains("port"))
+}
+
+fn redact_diagnostic_detail(detail: &str) -> String {
+    let mut redacted = detail.to_string();
+    for marker in [
+        "POSTGRES_PASSWORD=",
+        "SECRET_KEY_BASE=",
+        "DATABASE_URL=",
+        "SEED_PASSWORD=",
+        "SEED_TOKEN=",
+    ] {
+        let mut search_from = 0;
+        while let Some(relative_start) = redacted[search_from..].find(marker) {
+            let start = search_from + relative_start;
+            let value_start = start + marker.len();
+            let value_end = redacted[value_start..]
+                .find(char::is_whitespace)
+                .map_or(redacted.len(), |relative_end| value_start + relative_end);
+            redacted.replace_range(value_start..value_end, "[redacted]");
+            search_from = value_start + "[redacted]".len();
+        }
+    }
+    redacted
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StackKind {
@@ -104,6 +297,137 @@ pub enum ProvisioningState {
     Ready,
     Failed,
     Unverified,
+}
+
+/// API token whose debug representation is redacted.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ApiToken(String);
+
+impl ApiToken {
+    pub fn generate() -> Result<Self, LocalBackendError> {
+        let mut entropy = [0_u8; 32];
+        getrandom::getrandom(&mut entropy)
+            .map_err(|error| LocalBackendError::SecretGeneration(error.to_string()))?;
+        Self::new(format!("sac_{}", to_hex(&entropy)))
+    }
+
+    pub fn new(value: impl Into<String>) -> Result<Self, LocalBackendError> {
+        let token = Self(value.into());
+        if !token.0.strip_prefix("sac_").is_some_and(|suffix| {
+            suffix.len() == 64 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) {
+            return Err(LocalBackendError::InvalidState(
+                "local API token must use the sac_ prefix and contain 32 bytes of hex entropy"
+                    .to_string(),
+            ));
+        }
+        Ok(token)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn redact(&self, text: &str) -> String {
+        text.replace(self.as_str(), "[redacted]")
+    }
+}
+
+impl fmt::Debug for ApiToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("ApiToken")
+            .field(&"[redacted]")
+            .finish()
+    }
+}
+
+impl Drop for ApiToken {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+/// Seeder account data; the password is redacted and zeroized on drop.
+pub struct SeedAccount {
+    email: String,
+    username: String,
+    password: String,
+}
+
+impl SeedAccount {
+    pub fn new(
+        email: impl Into<String>,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Result<Self, LocalBackendError> {
+        let account = Self {
+            email: email.into(),
+            username: username.into(),
+            password: password.into(),
+        };
+        account.validate()?;
+        Ok(account)
+    }
+
+    pub fn email(&self) -> &str {
+        &self.email
+    }
+
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
+    pub(crate) fn password(&self) -> &str {
+        &self.password
+    }
+
+    pub(crate) fn redact(&self, text: &str) -> String {
+        text.replace(self.password(), "[redacted]")
+    }
+
+    fn validate(&self) -> Result<(), LocalBackendError> {
+        if self.email.trim().is_empty() || self.username.trim().is_empty() {
+            return Err(LocalBackendError::InvalidState(
+                "local account email and username are required".to_string(),
+            ));
+        }
+        if self.password.is_empty() {
+            return Err(LocalBackendError::InvalidState(
+                "local account password is required".to_string(),
+            ));
+        }
+        if [&self.email, &self.username, &self.password]
+            .iter()
+            .any(|value| {
+                value
+                    .bytes()
+                    .any(|byte| byte == b'\0' || byte == b'\n' || byte == b'\r')
+            })
+        {
+            return Err(LocalBackendError::InvalidState(
+                "local account values must not contain NUL or line-break characters".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for SeedAccount {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SeedAccount")
+            .field("email", &self.email)
+            .field("username", &self.username)
+            .field("password", &"[redacted]")
+            .finish()
+    }
+}
+
+impl Drop for SeedAccount {
+    fn drop(&mut self) {
+        self.password.zeroize();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,12 +788,20 @@ impl fmt::Debug for RuntimeSecrets {
     }
 }
 
+impl Drop for RuntimeSecrets {
+    fn drop(&mut self) {
+        self.postgres_password.zeroize();
+        self.secret_key_base.zeroize();
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedStackPaths {
     pub root: PathBuf,
     pub compose_file: PathBuf,
     pub seed_file: PathBuf,
     pub secrets_file: PathBuf,
+    pub api_token_file: PathBuf,
     pub state_file: PathBuf,
 }
 
@@ -486,6 +818,7 @@ impl ManagedStackPaths {
             compose_file: root.join("compose.yaml"),
             seed_file: root.join("seed.exs"),
             secrets_file: root.join("runtime.env"),
+            api_token_file: root.join("api-token"),
             state_file: root.join("state.json"),
             root,
         }
@@ -541,6 +874,41 @@ impl ManagedStackPaths {
         let content = fs::read_to_string(&self.secrets_file)
             .map_err(|source| file_error("read", &self.secrets_file, source))?;
         RuntimeSecrets::from_env_file(&content, kind)
+    }
+
+    pub fn ensure_api_token(&self, proposed: &ApiToken) -> Result<ApiToken, LocalBackendError> {
+        ensure_private_directory(&self.root)?;
+        if self.api_token_file.exists() {
+            return self.load_api_token();
+        }
+
+        let temp = write_temp_file(&self.api_token_file, proposed.as_str().as_bytes(), 0o600)?;
+        match fs::hard_link(&temp, &self.api_token_file) {
+            Ok(()) => {
+                remove_temp(&temp);
+                sync_parent(&self.api_token_file)?;
+                Ok(proposed.clone())
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                remove_temp(&temp);
+                self.load_api_token()
+            }
+            Err(source) => {
+                remove_temp(&temp);
+                Err(file_error(
+                    "persist local API token",
+                    &self.api_token_file,
+                    source,
+                ))
+            }
+        }
+    }
+
+    pub fn load_api_token(&self) -> Result<ApiToken, LocalBackendError> {
+        set_mode(&self.api_token_file, 0o600)?;
+        let content = fs::read_to_string(&self.api_token_file)
+            .map_err(|source| file_error("read", &self.api_token_file, source))?;
+        ApiToken::new(content.trim_end_matches(['\r', '\n']))
     }
 
     pub fn save_state(&self, state: &ManagedStackState) -> Result<(), LocalBackendError> {
@@ -872,6 +1240,124 @@ mod tests {
             .to_env_file()
             .chars()
             .all(|character| !matches!(character, '/' | '+')));
+    }
+
+    #[test]
+    fn generated_api_tokens_are_sac_prefixed_and_distinct() {
+        let first = ApiToken::generate().expect("generate first API token");
+        let second = ApiToken::generate().expect("generate second API token");
+
+        assert!(first.as_str().starts_with("sac_"));
+        assert_eq!(first.as_str().len(), 68);
+        assert!(first.as_str()[4..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(first, second);
+        assert_eq!(format!("{first:?}"), "ApiToken(\"[redacted]\")");
+    }
+
+    #[test]
+    fn api_token_is_persisted_once_with_owner_only_permissions() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let paths = ManagedStackPaths::from_data_dir(temp.path());
+        let first = ApiToken::new(format!("sac_{}", "a".repeat(64))).expect("valid token");
+        let second = ApiToken::new(format!("sac_{}", "b".repeat(64))).expect("valid token");
+
+        assert_eq!(
+            paths.ensure_api_token(&first).expect("persist token"),
+            first
+        );
+        assert_eq!(paths.ensure_api_token(&second).expect("reuse token"), first);
+        assert_eq!(paths.load_api_token().expect("load token"), first);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&paths.api_token_file)
+                    .expect("token metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn seed_account_rejects_unsafe_values_and_redacts_password() {
+        let account = SeedAccount::new("user@example.test", "user", "correct horse battery staple")
+            .expect("valid account");
+        assert_eq!(account.email(), "user@example.test");
+        assert_eq!(account.username(), "user");
+        assert!(!format!("{account:?}").contains("correct horse"));
+        assert!(!account
+            .redact("password=correct horse battery staple")
+            .contains("correct horse"));
+        assert!(SeedAccount::new("user\n@example.test", "user", "password").is_err());
+    }
+
+    #[test]
+    fn diagnostics_classify_retryable_setup_failures_with_remediation() {
+        let cases = [
+            (
+                LocalBackendError::CommandFailed {
+                    action: "start local Sacrum".to_string(),
+                    status: "1".to_string(),
+                    output: "pull access denied for ghcr.io/camonz/sacrum".to_string(),
+                },
+                "sacrum_image_unavailable",
+                "registry authentication",
+            ),
+            (
+                LocalBackendError::CommandFailed {
+                    action: "start local Sacrum".to_string(),
+                    status: "1".to_string(),
+                    output: "migration failed: column already exists".to_string(),
+                },
+                "sacrum_migration_failed",
+                "migrations",
+            ),
+            (
+                LocalBackendError::CommandFailed {
+                    action: "seed local Sacrum account".to_string(),
+                    status: "1".to_string(),
+                    output: "seed exited with status 1".to_string(),
+                },
+                "seeder_failed",
+                "same account details",
+            ),
+            (
+                LocalBackendError::PortUnavailable {
+                    port: 4400,
+                    output: "address already in use".to_string(),
+                },
+                "local_port_unavailable",
+                "conflicting process",
+            ),
+        ];
+
+        for (error, expected_code, expected_hint) in cases {
+            let diagnostic = error.diagnostic();
+            assert_eq!(diagnostic.code, expected_code);
+            assert!(diagnostic.retryable, "{diagnostic:?}");
+            assert!(diagnostic.message.contains(expected_hint), "{diagnostic:?}");
+        }
+    }
+
+    #[test]
+    fn diagnostics_keep_command_details_bounded_and_redacted() {
+        let error = LocalBackendError::CommandFailed {
+            action: "seed local Sacrum account".to_string(),
+            status: "1".to_string(),
+            output: "SEED_PASSWORD=raw-password SEED_TOKEN=raw-token".to_string(),
+        };
+        let diagnostic = error.diagnostic();
+
+        assert_eq!(diagnostic.code, "seeder_failed");
+        assert!(!diagnostic.message.contains("raw-password"));
+        assert!(!diagnostic.message.contains("raw-token"));
+        assert_eq!(diagnostic.message.matches("[redacted]").count(), 2);
     }
 
     #[test]
