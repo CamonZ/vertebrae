@@ -54,16 +54,31 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
-  /**
-   * Persist Sacrum settings to the shared config.toml.
-   */
   async saveSacrumSettings(
+    url: string,
     token: string
   ): Promise<Result<SacrumConfigStatus, CommandError>> {
     try {
       return {
         status: "ok",
-        data: await TAURI_INVOKE("save_sacrum_settings", { token }),
+        data: await TAURI_INVOKE("save_sacrum_settings", { url, token }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  /**
+   * Provision or adopt the local Sacrum backend and persist its generated
+   * connection settings before project initialization begins.
+   */
+  async setupLocalBackend(
+    adoptLegacy: boolean
+  ): Promise<Result<LocalBackendSetupResult, CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("setup_local_backend", { adoptLegacy }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;
@@ -1086,7 +1101,7 @@ export const commands = {
     }
   },
   /**
-   * Return applications registered by the operating system for local source/text files.
+   * Return applications and known editor commands that can open local files.
    */
   async getLocalFileEditors(): Promise<
     Result<LocalFileEditor[], CommandError>
@@ -1102,7 +1117,27 @@ export const commands = {
     }
   },
   /**
-   * Open a validated local-chat file reference with the external file handler.
+   * Return the canonical project and Git worktree roots that local-chat file
+   * references may target.
+   */
+  async getLocalFileRoots(
+    projectRoot: string
+  ): Promise<Result<string[], CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("get_local_file_roots", { projectRoot }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  /**
+   * Open a validated local-chat file reference with the operating system's
+   * external file handler. The frontend supplies the captured project root and
+   * the raw reference path; canonicalization here closes symlink and traversal
+   * gaps before invoking the opener plugin.
    */
   async openLocalFile(
     projectRoot: string,
@@ -1121,22 +1156,6 @@ export const commands = {
           column,
           editor,
         }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Return the project and Git worktree roots authorized for local file links.
-   */
-  async getLocalFileRoots(
-    projectRoot: string
-  ): Promise<Result<string[], CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_local_file_roots", { projectRoot }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;
@@ -1429,6 +1448,7 @@ export const commands = {
 
 export const events = __makeEvents__<{
   artifactChangedEvent: ArtifactChangedEvent;
+  localBackendProgressEvent: LocalBackendProgressEvent;
   localChatCompactionEvent: LocalChatCompactionEvent;
   localChatFileChangeEvent: LocalChatFileChangeEvent;
   localChatSessionEndEvent: LocalChatSessionEndEvent;
@@ -1455,6 +1475,7 @@ export const events = __makeEvents__<{
   workflowTransitionChangedEvent: WorkflowTransitionChangedEvent;
 }>({
   artifactChangedEvent: "artifact-changed-event",
+  localBackendProgressEvent: "local-backend-progress-event",
   localChatCompactionEvent: "local-chat-compaction-event",
   localChatFileChangeEvent: "local-chat-file-change-event",
   localChatSessionEndEvent: "local-chat-session-end-event",
@@ -1756,6 +1777,21 @@ export type LoadLocalChatSessionReplayOutput = {
    */
   events: string[];
 };
+export type LocalBackendProgressEvent = {
+  stage: LocalBackendProgressStage;
+  message: string;
+};
+export type LocalBackendProgressStage =
+  | "pulling"
+  | "migrating"
+  | "health"
+  | "seeding";
+export type LocalBackendSetupResult = {
+  status: LocalBackendSetupStatus;
+  backend_url: string | null;
+  adoption_message: string | null;
+};
+export type LocalBackendSetupStatus = "ready" | "adoption_required";
 export type LocalChatCompactionEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
@@ -1785,11 +1821,6 @@ export type LocalChatFileChangeEvent = {
 export type LocalChatHarnessCatalog = {
   default_harness: LocalChatHarnessKind;
   harnesses: LocalChatHarnessInfo[];
-};
-export type LocalFileEditor = {
-  id: string;
-  name: string;
-  path: string;
 };
 export type LocalChatHarnessInfo = {
   harness: LocalChatHarnessKind;
@@ -1940,6 +1971,10 @@ export type LocalChatTurnStartedEvent = {
   thread_id?: string | null;
   is_root: boolean;
 };
+/**
+ * An application or editor command that can open local source/text files.
+ */
+export type LocalFileEditor = { id: string; name: string; path: string };
 export type PermissionDecisionBehavior = "allow" | "deny";
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode

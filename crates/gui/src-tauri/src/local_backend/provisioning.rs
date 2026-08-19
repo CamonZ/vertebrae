@@ -1,8 +1,8 @@
 use super::command::ProcessRunner;
 use super::compose::{DockerCompose, HealthProbe, ServiceStatus};
 use super::state::{
-    ApiToken, LocalBackendError, ManagedStackPaths, ManagedStackState, ProvisioningState,
-    RuntimeSecrets, SeedAccount, StackKind,
+    ApiToken, LocalBackendError, ManagedStackPaths, ManagedStackState, ProvisioningStage,
+    ProvisioningState, RuntimeSecrets, SeedAccount, StackKind,
 };
 
 /// Provisioning result without the API token, which is persisted in the canonical config.
@@ -25,6 +25,20 @@ where
         state: &mut ManagedStackState,
         account: SeedAccount,
     ) -> Result<ProvisioningResult, LocalBackendError> {
+        self.provision_fresh_with_progress(paths, state, account, |_| {})
+            .await
+    }
+
+    pub async fn provision_fresh_with_progress<F>(
+        &self,
+        paths: &ManagedStackPaths,
+        state: &mut ManagedStackState,
+        account: SeedAccount,
+        progress: F,
+    ) -> Result<ProvisioningResult, LocalBackendError>
+    where
+        F: Fn(ProvisioningStage) + Send + Sync,
+    {
         if state.kind != StackKind::Managed {
             return Err(LocalBackendError::InvalidState(
                 "fresh local provisioning cannot modify an adopted development stack".to_string(),
@@ -49,11 +63,15 @@ where
             Err(error) => return Err(record_failed_state(paths, state, error)),
         };
 
-        let services = match self.start_and_wait_until_healthy(paths, state).await {
+        let services = match self
+            .start_and_wait_until_healthy_with_progress(paths, state, &progress)
+            .await
+        {
             Ok(services) => services,
             Err(error) => return Err(error),
         };
 
+        progress(ProvisioningStage::Seeding);
         let seed_result = self.run_seeder(paths, state, &account, &api_token).await;
         drop(account);
         if let Err(error) = seed_result {
@@ -75,9 +93,58 @@ where
             services,
         })
     }
+
+    pub async fn provision_adopted<F>(
+        &self,
+        paths: &ManagedStackPaths,
+        state: &mut ManagedStackState,
+        configured_token: ApiToken,
+        progress: F,
+    ) -> Result<ProvisioningResult, LocalBackendError>
+    where
+        F: Fn(ProvisioningStage) + Send + Sync,
+    {
+        if state.kind != StackKind::AdoptedLegacy {
+            return Err(LocalBackendError::InvalidState(
+                "adoption provisioning requires an adopted development stack".to_string(),
+            ));
+        }
+
+        state.provisioning_state = ProvisioningState::InProgress;
+        paths.save_state(state)?;
+        if let Err(error) = ensure_runtime_secrets(paths, state.kind) {
+            return Err(record_failed_state(paths, state, error));
+        }
+        let api_token = match paths.ensure_api_token(&configured_token) {
+            Ok(token) => token,
+            Err(error) => return Err(record_failed_state(paths, state, error)),
+        };
+
+        let result = async {
+            progress(ProvisioningStage::Pulling);
+            self.up_detached(paths, state).await?;
+            progress(ProvisioningStage::Health);
+            self.wait_until_healthy(paths, state).await?;
+            let services = self.status(paths, state).await?;
+            persist_local_client_config(&state.backend_url(), &api_token)?;
+            state.provisioning_state = ProvisioningState::Ready;
+            paths.save_state(state)?;
+            Ok(ProvisioningResult {
+                backend_url: state.backend_url(),
+                provisioning_state: state.provisioning_state,
+                services,
+            })
+        }
+        .await;
+
+        match result {
+            Ok(result) => Ok(result),
+            Err(error) => Err(record_failed_state(paths, state, error)),
+        }
+    }
 }
 
-fn ensure_runtime_secrets(
+pub(crate) fn ensure_runtime_secrets(
     paths: &ManagedStackPaths,
     kind: StackKind,
 ) -> Result<RuntimeSecrets, LocalBackendError> {
@@ -89,7 +156,7 @@ fn ensure_runtime_secrets(
     }
 }
 
-fn ensure_api_token(paths: &ManagedStackPaths) -> Result<ApiToken, LocalBackendError> {
+pub(crate) fn ensure_api_token(paths: &ManagedStackPaths) -> Result<ApiToken, LocalBackendError> {
     if paths.api_token_file.is_file() {
         paths.load_api_token()
     } else {
@@ -112,7 +179,7 @@ fn record_failed_state(
     }
 }
 
-fn persist_local_client_config(
+pub(crate) fn persist_local_client_config(
     backend_url: &str,
     api_token: &ApiToken,
 ) -> Result<(), LocalBackendError> {
@@ -126,12 +193,12 @@ fn persist_local_client_config(
     }
 
     let mut config = vertebrae_sacrum_client::load_config_file().map_err(|error| {
-        LocalBackendError::InvalidState(format!("could not load Sacrum client config: {error}"))
+        LocalBackendError::InvalidState(format!("could not load backend client config: {error}"))
     })?;
     config.sacrum.url = backend_url.trim_end_matches('/').to_string();
     config.sacrum.token = Some(api_token.as_str().to_string());
     vertebrae_sacrum_client::save_config_file(&config).map_err(|error| {
-        LocalBackendError::InvalidState(format!("could not persist Sacrum client config: {error}"))
+        LocalBackendError::InvalidState(format!("could not persist backend client config: {error}"))
     })
 }
 
@@ -148,7 +215,7 @@ mod tests {
             &paths,
             &mut state,
             LocalBackendError::CommandFailed {
-                action: "seed local Sacrum account".to_string(),
+                action: "seed local backend account".to_string(),
                 status: "1".to_string(),
                 output: "safe diagnostic".to_string(),
             },

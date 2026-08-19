@@ -6,7 +6,7 @@ use super::DockerCompose;
 use crate::local_backend::command::{CommandOutput, CommandRequest, ProcessRunner};
 use crate::local_backend::state::{
     ApiToken, DockerTarget, LocalBackendError, ManagedStackPaths, ManagedStackState,
-    RuntimeSecrets, SeedAccount, StackKind,
+    RuntimeSecrets, SeedAccount,
 };
 
 pub(super) const QUICK_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -262,17 +262,12 @@ where
         account: &SeedAccount,
         api_token: &ApiToken,
     ) -> Result<(), LocalBackendError> {
-        if state.kind != StackKind::Managed {
-            return Err(LocalBackendError::InvalidState(
-                "the fresh local seeder must not run for an adopted development stack".to_string(),
-            ));
-        }
         let secrets = self.validate_stack_files(paths, state)?;
         let request = self
             .compose_request(
                 paths,
                 state,
-                "seed local Sacrum account",
+                "seed local backend account",
                 ["run", "--rm", "--no-deps", "seeder"],
                 self.reconcile_timeout,
             )
@@ -555,6 +550,10 @@ mod tests {
             "account-password"
         );
         assert_eq!(request.env_value("SEED_TOKEN").unwrap(), token.as_str());
+        assert_eq!(
+            request.env_value("POSTGRES_DATA_PATH").unwrap(),
+            "/var/lib/postgresql"
+        );
         assert!(request.args_as_strings().iter().all(|argument| {
             !argument.contains("account-password") && !argument.contains(token.as_str())
         }));

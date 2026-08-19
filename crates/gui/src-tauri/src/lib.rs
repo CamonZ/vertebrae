@@ -26,8 +26,8 @@ use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use commands::AppState;
 use events::{
-    ArtifactChangedEvent, PermissionRequestEvent, SectionChangedEvent, SessionLogCreatedEvent,
-    SessionLogUpdatedEvent, StepChangedEvent, StepExecutionChangedEvent,
+    ArtifactChangedEvent, LocalBackendProgressEvent, PermissionRequestEvent, SectionChangedEvent,
+    SessionLogCreatedEvent, SessionLogUpdatedEvent, StepChangedEvent, StepExecutionChangedEvent,
     StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskRunStepChangedEvent,
     TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
 };
@@ -70,6 +70,7 @@ fn create_builder() -> Builder {
             commands::get_projects,
             commands::sacrum_config_status,
             commands::save_sacrum_settings,
+            commands::setup_local_backend,
             commands::initialize_project,
             commands::add_project,
             commands::remove_project,
@@ -163,6 +164,7 @@ fn create_builder() -> Builder {
         ])
         .events(collect_events![
             ArtifactChangedEvent,
+            LocalBackendProgressEvent,
             TaskChangedEvent,
             TaskRunChangedEvent,
             TaskStepChangedEvent,
@@ -373,6 +375,7 @@ mod tests {
             "async sendLocalChatMessage(",
             "async closeLocalChatSession(",
             "async inferLocalChatSessionTitle(",
+            "async setupLocalBackend(",
         ] {
             assert!(
                 bindings.contains(command),
@@ -388,6 +391,10 @@ mod tests {
             bindings.contains("localChatSessionInitEvent: LocalChatSessionInitEvent"),
             "generated bindings should include the neutral local chat init event"
         );
+        assert!(
+            bindings.contains("localBackendProgressEvent: LocalBackendProgressEvent"),
+            "generated bindings should include local backend progress events"
+        );
         for ty in [
             "export type LocalChatHarnessKind",
             "export type LocalChatHarnessCatalog",
@@ -395,6 +402,8 @@ mod tests {
             "export type InferLocalChatSessionTitleInput",
             "export type InferLocalChatSessionTitleOutput",
             "export type LocalChatSessionError",
+            "export type LocalBackendProgressEvent",
+            "export type LocalBackendSetupResult",
         ] {
             assert!(
                 bindings.contains(ty),

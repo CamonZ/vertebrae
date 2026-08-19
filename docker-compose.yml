@@ -1,3 +1,5 @@
+name: vertebrae-acceptance
+
 # Docker Compose for acceptance testing against a real Sacrum backend.
 #
 # Usage:

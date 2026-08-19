@@ -4,6 +4,21 @@ use tauri_specta::Event;
 
 use crate::types;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct LocalBackendProgressEvent {
+    pub stage: LocalBackendProgressStage,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalBackendProgressStage {
+    Pulling,
+    Migrating,
+    Health,
+    Seeding,
+}
+
 /// Complete artifact projection changed on the active Sacrum project.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct ArtifactChangedEvent {

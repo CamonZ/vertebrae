@@ -1241,7 +1241,7 @@ export function msgsToThread(
       const am: AgentMessage = {
         evt: idStr,
         type: "agent",
-        speaker: m.speaker ?? "sacrum",
+        speaker: m.speaker ?? "Backend",
         model: m.model,
         streaming: m.streaming,
         tools,

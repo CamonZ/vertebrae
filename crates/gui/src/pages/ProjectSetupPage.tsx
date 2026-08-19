@@ -2,20 +2,29 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   commands,
+  events,
   InitializeProjectResult,
+  LocalBackendProgressEvent,
   SavedProject,
-  SacrumConfigStatus,
+  SacrumConfigStatus as BackendConfigStatus,
 } from "../bindings";
 import { open } from "@tauri-apps/plugin-dialog";
 import { resetProjectScopedStores } from "../stores";
 import { FirstRunShell, type FirstRunPhase } from "../components";
 
-const SETUP_PHASES: FirstRunPhase[] = [
+const SAVED_PROJECT_PHASES: FirstRunPhase[] = [
   { kind: "Phase 01", name: "Project" },
   { kind: "Phase 02", name: "Ready" },
 ];
 
-type SetupView = "saved" | "project" | "ignition";
+const FIRST_RUN_PHASES: FirstRunPhase[] = [
+  { kind: "Phase 01", name: "Backend" },
+  { kind: "Phase 02", name: "Project" },
+  { kind: "Phase 03", name: "Ready" },
+];
+
+type SetupView = "saved" | "backend" | "project" | "ignition";
+type BackendChoice = "remote" | "local";
 
 const secondaryButtonClass =
   "inline-flex h-9 items-center justify-center gap-2 rounded-[var(--r-md)] border border-[var(--line-strong)] bg-transparent px-4 text-sm font-medium text-[var(--fg)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50";
@@ -38,21 +47,28 @@ export function ProjectSetupPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [setupView, setSetupView] = useState<SetupView>("saved");
-  const [sacrumStatus, setSacrumStatus] = useState<SacrumConfigStatus | null>(
+  const [backendChoice, setBackendChoice] = useState<BackendChoice | null>(
     null
   );
-  const [isLoadingSacrumStatus, setIsLoadingSacrumStatus] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<BackendConfigStatus | null>(
+    null
+  );
+  const [isLoadingBackendStatus, setIsLoadingBackendStatus] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [selectedPath, setSelectedPath] = useState("");
   const [projectName, setProjectName] = useState("");
-  const [sacrumToken, setSacrumToken] = useState("");
+  const [backendUrl, setBackendUrl] = useState("");
+  const [backendToken, setBackendToken] = useState("");
+  const [localProgress, setLocalProgress] =
+    useState<LocalBackendProgressEvent | null>(null);
+  const [localAdoptionRequired, setLocalAdoptionRequired] = useState(false);
+  const [isProvisioningLocal, setIsProvisioningLocal] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [sacrumStatusRetryKey, setSacrumStatusRetryKey] = useState(0);
+  const [backendStatusRetryKey, setBackendStatusRetryKey] = useState(0);
   const [isInitializing, setIsInitializing] = useState(false);
   const [initializeResult, setInitializeResult] =
     useState<InitializeProjectResult | null>(null);
 
-  // Load projects on mount
   const loadProjects = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -61,7 +77,8 @@ export function ProjectSetupPage() {
       if (result.status === "ok") {
         setProjects(result.data);
         if (result.data.length === 0) {
-          setSetupView("project");
+          setBackendChoice(null);
+          setSetupView("backend");
         }
       } else {
         setError(result.error.message);
@@ -78,38 +95,59 @@ export function ProjectSetupPage() {
   }, [loadProjects]);
 
   useEffect(() => {
-    if (setupView !== "project" || sacrumStatus) return;
+    if (setupView !== "project" || backendChoice !== "remote" || backendStatus)
+      return;
 
     let cancelled = false;
-    async function loadSacrumStatus() {
-      setIsLoadingSacrumStatus(true);
+    async function loadBackendStatus() {
+      setIsLoadingBackendStatus(true);
       setFormError(null);
       try {
         const result = await commands.sacrumConfigStatus();
         if (cancelled) return;
         if (result.status === "ok") {
-          setSacrumStatus(result.data);
+          setBackendStatus(result.data);
+          setBackendUrl(result.data.url);
         } else {
           setFormError(result.error.message);
         }
       } catch (e) {
         if (!cancelled) {
-          setFormError(`Failed to load Sacrum settings: ${e}`);
+          setFormError(`Failed to load backend settings: ${e}`);
         }
       } finally {
         if (!cancelled) {
-          setIsLoadingSacrumStatus(false);
+          setIsLoadingBackendStatus(false);
         }
       }
     }
 
-    loadSacrumStatus();
+    loadBackendStatus();
     return () => {
       cancelled = true;
     };
-  }, [sacrumStatus, sacrumStatusRetryKey, setupView]);
+  }, [backendChoice, backendStatus, backendStatusRetryKey, setupView]);
 
-  // Handle selecting a project
+  useEffect(() => {
+    if (setupView !== "project" || backendChoice !== "local") return;
+
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void events.localBackendProgressEvent
+      .listen((event) => {
+        if (!cancelled) setLocalProgress(event.payload);
+      })
+      .then((cleanup) => {
+        if (cancelled) cleanup();
+        else unlisten = cleanup;
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [backendChoice, setupView]);
+
   const handleSelectProject = async (project: SavedProject) => {
     setIsLoading(true);
     setError(null);
@@ -130,6 +168,20 @@ export function ProjectSetupPage() {
 
   const showProjectForm = () => {
     setError(null);
+    setFormError(null);
+    if (projects.length === 0) {
+      setSetupView("backend");
+      return;
+    }
+    setBackendChoice("remote");
+    setSetupView("project");
+  };
+
+  const handleBackendContinue = () => {
+    if (!backendChoice) {
+      setFormError("Choose how Vertebrae should connect to the backend.");
+      return;
+    }
     setFormError(null);
     setSetupView("project");
   };
@@ -154,13 +206,16 @@ export function ProjectSetupPage() {
     }
   };
 
-  const needsSacrumSettings =
-    sacrumStatus !== null &&
-    (!sacrumStatus.config_exists || !sacrumStatus.has_token);
+  const needsBackendSettings =
+    backendStatus !== null &&
+    (!backendStatus.config_exists ||
+      !backendStatus.has_token ||
+      backendUrl.trim() !== backendStatus.url);
 
   const handleProjectContinue = async () => {
     const trimmedName = projectName.trim();
-    const trimmedToken = sacrumToken.trim();
+    const trimmedUrl = backendUrl.trim();
+    const trimmedToken = backendToken.trim();
 
     if (!selectedPath) {
       setFormError("Choose a project folder before continuing.");
@@ -170,12 +225,66 @@ export function ProjectSetupPage() {
       setFormError("Project name is required.");
       return;
     }
-    if (!sacrumStatus) {
-      setFormError("Sacrum settings are required before continuing.");
+    if (backendChoice === "remote" && !trimmedUrl) {
+      setFormError("Backend URL is required.");
       return;
     }
-    if (needsSacrumSettings && !trimmedToken) {
-      setFormError("Sacrum API token is required.");
+
+    if (backendChoice === "local") {
+      setFormError(null);
+      setLocalProgress(null);
+      setIsProvisioningLocal(true);
+      try {
+        const result = await commands.setupLocalBackend(localAdoptionRequired);
+        if (result.status === "error") {
+          setFormError(result.error.message);
+          return;
+        }
+        if (result.data.status === "adoption_required") {
+          setLocalAdoptionRequired(true);
+          setFormError(
+            result.data.adoption_message ??
+              "A compatible vertebrae-dev backend was detected. Confirm adoption to continue."
+          );
+          return;
+        }
+
+        setLocalAdoptionRequired(false);
+        setIsInitializing(true);
+        setInitializeResult(null);
+        const initResult = await commands.initializeProject(
+          selectedPath,
+          trimmedName
+        );
+        if (initResult.status === "error") {
+          setFormError(initResult.error.message);
+          return;
+        }
+        setInitializeResult(initResult.data);
+        const selectResult = await commands.setCurrentProject(
+          initResult.data.slug
+        );
+        if (selectResult.status === "error") {
+          setFormError(selectResult.error.message);
+          return;
+        }
+        resetProjectScopedStores();
+        setSetupView("ignition");
+      } catch (e) {
+        setFormError(`Failed to set up local backend: ${e}`);
+      } finally {
+        setIsProvisioningLocal(false);
+        setIsInitializing(false);
+      }
+      return;
+    }
+
+    if (!backendStatus) {
+      setFormError("Backend settings are required before continuing.");
+      return;
+    }
+    if (!backendStatus.has_token && !trimmedToken) {
+      setFormError("Backend API token is required.");
       return;
     }
 
@@ -183,11 +292,15 @@ export function ProjectSetupPage() {
     setIsInitializing(true);
     setFormError(null);
     try {
-      if (needsSacrumSettings) {
-        const result = await commands.saveSacrumSettings(trimmedToken);
+      if (needsBackendSettings) {
+        const result = await commands.saveSacrumSettings(
+          trimmedUrl,
+          trimmedToken
+        );
         if (result.status === "ok") {
-          setSacrumStatus(result.data);
-          setSacrumToken("");
+          setBackendStatus(result.data);
+          setBackendUrl(result.data.url);
+          setBackendToken("");
         } else {
           setFormError(result.error.message);
           return;
@@ -201,7 +314,7 @@ export function ProjectSetupPage() {
       );
       if (result.status === "error") {
         if (isLikelyTokenError(result.error.message)) {
-          setSacrumStatus((current) =>
+          setBackendStatus((current) =>
             current
               ? {
                   ...current,
@@ -209,9 +322,9 @@ export function ProjectSetupPage() {
                 }
               : current
           );
-          setSacrumToken("");
+          setBackendToken("");
           setFormError(
-            "Sacrum rejected the API token. Enter a valid token and try again."
+            "The backend rejected the API token. Enter a valid token and try again."
           );
         } else {
           setFormError(result.error.message);
@@ -235,16 +348,15 @@ export function ProjectSetupPage() {
     }
   };
 
-  const handleRetrySacrumStatus = () => {
+  const handleRetryBackendStatus = () => {
     setFormError(null);
-    setSacrumStatusRetryKey((current) => current + 1);
+    setBackendStatusRetryKey((current) => current + 1);
   };
 
   const enterInitializedProject = () => {
     navigate("/");
   };
 
-  // Handle removing a project
   const handleRemoveProject = async (
     e: React.MouseEvent,
     project: SavedProject
@@ -267,85 +379,137 @@ export function ProjectSetupPage() {
     projects.length === 1
       ? "1 saved project"
       : `${projects.length} saved projects`;
-  const activeIndex = setupView === "ignition" ? 1 : 0;
+  const isFirstRun = projects.length === 0;
+  const phases = isFirstRun ? FIRST_RUN_PHASES : SAVED_PROJECT_PHASES;
+  const activeIndex = isFirstRun
+    ? setupView === "backend"
+      ? 0
+      : setupView === "ignition"
+        ? 2
+        : 1
+    : setupView === "ignition"
+      ? 1
+      : 0;
   const isProjectForm = setupView === "project";
   const title =
     setupView === "ignition"
       ? "Project ready"
-      : isProjectForm
-        ? projects.length === 0
-          ? "Add your first project"
-          : "Add a project"
-        : "Choose a project";
+      : setupView === "backend"
+        ? "Choose your backend"
+        : isProjectForm
+          ? projects.length === 0
+            ? "Add your first project"
+            : "Add a project"
+          : "Choose a project";
   const lede =
     setupView === "ignition"
       ? "Project setup is complete. Vertebrae registered and selected the project."
-      : isProjectForm
-        ? "Point Vertebrae at a folder and confirm the name it should use."
-        : "Select a saved project or add a new one.";
+      : setupView === "backend"
+        ? "Choose an existing backend or run one locally with Docker."
+        : isProjectForm
+          ? "Point Vertebrae at a folder and confirm the name it should use."
+          : "Select a saved project or add a new one.";
   const footerLeft =
     setupView === "ignition" && initializeResult
       ? "Project registered and selected"
       : isLoading
         ? "Loading projects..."
         : projectCountLabel;
-  const footerRight = isProjectForm ? (
-    <>
-      {projects.length > 0 && (
-        <button
-          onClick={() => setSetupView("saved")}
-          className={secondaryButtonClass}
-          disabled={isSavingSettings}
-        >
-          Back
-        </button>
-      )}
+  const footerRight =
+    setupView === "backend" ? (
       <button
-        onClick={handleProjectContinue}
+        onClick={handleBackendContinue}
         className={primaryButtonClass}
-        disabled={isLoadingSacrumStatus || isSavingSettings || isInitializing}
-        data-testid="project-phase-continue"
+        disabled={!backendChoice}
+        data-testid="backend-choice-continue"
       >
-        {isSavingSettings || isInitializing ? "Creating..." : "Create project"}
+        Continue
       </button>
-    </>
-  ) : setupView === "ignition" ? (
-    <button
-      onClick={enterInitializedProject}
-      className={primaryButtonClass}
-      data-testid="ignition-enter"
-    >
-      Enter {initializeResult?.project_name ?? "project"}
-    </button>
-  ) : (
-    <button
-      onClick={showProjectForm}
-      className={secondaryButtonClass}
-      data-testid="setup-add-project"
-    >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        className="h-4 w-4"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
+    ) : isProjectForm ? (
+      <>
+        {projects.length > 0 ? (
+          <button
+            onClick={() => setSetupView("saved")}
+            className={secondaryButtonClass}
+            disabled={isSavingSettings || isProvisioningLocal}
+          >
+            Back
+          </button>
+        ) : (
+          <button
+            onClick={() => setSetupView("backend")}
+            className={secondaryButtonClass}
+            disabled={isSavingSettings || isProvisioningLocal}
+            data-testid="project-back-backend"
+          >
+            Back
+          </button>
+        )}
+        <button
+          onClick={handleProjectContinue}
+          className={primaryButtonClass}
+          disabled={
+            isLoadingBackendStatus ||
+            isSavingSettings ||
+            isInitializing ||
+            isProvisioningLocal
+          }
+          data-testid="project-phase-continue"
+        >
+          {isProvisioningLocal
+            ? "Setting up..."
+            : isSavingSettings || isInitializing
+              ? "Creating..."
+              : localAdoptionRequired
+                ? "Adopt backend"
+                : "Create project"}
+        </button>
+      </>
+    ) : setupView === "ignition" ? (
+      <button
+        onClick={enterInitializedProject}
+        className={primaryButtonClass}
+        data-testid="ignition-enter"
       >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M12 4v16m8-8H4"
-        />
-      </svg>
-      Add Project
-    </button>
-  );
+        Enter {initializeResult?.project_name ?? "project"}
+      </button>
+    ) : (
+      <button
+        onClick={showProjectForm}
+        className={secondaryButtonClass}
+        data-testid="setup-add-project"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="h-4 w-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M12 4v16m8-8H4"
+          />
+        </svg>
+        Add Project
+      </button>
+    );
 
   return (
     <FirstRunShell
-      phases={SETUP_PHASES}
+      phases={phases}
       activeIndex={activeIndex}
-      eyebrow={setupView === "ignition" ? "Initialized" : "Phase 01 · Project"}
+      eyebrow={
+        setupView === "ignition"
+          ? "Initialized"
+          : setupView === "backend"
+            ? "Phase 01 · Backend"
+            : isFirstRun
+              ? "Phase 02 · Project"
+              : "Phase 01 · Project"
+      }
       title={title}
       lede={lede}
       footerLeft={footerLeft}
@@ -364,18 +528,47 @@ export function ProjectSetupPage() {
           data-testid="project-phase-error"
         >
           <span>{formError}</span>
-          {setupView === "project" && !sacrumStatus && (
-            <button
-              onClick={handleRetrySacrumStatus}
-              className={secondaryButtonClass}
-              disabled={isLoadingSacrumStatus}
-              data-testid="sacrum-status-retry"
-            >
-              Retry
-            </button>
-          )}
+          {setupView === "project" &&
+            backendChoice === "remote" &&
+            !backendStatus && (
+              <button
+                onClick={handleRetryBackendStatus}
+                className={secondaryButtonClass}
+                disabled={isLoadingBackendStatus}
+                data-testid="backend-status-retry"
+              >
+                Retry
+              </button>
+            )}
         </div>
       )}
+
+      {setupView === "project" &&
+        backendChoice === "local" &&
+        localProgress && (
+          <div
+            className="mb-4 rounded-lg border border-border bg-bg-2 p-3"
+            data-testid="local-backend-progress"
+          >
+            <div className="text-sm font-medium text-fg">
+              {localProgress.message}
+            </div>
+            <div className="mt-2 grid grid-cols-4 gap-1 text-[0.65rem] uppercase tracking-[0.12em] text-fg-mute">
+              {(["pulling", "migrating", "health", "seeding"] as const).map(
+                (stage) => (
+                  <span
+                    key={stage}
+                    className={
+                      stage === localProgress.stage ? "text-accent" : ""
+                    }
+                  >
+                    {stage}
+                  </span>
+                )
+              )}
+            </div>
+          </div>
+        )}
 
       {/* Loading state */}
       {isLoading && (
@@ -434,6 +627,12 @@ export function ProjectSetupPage() {
 
       {!isLoading && setupView === "project" && (
         <div className="space-y-4" data-testid="project-phase-form">
+          <div className="fr-callout" data-testid="selected-backend">
+            {backendChoice === "local"
+              ? "Docker-hosted local backend"
+              : "Existing backend"}
+          </div>
+
           <div className="fr-field">
             <label>Project folder</label>
             <div className="fr-folder">
@@ -467,33 +666,114 @@ export function ProjectSetupPage() {
             <input
               id="project-name"
               className="fr-input"
-              placeholder="e.g. cervical"
+              placeholder="e.g. my-project"
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
             />
           </div>
 
-          {isLoadingSacrumStatus && (
+          {backendChoice === "remote" && isLoadingBackendStatus && (
             <div className="fr-callout">
-              <span>Loading Sacrum settings...</span>
+              <span>Loading backend settings...</span>
             </div>
           )}
 
-          {needsSacrumSettings && (
-            <div className="fr-field">
-              <label htmlFor="sacrum-token">Sacrum API token</label>
-              <input
-                id="sacrum-token"
-                className="fr-input"
-                type="password"
-                value={sacrumToken}
-                onChange={(e) => {
-                  setSacrumToken(e.target.value);
-                  setFormError(null);
-                }}
-              />
-            </div>
+          {backendChoice === "remote" && backendStatus && (
+            <>
+              <div className="fr-field">
+                <label htmlFor="backend-url">Backend URL</label>
+                <input
+                  id="backend-url"
+                  className="fr-input"
+                  type="url"
+                  value={backendUrl}
+                  onChange={(e) => {
+                    setBackendUrl(e.target.value);
+                    setFormError(null);
+                  }}
+                />
+              </div>
+              {(!backendStatus.has_token || needsBackendSettings) && (
+                <div className="fr-field">
+                  <label htmlFor="backend-token">Backend API token</label>
+                  <input
+                    id="backend-token"
+                    className="fr-input"
+                    type="password"
+                    placeholder={
+                      backendStatus.has_token
+                        ? "Leave blank to keep current token"
+                        : undefined
+                    }
+                    value={backendToken}
+                    onChange={(e) => {
+                      setBackendToken(e.target.value);
+                      setFormError(null);
+                    }}
+                  />
+                </div>
+              )}
+            </>
           )}
+
+          {backendChoice === "local" && (
+            <>
+              <div className="fr-callout">
+                <span>
+                  Vertebrae will provision the local backend after you continue.
+                  It generates the backend account and stores its connection
+                  settings automatically.
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {!isLoading && setupView === "backend" && (
+        <div className="space-y-4" data-testid="backend-choice">
+          <button
+            type="button"
+            className={`w-full rounded-lg border p-4 text-left transition-colors ${
+              backendChoice === "remote"
+                ? "border-accent bg-bg-2"
+                : "border-border hover:border-accent"
+            }`}
+            onClick={() => {
+              setBackendChoice("remote");
+              setFormError(null);
+            }}
+            data-testid="backend-choice-remote"
+          >
+            <div className="font-medium text-fg">
+              Use an existing backend
+            </div>
+            <div className="mt-1 text-sm text-fg-mute">
+              Connect to a backend URL with an API token you already have.
+            </div>
+          </button>
+          <button
+            type="button"
+            className={`w-full rounded-lg border p-4 text-left transition-colors ${
+              backendChoice === "local"
+                ? "border-accent bg-bg-2"
+                : "border-border hover:border-accent"
+            }`}
+            onClick={() => {
+              setBackendChoice("local");
+              setLocalAdoptionRequired(false);
+              setLocalProgress(null);
+              setFormError(null);
+            }}
+            data-testid="backend-choice-local"
+          >
+            <div className="font-medium text-fg">
+              Run a local backend with Docker
+            </div>
+            <div className="mt-1 text-sm text-fg-mute">
+              Keep the backend on this computer and let Vertebrae manage its stack.
+            </div>
+          </button>
         </div>
       )}
 
@@ -509,7 +789,7 @@ export function ProjectSetupPage() {
               <div className="v">
                 {initializeResult.project_created ? "new" : "linked"}
               </div>
-              <div className="l">Sacrum</div>
+              <div className="l">Backend</div>
             </div>
           </div>
           <div className="fr-callout">

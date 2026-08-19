@@ -19,6 +19,8 @@ const {
   mockSetCurrentProject,
   mockSacrumConfigStatus,
   mockSaveSacrumSettings,
+  mockSetupLocalBackend,
+  mockLocalBackendProgressListen,
   mockInitializeProject,
   mockRemoveProject,
   mockNavigate,
@@ -28,6 +30,8 @@ const {
   mockSetCurrentProject: vi.fn(),
   mockSacrumConfigStatus: vi.fn(),
   mockSaveSacrumSettings: vi.fn(),
+  mockSetupLocalBackend: vi.fn(),
+  mockLocalBackendProgressListen: vi.fn(),
   mockInitializeProject: vi.fn(),
   mockRemoveProject: vi.fn(),
   mockNavigate: vi.fn(),
@@ -52,8 +56,14 @@ vi.mock("../bindings", () => ({
     setCurrentProject: (...args: unknown[]) => mockSetCurrentProject(...args),
     sacrumConfigStatus: (...args: unknown[]) => mockSacrumConfigStatus(...args),
     saveSacrumSettings: (...args: unknown[]) => mockSaveSacrumSettings(...args),
+    setupLocalBackend: (...args: unknown[]) => mockSetupLocalBackend(...args),
     initializeProject: (...args: unknown[]) => mockInitializeProject(...args),
     removeProject: (...args: unknown[]) => mockRemoveProject(...args),
+  },
+  events: {
+    localBackendProgressEvent: {
+      listen: (...args: unknown[]) => mockLocalBackendProgressListen(...args),
+    },
   },
 }));
 
@@ -69,6 +79,13 @@ const initializedProject = {
     project_created: true,
   },
 };
+
+async function chooseRemoteBackend() {
+  expect(await screen.findByTestId("backend-choice")).toBeInTheDocument();
+  await userEvent.click(screen.getByTestId("backend-choice-remote"));
+  await userEvent.click(screen.getByTestId("backend-choice-continue"));
+  expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+}
 
 describe("ProjectSetupPage", () => {
   beforeEach(() => {
@@ -107,6 +124,15 @@ describe("ProjectSetupPage", () => {
     mockInitializeProject.mockResolvedValue(initializedProject);
     mockRemoveProject.mockResolvedValue({ status: "ok", data: null });
     mockOpen.mockResolvedValue("/tmp/new-project");
+    mockSetupLocalBackend.mockResolvedValue({
+      status: "ok",
+      data: {
+        status: "ready",
+        backend_url: "http://127.0.0.1:4400",
+        adoption_message: null,
+      },
+    });
+    mockLocalBackendProgressListen.mockResolvedValue(() => {});
   });
 
   it("resets project-scoped query cache after switching projects and before navigation", async () => {
@@ -193,17 +219,46 @@ describe("ProjectSetupPage", () => {
       expect(mockRemoveProject).toHaveBeenCalledWith("new-project");
     });
     expect(mockSetCurrentProject).not.toHaveBeenCalled();
-    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    expect(await screen.findByTestId("backend-choice")).toBeInTheDocument();
   });
 
-  it("collects folder and project name without showing Sacrum fields when config is complete", async () => {
+  it("requires an explicit backend choice and preserves project fields", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+
+    render(<ProjectSetupPage />);
+
+    expect(await screen.findByTestId("backend-choice")).toBeInTheDocument();
+    expect(screen.getByTestId("backend-choice-continue")).toBeDisabled();
+    expect(mockSacrumConfigStatus).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    expect(await screen.findByTestId("project-phase-form")).toHaveTextContent(
+      "Docker-hosted local backend"
+    );
+    await userEvent.type(
+      screen.getByLabelText("Project name"),
+      "first-project"
+    );
+    await userEvent.click(screen.getByTestId("project-back-backend"));
+    expect(await screen.findByTestId("backend-choice")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("backend-choice-remote"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    expect(await screen.findByLabelText("Project name")).toHaveValue(
+      "first-project"
+    );
+    expect(mockSacrumConfigStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("collects folder and project name without showing backend fields when config is complete", async () => {
     render(<ProjectSetupPage />);
 
     await userEvent.click(await screen.findByTestId("setup-add-project"));
 
     expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
     expect(mockSacrumConfigStatus).toHaveBeenCalled();
-    expect(screen.queryByLabelText("Sacrum API token")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Backend API token")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("project-folder-choose"));
 
@@ -216,7 +271,97 @@ describe("ProjectSetupPage", () => {
     expect(screen.getByText("/tmp/new-project")).toBeInTheDocument();
   });
 
-  it("saves missing Sacrum settings and initializes directly into the ready state", async () => {
+  it("saves a changed remote URL while preserving an existing token", async () => {
+    render(<ProjectSetupPage />);
+
+    await userEvent.click(await screen.findByTestId("setup-add-project"));
+    const url = await screen.findByLabelText("Backend URL");
+    expect(url).toHaveValue("http://localhost:4000");
+
+    await userEvent.clear(url);
+    await userEvent.type(url, "https://backend.example.test/graphql");
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
+    expect(mockSaveSacrumSettings).toHaveBeenCalledWith(
+      "https://backend.example.test/graphql",
+      ""
+    );
+  });
+
+  it("provisions a local backend without collecting account credentials", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockLocalBackendProgressListen.mockImplementation(async (callback) => {
+      callback({
+        payload: {
+          stage: "pulling",
+          message: "Pulling the local backend and PostgreSQL images...",
+        },
+      });
+      return () => {};
+    });
+
+    render(<ProjectSetupPage />);
+
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    expect(screen.queryByLabelText("Backend email")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Backend username")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Backend password")).not.toBeInTheDocument();
+    expect(
+      await screen.findByTestId("local-backend-progress")
+    ).toHaveTextContent("Pulling");
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
+    expect(mockSetupLocalBackend).toHaveBeenCalledWith(false);
+    expect(mockSaveSacrumSettings).not.toHaveBeenCalled();
+    expect(mockInitializeProject).toHaveBeenCalledWith(
+      "/tmp/new-project",
+      "new-project"
+    );
+  });
+
+  it("requires adoption confirmation before handing off to project initialization", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockSetupLocalBackend
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          status: "adoption_required",
+          backend_url: null,
+          adoption_message: "Adopt the compatible vertebrae-dev stack.",
+        },
+      })
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          status: "ready",
+          backend_url: "http://127.0.0.1:4400",
+          adoption_message: null,
+        },
+      });
+
+    render(<ProjectSetupPage />);
+
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
+      "Adopt the compatible vertebrae-dev stack."
+    );
+    expect(mockInitializeProject).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
+    expect(mockSetupLocalBackend).toHaveBeenLastCalledWith(true);
+  });
+
+  it("saves missing backend settings and initializes directly into the ready state", async () => {
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSacrumConfigStatus.mockResolvedValue({
       status: "ok",
@@ -230,29 +375,32 @@ describe("ProjectSetupPage", () => {
 
     render(<ProjectSetupPage />);
 
-    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    await chooseRemoteBackend();
     expect(screen.getByTestId("first-run-progress")).toHaveTextContent(
-      "Step 1 of 2"
+      "Step 2 of 3"
     );
     await userEvent.click(screen.getByTestId("project-folder-choose"));
 
     expect(
-      await screen.findByLabelText("Sacrum API token")
+      await screen.findByLabelText("Backend API token")
     ).toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("project-phase-continue"));
     expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
-      "Sacrum API token is required."
+      "Backend API token is required."
     );
     expect(mockSaveSacrumSettings).not.toHaveBeenCalled();
 
-    await userEvent.type(screen.getByLabelText("Sacrum API token"), "sac_test");
+    await userEvent.type(screen.getByLabelText("Backend API token"), "sac_test");
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     expect(await screen.findByTestId("ignition-screen")).toHaveTextContent(
       "/tmp/new-project"
     );
-    expect(mockSaveSacrumSettings).toHaveBeenCalledWith("sac_test");
+    expect(mockSaveSacrumSettings).toHaveBeenCalledWith(
+      "http://localhost:4000",
+      "sac_test"
+    );
     expect(mockInitializeProject).toHaveBeenCalledWith(
       "/tmp/new-project",
       "new-project"
@@ -261,12 +409,12 @@ describe("ProjectSetupPage", () => {
     expect(screen.queryByText("Skills & Docs")).not.toBeInTheDocument();
   });
 
-  it("retries Sacrum status loading after a transient failure", async () => {
+  it("retries backend status loading after a transient failure", async () => {
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSacrumConfigStatus
       .mockResolvedValueOnce({
         status: "error",
-        error: { message: "Sacrum config unavailable" },
+        error: { message: "Backend config unavailable" },
       })
       .mockResolvedValueOnce({
         status: "ok",
@@ -280,11 +428,12 @@ describe("ProjectSetupPage", () => {
 
     render(<ProjectSetupPage />);
 
+    await chooseRemoteBackend();
     expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
-      "Sacrum config unavailable"
+      "Backend config unavailable"
     );
 
-    await userEvent.click(screen.getByTestId("sacrum-status-retry"));
+    await userEvent.click(screen.getByTestId("backend-status-retry"));
 
     await waitFor(() => {
       expect(mockSacrumConfigStatus).toHaveBeenCalledTimes(2);
@@ -294,7 +443,7 @@ describe("ProjectSetupPage", () => {
     expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
   });
 
-  it("returns to token entry when Sacrum rejects the saved API token", async () => {
+  it("returns to token entry when the backend rejects the saved API token", async () => {
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSacrumConfigStatus.mockResolvedValue({
       status: "ok",
@@ -314,28 +463,31 @@ describe("ProjectSetupPage", () => {
 
     render(<ProjectSetupPage />);
 
-    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    await chooseRemoteBackend();
     await userEvent.click(screen.getByTestId("project-folder-choose"));
     await userEvent.type(
-      screen.getByLabelText("Sacrum API token"),
+      screen.getByLabelText("Backend API token"),
       "bad-token"
     );
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
-      "Sacrum rejected the API token"
+      "The backend rejected the API token"
     );
-    expect(screen.getByLabelText("Sacrum API token")).toHaveValue("");
+    expect(screen.getByLabelText("Backend API token")).toHaveValue("");
     expect(mockSetCurrentProject).not.toHaveBeenCalled();
 
     await userEvent.type(
-      screen.getByLabelText("Sacrum API token"),
+      screen.getByLabelText("Backend API token"),
       "sac_valid-token"
     );
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
-    expect(mockSaveSacrumSettings).toHaveBeenLastCalledWith("sac_valid-token");
+    expect(mockSaveSacrumSettings).toHaveBeenLastCalledWith(
+      "http://localhost:4000",
+      "sac_valid-token"
+    );
     expect(mockSetCurrentProject).toHaveBeenCalledWith("new-project");
   });
 
@@ -344,17 +496,17 @@ describe("ProjectSetupPage", () => {
     mockInitializeProject
       .mockResolvedValueOnce({
         status: "error",
-        error: { message: "Sacrum is unavailable" },
+        error: { message: "Backend is unavailable" },
       })
       .mockResolvedValueOnce(initializedProject);
 
     render(<ProjectSetupPage />);
-    await screen.findByTestId("project-phase-form");
+    await chooseRemoteBackend();
     await userEvent.click(screen.getByTestId("project-folder-choose"));
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
-      "Sacrum is unavailable"
+      "Backend is unavailable"
     );
     expect(mockSetCurrentProject).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
@@ -378,7 +530,7 @@ describe("ProjectSetupPage", () => {
 
     render(<ProjectSetupPage />);
 
-    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    await chooseRemoteBackend();
     await userEvent.click(screen.getByTestId("project-folder-choose"));
     await userEvent.clear(screen.getByLabelText("Project name"));
     await userEvent.type(screen.getByLabelText("Project name"), "Ørsted");
