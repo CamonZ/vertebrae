@@ -2,7 +2,7 @@
    Workflow Atlas · Run Console — a docked glass HUD over the workflow canvas.
    The map shows the *machine* (workflows); this shows the *work* (tasks)
    flowing through it. Ready ↔ Running, with launch + stop controls.
-   Glass recipe matches the floating detail panels (blur + warm translucency).
+   Glass recipe matches the floating detail panels (blur + neutral translucency).
 
    Kind hues come from the shared `k-<kind>` carrier classes (which set --kc),
    so this sheet never inlines a step colour.
@@ -24,8 +24,8 @@
     color-mix(in oklch, var(--bg-3) 42%, transparent),
     color-mix(in oklch, var(--bg-2) 30%, transparent)
   );
-  -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1.6);
-  backdrop-filter: blur(30px) brightness(1.4) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1);
+  backdrop-filter: blur(30px) brightness(1.4) saturate(1);
   border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-3), 0 0 44px rgba(0, 0, 0, 0.35);
@@ -427,8 +427,8 @@
     color-mix(in oklch, var(--bg-3) 46%, transparent),
     color-mix(in oklch, var(--bg-2) 34%, transparent)
   );
-  -webkit-backdrop-filter: blur(26px) brightness(1.4) saturate(1.55);
-  backdrop-filter: blur(26px) brightness(1.4) saturate(1.55);
+  -webkit-backdrop-filter: blur(26px) brightness(1.4) saturate(1);
+  backdrop-filter: blur(26px) brightness(1.4) saturate(1);
   border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
   border-radius: var(--r-full);
   box-shadow: var(--shadow-2), 0 0 22px rgba(0, 0, 0, 0.35);

@@ -805,8 +805,8 @@ html.light ::selection {
     color-mix(in oklch, var(--bg-3) 42%, transparent),
     color-mix(in oklch, var(--bg-2) 32%, transparent)
   );
-  -webkit-backdrop-filter: blur(34px) brightness(1.5) saturate(1.5);
-  backdrop-filter: blur(34px) brightness(1.5) saturate(1.5);
+  -webkit-backdrop-filter: blur(34px) brightness(1.5) saturate(1);
+  backdrop-filter: blur(34px) brightness(1.5) saturate(1);
   border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
   border-top: 3px solid var(--accent);
   border-radius: var(--r-xl);
@@ -2318,8 +2318,8 @@ html.light ::selection {
   padding: 0 var(--s-4) 0 var(--s-3);
   background: color-mix(in oklch, var(--bg-2) 50%, transparent);
   color: var(--fg);
-  -webkit-backdrop-filter: blur(20px) brightness(1.5) saturate(1.5);
-  backdrop-filter: blur(20px) brightness(1.5) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) brightness(1.5) saturate(1);
+  backdrop-filter: blur(20px) brightness(1.5) saturate(1);
   border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
   border-radius: var(--r-full);
   box-shadow:
@@ -2397,8 +2397,8 @@ html.light ::selection {
     color-mix(in oklch, var(--bg-3) 34%, transparent),
     color-mix(in oklch, var(--bg-2) 28%, transparent)
   );
-  -webkit-backdrop-filter: blur(30px) brightness(1.5) saturate(1.6);
-  backdrop-filter: blur(30px) brightness(1.5) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) brightness(1.5) saturate(1);
+  backdrop-filter: blur(30px) brightness(1.5) saturate(1);
   border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
   border-radius: var(--r-lg);
   box-shadow:
@@ -3403,8 +3403,8 @@ html.light ::selection {
     color-mix(in oklch, var(--bg-3) 40%, transparent),
     color-mix(in oklch, var(--bg-2) 34%, transparent)
   );
-  -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1.5);
-  backdrop-filter: blur(30px) brightness(1.4) saturate(1.5);
+  -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1);
+  backdrop-filter: blur(30px) brightness(1.4) saturate(1);
   border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
   border-radius: var(--r-lg);
   box-shadow:
