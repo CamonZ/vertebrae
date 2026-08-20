@@ -65,12 +65,11 @@ export function TreeNode({
         multiline ? "min-h-[3.25rem] items-start py-2" : "h-8 items-center",
         "transition-[background-color] duration-[var(--t-fast)]",
         "focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]",
-        // Selected rows: a solid accent bar pinned to the left edge plus a calm
-        // tint. The bar is an inset pseudo-replacement so it never shifts the
-        // content the way a left border would, and the tint reads as selection
-        // rather than the heavy accent-wash fill used previously.
+        // Selected rows: a solid accent bar pinned to the left edge plus the
+        // shared neutral selection surface. The bar is an inset pseudo-
+        // replacement so it never shifts content the way a left border would.
         selected
-          ? "bg-[color-mix(in_oklch,var(--color-accent)_8%,var(--color-bg))] before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-[var(--color-accent)] before:content-['']"
+          ? "bg-[var(--color-selection)] before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-[var(--color-accent)] before:content-['']"
           : "hover:bg-[var(--color-bg-1)]",
         className,
       ]

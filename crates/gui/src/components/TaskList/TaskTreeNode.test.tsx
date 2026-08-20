@@ -376,6 +376,7 @@ describe("TaskTreeNode", () => {
     );
     expect(selectedRows).toHaveLength(1);
     expect(selectedRows[0]).toHaveAttribute("aria-selected", "true");
+    expect(selectedRows[0]).toHaveClass("t-row", "sel");
     expect(selectedRows[0]).toHaveTextContent("Selected");
   });
 

@@ -133,15 +133,15 @@ describe("KanbanCard", () => {
   });
 
   describe("selected state", () => {
-    it("applies the shared selection signal (accent bar + wash, no accent border/glow)", () => {
+    it("applies the shared selection signal (accent bar + neutral surface, no accent border/glow)", () => {
       const task = createMockTask({ title: "Selected task" });
       render(<KanbanCard task={task} isSelected={true} />);
 
       const card = screen.getByRole("button", { name: /Task: Selected task/i });
-      // Same signal as the Tasks list / Run Console: accent left bar + accent-wash
-      // background. No accent border, no glow.
+      // Same signal as the Tasks list / Run Console: accent left bar + neutral
+      // selection background. No accent border, no glow.
       expect(card.className).toContain("before:bg-[var(--color-accent)]");
-      expect(card.getAttribute("style")).toContain("var(--color-accent-wash)");
+      expect(card.getAttribute("style")).toContain("var(--color-selection)");
       expect(card.className).not.toContain("border-[var(--color-accent)]");
       expect(card.className).not.toContain("shadow-[0_0_14px");
     });

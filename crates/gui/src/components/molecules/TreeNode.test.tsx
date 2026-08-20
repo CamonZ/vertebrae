@@ -36,4 +36,17 @@ describe("TreeNode", () => {
     render(<TreeNode depth={2}>Leaf</TreeNode>);
     expect(screen.getByRole("treeitem")).toHaveAttribute("aria-level", "3");
   });
+
+  it("uses the shared neutral selection surface and accent edge", () => {
+    render(
+      <TreeNode selected onSelect={vi.fn()}>
+        Selected task
+      </TreeNode>,
+    );
+
+    const row = screen.getByRole("treeitem");
+    expect(row).toHaveAttribute("aria-selected", "true");
+    expect(row).toHaveClass("bg-[var(--color-selection)]");
+    expect(row).toHaveClass("before:bg-[var(--color-accent)]");
+  });
 });
