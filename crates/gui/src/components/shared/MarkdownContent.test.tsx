@@ -16,12 +16,22 @@ const mermaidMock = vi.hoisted(() => ({
   render: vi.fn(),
 }));
 
+const graphvizMock = vi.hoisted(() => ({
+  dot: vi.fn(),
+}));
+
+const loadGraphvizMock = vi.hoisted(() => vi.fn());
+
 const openerMock = vi.hoisted(() => ({
   openUrl: vi.fn(),
 }));
 
 vi.mock("mermaid", () => ({
   default: mermaidMock,
+}));
+
+vi.mock("../../utils/graphviz", () => ({
+  loadGraphviz: loadGraphvizMock,
 }));
 
 vi.mock("@tauri-apps/plugin-opener", () => openerMock);
@@ -41,6 +51,12 @@ describe("MarkdownContent", () => {
     mermaidMock.render.mockResolvedValue({
       svg: '<svg viewBox="0 0 100 40" style="max-width: 50px;" onload="alert(1)"><text>A --&gt; B</text><script>alert("x")</script></svg>',
     });
+    graphvizMock.dot.mockReset();
+    graphvizMock.dot.mockReturnValue(
+      '<svg viewBox="0 0 120 60"><title>a</title><title>b</title></svg>'
+    );
+    loadGraphvizMock.mockReset();
+    loadGraphvizMock.mockResolvedValue(graphvizMock);
   });
 
   afterEach(() => {
@@ -460,17 +476,142 @@ describe("MarkdownContent", () => {
       expect(container.querySelector("code")?.textContent).toBe(diagram);
     });
 
-    it("falls back to highlighted source with an error for unsupported diagram languages", async () => {
-      const markdown = "```dot\ndigraph { A -> B }\n```";
-      const { container } = render(<MarkdownContent text={markdown} />);
+    it("falls back with the original source when Graphviz rejects malformed DOT", async () => {
+      const source = "digraph { a -> }";
+      graphvizMock.dot.mockImplementationOnce(() => {
+        throw new Error("syntax error");
+      });
+
+      const { container } = render(
+        <MarkdownContent text={`\`\`\`dot\n${source}\n\`\`\``} />
+      );
 
       expect(
-        await screen.findByText("DOT diagrams are not supported yet.")
+        await screen.findByText("Unable to render DOT diagram: syntax error")
       ).toBeInTheDocument();
-      expect(mermaidMock.parse).not.toHaveBeenCalled();
-      const codeEl = container.querySelector("code");
-      expect(codeEl).not.toBeNull();
-      expect(codeEl!.textContent).toBe("digraph { A -> B }");
+      expect(screen.queryByTitle("DOT diagram")).toBeNull();
+      expect(screen.getByTestId("diagram-fallback")).toBeInTheDocument();
+      expect(container.querySelector("code")?.textContent).toBe(source);
+      expect(graphvizMock.dot).toHaveBeenCalledWith(source);
+    });
+
+    it("falls back with the original source when Graphviz fails to load", async () => {
+      const source = "digraph { a -> b; }";
+      loadGraphvizMock.mockRejectedValueOnce(new Error("WASM load error"));
+
+      const { container } = render(
+        <MarkdownContent text={`\`\`\`dot\n${source}\n\`\`\``} />
+      );
+
+      expect(
+        await screen.findByText("Unable to render DOT diagram: WASM load error")
+      ).toBeInTheDocument();
+      expect(screen.queryByTitle("DOT diagram")).toBeNull();
+      expect(screen.getByTestId("diagram-fallback")).toBeInTheDocument();
+      expect(container.querySelector("code")?.textContent).toBe(source);
+      expect(graphvizMock.dot).not.toHaveBeenCalled();
+    });
+
+    it("defers rendering large DOT content until expansion", async () => {
+      const source = `digraph {\n${"  a -> b;\n".repeat(250)}}`;
+      render(<MarkdownContent text={`\`\`\`dot\n${source}\n\`\`\``} />);
+
+      expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
+      expect(loadGraphvizMock).not.toHaveBeenCalled();
+      expect(graphvizMock.dot).not.toHaveBeenCalled();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /Show full content/ })
+      );
+
+      expect(await screen.findByTitle("DOT diagram")).toBeInTheDocument();
+      expect(graphvizMock.dot).toHaveBeenCalledWith(source);
+    });
+
+    it.each(["dot", "graphviz"])(
+      "renders a completed %s fence as a sandboxed DOT diagram",
+      async (language) => {
+        const source = "digraph { a -> b; }";
+        render(
+          <MarkdownContent text={`\`\`\`${language}\n${source}\n\`\`\``} />
+        );
+
+        const frame = await screen.findByTitle("DOT diagram");
+        expect(frame).toHaveAttribute("sandbox", "");
+        expect(frame).toHaveAttribute(
+          "srcdoc",
+          expect.stringContaining("<svg")
+        );
+        expect(frame).toHaveAttribute(
+          "srcdoc",
+          expect.stringContaining("<title>a</title>")
+        );
+        expect(graphvizMock.dot).toHaveBeenCalledWith(source);
+        expect(screen.queryByTestId("diagram-fallback")).toBeNull();
+      }
+    );
+
+    it("sanitizes untrusted Graphviz SVG before embedding it in the sandbox", async () => {
+      graphvizMock.dot.mockReturnValueOnce(`
+        <svg xmlns:xlink="http://www.w3.org/1999/xlink" width="240pt" height="120pt" viewBox="0 0 240 120" onload="alert(1)">
+          <defs><path id="safe-shape" d="M0 0h10v10z" /></defs>
+          <use href="#safe-shape" />
+          <a href="https://attacker.example/" xlink:href="javascript:alert(2)" onclick="alert(3)"><text>link</text></a>
+          <image href="https://attacker.example/image.svg" src="data:text/html,%3Cscript%3Ealert(4)%3C/script%3E" />
+          <path d="M0 0h10" onmouseover="alert(5)" style="fill: url(https://attacker.example/fill.svg)" />
+          <script>alert(6)</script>
+          <foreignObject><div>unsafe HTML</div></foreignObject>
+        </svg>
+      `);
+
+      render(
+        <MarkdownContent text={`\`\`\`dot\ndigraph { a -> b; }\n\`\`\``} />
+      );
+
+      const frame = await screen.findByTitle("DOT diagram");
+      const srcDoc = frame.getAttribute("srcdoc");
+
+      expect(srcDoc).not.toBeNull();
+      expect(srcDoc).toContain('href="#safe-shape"');
+      expect(srcDoc).not.toContain("attacker.example");
+      expect(srcDoc).not.toContain("javascript:");
+      expect(srcDoc).not.toContain("data:text/html");
+      expect(srcDoc).not.toMatch(/on(?:load|click|mouseover)=/i);
+      expect(srcDoc).not.toMatch(/<script\b/i);
+      expect(srcDoc).not.toMatch(/<foreignobject\b/i);
+      expect(srcDoc).toContain("default-src 'none'");
+      expect(frame).toHaveAttribute("sandbox", "");
+    });
+
+    it("uses Graphviz viewBox dimensions for responsive sizing", async () => {
+      graphvizMock.dot.mockReturnValueOnce(
+        '<svg width="100000pt" height="50000pt" viewBox="-12.5 4 240 120"><title>large graph</title></svg>'
+      );
+
+      render(
+        <MarkdownContent text={`\`\`\`graphviz\ndigraph { a -> b; }\n\`\`\``} />
+      );
+
+      const frame = await screen.findByTitle("DOT diagram");
+
+      expect(frame).toHaveClass("w-full");
+      expect(frame).toHaveStyle({ aspectRatio: "240 / 120" });
+      expect(frame).not.toHaveStyle({ maxWidth: "100000px" });
+    });
+
+    it("falls back to positive SVG dimensions when viewBox is unusable", async () => {
+      graphvizMock.dot.mockReturnValueOnce(
+        '<svg width="180pt" height="90pt" viewBox="0 0 0 0"><title>dimensioned graph</title></svg>'
+      );
+
+      render(
+        <MarkdownContent text={`\`\`\`dot\ndigraph { a -> b; }\n\`\`\``} />
+      );
+
+      const frame = await screen.findByTitle("DOT diagram");
+
+      expect(frame).toHaveStyle({ aspectRatio: "180 / 90" });
+      expect(frame).toHaveStyle({ maxWidth: "180px" });
     });
   });
 
@@ -537,6 +678,23 @@ describe("MarkdownContent", () => {
       expect(codeEl).not.toBeNull();
       expect(codeEl!.textContent).toContain("graph TD");
       expect(codeEl!.textContent).toContain("A -->");
+    });
+
+    it("does not render or report errors for an unclosed DOT fence", async () => {
+      const partial = "Here is a diagram:\n```dot\ndigraph { a ->";
+      const { container } = render(<MarkdownContent text={partial} />);
+
+      expect(
+        container.querySelector('[data-testid="markdown-content"]')
+      ).toBeInTheDocument();
+      await waitFor(() => {
+        expect(loadGraphvizMock).not.toHaveBeenCalled();
+      });
+      expect(screen.queryByTitle("DOT diagram")).toBeNull();
+      expect(screen.queryByTestId("diagram-fallback")).toBeNull();
+      const codeEl = container.querySelector("code");
+      expect(codeEl).not.toBeNull();
+      expect(codeEl!.textContent).toContain("digraph { a ->");
     });
 
     it("renders partial bold syntax without breaking", () => {

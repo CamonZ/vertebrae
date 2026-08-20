@@ -19,6 +19,7 @@ import {
   vscDarkPlus,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useIsLightTheme } from "../../hooks/useTheme";
+import { loadGraphviz } from "../../utils/graphviz";
 import { LocalFileReferenceLink } from "./LocalFileReferenceLink";
 import { parseLocalFileReference } from "./localFileReference";
 import { VtbEntityMarkdownLink } from "./VtbEntityLink";
@@ -275,8 +276,14 @@ const diagramRenderers: Record<string, DiagramRenderer> = {
     label: "Mermaid",
     render: renderMermaidDiagram,
   },
-  dot: { label: "DOT" },
-  graphviz: { label: "DOT" },
+  dot: {
+    label: "DOT",
+    render: renderDotDiagram,
+  },
+  graphviz: {
+    label: "DOT",
+    render: renderDotDiagram,
+  },
   d2: { label: "D2" },
   plantuml: { label: "PlantUML" },
   puml: { label: "PlantUML" },
@@ -284,6 +291,19 @@ const diagramRenderers: Record<string, DiagramRenderer> = {
 };
 
 let mermaidInitialized = false;
+
+async function renderDotDiagram(source: string): Promise<RenderedDiagram> {
+  const graphviz = await loadGraphviz();
+  const svg = graphviz.dot(source);
+  const sanitized = sanitizeSvg(svg);
+  if (!sanitized) {
+    throw new Error("Renderer returned an invalid SVG.");
+  }
+  return {
+    document: buildSandboxedSvgDocument(sanitized.svg),
+    frameStyle: diagramFrameStyle(sanitized.size),
+  };
+}
 
 async function renderMermaidDiagram(
   source: string,
