@@ -265,23 +265,33 @@ pub fn run() {
                 "[STARTUP] Claude provider, compatibility, and skill discovery are cached until restart"
             );
 
-            // Try to load Sacrum config for the current project from global config
-            let sacrum_config = current_slug.as_deref().and_then(|slug| {
-                match SacrumConfig::load_for_project(slug) {
-                    Ok(config) => {
-                        log::info!(
-                            "Found Sacrum config for project '{}' with ID: {}",
-                            slug,
-                            config.project_id
-                        );
-                        Some(config)
+            let local_backend_startup = tauri::async_runtime::block_on(
+                local_backend::ensure_for_startup(),
+            );
+            if let Err(error) = &local_backend_startup {
+                log::warn!("[STARTUP] Failed to ensure the configured local backend: {error}");
+            }
+
+            let sacrum_config = if local_backend_startup.is_err() {
+                None
+            } else {
+                current_slug.as_deref().and_then(|slug| {
+                    match SacrumConfig::load_for_project(slug) {
+                        Ok(config) => {
+                            log::info!(
+                                "Found Sacrum config for project '{}' with ID: {}",
+                                slug,
+                                config.project_id
+                            );
+                            Some(config)
+                        }
+                        Err(e) => {
+                            log::info!("Failed to load config for project '{}': {}", slug, e);
+                            None
+                        }
                     }
-                    Err(e) => {
-                        log::info!("Failed to load config for project '{}': {}", slug, e);
-                        None
-                    }
-                }
-            });
+                })
+            };
 
             let (service, client_arc) = match sacrum_config.as_ref() {
                 Some(config) => {
