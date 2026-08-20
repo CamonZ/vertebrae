@@ -498,6 +498,69 @@ describe("MarkdownContent", () => {
         expect(screen.queryByTestId("diagram-fallback")).toBeNull();
       }
     );
+
+    it("sanitizes untrusted Graphviz SVG before embedding it in the sandbox", async () => {
+      graphvizMock.dot.mockReturnValueOnce(`
+        <svg xmlns:xlink="http://www.w3.org/1999/xlink" width="240pt" height="120pt" viewBox="0 0 240 120" onload="alert(1)">
+          <defs><path id="safe-shape" d="M0 0h10v10z" /></defs>
+          <use href="#safe-shape" />
+          <a href="https://attacker.example/" xlink:href="javascript:alert(2)" onclick="alert(3)"><text>link</text></a>
+          <image href="https://attacker.example/image.svg" src="data:text/html,%3Cscript%3Ealert(4)%3C/script%3E" />
+          <path d="M0 0h10" onmouseover="alert(5)" style="fill: url(https://attacker.example/fill.svg)" />
+          <script>alert(6)</script>
+          <foreignObject><div>unsafe HTML</div></foreignObject>
+        </svg>
+      `);
+
+      render(
+        <MarkdownContent text={`\`\`\`dot\ndigraph { a -> b; }\n\`\`\``} />
+      );
+
+      const frame = await screen.findByTitle("DOT diagram");
+      const srcDoc = frame.getAttribute("srcdoc");
+
+      expect(srcDoc).not.toBeNull();
+      expect(srcDoc).toContain('href="#safe-shape"');
+      expect(srcDoc).not.toContain("attacker.example");
+      expect(srcDoc).not.toContain("javascript:");
+      expect(srcDoc).not.toContain("data:text/html");
+      expect(srcDoc).not.toMatch(/on(?:load|click|mouseover)=/i);
+      expect(srcDoc).not.toMatch(/<script\b/i);
+      expect(srcDoc).not.toMatch(/<foreignobject\b/i);
+      expect(srcDoc).toContain("default-src 'none'");
+      expect(frame).toHaveAttribute("sandbox", "");
+    });
+
+    it("uses Graphviz viewBox dimensions for responsive sizing", async () => {
+      graphvizMock.dot.mockReturnValueOnce(
+        '<svg width="100000pt" height="50000pt" viewBox="-12.5 4 240 120"><title>large graph</title></svg>'
+      );
+
+      render(
+        <MarkdownContent text={`\`\`\`graphviz\ndigraph { a -> b; }\n\`\`\``} />
+      );
+
+      const frame = await screen.findByTitle("DOT diagram");
+
+      expect(frame).toHaveClass("w-full");
+      expect(frame).toHaveStyle({ aspectRatio: "240 / 120" });
+      expect(frame).not.toHaveStyle({ maxWidth: "100000px" });
+    });
+
+    it("falls back to positive SVG dimensions when viewBox is unusable", async () => {
+      graphvizMock.dot.mockReturnValueOnce(
+        '<svg width="180pt" height="90pt" viewBox="0 0 0 0"><title>dimensioned graph</title></svg>'
+      );
+
+      render(
+        <MarkdownContent text={`\`\`\`dot\ndigraph { a -> b; }\n\`\`\``} />
+      );
+
+      const frame = await screen.findByTitle("DOT diagram");
+
+      expect(frame).toHaveStyle({ aspectRatio: "180 / 90" });
+      expect(frame).toHaveStyle({ maxWidth: "180px" });
+    });
   });
 
   describe("tables (GFM)", () => {
