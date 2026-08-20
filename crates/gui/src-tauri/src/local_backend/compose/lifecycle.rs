@@ -152,6 +152,48 @@ where
             .await
     }
 
+    pub async fn update_sacrum_image(
+        &self,
+        paths: &ManagedStackPaths,
+        state: &ManagedStackState,
+        image_ref: &str,
+    ) -> Result<Vec<ServiceStatus>, LocalBackendError>
+    where
+        H: super::health::HealthProbe,
+    {
+        let mut updated_state = state.clone();
+        updated_state.sacrum_image_ref = image_ref.to_string();
+        updated_state.validate()?;
+        let secrets = self.validate_stack_files(paths, state)?;
+
+        self.checked_stack(
+            self.compose_request(
+                paths,
+                &updated_state,
+                "pull local backend image",
+                ["pull", "sacrum"],
+                self.reconcile_timeout,
+            ),
+            &secrets,
+        )
+        .await?;
+        self.checked_stack(
+            self.compose_request(
+                paths,
+                &updated_state,
+                "recreate local backend",
+                ["up", "--detach", "--no-deps", "--pull", "never", "sacrum"],
+                self.reconcile_timeout,
+            ),
+            &secrets,
+        )
+        .await?;
+        self.wait_until_healthy(paths, &updated_state).await?;
+        let status = self.status(paths, &updated_state).await?;
+        paths.save_state(&updated_state)?;
+        Ok(status)
+    }
+
     async fn validate_persistent_volume(
         &self,
         state: &ManagedStackState,
@@ -429,6 +471,87 @@ mod tests {
                 .iter()
                 .any(|argument| argument == "down")
         }));
+    }
+
+    #[tokio::test]
+    async fn image_update_reconciles_only_backend_and_persists_after_health() {
+        let (_temp, paths, state) = stack_fixture(StackKind::Managed);
+        let new_image =
+            "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+        let status_json = r#"[{"Name":"vertebrae-local-sacrum-1","Service":"sacrum","State":"running","Health":"healthy","ExitCode":0}]"#;
+        let runner = MockRunner::with_outputs([
+            CommandOutput::success(""),
+            CommandOutput::success(""),
+            CommandOutput::success("unix:///tmp/docker.sock"),
+            CommandOutput::success("unix:///tmp/docker.sock"),
+            CommandOutput::success("28.0.0"),
+            CommandOutput::success("2.30.0"),
+            CommandOutput::success(status_json),
+        ]);
+        let controller = controller(runner.clone(), MockHealth::with_results([true]));
+
+        let status = controller
+            .update_sacrum_image(&paths, &state, new_image)
+            .await
+            .expect("image update should succeed");
+
+        assert_eq!(status.len(), 1);
+        assert_eq!(status[0].service, "sacrum");
+        assert_eq!(
+            paths
+                .load_state()
+                .expect("load state")
+                .expect("state exists")
+                .sacrum_image_ref,
+            new_image
+        );
+        let requests = runner.requests();
+        assert!(requests[0]
+            .args_as_strings()
+            .ends_with(&["pull".to_string(), "sacrum".to_string()]));
+        assert!(requests[1].args_as_strings().ends_with(&[
+            "up".to_string(),
+            "--detach".to_string(),
+            "--no-deps".to_string(),
+            "--pull".to_string(),
+            "never".to_string(),
+            "sacrum".to_string()
+        ]));
+        assert!(requests.iter().all(|request| {
+            !request
+                .args_as_strings()
+                .iter()
+                .any(|argument| argument == "postgres")
+        }));
+    }
+
+    #[tokio::test]
+    async fn failed_image_pull_keeps_the_previous_state() {
+        let (_temp, paths, state) = stack_fixture(StackKind::Managed);
+        let previous_image = state.sacrum_image_ref.clone();
+        paths.save_state(&state).expect("save previous state");
+        let runner = MockRunner::with_outputs([CommandOutput::failure(1, "manifest unknown")]);
+        let controller = controller(runner.clone(), MockHealth::default());
+
+        let error = controller
+            .update_sacrum_image(
+                &paths,
+                &state,
+                "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            )
+            .await
+            .expect_err("failed image pull should be reported");
+
+        assert!(error.to_string().contains("manifest unknown"));
+        assert_eq!(
+            paths
+                .load_state()
+                .expect("load state")
+                .expect("state exists")
+                .sacrum_image_ref,
+            previous_image
+        );
+        assert_eq!(runner.requests().len(), 1);
     }
 
     #[tokio::test]

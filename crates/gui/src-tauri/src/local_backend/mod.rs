@@ -6,6 +6,7 @@ pub(crate) mod state;
 
 use command::ProcessRunner;
 use compose::{DockerCompose, HealthProbe};
+use manifest::BackendManifestClient;
 use state::{LocalBackendError, ManagedStackPaths, ManagedStackState, ProvisioningState};
 
 pub(crate) async fn ensure_for_startup() -> Result<bool, LocalBackendError> {
@@ -37,6 +38,14 @@ where
 
     compose.up_detached(paths, &mut state).await?;
     compose.wait_until_healthy(paths, &state).await?;
+    let manifest = BackendManifestClient::default()
+        .fetch(state.image_channel)
+        .await?;
+    if manifest.requires_image_update(&state) {
+        compose
+            .update_sacrum_image(paths, &state, &manifest.image_ref)
+            .await?;
+    }
     let api_token = paths.load_api_token()?;
     provisioning::persist_local_client_config(&state.backend_url(), &api_token)?;
     Ok(state)
