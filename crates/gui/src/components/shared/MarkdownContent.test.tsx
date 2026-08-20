@@ -16,12 +16,22 @@ const mermaidMock = vi.hoisted(() => ({
   render: vi.fn(),
 }));
 
+const graphvizMock = vi.hoisted(() => ({
+  dot: vi.fn(),
+}));
+
+const loadGraphvizMock = vi.hoisted(() => vi.fn());
+
 const openerMock = vi.hoisted(() => ({
   openUrl: vi.fn(),
 }));
 
 vi.mock("mermaid", () => ({
   default: mermaidMock,
+}));
+
+vi.mock("../../utils/graphviz", () => ({
+  loadGraphviz: loadGraphvizMock,
 }));
 
 vi.mock("@tauri-apps/plugin-opener", () => openerMock);
@@ -41,6 +51,12 @@ describe("MarkdownContent", () => {
     mermaidMock.render.mockResolvedValue({
       svg: '<svg viewBox="0 0 100 40" style="max-width: 50px;" onload="alert(1)"><text>A --&gt; B</text><script>alert("x")</script></svg>',
     });
+    graphvizMock.dot.mockReset();
+    graphvizMock.dot.mockReturnValue(
+      '<svg viewBox="0 0 120 60"><title>a</title><title>b</title></svg>'
+    );
+    loadGraphvizMock.mockReset();
+    loadGraphvizMock.mockResolvedValue(graphvizMock);
   });
 
   afterEach(() => {
@@ -460,18 +476,28 @@ describe("MarkdownContent", () => {
       expect(container.querySelector("code")?.textContent).toBe(diagram);
     });
 
-    it("falls back to highlighted source with an error for unsupported diagram languages", async () => {
-      const markdown = "```dot\ndigraph { A -> B }\n```";
-      const { container } = render(<MarkdownContent text={markdown} />);
+    it.each(["dot", "graphviz"])(
+      "renders a completed %s fence as a sandboxed DOT diagram",
+      async (language) => {
+        const source = "digraph { a -> b; }";
+        render(
+          <MarkdownContent text={`\`\`\`${language}\n${source}\n\`\`\``} />
+        );
 
-      expect(
-        await screen.findByText("DOT diagrams are not supported yet.")
-      ).toBeInTheDocument();
-      expect(mermaidMock.parse).not.toHaveBeenCalled();
-      const codeEl = container.querySelector("code");
-      expect(codeEl).not.toBeNull();
-      expect(codeEl!.textContent).toBe("digraph { A -> B }");
-    });
+        const frame = await screen.findByTitle("DOT diagram");
+        expect(frame).toHaveAttribute("sandbox", "");
+        expect(frame).toHaveAttribute(
+          "srcdoc",
+          expect.stringContaining("<svg")
+        );
+        expect(frame).toHaveAttribute(
+          "srcdoc",
+          expect.stringContaining("<title>a</title>")
+        );
+        expect(graphvizMock.dot).toHaveBeenCalledWith(source);
+        expect(screen.queryByTestId("diagram-fallback")).toBeNull();
+      }
+    );
   });
 
   describe("tables (GFM)", () => {
