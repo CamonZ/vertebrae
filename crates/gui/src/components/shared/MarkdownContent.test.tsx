@@ -476,6 +476,58 @@ describe("MarkdownContent", () => {
       expect(container.querySelector("code")?.textContent).toBe(diagram);
     });
 
+    it("falls back with the original source when Graphviz rejects malformed DOT", async () => {
+      const source = "digraph { a -> }";
+      graphvizMock.dot.mockImplementationOnce(() => {
+        throw new Error("syntax error");
+      });
+
+      const { container } = render(
+        <MarkdownContent text={`\`\`\`dot\n${source}\n\`\`\``} />
+      );
+
+      expect(
+        await screen.findByText("Unable to render DOT diagram: syntax error")
+      ).toBeInTheDocument();
+      expect(screen.queryByTitle("DOT diagram")).toBeNull();
+      expect(screen.getByTestId("diagram-fallback")).toBeInTheDocument();
+      expect(container.querySelector("code")?.textContent).toBe(source);
+      expect(graphvizMock.dot).toHaveBeenCalledWith(source);
+    });
+
+    it("falls back with the original source when Graphviz fails to load", async () => {
+      const source = "digraph { a -> b; }";
+      loadGraphvizMock.mockRejectedValueOnce(new Error("WASM load error"));
+
+      const { container } = render(
+        <MarkdownContent text={`\`\`\`dot\n${source}\n\`\`\``} />
+      );
+
+      expect(
+        await screen.findByText("Unable to render DOT diagram: WASM load error")
+      ).toBeInTheDocument();
+      expect(screen.queryByTitle("DOT diagram")).toBeNull();
+      expect(screen.getByTestId("diagram-fallback")).toBeInTheDocument();
+      expect(container.querySelector("code")?.textContent).toBe(source);
+      expect(graphvizMock.dot).not.toHaveBeenCalled();
+    });
+
+    it("defers rendering large DOT content until expansion", async () => {
+      const source = `digraph {\n${"  a -> b;\n".repeat(250)}}`;
+      render(<MarkdownContent text={`\`\`\`dot\n${source}\n\`\`\``} />);
+
+      expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
+      expect(loadGraphvizMock).not.toHaveBeenCalled();
+      expect(graphvizMock.dot).not.toHaveBeenCalled();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /Show full content/ })
+      );
+
+      expect(await screen.findByTitle("DOT diagram")).toBeInTheDocument();
+      expect(graphvizMock.dot).toHaveBeenCalledWith(source);
+    });
+
     it.each(["dot", "graphviz"])(
       "renders a completed %s fence as a sandboxed DOT diagram",
       async (language) => {
@@ -626,6 +678,23 @@ describe("MarkdownContent", () => {
       expect(codeEl).not.toBeNull();
       expect(codeEl!.textContent).toContain("graph TD");
       expect(codeEl!.textContent).toContain("A -->");
+    });
+
+    it("does not render or report errors for an unclosed DOT fence", async () => {
+      const partial = "Here is a diagram:\n```dot\ndigraph { a ->";
+      const { container } = render(<MarkdownContent text={partial} />);
+
+      expect(
+        container.querySelector('[data-testid="markdown-content"]')
+      ).toBeInTheDocument();
+      await waitFor(() => {
+        expect(loadGraphvizMock).not.toHaveBeenCalled();
+      });
+      expect(screen.queryByTitle("DOT diagram")).toBeNull();
+      expect(screen.queryByTestId("diagram-fallback")).toBeNull();
+      const codeEl = container.querySelector("code");
+      expect(codeEl).not.toBeNull();
+      expect(codeEl!.textContent).toContain("digraph { a ->");
     });
 
     it("renders partial bold syntax without breaking", () => {
