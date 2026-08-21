@@ -62,7 +62,7 @@ services:
       retries: 10
 
   sacrum:
-    image: ghcr.io/camonz/sacrum:master
+    image: "${SACRUM_IMAGE_REF:-ghcr.io/camonz/sacrum:master}"
     user: root
     depends_on:
       postgres:
@@ -87,7 +87,7 @@ services:
       retries: 10
 
   seeder:
-    image: ghcr.io/camonz/sacrum:master
+    image: "${SACRUM_IMAGE_REF:-ghcr.io/camonz/sacrum:master}"
     user: root
     depends_on:
       sacrum:
