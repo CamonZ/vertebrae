@@ -311,6 +311,10 @@ describe("ProjectSetupPage", () => {
     expect(screen.queryByLabelText("Backend username")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Backend password")).not.toBeInTheDocument();
     expect(
+      screen.queryByLabelText("Backend API token")
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("SECRET_KEY_BASE")).not.toBeInTheDocument();
+    expect(
       await screen.findByTestId("local-backend-progress")
     ).toHaveTextContent("Pulling");
     await userEvent.click(screen.getByTestId("project-phase-continue"));
@@ -321,6 +325,33 @@ describe("ProjectSetupPage", () => {
     expect(mockInitializeProject).toHaveBeenCalledWith(
       "/tmp/new-project",
       "new-project"
+    );
+  });
+
+  it("surfaces local backend failures without saving remote settings or initializing", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockSetupLocalBackend.mockResolvedValue({
+      status: "error",
+      error: {
+        message:
+          "Docker is not reachable. Existing local data was preserved; retry after starting Docker.",
+      },
+    });
+
+    render(<ProjectSetupPage />);
+
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
+      "Docker is not reachable"
+    );
+    expect(mockSaveSacrumSettings).not.toHaveBeenCalled();
+    expect(mockInitializeProject).not.toHaveBeenCalled();
+    expect(screen.getByTestId("project-phase-continue")).toHaveTextContent(
+      "Create project"
     );
   });
 
