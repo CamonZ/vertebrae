@@ -30,6 +30,7 @@ pub struct LocalBackendUpdateRelease {
     pub version: String,
     pub build: String,
     pub image_ref: String,
+    pub generated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -40,6 +41,7 @@ pub struct LocalBackendUpdateStatus {
     pub current_version: Option<String>,
     pub current_build: Option<String>,
     pub current_image_ref: Option<String>,
+    pub current_generated_at: Option<String>,
     pub latest: Option<LocalBackendUpdateRelease>,
     pub available: bool,
 }
@@ -50,6 +52,7 @@ pub struct LocalBackendUpdateResult {
     pub version: String,
     pub build: String,
     pub image_ref: String,
+    pub generated_at: Option<String>,
 }
 
 #[tauri::command]
@@ -65,6 +68,7 @@ pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, Co
             current_version: None,
             current_build: None,
             current_image_ref: None,
+            current_generated_at: None,
             latest: None,
             available: false,
         });
@@ -77,6 +81,7 @@ pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, Co
             current_version: None,
             current_build: None,
             current_image_ref: None,
+            current_generated_at: None,
             latest: None,
             available: false,
         });
@@ -87,11 +92,13 @@ pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, Co
         .await
         .map_err(local_backend_error)?;
     let available = manifest.requires_image_update(&state);
-    let (current_version, current_build) = current_backend_release_metadata(
+    let (current_version, current_build, current_generated_at) = current_backend_release_metadata(
         state.sacrum_version,
         state.sacrum_build,
+        state.sacrum_image_created_at,
         &manifest.version,
         &manifest.build,
+        manifest.generated_at.as_deref(),
         available,
     );
 
@@ -102,11 +109,13 @@ pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, Co
         current_version,
         current_build,
         current_image_ref: Some(state.sacrum_image_ref),
+        current_generated_at,
         latest: Some(LocalBackendUpdateRelease {
             channel: manifest.channel,
             version: manifest.version,
             build: manifest.build,
             image_ref: manifest.image_ref,
+            generated_at: manifest.generated_at,
         }),
         available,
     })
@@ -172,6 +181,7 @@ pub async fn apply_approved_local_backend_update(
             &manifest.image_ref,
             Some(&manifest.version),
             Some(&manifest.build),
+            manifest.generated_at.as_deref(),
         )
         .await
         .map_err(local_backend_error)?;
@@ -181,6 +191,7 @@ pub async fn apply_approved_local_backend_update(
         version: manifest.version,
         build: manifest.build,
         image_ref: manifest.image_ref,
+        generated_at: manifest.generated_at,
     })
 }
 
@@ -219,13 +230,20 @@ fn is_loopback_host(host: &str) -> bool {
 fn current_backend_release_metadata(
     stored_version: Option<String>,
     stored_build: Option<String>,
+    stored_generated_at: Option<String>,
     manifest_version: &str,
     manifest_build: &str,
+    manifest_generated_at: Option<&str>,
     update_available: bool,
-) -> (Option<String>, Option<String>) {
+) -> (Option<String>, Option<String>, Option<String>) {
     (
         stored_version.or_else(|| (!update_available).then(|| manifest_version.to_string())),
         stored_build.or_else(|| (!update_available).then(|| manifest_build.to_string())),
+        stored_generated_at.or_else(|| {
+            (!update_available)
+                .then(|| manifest_generated_at.map(str::to_string))
+                .flatten()
+        }),
     )
 }
 
@@ -253,16 +271,36 @@ mod tests {
     #[test]
     fn uses_manifest_metadata_when_the_current_image_is_up_to_date() {
         assert_eq!(
-            current_backend_release_metadata(None, None, "0.4.0", "abcdef12", false,),
-            (Some("0.4.0".to_string()), Some("abcdef12".to_string()))
+            current_backend_release_metadata(
+                None,
+                None,
+                None,
+                "0.4.0",
+                "abcdef12",
+                Some("2026-08-21T00:00:00Z"),
+                false,
+            ),
+            (
+                Some("0.4.0".to_string()),
+                Some("abcdef12".to_string()),
+                Some("2026-08-21T00:00:00Z".to_string())
+            )
         );
     }
 
     #[test]
     fn does_not_use_latest_manifest_metadata_for_an_older_image() {
         assert_eq!(
-            current_backend_release_metadata(None, None, "0.5.0", "12345678", true),
-            (None, None)
+            current_backend_release_metadata(
+                None,
+                None,
+                None,
+                "0.5.0",
+                "12345678",
+                Some("2026-08-22T00:00:00Z"),
+                true,
+            ),
+            (None, None, None)
         );
     }
 }

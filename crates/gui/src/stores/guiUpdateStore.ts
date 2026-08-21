@@ -62,9 +62,11 @@ export interface GuiUpdateInfo {
 export interface LocalBackendUpdateInfo {
   channel: GuiUpdateChannel;
   currentImageRef: string;
+  currentImageCreatedAt: string | null;
   version: string;
   build: string;
   imageRef: string;
+  generatedAt: string | null;
 }
 
 export interface LocalBackendUpdateResult {
@@ -73,6 +75,8 @@ export interface LocalBackendUpdateResult {
   build: string;
   imageRef: string;
   image_ref?: string;
+  generatedAt?: string | null;
+  generated_at?: string | null;
 }
 
 export type BackendManagement = "managed_local" | "external" | "not_configured";
@@ -90,6 +94,7 @@ export interface LocalBackendUpdateState {
   currentVersion: string | null;
   currentBuild: string | null;
   currentImageRef: string | null;
+  currentImageCreatedAt: string | null;
   update: LocalBackendUpdateInfo | null;
   error: string | null;
   apply: LocalBackendUpdateApplyState;
@@ -220,6 +225,7 @@ export const initialGuiUpdateState: GuiUpdateState = {
     currentVersion: null,
     currentBuild: null,
     currentImageRef: null,
+    currentImageCreatedAt: null,
     update: null,
     error: null,
     apply: { status: "idle" },

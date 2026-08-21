@@ -529,6 +529,8 @@ pub struct ManagedStackState {
     pub sacrum_version: Option<String>,
     #[serde(default)]
     pub sacrum_build: Option<String>,
+    #[serde(default)]
+    pub sacrum_image_created_at: Option<String>,
     pub image_channel: BackendImageChannel,
     pub provisioning_state: ProvisioningState,
     pub postgres_volume_initialized: bool,
@@ -551,6 +553,7 @@ impl ManagedStackState {
             sacrum_image_ref: sacrum_image_ref.into(),
             sacrum_version: None,
             sacrum_build: None,
+            sacrum_image_created_at: None,
             image_channel,
             provisioning_state: ProvisioningState::Pending,
             postgres_volume_initialized: false,
@@ -574,6 +577,7 @@ impl ManagedStackState {
             sacrum_image_ref: sacrum_image_ref.into(),
             sacrum_version: None,
             sacrum_build: None,
+            sacrum_image_created_at: None,
             image_channel,
             provisioning_state: ProvisioningState::Unverified,
             postgres_volume_initialized: true,

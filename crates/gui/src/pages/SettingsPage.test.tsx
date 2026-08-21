@@ -263,10 +263,12 @@ describe("SettingsPage", () => {
       channel: "release" as const,
       currentImageRef:
         "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      currentImageCreatedAt: "2026-08-20T00:00:00Z",
       version: "0.4.0",
       build: "backend-build",
       imageRef:
         "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      generatedAt: "2026-08-21T00:00:00Z",
     };
     useGuiUpdateStore.setState({
       ...initialGuiUpdateState,
@@ -295,6 +297,12 @@ describe("SettingsPage", () => {
     expect(
       screen.getByTestId("settings-local-backend-update-card")
     ).toHaveTextContent("Backend 0.4.0");
+    expect(
+      screen.getByTestId("settings-local-backend-update-card")
+    ).toHaveTextContent("2026-08-20 00:00 UTC");
+    expect(
+      screen.getByTestId("settings-local-backend-update-card")
+    ).toHaveTextContent("2026-08-21 00:00 UTC");
     await user.click(
       screen.getByTestId("settings-review-local-backend-update")
     );

@@ -624,6 +624,13 @@ function imageDigest(imageRef: string): string {
   return digest ? `sha256:${digest.slice(0, 12)}…` : imageRef;
 }
 
+function backendImageTimestamp(timestamp: string | null | undefined): string {
+  if (!timestamp) return NOT_PROVIDED;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
 function LocalBackendUpdateApplyStatus({
   apply,
 }: {
@@ -714,6 +721,12 @@ function ReviewLocalBackendUpdateDialog({
               {imageDigest(update.imageRef)}
             </dd>
           </div>
+          <div>
+            <dt className="text-xs text-[var(--color-fg-mute)]">Published</dt>
+            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+              {backendImageTimestamp(update.generatedAt)}
+            </dd>
+          </div>
         </dl>
         <div className="flex flex-col-reverse gap-2 border-t border-[var(--color-line)] pt-4 sm:flex-row sm:justify-end">
           <Button
@@ -768,7 +781,7 @@ function LocalBackendUpdateSection({
           Review backend update
         </Button>
       </div>
-      <dl className="mt-6 grid gap-4 border-y border-[var(--color-line)] py-4 sm:grid-cols-3">
+      <dl className="mt-6 grid gap-4 border-y border-[var(--color-line)] py-4 sm:grid-cols-4">
         <div>
           <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
           <dd className="mt-1 text-sm text-[var(--color-fg)]">
@@ -785,6 +798,22 @@ function LocalBackendUpdateSection({
           <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
           <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
             {update.build}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-[var(--color-fg-mute)]">
+            Current published
+          </dt>
+          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            {backendImageTimestamp(update.currentImageCreatedAt)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-[var(--color-fg-mute)]">
+            Target published
+          </dt>
+          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            {backendImageTimestamp(update.generatedAt)}
           </dd>
         </div>
       </dl>
@@ -984,7 +1013,7 @@ function BackendCurrentDetails({ state }: { state: GuiUpdateState }) {
   const backend = state.localBackend;
   return (
     <dl
-      className="mt-5 grid gap-4 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 sm:grid-cols-3"
+      className="mt-5 grid gap-4 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 sm:grid-cols-4"
       data-testid="settings-backend-current"
     >
       <div>
@@ -1005,6 +1034,12 @@ function BackendCurrentDetails({ state }: { state: GuiUpdateState }) {
           {backend.currentImageRef
             ? imageDigest(backend.currentImageRef)
             : NOT_PROVIDED}
+        </dd>
+      </div>
+      <div>
+        <dt className="text-xs text-[var(--color-fg-mute)]">Published</dt>
+        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          {backendImageTimestamp(backend.currentImageCreatedAt)}
         </dd>
       </div>
     </dl>

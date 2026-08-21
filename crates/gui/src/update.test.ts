@@ -188,12 +188,14 @@ describe("GUI update checker", () => {
       channel: "release",
       current_image_ref:
         "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      current_generated_at: "2026-08-20T00:00:00Z",
       latest: {
         channel: "release",
         version: "0.4.0",
         build: "backend-build",
         image_ref:
           "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+        generated_at: "2026-08-21T00:00:00Z",
       },
       available: true,
     });
@@ -206,14 +208,17 @@ describe("GUI update checker", () => {
       currentBuild: null,
       currentImageRef:
         "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      currentImageCreatedAt: "2026-08-20T00:00:00Z",
       update: {
         channel: "release",
         currentImageRef:
           "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        currentImageCreatedAt: "2026-08-20T00:00:00Z",
         version: "0.4.0",
         build: "backend-build",
         imageRef:
           "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+        generatedAt: "2026-08-21T00:00:00Z",
       },
       error: null,
     });
@@ -224,15 +229,18 @@ describe("GUI update checker", () => {
     const update: LocalBackendUpdateInfo = {
       channel: "release",
       currentImageRef: "current-image",
+      currentImageCreatedAt: "2026-08-20T00:00:00Z",
       version: "0.4.0",
       build: "backend-build",
       imageRef: "target-image",
+      generatedAt: "2026-08-21T00:00:00Z",
     };
     const result = {
       channel: "release",
       version: "0.4.0",
       build: "backend-build",
       image_ref: "target-image",
+      generated_at: "2026-08-21T00:00:00Z",
     };
     invokeMock.mockResolvedValue(result);
 
@@ -241,6 +249,7 @@ describe("GUI update checker", () => {
       version: "0.4.0",
       build: "backend-build",
       image_ref: "target-image",
+      generated_at: "2026-08-21T00:00:00Z",
     });
     expect(invokeMock).toHaveBeenCalledWith(
       "apply_approved_local_backend_update",
@@ -365,12 +374,15 @@ describe("GUI update checker", () => {
       currentVersion: "0.3.0",
       currentBuild: "backend-current-build",
       currentImageRef: "current-image",
+      currentImageCreatedAt: "2026-08-20T00:00:00Z",
       update: {
         channel: "release" as const,
         currentImageRef: "current-image",
+        currentImageCreatedAt: "2026-08-20T00:00:00Z",
         version: "0.4.0",
         build: "backend-build",
         imageRef: "target-image",
+        generatedAt: "2026-08-21T00:00:00Z",
       },
       error: null,
     });

@@ -15,6 +15,8 @@ pub(crate) struct BackendManifest {
     pub build: String,
     pub image_ref: String,
     pub platforms: Vec<String>,
+    #[serde(default)]
+    pub generated_at: Option<String>,
 }
 
 impl BackendManifest {
@@ -165,6 +167,10 @@ mod tests {
         assert_eq!(manifest.channel, "master");
         assert_eq!(manifest.image_ref, image_ref);
         assert_eq!(manifest.platforms, ["linux/amd64", "linux/arm64/v8"]);
+        assert_eq!(
+            manifest.generated_at.as_deref(),
+            Some("2026-08-21T00:00:00Z")
+        );
     }
 
     #[tokio::test]

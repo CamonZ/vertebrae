@@ -159,6 +159,7 @@ where
         image_ref: &str,
         version: Option<&str>,
         build: Option<&str>,
+        image_created_at: Option<&str>,
     ) -> Result<Vec<ServiceStatus>, LocalBackendError>
     where
         H: super::health::HealthProbe,
@@ -167,6 +168,7 @@ where
         updated_state.sacrum_image_ref = image_ref.to_string();
         updated_state.sacrum_version = version.map(str::to_string);
         updated_state.sacrum_build = build.map(str::to_string);
+        updated_state.sacrum_image_created_at = image_created_at.map(str::to_string);
         updated_state.validate()?;
         let secrets = self.validate_stack_files(paths, state)?;
 
@@ -495,7 +497,14 @@ mod tests {
         let controller = controller(runner.clone(), MockHealth::with_results([true]));
 
         let status = controller
-            .update_sacrum_image(&paths, &state, new_image, Some("0.4.0"), Some("build-1"))
+            .update_sacrum_image(
+                &paths,
+                &state,
+                new_image,
+                Some("0.4.0"),
+                Some("build-1"),
+                Some("2026-08-21T00:00:00Z"),
+            )
             .await
             .expect("image update should succeed");
 
@@ -515,6 +524,10 @@ mod tests {
             .expect("state exists");
         assert_eq!(updated_state.sacrum_version.as_deref(), Some("0.4.0"));
         assert_eq!(updated_state.sacrum_build.as_deref(), Some("build-1"));
+        assert_eq!(
+            updated_state.sacrum_image_created_at.as_deref(),
+            Some("2026-08-21T00:00:00Z")
+        );
         let requests = runner.requests();
         assert!(requests[0]
             .args_as_strings()
@@ -550,6 +563,7 @@ mod tests {
                 "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
                 Some("0.4.0"),
                 Some("build-1"),
+                Some("2026-08-21T00:00:00Z"),
             )
             .await
             .expect_err("failed image pull should be reported");

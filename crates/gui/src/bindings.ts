@@ -1833,6 +1833,7 @@ export type LocalBackendUpdateRelease = {
   version: string;
   build: string;
   image_ref: string;
+  generated_at: string | null;
 };
 export type LocalBackendUpdateStatus = {
   management: string;
@@ -1841,6 +1842,7 @@ export type LocalBackendUpdateStatus = {
   current_version: string | null;
   current_build: string | null;
   current_image_ref: string | null;
+  current_generated_at: string | null;
   latest: LocalBackendUpdateRelease | null;
   available: boolean;
 };
@@ -1849,6 +1851,7 @@ export type LocalBackendUpdateResult = {
   version: string;
   build: string;
   image_ref: string;
+  generated_at: string | null;
 };
 export type LocalChatCompactionEvent = {
   backend_session_id: string;

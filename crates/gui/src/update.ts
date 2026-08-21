@@ -94,6 +94,8 @@ export async function applyApprovedLocalBackendUpdate(
         currentVersion: result.version,
         currentBuild: result.build,
         currentImageRef: result.image_ref ?? result.imageRef,
+        currentImageCreatedAt:
+          result.generated_at ?? result.generatedAt ?? null,
         apply: { status: "success", result },
       },
     }));
@@ -203,11 +205,13 @@ interface NativeLocalBackendUpdateStatus {
   current_version?: string | null;
   current_build?: string | null;
   current_image_ref: string | null;
+  current_generated_at?: string | null;
   latest: {
     channel: GuiUpdateChannel;
     version: string;
     build: string;
     image_ref: string;
+    generated_at?: string | null;
   } | null;
   available: boolean;
 }
@@ -219,6 +223,7 @@ export interface LocalBackendUpdateCheck {
   currentVersion: string | null;
   currentBuild: string | null;
   currentImageRef: string | null;
+  currentImageCreatedAt: string | null;
   update: LocalBackendUpdateInfo | null;
   error: string | null;
 }
@@ -313,14 +318,17 @@ export async function checkLocalBackendUpdate(): Promise<LocalBackendUpdateCheck
       currentVersion: status.current_version ?? null,
       currentBuild: status.current_build ?? null,
       currentImageRef: status.current_image_ref,
+      currentImageCreatedAt: status.current_generated_at ?? null,
       update:
         status.available && latest && status.channel
           ? {
               channel: status.channel,
               currentImageRef: status.current_image_ref ?? "unknown",
+              currentImageCreatedAt: status.current_generated_at ?? null,
               version: latest.version,
               build: latest.build,
               imageRef: latest.image_ref,
+              generatedAt: latest.generated_at ?? null,
             }
           : null,
       error: null,
@@ -333,6 +341,7 @@ export async function checkLocalBackendUpdate(): Promise<LocalBackendUpdateCheck
       currentVersion: null,
       currentBuild: null,
       currentImageRef: null,
+      currentImageCreatedAt: null,
       update: null,
       error: updateCheckErrorMessage(reason),
     };
@@ -503,6 +512,9 @@ export function createGuiUpdateScheduler(
                 currentImageRef: localBackendCheck.error
                   ? state.localBackend.currentImageRef
                   : localBackendCheck.currentImageRef,
+                currentImageCreatedAt: localBackendCheck.error
+                  ? state.localBackend.currentImageCreatedAt
+                  : localBackendCheck.currentImageCreatedAt,
                 update: localBackendCheck.error
                   ? state.localBackend.update
                   : localBackendCheck.update,
