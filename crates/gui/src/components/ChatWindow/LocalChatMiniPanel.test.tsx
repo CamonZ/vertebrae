@@ -124,6 +124,38 @@ function DeletingPanel() {
   );
 }
 
+function ExpandableDeletingPanel() {
+  const [sessions, setSessions] = useState(
+    Array.from({ length: 8 }, (_, index) =>
+      makeSession(`deletable-${index + 1}`, {
+        title: `Deletable ${index + 1}`,
+        label: `Deletable ${index + 1}`,
+      })
+    )
+  );
+
+  return (
+    <LocalChatMiniPanel
+      activeSessionId={sessions[0].id}
+      activeProviderThreadId={null}
+      searchQuery=""
+      onSearchQueryChange={vi.fn()}
+      hasLocalChatSessions
+      deletingSessionId={null}
+      deleteError={null}
+      projectWarning={null}
+      sessionGroups={[makeGroup("current", "Current project", sessions)]}
+      spawnOutlineBySessionId={new Map()}
+      onSelect={vi.fn()}
+      onDelete={(sessionId) => {
+        setSessions((current) =>
+          current.filter((session) => session.id !== sessionId)
+        );
+      }}
+    />
+  );
+}
+
 describe("LocalChatMiniPanel search", () => {
   it("renders an accessible controlled search field and updates as it is typed", async () => {
     const user = userEvent.setup();
@@ -326,5 +358,112 @@ describe("LocalChatMiniPanel search", () => {
 
     fireEvent.keyDown(sessionButton, { key: "Enter" });
     expect(onSelect).toHaveBeenCalledWith(session.id);
+  });
+});
+
+describe("LocalChatMiniPanel session limits", () => {
+  it("caps each project independently and exposes accessible expansion state", async () => {
+    const user = userEvent.setup();
+    const makeSessions = (prefix: string, count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        makeSession(`${prefix}-${index + 1}`, {
+          title: `${prefix} ${index + 1}`,
+          label: `${prefix} ${index + 1}`,
+          updatedAt: `2026-01-${String(count - index).padStart(2, "0")}T00:00:00Z`,
+        })
+      );
+    const currentSessions = makeSessions("Current", 8);
+    const otherSessions = makeSessions("Other", 8);
+    const shortSessions = makeSessions("Short", 7);
+
+    render(
+      <ControlledPanel
+        sessionGroups={[
+          makeGroup("current", "Current project", currentSessions),
+          makeGroup("other", "Other project", otherSessions),
+          makeGroup("short", "Short project", shortSessions),
+        ]}
+      />
+    );
+
+    const panel = within(screen.getByTestId("local-chat-mini-panel"));
+    const current = within(
+      panel.getByRole("region", { name: "Current project chats" })
+    );
+    const other = within(
+      panel.getByRole("region", { name: "Other project chats" })
+    );
+    const short = within(
+      panel.getByRole("region", { name: "Short project chats" })
+    );
+
+    expect(
+      current.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(7);
+    expect(
+      other.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(7);
+    expect(
+      short.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(7);
+    expect(
+      short.queryByRole("button", { name: /Show all/ })
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      current.getByRole("button", { name: "Show all (1 more)" })
+    );
+
+    expect(
+      current.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(8);
+    const showLess = current.getByRole("button", { name: "Show less" });
+    expect(showLess).toHaveAttribute("aria-expanded", "true");
+    expect(showLess).toHaveFocus();
+    expect(
+      other.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(7);
+    expect(
+      other.getByRole("button", { name: "Show all (1 more)" })
+    ).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(showLess);
+    expect(
+      current.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(7);
+    expect(
+      current.getByRole("button", { name: "Show all (1 more)" })
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("collapses the control when deleting the final row beyond the default limit", async () => {
+    const user = userEvent.setup();
+    render(<ExpandableDeletingPanel />);
+
+    const panel = within(screen.getByTestId("local-chat-mini-panel"));
+    const current = within(
+      panel.getByRole("region", { name: "Current project chats" })
+    );
+
+    await user.click(
+      current.getByRole("button", { name: "Show all (1 more)" })
+    );
+    expect(
+      current.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(8);
+
+    await user.click(
+      current.getByRole("button", { name: "Delete local chat Deletable 8" })
+    );
+
+    expect(
+      current.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(7);
+    expect(
+      current.queryByRole("button", { name: "Show less" })
+    ).not.toBeInTheDocument();
+    expect(
+      current.queryByRole("button", { name: /Show all/ })
+    ).not.toBeInTheDocument();
   });
 });

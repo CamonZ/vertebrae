@@ -15,6 +15,7 @@ import { useChatKeyboardShortcuts } from "../../hooks/useChatKeyboardShortcuts";
 import { useLocalChatHistory } from "../../hooks/useLocalChatHistory";
 import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
+import { projectLocalChatSessionGroups } from "../../utils/localChatSessionGroups";
 import { ChatPaneList } from "./ChatPaneList";
 import { ChatResizeHandle } from "./ChatResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
@@ -141,20 +142,21 @@ export function ChatWindowManager() {
     projectGroupingWarning,
     bumpHistoryRevision,
   } = useLocalChatHistory({ sessionChangeToken });
-  const visibleLocalSessionGroups = useMemo(
-    () =>
-      localSessionGroups
-        .map((group) => ({
-          ...group,
-          sessions: group.sessions.filter(
-            (session) =>
-              !session.providerResumeId ||
-              !childProviderThreadIds.has(session.providerResumeId)
-          ),
-        }))
-        .filter((group) => group.sessions.length > 0),
-    [childProviderThreadIds, localSessionGroups]
-  );
+  const visibleLocalSessionGroups = useMemo(() => {
+    // Search and child-thread filtering must precede the cap so older
+    // matching sessions remain eligible for the visible seven rows.
+    const childFilteredGroups = localSessionGroups
+      .map((group) => ({
+        ...group,
+        sessions: group.sessions.filter(
+          (session) =>
+            !session.providerResumeId ||
+            !childProviderThreadIds.has(session.providerResumeId)
+        ),
+      }))
+      .filter((group) => group.sessions.length > 0);
+    return projectLocalChatSessionGroups(childFilteredGroups);
+  }, [childProviderThreadIds, localSessionGroups]);
   const hasLocalChatSessions = useMemo(
     () =>
       allLocalSessionGroups.some((group) =>

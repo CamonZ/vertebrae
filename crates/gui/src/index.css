@@ -2794,6 +2794,19 @@ html.light ::selection {
   font-weight: 500;
   color: var(--fg-mute);
 }
+.hc-panel .hc-mini-history-toggle {
+  margin: var(--s-1) var(--s-2) 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  font-size: var(--text-12);
+  cursor: pointer;
+}
+.hc-panel .hc-mini-history-toggle:hover,
+.hc-panel .hc-mini-history-toggle:focus-visible {
+  text-decoration: underline;
+}
 .hc-panel .hc-mini-history-row {
   display: flex;
   align-items: center;

@@ -16,10 +16,12 @@ export {
 export type { UtilizationLevel } from "./modelContextWindow";
 export {
   FALLBACK_CHAT_PROJECT_LABEL,
+  LOCAL_CHAT_SESSION_ROW_LIMIT,
   filterLocalChatSessionGroups,
   groupLocalChatSessionsByProject,
   localChatSessionDisplayTitle,
   normalizeLocalChatSessionQuery,
+  projectLocalChatSessionGroups,
 } from "./localChatSessionGroups";
 export type { LocalChatSessionGroup } from "./localChatSessionGroups";
 export { getPriorityIndicator } from "./taskPriority";

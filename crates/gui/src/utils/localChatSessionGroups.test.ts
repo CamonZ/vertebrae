@@ -3,10 +3,12 @@ import type { SavedProject } from "../bindings";
 import type { LocalChatSessionSummary } from "./localChatPersistence";
 import {
   FALLBACK_CHAT_PROJECT_LABEL,
+  LOCAL_CHAT_SESSION_ROW_LIMIT,
   filterLocalChatSessionGroups,
   groupLocalChatSessionsByProject,
   localChatSessionDisplayTitle,
   normalizeLocalChatSessionQuery,
+  projectLocalChatSessionGroups,
 } from "./localChatSessionGroups";
 
 const projects: SavedProject[] = [
@@ -249,5 +251,119 @@ describe("local chat session history search", () => {
     expect(
       filterLocalChatSessionGroups(groups, "new chat")[0].sessions
     ).toHaveLength(1);
+  });
+});
+
+describe("local chat session display projection", () => {
+  it.each([
+    [0, 0],
+    [1, 1],
+    [LOCAL_CHAT_SESSION_ROW_LIMIT, LOCAL_CHAT_SESSION_ROW_LIMIT],
+    [LOCAL_CHAT_SESSION_ROW_LIMIT + 1, LOCAL_CHAT_SESSION_ROW_LIMIT],
+  ])(
+    "keeps %i source sessions at %i visible rows",
+    (sourceCount, visibleCount) => {
+      const sessions = Array.from({ length: sourceCount }, (_, index) =>
+        makeSummary(
+          `session-${index + 1}`,
+          "/work/alpha",
+          `2026-01-${String(sourceCount - index).padStart(2, "0")}T00:00:00Z`
+        )
+      );
+      const groups = [
+        {
+          id: "project:alpha",
+          label: "alpha",
+          isCurrentProject: true,
+          isFallback: false,
+          sessions,
+        },
+      ];
+
+      const projected = projectLocalChatSessionGroups(groups);
+
+      expect(projected).toHaveLength(sourceCount === 0 ? 0 : 1);
+      if (sourceCount > 0) {
+        expect(projected[0].sessions).toHaveLength(visibleCount);
+        expect(projected[0].allSessions).toEqual(sessions);
+      }
+    }
+  );
+
+  it("caps each group independently, preserves metadata, and does not mutate inputs", () => {
+    const alphaSessions = Array.from({ length: 8 }, (_, index) =>
+      makeSummary(
+        `alpha-${index + 1}`,
+        "/work/alpha",
+        `2026-02-${String(8 - index).padStart(2, "0")}T00:00:00Z`
+      )
+    );
+    const betaSessions = [
+      makeSummary("beta-1", "/work/beta", "2026-01-01T00:00:00Z"),
+    ];
+    const groups = [
+      {
+        id: "project:alpha",
+        label: "alpha",
+        isCurrentProject: true,
+        isFallback: false,
+        sessions: alphaSessions,
+      },
+      {
+        id: "project:beta",
+        label: "beta",
+        isCurrentProject: false,
+        isFallback: false,
+        sessions: betaSessions,
+      },
+    ];
+
+    const projected = projectLocalChatSessionGroups(groups);
+
+    expect(projected.map((group) => group.id)).toEqual([
+      "project:alpha",
+      "project:beta",
+    ]);
+    expect(projected[0]).toMatchObject({
+      id: "project:alpha",
+      label: "alpha",
+      isCurrentProject: true,
+      isFallback: false,
+    });
+    expect(projected[0].sessions.map((session) => session.id)).toEqual(
+      alphaSessions
+        .slice(0, LOCAL_CHAT_SESSION_ROW_LIMIT)
+        .map((session) => session.id)
+    );
+    expect(projected[1].sessions.map((session) => session.id)).toEqual([
+      "beta-1",
+    ]);
+    expect(groups[0].sessions).toBe(alphaSessions);
+    expect(groups[0].sessions).toHaveLength(8);
+    expect(projected[0].allSessions).not.toBe(alphaSessions);
+  });
+
+  it("filters before projecting so an older matching session remains visible", () => {
+    const sessions = Array.from({ length: 8 }, (_, index) =>
+      makeSummary(
+        `session-${index + 1}`,
+        "/work/alpha",
+        `2026-03-${String(8 - index).padStart(2, "0")}T00:00:00Z`,
+        { title: index === 7 ? "Older matching session" : `Recent ${index}` }
+      )
+    );
+    const groups = groupLocalChatSessionsByProject(
+      sessions,
+      projects,
+      "/work/alpha"
+    );
+
+    const projected = projectLocalChatSessionGroups(
+      filterLocalChatSessionGroups(groups, "matching")
+    );
+
+    expect(projected[0].sessions.map((session) => session.id)).toEqual([
+      "session-8",
+    ]);
   });
 });
