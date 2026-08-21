@@ -34,8 +34,11 @@ pub struct LocalBackendUpdateRelease {
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct LocalBackendUpdateStatus {
+    pub management: String,
     pub configured: bool,
     pub channel: Option<String>,
+    pub current_version: Option<String>,
+    pub current_build: Option<String>,
     pub current_image_ref: Option<String>,
     pub latest: Option<LocalBackendUpdateRelease>,
     pub available: bool,
@@ -53,10 +56,26 @@ pub struct LocalBackendUpdateResult {
 #[specta::specta]
 pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, CommandError> {
     let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
+    let configured_management = configured_backend_management()?;
+    if configured_management == "external" {
+        return Ok(LocalBackendUpdateStatus {
+            management: configured_management.to_string(),
+            configured: true,
+            channel: None,
+            current_version: None,
+            current_build: None,
+            current_image_ref: None,
+            latest: None,
+            available: false,
+        });
+    }
     let Some(state) = paths.load_state().map_err(local_backend_error)? else {
         return Ok(LocalBackendUpdateStatus {
+            management: configured_management.to_string(),
             configured: false,
             channel: None,
+            current_version: None,
+            current_build: None,
             current_image_ref: None,
             latest: None,
             available: false,
@@ -70,8 +89,11 @@ pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, Co
     let available = manifest.requires_image_update(&state);
 
     Ok(LocalBackendUpdateStatus {
+        management: "managed_local".to_string(),
         configured: true,
         channel: Some(state.image_channel.manifest_channel().to_string()),
+        current_version: state.sacrum_version,
+        current_build: state.sacrum_build,
         current_image_ref: Some(state.sacrum_image_ref),
         latest: Some(LocalBackendUpdateRelease {
             channel: manifest.channel,
@@ -137,7 +159,13 @@ pub async fn apply_approved_local_backend_update(
     let compose =
         DockerCompose::system_for(state.docker_target.clone()).map_err(local_backend_error)?;
     compose
-        .update_sacrum_image(&paths, &state, &manifest.image_ref)
+        .update_sacrum_image(
+            &paths,
+            &state,
+            &manifest.image_ref,
+            Some(&manifest.version),
+            Some(&manifest.build),
+        )
         .await
         .map_err(local_backend_error)?;
 
@@ -147,6 +175,60 @@ pub async fn apply_approved_local_backend_update(
         build: manifest.build,
         image_ref: manifest.image_ref,
     })
+}
+
+fn configured_backend_management() -> Result<&'static str, CommandError> {
+    if let Some(url) = std::env::var_os("VTB_URL").filter(|url| !url.is_empty()) {
+        return Ok(backend_management_for_url(&url.to_string_lossy()));
+    }
+
+    let config_path = vertebrae_sacrum_client::config_path();
+    if !config_path.as_ref().is_some_and(|path| path.exists()) {
+        return Ok("not_configured");
+    }
+
+    let config = vertebrae_sacrum_client::load_config_file().map_err(|error| CommandError {
+        message: format!("Failed to load config file: {error}"),
+    })?;
+    Ok(backend_management_for_url(&config.sacrum.url))
+}
+
+fn backend_management_for_url(url: &str) -> &'static str {
+    let parsed = url::Url::parse(url).ok();
+    let host = parsed.as_ref().and_then(url::Url::host_str);
+    if host.is_some_and(is_loopback_host) {
+        "not_configured"
+    } else if host.is_some() {
+        "external"
+    } else {
+        "not_configured"
+    }
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::backend_management_for_url;
+
+    #[test]
+    fn classifies_backend_urls_by_management() {
+        assert_eq!(
+            backend_management_for_url("https://backend.example.test/api"),
+            "external"
+        );
+        assert_eq!(
+            backend_management_for_url("http://localhost:4400"),
+            "not_configured"
+        );
+        assert_eq!(
+            backend_management_for_url("http://127.0.0.1:4400"),
+            "not_configured"
+        );
+        assert_eq!(backend_management_for_url("not-a-url"), "not_configured");
+    }
 }
 
 /// Provision or adopt the local Sacrum backend and persist its generated

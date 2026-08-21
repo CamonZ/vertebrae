@@ -980,88 +980,84 @@ function ReviewUpdateDialog({
   );
 }
 
-function UpdatesSection({
+function BackendCurrentDetails({ state }: { state: GuiUpdateState }) {
+  const backend = state.localBackend;
+  return (
+    <dl
+      className="mt-5 grid gap-4 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 sm:grid-cols-3"
+      data-testid="settings-backend-current"
+    >
+      <div>
+        <dt className="text-xs text-[var(--color-fg-mute)]">Current version</dt>
+        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          {backend.currentVersion ?? NOT_PROVIDED}
+        </dd>
+      </div>
+      <div>
+        <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
+        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          {backend.currentBuild ?? NOT_PROVIDED}
+        </dd>
+      </div>
+      <div>
+        <dt className="text-xs text-[var(--color-fg-mute)]">Image</dt>
+        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          {backend.currentImageRef
+            ? imageDigest(backend.currentImageRef)
+            : NOT_PROVIDED}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+function FrontendUpdatesSection({
   state,
   onReview,
-  onReviewBackend,
 }: {
   state: GuiUpdateState;
   onReview: () => void;
-  onReviewBackend: () => void;
 }) {
   const update = state.available;
   const showRelease = update !== null && hasAvailableUpdate(state);
-  const apply = state.apply ?? { status: "idle" as const };
-  const backendUpdate = state.localBackend.update;
-  const showBackendUpdate = backendUpdate !== null;
-  const backendApply = state.localBackend.apply;
-
-  if (apply.status !== "idle") {
-    return <UpdateApplyStatus apply={apply} />;
-  }
-
-  if (backendApply.status !== "idle") {
-    return <LocalBackendUpdateApplyStatus apply={backendApply} />;
-  }
-
-  if (!showRelease && !showBackendUpdate) {
-    if (state.localBackend.error) {
-      return (
-        <UpdateStateMessage
-          intent="alert"
-          testId="settings-local-backend-updates-failed"
-        >
-          The local backend update check failed: {state.localBackend.error}
-        </UpdateStateMessage>
-      );
-    }
-    if (state.checking || state.status === "checking") {
-      return (
-        <UpdateStateMessage intent="status" testId="settings-updates-loading">
-          Checking for signed updates…
-        </UpdateStateMessage>
-      );
-    }
-    if (state.status === "error") {
-      return (
-        <UpdateStateMessage intent="alert" testId="settings-updates-failed">
-          The update check failed.
-        </UpdateStateMessage>
-      );
-    }
-    if (state.status === "unavailable" || state.status === "idle") {
-      return (
-        <UpdateStateMessage
-          intent="status"
-          testId="settings-updates-unavailable"
-        >
-          Signed update information is not available yet.
-        </UpdateStateMessage>
-      );
-    }
-    return (
-      <UpdateStateMessage intent="status" testId="settings-updates-current">
-        Vertebrae is up to date. No verified release is available.
-      </UpdateStateMessage>
-    );
-  }
-
   const stale = state.status === "error" || state.status === "stale";
   const notes = update ? releaseNotes(update) : null;
+  const apply = state.apply ?? { status: "idle" as const };
+
   return (
-    <div className="mt-8" data-testid="settings-updates-available">
-      {state.localBackend.error && (
-        <p
-          className="mb-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
-          data-testid="settings-local-backend-updates-stale"
-          role="status"
-        >
-          The local backend update check failed. Showing the last verified
-          backend release, if available.
-        </p>
-      )}
-      {showRelease && update && (
-        <>
+    <section
+      data-testid="settings-frontend-updates"
+      aria-labelledby="settings-frontend-updates-heading"
+    >
+      <h2
+        id="settings-frontend-updates-heading"
+        className="font-serif text-2xl text-[var(--color-fg)]"
+      >
+        Frontend
+      </h2>
+      <dl
+        className="mt-5 grid gap-4 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 sm:grid-cols-2"
+        data-testid="settings-frontend-current"
+      >
+        <div>
+          <dt className="text-xs text-[var(--color-fg-mute)]">
+            Current version
+          </dt>
+          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            {state.currentVersion ?? NOT_PROVIDED}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
+          <dd className="mt-1 text-sm text-[var(--color-fg)]">
+            {channelLabel(state.selectedChannel ?? GUI_UPDATE_CHANNEL)}
+          </dd>
+        </div>
+      </dl>
+
+      {apply.status !== "idle" && <UpdateApplyStatus apply={apply} />}
+      {showRelease && update ? (
+        <div className="mt-6" data-testid="settings-updates-available">
           {stale && (
             <p
               className="mb-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
@@ -1087,11 +1083,11 @@ function UpdatesSection({
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-accent)]">
-                  Release available
+                  Frontend release available
                 </p>
-                <h2 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
+                <h3 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
                   Vertebrae {update.version}
-                </h2>
+                </h3>
               </div>
               <Button
                 variant="primary"
@@ -1149,14 +1145,121 @@ function UpdatesSection({
 
             <UpdateComponents update={update} />
           </article>
+        </div>
+      ) : state.checking || state.status === "checking" ? (
+        <UpdateStateMessage intent="status" testId="settings-updates-loading">
+          Checking for signed updates…
+        </UpdateStateMessage>
+      ) : state.status === "error" ? (
+        <UpdateStateMessage intent="alert" testId="settings-updates-failed">
+          The update check failed.
+        </UpdateStateMessage>
+      ) : state.status === "unavailable" || state.status === "idle" ? (
+        <UpdateStateMessage
+          intent="status"
+          testId="settings-updates-unavailable"
+        >
+          Signed update information is not available yet.
+        </UpdateStateMessage>
+      ) : (
+        <UpdateStateMessage intent="status" testId="settings-updates-current">
+          Frontend is up to date. No verified release is available.
+        </UpdateStateMessage>
+      )}
+    </section>
+  );
+}
+
+function BackendUpdatesSection({
+  state,
+  onReview,
+}: {
+  state: GuiUpdateState;
+  onReview: () => void;
+}) {
+  const backend = state.localBackend;
+  const management =
+    backend.management === "not_configured" && backend.configured
+      ? "managed_local"
+      : backend.management;
+  const backendApply = backend.apply;
+
+  return (
+    <section
+      className="border-t border-[var(--color-line)] pt-8"
+      data-testid="settings-backend-updates"
+      aria-labelledby="settings-backend-updates-heading"
+    >
+      <h2
+        id="settings-backend-updates-heading"
+        className="font-serif text-2xl text-[var(--color-fg)]"
+      >
+        Backend
+      </h2>
+      {management === "external" ? (
+        <>
+          <BackendCurrentDetails state={state} />
+          <UpdateStateMessage
+            intent="status"
+            testId="settings-backend-external"
+          >
+            Backend updates are not available because the backend is not managed
+            by the app.
+          </UpdateStateMessage>
         </>
+      ) : management === "managed_local" ? (
+        <>
+          <BackendCurrentDetails state={state} />
+          {backendApply.status !== "idle" && (
+            <LocalBackendUpdateApplyStatus apply={backendApply} />
+          )}
+          {backend.error && (
+            <UpdateStateMessage
+              intent="alert"
+              testId="settings-local-backend-updates-failed"
+            >
+              The local backend update check failed: {backend.error}
+            </UpdateStateMessage>
+          )}
+          {backend.update ? (
+            <LocalBackendUpdateSection
+              update={backend.update}
+              onReview={onReview}
+            />
+          ) : backendApply.status === "idle" && !backend.error ? (
+            <UpdateStateMessage
+              intent="status"
+              testId="settings-backend-current-status"
+            >
+              The local backend is up to date.
+            </UpdateStateMessage>
+          ) : null}
+        </>
+      ) : (
+        <UpdateStateMessage
+          intent="status"
+          testId="settings-backend-not-configured"
+        >
+          No backend is configured.
+        </UpdateStateMessage>
       )}
-      {showBackendUpdate && backendUpdate && (
-        <LocalBackendUpdateSection
-          update={backendUpdate}
-          onReview={onReviewBackend}
-        />
-      )}
+    </section>
+  );
+}
+
+function UpdatesSection({
+  state,
+  onReview,
+  onReviewBackend,
+}: {
+  state: GuiUpdateState;
+  onReview: () => void;
+  onReviewBackend: () => void;
+}) {
+  return (
+    <div className="mt-8 space-y-8" data-testid="settings-updates">
+      <FrontendUpdatesSection state={state} onReview={onReview} />
+      <BackendUpdatesSection state={state} onReview={onReviewBackend} />
     </div>
   );
 }

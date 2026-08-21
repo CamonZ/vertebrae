@@ -199,8 +199,11 @@ describe("GUI update checker", () => {
     });
 
     await expect(checkLocalBackendUpdate()).resolves.toEqual({
+      management: "managed_local",
       configured: true,
       channel: "release",
+      currentVersion: null,
+      currentBuild: null,
       currentImageRef:
         "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       update: {
@@ -356,8 +359,11 @@ describe("GUI update checker", () => {
       },
     ]);
     const checkLocalBackend = vi.fn().mockResolvedValue({
+      management: "managed_local" as const,
       configured: true,
       channel: "release" as const,
+      currentVersion: "0.3.0",
+      currentBuild: "backend-current-build",
       currentImageRef: "current-image",
       update: {
         channel: "release" as const,

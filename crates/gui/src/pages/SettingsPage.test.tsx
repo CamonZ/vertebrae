@@ -272,6 +272,7 @@ describe("SettingsPage", () => {
       ...initialGuiUpdateState,
       localBackend: {
         ...initialGuiUpdateState.localBackend,
+        management: "managed_local",
         configured: true,
         channel: "release",
         currentImageRef: localBackendUpdate.currentImageRef,
@@ -315,6 +316,45 @@ describe("SettingsPage", () => {
     expect(onApproveLocalBackendUpdate).toHaveBeenCalledOnce();
     expect(onApproveLocalBackendUpdate).toHaveBeenCalledWith(
       localBackendUpdate
+    );
+  });
+
+  it("shows the externally managed backend notice separately from frontend updates", async () => {
+    const user = userEvent.setup();
+    useGuiUpdateStore.setState({
+      ...initialGuiUpdateState,
+      currentVersion: "0.2.0",
+      status: "current",
+      localBackend: {
+        ...initialGuiUpdateState.localBackend,
+        management: "external",
+        configured: true,
+        currentVersion: "0.8.0",
+        currentBuild: "remote-build",
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-updates"));
+    expect(screen.getByTestId("settings-frontend-updates")).toHaveTextContent(
+      "Frontend"
+    );
+    expect(screen.getByTestId("settings-frontend-current")).toHaveTextContent(
+      "0.2.0"
+    );
+    expect(screen.getByTestId("settings-backend-updates")).toHaveTextContent(
+      "Backend"
+    );
+    expect(screen.getByTestId("settings-backend-current")).toHaveTextContent(
+      "0.8.0"
+    );
+    expect(screen.getByTestId("settings-backend-external")).toHaveTextContent(
+      "Backend updates are not available because the backend is not managed by the app."
     );
   });
 

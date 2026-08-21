@@ -525,6 +525,10 @@ pub struct ManagedStackState {
     pub installation_id: Uuid,
     pub docker_target: DockerTarget,
     pub sacrum_image_ref: String,
+    #[serde(default)]
+    pub sacrum_version: Option<String>,
+    #[serde(default)]
+    pub sacrum_build: Option<String>,
     pub image_channel: BackendImageChannel,
     pub provisioning_state: ProvisioningState,
     pub postgres_volume_initialized: bool,
@@ -545,6 +549,8 @@ impl ManagedStackState {
             installation_id: Uuid::new_v4(),
             docker_target,
             sacrum_image_ref: sacrum_image_ref.into(),
+            sacrum_version: None,
+            sacrum_build: None,
             image_channel,
             provisioning_state: ProvisioningState::Pending,
             postgres_volume_initialized: false,
@@ -566,6 +572,8 @@ impl ManagedStackState {
             installation_id: Uuid::new_v4(),
             docker_target,
             sacrum_image_ref: sacrum_image_ref.into(),
+            sacrum_version: None,
+            sacrum_build: None,
             image_channel,
             provisioning_state: ProvisioningState::Unverified,
             postgres_volume_initialized: true,

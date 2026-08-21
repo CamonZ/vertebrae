@@ -9,6 +9,7 @@ import {
   type GuiUpdateChannelState,
   type GuiUpdateInfo,
   type GuiUpdateTransactionResult,
+  type BackendManagement,
   type LocalBackendUpdateInfo,
   type LocalBackendUpdateResult,
 } from "./stores/guiUpdateStore";
@@ -90,6 +91,9 @@ export async function applyApprovedLocalBackendUpdate(
       localBackend: {
         ...state.localBackend,
         update: null,
+        currentVersion: result.version,
+        currentBuild: result.build,
+        currentImageRef: result.image_ref ?? result.imageRef,
         apply: { status: "success", result },
       },
     }));
@@ -193,8 +197,11 @@ interface NativeGuiUpdateChannelStatus {
 }
 
 interface NativeLocalBackendUpdateStatus {
+  management?: string;
   configured: boolean;
   channel: GuiUpdateChannel | null;
+  current_version?: string | null;
+  current_build?: string | null;
   current_image_ref: string | null;
   latest: {
     channel: GuiUpdateChannel;
@@ -206,11 +213,27 @@ interface NativeLocalBackendUpdateStatus {
 }
 
 export interface LocalBackendUpdateCheck {
+  management: BackendManagement;
   configured: boolean;
   channel: GuiUpdateChannel | null;
+  currentVersion: string | null;
+  currentBuild: string | null;
   currentImageRef: string | null;
   update: LocalBackendUpdateInfo | null;
   error: string | null;
+}
+
+function backendManagement(
+  status: NativeLocalBackendUpdateStatus
+): BackendManagement {
+  if (
+    status.management === "managed_local" ||
+    status.management === "external" ||
+    status.management === "not_configured"
+  ) {
+    return status.management;
+  }
+  return status.configured ? "managed_local" : "not_configured";
 }
 
 function updateFromChannelRelease(
@@ -282,9 +305,13 @@ export async function checkLocalBackendUpdate(): Promise<LocalBackendUpdateCheck
       "check_local_backend_update"
     );
     const latest = status.latest;
+    const management = backendManagement(status);
     return {
+      management,
       configured: status.configured,
       channel: status.channel,
+      currentVersion: status.current_version ?? null,
+      currentBuild: status.current_build ?? null,
       currentImageRef: status.current_image_ref,
       update:
         status.available && latest && status.channel
@@ -300,8 +327,11 @@ export async function checkLocalBackendUpdate(): Promise<LocalBackendUpdateCheck
     };
   } catch (reason) {
     return {
+      management: "not_configured",
       configured: true,
       channel: null,
+      currentVersion: null,
+      currentBuild: null,
       currentImageRef: null,
       update: null,
       error: updateCheckErrorMessage(reason),
@@ -455,12 +485,21 @@ export function createGuiUpdateScheduler(
           localBackend: localBackendCheck
             ? {
                 ...state.localBackend,
+                management: localBackendCheck.error
+                  ? state.localBackend.management
+                  : localBackendCheck.management,
                 configured: localBackendCheck.error
                   ? state.localBackend.configured
                   : localBackendCheck.configured,
                 channel: localBackendCheck.error
                   ? state.localBackend.channel
                   : localBackendCheck.channel,
+                currentVersion: localBackendCheck.error
+                  ? state.localBackend.currentVersion
+                  : localBackendCheck.currentVersion,
+                currentBuild: localBackendCheck.error
+                  ? state.localBackend.currentBuild
+                  : localBackendCheck.currentBuild,
                 currentImageRef: localBackendCheck.error
                   ? state.localBackend.currentImageRef
                   : localBackendCheck.currentImageRef,

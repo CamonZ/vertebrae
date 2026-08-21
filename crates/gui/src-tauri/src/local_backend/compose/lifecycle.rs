@@ -157,12 +157,16 @@ where
         paths: &ManagedStackPaths,
         state: &ManagedStackState,
         image_ref: &str,
+        version: Option<&str>,
+        build: Option<&str>,
     ) -> Result<Vec<ServiceStatus>, LocalBackendError>
     where
         H: super::health::HealthProbe,
     {
         let mut updated_state = state.clone();
         updated_state.sacrum_image_ref = image_ref.to_string();
+        updated_state.sacrum_version = version.map(str::to_string);
+        updated_state.sacrum_build = build.map(str::to_string);
         updated_state.validate()?;
         let secrets = self.validate_stack_files(paths, state)?;
 
@@ -491,7 +495,7 @@ mod tests {
         let controller = controller(runner.clone(), MockHealth::with_results([true]));
 
         let status = controller
-            .update_sacrum_image(&paths, &state, new_image)
+            .update_sacrum_image(&paths, &state, new_image, Some("0.4.0"), Some("build-1"))
             .await
             .expect("image update should succeed");
 
@@ -505,6 +509,12 @@ mod tests {
                 .sacrum_image_ref,
             new_image
         );
+        let updated_state = paths
+            .load_state()
+            .expect("load state")
+            .expect("state exists");
+        assert_eq!(updated_state.sacrum_version.as_deref(), Some("0.4.0"));
+        assert_eq!(updated_state.sacrum_build.as_deref(), Some("build-1"));
         let requests = runner.requests();
         assert!(requests[0]
             .args_as_strings()
@@ -538,6 +548,8 @@ mod tests {
                 &paths,
                 &state,
                 "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+                Some("0.4.0"),
+                Some("build-1"),
             )
             .await
             .expect_err("failed image pull should be reported");

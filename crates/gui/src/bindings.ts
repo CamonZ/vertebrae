@@ -1835,8 +1835,11 @@ export type LocalBackendUpdateRelease = {
   image_ref: string;
 };
 export type LocalBackendUpdateStatus = {
+  management: string;
   configured: boolean;
   channel: string | null;
+  current_version: string | null;
+  current_build: string | null;
   current_image_ref: string | null;
   latest: LocalBackendUpdateRelease | null;
   available: boolean;
