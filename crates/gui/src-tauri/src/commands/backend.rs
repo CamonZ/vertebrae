@@ -87,13 +87,20 @@ pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, Co
         .await
         .map_err(local_backend_error)?;
     let available = manifest.requires_image_update(&state);
+    let (current_version, current_build) = current_backend_release_metadata(
+        state.sacrum_version,
+        state.sacrum_build,
+        &manifest.version,
+        &manifest.build,
+        available,
+    );
 
     Ok(LocalBackendUpdateStatus {
         management: "managed_local".to_string(),
         configured: true,
         channel: Some(state.image_channel.manifest_channel().to_string()),
-        current_version: state.sacrum_version,
-        current_build: state.sacrum_build,
+        current_version,
+        current_build,
         current_image_ref: Some(state.sacrum_image_ref),
         latest: Some(LocalBackendUpdateRelease {
             channel: manifest.channel,
@@ -209,9 +216,22 @@ fn is_loopback_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
+fn current_backend_release_metadata(
+    stored_version: Option<String>,
+    stored_build: Option<String>,
+    manifest_version: &str,
+    manifest_build: &str,
+    update_available: bool,
+) -> (Option<String>, Option<String>) {
+    (
+        stored_version.or_else(|| (!update_available).then(|| manifest_version.to_string())),
+        stored_build.or_else(|| (!update_available).then(|| manifest_build.to_string())),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::backend_management_for_url;
+    use super::{backend_management_for_url, current_backend_release_metadata};
 
     #[test]
     fn classifies_backend_urls_by_management() {
@@ -228,6 +248,22 @@ mod tests {
             "not_configured"
         );
         assert_eq!(backend_management_for_url("not-a-url"), "not_configured");
+    }
+
+    #[test]
+    fn uses_manifest_metadata_when_the_current_image_is_up_to_date() {
+        assert_eq!(
+            current_backend_release_metadata(None, None, "0.4.0", "abcdef12", false,),
+            (Some("0.4.0".to_string()), Some("abcdef12".to_string()))
+        );
+    }
+
+    #[test]
+    fn does_not_use_latest_manifest_metadata_for_an_older_image() {
+        assert_eq!(
+            current_backend_release_metadata(None, None, "0.5.0", "12345678", true),
+            (None, None)
+        );
     }
 }
 
