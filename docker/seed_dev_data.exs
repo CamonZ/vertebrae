@@ -40,6 +40,6 @@ Sacrum.Repo.insert(
 
 IO.puts("")
 IO.puts("Seeded dev user: #{email} (username: #{username})")
-IO.puts("API token:       #{token}")
-IO.puts("Put that token in ~/.config/vertebrae/config.toml under [sacrum].token")
+IO.puts("API token:       configured")
+IO.puts("The API token was not printed; use the configured client settings.")
 IO.puts("")

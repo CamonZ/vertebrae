@@ -331,9 +331,15 @@ pub struct ApiToken(String);
 
 impl ApiToken {
     pub fn generate() -> Result<Self, LocalBackendError> {
+        let mut entropy = OsEntropy;
+        Self::generate_with(&mut entropy)
+    }
+
+    pub(crate) fn generate_with<R: EntropySource>(
+        entropy_source: &mut R,
+    ) -> Result<Self, LocalBackendError> {
         let mut entropy = [0_u8; 32];
-        getrandom::getrandom(&mut entropy)
-            .map_err(|error| LocalBackendError::SecretGeneration(error.to_string()))?;
+        fill_entropy(entropy_source, &mut entropy)?;
         Self::new(format!("sac_{}", to_hex(&entropy)))
     }
 
@@ -397,9 +403,16 @@ impl SeedAccount {
     }
 
     pub fn generated_for_installation(installation_id: Uuid) -> Result<Self, LocalBackendError> {
+        let mut entropy = OsEntropy;
+        Self::generated_for_installation_with(installation_id, &mut entropy)
+    }
+
+    pub(crate) fn generated_for_installation_with<R: EntropySource>(
+        installation_id: Uuid,
+        entropy_source: &mut R,
+    ) -> Result<Self, LocalBackendError> {
         let mut entropy = [0_u8; 32];
-        getrandom::getrandom(&mut entropy)
-            .map_err(|error| LocalBackendError::SecretGeneration(error.to_string()))?;
+        fill_entropy(entropy_source, &mut entropy)?;
         let suffix = installation_id.simple().to_string();
         Self::new(
             format!("local-{suffix}@vertebrae.local"),
@@ -702,9 +715,15 @@ pub struct RuntimeSecrets {
 
 impl RuntimeSecrets {
     pub fn generate() -> Result<Self, LocalBackendError> {
+        let mut entropy = OsEntropy;
+        Self::generate_with(&mut entropy)
+    }
+
+    pub(crate) fn generate_with<R: EntropySource>(
+        entropy_source: &mut R,
+    ) -> Result<Self, LocalBackendError> {
         let mut entropy = [0_u8; 96];
-        getrandom::getrandom(&mut entropy)
-            .map_err(|error| LocalBackendError::SecretGeneration(error.to_string()))?;
+        fill_entropy(entropy_source, &mut entropy)?;
         Self::new(to_hex(&entropy[..32]), to_hex(&entropy[32..]))
     }
 
@@ -851,6 +870,27 @@ impl Drop for RuntimeSecrets {
         self.postgres_password.zeroize();
         self.secret_key_base.zeroize();
     }
+}
+
+pub(crate) trait EntropySource {
+    fn fill(&mut self, bytes: &mut [u8]) -> Result<(), String>;
+}
+
+struct OsEntropy;
+
+impl EntropySource for OsEntropy {
+    fn fill(&mut self, bytes: &mut [u8]) -> Result<(), String> {
+        getrandom::getrandom(bytes).map_err(|error| error.to_string())
+    }
+}
+
+fn fill_entropy<R: EntropySource>(
+    entropy_source: &mut R,
+    bytes: &mut [u8],
+) -> Result<(), LocalBackendError> {
+    entropy_source
+        .fill(bytes)
+        .map_err(LocalBackendError::SecretGeneration)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1134,6 +1174,29 @@ mod tests {
         ManagedStackState::fresh(DIGEST_IMAGE, 4400, channel, docker_target()).expect("fresh state")
     }
 
+    #[derive(Default)]
+    struct SequenceEntropy {
+        next: u8,
+    }
+
+    impl EntropySource for SequenceEntropy {
+        fn fill(&mut self, bytes: &mut [u8]) -> Result<(), String> {
+            for byte in bytes {
+                *byte = self.next;
+                self.next = self.next.wrapping_add(1);
+            }
+            Ok(())
+        }
+    }
+
+    struct FailingEntropy;
+
+    impl EntropySource for FailingEntropy {
+        fn fill(&mut self, _bytes: &mut [u8]) -> Result<(), String> {
+            Err("deterministic entropy failure".to_string())
+        }
+    }
+
     #[test]
     fn managed_assets_define_the_required_stack() {
         let temp = tempfile::tempdir().expect("temp dir");
@@ -1301,6 +1364,50 @@ mod tests {
     }
 
     #[test]
+    fn generated_credentials_use_the_injectable_entropy_boundary() {
+        let mut entropy = SequenceEntropy::default();
+        let token = ApiToken::generate_with(&mut entropy).expect("generate token");
+        let secrets = RuntimeSecrets::generate_with(&mut entropy).expect("generate secrets");
+
+        let token_entropy: Vec<_> = (0_u8..32).collect();
+        let postgres_entropy: Vec<_> = (32_u8..64).collect();
+        let secret_key_entropy: Vec<_> = (64_u8..128).collect();
+
+        assert_eq!(token.as_str(), format!("sac_{}", to_hex(&token_entropy)));
+        assert_eq!(secrets.postgres_password(), to_hex(&postgres_entropy));
+        assert_eq!(secrets.secret_key_base(), to_hex(&secret_key_entropy));
+    }
+
+    #[test]
+    fn generated_account_password_uses_the_injectable_entropy_boundary() {
+        let installation_id =
+            Uuid::parse_str("00112233-4455-6677-8899-aabbccddeeff").expect("valid installation ID");
+        let mut entropy = SequenceEntropy::default();
+
+        let account = SeedAccount::generated_for_installation_with(installation_id, &mut entropy)
+            .expect("generate account");
+
+        assert_eq!(
+            account.email(),
+            "local-00112233445566778899aabbccddeeff@vertebrae.local"
+        );
+        assert_eq!(account.username(), "local_00112233445566778899aabb");
+        assert_eq!(account.password(), to_hex(&(0_u8..32).collect::<Vec<_>>()));
+    }
+
+    #[test]
+    fn entropy_failures_are_mapped_to_redacted_secret_generation_errors() {
+        let mut entropy = FailingEntropy;
+        let error = ApiToken::generate_with(&mut entropy).expect_err("token generation fails");
+
+        assert!(matches!(
+            error,
+            LocalBackendError::SecretGeneration(message)
+                if message == "deterministic entropy failure"
+        ));
+    }
+
+    #[test]
     fn generated_api_tokens_are_sac_prefixed_and_distinct() {
         let first = ApiToken::generate().expect("generate first API token");
         let second = ApiToken::generate().expect("generate second API token");
@@ -1338,6 +1445,14 @@ mod tests {
                     .mode()
                     & 0o777,
                 0o600
+            );
+            assert_eq!(
+                fs::metadata(&paths.root)
+                    .expect("root metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
             );
         }
     }
@@ -1468,7 +1583,7 @@ mod tests {
         paths.save_state(&state).expect("save state");
 
         assert_eq!(paths.load_state().expect("load state"), Some(state));
-        let json = fs::read_to_string(paths.state_file).expect("read state");
+        let json = fs::read_to_string(&paths.state_file).expect("read state");
         assert!(!json.contains("POSTGRES_PASSWORD"));
         assert!(!json.contains("SECRET_KEY_BASE"));
         for expected in [
@@ -1496,6 +1611,35 @@ mod tests {
             names,
             ["compose.yaml", "runtime.env", "seed.exs", "state.json"]
         );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&paths.state_file)
+                    .expect("state metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            assert_eq!(
+                fs::metadata(&paths.compose_file)
+                    .expect("compose metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            assert_eq!(
+                fs::metadata(&paths.seed_file)
+                    .expect("seed metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
     }
 
     #[test]

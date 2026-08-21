@@ -95,6 +95,33 @@ npm run test:watch
 npm run test:coverage
 ```
 
+### GUI-managed Docker smoke tests
+
+The local-backend Docker smoke tests are ignored by default because they pull an
+actual GHCR Sacrum image and create temporary Docker resources. Run them only in
+an isolated Docker environment with official digest-pinned image references:
+
+```bash
+VERTEBRAE_TEST_SACRUM_IMAGE_REF='<official-sacrum-digest>' \
+VERTEBRAE_TEST_SACRUM_UPDATE_IMAGE_REF='<second-official-sacrum-digest>' \
+cargo test -p gui --lib docker_smoke_fresh_stack_covers_provisioning_persistence_and_updates \
+  -- --ignored --nocapture
+```
+
+This verifies PostgreSQL 18 logical replication, migrations, `/healthz`, generated
+secrets and token seeding, log redaction, controller restart persistence, and an
+approved Sacrum image update without database recreation. A separate Unix-only
+adoption smoke test exercises the legacy `scripts/dev-backend.sh` contract. It
+requires the explicit opt-in below, starts only when no `vertebrae-dev` stack or
+volume already exists, and destroys the test-created legacy volume when complete:
+
+```bash
+VERTEBRAE_TEST_ALLOW_LEGACY_STACK=1 \
+VERTEBRAE_TEST_SACRUM_IMAGE_REF='<official-sacrum-digest>' \
+cargo test -p gui --lib docker_smoke_adopts_dev_backend_without_reseeding_or_replacing_v17_volume \
+  -- --ignored --nocapture
+```
+
 ## Linting and Formatting
 
 ```bash

@@ -71,7 +71,7 @@ wait_for_health() {
 }
 
 do_seed() {
-  echo "==> Seeding user + token (email=$SEED_EMAIL token=$SEED_TOKEN) ..."
+  echo "==> Seeding user + token (email=$SEED_EMAIL) ..."
   compose run --rm seeder
 }
 
@@ -139,8 +139,8 @@ cmd_provision() {
   cat <<EOF
 
 Provisioned.
-  user:  $SEED_EMAIL  (password: $SEED_PASSWORD)
-  token: $SEED_TOKEN
+  user:  $SEED_EMAIL  (credentials configured)
+  token: configured in the app config (not printed)
   app config now points at $SACRUM_URL
 
   - Launch the GUI (cd crates/gui && npm run tauri:dev) and create your project

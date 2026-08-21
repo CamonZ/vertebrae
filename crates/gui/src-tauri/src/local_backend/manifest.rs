@@ -150,7 +150,7 @@ mod tests {
     #[tokio::test]
     async fn fetches_and_validates_the_channel_manifest() {
         let server = MockServer::start().await;
-        let image_ref = format!("{DIGEST_IMAGE}");
+        let image_ref = DIGEST_IMAGE.to_string();
         Mock::given(method("GET"))
             .and(path("/backend-master/latest.json"))
             .respond_with(
@@ -176,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_a_manifest_for_the_wrong_channel() {
         let server = MockServer::start().await;
-        let image_ref = format!("{DIGEST_IMAGE}");
+        let image_ref = DIGEST_IMAGE.to_string();
         Mock::given(method("GET"))
             .and(path("/backend-release/latest.json"))
             .respond_with(
@@ -214,5 +214,73 @@ mod tests {
         let same_manifest: BackendManifest =
             serde_json::from_value(manifest_json("master", DIGEST_IMAGE)).expect("valid manifest");
         assert!(!same_manifest.requires_image_update(&state));
+    }
+
+    #[test]
+    fn rejects_invalid_manifest_contracts_before_comparing_digests() {
+        type ManifestCase = (serde_json::Value, fn(&mut BackendManifest), &'static str);
+        let cases: [ManifestCase; 4] = [
+            (
+                manifest_json("master", DIGEST_IMAGE),
+                |manifest: &mut BackendManifest| manifest.schema = 2,
+                "unsupported schema",
+            ),
+            (
+                manifest_json("master", "ghcr.io/camonz/sacrum:latest"),
+                |_manifest: &mut BackendManifest| {},
+                "official digest-pinned image",
+            ),
+            (
+                manifest_json("master", DIGEST_IMAGE),
+                |manifest: &mut BackendManifest| manifest.platforms.clear(),
+                "platforms must contain",
+            ),
+            (
+                manifest_json("release", DIGEST_IMAGE),
+                |_manifest: &mut BackendManifest| {},
+                "expected channel master",
+            ),
+        ];
+
+        for (value, mutate, expected) in cases {
+            let mut manifest: BackendManifest =
+                serde_json::from_value(value).expect("valid manifest shape");
+            mutate(&mut manifest);
+            let error = manifest
+                .validate(BackendImageChannel::BackendMaster)
+                .expect_err("invalid manifest must be rejected");
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn maps_manifest_http_failures_and_oversized_payloads() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/backend-master/latest.json"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let error = BackendManifestClient::new(server.uri())
+            .fetch(BackendImageChannel::BackendMaster)
+            .await
+            .expect_err("HTTP failure must be reported");
+        assert!(
+            matches!(error, LocalBackendError::BackendManifestFetch { reason, .. } if reason.contains("503"))
+        );
+
+        let oversized = "{".to_string() + &"x".repeat(MANIFEST_MAX_BYTES);
+        Mock::given(method("GET"))
+            .and(path("/backend-release/latest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(oversized))
+            .mount(&server)
+            .await;
+        let error = BackendManifestClient::new(server.uri())
+            .fetch(BackendImageChannel::BackendRelease)
+            .await
+            .expect_err("oversized response must be rejected");
+        assert!(
+            matches!(error, LocalBackendError::BackendManifestInvalid(message) if message.contains("exceeds"))
+        );
     }
 }
