@@ -395,6 +395,11 @@ describe("ChatWindowManager", () => {
       projectPath: "/test/project",
       messages: [
         {
+          kind: "assistant",
+          text: "spawning nested reviewer",
+          timestamp: "2026-01-09T23:59:59Z",
+        },
+        {
           kind: "tool_call",
           toolName: "Agent",
           toolId: "agent-1",
@@ -871,6 +876,190 @@ describe("ChatWindowManager", () => {
     expect(miniPanel.getByText("Current Project Chat")).toBeInTheDocument();
     expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
     expect(miniPanel.getByText("No Project Chat")).toBeInTheDocument();
+  });
+
+  it("searches older sessions beyond the seven-row cap and keeps selection and deletion in sync", async () => {
+    const user = userEvent.setup();
+    const makePersistedSession = (
+      id: string,
+      title: string,
+      projectPath: string | null,
+      updatedAt: string,
+      overrides: Partial<ChatSession> = {}
+    ) => {
+      const session = createSession({
+        id,
+        label: title,
+        title,
+        projectPath,
+        messages: [
+          {
+            kind: "user",
+            text: `${title} message`,
+            timestamp: updatedAt,
+          },
+        ],
+        ...overrides,
+      });
+      persistLocalChatSession(session);
+      return session;
+    };
+
+    const active = createSession({
+      id: "current-active",
+      label: "Current active",
+      title: "Current active",
+      projectPath: "/test/project",
+      messages: [
+        {
+          kind: "tool_call",
+          toolName: "Agent",
+          toolId: "agent-1",
+          input: JSON.stringify({
+            description: "Inspect current project",
+            receiver_agents: [
+              {
+                thread_id: "agent-thread-1",
+                agent_nickname: "Nested reviewer",
+                agent_role: "reviewer",
+              },
+            ],
+          }),
+          timestamp: "2026-01-10T00:00:00Z",
+        },
+        {
+          kind: "assistant",
+          text: "nested reviewer started",
+          timestamp: "2026-01-10T00:00:01Z",
+          parentToolUseId: "agent-1",
+        },
+      ],
+    });
+    persistLocalChatSession(active);
+    const currentRecent = Array.from({ length: 6 }, (_, index) =>
+      makePersistedSession(
+        `current-recent-${index + 2}`,
+        `Current recent ${index + 2}`,
+        "/test/project",
+        `2026-01-${String(9 - index).padStart(2, "0")}T00:00:00Z`
+      )
+    );
+    const older = makePersistedSession(
+      "current-older-match",
+      "Older needle session",
+      "/test/project",
+      "2026-01-01T00:00:00Z"
+    );
+    makePersistedSession(
+      "nested-hidden",
+      "Nested hidden thread",
+      "/test/project",
+      "2026-01-11T00:00:00Z",
+      { providerResumeId: "agent-thread-1" }
+    );
+    makePersistedSession(
+      "other-project",
+      "Other project chat",
+      "/old/project",
+      "2026-01-03T00:00:00Z"
+    );
+    makePersistedSession(
+      "fallback-project",
+      "Fallback project chat",
+      null,
+      "2026-01-02T00:00:00Z"
+    );
+
+    useChatStore.setState({
+      sessions: {
+        [active.id]: active,
+        [currentRecent[0].id]: currentRecent[0],
+      },
+      activeSessionId: active.id,
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
+
+    await waitFor(() => {
+      expect(
+        miniPanel
+          .getAllByRole("heading", { level: 3 })
+          .map((heading) => heading.textContent)
+      ).toEqual(["test-project", "old-project", "Unknown project"]);
+    });
+    const currentGroup = within(
+      miniPanel.getByRole("region", { name: "test-project chats" })
+    );
+    expect(
+      currentGroup.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(7);
+    expect(
+      currentGroup.getByRole("button", { name: "Show all (1 more)" })
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      currentGroup.queryByRole("button", {
+        name: "Load local chat Nested hidden thread into active pane",
+      })
+    ).not.toBeInTheDocument();
+    const search = miniPanel.getByRole("searchbox", {
+      name: "Search local chats",
+    });
+    await user.type(search, "needle");
+    await waitFor(() => {
+      expect(
+        currentGroup.getByRole("button", {
+          name: "Load local chat Older needle session into active pane",
+        })
+      ).toBeInTheDocument();
+    });
+    expect(
+      currentGroup.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(1);
+
+    await user.click(
+      currentGroup.getByRole("button", {
+        name: "Load local chat Older needle session into active pane",
+      })
+    );
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(older.id);
+    });
+
+    await user.click(
+      currentGroup.getByRole("button", {
+        name: "Delete local chat Older needle session",
+      })
+    );
+    await waitFor(() => {
+      expect(loadPersistedLocalChatSession(older.id)).toBeNull();
+      expect(
+        miniPanel.getByTestId("local-chat-history-no-results")
+      ).toHaveTextContent("No local chats match “needle”.");
+    });
+
+    await user.click(miniPanel.getByRole("button", { name: "Clear search" }));
+    const restoredCurrentGroup = () =>
+      within(miniPanel.getByRole("region", { name: "test-project chats" }));
+    await waitFor(() => {
+      expect(
+        restoredCurrentGroup().getAllByRole("button", {
+          name: /^Load local chat/,
+        })
+      ).toHaveLength(7);
+      expect(
+        restoredCurrentGroup().queryByRole("button", {
+          name: "Show all (1 more)",
+        })
+      ).not.toBeInTheDocument();
+      expect(
+        restoredCurrentGroup().queryByRole("button", {
+          name: "Load local chat Older needle session into active pane",
+        })
+      ).not.toBeInTheDocument();
+    });
   });
 
   it("keeps project load failures scoped to current-project chats", async () => {
@@ -2065,5 +2254,4 @@ describe("ChatWindowManager", () => {
       isMaximized: false,
     });
   });
-
 });
