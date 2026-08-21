@@ -3,10 +3,12 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { LocalChatHarnessKind } from "../../bindings";
 import {
   localChatSessionDisplayTitle,
+  normalizeLocalChatSessionQuery,
   type LocalChatSessionGroup,
 } from "../../utils/localChatSessionGroups";
 import { formatRelative } from "../../utils/formatRelative";
 import { harnessDisplayName } from "./chatHelpers";
+import { SearchInput } from "../molecules/SearchInput";
 import { scrollToSpawn, type SpawnOutlineItem } from "./sessionListUtils";
 import { SessionGroupList } from "./SessionGroupList";
 import { SessionDeleteButton } from "./SessionDeleteButton";
@@ -16,6 +18,7 @@ interface LocalChatMiniPanelProps {
   activeProviderThreadId?: string | null;
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
+  hasLocalChatSessions: boolean;
   deletingSessionId: string | null;
   deleteError: string | null;
   projectWarning: string | null;
@@ -37,6 +40,9 @@ interface LocalChatMiniPanelProps {
 export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   activeSessionId,
   activeProviderThreadId,
+  searchQuery,
+  onSearchQueryChange,
+  hasLocalChatSessions,
   deletingSessionId,
   deleteError,
   projectWarning,
@@ -46,14 +52,24 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   onSelectAgent,
   onDelete,
 }: LocalChatMiniPanelProps) {
-  const sessionItems = useMemo(
-    () => sessionGroups.flatMap((group) => group.sessions),
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const visibleSessionGroups = useMemo(
+    () => sessionGroups.filter((group) => group.sessions.length > 0),
     [sessionGroups]
+  );
+  const sessionItems = useMemo(
+    () => visibleSessionGroups.flatMap((group) => group.sessions),
+    [visibleSessionGroups]
   );
   const sessionButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [keyboardSessionId, setKeyboardSessionId] = useState<string | null>(
     activeSessionId
   );
+  const hasSearchQuery = normalizeLocalChatSessionQuery(searchQuery) !== "";
+
+  const focusSearchInput = useCallback(() => {
+    searchInputRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     if (sessionItems.length === 0) {
@@ -76,6 +92,13 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 
   const handleHistoryKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLElement>) => {
+      if (
+        (event.target as HTMLElement).closest(
+          "[data-mini-history-search], [data-mini-delete]"
+        )
+      ) {
+        return;
+      }
       if (sessionItems.length === 0) return;
       const currentIndex = Math.max(
         0,
@@ -100,7 +123,6 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
       }
 
       if (event.key !== "Enter" && event.key !== " ") return;
-      if ((event.target as HTMLElement).closest("[data-mini-delete]")) return;
       event.preventDefault();
       const selectedSessionId =
         keyboardSessionId ??
@@ -127,6 +149,28 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     >
       <div className="hc-mini-history-head">
         <span>Chats</span>
+        <label
+          className="hc-mini-history-search-label"
+          htmlFor="local-chat-session-search"
+        >
+          Search chats
+        </label>
+        <div
+          data-mini-history-search
+          className="hc-mini-history-search"
+          onClick={focusSearchInput}
+        >
+          <SearchInput
+            ref={searchInputRef}
+            id="local-chat-session-search"
+            value={searchQuery}
+            onChange={onSearchQueryChange}
+            debounceMs={0}
+            placeholder="Search chats…"
+            aria-label="Search local chats"
+            data-testid="local-chat-session-search"
+          />
+        </div>
       </div>
       <div data-testid="local-chat-history-drawer">
         {deleteError && (
@@ -139,12 +183,25 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
             {projectWarning}
           </div>
         )}
-        {sessionGroups.length === 0 ? (
-          <div className="hc-mini-history-empty">No local chats yet.</div>
+        {visibleSessionGroups.length === 0 ? (
+          <div
+            className="hc-mini-history-empty"
+            data-testid={
+              hasSearchQuery && hasLocalChatSessions
+                ? "local-chat-history-no-results"
+                : "local-chat-history-empty"
+            }
+            role="status"
+            aria-live="polite"
+          >
+            {hasSearchQuery && hasLocalChatSessions
+              ? `No local chats match “${searchQuery.trim()}”.`
+              : "No local chats yet."}
+          </div>
         ) : (
           <div className="hc-mini-history-list">
             <SessionGroupList
-              sessionGroups={sessionGroups}
+              sessionGroups={visibleSessionGroups}
               activeSessionId={activeSessionId}
               deletingSessionId={deletingSessionId}
               renderGroup={(group, rows) => (

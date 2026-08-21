@@ -28,6 +28,8 @@ interface UseLocalChatHistoryResult {
   loadCurrentProjectPath: () => Promise<string | null>;
   /** Persist a freshly-resolved project path + scope generation. */
   commitCurrentProjectPath: (projectPath: string | null) => void;
+  /** Grouped local chat summaries before applying the active search query. */
+  allLocalSessionGroups: LocalChatSessionGroup[];
   /** Grouped, project-scoped local chat summaries for the history views. */
   localSessionGroups: LocalChatSessionGroup[];
   /** Raw search query controlled by the expanded history surface. */
@@ -143,22 +145,28 @@ export function useLocalChatHistory({
       ? projectGroupingState.projects
       : EMPTY_SAVED_PROJECTS;
 
-  const localSessionGroups = useMemo(() => {
+  const { allLocalSessionGroups, localSessionGroups } = useMemo(() => {
     // Persisted-only deletes need a React-side invalidation even when the
     // in-memory session map is unchanged.
     void historyRevision;
     const summaries = listLocalSessions(
       projectsLoadFailed ? currentProjectPath : undefined
     );
-    if (!sessionChangeToken && summaries.length === 0) return [];
-    return filterLocalChatSessionGroups(
-      groupLocalChatSessionsByProject(
-        summaries,
-        savedProjects,
-        currentProjectPath
-      ),
-      sessionQuery
+    if (!sessionChangeToken && summaries.length === 0) {
+      return { allLocalSessionGroups: [], localSessionGroups: [] };
+    }
+    const allLocalSessionGroups = groupLocalChatSessionsByProject(
+      summaries,
+      savedProjects,
+      currentProjectPath
     );
+    return {
+      allLocalSessionGroups,
+      localSessionGroups: filterLocalChatSessionGroups(
+        allLocalSessionGroups,
+        sessionQuery
+      ),
+    };
   }, [
     currentProjectPath,
     historyRevision,
@@ -181,6 +189,7 @@ export function useLocalChatHistory({
   return {
     loadCurrentProjectPath,
     commitCurrentProjectPath,
+    allLocalSessionGroups,
     localSessionGroups,
     sessionQuery,
     setSessionQuery,

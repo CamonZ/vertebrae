@@ -134,6 +134,7 @@ export function ChatWindowManager() {
   const {
     loadCurrentProjectPath,
     commitCurrentProjectPath,
+    allLocalSessionGroups,
     localSessionGroups,
     sessionQuery,
     setSessionQuery,
@@ -153,6 +154,17 @@ export function ChatWindowManager() {
         }))
         .filter((group) => group.sessions.length > 0),
     [childProviderThreadIds, localSessionGroups]
+  );
+  const hasLocalChatSessions = useMemo(
+    () =>
+      allLocalSessionGroups.some((group) =>
+        group.sessions.some(
+          (session) =>
+            !session.providerResumeId ||
+            !childProviderThreadIds.has(session.providerResumeId)
+        )
+      ),
+    [allLocalSessionGroups, childProviderThreadIds]
   );
 
   const {
@@ -311,10 +323,22 @@ export function ChatWindowManager() {
 
   // Join the shared glass-panel focus model so Escape closes whichever panel is
   // focused. The chat is globally mounted; it's "open" only while showing.
+  const shouldHandleChatPanelEscape = useCallback(() => {
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLInputElement &&
+      activeElement.closest("[data-mini-history-search]") &&
+      activeElement.value
+    ) {
+      return false;
+    }
+    return true;
+  }, []);
   const { isFocused, focusProps } = useGlassPanel({
     id: "chat",
     isOpen: open,
     onClose: closeChatPanel,
+    shouldHandleEscape: shouldHandleChatPanelEscape,
   });
 
   // Defer unmount so the panel can drill back out to the edge on close. Sessions
@@ -374,6 +398,7 @@ export function ChatWindowManager() {
               activeProviderThreadId={activeSession?.providerResumeId ?? null}
               searchQuery={sessionQuery}
               onSearchQueryChange={setSessionQuery}
+              hasLocalChatSessions={hasLocalChatSessions}
               sessionGroups={visibleLocalSessionGroups}
               spawnOutlineBySessionId={spawnOutlineBySessionId}
               projectWarning={projectGroupingWarning}

@@ -2739,8 +2739,9 @@ html.light ::selection {
 }
 .hc-panel .hc-mini-history-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--s-1);
   min-height: 42px;
   padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
   border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
@@ -2749,6 +2750,13 @@ html.light ::selection {
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
   color: var(--fg-mute);
+}
+.hc-panel .hc-mini-history-search-label {
+  font-size: var(--text-10);
+  letter-spacing: 0.04em;
+}
+.hc-panel .hc-mini-history-search {
+  width: 100%;
 }
 .hc-panel .hc-mini-history-error {
   border-bottom: 1px solid color-mix(in oklch, var(--err) 22%, transparent);
