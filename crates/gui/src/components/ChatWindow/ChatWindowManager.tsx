@@ -11,6 +11,7 @@ import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { usePanelExitTransition } from "../../hooks/usePanelExitTransition";
 import { doCloseSession } from "../../hooks/useLocalChat";
 import { useChatPanelLayout } from "../../hooks/useChatPanelLayout";
+import { useChatHistoryPanelLayout } from "../../hooks/useChatHistoryPanelLayout";
 import { useChatKeyboardShortcuts } from "../../hooks/useChatKeyboardShortcuts";
 import { useLocalChatHistory } from "../../hooks/useLocalChatHistory";
 import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
@@ -131,6 +132,7 @@ export function ChatWindowManager() {
     startResizeDrag,
     collapseMaximized,
   } = useChatPanelLayout({ unsplitPanes });
+  const { historyWidth } = useChatHistoryPanelLayout();
 
   const {
     loadCurrentProjectPath,
@@ -396,6 +398,7 @@ export function ChatWindowManager() {
         <div className="hc-panel-main">
           {isMaximized && (
             <LocalChatMiniPanel
+              width={historyWidth}
               activeSessionId={activeSessionId ?? visiblePanes[0].sessionId}
               activeProviderThreadId={activeSession?.providerResumeId ?? null}
               searchQuery={sessionQuery}

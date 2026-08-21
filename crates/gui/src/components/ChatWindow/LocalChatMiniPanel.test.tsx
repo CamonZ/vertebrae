@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 import type { LocalChatSessionGroup } from "../../utils/localChatSessionGroups";
+import { DEFAULT_HISTORY_WIDTH } from "../../hooks/useChatHistoryPanelLayout";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import type { SpawnOutlineItem } from "./sessionListUtils";
 
@@ -65,6 +66,7 @@ function ControlledPanel({
 
   return (
     <LocalChatMiniPanel
+      width={DEFAULT_HISTORY_WIDTH}
       activeSessionId={sessionGroups[0]?.sessions[0]?.id ?? "active"}
       activeProviderThreadId={null}
       searchQuery={query}
@@ -97,6 +99,7 @@ function DeletingPanel() {
 
   return (
     <LocalChatMiniPanel
+      width={DEFAULT_HISTORY_WIDTH}
       activeSessionId={session.id}
       activeProviderThreadId={null}
       searchQuery={query}
@@ -136,6 +139,7 @@ function ExpandableDeletingPanel() {
 
   return (
     <LocalChatMiniPanel
+      width={DEFAULT_HISTORY_WIDTH}
       activeSessionId={sessions[0].id}
       activeProviderThreadId={null}
       searchQuery=""

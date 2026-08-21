@@ -16,6 +16,7 @@ import { SessionGroupList } from "./SessionGroupList";
 import { SessionDeleteButton } from "./SessionDeleteButton";
 
 interface LocalChatMiniPanelProps {
+  width: number;
   activeSessionId: string;
   activeProviderThreadId?: string | null;
   searchQuery: string;
@@ -40,6 +41,7 @@ interface LocalChatMiniPanelProps {
  * session list.
  */
 export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
+  width,
   activeSessionId,
   activeProviderThreadId,
   searchQuery,
@@ -190,8 +192,10 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   return (
     <aside
       data-testid="local-chat-mini-panel"
+      data-sidebar-width={width}
       aria-label="Local chat threads for active pane"
       className="hc-mini-history"
+      style={{ width: `${width}px` }}
       tabIndex={-1}
       onKeyDown={handleHistoryKeyDown}
     >
