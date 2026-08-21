@@ -142,7 +142,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     (event: ReactKeyboardEvent<HTMLElement>) => {
       if (
         (event.target as HTMLElement).closest(
-          "[data-mini-history-search], [data-mini-delete]"
+          "[data-mini-history-search], [data-mini-delete], [data-mini-history-toggle]"
         )
       ) {
         return;
@@ -256,7 +256,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                 const allSessionCount =
                   group.allSessions?.length ?? group.sessions.length;
                 const isExpanded = expandedGroupIds.has(group.id);
-                const groupRowsId = `local-chat-history-group-${group.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+                const groupRowsId = `local-chat-history-group-${encodeURIComponent(group.id)}`;
                 return (
                   <section
                     key={group.id}
@@ -271,6 +271,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                       <button
                         type="button"
                         className="hc-mini-history-toggle"
+                        data-mini-history-toggle
                         aria-expanded={isExpanded}
                         aria-controls={groupRowsId}
                         onClick={() => toggleGroupExpansion(group.id)}
