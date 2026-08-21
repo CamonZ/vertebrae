@@ -124,7 +124,14 @@ pub(super) fn claude_init_tools(object: &Map<String, Value>) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn rate_limit_failure_message(object: &Map<String, Value>) -> Option<String> {
+pub(super) enum RateLimitClassification {
+    Advisory(String),
+    Fatal(String),
+}
+
+pub(super) fn classify_rate_limit_event(
+    object: &Map<String, Value>,
+) -> Option<RateLimitClassification> {
     let info = object.get("rate_limit_info").and_then(Value::as_object);
     let status = info
         .and_then(|info| string(info, "status"))
@@ -144,19 +151,25 @@ pub(super) fn rate_limit_failure_message(object: &Map<String, Value>) -> Option<
             || message.contains("rate_limit")
             || message.contains("too many requests")
     });
-    let status_is_failure = status.is_some_and(|status| {
-        !matches!(
-            status.to_ascii_lowercase().as_str(),
-            "allowed" | "ok" | "available" | "active"
-        )
-    });
-    if !message_is_rate_limit && !status_is_failure {
+    let status = status.map(str::to_ascii_lowercase);
+    let status_is_allowed = status
+        .as_deref()
+        .is_some_and(|status| matches!(status, "allowed" | "ok" | "available" | "active"));
+    if !message_is_rate_limit && (status.is_none() || status_is_allowed) {
         return None;
     }
-    Some(
-        message
-            .map(str::to_owned)
-            .or_else(|| status.map(|status| format!("Claude rate limit status: {status}")))
-            .unwrap_or_else(|| "Claude rate limit reached".into()),
-    )
+    let is_advisory = status.as_deref() == Some("allowed_warning");
+    let message = message
+        .map(str::to_owned)
+        .or_else(|| {
+            status
+                .as_deref()
+                .map(|status| format!("Claude rate limit status: {status}"))
+        })
+        .unwrap_or_else(|| "Claude rate limit reached".into());
+    Some(if is_advisory {
+        RateLimitClassification::Advisory(message)
+    } else {
+        RateLimitClassification::Fatal(message)
+    })
 }
