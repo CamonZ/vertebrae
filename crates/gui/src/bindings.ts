@@ -85,6 +85,42 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async checkLocalBackendUpdate(): Promise<
+    Result<LocalBackendUpdateStatus, CommandError>
+  > {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("check_local_backend_update"),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async applyApprovedLocalBackendUpdate(
+    approved: boolean,
+    channel: string,
+    version: string,
+    build: string,
+    imageRef: string
+  ): Promise<Result<LocalBackendUpdateResult, CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("apply_approved_local_backend_update", {
+          approved,
+          channel,
+          version,
+          build,
+          imageRef,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   /**
    * Initialize a local project from the GUI without shelling out to `vtb init`.
    */
@@ -1792,6 +1828,25 @@ export type LocalBackendSetupResult = {
   adoption_message: string | null;
 };
 export type LocalBackendSetupStatus = "ready" | "adoption_required";
+export type LocalBackendUpdateRelease = {
+  channel: string;
+  version: string;
+  build: string;
+  image_ref: string;
+};
+export type LocalBackendUpdateStatus = {
+  configured: boolean;
+  channel: string | null;
+  current_image_ref: string | null;
+  latest: LocalBackendUpdateRelease | null;
+  available: boolean;
+};
+export type LocalBackendUpdateResult = {
+  channel: string;
+  version: string;
+  build: string;
+  image_ref: string;
+};
 export type LocalChatCompactionEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;

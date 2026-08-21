@@ -24,8 +24,14 @@ import {
   type GuiUpdateInfo,
   type GuiUpdateApplyState,
   type GuiUpdateState,
+  type LocalBackendUpdateApplyState,
+  type LocalBackendUpdateInfo,
 } from "../stores/guiUpdateStore";
-import { applyApprovedGuiUpdate, relaunchGuiApplication } from "../update";
+import {
+  applyApprovedGuiUpdate,
+  applyApprovedLocalBackendUpdate,
+  relaunchGuiApplication,
+} from "../update";
 import { useUIStore } from "../stores/uiStore";
 import {
   hasStaleModelDefault,
@@ -613,6 +619,179 @@ function UpdateApplyStatus({ apply }: { apply: GuiUpdateApplyState }) {
   );
 }
 
+function imageDigest(imageRef: string): string {
+  const digest = imageRef.split("@sha256:")[1];
+  return digest ? `sha256:${digest.slice(0, 12)}…` : imageRef;
+}
+
+function LocalBackendUpdateApplyStatus({
+  apply,
+}: {
+  apply: LocalBackendUpdateApplyState;
+}) {
+  if (apply.status === "idle") return null;
+  if (apply.status === "applying") {
+    return (
+      <UpdateStateMessage
+        intent="status"
+        testId="settings-local-backend-update-applying"
+      >
+        Applying the approved local backend update. Existing backend data will
+        be preserved.
+      </UpdateStateMessage>
+    );
+  }
+  if (apply.status === "error") {
+    return (
+      <UpdateStateMessage
+        intent="alert"
+        testId="settings-local-backend-update-error"
+      >
+        The local backend update could not be applied: {apply.message}
+      </UpdateStateMessage>
+    );
+  }
+
+  return (
+    <UpdateStateMessage
+      intent="status"
+      testId="settings-local-backend-update-result"
+    >
+      The local backend was updated to {apply.result.version} (
+      {apply.result.build}).
+    </UpdateStateMessage>
+  );
+}
+
+function ReviewLocalBackendUpdateDialog({
+  update,
+  onApprove,
+  onClose,
+}: {
+  update: LocalBackendUpdateInfo;
+  onApprove: (update: LocalBackendUpdateInfo) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Review local backend update"
+      variant="sheet"
+      className="max-w-[calc(100vw-2rem)]"
+    >
+      <div className="space-y-5">
+        <p className="text-sm leading-6 text-[var(--color-fg-soft)]">
+          Review the verified local backend release before approving it. No
+          Docker image will be downloaded or restarted until you approve.
+        </p>
+        <dl className="grid gap-3 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 sm:grid-cols-2">
+          <div>
+            <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
+            <dd className="mt-1 text-sm text-[var(--color-fg)]">
+              {channelLabel(update.channel)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-[var(--color-fg-mute)]">
+              Target version
+            </dt>
+            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+              {update.version}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
+            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+              {update.build}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-[var(--color-fg-mute)]">
+              Image digest
+            </dt>
+            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+              {imageDigest(update.imageRef)}
+            </dd>
+          </div>
+        </dl>
+        <div className="flex flex-col-reverse gap-2 border-t border-[var(--color-line)] pt-4 sm:flex-row sm:justify-end">
+          <Button
+            variant="ghost"
+            onClick={onClose}
+            data-testid="settings-review-local-backend-update-cancel"
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => {
+              onApprove(update);
+              onClose();
+            }}
+            data-testid="settings-review-local-backend-update-approve"
+          >
+            Approve backend update
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function LocalBackendUpdateSection({
+  update,
+  onReview,
+}: {
+  update: LocalBackendUpdateInfo;
+  onReview: () => void;
+}) {
+  return (
+    <article
+      className="mt-7 rounded-[var(--radius-lg)] border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] p-5 sm:p-6"
+      data-testid="settings-local-backend-update-card"
+    >
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-accent)]">
+            Local backend update available
+          </p>
+          <h2 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
+            Backend {update.version}
+          </h2>
+        </div>
+        <Button
+          variant="primary"
+          onClick={onReview}
+          data-testid="settings-review-local-backend-update"
+        >
+          Review backend update
+        </Button>
+      </div>
+      <dl className="mt-6 grid gap-4 border-y border-[var(--color-line)] py-4 sm:grid-cols-3">
+        <div>
+          <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
+          <dd className="mt-1 text-sm text-[var(--color-fg)]">
+            {channelLabel(update.channel)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-[var(--color-fg-mute)]">Current image</dt>
+          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            {imageDigest(update.currentImageRef)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
+          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            {update.build}
+          </dd>
+        </div>
+      </dl>
+    </article>
+  );
+}
+
 function UpdateComponents({ update }: { update: GuiUpdateInfo }) {
   return (
     <section
@@ -804,19 +983,38 @@ function ReviewUpdateDialog({
 function UpdatesSection({
   state,
   onReview,
+  onReviewBackend,
 }: {
   state: GuiUpdateState;
   onReview: () => void;
+  onReviewBackend: () => void;
 }) {
   const update = state.available;
   const showRelease = update !== null && hasAvailableUpdate(state);
   const apply = state.apply ?? { status: "idle" as const };
+  const backendUpdate = state.localBackend.update;
+  const showBackendUpdate = backendUpdate !== null;
+  const backendApply = state.localBackend.apply;
 
   if (apply.status !== "idle") {
     return <UpdateApplyStatus apply={apply} />;
   }
 
-  if (!showRelease) {
+  if (backendApply.status !== "idle") {
+    return <LocalBackendUpdateApplyStatus apply={backendApply} />;
+  }
+
+  if (!showRelease && !showBackendUpdate) {
+    if (state.localBackend.error) {
+      return (
+        <UpdateStateMessage
+          intent="alert"
+          testId="settings-local-backend-updates-failed"
+        >
+          The local backend update check failed: {state.localBackend.error}
+        </UpdateStateMessage>
+      );
+    }
     if (state.checking || state.status === "checking") {
       return (
         <UpdateStateMessage intent="status" testId="settings-updates-loading">
@@ -849,94 +1047,116 @@ function UpdatesSection({
   }
 
   const stale = state.status === "error" || state.status === "stale";
-  const notes = releaseNotes(update);
+  const notes = update ? releaseNotes(update) : null;
   return (
     <div className="mt-8" data-testid="settings-updates-available">
-      {stale && (
+      {state.localBackend.error && (
         <p
           className="mb-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
-          data-testid="settings-updates-stale"
+          data-testid="settings-local-backend-updates-stale"
           role="status"
         >
-          The last check failed. Showing the last verified release.
+          The local backend update check failed. Showing the last verified
+          backend release, if available.
         </p>
       )}
-      {state.checking && (
-        <p
-          className="mb-4 text-xs text-[var(--color-fg-mute)]"
-          data-testid="settings-updates-checking"
-          role="status"
-        >
-          Checking for a newer signed release…
-        </p>
-      )}
-      <article
-        className="rounded-[var(--radius-lg)] border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] p-5 sm:p-6"
-        data-testid="settings-update-card"
-      >
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-accent)]">
-              Release available
+      {showRelease && update && (
+        <>
+          {stale && (
+            <p
+              className="mb-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
+              data-testid="settings-updates-stale"
+              role="status"
+            >
+              The last check failed. Showing the last verified release.
             </p>
-            <h2 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
-              Vertebrae {update.version}
-            </h2>
-          </div>
-          <Button
-            variant="primary"
-            onClick={onReview}
-            data-testid="settings-review-update"
+          )}
+          {state.checking && (
+            <p
+              className="mb-4 text-xs text-[var(--color-fg-mute)]"
+              data-testid="settings-updates-checking"
+              role="status"
+            >
+              Checking for a newer signed release…
+            </p>
+          )}
+          <article
+            className="rounded-[var(--radius-lg)] border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] p-5 sm:p-6"
+            data-testid="settings-update-card"
           >
-            Review update
-          </Button>
-        </div>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-accent)]">
+                  Release available
+                </p>
+                <h2 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
+                  Vertebrae {update.version}
+                </h2>
+              </div>
+              <Button
+                variant="primary"
+                onClick={onReview}
+                data-testid="settings-review-update"
+              >
+                Review update
+              </Button>
+            </div>
 
-        <dl className="mt-6 grid gap-4 border-y border-[var(--color-line)] py-4 sm:grid-cols-4">
-          <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
-            <dd className="mt-1 text-sm text-[var(--color-fg)]">
-              {update.channel ?? GUI_UPDATE_CHANNEL}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">Version</dt>
-            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
-              {update.version}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
-            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
-              {update.build ?? NOT_PROVIDED}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">Published</dt>
-            <dd className="mt-1 text-sm text-[var(--color-fg)]">
-              {publicationDate(update) ?? NOT_PROVIDED}
-            </dd>
-          </div>
-        </dl>
+            <dl className="mt-6 grid gap-4 border-y border-[var(--color-line)] py-4 sm:grid-cols-4">
+              <div>
+                <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
+                <dd className="mt-1 text-sm text-[var(--color-fg)]">
+                  {update.channel ?? GUI_UPDATE_CHANNEL}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-[var(--color-fg-mute)]">Version</dt>
+                <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+                  {update.version}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
+                <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+                  {update.build ?? NOT_PROVIDED}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-[var(--color-fg-mute)]">
+                  Published
+                </dt>
+                <dd className="mt-1 text-sm text-[var(--color-fg)]">
+                  {publicationDate(update) ?? NOT_PROVIDED}
+                </dd>
+              </div>
+            </dl>
 
-        <section
-          className="border-t border-[var(--color-line)] pt-5"
-          aria-labelledby="settings-release-notes-heading"
-          data-testid="settings-release-notes"
-        >
-          <h3
-            id="settings-release-notes-heading"
-            className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]"
-          >
-            Release notes
-          </h3>
-          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--color-fg-soft)]">
-            {notes ?? "No release notes were provided for this release."}
-          </p>
-        </section>
+            <section
+              className="border-t border-[var(--color-line)] pt-5"
+              aria-labelledby="settings-release-notes-heading"
+              data-testid="settings-release-notes"
+            >
+              <h3
+                id="settings-release-notes-heading"
+                className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]"
+              >
+                Release notes
+              </h3>
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--color-fg-soft)]">
+                {notes ?? "No release notes were provided for this release."}
+              </p>
+            </section>
 
-        <UpdateComponents update={update} />
-      </article>
+            <UpdateComponents update={update} />
+          </article>
+        </>
+      )}
+      {showBackendUpdate && backendUpdate && (
+        <LocalBackendUpdateSection
+          update={backendUpdate}
+          onReview={onReviewBackend}
+        />
+      )}
     </div>
   );
 }
@@ -946,9 +1166,13 @@ type SettingsSection = "chat" | "appearance" | "updates";
 export interface SettingsPageProps {
   /** Optional test/integration hook; the default action applies the approved release. */
   onApproveUpdate?: (update: GuiUpdateInfo) => void;
+  onApproveLocalBackendUpdate?: (update: LocalBackendUpdateInfo) => void;
 }
 
-export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
+export function SettingsPage({
+  onApproveUpdate,
+  onApproveLocalBackendUpdate,
+}: SettingsPageProps = {}) {
   const [catalog, setCatalog] = useState<LocalChatHarnessCatalog | null>(null);
   const [externalEditors, setExternalEditors] = useState<LocalFileEditor[]>([]);
   const [externalEditorsLoading, setExternalEditorsLoading] = useState(false);
@@ -960,6 +1184,7 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
   const [savedFeedback, setSavedFeedback] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>("chat");
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [localBackendReviewOpen, setLocalBackendReviewOpen] = useState(false);
   const updateState = useGuiUpdateStore();
   const storageWarning = useLocalChatDefaultsStore(
     (state) => state.storageWarning
@@ -1004,10 +1229,15 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
       })),
     ];
   }, [externalEditor, externalEditors, externalEditorsLoading]);
-  const updateIsAvailable = hasAvailableUpdate(updateState);
+  const updateIsAvailable =
+    hasAvailableUpdate(updateState) || updateState.localBackend.update !== null;
   const approveUpdate =
     onApproveUpdate ??
     ((update: GuiUpdateInfo) => void applyApprovedGuiUpdate(update));
+  const approveLocalBackendUpdate =
+    onApproveLocalBackendUpdate ??
+    ((update: LocalBackendUpdateInfo) =>
+      void applyApprovedLocalBackendUpdate(update));
 
   useEffect(() => {
     if (!savedFeedback) return;
@@ -1245,6 +1475,11 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
                     setReviewOpen(true);
                   }
                 }}
+                onReviewBackend={() => {
+                  if (updateState.localBackend.update) {
+                    setLocalBackendReviewOpen(true);
+                  }
+                }}
               />
             </>
           ) : (
@@ -1335,6 +1570,13 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
             onClose={() => setReviewOpen(false)}
           />
         )}
+      {localBackendReviewOpen && updateState.localBackend.update && (
+        <ReviewLocalBackendUpdateDialog
+          update={updateState.localBackend.update}
+          onApprove={approveLocalBackendUpdate}
+          onClose={() => setLocalBackendReviewOpen(false)}
+        />
+      )}
     </main>
   );
 }

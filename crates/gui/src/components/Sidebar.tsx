@@ -477,7 +477,7 @@ export function Sidebar() {
   const project = useCurrentProject();
   const navigate = useNavigate();
   const hasAvailableGuiUpdate = useGuiUpdateStore(
-    (state) => state.available !== null
+    (state) => state.available !== null || state.localBackend.update !== null
   );
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [addProjectState, setAddProjectState] = useState<AddProjectState>({

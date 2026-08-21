@@ -155,6 +155,8 @@ fn create_builder() -> Builder {
             commands::quit_application,
             // Update diagnostics
             commands::check_gui_update_channels,
+            commands::check_local_backend_update,
+            commands::apply_approved_local_backend_update,
             commands::diagnose_gui_update_check,
             // Installer flow commands (first-run welcome screen)
             install::installation_status,
@@ -386,6 +388,8 @@ mod tests {
             "async closeLocalChatSession(",
             "async inferLocalChatSessionTitle(",
             "async setupLocalBackend(",
+            "async checkLocalBackendUpdate(",
+            "async applyApprovedLocalBackendUpdate(",
         ] {
             assert!(
                 bindings.contains(command),
@@ -414,6 +418,8 @@ mod tests {
             "export type LocalChatSessionError",
             "export type LocalBackendProgressEvent",
             "export type LocalBackendSetupResult",
+            "export type LocalBackendUpdateStatus",
+            "export type LocalBackendUpdateResult",
         ] {
             assert!(
                 bindings.contains(ty),

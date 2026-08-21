@@ -41,4 +41,8 @@ export type {
   GuiUpdateState,
   GuiUpdateStatus,
   GuiUpdateVerificationInfo,
+  LocalBackendUpdateApplyState,
+  LocalBackendUpdateInfo,
+  LocalBackendUpdateResult,
+  LocalBackendUpdateState,
 } from "./guiUpdateStore";

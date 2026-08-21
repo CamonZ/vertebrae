@@ -10,7 +10,11 @@ import { commands } from "./bindings";
 import { useDebugLogger } from "./hooks/useDebugLogger";
 import { useDebugStore } from "./stores/debugStore";
 import { queryClient } from "./query/queryClient";
-import { checkGuiUpdateChannels, createGuiUpdateScheduler } from "./update";
+import {
+  checkGuiUpdateChannels,
+  checkLocalBackendUpdate,
+  createGuiUpdateScheduler,
+} from "./update";
 import { installActionableReferenceClickRecovery } from "./utils/actionableReferenceClickRecovery";
 import { isDebugConsoleShortcut } from "./utils/debugShortcut";
 
@@ -18,7 +22,10 @@ function App() {
   const [booting, setBooting] = useState(true);
   const [status, setStatus] = useState("Loading configuration...");
   const [updateScheduler] = useState(() =>
-    createGuiUpdateScheduler({ checkChannels: checkGuiUpdateChannels })
+    createGuiUpdateScheduler({
+      checkChannels: checkGuiUpdateChannels,
+      checkLocalBackend: checkLocalBackendUpdate,
+    })
   );
 
   // Subscribe to Rust backend logs for the debug console

@@ -9,13 +9,16 @@ import {
   GUI_UPDATE_CHANNEL,
   GUI_UPDATE_INTERVAL_MS,
   applyApprovedGuiUpdate,
+  applyApprovedLocalBackendUpdate,
   checkGuiUpdate,
   checkGuiUpdateChannels,
+  checkLocalBackendUpdate,
   createGuiUpdateScheduler,
   guiUpdateNotificationId,
   notifyGuiUpdateAvailable,
   resetGuiUpdateNotificationDeduplication,
   type GuiUpdateInfo,
+  type LocalBackendUpdateInfo,
 } from "./update";
 import { useNotificationStore } from "./stores";
 
@@ -179,6 +182,79 @@ describe("GUI update checker", () => {
     });
   });
 
+  it("checks the configured local backend without applying an image update", async () => {
+    invokeMock.mockResolvedValue({
+      configured: true,
+      channel: "release",
+      current_image_ref:
+        "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      latest: {
+        channel: "release",
+        version: "0.4.0",
+        build: "backend-build",
+        image_ref:
+          "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      },
+      available: true,
+    });
+
+    await expect(checkLocalBackendUpdate()).resolves.toEqual({
+      configured: true,
+      channel: "release",
+      currentImageRef:
+        "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      update: {
+        channel: "release",
+        currentImageRef:
+          "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        version: "0.4.0",
+        build: "backend-build",
+        imageRef:
+          "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      },
+      error: null,
+    });
+    expect(invokeMock).toHaveBeenCalledWith("check_local_backend_update");
+  });
+
+  it("applies a local backend image only after explicit approval", async () => {
+    const update: LocalBackendUpdateInfo = {
+      channel: "release",
+      currentImageRef: "current-image",
+      version: "0.4.0",
+      build: "backend-build",
+      imageRef: "target-image",
+    };
+    const result = {
+      channel: "release",
+      version: "0.4.0",
+      build: "backend-build",
+      image_ref: "target-image",
+    };
+    invokeMock.mockResolvedValue(result);
+
+    await expect(applyApprovedLocalBackendUpdate(update)).resolves.toEqual({
+      channel: "release",
+      version: "0.4.0",
+      build: "backend-build",
+      image_ref: "target-image",
+    });
+    expect(invokeMock).toHaveBeenCalledWith(
+      "apply_approved_local_backend_update",
+      {
+        approved: true,
+        channel: "release",
+        version: "0.4.0",
+        build: "backend-build",
+        imageRef: "target-image",
+      }
+    );
+    expect(useGuiUpdateStore.getState().localBackend.apply).toEqual({
+      status: "success",
+      result,
+    });
+  });
+
   it("keeps failed apply results retryable and visible", async () => {
     const result = {
       state: "retryable_failure",
@@ -256,6 +332,59 @@ describe("GUI update checker", () => {
         error: "Could not fetch a valid release JSON from the remote",
       },
     ]);
+  });
+
+  it("notifies and stores a local backend update from the scheduler", async () => {
+    const checkChannels = vi.fn().mockResolvedValue([
+      {
+        channel: "release" as const,
+        endpoint: "https://example.test/release/gui-latest.json",
+        available: true,
+        currentVersion: "0.1.0",
+        latestVersion: "0.1.0",
+        update: null,
+        error: null,
+      },
+      {
+        channel: "master" as const,
+        endpoint: "https://example.test/master/gui-latest.json",
+        available: true,
+        currentVersion: "0.1.0",
+        latestVersion: "0.1.0",
+        update: null,
+        error: null,
+      },
+    ]);
+    const checkLocalBackend = vi.fn().mockResolvedValue({
+      configured: true,
+      channel: "release" as const,
+      currentImageRef: "current-image",
+      update: {
+        channel: "release" as const,
+        currentImageRef: "current-image",
+        version: "0.4.0",
+        build: "backend-build",
+        imageRef: "target-image",
+      },
+      error: null,
+    });
+    const scheduler = createGuiUpdateScheduler({
+      checkChannels,
+      checkLocalBackend,
+    });
+
+    scheduler.start();
+    await flushPromises();
+
+    expect(useGuiUpdateStore.getState().localBackend.update).toMatchObject({
+      version: "0.4.0",
+      build: "backend-build",
+    });
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    expect(useNotificationStore.getState().notifications[0]).toMatchObject({
+      message: "Local backend 0.4.0 is available.",
+    });
+    scheduler.stop();
   });
 
   it("selects the valid channel when the preferred channel is unavailable", async () => {

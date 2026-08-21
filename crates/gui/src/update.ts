@@ -9,11 +9,17 @@ import {
   type GuiUpdateChannelState,
   type GuiUpdateInfo,
   type GuiUpdateTransactionResult,
+  type LocalBackendUpdateInfo,
+  type LocalBackendUpdateResult,
 } from "./stores/guiUpdateStore";
 
 export { GUI_UPDATE_CHANNEL } from "./stores/guiUpdateStore";
 export type { GuiUpdateInfo } from "./stores/guiUpdateStore";
 export type { GuiUpdateTransactionResult } from "./stores/guiUpdateStore";
+export type {
+  LocalBackendUpdateInfo,
+  LocalBackendUpdateResult,
+} from "./stores/guiUpdateStore";
 
 export const GUI_UPDATE_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -52,6 +58,50 @@ export async function applyApprovedGuiUpdate(
     useGuiUpdateStore.setState((state) => ({
       ...state,
       apply: { status: "error", message },
+    }));
+    return null;
+  }
+}
+
+export async function applyApprovedLocalBackendUpdate(
+  update: LocalBackendUpdateInfo
+): Promise<LocalBackendUpdateResult | null> {
+  useGuiUpdateStore.setState((state) => ({
+    ...state,
+    localBackend: {
+      ...state.localBackend,
+      apply: { status: "applying" },
+    },
+  }));
+
+  try {
+    const result = await invoke<LocalBackendUpdateResult>(
+      "apply_approved_local_backend_update",
+      {
+        approved: true,
+        channel: update.channel,
+        version: update.version,
+        build: update.build,
+        imageRef: update.imageRef,
+      }
+    );
+    useGuiUpdateStore.setState((state) => ({
+      ...state,
+      localBackend: {
+        ...state.localBackend,
+        update: null,
+        apply: { status: "success", result },
+      },
+    }));
+    return result;
+  } catch (reason) {
+    const message = updateCheckErrorMessage(reason);
+    useGuiUpdateStore.setState((state) => ({
+      ...state,
+      localBackend: {
+        ...state.localBackend,
+        apply: { status: "error", message },
+      },
     }));
     return null;
   }
@@ -142,6 +192,27 @@ interface NativeGuiUpdateChannelStatus {
   error: string | null;
 }
 
+interface NativeLocalBackendUpdateStatus {
+  configured: boolean;
+  channel: GuiUpdateChannel | null;
+  current_image_ref: string | null;
+  latest: {
+    channel: GuiUpdateChannel;
+    version: string;
+    build: string;
+    image_ref: string;
+  } | null;
+  available: boolean;
+}
+
+export interface LocalBackendUpdateCheck {
+  configured: boolean;
+  channel: GuiUpdateChannel | null;
+  currentImageRef: string | null;
+  update: LocalBackendUpdateInfo | null;
+  error: string | null;
+}
+
 function updateFromChannelRelease(
   status: NativeGuiUpdateChannelStatus
 ): GuiUpdateInfo | null {
@@ -205,6 +276,39 @@ export async function checkGuiUpdateChannels(): Promise<
   }));
 }
 
+export async function checkLocalBackendUpdate(): Promise<LocalBackendUpdateCheck> {
+  try {
+    const status = await invoke<NativeLocalBackendUpdateStatus>(
+      "check_local_backend_update"
+    );
+    const latest = status.latest;
+    return {
+      configured: status.configured,
+      channel: status.channel,
+      currentImageRef: status.current_image_ref,
+      update:
+        status.available && latest && status.channel
+          ? {
+              channel: status.channel,
+              currentImageRef: status.current_image_ref ?? "unknown",
+              version: latest.version,
+              build: latest.build,
+              imageRef: latest.image_ref,
+            }
+          : null,
+      error: null,
+    };
+  } catch (reason) {
+    return {
+      configured: true,
+      channel: null,
+      currentImageRef: null,
+      update: null,
+      error: updateCheckErrorMessage(reason),
+    };
+  }
+}
+
 /**
  * Safe one-shot wrapper retained for callers that only need the optional
  * result. The lifecycle scheduler uses the rejecting reader so it can expose
@@ -226,6 +330,7 @@ export interface GuiUpdateSchedulerTimers {
 export interface GuiUpdateSchedulerOptions {
   check?: () => Promise<GuiUpdateInfo | null>;
   checkChannels?: () => Promise<GuiUpdateChannelCheck[]>;
+  checkLocalBackend?: () => Promise<LocalBackendUpdateCheck>;
   intervalMs?: number;
   timers?: GuiUpdateSchedulerTimers;
   reportFailure?: (message: string) => Promise<unknown>;
@@ -237,6 +342,7 @@ export interface GuiUpdateScheduler {
 }
 
 const notifiedGuiUpdateIds = new Set<string>();
+const notifiedLocalBackendUpdateIds = new Set<string>();
 
 function updateCheckErrorMessage(reason: unknown): string {
   if (reason instanceof Error && reason.message) return reason.message;
@@ -268,6 +374,7 @@ export function createGuiUpdateScheduler(
 ): GuiUpdateScheduler {
   const checkUpdate = options.check ?? readGuiUpdate;
   const checkChannels = options.checkChannels;
+  const checkLocalBackend = options.checkLocalBackend;
   const intervalMs = options.intervalMs ?? GUI_UPDATE_INTERVAL_MS;
   const timers = options.timers ?? browserTimers;
   const reportFailure =
@@ -301,6 +408,9 @@ export function createGuiUpdateScheduler(
     try {
       if (checkChannels) {
         const channelChecks = await checkChannels();
+        const localBackendCheck = checkLocalBackend
+          ? await checkLocalBackend()
+          : null;
         if (!isCurrentLifecycle(generation)) return;
 
         const currentState = useGuiUpdateStore.getState();
@@ -342,8 +452,29 @@ export function createGuiUpdateScheduler(
           error: selected.error,
           selectedChannel,
           status,
+          localBackend: localBackendCheck
+            ? {
+                ...state.localBackend,
+                configured: localBackendCheck.error
+                  ? state.localBackend.configured
+                  : localBackendCheck.configured,
+                channel: localBackendCheck.error
+                  ? state.localBackend.channel
+                  : localBackendCheck.channel,
+                currentImageRef: localBackendCheck.error
+                  ? state.localBackend.currentImageRef
+                  : localBackendCheck.currentImageRef,
+                update: localBackendCheck.error
+                  ? state.localBackend.update
+                  : localBackendCheck.update,
+                error: localBackendCheck.error,
+              }
+            : state.localBackend,
         }));
         if (selected.update) notifyGuiUpdateAvailable(selected.update);
+        if (localBackendCheck?.update) {
+          notifyLocalBackendUpdateAvailable(localBackendCheck.update);
+        }
         return;
       }
 
@@ -467,7 +598,39 @@ export function guiUpdateNotificationId(update: GuiUpdateInfo): string {
   return `gui-update-${update.channel ?? GUI_UPDATE_CHANNEL}-${update.version}`;
 }
 
+export function localBackendUpdateNotificationId(
+  update: LocalBackendUpdateInfo
+): string {
+  return `local-backend-update-${update.channel}-${update.version}-${update.build}`;
+}
+
+export function notifyLocalBackendUpdateAvailable(
+  update: LocalBackendUpdateInfo
+): void {
+  const entityId = localBackendUpdateNotificationId(update);
+  const { notifications, addNotification } = useNotificationStore.getState();
+  if (notifiedLocalBackendUpdateIds.has(entityId)) return;
+  if (
+    notifications.some(
+      (notification) =>
+        notification.entity === "application" &&
+        notification.entityId === entityId
+    )
+  ) {
+    return;
+  }
+
+  addNotification({
+    message: `Local backend ${update.version} is available.`,
+    type: "info",
+    entity: "application",
+    entityId,
+  });
+  notifiedLocalBackendUpdateIds.add(entityId);
+}
+
 /** Reset session deduplication between isolated consumers/tests. */
 export function resetGuiUpdateNotificationDeduplication(): void {
   notifiedGuiUpdateIds.clear();
+  notifiedLocalBackendUpdateIds.clear();
 }

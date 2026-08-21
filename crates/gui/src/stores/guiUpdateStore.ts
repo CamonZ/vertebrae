@@ -59,6 +59,36 @@ export interface GuiUpdateInfo {
   verification?: GuiUpdateVerificationInfo;
 }
 
+export interface LocalBackendUpdateInfo {
+  channel: GuiUpdateChannel;
+  currentImageRef: string;
+  version: string;
+  build: string;
+  imageRef: string;
+}
+
+export interface LocalBackendUpdateResult {
+  channel: string;
+  version: string;
+  build: string;
+  imageRef: string;
+}
+
+export type LocalBackendUpdateApplyState =
+  | { status: "idle" }
+  | { status: "applying" }
+  | { status: "success"; result: LocalBackendUpdateResult }
+  | { status: "error"; message: string };
+
+export interface LocalBackendUpdateState {
+  configured: boolean;
+  channel: GuiUpdateChannel | null;
+  currentImageRef: string | null;
+  update: LocalBackendUpdateInfo | null;
+  error: string | null;
+  apply: LocalBackendUpdateApplyState;
+}
+
 export type GuiUpdateComponentState =
   | "pending"
   | "downloaded"
@@ -145,6 +175,7 @@ export interface GuiUpdateState {
   /** Channel currently shown by Settings > Updates. */
   selectedChannel: GuiUpdateChannel;
   apply: GuiUpdateApplyState;
+  localBackend: LocalBackendUpdateState;
 }
 
 function initialChannelState(): GuiUpdateChannelState {
@@ -176,6 +207,14 @@ export const initialGuiUpdateState: GuiUpdateState = {
   channels: initialChannelStates(),
   selectedChannel: GUI_UPDATE_CHANNEL,
   apply: { status: "idle" },
+  localBackend: {
+    configured: false,
+    channel: null,
+    currentImageRef: null,
+    update: null,
+    error: null,
+    apply: { status: "idle" },
+  },
 };
 
 export const useGuiUpdateStore = create<GuiUpdateState>()(() => ({
