@@ -2,8 +2,10 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { LocalChatHarnessKind } from "../../bindings";
 import {
+  LOCAL_CHAT_SESSION_ROW_LIMIT,
   localChatSessionDisplayTitle,
   normalizeLocalChatSessionQuery,
+  projectLocalChatSessionGroups,
   type LocalChatSessionGroup,
 } from "../../utils/localChatSessionGroups";
 import { formatRelative } from "../../utils/formatRelative";
@@ -54,12 +56,58 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 }: LocalChatMiniPanelProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const visibleSessionGroups = useMemo(
-    () => sessionGroups.filter((group) => group.sessions.length > 0),
+    () =>
+      projectLocalChatSessionGroups(
+        sessionGroups.filter((group) => group.sessions.length > 0)
+      ),
     [sessionGroups]
   );
-  const sessionItems = useMemo(
-    () => visibleSessionGroups.flatMap((group) => group.sessions),
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const expandableGroupIds = useMemo(
+    () =>
+      new Set(
+        visibleSessionGroups
+          .filter(
+            (group) =>
+              (group.allSessions?.length ?? group.sessions.length) >
+              LOCAL_CHAT_SESSION_ROW_LIMIT
+          )
+          .map((group) => group.id)
+      ),
     [visibleSessionGroups]
+  );
+  useEffect(() => {
+    setExpandedGroupIds((current) => {
+      const next = new Set(
+        [...current].filter((groupId) => expandableGroupIds.has(groupId))
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [expandableGroupIds]);
+  const toggleGroupExpansion = useCallback((groupId: string) => {
+    setExpandedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }, []);
+  const expandedSessionGroups = useMemo(
+    () =>
+      visibleSessionGroups.map((group) => {
+        const allSessions = group.allSessions ?? group.sessions;
+        const isExpanded =
+          expandedGroupIds.has(group.id) &&
+          allSessions.length > LOCAL_CHAT_SESSION_ROW_LIMIT;
+        return isExpanded ? { ...group, sessions: allSessions } : group;
+      }),
+    [expandedGroupIds, visibleSessionGroups]
+  );
+  const sessionItems = useMemo(
+    () => expandedSessionGroups.flatMap((group) => group.sessions),
+    [expandedSessionGroups]
   );
   const sessionButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [keyboardSessionId, setKeyboardSessionId] = useState<string | null>(
@@ -201,19 +249,40 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
         ) : (
           <div className="hc-mini-history-list">
             <SessionGroupList
-              sessionGroups={visibleSessionGroups}
+              sessionGroups={expandedSessionGroups}
               activeSessionId={activeSessionId}
               deletingSessionId={deletingSessionId}
-              renderGroup={(group, rows) => (
-                <section
-                  key={group.id}
-                  className="hc-mini-history-group"
-                  aria-label={`${group.label} chats`}
-                >
-                  <h3 className="hc-mini-history-group-title">{group.label}</h3>
-                  {rows}
-                </section>
-              )}
+              renderGroup={(group, rows) => {
+                const allSessionCount =
+                  group.allSessions?.length ?? group.sessions.length;
+                const isExpanded = expandedGroupIds.has(group.id);
+                const groupRowsId = `local-chat-history-group-${group.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+                return (
+                  <section
+                    key={group.id}
+                    className="hc-mini-history-group"
+                    aria-label={`${group.label} chats`}
+                  >
+                    <h3 className="hc-mini-history-group-title">
+                      {group.label}
+                    </h3>
+                    <div id={groupRowsId}>{rows}</div>
+                    {allSessionCount > LOCAL_CHAT_SESSION_ROW_LIMIT && (
+                      <button
+                        type="button"
+                        className="hc-mini-history-toggle"
+                        aria-expanded={isExpanded}
+                        aria-controls={groupRowsId}
+                        onClick={() => toggleGroupExpansion(group.id)}
+                      >
+                        {isExpanded
+                          ? "Show less"
+                          : `Show all (${allSessionCount - LOCAL_CHAT_SESSION_ROW_LIMIT} more)`}
+                      </button>
+                    )}
+                  </section>
+                );
+              }}
               renderRow={(session, { isActive, isDeleting }) => {
                 const age = miniThreadAge(session.updatedAt);
                 const title = miniThreadTitle(session.title, session.label);
