@@ -100,6 +100,32 @@ fn benign_protocol_records_are_silent_but_rate_limit_failures_are_errors() {
         )
         .unwrap()
         .is_empty());
+    let warning = decoder
+        .decode_line(
+            r#"{"type":"rate_limit_event","session_id":"protocol-session","rate_limit_info":{"status":"allowed_warning","resetsAt":1772500000,"rateLimitType":"five_hour","utilization":0.8}}"#,
+        )
+        .unwrap();
+    assert!(warning.iter().any(|draft| matches!(
+        &draft.payload,
+        HarnessEventPayloadV1::Warning(warning)
+            if warning.code.as_deref() == Some("claude_rate_limit_warning")
+                && warning.message.contains("allowed_warning")
+    )));
+    assert!(
+        !warning
+            .iter()
+            .any(|draft| matches!(draft.payload, HarnessEventPayloadV1::Error(_)))
+    );
+    assert!(decoder
+        .decode_line(
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"still running"}]}}"#,
+        )
+        .unwrap()
+        .iter()
+        .any(|draft| matches!(
+            &draft.payload,
+            HarnessEventPayloadV1::Text(text) if text.text == "still running"
+        )));
     assert!(decoder
         .decode_line(
             r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"signature_delta","signature":"opaque"}}}"#,

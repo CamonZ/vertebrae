@@ -9,7 +9,8 @@ use vertebrae_harness_core::{
 
 use super::controls::decode_control_request;
 use super::drafts::{
-    claude_init_tools, rate_limit_failure_message, required_nonempty_string, string,
+    RateLimitClassification, classify_rate_limit_event, claude_init_tools,
+    required_nonempty_string, string,
 };
 use super::{ClaudeDecodeError, ClaudeStreamDecoder};
 
@@ -250,16 +251,27 @@ impl ClaudeStreamDecoder {
             // records above produce normalized events.
             "system" => {}
             "rate_limit_event" => {
-                if let Some(message) = rate_limit_failure_message(object) {
+                if let Some(classification) = classify_rate_limit_event(object) {
+                    let payload = match classification {
+                        RateLimitClassification::Advisory(message) => {
+                            HarnessEventPayloadV1::Warning(DiagnosticEvent {
+                                message,
+                                code: Some("claude_rate_limit_warning".into()),
+                            })
+                        }
+                        RateLimitClassification::Fatal(message) => {
+                            HarnessEventPayloadV1::Error(DiagnosticEvent {
+                                message,
+                                code: Some("claude_rate_limited".into()),
+                            })
+                        }
+                    };
                     drafts.push(self.draft(
                         stream_id,
                         &thread_id,
                         parent_tool_call,
                         UpdateSemantics::Snapshot,
-                        HarnessEventPayloadV1::Error(DiagnosticEvent {
-                            message,
-                            code: Some("claude_rate_limited".into()),
-                        }),
+                        payload,
                     ));
                 }
             }
