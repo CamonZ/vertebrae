@@ -256,6 +256,116 @@ describe("SettingsPage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("reviews and explicitly approves a local backend update", async () => {
+    const user = userEvent.setup();
+    const onApproveLocalBackendUpdate = vi.fn();
+    const localBackendUpdate = {
+      channel: "release" as const,
+      currentImageRef:
+        "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      currentImageCreatedAt: "2026-08-20T00:00:00Z",
+      version: "0.4.0",
+      build: "backend-build",
+      imageRef:
+        "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      generatedAt: "2026-08-21T00:00:00Z",
+    };
+    useGuiUpdateStore.setState({
+      ...initialGuiUpdateState,
+      localBackend: {
+        ...initialGuiUpdateState.localBackend,
+        management: "managed_local",
+        configured: true,
+        channel: "release",
+        currentImageRef: localBackendUpdate.currentImageRef,
+        update: localBackendUpdate,
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage
+          onApproveLocalBackendUpdate={onApproveLocalBackendUpdate}
+        />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-updates"));
+    expect(screen.getByTestId("settings-nav-updates-badge")).toHaveTextContent(
+      "1"
+    );
+    expect(
+      screen.getByTestId("settings-local-backend-update-card")
+    ).toHaveTextContent("Backend 0.4.0");
+    expect(
+      screen.getByTestId("settings-local-backend-update-card")
+    ).toHaveTextContent("2026-08-20 00:00 UTC");
+    expect(
+      screen.getByTestId("settings-local-backend-update-card")
+    ).toHaveTextContent("2026-08-21 00:00 UTC");
+    await user.click(
+      screen.getByTestId("settings-review-local-backend-update")
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Review local backend update" })
+    ).toBeVisible();
+
+    await user.click(
+      screen.getByTestId("settings-review-local-backend-update-cancel")
+    );
+    expect(onApproveLocalBackendUpdate).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByTestId("settings-review-local-backend-update")
+    );
+    await user.click(
+      screen.getByTestId("settings-review-local-backend-update-approve")
+    );
+    expect(onApproveLocalBackendUpdate).toHaveBeenCalledOnce();
+    expect(onApproveLocalBackendUpdate).toHaveBeenCalledWith(
+      localBackendUpdate
+    );
+  });
+
+  it("shows the externally managed backend notice separately from frontend updates", async () => {
+    const user = userEvent.setup();
+    useGuiUpdateStore.setState({
+      ...initialGuiUpdateState,
+      currentVersion: "0.2.0",
+      status: "current",
+      localBackend: {
+        ...initialGuiUpdateState.localBackend,
+        management: "external",
+        configured: true,
+        currentVersion: "0.8.0",
+        currentBuild: "remote-build",
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-updates"));
+    expect(screen.getByTestId("settings-frontend-updates")).toHaveTextContent(
+      "Frontend"
+    );
+    expect(screen.getByTestId("settings-frontend-current")).toHaveTextContent(
+      "0.2.0"
+    );
+    expect(screen.getByTestId("settings-backend-updates")).toHaveTextContent(
+      "Backend"
+    );
+    expect(screen.getByTestId("settings-backend-current")).toHaveTextContent(
+      "0.8.0"
+    );
+    expect(screen.getByTestId("settings-backend-external")).toHaveTextContent(
+      "This backend is managed externally, so the app cannot update it automatically."
+    );
+  });
+
   it("renders ordered apply progress and offers only a deferred relaunch", async () => {
     const user = userEvent.setup();
     const result = {

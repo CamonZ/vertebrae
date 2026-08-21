@@ -33,6 +33,7 @@ export {
   useGuiUpdateStore,
 } from "./guiUpdateStore";
 export type {
+  BackendManagement,
   GuiUpdateComponentInfo,
   GuiUpdateComponentKey,
   GuiUpdateComponentStatus,
@@ -41,4 +42,8 @@ export type {
   GuiUpdateState,
   GuiUpdateStatus,
   GuiUpdateVerificationInfo,
+  LocalBackendUpdateApplyState,
+  LocalBackendUpdateInfo,
+  LocalBackendUpdateResult,
+  LocalBackendUpdateState,
 } from "./guiUpdateStore";

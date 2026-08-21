@@ -90,6 +90,10 @@ pub enum LocalBackendError {
     AdoptionNotConfirmed,
     #[error("The preserved vertebrae-dev volume requires its prior host port")]
     LegacyHostPortRequired,
+    #[error("Could not fetch the local backend manifest from {url}: {reason}")]
+    BackendManifestFetch { url: String, reason: String },
+    #[error("The local backend manifest is invalid: {0}")]
+    BackendManifestInvalid(String),
 }
 
 impl LocalBackendError {
@@ -178,6 +182,16 @@ impl LocalBackendError {
                 "legacy_host_port_required",
                 false,
                 "The preserved development volume requires its existing host port. Provide that port to adopt the stack without changing its data.",
+            ),
+            Self::BackendManifestFetch { .. } => (
+                "backend_manifest_unavailable",
+                true,
+                "The local backend update manifest could not be fetched. Check network access and retry without deleting the database volume.",
+            ),
+            Self::BackendManifestInvalid(_) => (
+                "backend_manifest_invalid",
+                true,
+                "The local backend update manifest was invalid. Retry later or continue using the current backend image; existing data is preserved.",
             ),
         };
 
@@ -511,6 +525,12 @@ pub struct ManagedStackState {
     pub installation_id: Uuid,
     pub docker_target: DockerTarget,
     pub sacrum_image_ref: String,
+    #[serde(default)]
+    pub sacrum_version: Option<String>,
+    #[serde(default)]
+    pub sacrum_build: Option<String>,
+    #[serde(default)]
+    pub sacrum_image_created_at: Option<String>,
     pub image_channel: BackendImageChannel,
     pub provisioning_state: ProvisioningState,
     pub postgres_volume_initialized: bool,
@@ -531,6 +551,9 @@ impl ManagedStackState {
             installation_id: Uuid::new_v4(),
             docker_target,
             sacrum_image_ref: sacrum_image_ref.into(),
+            sacrum_version: None,
+            sacrum_build: None,
+            sacrum_image_created_at: None,
             image_channel,
             provisioning_state: ProvisioningState::Pending,
             postgres_volume_initialized: false,
@@ -552,6 +575,9 @@ impl ManagedStackState {
             installation_id: Uuid::new_v4(),
             docker_target,
             sacrum_image_ref: sacrum_image_ref.into(),
+            sacrum_version: None,
+            sacrum_build: None,
+            sacrum_image_created_at: None,
             image_channel,
             provisioning_state: ProvisioningState::Unverified,
             postgres_volume_initialized: true,
@@ -643,20 +669,28 @@ impl ManagedStackState {
                 "Backend bind host does not match the stack kind".to_string(),
             ));
         }
-        let digest = self
-            .sacrum_image_ref
-            .strip_prefix("ghcr.io/camonz/sacrum@sha256:")
-            .ok_or_else(|| {
-                LocalBackendError::InvalidState(
-                    "Backend image must be the official digest-pinned image".to_string(),
-                )
-            })?;
-        if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        if !is_valid_backend_image_ref(&self.sacrum_image_ref) {
             return Err(LocalBackendError::InvalidState(
-                "Backend image digest must contain 64 hexadecimal characters".to_string(),
+                "Backend image must be the official digest-pinned image".to_string(),
             ));
         }
         Ok(())
+    }
+}
+
+pub(crate) fn is_valid_backend_image_ref(image_ref: &str) -> bool {
+    let Some(digest) = image_ref.strip_prefix("ghcr.io/camonz/sacrum@sha256:") else {
+        return false;
+    };
+    digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+impl BackendImageChannel {
+    pub(crate) fn manifest_channel(self) -> &'static str {
+        match self {
+            Self::BackendMaster => "master",
+            Self::BackendRelease => "release",
+        }
     }
 }
 

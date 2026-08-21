@@ -59,6 +59,47 @@ export interface GuiUpdateInfo {
   verification?: GuiUpdateVerificationInfo;
 }
 
+export interface LocalBackendUpdateInfo {
+  channel: GuiUpdateChannel;
+  currentImageRef: string;
+  currentImageCreatedAt: string | null;
+  version: string;
+  build: string;
+  imageRef: string;
+  generatedAt: string | null;
+}
+
+export interface LocalBackendUpdateResult {
+  channel: string;
+  version: string;
+  build: string;
+  imageRef: string;
+  image_ref?: string;
+  generatedAt?: string | null;
+  generated_at?: string | null;
+}
+
+export type BackendManagement = "managed_local" | "external" | "not_configured";
+
+export type LocalBackendUpdateApplyState =
+  | { status: "idle" }
+  | { status: "applying" }
+  | { status: "success"; result: LocalBackendUpdateResult }
+  | { status: "error"; message: string };
+
+export interface LocalBackendUpdateState {
+  management: BackendManagement;
+  configured: boolean;
+  channel: GuiUpdateChannel | null;
+  currentVersion: string | null;
+  currentBuild: string | null;
+  currentImageRef: string | null;
+  currentImageCreatedAt: string | null;
+  update: LocalBackendUpdateInfo | null;
+  error: string | null;
+  apply: LocalBackendUpdateApplyState;
+}
+
 export type GuiUpdateComponentState =
   | "pending"
   | "downloaded"
@@ -145,6 +186,7 @@ export interface GuiUpdateState {
   /** Channel currently shown by Settings > Updates. */
   selectedChannel: GuiUpdateChannel;
   apply: GuiUpdateApplyState;
+  localBackend: LocalBackendUpdateState;
 }
 
 function initialChannelState(): GuiUpdateChannelState {
@@ -176,6 +218,18 @@ export const initialGuiUpdateState: GuiUpdateState = {
   channels: initialChannelStates(),
   selectedChannel: GUI_UPDATE_CHANNEL,
   apply: { status: "idle" },
+  localBackend: {
+    management: "not_configured",
+    configured: false,
+    channel: null,
+    currentVersion: null,
+    currentBuild: null,
+    currentImageRef: null,
+    currentImageCreatedAt: null,
+    update: null,
+    error: null,
+    apply: { status: "idle" },
+  },
 };
 
 export const useGuiUpdateStore = create<GuiUpdateState>()(() => ({

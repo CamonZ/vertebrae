@@ -2,6 +2,7 @@ use super::*;
 
 use crate::events::{LocalBackendProgressEvent, LocalBackendProgressStage};
 use crate::local_backend::compose::{DockerCompose, LegacyStackDetection};
+use crate::local_backend::manifest::BackendManifestClient;
 use crate::local_backend::provisioning::{self, ProvisioningResult};
 use crate::local_backend::state::{
     ApiToken, BackendImageChannel, LocalBackendError, ManagedStackPaths, ManagedStackState,
@@ -21,6 +22,287 @@ pub struct LocalBackendSetupResult {
 pub enum LocalBackendSetupStatus {
     Ready,
     AdoptionRequired,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LocalBackendUpdateRelease {
+    pub channel: String,
+    pub version: String,
+    pub build: String,
+    pub image_ref: String,
+    pub generated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LocalBackendUpdateStatus {
+    pub management: String,
+    pub configured: bool,
+    pub channel: Option<String>,
+    pub current_version: Option<String>,
+    pub current_build: Option<String>,
+    pub current_image_ref: Option<String>,
+    pub current_generated_at: Option<String>,
+    pub latest: Option<LocalBackendUpdateRelease>,
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LocalBackendUpdateResult {
+    pub channel: String,
+    pub version: String,
+    pub build: String,
+    pub image_ref: String,
+    pub generated_at: Option<String>,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, CommandError> {
+    let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
+    let configured_management = configured_backend_management()?;
+    if configured_management == "external" {
+        return Ok(LocalBackendUpdateStatus {
+            management: configured_management.to_string(),
+            configured: true,
+            channel: None,
+            current_version: None,
+            current_build: None,
+            current_image_ref: None,
+            current_generated_at: None,
+            latest: None,
+            available: false,
+        });
+    }
+    let Some(state) = paths.load_state().map_err(local_backend_error)? else {
+        return Ok(LocalBackendUpdateStatus {
+            management: configured_management.to_string(),
+            configured: false,
+            channel: None,
+            current_version: None,
+            current_build: None,
+            current_image_ref: None,
+            current_generated_at: None,
+            latest: None,
+            available: false,
+        });
+    };
+
+    let manifest = BackendManifestClient::default()
+        .fetch(state.image_channel)
+        .await
+        .map_err(local_backend_error)?;
+    let available = manifest.requires_image_update(&state);
+    let (current_version, current_build, current_generated_at) = current_backend_release_metadata(
+        state.sacrum_version,
+        state.sacrum_build,
+        state.sacrum_image_created_at,
+        &manifest.version,
+        &manifest.build,
+        manifest.generated_at.as_deref(),
+        available,
+    );
+
+    Ok(LocalBackendUpdateStatus {
+        management: "managed_local".to_string(),
+        configured: true,
+        channel: Some(state.image_channel.manifest_channel().to_string()),
+        current_version,
+        current_build,
+        current_image_ref: Some(state.sacrum_image_ref),
+        current_generated_at,
+        latest: Some(LocalBackendUpdateRelease {
+            channel: manifest.channel,
+            version: manifest.version,
+            build: manifest.build,
+            image_ref: manifest.image_ref,
+            generated_at: manifest.generated_at,
+        }),
+        available,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn apply_approved_local_backend_update(
+    approved: bool,
+    channel: String,
+    version: String,
+    build: String,
+    image_ref: String,
+) -> Result<LocalBackendUpdateResult, CommandError> {
+    if !approved {
+        return Err(CommandError {
+            message: "Explicit GUI approval is required before applying a local backend update."
+                .to_string(),
+        });
+    }
+
+    let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
+    let state = paths
+        .load_state()
+        .map_err(local_backend_error)?
+        .ok_or_else(|| {
+            local_backend_error(LocalBackendError::InvalidState(
+                "a configured local backend is required before applying an update".to_string(),
+            ))
+        })?;
+    if state.provisioning_state != ProvisioningState::Ready {
+        return Err(local_backend_error(LocalBackendError::InvalidState(
+            "the local backend must be ready before applying an update".to_string(),
+        )));
+    }
+
+    let manifest = BackendManifestClient::default()
+        .fetch(state.image_channel)
+        .await
+        .map_err(local_backend_error)?;
+    if manifest.channel != channel
+        || manifest.version != version
+        || manifest.build != build
+        || manifest.image_ref != image_ref
+    {
+        return Err(local_backend_error(LocalBackendError::InvalidState(
+            "the approved local backend release is no longer current; check for updates again"
+                .to_string(),
+        )));
+    }
+    if !manifest.requires_image_update(&state) {
+        return Err(local_backend_error(LocalBackendError::InvalidState(
+            "the configured local backend is already up to date".to_string(),
+        )));
+    }
+
+    let compose =
+        DockerCompose::system_for(state.docker_target.clone()).map_err(local_backend_error)?;
+    compose
+        .update_sacrum_image(
+            &paths,
+            &state,
+            &manifest.image_ref,
+            Some(&manifest.version),
+            Some(&manifest.build),
+            manifest.generated_at.as_deref(),
+        )
+        .await
+        .map_err(local_backend_error)?;
+
+    Ok(LocalBackendUpdateResult {
+        channel: manifest.channel,
+        version: manifest.version,
+        build: manifest.build,
+        image_ref: manifest.image_ref,
+        generated_at: manifest.generated_at,
+    })
+}
+
+fn configured_backend_management() -> Result<&'static str, CommandError> {
+    if let Some(url) = std::env::var_os("VTB_URL").filter(|url| !url.is_empty()) {
+        return Ok(backend_management_for_url(&url.to_string_lossy()));
+    }
+
+    let config_path = vertebrae_sacrum_client::config_path();
+    if !config_path.as_ref().is_some_and(|path| path.exists()) {
+        return Ok("not_configured");
+    }
+
+    let config = vertebrae_sacrum_client::load_config_file().map_err(|error| CommandError {
+        message: format!("Failed to load config file: {error}"),
+    })?;
+    Ok(backend_management_for_url(&config.sacrum.url))
+}
+
+fn backend_management_for_url(url: &str) -> &'static str {
+    let parsed = url::Url::parse(url).ok();
+    let host = parsed.as_ref().and_then(url::Url::host_str);
+    if host.is_some_and(is_loopback_host) {
+        "not_configured"
+    } else if host.is_some() {
+        "external"
+    } else {
+        "not_configured"
+    }
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+fn current_backend_release_metadata(
+    stored_version: Option<String>,
+    stored_build: Option<String>,
+    stored_generated_at: Option<String>,
+    manifest_version: &str,
+    manifest_build: &str,
+    manifest_generated_at: Option<&str>,
+    update_available: bool,
+) -> (Option<String>, Option<String>, Option<String>) {
+    (
+        stored_version.or_else(|| (!update_available).then(|| manifest_version.to_string())),
+        stored_build.or_else(|| (!update_available).then(|| manifest_build.to_string())),
+        stored_generated_at.or_else(|| {
+            (!update_available)
+                .then(|| manifest_generated_at.map(str::to_string))
+                .flatten()
+        }),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{backend_management_for_url, current_backend_release_metadata};
+
+    #[test]
+    fn classifies_backend_urls_by_management() {
+        assert_eq!(
+            backend_management_for_url("https://backend.example.test/api"),
+            "external"
+        );
+        assert_eq!(
+            backend_management_for_url("http://localhost:4400"),
+            "not_configured"
+        );
+        assert_eq!(
+            backend_management_for_url("http://127.0.0.1:4400"),
+            "not_configured"
+        );
+        assert_eq!(backend_management_for_url("not-a-url"), "not_configured");
+    }
+
+    #[test]
+    fn uses_manifest_metadata_when_the_current_image_is_up_to_date() {
+        assert_eq!(
+            current_backend_release_metadata(
+                None,
+                None,
+                None,
+                "0.4.0",
+                "abcdef12",
+                Some("2026-08-21T00:00:00Z"),
+                false,
+            ),
+            (
+                Some("0.4.0".to_string()),
+                Some("abcdef12".to_string()),
+                Some("2026-08-21T00:00:00Z".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn does_not_use_latest_manifest_metadata_for_an_older_image() {
+        assert_eq!(
+            current_backend_release_metadata(
+                None,
+                None,
+                None,
+                "0.5.0",
+                "12345678",
+                Some("2026-08-22T00:00:00Z"),
+                true,
+            ),
+            (None, None, None)
+        );
+    }
 }
 
 /// Provision or adopt the local Sacrum backend and persist its generated
