@@ -4,14 +4,16 @@ This document describes the configuration format for the Sacrum backend used by 
 
 ## Configuration File
 
-The Sacrum client reads configuration from `~/.config/vertebrae/config.toml`.
+The Sacrum client reads `config.toml` from Vertebrae’s platform configuration
+directory (for example, `~/.config/vertebrae/config.toml` on Linux and
+`~/Library/Application Support/vertebrae/config.toml` on macOS).
 
 ### Format
 
 ```toml
 [sacrum]
-url = "https://vertebrae.dev"
-token = "your-token"
+url = "<backend-url>"
+token = "<api-token>"
 
 [projects.vertebrae]
 id = "my-project-id"
@@ -24,9 +26,9 @@ path = "/Users/example/Code/vertebrae"
 
 - **url** (optional): The base URL for the Sacrum API server
   - Default: `https://vertebrae.dev`
-  - Example: `http://localhost:4000`
+  - A GUI-managed local backend uses its loopback URL and selected host port.
 
-- **token** (required unless using `VTB_TOKEN`): Bearer token for GraphQL requests and Phoenix channel authentication
+- **token** (required unless using `VTB_TOKEN`): Bearer token for GraphQL requests and Phoenix channel authentication. Do not print or commit it.
 
 `[projects.<slug>]`
 
@@ -42,13 +44,32 @@ path = "/Users/example/Code/vertebrae"
 - **VTB_TOKEN**: Overrides `[sacrum].token`
 - **VTB_PROJECT_ID**: Overrides path-based project resolution and uses the given Sacrum project ID directly
 
+## Backend ownership
+
+Remote and local backends use exactly the same `[sacrum].url` and
+`[sacrum].token` fields. The CLI, GUI, `sacrum-client`, and `vtb-daemon` remain
+transparent consumers of those fields.
+
+When the GUI manages a local Docker backend, its private application-data directory
+also contains `local-backend/compose.yaml`, `runtime.env`, `api-token`, and
+`state.json`. Those files control the Docker target, pinned image, named volume,
+loopback port, and startup reconciliation. They are not part of `config.toml`, and
+the runtime secrets must never be copied into it.
+
+The GUI creates a fresh stack with PostgreSQL 18, logical replication, migrations,
+health checks, generated runtime secrets, and a generated one-shot seed account.
+Ready-state startup reuses the existing token and volume. An explicitly confirmed
+legacy adoption keeps the `vertebrae-dev_pgdata` PostgreSQL 17 volume and existing
+account/token instead of reseeding or upgrading that volume. `vtb-daemon` does not
+manage either Docker lifecycle; it only uses the shared connection settings.
+
 ## Example Configuration
 
 ```toml
 # Development configuration
 [sacrum]
-url = "http://localhost:4000"
-token = "dev-token"
+url = "http://127.0.0.1:<port>"
+token = "<local-api-token>"
 
 [projects.vertebrae]
 id = "dev-project"
@@ -59,7 +80,7 @@ path = "/Users/example/Code/vertebrae"
 # Production configuration
 [sacrum]
 url = "https://vertebrae.dev"
-token = "prod-token"
+token = "<remote-api-token>"
 
 [projects.vertebrae]
 id = "prod-project"
@@ -77,6 +98,12 @@ The CLI resolves configuration in this order:
 If required fields are missing, an error will be returned.
 
 The GUI resolves configuration by selected project slug using `SacrumConfig::load_for_project()`. It reads `[sacrum].url`, `[sacrum].token`, and `[projects.<slug>].id` from the global config file.
+
+Changing backend management in the GUI updates only the connection URL/token and
+the GUI’s private local-backend state. It does not add Docker settings to the
+shared file. If Docker is unavailable, the local port is occupied, the saved
+volume is missing, or the legacy stack is unsafe to adopt, the GUI reports a
+diagnostic and leaves existing data in place for recovery.
 
 ## Task and Workflow ID Handling
 
