@@ -183,6 +183,20 @@ pub(crate) fn persist_local_client_config(
     backend_url: &str,
     api_token: &ApiToken,
 ) -> Result<(), LocalBackendError> {
+    let mut config = vertebrae_sacrum_client::load_config_file().map_err(|error| {
+        LocalBackendError::InvalidState(format!("could not load backend client config: {error}"))
+    })?;
+    update_connection_config(&mut config, backend_url, api_token)?;
+    vertebrae_sacrum_client::save_config_file(&config).map_err(|error| {
+        LocalBackendError::InvalidState(format!("could not persist backend client config: {error}"))
+    })
+}
+
+fn update_connection_config(
+    config: &mut vertebrae_sacrum_client::VertebraeConfigFile,
+    backend_url: &str,
+    api_token: &ApiToken,
+) -> Result<(), LocalBackendError> {
     let parsed = url::Url::parse(backend_url).map_err(|error| {
         LocalBackendError::InvalidState(format!("local backend URL is invalid: {error}"))
     })?;
@@ -192,14 +206,9 @@ pub(crate) fn persist_local_client_config(
         ));
     }
 
-    let mut config = vertebrae_sacrum_client::load_config_file().map_err(|error| {
-        LocalBackendError::InvalidState(format!("could not load backend client config: {error}"))
-    })?;
     config.sacrum.url = backend_url.trim_end_matches('/').to_string();
     config.sacrum.token = Some(api_token.as_str().to_string());
-    vertebrae_sacrum_client::save_config_file(&config).map_err(|error| {
-        LocalBackendError::InvalidState(format!("could not persist backend client config: {error}"))
-    })
+    Ok(())
 }
 
 #[cfg(test)]
@@ -239,6 +248,31 @@ mod tests {
         let error = persist_local_client_config("file:///tmp/backend", &token)
             .expect_err("file URL must not be configured");
         assert!(error.to_string().contains("HTTP(S)"));
+    }
+
+    #[test]
+    fn local_client_config_updates_only_the_connection_fields() {
+        let token = ApiToken::new(format!("sac_{}", "a".repeat(64))).expect("valid token");
+        let mut config = vertebrae_sacrum_client::VertebraeConfigFile::default();
+        config.projects.insert(
+            "demo".to_string(),
+            vertebrae_sacrum_client::ProjectSection {
+                id: "project-id".to_string(),
+                path: "/tmp/demo".to_string(),
+            },
+        );
+
+        update_connection_config(&mut config, "http://127.0.0.1:4400///", &token)
+            .expect("update connection config");
+
+        assert_eq!(config.sacrum.url, "http://127.0.0.1:4400");
+        assert_eq!(config.sacrum.token.as_deref(), Some(token.as_str()));
+        assert_eq!(config.projects["demo"].id, "project-id");
+        let serialized = toml::to_string(&config).expect("serialize config");
+        assert!(!serialized.contains("local_backend"));
+        assert!(!serialized.contains("docker"));
+        assert!(!serialized.contains("POSTGRES_PASSWORD"));
+        assert!(!serialized.contains("SECRET_KEY_BASE"));
     }
 
     #[test]

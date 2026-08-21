@@ -159,7 +159,6 @@ mod tests {
             config
                 .save(&AppStateFile {
                     current_project_slug: Some("alpha".to_string()),
-                    ..Default::default()
                 })
                 .unwrap();
         }
