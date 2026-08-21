@@ -3,6 +3,7 @@ import type { LocalChatSessionSummary } from "./localChatPersistence";
 import { compareLocalChatSessionRecency } from "./localChatPersistence";
 
 export const FALLBACK_CHAT_PROJECT_LABEL = "Unknown project";
+export const LOCAL_CHAT_SESSION_ROW_LIMIT = 7;
 
 export interface LocalChatSessionGroup {
   id: string;
@@ -10,6 +11,8 @@ export interface LocalChatSessionGroup {
   isCurrentProject: boolean;
   isFallback: boolean;
   sessions: LocalChatSessionSummary[];
+  /** Full source rows retained by a capped projection for future expansion. */
+  allSessions?: LocalChatSessionSummary[];
 }
 
 export function normalizeLocalChatSessionQuery(query: unknown): string {
@@ -39,14 +42,38 @@ export function filterLocalChatSessionGroups(
   if (!normalizedQuery) return groups;
 
   return groups
-    .map((group) => ({
-      ...group,
-      sessions: group.sessions.filter((session) =>
+    .map((group) => {
+      const sourceSessions = group.allSessions ?? group.sessions;
+      const sessions = sourceSessions.filter((session) =>
         localChatSessionDisplayTitle(session)
           .toLowerCase()
           .includes(normalizedQuery)
-      ),
-    }))
+      );
+      return {
+        ...group,
+        sessions,
+        ...(group.allSessions ? { allSessions: sessions } : {}),
+      };
+    })
+    .filter((group) => group.sessions.length > 0);
+}
+
+/**
+ * Projects already-grouped, already-filtered sessions into the default row
+ * view without changing their established ordering.
+ */
+export function projectLocalChatSessionGroups(
+  groups: LocalChatSessionGroup[]
+): LocalChatSessionGroup[] {
+  return groups
+    .map((group) => {
+      const allSessions = [...(group.allSessions ?? group.sessions)];
+      return {
+        ...group,
+        sessions: allSessions.slice(0, LOCAL_CHAT_SESSION_ROW_LIMIT),
+        allSessions,
+      };
+    })
     .filter((group) => group.sessions.length > 0);
 }
 
