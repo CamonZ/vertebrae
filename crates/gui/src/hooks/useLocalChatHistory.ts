@@ -28,13 +28,9 @@ interface UseLocalChatHistoryResult {
   loadCurrentProjectPath: () => Promise<string | null>;
   /** Persist a freshly-resolved project path + scope generation. */
   commitCurrentProjectPath: (projectPath: string | null) => void;
-  /** Grouped local chat summaries before applying the active search query. */
   allLocalSessionGroups: LocalChatSessionGroup[];
-  /** Grouped, project-scoped local chat summaries for the history views. */
   localSessionGroups: LocalChatSessionGroup[];
-  /** Raw search query controlled by the expanded history surface. */
   sessionQuery: string;
-  /** Update the expanded history search query. */
   setSessionQuery: (query: string) => void;
   /** Warning string shown when saved-project loading failed; null when ok. */
   projectGroupingWarning: string | null;

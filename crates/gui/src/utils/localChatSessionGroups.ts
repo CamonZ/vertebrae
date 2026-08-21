@@ -12,20 +12,11 @@ export interface LocalChatSessionGroup {
   sessions: LocalChatSessionSummary[];
 }
 
-/**
- * Normalize the value used by local-chat history search. Keeping this helper
- * independent from React makes the projection safe to reuse at any history
- * boundary and keeps whitespace-only queries equivalent to an empty query.
- */
 export function normalizeLocalChatSessionQuery(query: unknown): string {
   return typeof query === "string" ? query.trim().toLowerCase() : "";
 }
 
-/**
- * Resolve the title shown for a local-chat history row. Search must use this
- * same title-then-label display rule so a session cannot be found by text the
- * user does not see in the row.
- */
+/** Search must use the same title-then-label display rule as the session row. */
 export function localChatSessionDisplayTitle(
   session: Pick<LocalChatSessionSummary, "title" | "label">
 ): string {
@@ -37,10 +28,8 @@ export function localChatSessionDisplayTitle(
 }
 
 /**
- * Filter already-grouped local-chat history without changing group metadata,
- * group order, or the recency order established by the grouping projection.
- * A blank query returns the existing groups unchanged; a non-blank query
- * creates a new projection and removes groups that no longer contain rows.
+ * Filters before any display cap while preserving group/session ordering and
+ * removing groups that no longer contain matching rows.
  */
 export function filterLocalChatSessionGroups(
   groups: LocalChatSessionGroup[],
