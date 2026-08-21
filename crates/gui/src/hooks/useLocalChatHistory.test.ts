@@ -238,6 +238,9 @@ describe("useLocalChatHistory", () => {
     );
 
     expect(result.current.sessionQuery).toBe("");
+    const callsBeforeQuery = (
+      useChatStore.getState().listLocalSessions as ReturnType<typeof vi.fn>
+    ).mock.calls.length;
     act(() => result.current.setSessionQuery("  NEEDLE  "));
 
     await waitFor(() => {
@@ -247,6 +250,10 @@ describe("useLocalChatHistory", () => {
         )
       ).toEqual(["older"]);
     });
+    expect(
+      (useChatStore.getState().listLocalSessions as ReturnType<typeof vi.fn>)
+        .mock.calls
+    ).toHaveLength(callsBeforeQuery);
     expect(summaries.map((summary) => summary.id)).toEqual(["newer", "older"]);
   });
 

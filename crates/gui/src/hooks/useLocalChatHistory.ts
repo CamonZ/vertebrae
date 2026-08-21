@@ -145,7 +145,7 @@ export function useLocalChatHistory({
       ? projectGroupingState.projects
       : EMPTY_SAVED_PROJECTS;
 
-  const { allLocalSessionGroups, localSessionGroups } = useMemo(() => {
+  const allLocalSessionGroups = useMemo(() => {
     // Persisted-only deletes need a React-side invalidation even when the
     // in-memory session map is unchanged.
     void historyRevision;
@@ -153,29 +153,25 @@ export function useLocalChatHistory({
       projectsLoadFailed ? currentProjectPath : undefined
     );
     if (!sessionChangeToken && summaries.length === 0) {
-      return { allLocalSessionGroups: [], localSessionGroups: [] };
+      return [];
     }
-    const allLocalSessionGroups = groupLocalChatSessionsByProject(
+    return groupLocalChatSessionsByProject(
       summaries,
       savedProjects,
       currentProjectPath
     );
-    return {
-      allLocalSessionGroups,
-      localSessionGroups: filterLocalChatSessionGroups(
-        allLocalSessionGroups,
-        sessionQuery
-      ),
-    };
   }, [
     currentProjectPath,
     historyRevision,
     listLocalSessions,
     projectsLoadFailed,
     savedProjects,
-    sessionQuery,
     sessionChangeToken,
   ]);
+  const localSessionGroups = useMemo(
+    () => filterLocalChatSessionGroups(allLocalSessionGroups, sessionQuery),
+    [allLocalSessionGroups, sessionQuery]
+  );
 
   const projectGroupingWarning = projectsLoadFailed
     ? PROJECT_LOAD_WARNING
