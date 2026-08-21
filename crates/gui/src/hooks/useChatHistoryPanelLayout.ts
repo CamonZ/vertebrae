@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { MIN_SPLIT_PANE_WIDTH } from "./useChatPaneManagement";
 
 /** Persisted width for the history sidebar inside the maximized chat panel. */
 export const HISTORY_WIDTH_STORAGE_KEY = "chat-window-manager-history-width";
@@ -11,6 +12,34 @@ export const HISTORY_RESIZE_STEP = 16;
 export function clampHistoryWidth(width: number): number {
   if (!Number.isFinite(width)) return DEFAULT_HISTORY_WIDTH;
   return Math.min(MAX_HISTORY_WIDTH, Math.max(MIN_HISTORY_WIDTH, width));
+}
+
+/**
+ * Returns the largest history width that leaves every visible chat pane at
+ * least its supported minimum width.
+ */
+export function maxHistoryWidthForLayout(
+  renderedPanelWidth: number,
+  paneCount: number
+): number {
+  const safePaneCount = Number.isFinite(paneCount)
+    ? Math.max(1, Math.floor(paneCount))
+    : 1;
+  const availableWidth = Number.isFinite(renderedPanelWidth)
+    ? renderedPanelWidth - safePaneCount * MIN_SPLIT_PANE_WIDTH
+    : Number.NaN;
+  return clampHistoryWidth(availableWidth);
+}
+
+export function clampHistoryWidthForLayout(
+  width: number,
+  renderedPanelWidth: number,
+  paneCount: number
+): number {
+  return Math.min(
+    maxHistoryWidthForLayout(renderedPanelWidth, paneCount),
+    clampHistoryWidth(width)
+  );
 }
 
 function readPersistedHistoryWidth(): number {
