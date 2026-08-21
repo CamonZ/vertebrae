@@ -1,7 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { LocalChatHarnessKind } from "../../bindings";
-import type { LocalChatSessionGroup } from "../../utils/localChatSessionGroups";
+import {
+  localChatSessionDisplayTitle,
+  type LocalChatSessionGroup,
+} from "../../utils/localChatSessionGroups";
 import { formatRelative } from "../../utils/formatRelative";
 import { harnessDisplayName } from "./chatHelpers";
 import { scrollToSpawn, type SpawnOutlineItem } from "./sessionListUtils";
@@ -11,6 +14,8 @@ import { SessionDeleteButton } from "./SessionDeleteButton";
 interface LocalChatMiniPanelProps {
   activeSessionId: string;
   activeProviderThreadId?: string | null;
+  searchQuery: string;
+  onSearchQueryChange: (query: string) => void;
   deletingSessionId: string | null;
   deleteError: string | null;
   projectWarning: string | null;
@@ -254,9 +259,10 @@ function miniThreadTitle(
   inferredTitle: string | null | undefined,
   fallbackLabel: string
 ): string {
-  const generated = inferredTitle?.trim();
-  if (generated) return generated;
-  return fallbackLabel.trim() || "New Chat";
+  return localChatSessionDisplayTitle({
+    title: inferredTitle,
+    label: fallbackLabel,
+  });
 }
 
 function HarnessBadge({ harness }: { harness: LocalChatHarnessKind }) {

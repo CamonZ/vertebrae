@@ -4,6 +4,7 @@ import type { SavedProject } from "../bindings";
 import { useChatStore } from "../stores/chatStore";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import {
+  filterLocalChatSessionGroups,
   groupLocalChatSessionsByProject,
   type LocalChatSessionGroup,
 } from "../utils/localChatSessionGroups";
@@ -29,6 +30,10 @@ interface UseLocalChatHistoryResult {
   commitCurrentProjectPath: (projectPath: string | null) => void;
   /** Grouped, project-scoped local chat summaries for the history views. */
   localSessionGroups: LocalChatSessionGroup[];
+  /** Raw search query controlled by the expanded history surface. */
+  sessionQuery: string;
+  /** Update the expanded history search query. */
+  setSessionQuery: (query: string) => void;
   /** Warning string shown when saved-project loading failed; null when ok. */
   projectGroupingWarning: string | null;
   /** Bump to force the grouping memo to re-read the local chat index after deletes. */
@@ -57,6 +62,7 @@ export function useLocalChatHistory({
   );
   const projectScopeGeneration = useProjectScopeGeneration();
   const [historyRevision, setHistoryRevision] = useState(0);
+  const [sessionQuery, setSessionQuery] = useState("");
   const [projectGroupingState, setProjectGroupingState] =
     useState<ProjectGroupingState>({
       generation: -1,
@@ -145,10 +151,13 @@ export function useLocalChatHistory({
       projectsLoadFailed ? currentProjectPath : undefined
     );
     if (!sessionChangeToken && summaries.length === 0) return [];
-    return groupLocalChatSessionsByProject(
-      summaries,
-      savedProjects,
-      currentProjectPath
+    return filterLocalChatSessionGroups(
+      groupLocalChatSessionsByProject(
+        summaries,
+        savedProjects,
+        currentProjectPath
+      ),
+      sessionQuery
     );
   }, [
     currentProjectPath,
@@ -156,6 +165,7 @@ export function useLocalChatHistory({
     listLocalSessions,
     projectsLoadFailed,
     savedProjects,
+    sessionQuery,
     sessionChangeToken,
   ]);
 
@@ -172,6 +182,8 @@ export function useLocalChatHistory({
     loadCurrentProjectPath,
     commitCurrentProjectPath,
     localSessionGroups,
+    sessionQuery,
+    setSessionQuery,
     projectGroupingWarning,
     bumpHistoryRevision,
   };

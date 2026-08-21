@@ -135,6 +135,8 @@ export function ChatWindowManager() {
     loadCurrentProjectPath,
     commitCurrentProjectPath,
     localSessionGroups,
+    sessionQuery,
+    setSessionQuery,
     projectGroupingWarning,
     bumpHistoryRevision,
   } = useLocalChatHistory({ sessionChangeToken });
@@ -370,6 +372,8 @@ export function ChatWindowManager() {
             <LocalChatMiniPanel
               activeSessionId={activeSessionId ?? visiblePanes[0].sessionId}
               activeProviderThreadId={activeSession?.providerResumeId ?? null}
+              searchQuery={sessionQuery}
+              onSearchQueryChange={setSessionQuery}
               sessionGroups={visibleLocalSessionGroups}
               spawnOutlineBySessionId={spawnOutlineBySessionId}
               projectWarning={projectGroupingWarning}

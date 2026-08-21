@@ -50,9 +50,7 @@ describe("useLocalChatHistory", () => {
     });
     vi.mocked(mockedCommands.getProjects).mockResolvedValue({
       status: "ok",
-      data: [
-        { slug: "test-project", project_id: "p1", path: "/test/project" },
-      ],
+      data: [{ slug: "test-project", project_id: "p1", path: "/test/project" }],
     });
   });
 
@@ -135,7 +133,9 @@ describe("useLocalChatHistory", () => {
     const { result } = renderHook(() =>
       useLocalChatHistory({ sessionChangeToken: "" })
     );
-    await waitFor(() => expect(result.current.localSessionGroups).toBeDefined());
+    await waitFor(() =>
+      expect(result.current.localSessionGroups).toBeDefined()
+    );
 
     expect(() =>
       result.current.commitCurrentProjectPath("/new/path")
@@ -150,7 +150,9 @@ describe("useLocalChatHistory", () => {
       useLocalChatHistory({ sessionChangeToken: "" })
     );
 
-    await waitFor(() => expect(result.current.localSessionGroups).toBeDefined());
+    await waitFor(() =>
+      expect(result.current.localSessionGroups).toBeDefined()
+    );
     const callsBefore = (
       useChatStore.getState().listLocalSessions as ReturnType<typeof vi.fn>
     ).mock.calls.length;
@@ -171,7 +173,9 @@ describe("useLocalChatHistory", () => {
     const { result } = renderHook(() =>
       useLocalChatHistory({ sessionChangeToken: "" })
     );
-    await waitFor(() => expect(result.current.localSessionGroups).toBeDefined());
+    await waitFor(() =>
+      expect(result.current.localSessionGroups).toBeDefined()
+    );
     expect(result.current.localSessionGroups).toEqual([]);
   });
 
@@ -205,8 +209,45 @@ describe("useLocalChatHistory", () => {
     const { result } = renderHook(() =>
       useLocalChatHistory({ sessionChangeToken: "token" })
     );
-    await waitFor(() => expect(result.current.localSessionGroups).toBeDefined());
+    await waitFor(() =>
+      expect(result.current.localSessionGroups).toBeDefined()
+    );
     expect(result.current.localSessionGroups).toEqual([]);
+  });
+
+  it("filters the complete summary source through controlled query state", async () => {
+    const summaries = [
+      makeSummary({
+        id: "newer",
+        title: "Recent chat",
+        updatedAt: "2026-01-03T00:00:00Z",
+      }),
+      makeSummary({
+        id: "older",
+        title: "Needle in an older chat",
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+    ];
+    useChatStore.getState().listLocalSessions = vi.fn(() => summaries);
+
+    const { result } = renderHook(() =>
+      useLocalChatHistory({ sessionChangeToken: "token" })
+    );
+    await waitFor(() =>
+      expect(result.current.localSessionGroups).toHaveLength(1)
+    );
+
+    expect(result.current.sessionQuery).toBe("");
+    act(() => result.current.setSessionQuery("  NEEDLE  "));
+
+    await waitFor(() => {
+      expect(
+        result.current.localSessionGroups[0]?.sessions.map(
+          (session) => session.id
+        )
+      ).toEqual(["older"]);
+    });
+    expect(summaries.map((summary) => summary.id)).toEqual(["newer", "older"]);
   });
 
   it("passes currentProjectPath to listLocalSessions when projectsLoadFailed", async () => {
