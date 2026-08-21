@@ -354,7 +354,7 @@ describe("SettingsPage", () => {
       "0.8.0"
     );
     expect(screen.getByTestId("settings-backend-external")).toHaveTextContent(
-      "Backend updates are not available because the backend is not managed by the app."
+      "This backend is managed externally, so the app cannot update it automatically."
     );
   });
 

@@ -1203,8 +1203,8 @@ function BackendUpdatesSection({
             intent="status"
             testId="settings-backend-external"
           >
-            Backend updates are not available because the backend is not managed
-            by the app.
+            This backend is managed externally, so the app cannot update it
+            automatically.
           </UpdateStateMessage>
         </>
       ) : management === "managed_local" ? (
