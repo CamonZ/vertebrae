@@ -12,6 +12,44 @@ export interface LocalChatSessionGroup {
   sessions: LocalChatSessionSummary[];
 }
 
+export function normalizeLocalChatSessionQuery(query: unknown): string {
+  return typeof query === "string" ? query.trim().toLowerCase() : "";
+}
+
+/** Search must use the same title-then-label display rule as the session row. */
+export function localChatSessionDisplayTitle(
+  session: Pick<LocalChatSessionSummary, "title" | "label">
+): string {
+  const title = typeof session.title === "string" ? session.title.trim() : "";
+  if (title) return title;
+
+  const label = typeof session.label === "string" ? session.label.trim() : "";
+  return label || "New Chat";
+}
+
+/**
+ * Filters before any display cap while preserving group/session ordering and
+ * removing groups that no longer contain matching rows.
+ */
+export function filterLocalChatSessionGroups(
+  groups: LocalChatSessionGroup[],
+  query: unknown
+): LocalChatSessionGroup[] {
+  const normalizedQuery = normalizeLocalChatSessionQuery(query);
+  if (!normalizedQuery) return groups;
+
+  return groups
+    .map((group) => ({
+      ...group,
+      sessions: group.sessions.filter((session) =>
+        localChatSessionDisplayTitle(session)
+          .toLowerCase()
+          .includes(normalizedQuery)
+      ),
+    }))
+    .filter((group) => group.sessions.length > 0);
+}
+
 interface ResolvedProjectGroup {
   id: string;
   label: string;

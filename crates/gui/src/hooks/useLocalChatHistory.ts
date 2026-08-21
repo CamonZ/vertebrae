@@ -4,6 +4,7 @@ import type { SavedProject } from "../bindings";
 import { useChatStore } from "../stores/chatStore";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import {
+  filterLocalChatSessionGroups,
   groupLocalChatSessionsByProject,
   type LocalChatSessionGroup,
 } from "../utils/localChatSessionGroups";
@@ -27,8 +28,10 @@ interface UseLocalChatHistoryResult {
   loadCurrentProjectPath: () => Promise<string | null>;
   /** Persist a freshly-resolved project path + scope generation. */
   commitCurrentProjectPath: (projectPath: string | null) => void;
-  /** Grouped, project-scoped local chat summaries for the history views. */
+  allLocalSessionGroups: LocalChatSessionGroup[];
   localSessionGroups: LocalChatSessionGroup[];
+  sessionQuery: string;
+  setSessionQuery: (query: string) => void;
   /** Warning string shown when saved-project loading failed; null when ok. */
   projectGroupingWarning: string | null;
   /** Bump to force the grouping memo to re-read the local chat index after deletes. */
@@ -57,6 +60,7 @@ export function useLocalChatHistory({
   );
   const projectScopeGeneration = useProjectScopeGeneration();
   const [historyRevision, setHistoryRevision] = useState(0);
+  const [sessionQuery, setSessionQuery] = useState("");
   const [projectGroupingState, setProjectGroupingState] =
     useState<ProjectGroupingState>({
       generation: -1,
@@ -137,14 +141,16 @@ export function useLocalChatHistory({
       ? projectGroupingState.projects
       : EMPTY_SAVED_PROJECTS;
 
-  const localSessionGroups = useMemo(() => {
+  const allLocalSessionGroups = useMemo(() => {
     // Persisted-only deletes need a React-side invalidation even when the
     // in-memory session map is unchanged.
     void historyRevision;
     const summaries = listLocalSessions(
       projectsLoadFailed ? currentProjectPath : undefined
     );
-    if (!sessionChangeToken && summaries.length === 0) return [];
+    if (!sessionChangeToken && summaries.length === 0) {
+      return [];
+    }
     return groupLocalChatSessionsByProject(
       summaries,
       savedProjects,
@@ -158,6 +164,10 @@ export function useLocalChatHistory({
     savedProjects,
     sessionChangeToken,
   ]);
+  const localSessionGroups = useMemo(
+    () => filterLocalChatSessionGroups(allLocalSessionGroups, sessionQuery),
+    [allLocalSessionGroups, sessionQuery]
+  );
 
   const projectGroupingWarning = projectsLoadFailed
     ? PROJECT_LOAD_WARNING
@@ -171,7 +181,10 @@ export function useLocalChatHistory({
   return {
     loadCurrentProjectPath,
     commitCurrentProjectPath,
+    allLocalSessionGroups,
     localSessionGroups,
+    sessionQuery,
+    setSessionQuery,
     projectGroupingWarning,
     bumpHistoryRevision,
   };

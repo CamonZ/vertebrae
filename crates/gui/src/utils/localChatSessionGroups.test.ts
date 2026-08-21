@@ -3,7 +3,10 @@ import type { SavedProject } from "../bindings";
 import type { LocalChatSessionSummary } from "./localChatPersistence";
 import {
   FALLBACK_CHAT_PROJECT_LABEL,
+  filterLocalChatSessionGroups,
   groupLocalChatSessionsByProject,
+  localChatSessionDisplayTitle,
+  normalizeLocalChatSessionQuery,
 } from "./localChatSessionGroups";
 
 const projects: SavedProject[] = [
@@ -14,7 +17,8 @@ const projects: SavedProject[] = [
 function makeSummary(
   id: string,
   projectPath: string | null,
-  updatedAt: string
+  updatedAt: string,
+  overrides: Partial<LocalChatSessionSummary> = {}
 ): LocalChatSessionSummary {
   return {
     id,
@@ -26,6 +30,7 @@ function makeSummary(
     providerResumeId: null,
     messageCount: 1,
     lifecycle: "idle",
+    ...overrides,
   };
 }
 
@@ -65,5 +70,184 @@ describe("local chat session project grouping", () => {
       "fallback-unknown",
       "fallback-missing",
     ]);
+  });
+});
+
+describe("local chat session history search", () => {
+  it("normalizes query whitespace and casing safely", () => {
+    expect(normalizeLocalChatSessionQuery("  Fix CHAT  ")).toBe("fix chat");
+    expect(normalizeLocalChatSessionQuery(" \t ")).toBe("");
+    expect(normalizeLocalChatSessionQuery(null)).toBe("");
+    expect(normalizeLocalChatSessionQuery(42)).toBe("");
+  });
+
+  it("uses the displayed title first and falls back to the label", () => {
+    expect(
+      localChatSessionDisplayTitle({
+        title: "  Inferred title  ",
+        label: "Fallback label",
+      })
+    ).toBe("Inferred title");
+    expect(
+      localChatSessionDisplayTitle({ title: "  ", label: "  Fallback label " })
+    ).toBe("Fallback label");
+    expect(
+      localChatSessionDisplayTitle({
+        title: 42 as never,
+        label: null as never,
+      })
+    ).toBe("New Chat");
+  });
+
+  it("returns blank-query groups unchanged", () => {
+    const groups = groupLocalChatSessionsByProject(
+      [makeSummary("session-1", "/work/alpha", "2026-01-01T00:00:00Z")],
+      projects,
+      "/work/alpha"
+    );
+
+    expect(filterLocalChatSessionGroups(groups, "")).toBe(groups);
+    expect(filterLocalChatSessionGroups(groups, "  \t ")).toBe(groups);
+  });
+
+  it("matches titles case-insensitively and does not search a hidden fallback label", () => {
+    const groups = groupLocalChatSessionsByProject(
+      [
+        makeSummary("title-match", "/work/alpha", "2026-01-02T00:00:00Z", {
+          title: "Fix The CHAT Panel",
+          label: "Unrelated fallback",
+        }),
+        makeSummary("fallback-only", "/work/alpha", "2026-01-01T00:00:00Z", {
+          title: "Visible title",
+          label: "Hidden fallback",
+        }),
+      ],
+      projects,
+      "/work/alpha"
+    );
+
+    expect(
+      filterLocalChatSessionGroups(groups, "  chat ")[0].sessions.map(
+        (session) => session.id
+      )
+    ).toEqual(["title-match"]);
+    expect(filterLocalChatSessionGroups(groups, "fallback")).toEqual([]);
+  });
+
+  it("matches the fallback label when the title is absent or whitespace", () => {
+    const groups = groupLocalChatSessionsByProject(
+      [
+        makeSummary("missing-title", "/work/alpha", "2026-01-02T00:00:00Z", {
+          label: "Fallback Search Label",
+        }),
+        makeSummary("blank-title", "/work/alpha", "2026-01-01T00:00:00Z", {
+          title: "   ",
+          label: "Another Label",
+        }),
+      ],
+      projects,
+      "/work/alpha"
+    );
+
+    expect(
+      filterLocalChatSessionGroups(groups, "label")[0].sessions.map(
+        (session) => session.id
+      )
+    ).toEqual(["missing-title", "blank-title"]);
+  });
+
+  it("removes non-matching rows and empty groups while preserving metadata and order", () => {
+    const groups = groupLocalChatSessionsByProject(
+      [
+        makeSummary("beta-match", "/work/beta", "2026-01-05T00:00:00Z", {
+          title: "Needle beta",
+        }),
+        makeSummary(
+          "alpha-newer-no-match",
+          "/work/alpha",
+          "2026-01-04T00:00:00Z",
+          {
+            title: "Other alpha",
+          }
+        ),
+        makeSummary("alpha-match", "/work/alpha", "2026-01-03T00:00:00Z", {
+          title: "Needle alpha",
+        }),
+        makeSummary("fallback-no-match", null, "2026-01-02T00:00:00Z", {
+          title: "Other fallback",
+        }),
+      ],
+      projects,
+      "/work/alpha"
+    );
+    const alpha = groups.find((group) => group.id === "project:alpha");
+    expect(alpha).toBeDefined();
+
+    const filtered = filterLocalChatSessionGroups(groups, "needle");
+
+    expect(filtered.map((group) => group.id)).toEqual([
+      "project:alpha",
+      "project:beta",
+    ]);
+    expect(filtered[0]).toMatchObject({
+      id: "project:alpha",
+      label: "alpha",
+      isCurrentProject: true,
+      isFallback: false,
+    });
+    expect(filtered[0].sessions.map((session) => session.id)).toEqual([
+      "alpha-match",
+    ]);
+    expect(filtered[1].sessions.map((session) => session.id)).toEqual([
+      "beta-match",
+    ]);
+    expect(filtered[0]).not.toBe(alpha);
+    expect(
+      groups.find((group) => group.id === "project:alpha")?.sessions
+    ).toHaveLength(2);
+  });
+
+  it("finds a matching session beyond the first seven rows without applying a display cap", () => {
+    const sessions = Array.from({ length: 8 }, (_, index) =>
+      makeSummary(
+        `session-${index + 1}`,
+        "/work/alpha",
+        `2026-01-${String(8 - index).padStart(2, "0")}T00:00:00Z`,
+        { title: index === 7 ? "Older needle session" : `Recent ${index + 1}` }
+      )
+    );
+    const groups = groupLocalChatSessionsByProject(
+      sessions,
+      projects,
+      "/work/alpha"
+    );
+
+    expect(
+      filterLocalChatSessionGroups(groups, "needle")[0].sessions.map(
+        (session) => session.id
+      )
+    ).toEqual(["session-8"]);
+  });
+
+  it("fails safely for malformed title and label values without retaining an empty group", () => {
+    const groups = [
+      {
+        id: "project:alpha",
+        label: "alpha",
+        isCurrentProject: true,
+        isFallback: false,
+        sessions: [
+          makeSummary("malformed", "/work/alpha", "2026-01-01T00:00:00Z", {
+            title: 12 as never,
+            label: null as never,
+          }),
+        ],
+      },
+    ];
+
+    expect(filterLocalChatSessionGroups(groups, "does-not-match")).toEqual([]);
+    expect(
+      filterLocalChatSessionGroups(groups, "new chat")[0].sessions
+    ).toHaveLength(1);
   });
 });
