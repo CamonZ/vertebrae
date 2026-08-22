@@ -10,8 +10,8 @@ interface ChatResumePromptProps {
 }
 
 /**
- * Choice shown before opening a new project chat when durable history exists.
- * The existing session is represented by a link so the action is explicitly a
+ * Notice shown inside the project chat panel when durable history exists. The
+ * existing session is represented by a link so the action is explicitly a
  * resume/focus operation rather than an implicit new-session copy.
  */
 export function ChatResumePrompt({
@@ -25,10 +25,10 @@ export function ChatResumePrompt({
 
   return (
     <div
-      className="hc-launch-prompt"
+      className="hc-resume-prompt"
       data-testid="local-chat-resume-prompt"
-      role="dialog"
-      aria-label="Choose a local chat"
+      role="status"
+      aria-live="polite"
     >
       <p>
         <a
@@ -43,16 +43,12 @@ export function ChatResumePrompt({
           continue with the last session {title}
         </a>{" "}
         <span>or</span>{" "}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void onNewChat()}
-        >
+        <button type="button" disabled={busy} onClick={() => void onNewChat()}>
           new chat
         </button>
       </p>
       {error && (
-        <div role="alert" className="hc-launch-prompt-error">
+        <div role="alert" className="hc-resume-prompt-error">
           {error}
         </div>
       )}

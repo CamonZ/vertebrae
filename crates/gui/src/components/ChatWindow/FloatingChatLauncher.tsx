@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { commands } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
-import { ChatResumePrompt } from "./ChatResumePrompt";
-import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 
 /** Max gap (ms) between the two Alt taps that toggle the chat. */
 const DOUBLE_TAP_MS = 400;
@@ -31,70 +29,64 @@ async function loadCurrentProjectPath(): Promise<string | null> {
  */
 export function FloatingChatLauncher() {
   const togglePanel = useChatStore((s) => s.togglePanel);
+  const setPanelOpen = useChatStore((s) => s.setPanelOpen);
   const findLatestResumableSession = useChatStore(
     (s) => s.findLatestResumableSession
   );
-  const selectPersistedSession = useChatStore((s) => s.selectPersistedSession);
   const startFreshSession = useChatStore((s) => s.startFreshSession);
-  const panelOpen = useChatStore((s) => s.panelOpen);
-  const [resumeCandidate, setResumeCandidate] =
-    useState<LocalChatSessionSummary | null>(null);
-  const [resumeProjectPath, setResumeProjectPath] = useState<string | null>(
-    null
+  const clearPendingLocalChatResume = useChatStore(
+    (s) => s.clearPendingLocalChatResume
   );
-  const [resumeError, setResumeError] = useState<string | null>(null);
-  const [choiceBusy, setChoiceBusy] = useState(false);
+  const setPendingLocalChatResume = useChatStore(
+    (s) => s.setPendingLocalChatResume
+  );
+  const panelOpen = useChatStore((s) => s.panelOpen);
+  const toggleRequestRef = useRef(0);
 
-  // Open (and ensure a session) when closed; close when already open. Reads
-  // panelOpen from the store at call time so it works from the key handler too.
+  // Open the panel when closed; close when already open. Reads panelOpen from
+  // the store at call time so it works from the key handler too. The panel is
+  // opened before the durable-session lookup so Alt-Alt never becomes a
+  // launcher-owned prompt.
   const toggleChat = useCallback(async () => {
     if (useChatStore.getState().panelOpen) {
-      setResumeCandidate(null);
-      setResumeError(null);
+      toggleRequestRef.current += 1;
+      clearPendingLocalChatResume();
       togglePanel();
       return;
     }
 
+    const requestId = ++toggleRequestRef.current;
+    clearPendingLocalChatResume();
+    setPanelOpen(true);
     const projectPath = await loadCurrentProjectPath();
-    if (useChatStore.getState().panelOpen) return;
+    if (
+      toggleRequestRef.current !== requestId ||
+      !useChatStore.getState().panelOpen
+    ) {
+      return;
+    }
 
     const candidate = await findLatestResumableSession(projectPath);
+    if (
+      toggleRequestRef.current !== requestId ||
+      !useChatStore.getState().panelOpen
+    ) {
+      return;
+    }
     if (candidate) {
-      setResumeProjectPath(projectPath);
-      setResumeCandidate(candidate);
-      setResumeError(null);
+      setPendingLocalChatResume(candidate, projectPath);
       return;
     }
 
     startFreshSession("New Chat", projectPath);
-  }, [findLatestResumableSession, startFreshSession, togglePanel]);
-
-  const continueLastSession = useCallback(async () => {
-    if (!resumeCandidate || choiceBusy) return;
-    setChoiceBusy(true);
-    setResumeError(null);
-    try {
-      const selected = await selectPersistedSession(resumeCandidate.id);
-      if (!selected) {
-        setResumeError(
-          "Could not continue that session. You can still start a new chat."
-        );
-        return;
-      }
-      setResumeCandidate(null);
-    } finally {
-      setChoiceBusy(false);
-    }
-  }, [choiceBusy, resumeCandidate, selectPersistedSession]);
-
-  const startNewChat = useCallback(() => {
-    if (choiceBusy) return;
-    setChoiceBusy(true);
-    startFreshSession("New Chat", resumeProjectPath);
-    setResumeCandidate(null);
-    setResumeError(null);
-    setChoiceBusy(false);
-  }, [choiceBusy, resumeProjectPath, startFreshSession]);
+  }, [
+    clearPendingLocalChatResume,
+    findLatestResumableSession,
+    setPanelOpen,
+    setPendingLocalChatResume,
+    startFreshSession,
+    togglePanel,
+  ]);
 
   // Double-tap Alt to toggle. Ignore auto-repeat from a held key; use the
   // event's monotonic timeStamp to measure the gap between discrete presses.
@@ -115,18 +107,6 @@ export function FloatingChatLauncher() {
 
   // While the panel is open it owns the bottom-right anchor; hide the pill.
   if (panelOpen) return null;
-
-  if (resumeCandidate) {
-    return (
-      <ChatResumePrompt
-        session={resumeCandidate}
-        error={resumeError}
-        busy={choiceBusy}
-        onContinue={continueLastSession}
-        onNewChat={startNewChat}
-      />
-    );
-  }
 
   return (
     <button

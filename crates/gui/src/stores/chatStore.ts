@@ -459,6 +459,13 @@ export interface ChatPaneLayout {
   activePaneId: string | null;
 }
 
+export interface PendingLocalChatResume {
+  /** Durable session offered by the launcher when the panel is opened. */
+  candidate: LocalChatSessionSummary;
+  /** Project context used if the user chooses a fresh chat instead. */
+  projectPath: string | null;
+}
+
 interface ChatStoreState {
   /** All open chat sessions, keyed by session ID */
   sessions: Record<string, ChatSession>;
@@ -470,6 +477,8 @@ interface ChatStoreState {
   panelOpen: boolean;
   /** Persisted metadata index used by history surfaces. */
   localSessionSummaries: Record<string, LocalChatSessionSummary>;
+  /** Resume choice waiting for the chat panel to render it. */
+  pendingLocalChatResume: PendingLocalChatResume | null;
 }
 
 interface ChatStoreActions {
@@ -625,6 +634,13 @@ interface ChatStoreActions {
   togglePanel: () => void;
   /** Set panel open state explicitly */
   setPanelOpen: (open: boolean) => void;
+  /** Show a durable-session resume choice inside the chat panel. */
+  setPendingLocalChatResume: (
+    candidate: LocalChatSessionSummary,
+    projectPath?: string | null
+  ) => void;
+  /** Clear the pending resume choice. */
+  clearPendingLocalChatResume: () => void;
   /** Reset local chat sessions */
   reset: () => void;
 }
@@ -644,6 +660,7 @@ const emptyState: ChatStoreState = {
   paneLayout: emptyPaneLayout,
   panelOpen: false,
   localSessionSummaries: {},
+  pendingLocalChatResume: null,
 };
 
 const GENERATED_TITLE_CONFIDENCE_THRESHOLD = 0.72;
@@ -2525,6 +2542,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     setPanelOpen: (open) => {
       set({ panelOpen: open });
+    },
+
+    setPendingLocalChatResume: (candidate, projectPath = null) => {
+      set({ pendingLocalChatResume: { candidate, projectPath } });
+    },
+
+    clearPendingLocalChatResume: () => {
+      set({ pendingLocalChatResume: null });
     },
 
     reset: () => set(emptyState),

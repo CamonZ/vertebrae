@@ -2376,12 +2376,10 @@ html.light ::selection {
   box-shadow: 0 0 7px var(--accent-glow);
 }
 
-.hc-launch-prompt {
-  position: fixed;
-  right: var(--s-3);
-  bottom: 22px;
-  z-index: 40;
-  max-width: min(440px, calc(100vw - 2 * var(--s-3)));
+.hc-resume-prompt {
+  flex: 0 0 auto;
+  margin: var(--s-3);
+  max-width: calc(100% - 2 * var(--s-3));
   padding: var(--s-3) var(--s-4);
   color: var(--fg);
   background: color-mix(in oklch, var(--bg-2) 74%, transparent);
@@ -2395,31 +2393,31 @@ html.light ::selection {
     inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
   animation: panel-drill-right var(--t-slow) var(--ease);
 }
-.hc-launch-prompt p {
+.hc-resume-prompt p {
   margin: 0;
   font-size: var(--text-sm);
   line-height: 1.45;
 }
-.hc-launch-prompt a,
-.hc-launch-prompt button {
+.hc-resume-prompt a,
+.hc-resume-prompt button {
   color: var(--accent);
   font: inherit;
   font-weight: 650;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.hc-launch-prompt a[aria-disabled="true"],
-.hc-launch-prompt button:disabled {
+.hc-resume-prompt a[aria-disabled="true"],
+.hc-resume-prompt button:disabled {
   cursor: wait;
   opacity: 0.6;
 }
-.hc-launch-prompt button {
+.hc-resume-prompt button {
   padding: 0;
   background: transparent;
   border: 0;
   cursor: pointer;
 }
-.hc-launch-prompt-error {
+.hc-resume-prompt-error {
   margin-top: var(--s-2);
   color: var(--err);
   font-size: var(--text-xs);
