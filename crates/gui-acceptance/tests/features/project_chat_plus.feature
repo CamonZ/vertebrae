@@ -8,6 +8,7 @@ Feature: Project chat plus actions
     When I click on the element with test id "local-chat-launcher"
     Then the GUI should show "New Chat" within 5 seconds
     When I click on the element with title "Close chat panel"
+    And I click on the element with test id "sidebar-project-avatar"
     And I switch to the second project
     And I click on the element with test id "local-chat-launcher"
     Then the GUI should show "New Chat" within 5 seconds
