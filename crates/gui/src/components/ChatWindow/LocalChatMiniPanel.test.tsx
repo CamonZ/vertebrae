@@ -183,13 +183,9 @@ describe("LocalChatMiniPanel search", () => {
     );
 
     const panel = screen.getByTestId("local-chat-mini-panel");
-    const header = panel.querySelector<HTMLDivElement>(
-      ".hc-mini-history-head"
-    );
+    const header = panel.querySelector<HTMLDivElement>(".hc-mini-history-head");
     const body = screen.getByTestId("local-chat-history-drawer");
-    const scrollRegion = screen.getByTestId(
-      "local-chat-history-scroll-region"
-    );
+    const scrollRegion = screen.getByTestId("local-chat-history-scroll-region");
 
     expect(header).toBe(panel.firstElementChild);
     expect(body).toHaveClass("hc-mini-history-body");

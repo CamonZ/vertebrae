@@ -148,7 +148,8 @@ function createPersistedHistorySession(
   id: string,
   title: string,
   projectPath: string | null,
-  timestamp: string
+  timestamp: string,
+  overrides: Partial<ChatSession> = {}
 ): ChatSession {
   const session = createSession({
     id,
@@ -162,6 +163,7 @@ function createPersistedHistorySession(
         timestamp,
       },
     ],
+    ...overrides,
   });
   persistLocalChatSession(session);
   return session;
@@ -1168,30 +1170,6 @@ describe("ChatWindowManager", () => {
 
   it("searches older sessions beyond the seven-row cap and keeps selection and deletion in sync", async () => {
     const user = userEvent.setup();
-    const makePersistedSession = (
-      id: string,
-      title: string,
-      projectPath: string | null,
-      updatedAt: string,
-      overrides: Partial<ChatSession> = {}
-    ) => {
-      const session = createSession({
-        id,
-        label: title,
-        title,
-        projectPath,
-        messages: [
-          {
-            kind: "user",
-            text: `${title} message`,
-            timestamp: updatedAt,
-          },
-        ],
-        ...overrides,
-      });
-      persistLocalChatSession(session);
-      return session;
-    };
 
     const active = createSession({
       id: "current-active",
@@ -1225,33 +1203,33 @@ describe("ChatWindowManager", () => {
     });
     persistLocalChatSession(active);
     const currentRecent = Array.from({ length: 6 }, (_, index) =>
-      makePersistedSession(
+      createPersistedHistorySession(
         `current-recent-${index + 2}`,
         `Current recent ${index + 2}`,
         "/test/project",
         `2026-01-${String(9 - index).padStart(2, "0")}T00:00:00Z`
       )
     );
-    const older = makePersistedSession(
+    const older = createPersistedHistorySession(
       "current-older-match",
       "Older needle session",
       "/test/project",
       "2026-01-01T00:00:00Z"
     );
-    makePersistedSession(
+    createPersistedHistorySession(
       "nested-hidden",
       "Nested hidden thread",
       "/test/project",
       "2026-01-11T00:00:00Z",
       { providerResumeId: "agent-thread-1" }
     );
-    makePersistedSession(
+    createPersistedHistorySession(
       "other-project",
       "Other project chat",
       "/old/project",
       "2026-01-03T00:00:00Z"
     );
-    makePersistedSession(
+    createPersistedHistorySession(
       "fallback-project",
       "Fallback project chat",
       null,
