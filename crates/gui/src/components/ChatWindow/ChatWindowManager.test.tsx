@@ -1029,9 +1029,11 @@ describe("ChatWindowManager", () => {
       expect(commands.getCurrentProjectPath).toHaveBeenCalled();
     });
 
-    expect(screen.getByTestId("local-chat-project-context")).toHaveTextContent(
-      "old-project"
-    );
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("local-chat-project-context")
+      ).toHaveTextContent("old-project");
+    });
 
     await user.click(screen.getByLabelText("Widen chat panel"));
     await user.click(screen.getByLabelText("Start fresh local chat"));
