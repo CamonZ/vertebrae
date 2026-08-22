@@ -144,6 +144,29 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
   };
 }
 
+function createPersistedHistorySession(
+  id: string,
+  title: string,
+  projectPath: string | null,
+  timestamp: string
+): ChatSession {
+  const session = createSession({
+    id,
+    label: title,
+    title,
+    projectPath,
+    messages: [
+      {
+        kind: "user",
+        text: `${title} message`,
+        timestamp,
+      },
+    ],
+  });
+  persistLocalChatSession(session);
+  return session;
+}
+
 describe("ChatWindowManager", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -908,6 +931,239 @@ describe("ChatWindowManager", () => {
     expect(miniPanel.getByText("Current Project Chat")).toBeInTheDocument();
     expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
     expect(miniPanel.getByText("No Project Chat")).toBeInTheDocument();
+  });
+
+  it("keeps long multi-project history scrollable through full-list, search, focus, agent, and deletion flows", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const user = userEvent.setup();
+    const active = createSession({
+      id: "overflow-active",
+      label: "Overflow active",
+      title: "Overflow active",
+      projectPath: "/test/project",
+      messages: [
+        {
+          kind: "tool_call",
+          toolName: "Agent",
+          toolId: "nested-agent",
+          input: JSON.stringify({
+            description: "Review the long history",
+            receiver_agents: [
+              {
+                thread_id: "nested-history-thread",
+                agent_nickname: "Nested history reviewer",
+                agent_role: "reviewer",
+              },
+            ],
+          }),
+          timestamp: "2026-02-01T00:00:00Z",
+        },
+        {
+          kind: "assistant",
+          text: "nested reviewer started",
+          timestamp: "2026-02-01T00:00:01Z",
+          parentToolUseId: "nested-agent",
+        },
+      ],
+    });
+    persistLocalChatSession(active);
+    Array.from({ length: 15 }, (_, index) =>
+      createPersistedHistorySession(
+        `current-overflow-${index + 1}`,
+        `Current session ${index + 1}`,
+        "/test/project",
+        `2026-01-${String(20 - index).padStart(2, "0")}T00:00:00Z`
+      )
+    );
+    Array.from({ length: 4 }, (_, index) =>
+      createPersistedHistorySession(
+        `old-overflow-${index + 1}`,
+        index === 3 ? "Older needle session" : `Older session ${index + 1}`,
+        "/old/project",
+        `2025-12-${String(20 - index).padStart(2, "0")}T00:00:00Z`
+      )
+    );
+
+    useChatStore.setState({
+      sessions: { [active.id]: active },
+      activeSessionId: active.id,
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+
+    const panel = screen.getByTestId("chat-window-manager");
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
+    await waitFor(() => {
+      expect(
+        miniPanel
+          .getAllByRole("heading", { level: 3 })
+          .map((heading) => heading.textContent)
+      ).toEqual(["test-project", "old-project"]);
+    });
+
+    const currentGroup = within(
+      miniPanel.getByRole("region", { name: "test-project chats" })
+    );
+    const scrollRegion = screen.getByTestId("local-chat-history-scroll-region");
+    expect(
+      currentGroup.getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(7);
+    expect(
+      currentGroup.getByRole("button", { name: "Show all (9 more)" })
+    ).toBeInTheDocument();
+    expect(panel).toHaveClass("hc-panel");
+    expect(screen.getByTestId("local-chat-history-drawer")).toHaveClass(
+      "hc-mini-history-body"
+    );
+    expect(scrollRegion).toHaveClass("hc-mini-history-list");
+    expect(screen.getByTestId("chat-pane")).toHaveClass("hc-chat-pane");
+
+    await user.click(
+      currentGroup.getByRole("button", { name: "Show all (9 more)" })
+    );
+    await waitFor(() => {
+      expect(
+        currentGroup.getByRole("button", {
+          name: "Load local chat Current session 1 into active pane",
+        })
+      ).toBeInTheDocument();
+    });
+    const expandedRows = currentGroup.getAllByRole("button", {
+      name: /^Load local chat/,
+    });
+    expect(
+      expandedRows.map((button) => button.getAttribute("aria-label"))
+    ).toEqual(
+      expect.arrayContaining([
+        "Load local chat Current session 1 into active pane",
+        "Load local chat Current session 15 into active pane",
+        "Load local chat Overflow active into active pane",
+      ])
+    );
+    expect(
+      currentGroup.getByRole("button", { name: "Show less" })
+    ).toBeInTheDocument();
+    expect(panel).toHaveStyle({ width: "1128px" });
+
+    const nestedAgent = miniPanel.getByRole("button", {
+      name: "Open spawned agent Nested history reviewer from Overflow active",
+    });
+    await user.click(nestedAgent);
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).not.toBe(active.id);
+    });
+
+    const search = screen.getByRole("searchbox", {
+      name: "Search local chats",
+    });
+    await user.type(search, "needle");
+    await waitFor(() => {
+      expect(
+        miniPanel.getByRole("button", {
+          name: "Load local chat Older needle session into active pane",
+        })
+      ).toBeInTheDocument();
+    });
+    expect(
+      miniPanel.queryByRole("button", {
+        name: "Load local chat Current session 1 into active pane",
+      })
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(
+      currentGroup.queryByRole("button", {
+        name: "Load local chat Current session 1 into active pane",
+      })
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByTestId("local-chat-mini-panel"), {
+      key: "Home",
+    });
+    const rows = currentGroup.getAllByRole("button", {
+      name: /^Load local chat/,
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    const homeFocused = document.activeElement as HTMLElement | null;
+    expect(homeFocused).toHaveClass("hc-mini-history-open");
+    expect(
+      screen
+        .getByTestId("local-chat-mini-panel")
+        .querySelector<HTMLElement>("[data-keyboard-active]")
+    ).toContainElement(homeFocused);
+    fireEvent.keyDown(homeFocused!, { key: "End" });
+    const endFocused = document.activeElement as HTMLElement | null;
+    expect(endFocused).toHaveClass("hc-mini-history-open");
+    expect(
+      screen
+        .getByTestId("local-chat-mini-panel")
+        .querySelector<HTMLElement>("[data-keyboard-active]")
+    ).toContainElement(endFocused);
+
+    await user.click(
+      currentGroup.getByRole("button", {
+        name: "Delete local chat Current session 9",
+      })
+    );
+    await waitFor(() => {
+      expect(
+        currentGroup.queryByRole("button", {
+          name: "Load local chat Current session 9 into active pane",
+        })
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps the sidebar bounds and pane minimum width through split and viewport changes", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1064,
+    });
+    localStorage.setItem(HISTORY_WIDTH_STORAGE_KEY, "400");
+    const user = userEvent.setup();
+    const first = useChatStore
+      .getState()
+      .openSession("Task One", "/test/project");
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const panel = screen.getByTestId("chat-window-manager");
+    const history = screen.getByTestId("local-chat-mini-panel");
+    expect(history).toHaveAttribute("data-sidebar-width", "400");
+    expect(history).toHaveClass("hc-mini-history");
+    expect(history).toHaveStyle({ width: "400px" });
+
+    await user.click(screen.getByLabelText("Split chat pane"));
+    await waitFor(() => {
+      expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
+    });
+    expect(history).toHaveAttribute("data-sidebar-width", "272");
+    expect(screen.getByTestId("chat-history-resize-handle")).toHaveClass(
+      "hc-history-resize-handle"
+    );
+    expect(screen.getByTestId("local-chat-history-scroll-region")).toHaveClass(
+      "hc-mini-history-list"
+    );
+    for (const pane of screen.getAllByTestId("chat-pane")) {
+      expect(pane).toHaveClass("hc-chat-pane");
+    }
+    expect(screen.getAllByTestId("chat-pane")[0].parentElement).toHaveClass(
+      "hc-chat-panes"
+    );
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 900,
+    });
+    fireEvent.resize(window);
+    expect(panel).toHaveStyle({ width: "828px" });
+    expect(history).toHaveAttribute("data-sidebar-width", "272");
+    expect(useChatStore.getState().paneLayout.panes[0].sessionId).toBe(first);
   });
 
   it("searches older sessions beyond the seven-row cap and keeps selection and deletion in sync", async () => {
