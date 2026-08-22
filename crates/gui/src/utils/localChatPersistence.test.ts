@@ -71,6 +71,7 @@ describe("localChatPersistence", () => {
       titleStatus: "generated",
       titleConfidence: 0.88,
       titleUserMessageCount: 2,
+      hasUserMessage: true,
       status: "open",
       harness: "claude",
       backendSessionId: null,
@@ -94,6 +95,39 @@ describe("localChatPersistence", () => {
       state: "unknown",
     });
     expect(trace?.detail).toContain("serialized_messages=0");
+  });
+
+  it("keeps untouched sessions out of history until the first user message", () => {
+    persistLocalChatSession(
+      makeSession({
+        id: "untouched",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        hasUserMessage: false,
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("untouched")).toMatchObject({
+      hasUserMessage: false,
+    });
+    expect(listPersistedLocalChatSessions()).toEqual([]);
+
+    persistLocalChatSession(
+      makeSession({
+        id: "untouched",
+        messages: [
+          { kind: "user", text: "hello", timestamp: "2026-01-01T00:00:00Z" },
+        ],
+        messageCount: 1,
+        providerResumeId: null,
+        hasUserMessage: true,
+      })
+    );
+
+    expect(
+      listPersistedLocalChatSessions().map((session) => session.id)
+    ).toEqual(["untouched"]);
   });
 
   it("ignores old browser localStorage session records", () => {

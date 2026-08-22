@@ -74,6 +74,8 @@ export interface LocalChatSessionSummary {
   providerResumeId: string | null;
   threadTotalTokens?: number;
   messageCount: number;
+  /** Whether the user has sent at least one message in this session. */
+  hasUserMessage?: boolean;
   lifecycle: LocalChatLifecycle;
 }
 
@@ -129,6 +131,12 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     typeof candidate.providerResumeId === "string"
       ? candidate.providerResumeId
       : null;
+  const hasUserMessage =
+    typeof candidate.hasUserMessage === "boolean"
+      ? candidate.hasUserMessage
+      : rawMessages.some((message) => message.kind === "user") ||
+        messageCount > 0 ||
+        !!providerResumeId?.trim();
   const title = typeof candidate.title === "string" ? candidate.title : null;
   const titleStatus =
     typeof candidate.titleStatus === "string" &&
@@ -158,6 +166,7 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     titleConfidence,
     titleUserMessageCount,
     messages,
+    hasUserMessage,
     status: candidate.status,
     harness: normalizeHarness(candidate.harness),
     backendSessionId: null,
@@ -213,6 +222,34 @@ function durableMessages(messages: ChatMessage[]): ChatMessage[] {
   );
 }
 
+export function hasLocalChatUserMessage(
+  session: Pick<
+    ChatSession,
+    "hasUserMessage" | "messages" | "messageCount" | "providerResumeId"
+  >
+): boolean {
+  if (typeof session.hasUserMessage === "boolean") {
+    return session.hasUserMessage;
+  }
+  return (
+    session.messages.length > 0 ||
+    (session.messageCount ?? 0) > 0 ||
+    !!session.providerResumeId?.trim()
+  );
+}
+
+export function hasLocalChatUserMessageSummary(
+  session: Pick<
+    LocalChatSessionSummary,
+    "hasUserMessage" | "messageCount" | "providerResumeId"
+  >
+): boolean {
+  if (typeof session.hasUserMessage === "boolean") {
+    return session.hasUserMessage;
+  }
+  return session.messageCount > 0 || !!session.providerResumeId?.trim();
+}
+
 export function hasDurableLocalChatContent(
   session: Pick<ChatSession, "messages" | "providerResumeId" | "messageCount">
 ): boolean {
@@ -229,11 +266,12 @@ export function hasDurableLocalChatContent(
  * An empty placeholder must never become the "last session" prompt target.
  */
 export function hasDurableLocalChatSummary(
-  session: Pick<LocalChatSessionSummary, "providerResumeId" | "messageCount">
+  session: Pick<
+    LocalChatSessionSummary,
+    "hasUserMessage" | "providerResumeId" | "messageCount"
+  >
 ): boolean {
-  return (
-    session.messageCount > 0 || !!session.providerResumeId?.trim()
-  );
+  return hasLocalChatUserMessageSummary(session);
 }
 
 export function isAutomaticLocalChatLabel(label: string): boolean {
@@ -343,11 +381,13 @@ function serializeSession(
     label: session.label,
     title: session.title ?? null,
     titleStatus:
-      session.titleStatus ?? (session.title?.trim() ? "generated" : "pending"),
+      session.titleStatus ??
+      (session.title?.trim() ? "generated" : "pending"),
     titleConfidence:
       session.titleConfidence ?? (session.title?.trim() ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
     messages,
+    hasUserMessage: hasLocalChatUserMessage(session),
     status: session.status,
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
     backendSessionId: null,
@@ -394,6 +434,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     threadTotalTokens: session.threadTotalTokens,
     messageCount:
       session.messageCount ?? durableMessages(session.messages).length,
+    hasUserMessage: hasLocalChatUserMessage(session),
     lifecycle: session.lifecycle ?? "idle",
     status: session.status,
   };
@@ -569,8 +610,7 @@ export function summarizeLocalChatSession(
     label: session.label,
     title: session.title ?? null,
     titleStatus:
-      session.titleStatus ??
-      (session.title?.trim() ? "generated" : "pending"),
+      session.titleStatus ?? (session.title?.trim() ? "generated" : "pending"),
     titleConfidence:
       session.titleConfidence ?? (session.title?.trim() ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
@@ -585,6 +625,7 @@ export function summarizeLocalChatSession(
     threadTotalTokens: session.threadTotalTokens,
     messageCount:
       session.messageCount ?? durableMessages(session.messages).length,
+    hasUserMessage: hasLocalChatUserMessage(session),
     lifecycle: session.lifecycle ?? "idle",
   };
 }
@@ -597,6 +638,7 @@ export function listPersistedLocalChatSessions(
       (session) =>
         session.status === "open" &&
         !isDisposableClosedLocalChatSession(session) &&
+        hasLocalChatUserMessage(session) &&
         projectPathMatches(session.projectPath, projectPath)
     )
     .map(summarizeLocalChatSession)

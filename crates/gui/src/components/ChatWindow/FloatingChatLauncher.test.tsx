@@ -179,6 +179,11 @@ describe("FloatingChatLauncher", () => {
     const closedId = useChatStore
       .getState()
       .openSession("Task Chat", "/test/project");
+    useChatStore.getState().addMessage(closedId, {
+      kind: "user",
+      text: "continue this task",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
     useChatStore.getState().setProviderResumeId(closedId, "conv-closed");
     useChatStore.getState().markSessionClosed(closedId);
     useChatStore.setState({

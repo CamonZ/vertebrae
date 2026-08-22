@@ -6,6 +6,7 @@ import {
   findPersistedDefaultEmptyLocalChatSession,
   findPersistedLocalChatSession,
   findLatestResumableLocalChatSession,
+  hasLocalChatUserMessageSummary,
   isDefaultEmptyLocalChatSession,
   isDisposableClosedLocalChatSession,
   isAutomaticLocalChatLabel,
@@ -399,6 +400,8 @@ export interface ChatSession {
   titleUserMessageCount?: number;
   /** Chat messages in this session */
   messages: ChatMessage[];
+  /** Whether the user has sent at least one message in this session. */
+  hasUserMessage?: boolean;
   /** Session status */
   status: "open" | "closed";
   /** Local chat harness that owns the runtime session. */
@@ -697,6 +700,7 @@ function createLocalSession(
     titleConfidence: null,
     titleUserMessageCount: 0,
     messages: [],
+    hasUserMessage: false,
     status: "open",
     harness:
       useLocalChatDefaultsStore.getState().defaultHarness ??
@@ -774,6 +778,9 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
     titleStatus: session.titleStatus ?? (title ? "generated" : "pending"),
     titleConfidence: session.titleConfidence ?? (title ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
+    hasUserMessage:
+      session.hasUserMessage ??
+      messages.some((message) => message.kind === "user"),
     harness,
     permissionMode,
     backendSessionId: null,
@@ -1375,6 +1382,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
                     current.messageCount ?? 0
                   ),
                 }),
+            hasUserMessage:
+              current.hasUserMessage ??
+              merged.some((message) => message.kind === "user"),
             providerMessagesHydrating: false,
           },
         },
@@ -1555,45 +1565,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     startFreshSessionInNewPane: (label, projectPath) => {
-      if (isAutomaticLocalChatLabel(label)) {
-        const runtime = findReusableDefaultEmptySession(
-          get().sessions,
-          projectPath
-        );
-        if (runtime) {
-          set((state) => ({
-            ...focusSessionInPaneLayout(state, runtime.id),
-            panelOpen: true,
-          }));
-          return runtime.id;
-        }
-
-        const persisted = findPersistedDefaultEmptyLocalChatSession(projectPath);
-        if (persisted) {
-          const hydrated = hydrateLocalSession({
-            ...persisted,
-            projectPath: persisted.projectPath ?? projectPath,
-          });
-          set((state) => {
-            const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
-            return {
-              sessions: nextSessions,
-              localSessionSummaries: upsertLocalSessionSummary(
-                state.localSessionSummaries,
-                hydrated
-              ),
-              ...addSessionPane(
-                { ...state, sessions: nextSessions },
-                hydrated.id
-              ),
-              panelOpen: true,
-            };
-          });
-          hydrateProviderMessagesInPlace(hydrated.id, hydrated);
-          return hydrated.id;
-        }
-      }
-
       const session = createLocalSession(label, projectPath);
       persistLocalChatSession(session);
       set((state) => {
@@ -1632,6 +1603,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         .filter((session) =>
           projectPathMatches(session.projectPath, projectPath)
         )
+        .filter(hasLocalChatUserMessageSummary)
         .sort(compareLocalChatSessionRecency),
 
     findLatestResumableSession: async (projectPath) => {
@@ -1856,6 +1828,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ) {
             return session;
           }
+          const nextHasUserMessage =
+            session.hasUserMessage || message.kind === "user";
           let messages = [...session.messages];
           if (message.kind === "user_question") {
             messages = messages.filter(
@@ -1887,6 +1861,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               return {
                 ...session,
                 messages,
+                hasUserMessage: nextHasUserMessage,
                 updatedAt: message.timestamp,
               };
             }
@@ -1910,6 +1885,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               return {
                 ...session,
                 messages,
+                hasUserMessage: nextHasUserMessage,
                 updatedAt: message.timestamp,
               };
             }
@@ -1918,6 +1894,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             return {
               ...session,
               messages: coalesceParentAssistantMessage(messages, message),
+              hasUserMessage: nextHasUserMessage,
               updatedAt: message.timestamp,
             };
           } else {
@@ -1926,6 +1903,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           return {
             ...session,
             messages,
+            hasUserMessage: nextHasUserMessage,
             updatedAt: message.timestamp,
           };
         },
@@ -2550,6 +2528,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             [sessionId]: {
               ...session,
               messages: [],
+              hasUserMessage: false,
               title: null,
               titleStatus: "pending",
               titleConfidence: null,

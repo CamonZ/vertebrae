@@ -574,7 +574,7 @@ describe("chatStore", () => {
       ).toBe(2);
     });
 
-    it("does not split an automatic empty chat into another empty session", () => {
+    it("splits an automatic empty chat into a new empty session", () => {
       const first = useChatStore
         .getState()
         .startFreshSession("New Chat", "/test/project");
@@ -583,10 +583,14 @@ describe("chatStore", () => {
         .startFreshSessionInNewPane("New Chat", "/test/project");
 
       const state = useChatStore.getState();
-      expect(second).toBe(first);
-      expect(Object.keys(state.sessions)).toEqual([first]);
-      expect(state.paneLayout.panes).toHaveLength(1);
-      expect(state.activeSessionId).toBe(first);
+      expect(second).not.toBe(first);
+      expect(Object.keys(state.sessions)).toHaveLength(2);
+      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+        first,
+        second,
+      ]);
+      expect(state.sessions[second].messages).toEqual([]);
+      expect(state.sessions[second].hasUserMessage).toBe(false);
     });
 
     it("supports more than two distinct split panes", () => {
@@ -656,7 +660,7 @@ describe("chatStore", () => {
       });
       const idB = useChatStore.getState().openSession("Repo B", "/repo-b");
       useChatStore.getState().addMessage(idB, {
-        kind: "assistant",
+        kind: "user",
         text: "from repo b",
         timestamp: "2026-01-02T00:00:00Z",
       });
@@ -673,6 +677,26 @@ describe("chatStore", () => {
         label: "Repo B",
         projectPath: "/repo-b",
       });
+    });
+
+    it("hides an untouched session until a user message is added", () => {
+      const id = useChatStore.getState().openSession("New Chat", "/repo");
+
+      expect(useChatStore.getState().listLocalSessions("/repo")).toEqual([]);
+
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "start here",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+
+      expect(
+        useChatStore
+          .getState()
+          .listLocalSessions("/repo")
+          .map((session) => session.id)
+      ).toEqual([id]);
+      expect(useChatStore.getState().sessions[id].hasUserMessage).toBe(true);
     });
 
     it("selects a persisted session into the active store without duplicating it", async () => {

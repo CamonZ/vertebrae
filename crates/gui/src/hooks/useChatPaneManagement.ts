@@ -5,7 +5,6 @@ import {
   useChatStore,
 } from "../stores/chatStore";
 import type { ChatPane, ChatSession } from "../stores/chatStore";
-import { isDefaultEmptyLocalChatSession } from "../utils/localChatPersistence";
 
 /** Pane split requires a minimum width per pane plus the history column. */
 export const MIN_SPLIT_PANE_WIDTH = 360;
@@ -79,8 +78,6 @@ export function useChatPaneManagement({
 
   const canAddSplitPane =
     isMaximized &&
-    visiblePanes.length > 0 &&
-    (!activeSession || !isDefaultEmptyLocalChatSession(activeSession)) &&
     visiblePanes.length < MAX_CHAT_PANES &&
     renderedPanelWidth >= minSplitLayoutWidth(visiblePanes.length + 1);
 

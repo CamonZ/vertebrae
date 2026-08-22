@@ -963,6 +963,8 @@ export function useLocalChat(sessionId: string | null) {
   const startSession = useCallback(
     async (userMessage?: string) => {
       if (!session || !sessionId) return;
+      const initialPrompt = userMessage?.trim();
+      if (!initialPrompt) return;
       const lifecycle = getLocalChatLifecycle(session);
       if (
         isLocalChatLifecycleBusy(lifecycle) ||
@@ -984,7 +986,7 @@ export function useLocalChat(sessionId: string | null) {
           getActiveTurnLocalId: currentActiveTurnLocalId,
           getBackendSessionId: currentBackendSessionId,
         },
-        userMessage
+        initialPrompt
       );
     },
     [
