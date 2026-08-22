@@ -223,6 +223,34 @@ export function hasDurableLocalChatContent(
   );
 }
 
+/**
+ * Index rows intentionally retain only metadata, so use their durable
+ * message count and provider resume handle when choosing a session to resume.
+ * An empty placeholder must never become the "last session" prompt target.
+ */
+export function hasDurableLocalChatSummary(
+  session: Pick<LocalChatSessionSummary, "providerResumeId" | "messageCount">
+): boolean {
+  return (
+    session.messageCount > 0 || !!session.providerResumeId?.trim()
+  );
+}
+
+/** Automatic placeholders are safe to reuse or deduplicate. Explicitly named
+ * empty sessions remain user-owned and are not treated as disposable. */
+export function isDefaultEmptyLocalChatSession(
+  session: Pick<
+    ChatSession,
+    "label" | "messages" | "providerResumeId" | "messageCount"
+  >
+): boolean {
+  const label = session.label.trim();
+  return (
+    (label === "New Chat" || label === "Project Chat") &&
+    !hasDurableLocalChatContent(session)
+  );
+}
+
 export function isDisposableClosedLocalChatSession(
   session: Pick<
     ChatSession,
@@ -271,6 +299,22 @@ export function compareLocalChatSessionRecency(
   if (createdDelta !== 0) return createdDelta;
 
   return b.id.localeCompare(a.id);
+}
+
+/** Select the newest durable session in the requested project bucket. */
+export function findLatestResumableLocalChatSession(
+  sessions: LocalChatSessionSummary[],
+  projectPath?: string | null
+): LocalChatSessionSummary | null {
+  return (
+    sessions
+      .filter(
+        (session) =>
+          projectPathMatches(session.projectPath, projectPath) &&
+          hasDurableLocalChatSummary(session)
+      )
+      .sort(compareLocalChatSessionRecency)[0] ?? null
+  );
 }
 
 function serializeSession(

@@ -4,6 +4,7 @@ import {
   compareLocalChatSessionRecency,
   DEFAULT_LOCAL_CHAT_HARNESS,
   findPersistedLocalChatSession,
+  findLatestResumableLocalChatSession,
   isDisposableClosedLocalChatSession,
   listPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
@@ -490,6 +491,10 @@ interface ChatStoreActions {
   unsplitPanes: (paneId?: string) => void;
   /** List persisted local chat sessions, newest first */
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
+  /** Find the newest persisted session with durable content in a project. */
+  findLatestResumableSession: (
+    projectPath?: string | null
+  ) => Promise<LocalChatSessionSummary | null>;
   /** Hydrate local chat metadata from the app-managed index file. */
   hydrateLocalSessionIndex: () => Promise<void>;
   /** Hydrate and focus a persisted local chat session */
@@ -1553,6 +1558,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
           projectPathMatches(session.projectPath, projectPath)
         )
         .sort(compareLocalChatSessionRecency),
+
+    findLatestResumableSession: async (projectPath) => {
+      await get().hydrateLocalSessionIndex();
+      return findLatestResumableLocalChatSession(
+        get().listLocalSessions(projectPath),
+        projectPath
+      );
+    },
 
     hydrateLocalSessionIndex: async () => {
       const { sessions } = await hydrateLocalChatSessionIndex();
