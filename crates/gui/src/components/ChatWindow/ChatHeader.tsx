@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StopIcon } from "../panels";
 import type { LocalChatLifecycle } from "../../stores/chatStore";
 
@@ -18,6 +19,10 @@ interface ChatHeaderProps {
   onClosePane?: () => void;
   onClearMessages: () => void;
   onStopGeneration: () => void;
+  onTitleSave?: (title: string) => void | Promise<void>;
+  onTitleRegenerate?: () => void;
+  isTitleRegenerating?: boolean;
+  titleError?: string | null;
 }
 
 interface HeaderAction {
@@ -68,7 +73,89 @@ export function ChatHeader({
   onClosePane,
   onClearMessages,
   onStopGeneration,
+  onTitleSave,
+  onTitleRegenerate,
+  isTitleRegenerating = false,
+  titleError,
 }: ChatHeaderProps) {
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(label);
+  const [titleEditError, setTitleEditError] = useState<string | null>(null);
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const titleButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreTitleFocus = useRef(false);
+
+  useEffect(() => {
+    if (!isEditingTitle) setDraftTitle(label);
+  }, [isEditingTitle, label]);
+
+  useEffect(() => {
+    if (isEditingTitle) {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+      return;
+    }
+    if (restoreTitleFocus.current) {
+      titleButtonRef.current?.focus();
+      restoreTitleFocus.current = false;
+    }
+  }, [isEditingTitle]);
+
+  const beginTitleEdit = useCallback(() => {
+    if (!onTitleSave || isTitleRegenerating || isSavingTitle) return;
+    setDraftTitle(label);
+    setTitleEditError(null);
+    setIsEditingTitle(true);
+  }, [isSavingTitle, isTitleRegenerating, label, onTitleSave]);
+
+  const cancelTitleEdit = useCallback(() => {
+    setDraftTitle(label);
+    setTitleEditError(null);
+    restoreTitleFocus.current = true;
+    setIsEditingTitle(false);
+  }, [label]);
+
+  const saveTitle = useCallback(async () => {
+    const normalized = draftTitle.replace(/\s+/g, " ").trim();
+    if (!normalized) {
+      setTitleEditError("Chat title cannot be empty.");
+      return;
+    }
+    if (normalized === label) {
+      cancelTitleEdit();
+      return;
+    }
+    if (!onTitleSave) return;
+
+    setIsSavingTitle(true);
+    setTitleEditError(null);
+    try {
+      await onTitleSave(normalized);
+      restoreTitleFocus.current = true;
+      setIsEditingTitle(false);
+    } catch (error) {
+      setTitleEditError(
+        error instanceof Error ? error.message : "Failed to save chat title."
+      );
+    } finally {
+      setIsSavingTitle(false);
+    }
+  }, [cancelTitleEdit, draftTitle, label, onTitleSave]);
+
+  const handleTitleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelTitleEdit();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        void saveTitle();
+      }
+    },
+    [cancelTitleEdit, saveTitle]
+  );
+
   const actions: HeaderAction[] = [
     {
       key: "fresh",
@@ -234,7 +321,87 @@ export function ChatHeader({
     <div className="hc-head">
       <div className="hc-head-top">
         <span className="hc-title">
-          <span className="label">{label}</span>
+          {isEditingTitle ? (
+            <span className="hc-title-editor">
+              <input
+                ref={titleInputRef}
+                className="hc-title-input"
+                type="text"
+                value={draftTitle}
+                onChange={(event) => {
+                  setDraftTitle(event.target.value);
+                  setTitleEditError(null);
+                }}
+                onKeyDown={handleTitleKeyDown}
+                disabled={isSavingTitle}
+                aria-label="Chat title"
+                data-testid="local-chat-title-input"
+              />
+              <span className="hc-title-edit-actions">
+                <button
+                  type="button"
+                  className="hc-ctrl"
+                  onClick={() => void saveTitle()}
+                  disabled={isSavingTitle}
+                  title="Save chat title"
+                  aria-label="Save chat title"
+                  data-testid="local-chat-title-save"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  className="hc-ctrl"
+                  onClick={cancelTitleEdit}
+                  disabled={isSavingTitle}
+                  title="Cancel chat title edit"
+                  aria-label="Cancel chat title edit"
+                  data-testid="local-chat-title-cancel"
+                >
+                  ×
+                </button>
+              </span>
+            </span>
+          ) : (
+            <>
+              <button
+                ref={titleButtonRef}
+                type="button"
+                className="label hc-title-button"
+                onClick={beginTitleEdit}
+                disabled={!onTitleSave || isTitleRegenerating}
+                title={onTitleSave ? "Rename chat" : undefined}
+                aria-label={`Rename chat: ${label}`}
+                data-testid="local-chat-title-button"
+              >
+                {label}
+              </button>
+              {onTitleRegenerate && (
+                <button
+                  type="button"
+                  className="hc-ctrl hc-title-regenerate"
+                  onClick={onTitleRegenerate}
+                  disabled={isTitleRegenerating || isSavingTitle}
+                  title="Regenerate chat title"
+                  aria-label={
+                    isTitleRegenerating
+                      ? "Regenerating chat title"
+                      : "Regenerate chat title"
+                  }
+                  data-testid="local-chat-title-regenerate"
+                >
+                  <SvgIcon size="h-3.5 w-3.5">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 4v5h5M20 20v-5h-5M5.5 15a7 7 0 0011.8 1.2L20 15M4 9a7 7 0 0111.8-1.2L20 9"
+                    />
+                  </SvgIcon>
+                </button>
+              )}
+            </>
+          )}
           {lifecycle === "error" ? (
             <span
               data-testid="chat-error-dot"
@@ -253,6 +420,11 @@ export function ChatHeader({
             <span className="em" />
           )}
         </span>
+        {(titleEditError || titleError) && (
+          <span className="hc-title-error" role="alert">
+            {titleEditError || titleError}
+          </span>
+        )}
         <div className="hc-ctrls">
           {actions
             .filter((action) => action.show)

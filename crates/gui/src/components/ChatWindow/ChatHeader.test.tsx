@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ChatHeader } from "./ChatHeader";
 
 function renderHeader(overrides: Record<string, unknown> = {}) {
@@ -20,6 +20,93 @@ describe("ChatHeader", () => {
   it("renders the session label", () => {
     renderHeader({ label: "My Project Chat" });
     expect(screen.getByText("My Project Chat")).toBeInTheDocument();
+  });
+
+  it("enters title editing and saves a normalized title", async () => {
+    const onTitleSave = vi.fn().mockResolvedValue(undefined);
+    renderHeader({ label: "Old title", onTitleSave });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Rename chat: Old title" })
+    );
+    const input = screen.getByRole("textbox", { name: "Chat title" });
+    expect(input).toHaveValue("Old title");
+
+    fireEvent.change(input, { target: { value: "  New   title  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onTitleSave).toHaveBeenCalledWith("New title"));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Rename chat: Old title" })
+      ).toHaveFocus()
+    );
+  });
+
+  it("cancels a title edit without changing the displayed title", () => {
+    const onTitleSave = vi.fn();
+    renderHeader({ label: "Keep this title", onTitleSave });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Rename chat: Keep this title" })
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat title" }), {
+      target: { value: "Discarded title" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Chat title" }), {
+      key: "Escape",
+    });
+
+    expect(onTitleSave).not.toHaveBeenCalled();
+    expect(screen.getByText("Keep this title")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("textbox", { name: "Chat title" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("rejects blank titles without losing the existing title", () => {
+    const onTitleSave = vi.fn();
+    renderHeader({ label: "Existing title", onTitleSave });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Rename chat: Existing title" })
+    );
+    const input = screen.getByRole("textbox", { name: "Chat title" });
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save chat title" }));
+
+    expect(onTitleSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Chat title cannot be empty."
+    );
+    expect(
+      screen.getByRole("textbox", { name: "Chat title" })
+    ).toBeInTheDocument();
+  });
+
+  it("shows and invokes the regenerate title control", () => {
+    const onTitleRegenerate = vi.fn();
+    renderHeader({ onTitleRegenerate });
+
+    const button = screen.getByRole("button", { name: "Regenerate chat title" });
+    fireEvent.click(button);
+
+    expect(onTitleRegenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables title actions while regenerating", () => {
+    renderHeader({
+      onTitleSave: vi.fn(),
+      onTitleRegenerate: vi.fn(),
+      isTitleRegenerating: true,
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Regenerating chat title" })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Rename chat: Test Chat" })
+    ).toBeDisabled();
   });
 
   // --- Status dots ---
@@ -195,9 +282,9 @@ describe("ChatHeader", () => {
 
   it("does not render any optional buttons when no callbacks are provided", () => {
     renderHeader();
-    // Only clear + stop are always-rendered.
+    // Title, clear, and stop are always-rendered.
     const buttons = screen.getAllByRole("button");
-    expect(buttons).toHaveLength(2); // clear + stop
+    expect(buttons).toHaveLength(3); // title + clear + stop
   });
 
   // --- Mutation-killing tests: conditional visibility ---
@@ -241,8 +328,8 @@ describe("ChatHeader", () => {
       onClosePanel: vi.fn(),
     });
     const buttons = screen.getAllByRole("button");
-    // 7 optional + 2 always (clear + stop) = 9
-    expect(buttons).toHaveLength(9);
+    // Title + 7 optional + 2 always (clear + stop) = 10
+    expect(buttons).toHaveLength(10);
   });
 
   it("applies danger class to stop generation button", () => {
