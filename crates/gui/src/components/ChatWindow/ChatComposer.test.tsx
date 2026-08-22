@@ -238,6 +238,35 @@ describe("ChatComposer", () => {
     expect(onPermissionModeChange).toHaveBeenCalledOnce();
   });
 
+  it("keeps picker controls accessible without visible text labels", () => {
+    const harnessWithEfforts: LocalChatHarnessInfo = {
+      ...CLAUDE_INFO,
+      reasoning_efforts: [{ id: "low", label: "Low" }],
+    };
+    render(
+      <ChatComposer
+        {...defaultProps({
+          visibleHarness: harnessWithEfforts,
+          supportedReasoningEffortIds: new Set(["low"]),
+        })}
+      />
+    );
+
+    for (const label of ["Provider", "Permission", "Model", "Effort"]) {
+      expect(
+        screen.queryByText(label, { exact: true })
+      ).not.toBeInTheDocument();
+    }
+    expect(screen.getByLabelText("Local chat provider")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Local chat permission mode")
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Claude model")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Claude reasoning effort")
+    ).toBeInTheDocument();
+  });
+
   it("disables permission picker when busy", () => {
     render(<ChatComposer {...defaultProps({ isBusy: true })} />);
     expect(
