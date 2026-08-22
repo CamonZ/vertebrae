@@ -265,7 +265,7 @@ async fn local_chat_history_drawer_shows_active_project(world: &mut GuiWorld, ti
         .await;
 
     let locator = Locator::XPath(&format!(
-        "//*[@data-testid='local-chat-history-drawer']//h3[normalize-space(.)='{}']",
+        "//*[@data-testid='local-chat-history-drawer']//h3/span[normalize-space(.)='{}']",
         slug
     ));
     let element = client
