@@ -574,6 +574,25 @@ describe("chatStore", () => {
       ).toBe(2);
     });
 
+    it("splits an automatic empty chat into a new empty session", () => {
+      const first = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/test/project");
+      const second = useChatStore
+        .getState()
+        .startFreshSessionInNewPane("New Chat", "/test/project");
+
+      const state = useChatStore.getState();
+      expect(second).not.toBe(first);
+      expect(Object.keys(state.sessions)).toHaveLength(2);
+      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+        first,
+        second,
+      ]);
+      expect(state.sessions[second].messages).toEqual([]);
+      expect(state.sessions[second].hasUserMessage).toBe(false);
+    });
+
     it("supports more than two distinct split panes", () => {
       const first = useChatStore.getState().openSession("First");
       const second = useChatStore
@@ -641,7 +660,7 @@ describe("chatStore", () => {
       });
       const idB = useChatStore.getState().openSession("Repo B", "/repo-b");
       useChatStore.getState().addMessage(idB, {
-        kind: "assistant",
+        kind: "user",
         text: "from repo b",
         timestamp: "2026-01-02T00:00:00Z",
       });
@@ -658,6 +677,26 @@ describe("chatStore", () => {
         label: "Repo B",
         projectPath: "/repo-b",
       });
+    });
+
+    it("hides an untouched session until a user message is added", () => {
+      const id = useChatStore.getState().openSession("New Chat", "/repo");
+
+      expect(useChatStore.getState().listLocalSessions("/repo")).toEqual([]);
+
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "start here",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+
+      expect(
+        useChatStore
+          .getState()
+          .listLocalSessions("/repo")
+          .map((session) => session.id)
+      ).toEqual([id]);
+      expect(useChatStore.getState().sessions[id].hasUserMessage).toBe(true);
     });
 
     it("selects a persisted session into the active store without duplicating it", async () => {
@@ -796,6 +835,60 @@ describe("chatStore", () => {
         label: "Task Chat",
         providerResumeId: null,
       });
+    });
+
+    it("reuses the default empty session for the same project", () => {
+      const first = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+
+      const second = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+
+      expect(second).toBe(first);
+      expect(Object.keys(useChatStore.getState().sessions)).toEqual([first]);
+      expect(useChatStore.getState().activeSessionId).toBe(first);
+    });
+
+    it("creates a new default session after the existing one becomes durable", () => {
+      const first = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+      useChatStore.getState().addMessage(first, {
+        kind: "user",
+        text: "keep this conversation",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+
+      const second = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+
+      expect(second).not.toBe(first);
+      expect(useChatStore.getState().sessions[first].messages).toHaveLength(1);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
+    });
+
+    it("reuses a persisted default session after runtime state is cleared", () => {
+      const first = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        paneLayout: { panes: [], activePaneId: null },
+        panelOpen: false,
+        localSessionSummaries: {},
+      });
+
+      const second = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+
+      expect(second).toBe(first);
+      expect(useChatStore.getState().sessions[first].messages).toEqual([]);
+      expect(useChatStore.getState().activeSessionId).toBe(first);
     });
   });
 

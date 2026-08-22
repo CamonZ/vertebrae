@@ -2376,6 +2376,35 @@ html.light ::selection {
   box-shadow: 0 0 7px var(--accent-glow);
 }
 
+.hc-resume-prompt p {
+  margin: 0;
+  line-height: 1.45;
+}
+.hc-resume-prompt a,
+.hc-resume-prompt button {
+  color: var(--accent);
+  font: inherit;
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.hc-resume-prompt a[aria-disabled="true"],
+.hc-resume-prompt button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.hc-resume-prompt button {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.hc-resume-prompt-error {
+  margin-top: var(--s-2);
+  color: var(--err);
+  font-size: var(--text-xs);
+}
+
 .hc-panel {
   position: fixed;
   right: var(--s-3);

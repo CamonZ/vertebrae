@@ -1,11 +1,6 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { commands } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
-import { useOpenChat } from "../../hooks/useLocalChat";
-import {
-  compareLocalChatSessionRecency,
-  projectPathMatches,
-} from "../../utils/localChatPersistence";
 
 /** Max gap (ms) between the two Alt taps that toggle the chat. */
 const DOUBLE_TAP_MS = 400;
@@ -33,48 +28,65 @@ async function loadCurrentProjectPath(): Promise<string | null> {
  * shortcut a true open/close toggle.
  */
 export function FloatingChatLauncher() {
-  const openChat = useOpenChat();
   const togglePanel = useChatStore((s) => s.togglePanel);
   const setPanelOpen = useChatStore((s) => s.setPanelOpen);
-  const focusSession = useChatStore((s) => s.focusSession);
+  const findLatestResumableSession = useChatStore(
+    (s) => s.findLatestResumableSession
+  );
+  const startFreshSession = useChatStore((s) => s.startFreshSession);
+  const clearPendingLocalChatResume = useChatStore(
+    (s) => s.clearPendingLocalChatResume
+  );
+  const setPendingLocalChatResume = useChatStore(
+    (s) => s.setPendingLocalChatResume
+  );
   const panelOpen = useChatStore((s) => s.panelOpen);
+  const toggleRequestRef = useRef(0);
 
-  // Open (and ensure a session) when closed; close when already open. Reads
-  // panelOpen from the store at call time so it works from the key handler too.
+  // Open the panel when closed; close when already open. Reads panelOpen from
+  // the store at call time so it works from the key handler too. The panel is
+  // opened before the durable-session lookup so Alt-Alt never becomes a
+  // launcher-owned prompt.
   const toggleChat = useCallback(async () => {
     if (useChatStore.getState().panelOpen) {
+      toggleRequestRef.current += 1;
+      clearPendingLocalChatResume();
       togglePanel();
       return;
     }
 
+    const requestId = ++toggleRequestRef.current;
+    clearPendingLocalChatResume();
+    setPanelOpen(true);
     const projectPath = await loadCurrentProjectPath();
-    const state = useChatStore.getState();
-    if (state.panelOpen) return;
-
-    const isReusableSession = (
-      session: (typeof state.sessions)[string]
-    ): boolean =>
-      session.status === "open" &&
-      session.lifecycle !== "closed" &&
-      projectPathMatches(session.projectPath, projectPath);
-    const activeSession = state.activeSessionId
-      ? state.sessions[state.activeSessionId]
-      : null;
-
-    if (activeSession && isReusableSession(activeSession)) {
-      setPanelOpen(true);
-    } else {
-      const session = Object.values(state.sessions)
-        .filter((s) => isReusableSession(s))
-        .sort(compareLocalChatSessionRecency)[0];
-      if (session) {
-        focusSession(session.id);
-        setPanelOpen(true);
-      } else {
-        void openChat("New Chat", projectPath);
-      }
+    if (
+      toggleRequestRef.current !== requestId ||
+      !useChatStore.getState().panelOpen
+    ) {
+      return;
     }
-  }, [focusSession, openChat, setPanelOpen, togglePanel]);
+
+    const candidate = await findLatestResumableSession(projectPath);
+    if (
+      toggleRequestRef.current !== requestId ||
+      !useChatStore.getState().panelOpen
+    ) {
+      return;
+    }
+    if (candidate) {
+      setPendingLocalChatResume(candidate, projectPath);
+      return;
+    }
+
+    startFreshSession("New Chat", projectPath);
+  }, [
+    clearPendingLocalChatResume,
+    findLatestResumableSession,
+    setPanelOpen,
+    setPendingLocalChatResume,
+    startFreshSession,
+    togglePanel,
+  ]);
 
   // Double-tap Alt to toggle. Ignore auto-repeat from a held key; use the
   // event's monotonic timeStamp to measure the gap between discrete presses.

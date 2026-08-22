@@ -74,6 +74,8 @@ export interface LocalChatSessionSummary {
   providerResumeId: string | null;
   threadTotalTokens?: number;
   messageCount: number;
+  /** Whether the user has sent at least one message in this session. */
+  hasUserMessage?: boolean;
   lifecycle: LocalChatLifecycle;
 }
 
@@ -129,6 +131,13 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     typeof candidate.providerResumeId === "string"
       ? candidate.providerResumeId
       : null;
+  const hasUserMessage =
+    typeof candidate.hasUserMessage === "boolean"
+      ? candidate.hasUserMessage
+      : rawMessages.some((message) => message.kind === "user") ||
+        messageCount > 0 ||
+        !!providerResumeId?.trim();
+  const resumeNoticeDismissed = candidate.resumeNoticeDismissed === true;
   const title = typeof candidate.title === "string" ? candidate.title : null;
   const titleStatus =
     typeof candidate.titleStatus === "string" &&
@@ -158,6 +167,8 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     titleConfidence,
     titleUserMessageCount,
     messages,
+    hasUserMessage,
+    resumeNoticeDismissed,
     status: candidate.status,
     harness: normalizeHarness(candidate.harness),
     backendSessionId: null,
@@ -213,6 +224,34 @@ function durableMessages(messages: ChatMessage[]): ChatMessage[] {
   );
 }
 
+export function hasLocalChatUserMessage(
+  session: Pick<
+    ChatSession,
+    "hasUserMessage" | "messages" | "messageCount" | "providerResumeId"
+  >
+): boolean {
+  if (typeof session.hasUserMessage === "boolean") {
+    return session.hasUserMessage;
+  }
+  return (
+    session.messages.length > 0 ||
+    (session.messageCount ?? 0) > 0 ||
+    !!session.providerResumeId?.trim()
+  );
+}
+
+export function hasLocalChatUserMessageSummary(
+  session: Pick<
+    LocalChatSessionSummary,
+    "hasUserMessage" | "messageCount" | "providerResumeId"
+  >
+): boolean {
+  if (typeof session.hasUserMessage === "boolean") {
+    return session.hasUserMessage;
+  }
+  return session.messageCount > 0 || !!session.providerResumeId?.trim();
+}
+
 export function hasDurableLocalChatContent(
   session: Pick<ChatSession, "messages" | "providerResumeId" | "messageCount">
 ): boolean {
@@ -220,6 +259,39 @@ export function hasDurableLocalChatContent(
     (session.messageCount ?? 0) > 0 ||
     durableMessages(session.messages).length > 0 ||
     !!session.providerResumeId?.trim()
+  );
+}
+
+/**
+ * Index rows intentionally retain only metadata, so use their durable
+ * message count and provider resume handle when choosing a session to resume.
+ * An empty placeholder must never become the "last session" prompt target.
+ */
+export function hasDurableLocalChatSummary(
+  session: Pick<
+    LocalChatSessionSummary,
+    "hasUserMessage" | "providerResumeId" | "messageCount"
+  >
+): boolean {
+  return hasLocalChatUserMessageSummary(session);
+}
+
+export function isAutomaticLocalChatLabel(label: string): boolean {
+  const normalized = label.trim();
+  return normalized === "New Chat" || normalized === "Project Chat";
+}
+
+/** Automatic placeholders are safe to reuse or deduplicate. Explicitly named
+ * empty sessions remain user-owned and are not treated as disposable. */
+export function isDefaultEmptyLocalChatSession(
+  session: Pick<
+    ChatSession,
+    "label" | "messages" | "providerResumeId" | "messageCount"
+>
+): boolean {
+  return (
+    isAutomaticLocalChatLabel(session.label) &&
+    !hasDurableLocalChatContent(session)
   );
 }
 
@@ -273,6 +345,22 @@ export function compareLocalChatSessionRecency(
   return b.id.localeCompare(a.id);
 }
 
+/** Select the newest durable session in the requested project bucket. */
+export function findLatestResumableLocalChatSession(
+  sessions: LocalChatSessionSummary[],
+  projectPath?: string | null
+): LocalChatSessionSummary | null {
+  return (
+    sessions
+      .filter(
+        (session) =>
+          projectPathMatches(session.projectPath, projectPath) &&
+          hasDurableLocalChatSummary(session)
+      )
+      .sort(compareLocalChatSessionRecency)[0] ?? null
+  );
+}
+
 function serializeSession(
   session: ChatSession,
   previous?: ChatSession | null
@@ -295,11 +383,14 @@ function serializeSession(
     label: session.label,
     title: session.title ?? null,
     titleStatus:
-      session.titleStatus ?? (session.title?.trim() ? "generated" : "pending"),
+      session.titleStatus ??
+      (session.title?.trim() ? "generated" : "pending"),
     titleConfidence:
       session.titleConfidence ?? (session.title?.trim() ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
     messages,
+    hasUserMessage: hasLocalChatUserMessage(session),
+    resumeNoticeDismissed: session.resumeNoticeDismissed === true,
     status: session.status,
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
     backendSessionId: null,
@@ -346,6 +437,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     threadTotalTokens: session.threadTotalTokens,
     messageCount:
       session.messageCount ?? durableMessages(session.messages).length,
+    hasUserMessage: hasLocalChatUserMessage(session),
     lifecycle: session.lifecycle ?? "idle",
     status: session.status,
   };
@@ -354,6 +446,32 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
 function writeSessions(sessions: Record<string, ChatSession>): Promise<boolean> {
   sessionIndexCache = sessions;
   return scheduleIndexSave();
+}
+
+function deduplicateDefaultEmptyLocalChatSessions(
+  sessions: Record<string, ChatSession>
+): { sessions: Record<string, ChatSession>; changed: boolean } {
+  const deduplicated = { ...sessions };
+  const byProject = new Map<string | null, ChatSession[]>();
+  for (const session of Object.values(deduplicated)) {
+    if (session.status !== "open" || !isDefaultEmptyLocalChatSession(session)) {
+      continue;
+    }
+    const projectKey = session.projectPath ?? null;
+    const bucket = byProject.get(projectKey) ?? [];
+    bucket.push(session);
+    byProject.set(projectKey, bucket);
+  }
+
+  let changed = false;
+  for (const candidates of byProject.values()) {
+    candidates.sort(compareLocalChatSessionRecency);
+    for (const duplicate of candidates.slice(1)) {
+      delete deduplicated[duplicate.id];
+      changed = true;
+    }
+  }
+  return { sessions: deduplicated, changed };
 }
 
 function scheduleIndexSave(): Promise<boolean> {
@@ -435,11 +553,14 @@ async function hydrateSessionIndexCache(): Promise<boolean> {
     sessionIndexHydratePromise = loadSessionIndexFromCommand()
       .then((loaded) => {
         if (loaded === null) return false;
-        sessionIndexCache = {
+        const merged = {
           ...loaded,
           ...sessionIndexCache,
         };
+        const deduplicated = deduplicateDefaultEmptyLocalChatSessions(merged);
+        sessionIndexCache = deduplicated.sessions;
         sessionIndexHydrated = true;
+        if (deduplicated.changed) scheduleIndexSave();
         return true;
       })
       .finally(() => {
@@ -492,8 +613,7 @@ export function summarizeLocalChatSession(
     label: session.label,
     title: session.title ?? null,
     titleStatus:
-      session.titleStatus ??
-      (session.title?.trim() ? "generated" : "pending"),
+      session.titleStatus ?? (session.title?.trim() ? "generated" : "pending"),
     titleConfidence:
       session.titleConfidence ?? (session.title?.trim() ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
@@ -508,6 +628,7 @@ export function summarizeLocalChatSession(
     threadTotalTokens: session.threadTotalTokens,
     messageCount:
       session.messageCount ?? durableMessages(session.messages).length,
+    hasUserMessage: hasLocalChatUserMessage(session),
     lifecycle: session.lifecycle ?? "idle",
   };
 }
@@ -520,6 +641,7 @@ export function listPersistedLocalChatSessions(
       (session) =>
         session.status === "open" &&
         !isDisposableClosedLocalChatSession(session) &&
+        hasLocalChatUserMessage(session) &&
         projectPathMatches(session.projectPath, projectPath)
     )
     .map(summarizeLocalChatSession)
@@ -549,6 +671,21 @@ export function findPersistedLocalChatSession(
   );
 }
 
+export function findPersistedDefaultEmptyLocalChatSession(
+  projectPath?: string | null
+): ChatSession | null {
+  return (
+    Object.values(readSessions())
+      .filter(
+        (session) =>
+          session.status === "open" &&
+          isDefaultEmptyLocalChatSession(session) &&
+          projectPathMatches(session.projectPath, projectPath)
+      )
+      .sort(compareLocalChatSessionRecency)[0] ?? null
+  );
+}
+
 export function persistLocalChatSession(session: ChatSession): Promise<boolean> {
   const sessions = readSessions();
   const serialized = serializeSession(session, sessions[session.id]);
@@ -565,7 +702,9 @@ export function persistLocalChatSession(session: ChatSession): Promise<boolean> 
     return writeSessions(sessions);
   }
   sessions[session.id] = serialized;
-  const persistence = writeSessions(sessions);
+  const persistence = writeSessions(
+    deduplicateDefaultEmptyLocalChatSessions(sessions).sessions
+  );
   clearLocalChatSessionCleared(session.id);
   return persistence;
 }

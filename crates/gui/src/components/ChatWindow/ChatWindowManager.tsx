@@ -26,6 +26,8 @@ import { ChatResizeHandle } from "./ChatResizeHandle";
 import { ChatHistoryResizeHandle } from "./ChatHistoryResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import { ChatShortcutHints } from "./ChatShortcutHints";
+import { ChatResumePrompt } from "./ChatResumePrompt";
+import { ChatEmptyState } from "./ChatMessages";
 import {
   buildSpawnOutline,
   isAgentSpawnTool,
@@ -47,6 +49,16 @@ export function ChatWindowManager() {
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const panelOpen = useChatStore((s) => s.panelOpen);
   const togglePanel = useChatStore((s) => s.togglePanel);
+  const pendingLocalChatResume = useChatStore((s) => s.pendingLocalChatResume);
+  const clearPendingLocalChatResume = useChatStore(
+    (s) => s.clearPendingLocalChatResume
+  );
+  const findLatestResumableSession = useChatStore(
+    (s) => s.findLatestResumableSession
+  );
+  const setPendingLocalChatResume = useChatStore(
+    (s) => s.setPendingLocalChatResume
+  );
   const selectPersistedSession = useChatStore((s) => s.selectPersistedSession);
   const selectProviderThreadSession = useChatStore(
     (s) => s.selectProviderThreadSession
@@ -63,6 +75,7 @@ export function ChatWindowManager() {
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
   const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
+  const dismissResumeNotice = useChatStore((s) => s.dismissResumeNotice);
   const localSessionSummaries = useChatStore((s) => s.localSessionSummaries);
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -70,6 +83,8 @@ export function ChatWindowManager() {
     null
   );
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resumeChoiceBusy, setResumeChoiceBusy] = useState(false);
 
   const sessionList = Object.values(sessions);
   const sessionChangeToken = Object.values(localSessionSummaries)
@@ -189,6 +204,18 @@ export function ChatWindowManager() {
     renderedPanelWidth,
     activeSession,
   });
+  const emptyPane = useMemo(
+    () =>
+      visiblePanes
+        .map((pane) => sessions[pane.sessionId])
+        .find((session) => session && session.hasUserMessage !== true) ?? null,
+    [sessions, visiblePanes]
+  );
+  const emptyPaneId = emptyPane?.id ?? null;
+  const emptyPaneProjectPath = emptyPane?.projectPath ?? null;
+  const emptyPaneToken = emptyPane
+    ? `${emptyPaneId}:${emptyPaneProjectPath ?? ""}:${emptyPane.hasUserMessage ? "1" : "0"}`
+    : "none";
   const historyMaxWidth = maxHistoryWidthForLayout(
     renderedPanelWidth,
     visiblePanes.length
@@ -198,7 +225,10 @@ export function ChatWindowManager() {
     renderedPanelWidth,
     visiblePanes.length
   );
-  const open = panelOpen && sessionList.length > 0;
+  // The panel can be open briefly before the launcher finishes checking
+  // durable history, and it can show a resume choice without any runtime
+  // session loaded yet.
+  const open = panelOpen;
   const setChatLayout = usePanelLayoutStore((s) => s.setChatLayout);
   const clearChatLayout = usePanelLayoutStore((s) => s.clearChatLayout);
 
@@ -207,8 +237,83 @@ export function ChatWindowManager() {
   }, [open]);
 
   const closeChatPanel = useCallback(() => {
+    clearPendingLocalChatResume();
     togglePanel();
-  }, [togglePanel]);
+  }, [clearPendingLocalChatResume, togglePanel]);
+
+  useEffect(() => {
+    if (!pendingLocalChatResume) {
+      setResumeError(null);
+      setResumeChoiceBusy(false);
+    }
+  }, [pendingLocalChatResume]);
+
+  useEffect(() => {
+    if (!open || !emptyPaneId || pendingLocalChatResume) return;
+    let cancelled = false;
+    void findLatestResumableSession(emptyPaneProjectPath).then((candidate) => {
+      if (cancelled || !candidate) return;
+      setPendingLocalChatResume(candidate, emptyPaneProjectPath);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    emptyPaneId,
+    emptyPaneProjectPath,
+    emptyPaneToken,
+    findLatestResumableSession,
+    open,
+    pendingLocalChatResume,
+    sessionChangeToken,
+    setPendingLocalChatResume,
+  ]);
+
+  const continueLastSession = useCallback(async () => {
+    const pending = useChatStore.getState().pendingLocalChatResume;
+    if (!pending || resumeChoiceBusy) return;
+    setResumeChoiceBusy(true);
+    setResumeError(null);
+    try {
+      const selected = await selectPersistedSession(pending.candidate.id);
+      if (!selected) {
+        setResumeError(
+          "Could not continue that session. You can still start a new chat."
+        );
+        return;
+      }
+      clearPendingLocalChatResume();
+    } finally {
+      setResumeChoiceBusy(false);
+    }
+  }, [clearPendingLocalChatResume, resumeChoiceBusy, selectPersistedSession]);
+
+  const startNewChatFromResume = useCallback(() => {
+    const pending = useChatStore.getState().pendingLocalChatResume;
+    if (!pending || resumeChoiceBusy) return;
+    setResumeChoiceBusy(true);
+    const state = useChatStore.getState();
+    const currentSession = state.activeSessionId
+      ? state.sessions[state.activeSessionId]
+      : null;
+    const sessionId =
+      currentSession && currentSession.hasUserMessage !== true
+        ? currentSession.id
+        : startFreshSession("New Chat", pending.projectPath);
+    dismissResumeNotice(sessionId);
+    setResumeError(null);
+    setResumeChoiceBusy(false);
+  }, [dismissResumeNotice, resumeChoiceBusy, startFreshSession]);
+
+  const resumeNotice = pendingLocalChatResume ? (
+    <ChatResumePrompt
+      session={pendingLocalChatResume.candidate}
+      error={resumeError}
+      busy={resumeChoiceBusy}
+      onContinue={continueLastSession}
+      onNewChat={startNewChatFromResume}
+    />
+  ) : undefined;
 
   const startFreshActiveSession = useCallback(async () => {
     if (!activeSession) return false;
@@ -407,6 +512,13 @@ export function ChatWindowManager() {
         startResizeDrag={startResizeDrag}
         resizePanel={resizePanel}
       />
+      {pendingLocalChatResume && visiblePanes.length === 0 && (
+        <div className="hc-panel-main">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <ChatEmptyState notice={resumeNotice} />
+          </div>
+        </div>
+      )}
       {visiblePanes.length > 0 && (
         <div className="hc-panel-main">
           {isMaximized && (
@@ -444,6 +556,8 @@ export function ChatWindowManager() {
             activePaneId={activePaneId}
             isMaximized={isMaximized}
             canAddSplitPane={canAddSplitPane}
+            emptyStateNotice={resumeNotice}
+            emptyStateNoticeProjectPath={pendingLocalChatResume?.projectPath}
             focusPane={focusPane}
             closePane={closePane}
             unsplitPanes={unsplitPanes}

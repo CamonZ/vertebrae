@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { ChatPane, ChatSession } from "../../stores/chatStore";
 import { ChatWindow } from "./ChatWindow";
 
@@ -15,6 +16,8 @@ interface ChatPaneListProps {
   toggleMaximized: () => void;
   startFreshActiveSession: () => Promise<boolean>;
   splitWithFreshSession: () => Promise<boolean>;
+  emptyStateNotice?: ReactNode;
+  emptyStateNoticeProjectPath?: string | null;
 }
 
 /**
@@ -36,6 +39,8 @@ export function ChatPaneList({
   toggleMaximized,
   startFreshActiveSession,
   splitWithFreshSession,
+  emptyStateNotice,
+  emptyStateNoticeProjectPath,
 }: ChatPaneListProps) {
   const paneCount = visiblePanes.length;
 
@@ -45,6 +50,13 @@ export function ChatPaneList({
         const session = sessions[pane.sessionId];
         if (!session) return null;
         const paneIsActive = pane.id === activePaneId;
+        const paneNotice =
+          emptyStateNotice &&
+          session.resumeNoticeDismissed !== true &&
+          (session.projectPath ?? null) ===
+            (emptyStateNoticeProjectPath ?? null)
+            ? emptyStateNotice
+            : undefined;
         return (
           <section
             key={pane.id}
@@ -65,6 +77,7 @@ export function ChatPaneList({
             <ChatWindow
               key={`${pane.id}:${session.id}`}
               sessionId={session.id}
+              emptyStateNotice={paneNotice}
               onClosePanel={closeChatPanel}
               onStartFresh={() => void startFreshActiveSession()}
               onToggleHistory={() => {

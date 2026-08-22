@@ -5,6 +5,7 @@ import { useDebugStore } from "../stores/debugStore";
 import {
   clearLastUsedLocalChatModelId,
   clearPersistedLocalChatSessions,
+  findPersistedDefaultEmptyLocalChatSession,
   findPersistedLocalChatSession,
   isLocalChatSessionCleared,
   loadLastUsedLocalChatModelId,
@@ -70,6 +71,7 @@ describe("localChatPersistence", () => {
       titleStatus: "generated",
       titleConfidence: 0.88,
       titleUserMessageCount: 2,
+      hasUserMessage: true,
       status: "open",
       harness: "claude",
       backendSessionId: null,
@@ -93,6 +95,39 @@ describe("localChatPersistence", () => {
       state: "unknown",
     });
     expect(trace?.detail).toContain("serialized_messages=0");
+  });
+
+  it("keeps untouched sessions out of history until the first user message", () => {
+    persistLocalChatSession(
+      makeSession({
+        id: "untouched",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        hasUserMessage: false,
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("untouched")).toMatchObject({
+      hasUserMessage: false,
+    });
+    expect(listPersistedLocalChatSessions()).toEqual([]);
+
+    persistLocalChatSession(
+      makeSession({
+        id: "untouched",
+        messages: [
+          { kind: "user", text: "hello", timestamp: "2026-01-01T00:00:00Z" },
+        ],
+        messageCount: 1,
+        providerResumeId: null,
+        hasUserMessage: true,
+      })
+    );
+
+    expect(
+      listPersistedLocalChatSessions().map((session) => session.id)
+    ).toEqual(["untouched"]);
   });
 
   it("ignores old browser localStorage session records", () => {
@@ -431,6 +466,62 @@ describe("localChatPersistence", () => {
     expect(savedIds).toEqual(["existing", "new"]);
   });
 
+  it("deduplicates automatic empty entries loaded from the app index", async () => {
+    vi.resetModules();
+    const { commands: freshCommands } = await import("../bindings");
+    vi.spyOn(freshCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "ok",
+      data: [
+        {
+          id: "loaded-empty",
+          label: "New Chat",
+          title: null,
+          titleStatus: "pending",
+          titleConfidence: null,
+          titleUserMessageCount: 0,
+          harness: "claude",
+          model: null,
+          selectedModelId: null,
+          selectedReasoningEffort: null,
+          permissionMode: "default",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          projectPath: "/repo",
+          providerResumeId: null,
+          threadTotalTokens: null,
+          messageCount: 0,
+          lifecycle: "idle",
+          status: "open",
+        },
+      ],
+    });
+    const saveIndex = vi
+      .spyOn(freshCommands, "saveLocalChatSessionIndex")
+      .mockResolvedValue({ status: "ok", data: null });
+    const persistence = await import("./localChatPersistence");
+
+    persistence.persistLocalChatSession(
+      makeSession({
+        id: "new-empty",
+        label: "New Chat",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        projectPath: "/repo",
+        createdAt: "2026-01-02T00:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+      })
+    );
+
+    await waitFor(() => expect(saveIndex).toHaveBeenCalled());
+    const savedIds =
+      saveIndex.mock.calls[saveIndex.mock.calls.length - 1]?.[0].sessions.map(
+        (session) => session.id
+      );
+    expect(savedIds).toContain("new-empty");
+    expect(savedIds).not.toContain("loaded-empty");
+  });
+
   it("scopes listed sessions by project path without treating no-project sessions as wildcards", () => {
     persistLocalChatSession(
       makeSession({ id: "repo-a", projectPath: "/repo-a" })
@@ -464,5 +555,74 @@ describe("localChatPersistence", () => {
     );
 
     expect(findPersistedLocalChatSession(null)?.id).toBe("no-project");
+  });
+
+  it("deduplicates automatic empty sessions without deleting durable sessions", () => {
+    persistLocalChatSession(
+      makeSession({
+        id: "empty-old",
+        label: "New Chat",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        projectPath: "/repo",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      })
+    );
+    persistLocalChatSession(
+      makeSession({
+        id: "durable",
+        projectPath: "/repo",
+        updatedAt: "2026-01-02T00:00:00Z",
+      })
+    );
+    persistLocalChatSession(
+      makeSession({
+        id: "empty-new",
+        label: "New Chat",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        projectPath: "/repo",
+        createdAt: "2026-01-03T00:00:00Z",
+        updatedAt: "2026-01-03T00:00:00Z",
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("empty-old")).toBeNull();
+    expect(loadPersistedLocalChatSession("empty-new")).not.toBeNull();
+    expect(loadPersistedLocalChatSession("durable")).not.toBeNull();
+    expect(findPersistedDefaultEmptyLocalChatSession("/repo")?.id).toBe(
+      "empty-new"
+    );
+  });
+
+  it("does not treat explicitly named empty sessions as automatic placeholders", () => {
+    persistLocalChatSession(
+      makeSession({
+        id: "scratch",
+        label: "Scratchpad",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        projectPath: "/repo",
+      })
+    );
+    persistLocalChatSession(
+      makeSession({
+        id: "default",
+        label: "New Chat",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        projectPath: "/repo",
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("scratch")).not.toBeNull();
+    expect(findPersistedDefaultEmptyLocalChatSession("/repo")?.id).toBe(
+      "default"
+    );
   });
 });

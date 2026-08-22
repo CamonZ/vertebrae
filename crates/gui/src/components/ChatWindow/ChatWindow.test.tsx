@@ -2680,6 +2680,7 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.getByTitle("Start session")).toBeDisabled();
+    expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
   });
 
   it("enables send button when input has text", async () => {

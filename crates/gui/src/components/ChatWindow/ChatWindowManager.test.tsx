@@ -204,6 +204,7 @@ describe("ChatWindowManager", () => {
       paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
       localSessionSummaries: {},
+      pendingLocalChatResume: null,
     });
     usePanelFocusStore.getState().reset();
     usePanelLayoutStore.getState().reset();
@@ -221,15 +222,181 @@ describe("ChatWindowManager", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("does not render when there are no sessions", () => {
+  it("renders the panel while a session lookup is pending", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
       panelOpen: true,
     });
 
-    const { container } = render(<ChatWindowManager />);
-    expect(container.innerHTML).toBe("");
+    render(<ChatWindowManager />);
+
+    expect(screen.getByTestId("chat-window-manager")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-pane")).not.toBeInTheDocument();
+  });
+
+  it("refreshes the resume notice for an existing empty pane", async () => {
+    const persisted = createPersistedHistorySession(
+      "resume-session",
+      "Task Chat",
+      "/test/project",
+      "2026-01-01T00:00:00Z"
+    );
+    const empty = createSession({
+      id: "empty-session",
+      label: "New Chat",
+      projectPath: "/test/project",
+      hasUserMessage: false,
+    });
+    useChatStore.setState({
+      sessions: { [empty.id]: empty },
+      activeSessionId: empty.id,
+      paneLayout: {
+        panes: [{ id: "pane-empty", sessionId: empty.id }],
+        activePaneId: "pane-empty",
+      },
+      panelOpen: true,
+      pendingLocalChatResume: null,
+    });
+
+    render(<ChatWindowManager />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("local-chat-resume-prompt")).toHaveTextContent(
+        "continue with the last session Task Chat"
+      );
+      expect(useChatStore.getState().pendingLocalChatResume?.candidate.id).toBe(
+        persisted.id
+      );
+    });
+    expect(
+      screen.getByRole("link", { name: "last session" })
+    ).toBeInTheDocument();
+  });
+
+  it("renders the resume notice inside the panel and continues the selected session", async () => {
+    const user = userEvent.setup();
+    const persisted = createPersistedHistorySession(
+      "resume-session",
+      "Task Chat",
+      "/test/project",
+      "2026-01-01T00:00:00Z"
+    );
+    const candidate = useChatStore
+      .getState()
+      .listLocalSessions("/test/project")
+      .find((session) => session.id === persisted.id);
+    expect(candidate).toBeDefined();
+
+    useChatStore.setState({
+      panelOpen: true,
+      pendingLocalChatResume: {
+        candidate: candidate!,
+        projectPath: "/test/project",
+      },
+    });
+
+    render(<ChatWindowManager />);
+
+    const panel = screen.getByTestId("chat-window-manager");
+    const emptyState = within(panel).getByTestId("chat-empty-state");
+    const prompt = within(panel).getByTestId("local-chat-resume-prompt");
+    expect(emptyState).toContainElement(prompt);
+    expect(prompt).toHaveTextContent(
+      "continue with the last session Task Chat"
+    );
+    expect(panel).toContainElement(prompt);
+
+    await user.click(
+      within(prompt).getByRole("link", {
+        name: "last session",
+      })
+    );
+
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(persisted.id);
+      expect(useChatStore.getState().pendingLocalChatResume).toBeNull();
+    });
+    expect(screen.queryByTestId("local-chat-resume-prompt")).toBeNull();
+  });
+
+  it("keeps new chat available when continuing fails", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const user = userEvent.setup();
+    const persisted = createPersistedHistorySession(
+      "unavailable-session",
+      "Unavailable Task",
+      "/test/project",
+      "2026-01-01T00:00:00Z"
+    );
+    const candidate = useChatStore
+      .getState()
+      .listLocalSessions("/test/project")
+      .find((session) => session.id === persisted.id);
+    expect(candidate).toBeDefined();
+    const selectPersistedSession =
+      useChatStore.getState().selectPersistedSession;
+    useChatStore.setState({
+      panelOpen: true,
+      pendingLocalChatResume: {
+        candidate: candidate!,
+        projectPath: "/test/project",
+      },
+      selectPersistedSession: vi.fn().mockResolvedValue(false),
+    });
+
+    try {
+      render(<ChatWindowManager />);
+
+      await user.click(
+        screen.getByRole("link", {
+          name: "last session",
+        })
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "You can still start a new chat"
+      );
+
+      await user.click(screen.getByRole("button", { name: "new chat" }));
+      await waitFor(() => {
+        expect(useChatStore.getState().activeSessionId).not.toBe(persisted.id);
+        expect(
+          useChatStore.getState().pendingLocalChatResume?.candidate.id
+        ).toBe(persisted.id);
+        expect(
+          useChatStore.getState().sessions[
+            useChatStore.getState().activeSessionId!
+          ]?.resumeNoticeDismissed
+        ).toBe(true);
+      });
+      expect(screen.queryByTestId("local-chat-resume-prompt")).toBeNull();
+      expect(
+        screen.getByText("Create, edit, and delete tasks, steps, and workflows")
+      ).toBeInTheDocument();
+
+      const sessionCountBeforeSplit = Object.keys(
+        useChatStore.getState().sessions
+      ).length;
+      fireEvent.keyDown(window, { key: "\\", metaKey: true });
+      const splitButton = await screen.findByLabelText("Split chat pane");
+      expect(splitButton).toBeEnabled();
+      await user.click(splitButton);
+      expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(
+        sessionCountBeforeSplit + 1
+      );
+      expect(screen.getAllByTestId("local-chat-resume-prompt")).toHaveLength(1);
+      expect(
+        screen.getAllByText(
+          "Create, edit, and delete tasks, steps, and workflows"
+        )
+      ).toHaveLength(1);
+    } finally {
+      useChatStore.setState({ selectPersistedSession });
+    }
   });
 
   it("renders the active session as a single header band, with no tabs", () => {
@@ -338,6 +505,11 @@ describe("ChatWindowManager", () => {
       projectPath: "/test/project",
       messages: [
         {
+          kind: "user",
+          text: "Inspect this repository",
+          timestamp: "2024-01-01T11:59:59Z",
+        },
+        {
           kind: "assistant",
           text: "spawning",
           timestamp: "2024-01-01T12:00:00Z",
@@ -420,6 +592,11 @@ describe("ChatWindowManager", () => {
       model: "gpt-5.5",
       projectPath: "/test/project",
       messages: [
+        {
+          kind: "user",
+          text: "Inspect the repository",
+          timestamp: "2024-01-01T11:59:59Z",
+        },
         {
           kind: "assistant",
           text: "spawning nested reviewer",
@@ -610,7 +787,7 @@ describe("ChatWindowManager", () => {
     );
   });
 
-  it("ignores Cmd+\\ when the chat panel is closed or has no sessions", () => {
+  it("ignores Cmd+\\ when the chat panel is closed and keeps an empty panel open", () => {
     const s1 = createSession({ id: "s1", label: "Task A" });
     useChatStore.setState({
       sessions: { s1 },
@@ -631,7 +808,7 @@ describe("ChatWindowManager", () => {
     });
     rerender(<ChatWindowManager />);
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
-    expect(screen.queryByTestId("chat-window-manager")).toBeNull();
+    expect(screen.getByTestId("chat-window-manager")).toBeInTheDocument();
   });
 
   it("toggles maximized width with Cmd+\\ while the composer is focused", async () => {
@@ -798,6 +975,11 @@ describe("ChatWindowManager", () => {
       .getState()
       .startFreshSession("Task Two", "/test/project");
     useChatStore.getState().addMessage(second, {
+      kind: "user",
+      text: "second saved question",
+      timestamp: "2026-01-02T00:00:00Z",
+    });
+    useChatStore.getState().addMessage(second, {
       kind: "assistant",
       text: "second saved answer",
       timestamp: "2026-01-02T00:00:00Z",
@@ -872,6 +1054,11 @@ describe("ChatWindowManager", () => {
       .getState()
       .openSession("Old Project Chat", "/old/project");
     useChatStore.getState().addMessage(stale, {
+      kind: "user",
+      text: "old project question",
+      timestamp: "2026-01-01T23:59:59Z",
+    });
+    useChatStore.getState().addMessage(stale, {
       kind: "assistant",
       text: "old project answer",
       timestamp: "2026-01-01T00:00:00Z",
@@ -896,7 +1083,7 @@ describe("ChatWindowManager", () => {
       .getState()
       .startFreshSession("No Project Chat", null);
     useChatStore.getState().addMessage(noProject, {
-      kind: "assistant",
+      kind: "user",
       text: "no-project answer",
       timestamp: "2026-01-03T00:00:00Z",
     });
@@ -947,6 +1134,11 @@ describe("ChatWindowManager", () => {
       title: "Overflow active",
       projectPath: "/test/project",
       messages: [
+        {
+          kind: "user",
+          text: "Review the long history",
+          timestamp: "2026-02-01T00:00:00Z",
+        },
         {
           kind: "tool_call",
           toolName: "Agent",
@@ -1130,6 +1322,11 @@ describe("ChatWindowManager", () => {
     const first = useChatStore
       .getState()
       .openSession("Task One", "/test/project");
+    useChatStore.getState().addMessage(first, {
+      kind: "user",
+      text: "Task One question",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
 
     render(<ChatWindowManager />);
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
@@ -1177,6 +1374,11 @@ describe("ChatWindowManager", () => {
       title: "Current active",
       projectPath: "/test/project",
       messages: [
+        {
+          kind: "user",
+          text: "Inspect current project",
+          timestamp: "2026-01-10T00:00:00Z",
+        },
         {
           kind: "tool_call",
           toolName: "Agent",
@@ -1351,7 +1553,7 @@ describe("ChatWindowManager", () => {
       .getState()
       .openSession("Current Project Chat", "/new/project");
     useChatStore.getState().addMessage(current, {
-      kind: "assistant",
+      kind: "user",
       text: "new project answer",
       timestamp: "2026-01-02T00:00:00Z",
     });
@@ -1400,6 +1602,11 @@ describe("ChatWindowManager", () => {
       label: "Task Two",
       projectPath: "/test/project",
       messages: [
+        {
+          kind: "user",
+          text: "second saved question",
+          timestamp: "2026-01-02T00:00:00Z",
+        },
         {
           kind: "assistant",
           text: "second saved answer",
@@ -1470,7 +1677,13 @@ describe("ChatWindowManager", () => {
       label: "New Chat",
       projectPath: "/test/project",
       backendSessionId: null,
+      hasUserMessage: false,
     });
+    expect(
+      screen.getAllByText(
+        "Create, edit, and delete tasks, steps, and workflows"
+      )
+    ).toHaveLength(2);
   });
 
   it("splits the maximized chat with Cmd+Option+Backslash", async () => {
@@ -1726,6 +1939,11 @@ describe("ChatWindowManager", () => {
     const second = useChatStore
       .getState()
       .startFreshSessionInNewPane("Task Two", "/test/project");
+    useChatStore.getState().addMessage(second, {
+      kind: "user",
+      text: "Task Two question",
+      timestamp: "2026-01-02T00:00:00Z",
+    });
     const third = "third";
     persistLocalChatSession(
       createSession({
@@ -1733,6 +1951,11 @@ describe("ChatWindowManager", () => {
         label: "Task Three",
         projectPath: "/test/project",
         messages: [
+          {
+            kind: "user",
+            text: "third saved question",
+            timestamp: "2026-01-03T00:00:00Z",
+          },
           {
             kind: "assistant",
             text: "third saved answer",
@@ -2295,7 +2518,7 @@ describe("ChatWindowManager", () => {
       .getState()
       .openSession("Old Project Chat", "/old/project");
     useChatStore.getState().addMessage(oldProject, {
-      kind: "assistant",
+      kind: "user",
       text: "old project answer",
       timestamp: "2026-01-03T00:00:00Z",
     });
@@ -2319,7 +2542,7 @@ describe("ChatWindowManager", () => {
       .getState()
       .startFreshSession("No Project Chat", null);
     useChatStore.getState().addMessage(noProject, {
-      kind: "assistant",
+      kind: "user",
       text: "no-project answer",
       timestamp: "2026-01-04T00:00:00Z",
     });
@@ -2394,6 +2617,11 @@ describe("ChatWindowManager", () => {
     const id = useChatStore
       .getState()
       .openSession("Live Task", "/test/project");
+    useChatStore.getState().addMessage(id, {
+      kind: "user",
+      text: "live question",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
     useChatStore.getState().setBackendSessionId(id, "live-backend-session");
 
     render(<ChatWindowManager />);

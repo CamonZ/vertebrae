@@ -3,8 +3,13 @@ import {
   clearLastUsedLocalChatModelId,
   compareLocalChatSessionRecency,
   DEFAULT_LOCAL_CHAT_HARNESS,
+  findPersistedDefaultEmptyLocalChatSession,
   findPersistedLocalChatSession,
+  findLatestResumableLocalChatSession,
+  hasLocalChatUserMessageSummary,
+  isDefaultEmptyLocalChatSession,
   isDisposableClosedLocalChatSession,
+  isAutomaticLocalChatLabel,
   listPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
   markLocalChatSessionCleared,
@@ -395,6 +400,10 @@ export interface ChatSession {
   titleUserMessageCount?: number;
   /** Chat messages in this session */
   messages: ChatMessage[];
+  /** Whether the user has sent at least one message in this session. */
+  hasUserMessage?: boolean;
+  /** Whether the user chose to start a new chat instead of resuming history. */
+  resumeNoticeDismissed?: boolean;
   /** Session status */
   status: "open" | "closed";
   /** Local chat harness that owns the runtime session. */
@@ -455,6 +464,13 @@ export interface ChatPaneLayout {
   activePaneId: string | null;
 }
 
+export interface PendingLocalChatResume {
+  /** Durable session offered by the launcher when the panel is opened. */
+  candidate: LocalChatSessionSummary;
+  /** Project context used if the user chooses a fresh chat instead. */
+  projectPath: string | null;
+}
+
 interface ChatStoreState {
   /** All open chat sessions, keyed by session ID */
   sessions: Record<string, ChatSession>;
@@ -466,6 +482,8 @@ interface ChatStoreState {
   panelOpen: boolean;
   /** Persisted metadata index used by history surfaces. */
   localSessionSummaries: Record<string, LocalChatSessionSummary>;
+  /** Resume choice waiting for the chat panel to render it. */
+  pendingLocalChatResume: PendingLocalChatResume | null;
 }
 
 interface ChatStoreActions {
@@ -490,6 +508,10 @@ interface ChatStoreActions {
   unsplitPanes: (paneId?: string) => void;
   /** List persisted local chat sessions, newest first */
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
+  /** Find the newest persisted session with durable content in a project. */
+  findLatestResumableSession: (
+    projectPath?: string | null
+  ) => Promise<LocalChatSessionSummary | null>;
   /** Hydrate local chat metadata from the app-managed index file. */
   hydrateLocalSessionIndex: () => Promise<void>;
   /** Hydrate and focus a persisted local chat session */
@@ -613,10 +635,19 @@ interface ChatStoreActions {
   markSessionClosed: (sessionId: string) => void;
   /** Clear messages in a session */
   clearMessages: (sessionId: string) => void;
+  /** Hide the resume notice for an empty session after choosing new chat. */
+  dismissResumeNotice: (sessionId: string) => void;
   /** Toggle the chat panel open/closed */
   togglePanel: () => void;
   /** Set panel open state explicitly */
   setPanelOpen: (open: boolean) => void;
+  /** Show a durable-session resume choice inside the chat panel. */
+  setPendingLocalChatResume: (
+    candidate: LocalChatSessionSummary,
+    projectPath?: string | null
+  ) => void;
+  /** Clear the pending resume choice. */
+  clearPendingLocalChatResume: () => void;
   /** Reset local chat sessions */
   reset: () => void;
 }
@@ -636,6 +667,7 @@ const emptyState: ChatStoreState = {
   paneLayout: emptyPaneLayout,
   panelOpen: false,
   localSessionSummaries: {},
+  pendingLocalChatResume: null,
 };
 
 const GENERATED_TITLE_CONFIDENCE_THRESHOLD = 0.72;
@@ -672,6 +704,8 @@ function createLocalSession(
     titleConfidence: null,
     titleUserMessageCount: 0,
     messages: [],
+    hasUserMessage: false,
+    resumeNoticeDismissed: false,
     status: "open",
     harness:
       useLocalChatDefaultsStore.getState().defaultHarness ??
@@ -749,6 +783,9 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
     titleStatus: session.titleStatus ?? (title ? "generated" : "pending"),
     titleConfidence: session.titleConfidence ?? (title ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
+    hasUserMessage:
+      session.hasUserMessage ??
+      messages.some((message) => message.kind === "user"),
     harness,
     permissionMode,
     backendSessionId: null,
@@ -986,6 +1023,22 @@ function upsertLocalSessionSummary(
     ...summaries,
     [session.id]: summary,
   };
+}
+
+function findReusableDefaultEmptySession(
+  sessions: Record<string, ChatSession>,
+  projectPath?: string | null
+): ChatSession | null {
+  return (
+    Object.values(sessions)
+      .filter(
+        (session) =>
+          session.status === "open" &&
+          isDefaultEmptyLocalChatSession(session) &&
+          projectPathMatches(session.projectPath, projectPath)
+      )
+      .sort(compareLocalChatSessionRecency)[0] ?? null
+  );
 }
 
 function omitLocalSessionSummary(
@@ -1334,6 +1387,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
                     current.messageCount ?? 0
                   ),
                 }),
+            hasUserMessage:
+              current.hasUserMessage ??
+              merged.some((message) => message.kind === "user"),
             providerMessagesHydrating: false,
           },
         },
@@ -1552,7 +1608,16 @@ export const useChatStore = create<ChatStore>((set, get) => {
         .filter((session) =>
           projectPathMatches(session.projectPath, projectPath)
         )
+        .filter(hasLocalChatUserMessageSummary)
         .sort(compareLocalChatSessionRecency),
+
+    findLatestResumableSession: async (projectPath) => {
+      await get().hydrateLocalSessionIndex();
+      return findLatestResumableLocalChatSession(
+        get().listLocalSessions(projectPath),
+        projectPath
+      );
+    },
 
     hydrateLocalSessionIndex: async () => {
       const { sessions } = await hydrateLocalChatSessionIndex();
@@ -1662,6 +1727,45 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     startFreshSession: (label, projectPath) => {
+      if (isAutomaticLocalChatLabel(label)) {
+        const runtime = findReusableDefaultEmptySession(
+          get().sessions,
+          projectPath
+        );
+        if (runtime) {
+          set((state) => ({
+            ...focusSessionInPaneLayout(state, runtime.id),
+            panelOpen: true,
+          }));
+          return runtime.id;
+        }
+
+        const persisted = findPersistedDefaultEmptyLocalChatSession(projectPath);
+        if (persisted) {
+          const hydrated = hydrateLocalSession({
+            ...persisted,
+            projectPath: persisted.projectPath ?? projectPath,
+          });
+          set((state) => {
+            const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
+            return {
+              sessions: nextSessions,
+              localSessionSummaries: upsertLocalSessionSummary(
+                state.localSessionSummaries,
+                hydrated
+              ),
+              ...focusSessionInPaneLayout(
+                { ...state, sessions: nextSessions },
+                hydrated.id
+              ),
+              panelOpen: true,
+            };
+          });
+          hydrateProviderMessagesInPlace(hydrated.id, hydrated);
+          return hydrated.id;
+        }
+      }
+
       const session = createLocalSession(label, projectPath);
       persistLocalChatSession(session);
       set((state) => {
@@ -1729,6 +1833,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ) {
             return session;
           }
+          const nextHasUserMessage =
+            session.hasUserMessage || message.kind === "user";
           let messages = [...session.messages];
           if (message.kind === "user_question") {
             messages = messages.filter(
@@ -1760,6 +1866,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               return {
                 ...session,
                 messages,
+                hasUserMessage: nextHasUserMessage,
                 updatedAt: message.timestamp,
               };
             }
@@ -1783,6 +1890,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               return {
                 ...session,
                 messages,
+                hasUserMessage: nextHasUserMessage,
                 updatedAt: message.timestamp,
               };
             }
@@ -1791,6 +1899,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             return {
               ...session,
               messages: coalesceParentAssistantMessage(messages, message),
+              hasUserMessage: nextHasUserMessage,
               updatedAt: message.timestamp,
             };
           } else {
@@ -1799,6 +1908,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           return {
             ...session,
             messages,
+            hasUserMessage: nextHasUserMessage,
             updatedAt: message.timestamp,
           };
         },
@@ -2423,6 +2533,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
             [sessionId]: {
               ...session,
               messages: [],
+              hasUserMessage: false,
+              resumeNoticeDismissed: false,
               title: null,
               titleStatus: "pending",
               titleConfidence: null,
@@ -2454,6 +2566,37 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     setPanelOpen: (open) => {
       set({ panelOpen: open });
+    },
+
+    setPendingLocalChatResume: (candidate, projectPath = null) => {
+      set({ pendingLocalChatResume: { candidate, projectPath } });
+    },
+
+    dismissResumeNotice: (sessionId) => {
+      let updatedSession: ChatSession | null = null;
+      set((state) => {
+        const session = state.sessions[sessionId];
+        if (!session || session.resumeNoticeDismissed) return state;
+        updatedSession = {
+          ...session,
+          resumeNoticeDismissed: true,
+        };
+        return {
+          sessions: {
+            ...state.sessions,
+            [sessionId]: updatedSession,
+          },
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            updatedSession
+          ),
+        };
+      });
+      if (updatedSession) persistLocalChatSession(updatedSession);
+    },
+
+    clearPendingLocalChatResume: () => {
+      set({ pendingLocalChatResume: null });
     },
 
     reset: () => set(emptyState),
