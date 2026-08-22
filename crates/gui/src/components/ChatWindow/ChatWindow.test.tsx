@@ -33,10 +33,6 @@ vi.mock("../../bindings", () => ({
       status: "ok",
       data: "/test/project",
     }),
-    getLocalFileRoots: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: ["/test/project"],
-    }),
     getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
       status: "ok",
       data: {
