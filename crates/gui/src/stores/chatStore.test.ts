@@ -574,6 +574,21 @@ describe("chatStore", () => {
       ).toBe(2);
     });
 
+    it("does not split an automatic empty chat into another empty session", () => {
+      const first = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/test/project");
+      const second = useChatStore
+        .getState()
+        .startFreshSessionInNewPane("New Chat", "/test/project");
+
+      const state = useChatStore.getState();
+      expect(second).toBe(first);
+      expect(Object.keys(state.sessions)).toEqual([first]);
+      expect(state.paneLayout.panes).toHaveLength(1);
+      expect(state.activeSessionId).toBe(first);
+    });
+
     it("supports more than two distinct split panes", () => {
       const first = useChatStore.getState().openSession("First");
       const second = useChatStore

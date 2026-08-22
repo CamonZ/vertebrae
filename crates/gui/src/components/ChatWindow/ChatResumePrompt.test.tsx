@@ -22,6 +22,7 @@ describe("ChatResumePrompt", () => {
         name: "continue with the last session Review API",
       })
     ).toBeInTheDocument();
+    expect(screen.getByText("or").parentElement).toHaveClass("font-normal");
 
     await user.click(screen.getByRole("link"));
     await user.click(screen.getByRole("button", { name: "new chat" }));

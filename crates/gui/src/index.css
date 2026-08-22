@@ -2384,7 +2384,7 @@ html.light ::selection {
 .hc-resume-prompt button {
   color: var(--accent);
   font: inherit;
-  font-weight: 650;
+  font-weight: 400;
   text-decoration: underline;
   text-underline-offset: 2px;
 }

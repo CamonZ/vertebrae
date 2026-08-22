@@ -1555,6 +1555,45 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     startFreshSessionInNewPane: (label, projectPath) => {
+      if (isAutomaticLocalChatLabel(label)) {
+        const runtime = findReusableDefaultEmptySession(
+          get().sessions,
+          projectPath
+        );
+        if (runtime) {
+          set((state) => ({
+            ...focusSessionInPaneLayout(state, runtime.id),
+            panelOpen: true,
+          }));
+          return runtime.id;
+        }
+
+        const persisted = findPersistedDefaultEmptyLocalChatSession(projectPath);
+        if (persisted) {
+          const hydrated = hydrateLocalSession({
+            ...persisted,
+            projectPath: persisted.projectPath ?? projectPath,
+          });
+          set((state) => {
+            const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
+            return {
+              sessions: nextSessions,
+              localSessionSummaries: upsertLocalSessionSummary(
+                state.localSessionSummaries,
+                hydrated
+              ),
+              ...addSessionPane(
+                { ...state, sessions: nextSessions },
+                hydrated.id
+              ),
+              panelOpen: true,
+            };
+          });
+          hydrateProviderMessagesInPlace(hydrated.id, hydrated);
+          return hydrated.id;
+        }
+      }
+
       const session = createLocalSession(label, projectPath);
       persistLocalChatSession(session);
       set((state) => {

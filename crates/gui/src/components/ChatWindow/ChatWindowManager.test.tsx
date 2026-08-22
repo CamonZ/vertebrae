@@ -282,6 +282,10 @@ describe("ChatWindowManager", () => {
   });
 
   it("keeps new chat available when continuing fails", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
     const user = userEvent.setup();
     const persisted = createPersistedHistorySession(
       "unavailable-session",
@@ -325,6 +329,18 @@ describe("ChatWindowManager", () => {
       expect(
         screen.getByText("Create, edit, and delete tasks, steps, and workflows")
       ).toBeInTheDocument();
+
+      const sessionCountBeforeSplit = Object.keys(
+        useChatStore.getState().sessions
+      ).length;
+      fireEvent.keyDown(window, { key: "\\", metaKey: true });
+      const splitButton = await screen.findByLabelText("Split chat pane");
+      expect(splitButton).toBeDisabled();
+      await user.click(splitButton);
+      expect(screen.getAllByTestId("chat-pane")).toHaveLength(1);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(
+        sessionCountBeforeSplit
+      );
     } finally {
       useChatStore.setState({ selectPersistedSession });
     }
@@ -1611,6 +1627,15 @@ describe("ChatWindowManager", () => {
           targetPaneCount
         );
       });
+      if (targetPaneCount === 2) {
+        const activeSessionId = useChatStore.getState().activeSessionId;
+        expect(activeSessionId).not.toBeNull();
+        useChatStore.getState().addMessage(activeSessionId!, {
+          kind: "user",
+          text: "Continue this chat",
+          timestamp: "2026-01-01T00:00:00Z",
+        });
+      }
     }
 
     const paneSessionIds = useChatStore
