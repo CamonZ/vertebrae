@@ -4,6 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 import type { LocalChatSessionGroup } from "../../utils/localChatSessionGroups";
+import {
+  DEFAULT_HISTORY_WIDTH,
+  MAX_HISTORY_WIDTH,
+} from "../../hooks/useChatHistoryPanelLayout";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import type { SpawnOutlineItem } from "./sessionListUtils";
 
@@ -45,6 +49,7 @@ interface ControlledPanelProps {
   hasLocalChatSessions?: boolean;
   sessionGroups?: LocalChatSessionGroup[];
   spawnOutlineBySessionId?: Map<string, SpawnOutlineItem[]>;
+  width?: number;
   onQueryChange?: (query: string) => void;
   onSelect?: (sessionId: string) => void;
   onSelectAgent?: (parentSessionId: string, agent: SpawnOutlineItem) => void;
@@ -56,6 +61,7 @@ function ControlledPanel({
   hasLocalChatSessions,
   sessionGroups = [],
   spawnOutlineBySessionId = new Map(),
+  width = DEFAULT_HISTORY_WIDTH,
   onQueryChange,
   onSelect = vi.fn(),
   onSelectAgent = vi.fn(),
@@ -65,6 +71,7 @@ function ControlledPanel({
 
   return (
     <LocalChatMiniPanel
+      width={width}
       activeSessionId={sessionGroups[0]?.sessions[0]?.id ?? "active"}
       activeProviderThreadId={null}
       searchQuery={query}
@@ -97,6 +104,7 @@ function DeletingPanel() {
 
   return (
     <LocalChatMiniPanel
+      width={DEFAULT_HISTORY_WIDTH}
       activeSessionId={session.id}
       activeProviderThreadId={null}
       searchQuery={query}
@@ -136,6 +144,7 @@ function ExpandableDeletingPanel() {
 
   return (
     <LocalChatMiniPanel
+      width={DEFAULT_HISTORY_WIDTH}
       activeSessionId={sessions[0].id}
       activeProviderThreadId={null}
       searchQuery=""
@@ -358,6 +367,71 @@ describe("LocalChatMiniPanel search", () => {
 
     fireEvent.keyDown(sessionButton, { key: "Enter" });
     expect(onSelect).toHaveBeenCalledWith(session.id);
+  });
+
+  it("keeps the history list and row controls usable at the minimum and wider widths", () => {
+    const session = makeSession("wide", {
+      label:
+        "A session with a title that benefits from the wider history panel",
+      title:
+        "A session with a title that benefits from the wider history panel",
+    });
+    const onDelete = vi.fn();
+
+    const { rerender } = render(
+      <ControlledPanel
+        sessionGroups={[makeGroup("current", "Current project", [session])]}
+        onDelete={onDelete}
+      />
+    );
+
+    const panelElement = () => screen.getByTestId("local-chat-mini-panel");
+    const panel = () => within(panelElement());
+
+    expect(panelElement()).toHaveStyle({
+      width: `${DEFAULT_HISTORY_WIDTH}px`,
+    });
+    expect(
+      panelElement().querySelector(".hc-mini-history-list")
+    ).not.toBeNull();
+    expect(
+      panel().getByRole("button", {
+        name: /Load local chat A session with a title/,
+      })
+    ).toBeInTheDocument();
+    expect(
+      panelElement().querySelector(".hc-mini-history-open .label")
+    ).toHaveTextContent(
+      "A session with a title that benefits from the wider history panel"
+    );
+    expect(
+      panel().getByRole("button", {
+        name: "Delete local chat A session with a title that benefits from the wider history panel",
+      })
+    ).toBeInTheDocument();
+
+    rerender(
+      <ControlledPanel
+        width={MAX_HISTORY_WIDTH}
+        sessionGroups={[makeGroup("current", "Current project", [session])]}
+        onDelete={onDelete}
+      />
+    );
+
+    expect(panelElement()).toHaveStyle({ width: `${MAX_HISTORY_WIDTH}px` });
+    expect(
+      panelElement().querySelector(".hc-mini-history-list")
+    ).not.toBeNull();
+    expect(
+      panel().getByRole("button", {
+        name: "Delete local chat A session with a title that benefits from the wider history panel",
+      })
+    ).toBeInTheDocument();
+    expect(
+      panelElement().querySelector(".hc-mini-history-open .label")
+    ).toHaveTextContent(
+      "A session with a title that benefits from the wider history panel"
+    );
   });
 });
 

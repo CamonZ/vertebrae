@@ -11,6 +11,11 @@ import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { usePanelExitTransition } from "../../hooks/usePanelExitTransition";
 import { doCloseSession } from "../../hooks/useLocalChat";
 import { useChatPanelLayout } from "../../hooks/useChatPanelLayout";
+import {
+  clampHistoryWidthForLayout,
+  maxHistoryWidthForLayout,
+  useChatHistoryPanelLayout,
+} from "../../hooks/useChatHistoryPanelLayout";
 import { useChatKeyboardShortcuts } from "../../hooks/useChatKeyboardShortcuts";
 import { useLocalChatHistory } from "../../hooks/useLocalChatHistory";
 import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
@@ -18,6 +23,7 @@ import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import { projectLocalChatSessionGroups } from "../../utils/localChatSessionGroups";
 import { ChatPaneList } from "./ChatPaneList";
 import { ChatResizeHandle } from "./ChatResizeHandle";
+import { ChatHistoryResizeHandle } from "./ChatHistoryResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import { ChatShortcutHints } from "./ChatShortcutHints";
 import {
@@ -131,6 +137,7 @@ export function ChatWindowManager() {
     startResizeDrag,
     collapseMaximized,
   } = useChatPanelLayout({ unsplitPanes });
+  const { historyWidth, resizeHistoryWidth } = useChatHistoryPanelLayout();
 
   const {
     loadCurrentProjectPath,
@@ -182,7 +189,15 @@ export function ChatWindowManager() {
     renderedPanelWidth,
     activeSession,
   });
-
+  const historyMaxWidth = maxHistoryWidthForLayout(
+    renderedPanelWidth,
+    visiblePanes.length
+  );
+  const effectiveHistoryWidth = clampHistoryWidthForLayout(
+    historyWidth,
+    renderedPanelWidth,
+    visiblePanes.length
+  );
   const open = panelOpen && sessionList.length > 0;
   const setChatLayout = usePanelLayoutStore((s) => s.setChatLayout);
   const clearChatLayout = usePanelLayoutStore((s) => s.clearChatLayout);
@@ -396,6 +411,7 @@ export function ChatWindowManager() {
         <div className="hc-panel-main">
           {isMaximized && (
             <LocalChatMiniPanel
+              width={effectiveHistoryWidth}
               activeSessionId={activeSessionId ?? visiblePanes[0].sessionId}
               activeProviderThreadId={activeSession?.providerResumeId ?? null}
               searchQuery={sessionQuery}
@@ -413,6 +429,13 @@ export function ChatWindowManager() {
               deletingSessionId={deletingSessionId}
               deleteError={deleteError}
               onDelete={(sessionId) => void handleDeleteSession(sessionId)}
+            />
+          )}
+          {isMaximized && (
+            <ChatHistoryResizeHandle
+              historyWidth={effectiveHistoryWidth}
+              maxWidth={historyMaxWidth}
+              onResize={resizeHistoryWidth}
             />
           )}
           <ChatPaneList

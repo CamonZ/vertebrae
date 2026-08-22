@@ -28,6 +28,7 @@ import {
   loadPersistedLocalChatSession,
   persistLocalChatSession,
 } from "../../utils/localChatPersistence";
+import { HISTORY_WIDTH_STORAGE_KEY } from "../../hooks/useChatHistoryPanelLayout";
 import { commands } from "../../bindings";
 
 // Mock scrollIntoView
@@ -551,6 +552,37 @@ describe("ChatWindowManager", () => {
     fireEvent.resize(window);
 
     expect(panel).toHaveStyle({ width: "828px" });
+  });
+
+  it("clamps the history sidebar when a second pane consumes the available width", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1064,
+    });
+    localStorage.setItem(HISTORY_WIDTH_STORAGE_KEY, "400");
+    const user = userEvent.setup();
+    useChatStore.getState().openSession("Task One", "/test/project");
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const handle = screen.getByTestId("chat-history-resize-handle");
+    expect(handle).toHaveAttribute("aria-valuemax", "400");
+    expect(screen.getByTestId("local-chat-mini-panel")).toHaveAttribute(
+      "data-sidebar-width",
+      "400"
+    );
+
+    await user.click(screen.getByLabelText("Split chat pane"));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
+    });
+    expect(handle).toHaveAttribute("aria-valuemax", "272");
+    expect(screen.getByTestId("local-chat-mini-panel")).toHaveAttribute(
+      "data-sidebar-width",
+      "272"
+    );
   });
 
   it("ignores Cmd+\\ when the chat panel is closed or has no sessions", () => {
