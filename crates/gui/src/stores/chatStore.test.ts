@@ -508,6 +508,19 @@ describe("chatStore", () => {
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
     });
 
+    it("reuses an empty session when equivalent project paths differ by a trailing separator", () => {
+      const existing = useChatStore
+        .getState()
+        .openSession("Empty", "/target/project/");
+
+      const opened = useChatStore
+        .getState()
+        .openProjectSession("New Chat", "/target/project");
+
+      expect(opened).toBe(existing);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
+    });
+
     it("hydrates a persisted empty project session instead of creating a duplicate", () => {
       const persisted = useChatStore
         .getState()

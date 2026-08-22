@@ -13,6 +13,7 @@ import {
   listPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
   markLocalChatSessionCleared,
+  normalizeProjectPath,
   persistLastUsedLocalChatModelId,
   persistLocalChatSession,
   projectPathMatches,
@@ -1524,9 +1525,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     openProjectSession: (label, projectPath) => {
+      const targetPath = normalizeProjectPath(projectPath) ?? projectPath;
       const existing = findEligibleEmptyProjectSession(
         get().sessions,
-        projectPath
+        targetPath
       );
       if (existing) {
         set((state) => ({
@@ -1536,7 +1538,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return existing;
       }
 
-      const persisted = listPersistedLocalChatSessions(projectPath)
+      const persisted = listPersistedLocalChatSessions(targetPath)
         .map((summary) => loadPersistedLocalChatSession(summary.id))
         .find(
           (session): session is ChatSession =>
@@ -1545,7 +1547,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (persisted && !get().sessions[persisted.id]) {
         const hydrated = hydrateLocalSession({
           ...persisted,
-          projectPath: persisted.projectPath ?? projectPath,
+          projectPath: persisted.projectPath ?? targetPath,
         });
         set((state) => {
           const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
@@ -1561,7 +1563,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return hydrated.id;
       }
 
-      const session = createLocalSession(label, projectPath);
+      const session = createLocalSession(label, targetPath);
       persistLocalChatSession(session);
       set((state) => {
         const nextSessions = { ...state.sessions, [session.id]: session };

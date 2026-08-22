@@ -15,8 +15,14 @@ Feature: Project chat plus actions
     Then the local chat history drawer should show the active project within 5 seconds
     When I click the local chat plus action for the "primary" project
     Then the active local chat should use the "primary" project directory within 5 seconds
+    When I type "hello from primary project" into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the GUI should show "local-chat-acceptance reply" within 10 seconds
     When I click the local chat plus action for the "second" project
     Then the active local chat should use the "second" project directory within 5 seconds
+    When I type "hello from second project" into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the GUI should show "local-chat-acceptance reply" within 10 seconds
 
   Scenario: Codex project plus action keeps the selected project active
     Given the GUI is showing the task list
@@ -27,3 +33,6 @@ Feature: Project chat plus actions
     Then the active local chat should use the "primary" project directory within 5 seconds
     When I choose local chat provider "codex"
     Then the local chat provider should be "codex" within 5 seconds
+    When I type "hello from codex project" into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the active local chat should use the "primary" project directory within 10 seconds

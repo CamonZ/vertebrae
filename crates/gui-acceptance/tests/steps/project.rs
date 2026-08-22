@@ -156,12 +156,8 @@ async fn choose_local_chat_provider(world: &mut GuiWorld, provider: String) {
         .for_element(Locator::Css("[data-testid='local-chat-provider-picker']"))
         .await
         .expect("local chat provider picker not found");
-    let element_json = serde_json::to_value(&element).expect("serialize provider picker");
-    client
-        .execute(
-            "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('change', { bubbles: true }));",
-            vec![element_json, serde_json::json!(provider)],
-        )
+    element
+        .select_by_value(&provider)
         .await
         .expect("failed to select local chat provider");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;

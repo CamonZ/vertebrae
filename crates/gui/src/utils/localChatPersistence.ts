@@ -590,9 +590,28 @@ export function projectPathMatches(
   if (requestedProjectPath === null) {
     return sessionProjectPath === undefined || sessionProjectPath === null;
   }
-  if (sessionProjectPath === undefined || sessionProjectPath === null)
-    return false;
-  return sessionProjectPath === requestedProjectPath;
+  const normalizedRequestedPath = normalizeProjectPath(requestedProjectPath);
+  const normalizedSessionPath = normalizeProjectPath(sessionProjectPath);
+  if (!normalizedRequestedPath || !normalizedSessionPath) return false;
+  return normalizedSessionPath === normalizedRequestedPath;
+}
+
+/** Normalize project paths before grouping or matching persisted sessions. */
+export function normalizeProjectPath(
+  path: string | null | undefined
+): string | null {
+  const trimmed = path?.trim();
+  if (!trimmed) return null;
+
+  let normalized = trimmed;
+  while (
+    normalized.length > 1 &&
+    /[\\/]$/.test(normalized) &&
+    !/^[A-Za-z]:[\\/]$/.test(normalized)
+  ) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized;
 }
 
 export function loadPersistedLocalChatSessions(): Record<string, ChatSession> {

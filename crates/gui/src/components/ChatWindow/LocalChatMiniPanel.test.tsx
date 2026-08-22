@@ -207,6 +207,13 @@ describe("LocalChatMiniPanel search", () => {
     expect(panel.getAllByTestId(/^new-project-chat-/)).toHaveLength(3);
     expect(alphaButton).toHaveAttribute("title", "Start a new chat in Alpha");
     expect(fallbackButton).toBeDisabled();
+    expect(fallbackButton).toHaveAttribute(
+      "title",
+      "Cannot start a chat in Unknown project: project directory unavailable"
+    );
+
+    await user.click(fallbackButton);
+    expect(onStartProjectChat).not.toHaveBeenCalled();
 
     await user.click(alphaButton);
     expect(onStartProjectChat).toHaveBeenCalledTimes(1);
