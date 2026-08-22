@@ -89,6 +89,7 @@ Rules:\n\
 - Do not include quotation marks, trailing punctuation, markdown, or labels.\n\
 - If the messages are only greetings, acknowledgements, or vague setup, set title to null, sufficient_signal to false, and confidence below 0.3.\n\
 - Set sufficient_signal to true only when the title would help distinguish this session from other local coding chats.\n\
+- If the conversation is about implementing a Vertebrae ticket, workflow, or step and provides its ID, prioritize that entity over generic coding topics. Start the title with the entity type and identifier when it fits within the 60-character limit, followed by the concise implementation goal.\n\
 - Use confidence at least 0.72 only for specific, actionable session titles.\n\n\
 Conversation transcript:\n{messages}"
     )
@@ -470,6 +471,17 @@ mod tests {
         assert!(prompt.contains("1. User: inspect the title flow"));
         assert!(prompt.contains("2. Assistant: I will inspect the shared path"));
         assert!(prompt.contains("3. User: also cover persistence"));
+    }
+
+    #[test]
+    fn prioritizes_vertebrae_entities_and_ids_in_title_prompt() {
+        let prompt = title_prompt(&[
+            "User: implement ticket f9979bf1-1199-455e-8558-9e15aa9b37b6".to_string(),
+        ]);
+
+        assert!(prompt.contains("Vertebrae ticket, workflow, or step"));
+        assert!(prompt.contains("entity type and identifier"));
+        assert!(prompt.contains("60-character limit"));
     }
 
     #[test]
