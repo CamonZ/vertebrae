@@ -192,6 +192,115 @@ describe("FloatingChatLauncher", () => {
     expect(useChatStore.getState().sessions[closedId].lifecycle).toBe("closed");
   });
 
+  it("offers a Codex session through the same provider-neutral resume flow", async () => {
+    const user = userEvent.setup();
+    const codexId = useChatStore
+      .getState()
+      .openSession("Codex Task", "/test/project");
+    useChatStore.getState().setSessionHarness(codexId, "codex");
+    useChatStore.getState().addMessage(codexId, {
+      kind: "user",
+      text: "continue with Codex",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    useChatStore.getState().setPanelOpen(false);
+
+    render(<FloatingChatLauncher />);
+
+    await user.click(screen.getByRole("button", { name: "Open project chat" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("local-chat-resume-prompt")).toBeInTheDocument()
+    );
+    expect(screen.getByTestId("local-chat-resume-prompt")).toHaveTextContent(
+      "Codex Task"
+    );
+    await user.click(
+      screen.getByRole("link", {
+        name: "continue with the last session Codex Task",
+      })
+    );
+
+    await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
+    expect(useChatStore.getState().activeSessionId).toBe(codexId);
+    expect(useChatStore.getState().sessions[codexId].harness).toBe("codex");
+  });
+
+  it("keeps new chat available when continuing a session fails", async () => {
+    const user = userEvent.setup();
+    const resumableId = useChatStore
+      .getState()
+      .openSession("Unavailable Task", "/test/project");
+    useChatStore.getState().addMessage(resumableId, {
+      kind: "user",
+      text: "this session cannot load",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    useChatStore.getState().setPanelOpen(false);
+    const selectPersistedSession =
+      useChatStore.getState().selectPersistedSession;
+    useChatStore.setState({
+      selectPersistedSession: vi.fn().mockResolvedValue(false),
+    });
+
+    try {
+      render(<FloatingChatLauncher />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Open project chat" })
+      );
+      await user.click(
+        screen.getByRole("link", {
+          name: "continue with the last session Unavailable Task",
+        })
+      );
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "You can still start a new chat"
+      );
+      await user.click(screen.getByRole("button", { name: "new chat" }));
+
+      await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
+      expect(useChatStore.getState().activeSessionId).not.toBe(resumableId);
+    } finally {
+      useChatStore.setState({ selectPersistedSession });
+    }
+  });
+
+  it("reuses the empty session when new chat is chosen repeatedly", async () => {
+    const user = userEvent.setup();
+    const resumableId = useChatStore
+      .getState()
+      .openSession("Durable Task", "/test/project");
+    useChatStore.getState().addMessage(resumableId, {
+      kind: "user",
+      text: "durable content",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    useChatStore.getState().setPanelOpen(false);
+
+    render(<FloatingChatLauncher />);
+
+    await user.click(screen.getByRole("button", { name: "Open project chat" }));
+    await user.click(screen.getByRole("button", { name: "new chat" }));
+    await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
+    const emptyId = useChatStore.getState().activeSessionId;
+    expect(emptyId).not.toBe(resumableId);
+
+    useChatStore.getState().setPanelOpen(false);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open project chat" })
+      ).toBeInTheDocument()
+    );
+    await user.click(screen.getByRole("button", { name: "Open project chat" }));
+    await user.click(screen.getByRole("button", { name: "new chat" }));
+    await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
+
+    expect(useChatStore.getState().activeSessionId).toBe(emptyId);
+    expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
+  });
+
   it("hides itself once the panel is open (panel owns the anchor)", () => {
     useChatStore.setState({ panelOpen: true });
     render(<FloatingChatLauncher />);
