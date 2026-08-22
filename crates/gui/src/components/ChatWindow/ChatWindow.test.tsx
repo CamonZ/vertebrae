@@ -33,6 +33,10 @@ vi.mock("../../bindings", () => ({
       status: "ok",
       data: "/test/project",
     }),
+    getLocalFileRoots: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: ["/test/project"],
+    }),
     getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
       status: "ok",
       data: {
@@ -186,6 +190,22 @@ describe("ChatWindow", () => {
     expect(screen.getByText("My Task")).toBeInTheDocument();
     expect(screen.queryByText("local to")).not.toBeInTheDocument();
     expect(screen.queryByText("this task")).not.toBeInTheDocument();
+  });
+
+  it("exposes the active session project path for GUI acceptance assertions", () => {
+    const session = createSession({ projectPath: "/selected/project" });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("local-chat-window")).toHaveAttribute(
+      "data-project-path",
+      "/selected/project"
+    );
   });
 
   it("renders the inferred session title in the header", () => {

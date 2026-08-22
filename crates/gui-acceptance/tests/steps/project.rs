@@ -74,6 +74,127 @@ async fn click_active_project_entry(world: &mut GuiWorld) {
     click_project_entry(world, &slug).await;
 }
 
+#[when(expr = "I click the local chat plus action for the {string} project")]
+async fn click_local_chat_plus_action(world: &mut GuiWorld, project: String) {
+    let slug = match project.as_str() {
+        "primary" => active_project_slug(world),
+        "second" => second_project_slug(world),
+        other => panic!("unknown acceptance project {other:?}; use primary or second"),
+    };
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let title = format!("Start a new chat in {slug}");
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(10))
+        .for_element(Locator::XPath(&format!("//*[@title='{title}']")))
+        .await
+        .unwrap_or_else(|_| panic!("local chat plus action for project '{slug}' not found"));
+    element
+        .click()
+        .await
+        .unwrap_or_else(|_| panic!("failed to click local chat plus action for '{slug}'"));
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    world
+        .screenshot(&client, &format!("after-project-chat-plus-{project}"))
+        .await;
+}
+
+#[then(
+    expr = "the active local chat should use the {string} project directory within {int} seconds"
+)]
+async fn active_local_chat_uses_project_directory(
+    world: &mut GuiWorld,
+    project: String,
+    timeout: u64,
+) {
+    let expected_path = world.project_path(&project);
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let locator = Locator::XPath(&format!(
+        "//*[@data-testid='local-chat-window' and @data-project-path='{}']",
+        expected_path
+    ));
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(timeout))
+        .for_element(locator)
+        .await;
+    if element.is_err() {
+        world
+            .screenshot(&client, &format!("fail-active-project-path-{project}"))
+            .await;
+    }
+    assert!(
+        element.is_ok(),
+        "expected the active local chat to use project '{project}' directory '{expected_path}' within {timeout}s"
+    );
+    world
+        .screenshot(&client, &format!("after-active-project-path-{project}"))
+        .await;
+}
+
+#[when(expr = "I choose local chat provider {string}")]
+async fn choose_local_chat_provider(world: &mut GuiWorld, provider: String) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(10))
+        .for_element(Locator::Css("[data-testid='local-chat-provider-picker']"))
+        .await
+        .expect("local chat provider picker not found");
+    let element_json = serde_json::to_value(&element).expect("serialize provider picker");
+    client
+        .execute(
+            "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('change', { bubbles: true }));",
+            vec![element_json, serde_json::json!(provider)],
+        )
+        .await
+        .expect("failed to select local chat provider");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    world
+        .screenshot(&client, &format!("after-select-provider-{provider}"))
+        .await;
+}
+
+#[then(expr = "the local chat provider should be {string} within {int} seconds")]
+async fn local_chat_provider_should_be(world: &mut GuiWorld, provider: String, timeout: u64) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(timeout))
+        .for_element(Locator::Css("[data-testid='local-chat-provider-picker']"))
+        .await
+        .expect("local chat provider picker not found");
+    let value = element
+        .attr("value")
+        .await
+        .expect("failed to read local chat provider")
+        .unwrap_or_default();
+    assert_eq!(value, provider);
+    world
+        .screenshot(&client, &format!("after-assert-provider-{provider}"))
+        .await;
+}
+
 #[then(expr = "the second project is the active project within {int} seconds")]
 async fn second_project_is_active_within(world: &mut GuiWorld, timeout: u64) {
     let slug = second_project_slug(world);

@@ -525,6 +525,45 @@ describe("chatStore", () => {
         messages: [],
       });
     });
+
+    it("replaces only the active pane and reuses the new empty session on repeat clicks", () => {
+      const preserved = useChatStore
+        .getState()
+        .openSession("Preserved", "/preserved/project");
+      const durableTarget = useChatStore
+        .getState()
+        .startFreshSessionInNewPane("Durable target", "/target/project");
+      useChatStore.getState().addMessage(durableTarget, {
+        kind: "user",
+        text: "Do not replace this conversation",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+      const preservedPane = useChatStore.getState().paneLayout.panes[0];
+      expect(preservedPane.sessionId).toBe(preserved);
+
+      useChatStore.getState().focusPane(preservedPane.id);
+      const opened = useChatStore
+        .getState()
+        .openProjectSession("New Chat", "/target/project");
+      const repeated = useChatStore
+        .getState()
+        .openProjectSession("New Chat", "/target/project");
+
+      const state = useChatStore.getState();
+      expect(repeated).toBe(opened);
+      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+        opened,
+        durableTarget,
+      ]);
+      expect(state.activeSessionId).toBe(opened);
+      expect(state.sessions[durableTarget].messages).toEqual([
+        {
+          kind: "user",
+          text: "Do not replace this conversation",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ]);
+    });
   });
 
   describe("closeSession", () => {

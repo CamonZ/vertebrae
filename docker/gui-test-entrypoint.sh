@@ -60,9 +60,9 @@ SIDECAR_PROFILE=debug node /app/crates/gui/scripts/prepare-sidecars.mjs
 
 # Build the Tauri app and mock-claude (debug mode for speed). The sidecars
 # were already built by the sidecar staging step above.
-echo "==> Building Tauri app, mock-claude binaries..."
+echo "==> Building Tauri app, mock Claude/Codex binaries..."
 VERTEBRAE_BUNDLE_SIDECARS=1 cargo build -p gui --bin gui --quiet
-cargo build -p daemon-acceptance --bin mock-claude --quiet
+cargo build -p daemon-acceptance --bin mock-claude --bin mock-codex --quiet
 
 # Install the component binaries that the GUI expects to find on a normal
 # machine. The files in data_bin are the managed install; ~/.local/bin contains
@@ -94,7 +94,9 @@ echo "==> GUI component prerequisites installed in $GUI_DATA_BIN"
 
 # Install mock-claude where the daemon expects it.
 ln -sf /app/target/debug/mock-claude /usr/local/bin/mock-claude
+ln -sf /app/target/debug/mock-codex /usr/local/bin/mock-codex
 export CLAUDE_CODE_PATH=/usr/local/bin/mock-claude
+export CODEX_PATH=/usr/local/bin/mock-codex
 mkdir -p /mocks
 export MOCK_OUTPUT_DIR=/mocks
 
