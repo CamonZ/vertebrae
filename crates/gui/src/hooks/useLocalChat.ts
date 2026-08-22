@@ -26,11 +26,13 @@ import type {
   ChatCompactionSummary,
   LocalChatLifecycle,
 } from "../stores/chatStore";
-import { DEFAULT_LOCAL_CHAT_HARNESS } from "../utils/localChatPersistence";
+import {
+  DEFAULT_LOCAL_CHAT_HARNESS,
+  isAutomaticLocalChatLabel,
+} from "../utils/localChatPersistence";
 import { resolveContextWindow } from "../utils/modelContextWindow";
 import { recordLocalChatTrace } from "../utils/localChatDebug";
 
-const AUTOMATIC_LOCAL_CHAT_LABELS = new Set(["New Chat", "Project Chat"]);
 const MAX_TITLE_USER_MESSAGES = 3;
 
 // --- Extracted event handlers (pure functions, testable without hooks) ---
@@ -143,7 +145,7 @@ function shouldInferSessionTitle(session: ChatSession, userMessages: string[]) {
     session.titleStatus !== "generated" &&
     session.titleStatus !== "manual" &&
     (session.titleUserMessageCount ?? 0) < userMessages.length &&
-    AUTOMATIC_LOCAL_CHAT_LABELS.has(session.label)
+    isAutomaticLocalChatLabel(session.label)
   );
 }
 

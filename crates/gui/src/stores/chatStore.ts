@@ -8,6 +8,7 @@ import {
   findLatestResumableLocalChatSession,
   isDefaultEmptyLocalChatSession,
   isDisposableClosedLocalChatSession,
+  isAutomaticLocalChatLabel,
   listPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
   markLocalChatSessionCleared,
@@ -1693,9 +1694,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     startFreshSession: (label, projectPath) => {
-      const shouldReuseDefaultEmpty =
-        label === "New Chat" || label === "Project Chat";
-      if (shouldReuseDefaultEmpty) {
+      if (isAutomaticLocalChatLabel(label)) {
         const runtime = findReusableDefaultEmptySession(
           get().sessions,
           projectPath

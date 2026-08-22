@@ -236,17 +236,21 @@ export function hasDurableLocalChatSummary(
   );
 }
 
+export function isAutomaticLocalChatLabel(label: string): boolean {
+  const normalized = label.trim();
+  return normalized === "New Chat" || normalized === "Project Chat";
+}
+
 /** Automatic placeholders are safe to reuse or deduplicate. Explicitly named
  * empty sessions remain user-owned and are not treated as disposable. */
 export function isDefaultEmptyLocalChatSession(
   session: Pick<
     ChatSession,
     "label" | "messages" | "providerResumeId" | "messageCount"
-  >
+>
 ): boolean {
-  const label = session.label.trim();
   return (
-    (label === "New Chat" || label === "Project Chat") &&
+    isAutomaticLocalChatLabel(session.label) &&
     !hasDurableLocalChatContent(session)
   );
 }
@@ -400,6 +404,32 @@ function writeSessions(sessions: Record<string, ChatSession>): Promise<boolean> 
   return scheduleIndexSave();
 }
 
+function deduplicateDefaultEmptyLocalChatSessions(
+  sessions: Record<string, ChatSession>
+): { sessions: Record<string, ChatSession>; changed: boolean } {
+  const deduplicated = { ...sessions };
+  const byProject = new Map<string | null, ChatSession[]>();
+  for (const session of Object.values(deduplicated)) {
+    if (session.status !== "open" || !isDefaultEmptyLocalChatSession(session)) {
+      continue;
+    }
+    const projectKey = session.projectPath ?? null;
+    const bucket = byProject.get(projectKey) ?? [];
+    bucket.push(session);
+    byProject.set(projectKey, bucket);
+  }
+
+  let changed = false;
+  for (const candidates of byProject.values()) {
+    candidates.sort(compareLocalChatSessionRecency);
+    for (const duplicate of candidates.slice(1)) {
+      delete deduplicated[duplicate.id];
+      changed = true;
+    }
+  }
+  return { sessions: deduplicated, changed };
+}
+
 function scheduleIndexSave(): Promise<boolean> {
   indexSaveQueued = true;
   if (!indexSavePromise) {
@@ -479,11 +509,14 @@ async function hydrateSessionIndexCache(): Promise<boolean> {
     sessionIndexHydratePromise = loadSessionIndexFromCommand()
       .then((loaded) => {
         if (loaded === null) return false;
-        sessionIndexCache = {
+        const merged = {
           ...loaded,
           ...sessionIndexCache,
         };
+        const deduplicated = deduplicateDefaultEmptyLocalChatSessions(merged);
+        sessionIndexCache = deduplicated.sessions;
         sessionIndexHydrated = true;
+        if (deduplicated.changed) scheduleIndexSave();
         return true;
       })
       .finally(() => {
@@ -624,21 +657,9 @@ export function persistLocalChatSession(session: ChatSession): Promise<boolean> 
     return writeSessions(sessions);
   }
   sessions[session.id] = serialized;
-  if (isDefaultEmptyLocalChatSession(serialized)) {
-    const projectKey = serialized.projectPath ?? null;
-    const emptySessions = Object.values(sessions)
-      .filter(
-        (candidate) =>
-          candidate.status === "open" &&
-          isDefaultEmptyLocalChatSession(candidate) &&
-          (candidate.projectPath ?? null) === projectKey
-      )
-      .sort(compareLocalChatSessionRecency);
-    for (const duplicate of emptySessions.slice(1)) {
-      delete sessions[duplicate.id];
-    }
-  }
-  const persistence = writeSessions(sessions);
+  const persistence = writeSessions(
+    deduplicateDefaultEmptyLocalChatSessions(sessions).sessions
+  );
   clearLocalChatSessionCleared(session.id);
   return persistence;
 }

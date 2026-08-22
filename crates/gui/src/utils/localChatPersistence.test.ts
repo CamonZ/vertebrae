@@ -432,6 +432,62 @@ describe("localChatPersistence", () => {
     expect(savedIds).toEqual(["existing", "new"]);
   });
 
+  it("deduplicates automatic empty entries loaded from the app index", async () => {
+    vi.resetModules();
+    const { commands: freshCommands } = await import("../bindings");
+    vi.spyOn(freshCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "ok",
+      data: [
+        {
+          id: "loaded-empty",
+          label: "New Chat",
+          title: null,
+          titleStatus: "pending",
+          titleConfidence: null,
+          titleUserMessageCount: 0,
+          harness: "claude",
+          model: null,
+          selectedModelId: null,
+          selectedReasoningEffort: null,
+          permissionMode: "default",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          projectPath: "/repo",
+          providerResumeId: null,
+          threadTotalTokens: null,
+          messageCount: 0,
+          lifecycle: "idle",
+          status: "open",
+        },
+      ],
+    });
+    const saveIndex = vi
+      .spyOn(freshCommands, "saveLocalChatSessionIndex")
+      .mockResolvedValue({ status: "ok", data: null });
+    const persistence = await import("./localChatPersistence");
+
+    persistence.persistLocalChatSession(
+      makeSession({
+        id: "new-empty",
+        label: "New Chat",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        projectPath: "/repo",
+        createdAt: "2026-01-02T00:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+      })
+    );
+
+    await waitFor(() => expect(saveIndex).toHaveBeenCalled());
+    const savedIds =
+      saveIndex.mock.calls[saveIndex.mock.calls.length - 1]?.[0].sessions.map(
+        (session) => session.id
+      );
+    expect(savedIds).toContain("new-empty");
+    expect(savedIds).not.toContain("loaded-empty");
+  });
+
   it("scopes listed sessions by project path without treating no-project sessions as wildcards", () => {
     persistLocalChatSession(
       makeSession({ id: "repo-a", projectPath: "/repo-a" })
