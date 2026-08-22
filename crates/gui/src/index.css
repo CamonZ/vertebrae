@@ -2759,9 +2759,9 @@ html.light ::selection {
   font-weight: 500;
 }
 .hc-panel .hc-mini-history {
-  width: 272px;
-  min-width: 240px;
-  max-width: 320px;
+  flex: 0 0 auto;
+  min-width: 272px;
+  max-width: 400px;
   display: flex;
   flex-direction: column;
   background: color-mix(in oklch, var(--bg-2) 34%, transparent);
