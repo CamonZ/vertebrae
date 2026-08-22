@@ -2632,6 +2632,94 @@ describe("ChatWindowManager", () => {
     });
   });
 
+  it("keeps history shortcut navigation in the active pane when a target is already open", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const first = createPersistedHistorySession(
+      "history-first",
+      "First chat",
+      "/test/project",
+      "2026-01-03T00:00:00Z",
+      {
+        createdAt: "2026-01-03T00:00:00Z",
+        updatedAt: "2026-01-03T00:00:00Z",
+      }
+    );
+    const second = createPersistedHistorySession(
+      "history-second",
+      "Second chat",
+      "/test/project",
+      "2026-01-02T00:00:00Z",
+      {
+        createdAt: "2026-01-02T00:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+      }
+    );
+    const third = createPersistedHistorySession(
+      "history-third",
+      "Third chat",
+      "/test/project",
+      "2026-01-01T00:00:00Z",
+      {
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      }
+    );
+
+    useChatStore.setState({
+      sessions: {
+        [first.id]: first,
+        [second.id]: second,
+        [third.id]: third,
+      },
+      activeSessionId: first.id,
+      paneLayout: {
+        panes: [
+          { id: "pane-one", sessionId: third.id },
+          { id: "pane-two", sessionId: first.id },
+        ],
+        activePaneId: "pane-two",
+      },
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    await screen.findByTestId("local-chat-mini-panel");
+
+    fireEvent.keyDown(window, {
+      key: "]",
+      code: "BracketRight",
+      metaKey: true,
+      altKey: true,
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(second.id);
+    });
+    expect(useChatStore.getState().paneLayout.activePaneId).toBe("pane-two");
+
+    fireEvent.keyDown(window, {
+      key: "]",
+      code: "BracketRight",
+      metaKey: true,
+      altKey: true,
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(third.id);
+    });
+    expect(useChatStore.getState().paneLayout.activePaneId).toBe("pane-two");
+    expect(
+      useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
+    ).toEqual([third.id, third.id]);
+    expect(
+      screen
+        .getAllByTestId("chat-pane")
+        .map((pane) => pane.getAttribute("aria-label"))
+    ).toEqual(["Chat pane 1: Third chat", "Chat pane 2: Third chat"]);
+  });
+
   it("shows chat keyboard shortcut hints with Cmd+Shift+Slash", () => {
     useChatStore.getState().openSession("Task One");
 

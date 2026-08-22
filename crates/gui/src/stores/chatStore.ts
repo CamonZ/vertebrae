@@ -517,8 +517,11 @@ interface ChatStoreActions {
   ) => Promise<LocalChatSessionSummary | null>;
   /** Hydrate local chat metadata from the app-managed index file. */
   hydrateLocalSessionIndex: () => Promise<void>;
-  /** Hydrate and focus a persisted local chat session */
-  selectPersistedSession: (sessionId: string) => Promise<boolean>;
+  /** Hydrate and focus a persisted local chat session, optionally in a pane. */
+  selectPersistedSession: (
+    sessionId: string,
+    preferredPaneId?: string
+  ) => Promise<boolean>;
   /** Hydrate and focus a provider child thread as its own local chat session */
   selectProviderThreadSession: (input: {
     harness: LocalChatHarnessKind;
@@ -1155,14 +1158,11 @@ export function normalizePaneLayout(
   paneLayout: ChatPaneLayout | undefined,
   sessions: Record<string, ChatSession>
 ): ChatPaneLayout {
-  const seenSessionIds = new Set<string>();
   const panes = (paneLayout?.panes ?? []).filter((pane) => {
     const session = sessions[pane.sessionId];
     if (!session || session.status !== "open") {
       return false;
     }
-    if (seenSessionIds.has(pane.sessionId)) return false;
-    seenSessionIds.add(pane.sessionId);
     return true;
   });
   const activePaneId =
@@ -1176,7 +1176,8 @@ export function normalizePaneLayout(
 
 function focusSessionInPaneLayout(
   state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
-  sessionId: string
+  sessionId: string,
+  preferredPaneId?: string
 ): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
   const session = state.sessions[sessionId];
   if (!session || session.status !== "open") {
@@ -1187,6 +1188,26 @@ function focusSessionInPaneLayout(
   }
 
   const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
+  const preferredPane = preferredPaneId
+    ? paneLayout.panes.find((pane) => pane.id === preferredPaneId)
+    : undefined;
+  if (preferredPaneId && !preferredPane) {
+    return {
+      activeSessionId: state.activeSessionId,
+      paneLayout,
+    };
+  }
+  if (preferredPane) {
+    return {
+      activeSessionId: sessionId,
+      paneLayout: {
+        panes: paneLayout.panes.map((pane) =>
+          pane.id === preferredPane.id ? { ...pane, sessionId } : pane
+        ),
+        activePaneId: preferredPane.id,
+      },
+    };
+  }
   const existingPane = paneLayout.panes.find(
     (pane) => pane.sessionId === sessionId
   );
@@ -1716,7 +1737,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }));
     },
 
-    selectPersistedSession: async (sessionId) => {
+    selectPersistedSession: async (sessionId, preferredPaneId) => {
       const existing = get().sessions[sessionId];
       if (existing) {
         const hydrationSession = existing.providerResumeId
@@ -1736,10 +1757,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (!current) return state;
           return {
             sessions: state.sessions,
-            ...focusSessionInPaneLayout(
-              state,
-              sessionId
-            ),
+            ...focusSessionInPaneLayout(state, sessionId, preferredPaneId),
             panelOpen: true,
           };
         });
@@ -1766,7 +1784,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
               ...state,
               sessions: nextSessions,
             },
-            hydrated.id
+            hydrated.id,
+            preferredPaneId
           ),
           panelOpen: true,
         };

@@ -213,6 +213,7 @@ export function ChatWindowManager() {
   );
 
   const {
+    normalizedPaneLayout,
     visiblePanes,
     activePaneId,
     canAddSplitPane,
@@ -399,9 +400,9 @@ export function ChatWindowManager() {
   }, [isMaximized, toggleMaximized]);
 
   const selectHistorySessionForActivePane = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, preferredPaneId?: string) => {
       setDeleteError(null);
-      const selected = await selectPersistedSession(sessionId);
+      const selected = await selectPersistedSession(sessionId, preferredPaneId);
       if (!selected) {
         bumpHistoryRevision();
       }
@@ -436,11 +437,18 @@ export function ChatWindowManager() {
             ? sessionItems.length - 1
             : 0
           : (currentIndex + offset + sessionItems.length) % sessionItems.length;
-      return selectHistorySessionForActivePane(sessionItems[nextIndex].id);
+      return selectHistorySessionForActivePane(
+        sessionItems[nextIndex].id,
+        normalizedPaneLayout.panes.some((pane) => pane.id === activePaneId)
+          ? (activePaneId ?? undefined)
+          : undefined
+      );
     },
     [
       activeSessionId,
+      activePaneId,
       isMaximized,
+      normalizedPaneLayout,
       selectHistorySessionForActivePane,
       visibleLocalSessionGroups,
     ]
