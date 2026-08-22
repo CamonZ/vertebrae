@@ -52,6 +52,7 @@ export function ChatPaneList({
         const paneIsActive = pane.id === activePaneId;
         const paneNotice =
           emptyStateNotice &&
+          session.resumeNoticeDismissed !== true &&
           (session.projectPath ?? null) ===
             (emptyStateNoticeProjectPath ?? null)
             ? emptyStateNotice

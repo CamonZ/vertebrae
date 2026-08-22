@@ -402,6 +402,8 @@ export interface ChatSession {
   messages: ChatMessage[];
   /** Whether the user has sent at least one message in this session. */
   hasUserMessage?: boolean;
+  /** Whether the user chose to start a new chat instead of resuming history. */
+  resumeNoticeDismissed?: boolean;
   /** Session status */
   status: "open" | "closed";
   /** Local chat harness that owns the runtime session. */
@@ -633,6 +635,8 @@ interface ChatStoreActions {
   markSessionClosed: (sessionId: string) => void;
   /** Clear messages in a session */
   clearMessages: (sessionId: string) => void;
+  /** Hide the resume notice for an empty session after choosing new chat. */
+  dismissResumeNotice: (sessionId: string) => void;
   /** Toggle the chat panel open/closed */
   togglePanel: () => void;
   /** Set panel open state explicitly */
@@ -701,6 +705,7 @@ function createLocalSession(
     titleUserMessageCount: 0,
     messages: [],
     hasUserMessage: false,
+    resumeNoticeDismissed: false,
     status: "open",
     harness:
       useLocalChatDefaultsStore.getState().defaultHarness ??
@@ -2529,6 +2534,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               ...session,
               messages: [],
               hasUserMessage: false,
+              resumeNoticeDismissed: false,
               title: null,
               titleStatus: "pending",
               titleConfidence: null,
@@ -2564,6 +2570,29 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     setPendingLocalChatResume: (candidate, projectPath = null) => {
       set({ pendingLocalChatResume: { candidate, projectPath } });
+    },
+
+    dismissResumeNotice: (sessionId) => {
+      let updatedSession: ChatSession | null = null;
+      set((state) => {
+        const session = state.sessions[sessionId];
+        if (!session || session.resumeNoticeDismissed) return state;
+        updatedSession = {
+          ...session,
+          resumeNoticeDismissed: true,
+        };
+        return {
+          sessions: {
+            ...state.sessions,
+            [sessionId]: updatedSession,
+          },
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            updatedSession
+          ),
+        };
+      });
+      if (updatedSession) persistLocalChatSession(updatedSession);
     },
 
     clearPendingLocalChatResume: () => {

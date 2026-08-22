@@ -366,9 +366,15 @@ describe("ChatWindowManager", () => {
         expect(
           useChatStore.getState().pendingLocalChatResume?.candidate.id
         ).toBe(persisted.id);
+        expect(
+          useChatStore.getState().sessions[
+            useChatStore.getState().activeSessionId!
+          ]?.resumeNoticeDismissed
+        ).toBe(true);
       });
+      expect(screen.queryByTestId("local-chat-resume-prompt")).toBeNull();
       expect(
-        screen.getByTestId("local-chat-resume-prompt")
+        screen.getByText("Create, edit, and delete tasks, steps, and workflows")
       ).toBeInTheDocument();
 
       const sessionCountBeforeSplit = Object.keys(
@@ -382,7 +388,12 @@ describe("ChatWindowManager", () => {
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(
         sessionCountBeforeSplit + 1
       );
-      expect(screen.getAllByTestId("local-chat-resume-prompt")).toHaveLength(2);
+      expect(screen.getAllByTestId("local-chat-resume-prompt")).toHaveLength(1);
+      expect(
+        screen.getAllByText(
+          "Create, edit, and delete tasks, steps, and workflows"
+        )
+      ).toHaveLength(1);
     } finally {
       useChatStore.setState({ selectPersistedSession });
     }

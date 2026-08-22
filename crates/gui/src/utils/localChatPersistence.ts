@@ -137,6 +137,7 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
       : rawMessages.some((message) => message.kind === "user") ||
         messageCount > 0 ||
         !!providerResumeId?.trim();
+  const resumeNoticeDismissed = candidate.resumeNoticeDismissed === true;
   const title = typeof candidate.title === "string" ? candidate.title : null;
   const titleStatus =
     typeof candidate.titleStatus === "string" &&
@@ -167,6 +168,7 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     titleUserMessageCount,
     messages,
     hasUserMessage,
+    resumeNoticeDismissed,
     status: candidate.status,
     harness: normalizeHarness(candidate.harness),
     backendSessionId: null,
@@ -388,6 +390,7 @@ function serializeSession(
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
     messages,
     hasUserMessage: hasLocalChatUserMessage(session),
+    resumeNoticeDismissed: session.resumeNoticeDismissed === true,
     status: session.status,
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
     backendSessionId: null,

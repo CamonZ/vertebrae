@@ -75,6 +75,7 @@ export function ChatWindowManager() {
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
   const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
+  const dismissResumeNotice = useChatStore((s) => s.dismissResumeNotice);
   const localSessionSummaries = useChatStore((s) => s.localSessionSummaries);
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -291,10 +292,18 @@ export function ChatWindowManager() {
     const pending = useChatStore.getState().pendingLocalChatResume;
     if (!pending || resumeChoiceBusy) return;
     setResumeChoiceBusy(true);
-    startFreshSession("New Chat", pending.projectPath);
+    const state = useChatStore.getState();
+    const currentSession = state.activeSessionId
+      ? state.sessions[state.activeSessionId]
+      : null;
+    const sessionId =
+      currentSession && currentSession.hasUserMessage !== true
+        ? currentSession.id
+        : startFreshSession("New Chat", pending.projectPath);
+    dismissResumeNotice(sessionId);
     setResumeError(null);
     setResumeChoiceBusy(false);
-  }, [resumeChoiceBusy, startFreshSession]);
+  }, [dismissResumeNotice, resumeChoiceBusy, startFreshSession]);
 
   const resumeNotice = pendingLocalChatResume ? (
     <ChatResumePrompt
