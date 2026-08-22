@@ -4,6 +4,7 @@ import {
   useChatKeyboardShortcuts,
   isShortcutHintsKey,
   isBackslashShortcutKey,
+  historyShortcutOffset,
   isLetterShortcutKey,
   paneNumberShortcutIndex,
   type ShortcutDispatchState,
@@ -18,6 +19,9 @@ function makeDispatch(
     hasActiveSession: true,
     focusPaneByIndex: vi.fn(() => true),
     focusPaneByOffset: vi.fn(() => true),
+    historyNavigationEnabled: true,
+    focusHistorySearch: vi.fn(() => true),
+    selectHistorySessionByOffset: vi.fn(async () => true),
     closeActivePane: vi.fn(() => true),
     keepOnlyActivePane: vi.fn(() => true),
     splitWithFreshSession: vi.fn(async () => true),
@@ -166,6 +170,52 @@ describe("useChatKeyboardShortcuts", () => {
     expect(dispatch.focusPaneByOffset).toHaveBeenCalledWith(-1);
   });
 
+  it("selects the previous and next history sessions with cmd+alt brackets", () => {
+    const dispatch = makeDispatch();
+    renderShortcutHook(dispatch);
+
+    fireKey({ key: "[", code: "BracketLeft", metaKey: true, altKey: true });
+    fireKey({ key: "]", code: "BracketRight", metaKey: true, altKey: true });
+
+    expect(dispatch.selectHistorySessionByOffset).toHaveBeenNthCalledWith(1, -1);
+    expect(dispatch.selectHistorySessionByOffset).toHaveBeenNthCalledWith(2, 1);
+  });
+
+  it("leaves bracket keys alone outside maximized history navigation", () => {
+    const dispatch = makeDispatch({ historyNavigationEnabled: false });
+    renderShortcutHook(dispatch);
+
+    const event = fireKey({
+      key: "]",
+      code: "BracketRight",
+      metaKey: true,
+      altKey: true,
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(dispatch.selectHistorySessionByOffset).not.toHaveBeenCalled();
+  });
+
+  it("focuses history search with cmd+f", () => {
+    const dispatch = makeDispatch();
+    renderShortcutHook(dispatch);
+
+    fireKey({ key: "f", code: "KeyF", metaKey: true });
+
+    expect(dispatch.focusHistorySearch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not intercept cmd+f when history search is unavailable", () => {
+    const dispatch = makeDispatch();
+    dispatch.focusHistorySearch = vi.fn(() => false);
+    const { unmount } = renderShortcutHook(dispatch);
+
+    const event = fireKey({ key: "f", code: "KeyF", metaKey: true });
+
+    expect(event.defaultPrevented).toBe(false);
+    unmount();
+  });
+
   it("focuses pane by number on cmd+alt+1", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
@@ -270,6 +320,26 @@ describe("isBackslashShortcutKey", () => {
   it("returns false for unrelated keys", () => {
     const event = { code: "KeyA", key: "a" } as KeyboardEvent;
     expect(isBackslashShortcutKey(event)).toBe(false);
+  });
+});
+
+describe("historyShortcutOffset", () => {
+  it("returns the previous offset for the left bracket", () => {
+    expect(
+      historyShortcutOffset({ code: "BracketLeft", key: "[" } as KeyboardEvent)
+    ).toBe(-1);
+  });
+
+  it("returns the next offset for the right bracket", () => {
+    expect(
+      historyShortcutOffset({ code: "BracketRight", key: "]" } as KeyboardEvent)
+    ).toBe(1);
+  });
+
+  it("returns null for other keys", () => {
+    expect(
+      historyShortcutOffset({ code: "KeyF", key: "f" } as KeyboardEvent)
+    ).toBeNull();
   });
 });
 

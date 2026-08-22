@@ -410,6 +410,42 @@ export function ChatWindowManager() {
     [bumpHistoryRevision, selectPersistedSession]
   );
 
+  const focusHistorySearch = useCallback(() => {
+    if (!isMaximized) return false;
+    const input = document.querySelector<HTMLInputElement>(
+      "#local-chat-session-search"
+    );
+    if (!input) return false;
+    input.focus();
+    return true;
+  }, [isMaximized]);
+
+  const selectHistorySessionByOffset = useCallback(
+    async (offset: number) => {
+      if (!isMaximized) return false;
+      const sessionItems = visibleLocalSessionGroups.flatMap(
+        (group) => group.sessions
+      );
+      if (sessionItems.length === 0) return false;
+      const currentIndex = sessionItems.findIndex(
+        (session) => session.id === activeSessionId
+      );
+      const nextIndex =
+        currentIndex < 0
+          ? offset < 0
+            ? sessionItems.length - 1
+            : 0
+          : (currentIndex + offset + sessionItems.length) % sessionItems.length;
+      return selectHistorySessionForActivePane(sessionItems[nextIndex].id);
+    },
+    [
+      activeSessionId,
+      isMaximized,
+      selectHistorySessionForActivePane,
+      visibleLocalSessionGroups,
+    ]
+  );
+
   const selectAgentThreadForActivePane = useCallback(
     async (parentSessionId: string, agent: SpawnOutlineItem) => {
       const parent = useChatStore.getState().sessions[parentSessionId];
@@ -476,6 +512,9 @@ export function ChatWindowManager() {
       hasActiveSession: !!activeSession,
       focusPaneByIndex,
       focusPaneByOffset,
+      historyNavigationEnabled: isMaximized,
+      focusHistorySearch,
+      selectHistorySessionByOffset,
       closeActivePane,
       keepOnlyActivePane,
       splitWithFreshSession,

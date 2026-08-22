@@ -9,6 +9,8 @@ export const CHAT_SHORTCUT_SECTIONS = [
       { keys: ["⌥", "⌥"], label: "Toggle chat" },
       { keys: ["⌘", "\\"], label: "Maximize or collapse" },
       { keys: chatHelpKeys, label: CHAT_HELP_SHORTCUT.label },
+      { keys: ["⌘", "⌥", "[ / ]"], label: "Previous/next conversation" },
+      { keys: ["⌘", "F"], label: "Focus chat search" },
       { keys: ["Esc"], label: "Close hints or focused panel" },
     ],
   },

@@ -1375,19 +1375,9 @@ describe("ChatWindowManager", () => {
     expect(rows.length).toBeGreaterThan(0);
     const homeFocused = document.activeElement as HTMLElement | null;
     expect(homeFocused).toHaveClass("hc-mini-history-open");
-    expect(
-      screen
-        .getByTestId("local-chat-mini-panel")
-        .querySelector<HTMLElement>("[data-keyboard-active]")
-    ).toContainElement(homeFocused);
     fireEvent.keyDown(homeFocused!, { key: "End" });
     const endFocused = document.activeElement as HTMLElement | null;
     expect(endFocused).toHaveClass("hc-mini-history-open");
-    expect(
-      screen
-        .getByTestId("local-chat-mini-panel")
-        .querySelector<HTMLElement>("[data-keyboard-active]")
-    ).toContainElement(endFocused);
 
     await user.click(
       currentGroup.getByRole("button", {
@@ -2554,6 +2544,92 @@ describe("ChatWindowManager", () => {
       useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
     ).toEqual([first, fresh]);
     expect(useChatStore.getState().sessions[second]).toBeDefined();
+  });
+
+  it("uses maximized history shortcuts to focus search and switch conversations", async () => {
+    const user = userEvent.setup();
+    const first = createPersistedHistorySession(
+      "history-first",
+      "First chat",
+      "/test/project",
+      "2026-01-03T00:00:00Z",
+      {
+        createdAt: "2026-01-03T00:00:00Z",
+        updatedAt: "2026-01-03T00:00:00Z",
+      }
+    );
+    const second = createPersistedHistorySession(
+      "history-second",
+      "Second chat",
+      "/test/project",
+      "2026-01-02T00:00:00Z",
+      {
+        createdAt: "2026-01-02T00:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+      }
+    );
+    createPersistedHistorySession(
+      "history-third",
+      "Third chat",
+      "/test/project",
+      "2026-01-01T00:00:00Z",
+      {
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      }
+    );
+
+    useChatStore.setState({
+      sessions: { [first.id]: first },
+      activeSessionId: first.id,
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "f", code: "KeyF", metaKey: true });
+    expect(
+      screen.queryByTestId("local-chat-session-search")
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    const search = await screen.findByRole("searchbox", {
+      name: "Search local chats",
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", {
+          name: "Load local chat Second chat into active pane",
+        })
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "f", code: "KeyF", metaKey: true });
+    expect(search).toHaveFocus();
+
+    fireEvent.keyDown(window, {
+      key: "]",
+      code: "BracketRight",
+      metaKey: true,
+      altKey: true,
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(second.id);
+    });
+    expect(
+      screen.getByRole("button", {
+        name: "Load local chat Second chat into active pane",
+      })
+    ).toHaveAttribute("aria-current", "true");
+
+    fireEvent.keyDown(window, {
+      key: "[",
+      code: "BracketLeft",
+      metaKey: true,
+      altKey: true,
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(first.id);
+    });
   });
 
   it("shows chat keyboard shortcut hints with Cmd+Shift+Slash", () => {

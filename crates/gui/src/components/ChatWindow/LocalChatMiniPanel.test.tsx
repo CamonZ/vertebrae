@@ -52,6 +52,7 @@ interface ControlledPanelProps {
   initialQuery?: string;
   hasLocalChatSessions?: boolean;
   sessionGroups?: LocalChatSessionGroup[];
+  activeSessionId?: string;
   spawnOutlineBySessionId?: Map<string, SpawnOutlineItem[]>;
   width?: number;
   onQueryChange?: (query: string) => void;
@@ -65,6 +66,7 @@ function ControlledPanel({
   initialQuery = "",
   hasLocalChatSessions,
   sessionGroups = [],
+  activeSessionId,
   spawnOutlineBySessionId = new Map(),
   width = DEFAULT_HISTORY_WIDTH,
   onQueryChange,
@@ -78,7 +80,9 @@ function ControlledPanel({
   return (
     <LocalChatMiniPanel
       width={width}
-      activeSessionId={sessionGroups[0]?.sessions[0]?.id ?? "active"}
+      activeSessionId={
+        activeSessionId ?? sessionGroups[0]?.sessions[0]?.id ?? "active"
+      }
       activeProviderThreadId={null}
       searchQuery={query}
       onSearchQueryChange={(nextQuery) => {
@@ -433,44 +437,70 @@ describe("LocalChatMiniPanel search", () => {
     expect(onDelete).toHaveBeenCalledWith(parent.id);
   });
 
-  it("keeps the search field out of session-row keyboard navigation", () => {
+  it("uses arrow keys from search to select filtered conversations", () => {
     const session = makeSession("matching", {
       label: "Matching session",
       title: "Matching session",
     });
+    const nextSession = makeSession("next", {
+      label: "Next session",
+      title: "Next session",
+    });
     const onSelect = vi.fn();
-    render(
-      <ControlledPanel
-        initialQuery="matching"
-        sessionGroups={[makeGroup("current", "Current project", [session])]}
-        onSelect={onSelect}
-      />
-    );
+    function SearchNavigationPanel() {
+      const [activeSessionId, setActiveSessionId] = useState(session.id);
+      return (
+        <ControlledPanel
+          initialQuery="session"
+          activeSessionId={activeSessionId}
+          sessionGroups={[
+            makeGroup("current", "Current project", [session, nextSession]),
+          ]}
+          onSelect={(sessionId) => {
+            onSelect(sessionId);
+            setActiveSessionId(sessionId);
+          }}
+        />
+      );
+    }
+    render(<SearchNavigationPanel />);
 
     const input = screen.getByRole("searchbox", {
       name: "Search local chats",
     });
     input.focus();
-    const arrowDown = new KeyboardEvent("keydown", {
-      bubbles: true,
-      cancelable: true,
-      key: "ArrowDown",
-    });
-    input.dispatchEvent(arrowDown);
-
-    expect(arrowDown.defaultPrevented).toBe(false);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(onSelect).toHaveBeenCalledWith(nextSession.id);
     expect(input).toHaveFocus();
-    expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(onSelect).toHaveBeenLastCalledWith(session.id);
+    expect(
+      screen
+        .getByRole("button", {
+          name: "Load local chat Matching session into active pane",
+        })
+        .closest(".hc-mini-history-row")
+    ).toHaveAttribute("data-active");
+  });
 
-    const panel = screen.getByTestId("local-chat-mini-panel");
-    fireEvent.keyDown(panel, { key: "Home" });
-    const sessionButton = screen.getByRole("button", {
-      name: "Load local chat Matching session into active pane",
+  it("does not use an accent keyboard outline for the history selection", () => {
+    const session = makeSession("matching", {
+      label: "Matching session",
+      title: "Matching session",
     });
-    expect(sessionButton).toHaveFocus();
+    render(
+      <ControlledPanel
+        sessionGroups={[makeGroup("current", "Current project", [session])]}
+      />
+    );
 
-    fireEvent.keyDown(sessionButton, { key: "Enter" });
-    expect(onSelect).toHaveBeenCalledWith(session.id);
+    expect(
+      screen
+        .getByRole("button", {
+          name: "Load local chat Matching session into active pane",
+        })
+        .closest(".hc-mini-history-row")
+    ).not.toHaveAttribute("data-keyboard-active");
   });
 
   it("keeps keyboard focus moving through long-list boundaries and selects the focused row", () => {
