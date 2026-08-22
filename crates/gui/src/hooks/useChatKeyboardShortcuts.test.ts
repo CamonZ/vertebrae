@@ -90,6 +90,19 @@ describe("useChatKeyboardShortcuts", () => {
     expect(setShortcutsOpen).toHaveBeenCalledWith(false);
   });
 
+  it("keeps Escape from reaching the chat panel while hints are open", () => {
+    const dispatch = makeDispatch({ shortcutsOpen: true });
+    renderShortcutHook(dispatch);
+    const closeChatPanel = vi.fn();
+    const panelEscapeListener = () => closeChatPanel();
+    window.addEventListener("keydown", panelEscapeListener, true);
+
+    fireKey({ key: "Escape" });
+
+    window.removeEventListener("keydown", panelEscapeListener, true);
+    expect(closeChatPanel).not.toHaveBeenCalled();
+  });
+
   it("does not process other shortcuts when hints are open", () => {
     const dispatch = makeDispatch({ shortcutsOpen: true });
     renderShortcutHook(dispatch);

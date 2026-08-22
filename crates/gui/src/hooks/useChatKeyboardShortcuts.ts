@@ -78,6 +78,7 @@ export function useChatKeyboardShortcuts({
 
       if (key === "escape" && current.shortcutsOpen) {
         event.preventDefault();
+        event.stopImmediatePropagation();
         setShortcutsOpen(false);
         return;
       }
