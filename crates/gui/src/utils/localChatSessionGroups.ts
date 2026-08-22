@@ -8,6 +8,32 @@ import {
 export const FALLBACK_CHAT_PROJECT_LABEL = "Unknown project";
 export const LOCAL_CHAT_SESSION_ROW_LIMIT = 7;
 
+/**
+ * Returns a stable, filesystem-safe label from the project path captured by a
+ * local chat session. This deliberately does not consult the active project
+ * or the current working directory.
+ */
+export function localChatSessionProjectDisplayName(
+  projectPath: string | null | undefined
+): string {
+  const normalizedPath = normalizeProjectPath(projectPath);
+  if (!normalizedPath || !isAbsoluteProjectPath(normalizedPath)) {
+    return FALLBACK_CHAT_PROJECT_LABEL;
+  }
+
+  const segments = normalizedPath.split(/[\\/]/).filter(Boolean);
+  const name = segments[segments.length - 1];
+  return name && !/^[A-Za-z]:$/.test(name) ? name : FALLBACK_CHAT_PROJECT_LABEL;
+}
+
+function isAbsoluteProjectPath(path: string): boolean {
+  return (
+    path.startsWith("/") ||
+    path.startsWith("\\") ||
+    /^[A-Za-z]:[\\/]/.test(path)
+  );
+}
+
 export interface LocalChatSessionGroup {
   id: string;
   label: string;
@@ -98,12 +124,12 @@ interface ProjectResolutionContext {
   currentProjectPath: string | null;
 }
 
-function displayProjectName(project: SavedProject): string {
+export function savedProjectDisplayName(project: SavedProject): string {
   const slug = project.slug.trim();
   if (slug) return slug;
 
-  const normalizedPath = normalizeProjectPath(project.path);
-  return normalizedPath?.split(/[\\/]/).filter(Boolean).pop() ?? "Project";
+  const pathLabel = localChatSessionProjectDisplayName(project.path);
+  return pathLabel === FALLBACK_CHAT_PROJECT_LABEL ? "Project" : pathLabel;
 }
 
 function buildProjectLookup(
@@ -150,7 +176,7 @@ function resolveLocalChatSessionProject(
   const slug = project.slug.trim() || normalizedPath;
   return {
     id: `project:${slug}`,
-    label: displayProjectName(project),
+    label: savedProjectDisplayName(project),
     projectId: project.project_id,
     projectPath: normalizedPath,
     isCurrentProject: normalizedPath === context.currentProjectPath,

@@ -22,6 +22,46 @@ describe("ChatHeader", () => {
     expect(screen.getByText("My Project Chat")).toBeInTheDocument();
   });
 
+  it("renders the project context after title controls with an accessible tooltip", () => {
+    renderHeader({
+      label: "My Project Chat",
+      projectLabel: "a-very-long-project-name",
+      onTitleRegenerate: vi.fn(),
+    });
+
+    const titleButton = screen.getByRole("button", {
+      name: "Rename chat: My Project Chat",
+    });
+    const regenerateButton = screen.getByRole("button", {
+      name: "Regenerate chat title",
+    });
+    const projectContext = screen.getByRole("note", {
+      name: "Project: a-very-long-project-name",
+    });
+
+    expect(
+      titleButton.compareDocumentPosition(regenerateButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      regenerateButton.compareDocumentPosition(projectContext) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(projectContext).toHaveAttribute(
+      "title",
+      "Project: a-very-long-project-name"
+    );
+    expect(projectContext).toHaveClass("hc-project-context");
+  });
+
+  it("uses an accessible neutral fallback when project metadata is missing", () => {
+    renderHeader();
+
+    expect(
+      screen.getByRole("note", { name: "Project: Unknown project" })
+    ).toHaveTextContent("Unknown project");
+  });
+
   it("enters title editing and saves a normalized title", async () => {
     const onTitleSave = vi.fn().mockResolvedValue(undefined);
     renderHeader({ label: "Old title", onTitleSave });

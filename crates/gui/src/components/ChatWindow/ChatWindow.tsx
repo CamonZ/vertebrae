@@ -4,6 +4,7 @@ import { useChatSession } from "../../hooks/useChatSession";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
+import { localChatSessionProjectDisplayName } from "../../utils/localChatSessionGroups";
 
 interface ChatWindowProps {
   sessionId: string;
@@ -27,6 +28,8 @@ interface ChatWindowProps {
   autoFocusComposer?: boolean;
   /** Optional notice rendered in the empty message state. */
   emptyStateNotice?: ReactNode;
+  /** Label resolved from this session's captured project association. */
+  projectLabel?: string;
 }
 
 /**
@@ -46,6 +49,7 @@ export function ChatWindow({
   onClosePane,
   autoFocusComposer = true,
   emptyStateNotice,
+  projectLabel,
 }: ChatWindowProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -88,6 +92,10 @@ export function ChatWindow({
         onTitleRegenerate={() => void chat.handleRegenerateTitle()}
         isTitleRegenerating={chat.isTitleRegenerating}
         titleError={chat.titleError}
+        projectLabel={
+          projectLabel ??
+          localChatSessionProjectDisplayName(chat.session.projectPath)
+        }
       />
       <ChatMessages
         sessionId={sessionId}

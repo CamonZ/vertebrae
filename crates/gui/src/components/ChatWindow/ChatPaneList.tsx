@@ -18,6 +18,7 @@ interface ChatPaneListProps {
   splitWithFreshSession: () => Promise<boolean>;
   emptyStateNotice?: ReactNode;
   emptyStateNoticeProjectPath?: string | null;
+  projectLabelBySessionId?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -41,6 +42,7 @@ export function ChatPaneList({
   splitWithFreshSession,
   emptyStateNotice,
   emptyStateNoticeProjectPath,
+  projectLabelBySessionId,
 }: ChatPaneListProps) {
   const paneCount = visiblePanes.length;
 
@@ -100,6 +102,7 @@ export function ChatPaneList({
                   : undefined
               }
               autoFocusComposer={!isMaximized || paneIsActive}
+              projectLabel={projectLabelBySessionId?.get(session.id)}
             />
           </section>
         );
