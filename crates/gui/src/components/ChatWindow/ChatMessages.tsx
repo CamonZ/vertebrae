@@ -193,6 +193,7 @@ interface ChatMessagesProps {
   assistantLabel: string;
   isEmpty: boolean;
   isActive: boolean;
+  notice?: ReactNode;
   isWaiting: boolean;
   activityLabel?: string | null;
   compactionSummary?: ChatCompactionSummary | null;
@@ -206,6 +207,7 @@ export function ChatMessages({
   assistantLabel,
   isEmpty,
   isActive,
+  notice,
   isWaiting,
   activityLabel,
   compactionSummary,
@@ -372,7 +374,7 @@ export function ChatMessages({
           if (container) keepAtBottomRef.current = isNearBottom(container);
         }}
       >
-        {isEmpty && !isActive && <ChatEmptyState />}
+        {isEmpty && !isActive && <ChatEmptyState notice={notice} />}
         <div className="flex flex-col gap-3">
           <HistoricalChatItems
             items={renderItems}

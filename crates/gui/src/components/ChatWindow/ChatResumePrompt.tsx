@@ -31,6 +31,7 @@ export function ChatResumePrompt({
       aria-live="polite"
     >
       <p className="text-sm font-normal text-[var(--color-fg-soft)]">
+        continue with the{" "}
         <a
           href={`#local-chat-resume-${encodeURIComponent(session.id)}`}
           aria-disabled={busy}
@@ -40,9 +41,9 @@ export function ChatResumePrompt({
             void onContinue();
           }}
         >
-          continue with the last session {title}
+          last session
         </a>{" "}
-        <span>or</span>{" "}
+        {title} <span>or</span>{" "}
         <button type="button" disabled={busy} onClick={() => void onNewChat()}>
           new chat
         </button>

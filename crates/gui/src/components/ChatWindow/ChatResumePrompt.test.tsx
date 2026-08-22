@@ -19,12 +19,15 @@ describe("ChatResumePrompt", () => {
 
     expect(
       screen.getByRole("link", {
-        name: "continue with the last session Review API",
+        name: "last session",
       })
     ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "last session" }).textContent).toBe(
+      "last session"
+    );
     expect(screen.getByText("or").parentElement).toHaveClass("font-normal");
 
-    await user.click(screen.getByRole("link"));
+    await user.click(screen.getByRole("link", { name: "last session" }));
     await user.click(screen.getByRole("button", { name: "new chat" }));
 
     expect(onContinue).toHaveBeenCalledOnce();
