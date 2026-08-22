@@ -2742,6 +2742,7 @@ html.light ::selection {
   max-width: 100%;
   align-items: center;
   gap: var(--s-2);
+  flex-wrap: wrap;
 }
 .hc-panel .hc-chat-controls.right {
   justify-content: flex-end;
@@ -2757,6 +2758,12 @@ html.light ::selection {
   font-family: var(--mono);
   font-size: var(--text-10);
   color: var(--fg-mute);
+}
+.hc-panel .hc-model-picker span,
+.hc-panel .hc-effort-picker span,
+.hc-panel .hc-provider-picker span,
+.hc-panel .hc-permission-picker span {
+  white-space: nowrap;
 }
 .hc-panel .hc-permission-picker {
   display: inline-flex;
