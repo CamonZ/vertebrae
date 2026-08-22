@@ -204,7 +204,6 @@ describe("ChatWindowManager", () => {
       paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
       localSessionSummaries: {},
-      pendingLocalChatResume: null,
     });
     usePanelFocusStore.getState().reset();
     usePanelLayoutStore.getState().reset();
@@ -235,8 +234,8 @@ describe("ChatWindowManager", () => {
     expect(screen.queryByTestId("chat-pane")).not.toBeInTheDocument();
   });
 
-  it("refreshes the resume notice for an existing empty pane", async () => {
-    const persisted = createPersistedHistorySession(
+  it("does not show a resume notice for an empty pane with history available", () => {
+    createPersistedHistorySession(
       "resume-session",
       "Task Chat",
       "/test/project",
@@ -256,147 +255,15 @@ describe("ChatWindowManager", () => {
         activePaneId: "pane-empty",
       },
       panelOpen: true,
-      pendingLocalChatResume: null,
     });
 
     render(<ChatWindowManager />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("local-chat-resume-prompt")).toHaveTextContent(
-        "continue with the last session Task Chat"
-      );
-      expect(useChatStore.getState().pendingLocalChatResume?.candidate.id).toBe(
-        persisted.id
-      );
-    });
-    expect(
-      screen.getByRole("link", { name: "last session" })
-    ).toBeInTheDocument();
-  });
-
-  it("renders the resume notice inside the panel and continues the selected session", async () => {
-    const user = userEvent.setup();
-    const persisted = createPersistedHistorySession(
-      "resume-session",
-      "Task Chat",
-      "/test/project",
-      "2026-01-01T00:00:00Z"
-    );
-    const candidate = useChatStore
-      .getState()
-      .listLocalSessions("/test/project")
-      .find((session) => session.id === persisted.id);
-    expect(candidate).toBeDefined();
-
-    useChatStore.setState({
-      panelOpen: true,
-      pendingLocalChatResume: {
-        candidate: candidate!,
-        projectPath: "/test/project",
-      },
-    });
-
-    render(<ChatWindowManager />);
-
-    const panel = screen.getByTestId("chat-window-manager");
-    const emptyState = within(panel).getByTestId("chat-empty-state");
-    const prompt = within(panel).getByTestId("local-chat-resume-prompt");
-    expect(emptyState).toContainElement(prompt);
-    expect(prompt).toHaveTextContent(
-      "continue with the last session Task Chat"
-    );
-    expect(panel).toContainElement(prompt);
-
-    await user.click(
-      within(prompt).getByRole("link", {
-        name: "last session",
-      })
-    );
-
-    await waitFor(() => {
-      expect(useChatStore.getState().activeSessionId).toBe(persisted.id);
-      expect(useChatStore.getState().pendingLocalChatResume).toBeNull();
-    });
     expect(screen.queryByTestId("local-chat-resume-prompt")).toBeNull();
-  });
-
-  it("keeps new chat available when continuing fails", async () => {
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: 1200,
-    });
-    const user = userEvent.setup();
-    const persisted = createPersistedHistorySession(
-      "unavailable-session",
-      "Unavailable Task",
-      "/test/project",
-      "2026-01-01T00:00:00Z"
-    );
-    const candidate = useChatStore
-      .getState()
-      .listLocalSessions("/test/project")
-      .find((session) => session.id === persisted.id);
-    expect(candidate).toBeDefined();
-    const selectPersistedSession =
-      useChatStore.getState().selectPersistedSession;
-    useChatStore.setState({
-      panelOpen: true,
-      pendingLocalChatResume: {
-        candidate: candidate!,
-        projectPath: "/test/project",
-      },
-      selectPersistedSession: vi.fn().mockResolvedValue(false),
-    });
-
-    try {
-      render(<ChatWindowManager />);
-
-      await user.click(
-        screen.getByRole("link", {
-          name: "last session",
-        })
-      );
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        "You can still start a new chat"
-      );
-
-      await user.click(screen.getByRole("button", { name: "new chat" }));
-      await waitFor(() => {
-        expect(useChatStore.getState().activeSessionId).not.toBe(persisted.id);
-        expect(
-          useChatStore.getState().pendingLocalChatResume?.candidate.id
-        ).toBe(persisted.id);
-        expect(
-          useChatStore.getState().sessions[
-            useChatStore.getState().activeSessionId!
-          ]?.resumeNoticeDismissed
-        ).toBe(true);
-      });
-      expect(screen.queryByTestId("local-chat-resume-prompt")).toBeNull();
-      expect(
-        screen.getByText("Create, edit, and delete tasks, steps, and workflows")
-      ).toBeInTheDocument();
-
-      const sessionCountBeforeSplit = Object.keys(
-        useChatStore.getState().sessions
-      ).length;
-      fireEvent.keyDown(window, { key: "\\", metaKey: true });
-      const splitButton = await screen.findByLabelText("Split chat pane");
-      expect(splitButton).toBeEnabled();
-      await user.click(splitButton);
-      expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
-      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(
-        sessionCountBeforeSplit + 1
-      );
-      expect(screen.getAllByTestId("local-chat-resume-prompt")).toHaveLength(1);
-      expect(
-        screen.getAllByText(
-          "Create, edit, and delete tasks, steps, and workflows"
-        )
-      ).toHaveLength(1);
-    } finally {
-      useChatStore.setState({ selectPersistedSession });
-    }
+    expect(
+      screen.getByText("Create, edit, and delete tasks, steps, and workflows")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "last session" })).toBeNull();
   });
 
   it("renders the active session as a single header band, with no tabs", () => {
@@ -1375,19 +1242,9 @@ describe("ChatWindowManager", () => {
     expect(rows.length).toBeGreaterThan(0);
     const homeFocused = document.activeElement as HTMLElement | null;
     expect(homeFocused).toHaveClass("hc-mini-history-open");
-    expect(
-      screen
-        .getByTestId("local-chat-mini-panel")
-        .querySelector<HTMLElement>("[data-keyboard-active]")
-    ).toContainElement(homeFocused);
     fireEvent.keyDown(homeFocused!, { key: "End" });
     const endFocused = document.activeElement as HTMLElement | null;
     expect(endFocused).toHaveClass("hc-mini-history-open");
-    expect(
-      screen
-        .getByTestId("local-chat-mini-panel")
-        .querySelector<HTMLElement>("[data-keyboard-active]")
-    ).toContainElement(endFocused);
 
     await user.click(
       currentGroup.getByRole("button", {
@@ -2554,6 +2411,180 @@ describe("ChatWindowManager", () => {
       useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
     ).toEqual([first, fresh]);
     expect(useChatStore.getState().sessions[second]).toBeDefined();
+  });
+
+  it("uses maximized history shortcuts to focus search and switch conversations", async () => {
+    const user = userEvent.setup();
+    const first = createPersistedHistorySession(
+      "history-first",
+      "First chat",
+      "/test/project",
+      "2026-01-03T00:00:00Z",
+      {
+        createdAt: "2026-01-03T00:00:00Z",
+        updatedAt: "2026-01-03T00:00:00Z",
+      }
+    );
+    const second = createPersistedHistorySession(
+      "history-second",
+      "Second chat",
+      "/test/project",
+      "2026-01-02T00:00:00Z",
+      {
+        createdAt: "2026-01-02T00:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+      }
+    );
+    createPersistedHistorySession(
+      "history-third",
+      "Third chat",
+      "/test/project",
+      "2026-01-01T00:00:00Z",
+      {
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      }
+    );
+
+    useChatStore.setState({
+      sessions: { [first.id]: first },
+      activeSessionId: first.id,
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "f", code: "KeyF", metaKey: true });
+    expect(
+      screen.queryByTestId("local-chat-session-search")
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    const search = await screen.findByRole("searchbox", {
+      name: "Search local chats",
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", {
+          name: "Load local chat Second chat into active pane",
+        })
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "f", code: "KeyF", metaKey: true });
+    expect(search).toHaveFocus();
+
+    fireEvent.keyDown(window, {
+      key: "]",
+      code: "BracketRight",
+      metaKey: true,
+      altKey: true,
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(second.id);
+    });
+    expect(
+      screen.getByRole("button", {
+        name: "Load local chat Second chat into active pane",
+      })
+    ).toHaveAttribute("aria-current", "true");
+
+    fireEvent.keyDown(window, {
+      key: "[",
+      code: "BracketLeft",
+      metaKey: true,
+      altKey: true,
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(first.id);
+    });
+  });
+
+  it("keeps history shortcut navigation in the active pane when a target is already open", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const first = createPersistedHistorySession(
+      "history-first",
+      "First chat",
+      "/test/project",
+      "2026-01-03T00:00:00Z",
+      {
+        createdAt: "2026-01-03T00:00:00Z",
+        updatedAt: "2026-01-03T00:00:00Z",
+      }
+    );
+    const second = createPersistedHistorySession(
+      "history-second",
+      "Second chat",
+      "/test/project",
+      "2026-01-02T00:00:00Z",
+      {
+        createdAt: "2026-01-02T00:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+      }
+    );
+    const third = createPersistedHistorySession(
+      "history-third",
+      "Third chat",
+      "/test/project",
+      "2026-01-01T00:00:00Z",
+      {
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      }
+    );
+
+    useChatStore.setState({
+      sessions: {
+        [first.id]: first,
+        [second.id]: second,
+        [third.id]: third,
+      },
+      activeSessionId: first.id,
+      paneLayout: {
+        panes: [
+          { id: "pane-one", sessionId: third.id },
+          { id: "pane-two", sessionId: first.id },
+        ],
+        activePaneId: "pane-two",
+      },
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    await screen.findByTestId("local-chat-mini-panel");
+
+    fireEvent.keyDown(window, {
+      key: "]",
+      code: "BracketRight",
+      metaKey: true,
+      altKey: true,
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(second.id);
+    });
+    expect(useChatStore.getState().paneLayout.activePaneId).toBe("pane-two");
+
+    fireEvent.keyDown(window, {
+      key: "]",
+      code: "BracketRight",
+      metaKey: true,
+      altKey: true,
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(third.id);
+    });
+    expect(useChatStore.getState().paneLayout.activePaneId).toBe("pane-two");
+    expect(
+      useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
+    ).toEqual([third.id, third.id]);
+    expect(
+      screen
+        .getAllByTestId("chat-pane")
+        .map((pane) => pane.getAttribute("aria-label"))
+    ).toEqual(["Chat pane 1: Third chat", "Chat pane 2: Third chat"]);
   });
 
   it("shows chat keyboard shortcut hints with Cmd+Shift+Slash", () => {

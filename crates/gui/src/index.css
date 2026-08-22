@@ -2514,6 +2514,23 @@ html.light ::selection {
     color-mix(in oklch, var(--accent) 58%, transparent);
 }
 
+/* The active chat input uses a quiet neutral state. Accent orange is reserved
+   for actions and status signals, so selecting a pane does not look like an
+   error or warning. */
+.chat-input-shell {
+  background-color: color-mix(in oklch, var(--color-fg) 4%, var(--color-bg));
+  transition:
+    border-color var(--t-fast, 120ms) var(--ease, ease),
+    background-color var(--t-fast, 120ms) var(--ease, ease),
+    box-shadow var(--t-fast, 120ms) var(--ease, ease);
+}
+.chat-input-shell:focus-within {
+  border-color: var(--color-line-strong);
+  background-color: var(--color-bg);
+  box-shadow: 0 0 0 1px
+    color-mix(in oklch, var(--color-fg-mute) 28%, transparent);
+}
+
 /* Side-panel "drill" open: the panel slides from its anchored screen edge in
    toward the center, fading as it lands. */
 @keyframes panel-drill-right {
@@ -2778,12 +2795,6 @@ html.light ::selection {
   font-size: var(--text-10);
   color: var(--fg-mute);
 }
-.hc-panel .hc-model-picker span,
-.hc-panel .hc-effort-picker span,
-.hc-panel .hc-provider-picker span,
-.hc-panel .hc-permission-picker span {
-  white-space: nowrap;
-}
 .hc-panel .hc-permission-picker {
   display: inline-flex;
   min-width: 0;
@@ -2821,8 +2832,8 @@ html.light ::selection {
 .hc-panel .hc-effort-picker select:focus-visible,
 .hc-panel .hc-provider-picker select:focus-visible,
 .hc-panel .hc-permission-picker select:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--fg-mute) 28%, transparent);
 }
 .hc-panel .hc-model-picker select:disabled,
 .hc-panel .hc-effort-picker select:disabled,
@@ -3013,10 +3024,6 @@ html.light ::selection {
 .hc-panel .hc-mini-history-row[data-active] {
   background: color-mix(in oklch, var(--fg) 8%, transparent);
 }
-.hc-panel .hc-mini-history-row[data-keyboard-active] {
-  outline: 1px solid color-mix(in oklch, var(--accent) 62%, transparent);
-  outline-offset: 1px;
-}
 .hc-panel .hc-mini-history-open {
   min-width: 0;
   min-height: 28px;
@@ -3030,6 +3037,10 @@ html.light ::selection {
   padding: 0;
   text-align: left;
   cursor: pointer;
+}
+.hc-panel .hc-mini-history-open:focus-visible {
+  outline: 1px solid color-mix(in oklch, var(--fg) 28%, transparent);
+  outline-offset: -1px;
 }
 .hc-panel .hc-mini-history-open .label,
 .hc-panel .hc-mini-history-open .meta {

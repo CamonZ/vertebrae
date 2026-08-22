@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
 import { commands } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
+import {
+  hasDurableLocalChatContent,
+  projectPathMatches,
+} from "../../utils/localChatPersistence";
 
 /** Max gap (ms) between the two Alt taps that toggle the chat. */
 const DOUBLE_TAP_MS = 400;
@@ -30,33 +34,22 @@ async function loadCurrentProjectPath(): Promise<string | null> {
 export function FloatingChatLauncher() {
   const togglePanel = useChatStore((s) => s.togglePanel);
   const setPanelOpen = useChatStore((s) => s.setPanelOpen);
-  const findLatestResumableSession = useChatStore(
-    (s) => s.findLatestResumableSession
-  );
   const startFreshSession = useChatStore((s) => s.startFreshSession);
-  const clearPendingLocalChatResume = useChatStore(
-    (s) => s.clearPendingLocalChatResume
-  );
-  const setPendingLocalChatResume = useChatStore(
-    (s) => s.setPendingLocalChatResume
-  );
   const panelOpen = useChatStore((s) => s.panelOpen);
   const toggleRequestRef = useRef(0);
 
   // Open the panel when closed; close when already open. Reads panelOpen from
   // the store at call time so it works from the key handler too. The panel is
-  // opened before the durable-session lookup so Alt-Alt never becomes a
-  // launcher-owned prompt.
+  // opened before the project lookup, then resumes a durable active chat or
+  // receives a fresh ephemeral chat.
   const toggleChat = useCallback(async () => {
     if (useChatStore.getState().panelOpen) {
       toggleRequestRef.current += 1;
-      clearPendingLocalChatResume();
       togglePanel();
       return;
     }
 
     const requestId = ++toggleRequestRef.current;
-    clearPendingLocalChatResume();
     setPanelOpen(true);
     const projectPath = await loadCurrentProjectPath();
     if (
@@ -66,27 +59,20 @@ export function FloatingChatLauncher() {
       return;
     }
 
-    const candidate = await findLatestResumableSession(projectPath);
+    const state = useChatStore.getState();
+    const activeSession = state.activeSessionId
+      ? state.sessions[state.activeSessionId]
+      : null;
     if (
-      toggleRequestRef.current !== requestId ||
-      !useChatStore.getState().panelOpen
+      activeSession &&
+      projectPathMatches(activeSession.projectPath, projectPath) &&
+      hasDurableLocalChatContent(activeSession)
     ) {
-      return;
-    }
-    if (candidate) {
-      setPendingLocalChatResume(candidate, projectPath);
       return;
     }
 
     startFreshSession("New Chat", projectPath);
-  }, [
-    clearPendingLocalChatResume,
-    findLatestResumableSession,
-    setPanelOpen,
-    setPendingLocalChatResume,
-    startFreshSession,
-    togglePanel,
-  ]);
+  }, [setPanelOpen, startFreshSession, togglePanel]);
 
   // Double-tap Alt to toggle. Ignore auto-repeat from a held key; use the
   // event's monotonic timeStamp to measure the gap between discrete presses.

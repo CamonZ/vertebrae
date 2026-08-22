@@ -2,9 +2,10 @@ import type { ComponentProps } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ChatMessages } from "./ChatMessages";
+import { ChatEmptyState, ChatMessages } from "./ChatMessages";
 import type { ChatMessage } from "../../stores/chatStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
+import { CHAT_HELP_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
 
 const { markdownRenderSpy } = vi.hoisted(() => ({
   markdownRenderSpy: vi.fn(),
@@ -55,6 +56,38 @@ describe("ChatMessages", () => {
     expect(
       screen.getByText("Or run a task through a workflow")
     ).toBeInTheDocument();
+
+    const shortcut = presentChatShortcut(
+      CHAT_HELP_SHORTCUT,
+      navigator.platform
+    );
+    const hint = screen.getByTestId("chat-help-shortcut-hint");
+    expect(hint).toHaveAccessibleName(
+      `Press ${shortcut?.ariaLabel} to show keyboard shortcuts`
+    );
+    expect(
+      [...hint.querySelectorAll("kbd")].map((key) => key.textContent)
+    ).toEqual(shortcut?.keys);
+
+    const icon = screen.getByTestId("chat-empty-state-icon");
+    expect(icon).toHaveAttribute("data-chat-icon-tone", "grayscale");
+    expect(icon.querySelector("svg")).toHaveClass(
+      "text-[var(--color-fg-mute)]"
+    );
+    expect(icon.querySelector("svg")).not.toHaveClass(
+      "text-[var(--color-accent)]"
+    );
+  });
+
+  it("falls back to generic help copy when shortcut metadata is unavailable", () => {
+    render(<ChatEmptyState chatHelpShortcut={null} />);
+
+    expect(screen.getByTestId("chat-help-shortcut-fallback")).toHaveTextContent(
+      "Use the chat panel's keyboard shortcuts for help"
+    );
+    expect(
+      screen.queryByTestId("chat-help-shortcut-hint")
+    ).not.toBeInTheDocument();
   });
 
   it("hides the empty state when not empty", () => {

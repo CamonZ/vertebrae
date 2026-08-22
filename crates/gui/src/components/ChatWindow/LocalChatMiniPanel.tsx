@@ -149,33 +149,58 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 
   const handleHistoryKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLElement>) => {
+      const target = event.target as HTMLElement;
+      const isSearchTarget =
+        target.closest("[data-mini-history-search]") !== null;
       if (
-        (event.target as HTMLElement).closest(
-          "[data-mini-history-search], [data-mini-delete], [data-mini-history-toggle], [data-mini-project-chat]"
+        target.closest(
+          "[data-mini-delete], [data-mini-history-toggle], [data-mini-project-chat]"
         )
       ) {
         return;
       }
+      if (
+        isSearchTarget &&
+        event.key !== "ArrowDown" &&
+        event.key !== "ArrowUp"
+      ) {
+        return;
+      }
       if (sessionItems.length === 0) return;
-      const currentIndex = Math.max(
-        0,
-        sessionItems.findIndex((session) => session.id === keyboardSessionId)
+      const navigationSessionId = isSearchTarget
+        ? activeSessionId
+        : keyboardSessionId;
+      const foundCurrentIndex = sessionItems.findIndex(
+        (session) => session.id === navigationSessionId
       );
+      const currentIndex = Math.max(0, foundCurrentIndex);
       let nextIndex: number | null = null;
 
       if (event.key === "ArrowDown") {
-        nextIndex = Math.min(sessionItems.length - 1, currentIndex + 1);
+        nextIndex =
+          isSearchTarget && foundCurrentIndex < 0
+            ? 0
+            : Math.min(sessionItems.length - 1, currentIndex + 1);
       } else if (event.key === "ArrowUp") {
-        nextIndex = Math.max(0, currentIndex - 1);
-      } else if (event.key === "Home") {
+        nextIndex =
+          isSearchTarget && foundCurrentIndex < 0
+            ? sessionItems.length - 1
+            : Math.max(0, currentIndex - 1);
+      } else if (!isSearchTarget && event.key === "Home") {
         nextIndex = 0;
-      } else if (event.key === "End") {
+      } else if (!isSearchTarget && event.key === "End") {
         nextIndex = sessionItems.length - 1;
       }
 
       if (nextIndex !== null) {
         event.preventDefault();
-        focusHistorySession(sessionItems[nextIndex].id);
+        const nextSessionId = sessionItems[nextIndex].id;
+        if (isSearchTarget) {
+          setKeyboardSessionId(nextSessionId);
+          void onSelect(nextSessionId);
+        } else {
+          focusHistorySession(nextSessionId);
+        }
         return;
       }
 
@@ -345,9 +370,6 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                     <div
                       className="hc-mini-history-row"
                       data-active={isActive || undefined}
-                      data-keyboard-active={
-                        keyboardSessionId === session.id || undefined
-                      }
                     >
                       <button
                         type="button"

@@ -228,7 +228,6 @@ export function ChatComposer({
             <div className="hc-chat-controls">
               {harnessCatalog && (
                 <label className="hc-provider-picker">
-                  <span>Provider</span>
                   <select
                     aria-label="Local chat provider"
                     data-testid="local-chat-provider-picker"
@@ -245,7 +244,6 @@ export function ChatComposer({
                 </label>
               )}
               <label className="hc-permission-picker">
-                <span>Permission</span>
                 <select
                   aria-label="Local chat permission mode"
                   data-testid="local-chat-permission-mode-picker"
@@ -266,7 +264,6 @@ export function ChatComposer({
             visibleHarness && picker ? (
               <div className="hc-chat-controls right">
                 <label className="hc-model-picker">
-                  <span>Model</span>
                   <select
                     aria-label={`${visibleHarness.label} model`}
                     data-testid="local-chat-model-picker"
@@ -292,7 +289,6 @@ export function ChatComposer({
                 </label>
                 {availableReasoningEfforts.length > 0 && (
                   <label className="hc-effort-picker">
-                    <span>Effort</span>
                     <select
                       aria-label={`${visibleHarness.label} reasoning effort`}
                       data-testid="local-chat-effort-picker"

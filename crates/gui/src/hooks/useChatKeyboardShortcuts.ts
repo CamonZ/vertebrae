@@ -1,4 +1,8 @@
 import { useEffect, useRef } from "react";
+import {
+  CHAT_HELP_SHORTCUT,
+  matchesChatShortcut,
+} from "../components/ChatWindow/chatShortcuts";
 
 export type ShortcutDispatchState = {
   shortcutsOpen: boolean;
@@ -6,6 +10,9 @@ export type ShortcutDispatchState = {
   hasActiveSession: boolean;
   focusPaneByIndex: (index: number) => boolean;
   focusPaneByOffset: (offset: number) => boolean;
+  historyNavigationEnabled: boolean;
+  focusHistorySearch: () => boolean;
+  selectHistorySessionByOffset: (offset: number) => Promise<boolean>;
   closeActivePane: () => boolean;
   keepOnlyActivePane: () => boolean;
   splitWithFreshSession: () => Promise<boolean>;
@@ -24,13 +31,17 @@ interface UseChatKeyboardShortcutsOptions {
 }
 
 export function isShortcutHintsKey(event: KeyboardEvent): boolean {
-  return (
-    event.metaKey && event.shiftKey && (event.key === "?" || event.key === "/")
-  );
+  return matchesChatShortcut(event, CHAT_HELP_SHORTCUT);
 }
 
 export function isBackslashShortcutKey(event: KeyboardEvent): boolean {
   return event.code === "Backslash" || event.key === "\\" || event.key === "|";
+}
+
+export function historyShortcutOffset(event: KeyboardEvent): number | null {
+  if (event.code === "BracketLeft" || event.key === "[") return -1;
+  if (event.code === "BracketRight" || event.key === "]") return 1;
+  return null;
 }
 
 export function isLetterShortcutKey(
@@ -76,6 +87,7 @@ export function useChatKeyboardShortcuts({
 
       if (key === "escape" && current.shortcutsOpen) {
         event.preventDefault();
+        event.stopImmediatePropagation();
         setShortcutsOpen(false);
         return;
       }
@@ -90,6 +102,27 @@ export function useChatKeyboardShortcuts({
       }
 
       if (!event.metaKey) return;
+
+      if (
+        key === "f" &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.shiftKey
+      ) {
+        if (current.focusHistorySearch()) {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      if (event.altKey && !event.shiftKey) {
+        const historyOffset = historyShortcutOffset(event);
+        if (historyOffset !== null && current.historyNavigationEnabled) {
+          event.preventDefault();
+          void current.selectHistorySessionByOffset(historyOffset);
+          return;
+        }
+      }
 
       if (isBackslashShortcutKey(event) && event.altKey && event.shiftKey) {
         if (current.closeActivePane()) {
