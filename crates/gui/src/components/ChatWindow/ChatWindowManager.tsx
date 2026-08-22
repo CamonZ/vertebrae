@@ -27,6 +27,7 @@ import { ChatHistoryResizeHandle } from "./ChatHistoryResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import { ChatShortcutHints } from "./ChatShortcutHints";
 import { ChatResumePrompt } from "./ChatResumePrompt";
+import { ChatEmptyState } from "./ChatMessages";
 import {
   buildSpawnOutline,
   isAgentSpawnTool,
@@ -454,14 +455,22 @@ export function ChatWindowManager() {
         startResizeDrag={startResizeDrag}
         resizePanel={resizePanel}
       />
-      {pendingLocalChatResume && (
-        <ChatResumePrompt
-          session={pendingLocalChatResume.candidate}
-          error={resumeError}
-          busy={resumeChoiceBusy}
-          onContinue={continueLastSession}
-          onNewChat={startNewChatFromResume}
-        />
+      {pendingLocalChatResume && visiblePanes.length === 0 && (
+        <div className="hc-panel-main">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <ChatEmptyState
+              notice={
+                <ChatResumePrompt
+                  session={pendingLocalChatResume.candidate}
+                  error={resumeError}
+                  busy={resumeChoiceBusy}
+                  onContinue={continueLastSession}
+                  onNewChat={startNewChatFromResume}
+                />
+              }
+            />
+          </div>
+        </div>
       )}
       {visiblePanes.length > 0 && (
         <div className="hc-panel-main">

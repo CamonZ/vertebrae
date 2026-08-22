@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { commands } from "../../bindings";
 import type {
@@ -24,6 +25,45 @@ import { MarkdownProjectRootProvider } from "../shared/MarkdownContent";
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 const BOTTOM_SCROLL_TOLERANCE_PX = 24;
+
+interface ChatEmptyStateProps {
+  notice?: ReactNode;
+}
+
+export function ChatEmptyState({ notice }: ChatEmptyStateProps) {
+  return (
+    <div
+      className="flex h-full flex-col items-center justify-center text-center"
+      data-testid="chat-empty-state"
+    >
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent)]/10">
+        <svg
+          className="h-6 w-6 text-[var(--color-accent)]"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 3.582-8 9-8s9 3.582 9 8z"
+          />
+        </svg>
+      </div>
+      {notice ?? (
+        <>
+          <p className="text-sm text-[var(--color-fg-soft)]">
+            Create, edit, and delete tasks, steps, and workflows
+          </p>
+          <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
+            Or run a task through a workflow
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
 
 function isNearBottom(element: HTMLElement): boolean {
   return (
@@ -332,32 +372,7 @@ export function ChatMessages({
           if (container) keepAtBottomRef.current = isNearBottom(container);
         }}
       >
-        {isEmpty && !isActive && (
-          <div className="flex h-full flex-col items-center justify-center text-center">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent)]/10">
-              <svg
-                className="h-6 w-6 text-[var(--color-accent)]"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                />
-              </svg>
-            </div>
-            <p className="text-sm text-[var(--color-fg-soft)]">
-              Create, edit, and delete tasks, steps, and workflows
-            </p>
-            <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
-              Or run a task through a workflow
-            </p>
-          </div>
-        )}
-
+        {isEmpty && !isActive && <ChatEmptyState />}
         <div className="flex flex-col gap-3">
           <HistoricalChatItems
             items={renderItems}

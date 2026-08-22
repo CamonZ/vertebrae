@@ -260,7 +260,9 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     const panel = screen.getByTestId("chat-window-manager");
+    const emptyState = within(panel).getByTestId("chat-empty-state");
     const prompt = within(panel).getByTestId("local-chat-resume-prompt");
+    expect(emptyState).toContainElement(prompt);
     expect(prompt).toHaveTextContent(
       "continue with the last session Task Chat"
     );
@@ -320,6 +322,9 @@ describe("ChatWindowManager", () => {
         expect(useChatStore.getState().activeSessionId).not.toBe(persisted.id);
         expect(useChatStore.getState().pendingLocalChatResume).toBeNull();
       });
+      expect(
+        screen.getByText("Create, edit, and delete tasks, steps, and workflows")
+      ).toBeInTheDocument();
     } finally {
       useChatStore.setState({ selectPersistedSession });
     }

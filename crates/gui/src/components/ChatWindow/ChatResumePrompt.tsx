@@ -30,7 +30,7 @@ export function ChatResumePrompt({
       role="status"
       aria-live="polite"
     >
-      <p>
+      <p className="text-sm text-[var(--color-fg-soft)]">
         <a
           href={`#local-chat-resume-${encodeURIComponent(session.id)}`}
           aria-disabled={busy}
