@@ -166,6 +166,46 @@ function ExpandableDeletingPanel() {
 }
 
 describe("LocalChatMiniPanel search", () => {
+  it("keeps the history chrome outside the bounded scroll region", () => {
+    const sessions = Array.from({ length: 24 }, (_, index) =>
+      makeSession(`overflow-${index + 1}`, {
+        label: `Overflow session ${index + 1}`,
+        title: `Overflow session ${index + 1}`,
+      })
+    );
+
+    render(
+      <div className="hc-panel">
+        <ControlledPanel
+          sessionGroups={[makeGroup("current", "Current project", sessions)]}
+        />
+      </div>
+    );
+
+    const panel = screen.getByTestId("local-chat-mini-panel");
+    const header = panel.querySelector<HTMLDivElement>(
+      ".hc-mini-history-head"
+    );
+    const body = screen.getByTestId("local-chat-history-drawer");
+    const scrollRegion = screen.getByTestId(
+      "local-chat-history-scroll-region"
+    );
+
+    expect(header).toBe(panel.firstElementChild);
+    expect(body).toHaveClass("hc-mini-history-body");
+    expect(body).toContainElement(scrollRegion);
+    expect(scrollRegion).toHaveClass("hc-mini-history-list");
+    expect(scrollRegion).not.toContainElement(header);
+    expect(
+      within(scrollRegion).getAllByRole("button", {
+        name: /^Load local chat Overflow session/,
+      })
+    ).toHaveLength(7);
+    expect(
+      within(body).getByRole("button", { name: "Show all (17 more)" })
+    ).toBeInTheDocument();
+  });
+
   it("renders an accessible controlled search field and updates as it is typed", async () => {
     const user = userEvent.setup();
     const onQueryChange = vi.fn();

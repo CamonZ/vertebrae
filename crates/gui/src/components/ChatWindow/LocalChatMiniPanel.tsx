@@ -224,7 +224,10 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
           />
         </div>
       </div>
-      <div data-testid="local-chat-history-drawer">
+      <div
+        data-testid="local-chat-history-drawer"
+        className="hc-mini-history-body"
+      >
         {deleteError && (
           <div role="alert" className="hc-mini-history-error">
             {deleteError}
@@ -251,7 +254,10 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
               : "No local chats yet."}
           </div>
         ) : (
-          <div className="hc-mini-history-list">
+          <div
+            className="hc-mini-history-list"
+            data-testid="local-chat-history-scroll-region"
+          >
             <SessionGroupList
               sessionGroups={expandedSessionGroups}
               activeSessionId={activeSessionId}

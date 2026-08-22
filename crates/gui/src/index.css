@@ -2416,6 +2416,7 @@ html.light ::selection {
 .hc-panel .hc-panel-main {
   position: relative;
   display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1;
 }
@@ -2762,11 +2763,14 @@ html.light ::selection {
   flex: 0 0 auto;
   min-width: 272px;
   max-width: 400px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: color-mix(in oklch, var(--bg-2) 34%, transparent);
 }
 .hc-panel .hc-mini-history-head {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -2780,6 +2784,14 @@ html.light ::selection {
   text-transform: uppercase;
   color: var(--fg-mute);
 }
+.hc-panel .hc-mini-history-body {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .hc-panel .hc-mini-history-search-label {
   font-size: var(--text-10);
   letter-spacing: 0.04em;
@@ -2788,6 +2800,7 @@ html.light ::selection {
   width: 100%;
 }
 .hc-panel .hc-mini-history-error {
+  flex: 0 0 auto;
   border-bottom: 1px solid color-mix(in oklch, var(--err) 22%, transparent);
   background: var(--err-wash);
   padding: var(--s-2);
@@ -2805,10 +2818,14 @@ html.light ::selection {
   color: var(--fg-mute);
 }
 .hc-panel .hc-mini-history-list {
+  min-width: 0;
   min-height: 0;
-  flex: 1;
+  flex: 1 1 auto;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--s-2) var(--s-1) var(--s-3);
+  touch-action: pan-y;
 }
 .hc-panel .hc-mini-history-group {
   margin-bottom: var(--s-2);
