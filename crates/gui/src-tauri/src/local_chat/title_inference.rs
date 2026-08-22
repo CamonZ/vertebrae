@@ -73,15 +73,15 @@ fn title_schema() -> Value {
     })
 }
 
-fn title_prompt(initial_prompts: &[String]) -> String {
-    let messages = initial_prompts
+fn title_prompt(transcript: &[String]) -> String {
+    let messages = transcript
         .iter()
         .enumerate()
-        .map(|(index, prompt)| format!("{}. {}", index + 1, prompt))
+        .map(|(index, message)| format!("{}. {}", index + 1, message))
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "Create a concise title for a local coding chat session from the user's early messages.\n\
+        "Create a concise title for a local coding chat session from the full conversation transcript.\n\
 Return only structured output matching the schema.\n\
 Rules:\n\
 - Use 3 to 7 words when possible.\n\
@@ -89,8 +89,8 @@ Rules:\n\
 - Do not include quotation marks, trailing punctuation, markdown, or labels.\n\
 - If the messages are only greetings, acknowledgements, or vague setup, set title to null, sufficient_signal to false, and confidence below 0.3.\n\
 - Set sufficient_signal to true only when the title would help distinguish this session from other local coding chats.\n\
-- Use confidence above 0.72 only for specific, actionable session titles.\n\n\
-User messages:\n{messages}"
+- Use confidence at least 0.72 only for specific, actionable session titles.\n\n\
+Conversation transcript:\n{messages}"
     )
 }
 
@@ -416,6 +416,21 @@ mod tests {
         assert!(!args.contains(&"--allowedTools".to_string()));
         assert!(!args.contains(&"--allowed-tools".to_string()));
         assert!(!args.contains(&"--tools".to_string()));
+    }
+
+    #[test]
+    fn includes_the_full_transcript_in_the_shared_title_prompt() {
+        let prompt = title_prompt(&[
+            "User: inspect the title flow".to_string(),
+            "Assistant: I will inspect the shared path".to_string(),
+            "User: also cover persistence".to_string(),
+        ]);
+
+        assert!(prompt.contains("full conversation transcript"));
+        assert!(prompt.contains("Conversation transcript:"));
+        assert!(prompt.contains("1. User: inspect the title flow"));
+        assert!(prompt.contains("2. Assistant: I will inspect the shared path"));
+        assert!(prompt.contains("3. User: also cover persistence"));
     }
 
     #[test]

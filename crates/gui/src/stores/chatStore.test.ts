@@ -1888,6 +1888,51 @@ describe("chatStore", () => {
       });
     });
 
+    it("accepts a candidate at the exact confidence threshold", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "Exact Threshold Title",
+        confidence: 0.72,
+        sufficientSignal: true,
+        userMessageCount: 1,
+      });
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: "Exact Threshold Title",
+        titleStatus: "generated",
+        titleConfidence: 0.72,
+      });
+    });
+
+    it("allows explicit regeneration to replace a generated title", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "First Generated Title",
+        confidence: 0.86,
+        sufficientSignal: true,
+        userMessageCount: 1,
+      });
+
+      useChatStore.getState().setSessionTitleCandidate(
+        id,
+        {
+          title: "Regenerated Title",
+          confidence: 0.72,
+          sufficientSignal: true,
+          userMessageCount: 2,
+        },
+        { replaceGenerated: true }
+      );
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: "Regenerated Title",
+        titleStatus: "generated",
+        titleConfidence: 0.72,
+        titleUserMessageCount: 2,
+      });
+    });
+
     it("freezes the mini-panel summary after a generated title is set", () => {
       const id = useChatStore.getState().openSession("New Chat");
       useChatStore.getState().setSessionTitleCandidate(id, {

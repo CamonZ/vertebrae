@@ -11,6 +11,7 @@ import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
 import { commands } from "../../bindings";
+import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
 import {
   routeLocalChatSessionEndEvent,
   routeLocalChatSessionErrorEvent,
@@ -68,6 +69,10 @@ vi.mock("../../bindings", () => ({
       },
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    getLocalFileRoots: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: ["/test/project"],
+    }),
     inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
       status: "ok",
       data: {
@@ -177,6 +182,59 @@ describe("ChatWindow", () => {
 
     expect(screen.getByText("Simple PR Review")).toBeInTheDocument();
     expect(screen.queryByText("New Chat")).not.toBeInTheDocument();
+  });
+
+  it("regenerates the title in the current pane and persists the session index", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      title: "Old Generated Title",
+      titleStatus: "generated",
+      projectPath: "/test/project",
+      messages: [
+        {
+          kind: "user",
+          text: "Regenerate this title from the complete conversation",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+        {
+          kind: "assistant",
+          text: "I will use the shared inference command.",
+          timestamp: "2026-01-01T00:00:01Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Regenerate chat title" })
+    );
+
+    await waitFor(() => {
+      expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
+        harness: "claude",
+        initial_prompts: [
+          "User: Regenerate this title from the complete conversation",
+          "Assistant: I will use the shared inference command.",
+        ],
+        working_dir: "/test/project",
+      });
+      expect(useChatStore.getState().sessions["test-session"].title).toBe(
+        "Inferred Title"
+      );
+    });
+
+    expect(screen.getByText("Inferred Title")).toBeInTheDocument();
+    expect(loadPersistedLocalChatSession("test-session")).toMatchObject({
+      title: "Inferred Title",
+      titleStatus: "generated",
+      titleConfidence: 0.91,
+    });
   });
 
   it("does not render old entity copy", () => {

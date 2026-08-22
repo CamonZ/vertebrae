@@ -366,6 +366,11 @@ export interface ChatTitleCandidate {
   userMessageCount: number;
 }
 
+export interface TitleCandidateOptions {
+  /** Explicit regeneration may replace a prior generated title. */
+  replaceGenerated?: boolean;
+}
+
 export interface StreamingAssistantMessage {
   text: string;
   timestamp: string;
@@ -562,7 +567,8 @@ interface ChatStoreActions {
   /** Apply a generated title candidate when it is confident enough */
   setSessionTitleCandidate: (
     sessionId: string,
-    candidate: ChatTitleCandidate
+    candidate: ChatTitleCandidate,
+    options?: TitleCandidateOptions
   ) => void;
   /** Set the model reported by the Claude CLI for a session */
   setSessionModel: (sessionId: string, model: string) => void;
@@ -2149,7 +2155,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       });
     },
 
-    setSessionTitleCandidate: (sessionId, candidate) => {
+    setSessionTitleCandidate: (sessionId, candidate, options) => {
       const normalized = candidate.title?.replace(/\s+/g, " ").trim() || null;
       const confidence = Number.isFinite(candidate.confidence)
         ? Math.max(0, Math.min(1, candidate.confidence))
@@ -2161,8 +2167,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
       updateSession(sessionId, (session) => {
         if (
           session.titleStatus === "manual" ||
-          session.titleStatus === "generated" ||
-          session.title?.trim()
+          (session.titleStatus === "generated" &&
+            !options?.replaceGenerated) ||
+          (session.title?.trim() && session.titleStatus !== "generated")
         ) {
           return session;
         }

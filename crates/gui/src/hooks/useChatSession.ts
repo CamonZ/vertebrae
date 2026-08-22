@@ -46,6 +46,9 @@ export function useChatSession(sessionId: string) {
     sendMessage,
     closeLocalChatSession,
     stopActiveTurn,
+    regenerateTitle,
+    isTitleRegenerating,
+    titleError,
   } = useLocalChat(sessionId);
 
   const clearMessages = useChatStore((s) => s.clearMessages);
@@ -546,6 +549,9 @@ export function useChatSession(sessionId: string) {
     handleStartSession,
     handleClearMessages,
     handleStopGeneration,
+    handleRegenerateTitle: regenerateTitle,
+    isTitleRegenerating,
+    titleError,
     handleModelChange,
     handleReasoningEffortChange,
     handleHarnessChange,

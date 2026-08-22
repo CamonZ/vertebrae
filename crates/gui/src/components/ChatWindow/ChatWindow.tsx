@@ -76,6 +76,9 @@ export function ChatWindow({
         onClosePane={onClosePane}
         onClearMessages={() => void chat.handleClearMessages()}
         onStopGeneration={() => void chat.handleStopGeneration()}
+        onTitleRegenerate={() => void chat.handleRegenerateTitle()}
+        isTitleRegenerating={chat.isTitleRegenerating}
+        titleError={chat.titleError}
       />
       <ChatMessages
         sessionId={sessionId}

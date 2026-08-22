@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { commands } from "../bindings";
 import type {
   LocalChatSessionInitEvent,
@@ -22,6 +22,7 @@ import type {
   ChatSession,
   ChatMessage,
   ChatTitleCandidate,
+  TitleCandidateOptions,
   ChatCompactionSummary,
   LocalChatLifecycle,
 } from "../stores/chatStore";
@@ -73,6 +74,35 @@ function earlyTitleUserMessages(
     userMessages.push(pending);
   }
   return userMessages.slice(0, MAX_TITLE_USER_MESSAGES);
+}
+
+/**
+ * Convert the active, provider-neutral chat transcript into the text entries
+ * consumed by the existing title inference command. Role markers keep the
+ * shared command aware of the conversation shape without exposing Claude or
+ * Codex wire formats to the UI.
+ */
+export function titleInferenceTranscript(messages: ChatMessage[]): {
+  entries: string[];
+  userMessageCount: number;
+} {
+  let userMessageCount = 0;
+  const entries = messages
+    .flatMap((message) => {
+      if (message.kind === "user") {
+        userMessageCount += 1;
+        return [`User: ${message.text.trim()}`];
+      }
+      if (message.kind === "assistant" && !message.isPartial) {
+        return [`Assistant: ${message.text.trim()}`];
+      }
+      return [];
+    })
+    .filter((entry) => {
+      const separator = entry.indexOf(": ");
+      return separator >= 0 && entry.slice(separator + 2).trim().length > 0;
+    });
+  return { entries, userMessageCount };
 }
 
 function shouldInferSessionTitle(session: ChatSession, userMessages: string[]) {
@@ -130,6 +160,48 @@ function inferSessionTitleInBackground(
     .catch((error) => {
       console.warn("Failed to infer local chat session title", error);
     });
+}
+
+export async function doRegenerateSessionTitle(
+  session: ChatSession,
+  sessionId: string,
+  setSessionTitleCandidate: (
+    sessionId: string,
+    candidate: ChatTitleCandidate,
+    options?: TitleCandidateOptions
+  ) => void
+): Promise<string | null> {
+  if (session.titleStatus === "manual") return null;
+
+  const transcript = titleInferenceTranscript(session.messages);
+  if (transcript.entries.length === 0) {
+    return "Add a message before regenerating the chat title.";
+  }
+
+  try {
+    const result = await commands.inferLocalChatSessionTitle({
+      harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+      initial_prompts: transcript.entries,
+      working_dir: session.projectPath ?? null,
+    });
+    if (result.status === "error") {
+      return commandErrorMessage(result.error);
+    }
+
+    setSessionTitleCandidate(
+      sessionId,
+      {
+        title: result.data.title,
+        confidence: result.data.confidence,
+        sufficientSignal: result.data.sufficient_signal,
+        userMessageCount: transcript.userMessageCount,
+      },
+      { replaceGenerated: true }
+    );
+    return null;
+  } catch (error) {
+    return commandErrorMessage(error);
+  }
 }
 
 export function handleInitEvent(
@@ -791,6 +863,8 @@ export async function doCloseSession(
  * - Sends, queues, and closes local chat messages
  */
 export function useLocalChat(sessionId: string | null) {
+  const [isTitleRegenerating, setIsTitleRegenerating] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
   const session = useChatStore((s) =>
     sessionId ? (s.sessions[sessionId] ?? null) : null
   );
@@ -815,6 +889,24 @@ export function useLocalChat(sessionId: string | null) {
   const markPendingUserQuestionsUnavailable = useChatStore(
     (s) => s.markPendingUserQuestionsUnavailable
   );
+
+  const regenerateTitle = useCallback(async () => {
+    if (!session || !sessionId || isTitleRegenerating) return;
+    setIsTitleRegenerating(true);
+    setTitleError(null);
+    const error = await doRegenerateSessionTitle(
+      session,
+      sessionId,
+      setSessionTitleCandidate
+    );
+    if (error) setTitleError(error);
+    setIsTitleRegenerating(false);
+  }, [
+    isTitleRegenerating,
+    session,
+    sessionId,
+    setSessionTitleCandidate,
+  ]);
 
   /**
    * Start the local chat session.
@@ -1033,6 +1125,9 @@ export function useLocalChat(sessionId: string | null) {
     sendMessage,
     closeLocalChatSession,
     stopActiveTurn,
+    regenerateTitle,
+    isTitleRegenerating,
+    titleError,
   };
 }
 

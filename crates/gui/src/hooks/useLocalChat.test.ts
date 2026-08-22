@@ -11,6 +11,8 @@ import {
   handleErrorEvent,
   handleWarningEvent,
   doStartSession,
+  doRegenerateSessionTitle,
+  titleInferenceTranscript,
   doSendMessage,
   doCloseSession,
 } from "./useLocalChat";
@@ -1614,6 +1616,155 @@ describe("doStartSession", () => {
     await starting;
 
     expect(deps.setSessionLifecycle).not.toHaveBeenCalled();
+  });
+});
+
+describe("doRegenerateSessionTitle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each(["claude", "codex"] as const)(
+    "passes the full active transcript through the neutral command for %s",
+    async (harness) => {
+      const session = makeSession({
+        harness,
+        projectPath: "/captured/project",
+        messages: [
+          {
+            kind: "user",
+            text: "Inspect the title flow",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+          {
+            kind: "assistant",
+            text: "I will inspect the shared title path.",
+            timestamp: "2026-01-01T00:00:01Z",
+          },
+          {
+            kind: "user",
+            text: "Also cover reload persistence",
+            timestamp: "2026-01-01T00:00:02Z",
+          },
+          {
+            kind: "assistant",
+            text: "The title should survive reopening.",
+            timestamp: "2026-01-01T00:00:03Z",
+          },
+          {
+            kind: "assistant",
+            text: "partial response",
+            timestamp: "2026-01-01T00:00:04Z",
+            isPartial: true,
+          },
+        ],
+      });
+      const setSessionTitleCandidate = vi.fn();
+
+      const error = await doRegenerateSessionTitle(
+        session,
+        SESSION_ID,
+        setSessionTitleCandidate
+      );
+
+      expect(error).toBeNull();
+      expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
+        harness,
+        initial_prompts: [
+          "User: Inspect the title flow",
+          "Assistant: I will inspect the shared title path.",
+          "User: Also cover reload persistence",
+          "Assistant: The title should survive reopening.",
+        ],
+        working_dir: "/captured/project",
+      });
+      expect(setSessionTitleCandidate).toHaveBeenCalledWith(
+        SESSION_ID,
+        {
+          title: "Inferred Title",
+          confidence: 0.91,
+          sufficientSignal: true,
+          userMessageCount: 2,
+        },
+        { replaceGenerated: true }
+      );
+    }
+  );
+
+  it("keeps the current title untouched when the neutral command fails", async () => {
+    mockedCommands.inferLocalChatSessionTitle.mockResolvedValueOnce({
+      status: "error",
+      error: { message: "provider unavailable" },
+    });
+    const setSessionTitleCandidate = vi.fn();
+
+    const error = await doRegenerateSessionTitle(
+      makeSession({
+        title: "Existing title",
+        titleStatus: "generated",
+        messages: [
+          {
+            kind: "user",
+            text: "Continue the existing chat",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+        ],
+      }),
+      SESSION_ID,
+      setSessionTitleCandidate
+    );
+
+    expect(error).toBe("provider unavailable");
+    expect(setSessionTitleCandidate).not.toHaveBeenCalled();
+  });
+
+  it("does not regenerate a manual title", async () => {
+    const error = await doRegenerateSessionTitle(
+      makeSession({ title: "Manual title", titleStatus: "manual" }),
+      SESSION_ID,
+      vi.fn()
+    );
+
+    expect(error).toBeNull();
+    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
+  });
+
+  it("reports an empty transcript without invoking inference", async () => {
+    const error = await doRegenerateSessionTitle(
+      makeSession(),
+      SESSION_ID,
+      vi.fn()
+    );
+
+    expect(error).toBe("Add a message before regenerating the chat title.");
+    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
+  });
+
+  it("formats user and assistant entries while excluding tool and partial records", () => {
+    expect(
+      titleInferenceTranscript([
+        {
+          kind: "user",
+          text: "A request",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+        {
+          kind: "tool_call",
+          toolName: "Read",
+          toolId: "tool-1",
+          input: "{}",
+          timestamp: "2026-01-01T00:00:01Z",
+        },
+        {
+          kind: "assistant",
+          text: "A response",
+          timestamp: "2026-01-01T00:00:02Z",
+        },
+      ])
+    ).toEqual({
+      entries: ["User: A request", "Assistant: A response"],
+      userMessageCount: 1,
+    });
   });
 });
 
