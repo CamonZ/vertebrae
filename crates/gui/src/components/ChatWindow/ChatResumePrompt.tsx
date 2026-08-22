@@ -4,6 +4,7 @@ import { localChatSessionDisplayTitle } from "../../utils/localChatSessionGroups
 interface ChatResumePromptProps {
   session: Pick<LocalChatSessionSummary, "id" | "label" | "title">;
   error?: string | null;
+  busy?: boolean;
   onContinue: () => void | Promise<void>;
   onNewChat: () => void | Promise<void>;
 }
@@ -16,6 +17,7 @@ interface ChatResumePromptProps {
 export function ChatResumePrompt({
   session,
   error,
+  busy = false,
   onContinue,
   onNewChat,
 }: ChatResumePromptProps) {
@@ -31,15 +33,21 @@ export function ChatResumePrompt({
       <p>
         <a
           href={`#local-chat-resume-${encodeURIComponent(session.id)}`}
+          aria-disabled={busy}
           onClick={(event) => {
             event.preventDefault();
+            if (busy) return;
             void onContinue();
           }}
         >
           continue with the last session {title}
         </a>{" "}
         <span>or</span>{" "}
-        <button type="button" onClick={() => void onNewChat()}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void onNewChat()}
+        >
           new chat
         </button>
       </p>

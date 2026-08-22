@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FloatingChatLauncher } from "./FloatingChatLauncher";
 import { useChatStore } from "../../stores/chatStore";
+import { clearPersistedLocalChatSessions } from "../../utils/localChatPersistence";
 
 const mockGetCurrentProjectPath = vi.fn();
 
@@ -21,6 +22,7 @@ describe("FloatingChatLauncher", () => {
       data: "/test/project",
     });
     window.localStorage.clear();
+    clearPersistedLocalChatSessions();
     useChatStore.getState().reset();
   });
 
@@ -52,7 +54,7 @@ describe("FloatingChatLauncher", () => {
     expect(session?.projectPath).toBe("/test/project");
   });
 
-  it("reopens the existing active session instead of creating project chat", async () => {
+  it("prompts before reopening the existing active session", async () => {
     const user = userEvent.setup();
     const id = useChatStore
       .getState()
@@ -67,6 +69,17 @@ describe("FloatingChatLauncher", () => {
     render(<FloatingChatLauncher />);
 
     await user.click(screen.getByRole("button", { name: "Open project chat" }));
+
+    expect(useChatStore.getState().panelOpen).toBe(false);
+    const prompt = screen.getByTestId("local-chat-resume-prompt");
+    expect(prompt).toHaveTextContent("continue with the last session");
+    expect(prompt).toHaveTextContent("Task Chat");
+
+    await user.click(
+      screen.getByRole("link", {
+        name: "continue with the last session Task Chat",
+      })
+    );
 
     expect(useChatStore.getState().panelOpen).toBe(true);
     expect(useChatStore.getState().activeSessionId).toBe(id);
@@ -130,7 +143,7 @@ describe("FloatingChatLauncher", () => {
     });
   });
 
-  it("reopens a no-project chat when current project lookup fails", async () => {
+  it("starts a new no-project chat when current project lookup fails", async () => {
     const user = userEvent.setup();
     mockGetCurrentProjectPath.mockResolvedValueOnce({
       status: "error",
@@ -146,10 +159,16 @@ describe("FloatingChatLauncher", () => {
     await user.click(screen.getByRole("button", { name: "Open project chat" }));
 
     await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
-    expect(useChatStore.getState().activeSessionId).toBe(noProject);
+    expect(useChatStore.getState().activeSessionId).not.toBe(noProject);
+    expect(
+      useChatStore.getState().sessions[useChatStore.getState().activeSessionId!]
+    ).toMatchObject({
+      label: "New Chat",
+      projectPath: null,
+    });
   });
 
-  it("opens a same-project locally closed session as resumable", async () => {
+  it("offers a same-project locally closed session as resumable", async () => {
     const user = userEvent.setup();
     const closedId = useChatStore
       .getState()
@@ -164,6 +183,15 @@ describe("FloatingChatLauncher", () => {
     render(<FloatingChatLauncher />);
 
     await user.click(screen.getByRole("button", { name: "Open project chat" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("local-chat-resume-prompt")).toBeInTheDocument()
+    );
+    await user.click(
+      screen.getByRole("link", {
+        name: "continue with the last session Task Chat",
+      })
+    );
 
     await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
     expect(useChatStore.getState().activeSessionId).toBe(closedId);

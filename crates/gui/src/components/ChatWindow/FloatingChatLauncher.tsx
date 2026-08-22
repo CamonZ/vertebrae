@@ -1,11 +1,8 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { commands } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
-import { useOpenChat } from "../../hooks/useLocalChat";
-import {
-  compareLocalChatSessionRecency,
-  projectPathMatches,
-} from "../../utils/localChatPersistence";
+import { ChatResumePrompt } from "./ChatResumePrompt";
+import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 
 /** Max gap (ms) between the two Alt taps that toggle the chat. */
 const DOUBLE_TAP_MS = 400;
@@ -33,48 +30,71 @@ async function loadCurrentProjectPath(): Promise<string | null> {
  * shortcut a true open/close toggle.
  */
 export function FloatingChatLauncher() {
-  const openChat = useOpenChat();
   const togglePanel = useChatStore((s) => s.togglePanel);
-  const setPanelOpen = useChatStore((s) => s.setPanelOpen);
-  const focusSession = useChatStore((s) => s.focusSession);
+  const findLatestResumableSession = useChatStore(
+    (s) => s.findLatestResumableSession
+  );
+  const selectPersistedSession = useChatStore((s) => s.selectPersistedSession);
+  const startFreshSession = useChatStore((s) => s.startFreshSession);
   const panelOpen = useChatStore((s) => s.panelOpen);
+  const [resumeCandidate, setResumeCandidate] =
+    useState<LocalChatSessionSummary | null>(null);
+  const [resumeProjectPath, setResumeProjectPath] = useState<string | null>(
+    null
+  );
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [choiceBusy, setChoiceBusy] = useState(false);
 
   // Open (and ensure a session) when closed; close when already open. Reads
   // panelOpen from the store at call time so it works from the key handler too.
   const toggleChat = useCallback(async () => {
     if (useChatStore.getState().panelOpen) {
+      setResumeCandidate(null);
+      setResumeError(null);
       togglePanel();
       return;
     }
 
     const projectPath = await loadCurrentProjectPath();
-    const state = useChatStore.getState();
-    if (state.panelOpen) return;
+    if (useChatStore.getState().panelOpen) return;
 
-    const isReusableSession = (
-      session: (typeof state.sessions)[string]
-    ): boolean =>
-      session.status === "open" &&
-      session.lifecycle !== "closed" &&
-      projectPathMatches(session.projectPath, projectPath);
-    const activeSession = state.activeSessionId
-      ? state.sessions[state.activeSessionId]
-      : null;
-
-    if (activeSession && isReusableSession(activeSession)) {
-      setPanelOpen(true);
-    } else {
-      const session = Object.values(state.sessions)
-        .filter((s) => isReusableSession(s))
-        .sort(compareLocalChatSessionRecency)[0];
-      if (session) {
-        focusSession(session.id);
-        setPanelOpen(true);
-      } else {
-        void openChat("New Chat", projectPath);
-      }
+    const candidate = await findLatestResumableSession(projectPath);
+    if (candidate) {
+      setResumeProjectPath(projectPath);
+      setResumeCandidate(candidate);
+      setResumeError(null);
+      return;
     }
-  }, [focusSession, openChat, setPanelOpen, togglePanel]);
+
+    startFreshSession("New Chat", projectPath);
+  }, [findLatestResumableSession, startFreshSession, togglePanel]);
+
+  const continueLastSession = useCallback(async () => {
+    if (!resumeCandidate || choiceBusy) return;
+    setChoiceBusy(true);
+    setResumeError(null);
+    try {
+      const selected = await selectPersistedSession(resumeCandidate.id);
+      if (!selected) {
+        setResumeError(
+          "Could not continue that session. You can still start a new chat."
+        );
+        return;
+      }
+      setResumeCandidate(null);
+    } finally {
+      setChoiceBusy(false);
+    }
+  }, [choiceBusy, resumeCandidate, selectPersistedSession]);
+
+  const startNewChat = useCallback(() => {
+    if (choiceBusy) return;
+    setChoiceBusy(true);
+    startFreshSession("New Chat", resumeProjectPath);
+    setResumeCandidate(null);
+    setResumeError(null);
+    setChoiceBusy(false);
+  }, [choiceBusy, resumeProjectPath, startFreshSession]);
 
   // Double-tap Alt to toggle. Ignore auto-repeat from a held key; use the
   // event's monotonic timeStamp to measure the gap between discrete presses.
@@ -95,6 +115,18 @@ export function FloatingChatLauncher() {
 
   // While the panel is open it owns the bottom-right anchor; hide the pill.
   if (panelOpen) return null;
+
+  if (resumeCandidate) {
+    return (
+      <ChatResumePrompt
+        session={resumeCandidate}
+        error={resumeError}
+        busy={choiceBusy}
+        onContinue={continueLastSession}
+        onNewChat={startNewChat}
+      />
+    );
+  }
 
   return (
     <button
