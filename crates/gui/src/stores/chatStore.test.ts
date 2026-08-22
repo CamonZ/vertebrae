@@ -797,6 +797,60 @@ describe("chatStore", () => {
         providerResumeId: null,
       });
     });
+
+    it("reuses the default empty session for the same project", () => {
+      const first = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+
+      const second = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+
+      expect(second).toBe(first);
+      expect(Object.keys(useChatStore.getState().sessions)).toEqual([first]);
+      expect(useChatStore.getState().activeSessionId).toBe(first);
+    });
+
+    it("creates a new default session after the existing one becomes durable", () => {
+      const first = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+      useChatStore.getState().addMessage(first, {
+        kind: "user",
+        text: "keep this conversation",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+
+      const second = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+
+      expect(second).not.toBe(first);
+      expect(useChatStore.getState().sessions[first].messages).toHaveLength(1);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
+    });
+
+    it("reuses a persisted default session after runtime state is cleared", () => {
+      const first = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        paneLayout: { panes: [], activePaneId: null },
+        panelOpen: false,
+        localSessionSummaries: {},
+      });
+
+      const second = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/repo");
+
+      expect(second).toBe(first);
+      expect(useChatStore.getState().sessions[first].messages).toEqual([]);
+      expect(useChatStore.getState().activeSessionId).toBe(first);
+    });
   });
 
   describe("addMessage", () => {

@@ -143,7 +143,7 @@ describe("FloatingChatLauncher", () => {
     });
   });
 
-  it("starts a new no-project chat when current project lookup fails", async () => {
+  it("reuses a no-project empty chat when current project lookup fails", async () => {
     const user = userEvent.setup();
     mockGetCurrentProjectPath.mockResolvedValueOnce({
       status: "error",
@@ -151,7 +151,7 @@ describe("FloatingChatLauncher", () => {
     });
     const noProject = useChatStore
       .getState()
-      .openSession("No Project Chat", null);
+      .openSession("New Chat", null);
     useChatStore.getState().setPanelOpen(false);
 
     render(<FloatingChatLauncher />);
@@ -159,13 +159,7 @@ describe("FloatingChatLauncher", () => {
     await user.click(screen.getByRole("button", { name: "Open project chat" }));
 
     await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
-    expect(useChatStore.getState().activeSessionId).not.toBe(noProject);
-    expect(
-      useChatStore.getState().sessions[useChatStore.getState().activeSessionId!]
-    ).toMatchObject({
-      label: "New Chat",
-      projectPath: null,
-    });
+    expect(useChatStore.getState().activeSessionId).toBe(noProject);
   });
 
   it("offers a same-project locally closed session as resumable", async () => {

@@ -3,8 +3,10 @@ import {
   clearLastUsedLocalChatModelId,
   compareLocalChatSessionRecency,
   DEFAULT_LOCAL_CHAT_HARNESS,
+  findPersistedDefaultEmptyLocalChatSession,
   findPersistedLocalChatSession,
   findLatestResumableLocalChatSession,
+  isDefaultEmptyLocalChatSession,
   isDisposableClosedLocalChatSession,
   listPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
@@ -993,6 +995,22 @@ function upsertLocalSessionSummary(
   };
 }
 
+function findReusableDefaultEmptySession(
+  sessions: Record<string, ChatSession>,
+  projectPath?: string | null
+): ChatSession | null {
+  return (
+    Object.values(sessions)
+      .filter(
+        (session) =>
+          session.status === "open" &&
+          isDefaultEmptyLocalChatSession(session) &&
+          projectPathMatches(session.projectPath, projectPath)
+      )
+      .sort(compareLocalChatSessionRecency)[0] ?? null
+  );
+}
+
 function omitLocalSessionSummary(
   summaries: Record<string, LocalChatSessionSummary>,
   sessionId: string
@@ -1675,6 +1693,47 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     startFreshSession: (label, projectPath) => {
+      const shouldReuseDefaultEmpty =
+        label === "New Chat" || label === "Project Chat";
+      if (shouldReuseDefaultEmpty) {
+        const runtime = findReusableDefaultEmptySession(
+          get().sessions,
+          projectPath
+        );
+        if (runtime) {
+          set((state) => ({
+            ...focusSessionInPaneLayout(state, runtime.id),
+            panelOpen: true,
+          }));
+          return runtime.id;
+        }
+
+        const persisted = findPersistedDefaultEmptyLocalChatSession(projectPath);
+        if (persisted) {
+          const hydrated = hydrateLocalSession({
+            ...persisted,
+            projectPath: persisted.projectPath ?? projectPath,
+          });
+          set((state) => {
+            const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
+            return {
+              sessions: nextSessions,
+              localSessionSummaries: upsertLocalSessionSummary(
+                state.localSessionSummaries,
+                hydrated
+              ),
+              ...focusSessionInPaneLayout(
+                { ...state, sessions: nextSessions },
+                hydrated.id
+              ),
+              panelOpen: true,
+            };
+          });
+          hydrateProviderMessagesInPlace(hydrated.id, hydrated);
+          return hydrated.id;
+        }
+      }
+
       const session = createLocalSession(label, projectPath);
       persistLocalChatSession(session);
       set((state) => {

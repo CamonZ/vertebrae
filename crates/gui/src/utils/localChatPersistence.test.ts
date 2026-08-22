@@ -5,6 +5,7 @@ import { useDebugStore } from "../stores/debugStore";
 import {
   clearLastUsedLocalChatModelId,
   clearPersistedLocalChatSessions,
+  findPersistedDefaultEmptyLocalChatSession,
   findPersistedLocalChatSession,
   isLocalChatSessionCleared,
   loadLastUsedLocalChatModelId,
@@ -464,5 +465,74 @@ describe("localChatPersistence", () => {
     );
 
     expect(findPersistedLocalChatSession(null)?.id).toBe("no-project");
+  });
+
+  it("deduplicates automatic empty sessions without deleting durable sessions", () => {
+    persistLocalChatSession(
+      makeSession({
+        id: "empty-old",
+        label: "New Chat",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        projectPath: "/repo",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      })
+    );
+    persistLocalChatSession(
+      makeSession({
+        id: "durable",
+        projectPath: "/repo",
+        updatedAt: "2026-01-02T00:00:00Z",
+      })
+    );
+    persistLocalChatSession(
+      makeSession({
+        id: "empty-new",
+        label: "New Chat",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        projectPath: "/repo",
+        createdAt: "2026-01-03T00:00:00Z",
+        updatedAt: "2026-01-03T00:00:00Z",
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("empty-old")).toBeNull();
+    expect(loadPersistedLocalChatSession("empty-new")).not.toBeNull();
+    expect(loadPersistedLocalChatSession("durable")).not.toBeNull();
+    expect(findPersistedDefaultEmptyLocalChatSession("/repo")?.id).toBe(
+      "empty-new"
+    );
+  });
+
+  it("does not treat explicitly named empty sessions as automatic placeholders", () => {
+    persistLocalChatSession(
+      makeSession({
+        id: "scratch",
+        label: "Scratchpad",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        projectPath: "/repo",
+      })
+    );
+    persistLocalChatSession(
+      makeSession({
+        id: "default",
+        label: "New Chat",
+        messages: [],
+        messageCount: 0,
+        providerResumeId: null,
+        projectPath: "/repo",
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("scratch")).not.toBeNull();
+    expect(findPersistedDefaultEmptyLocalChatSession("/repo")?.id).toBe(
+      "default"
+    );
   });
 });

@@ -593,6 +593,21 @@ export function findPersistedLocalChatSession(
   );
 }
 
+export function findPersistedDefaultEmptyLocalChatSession(
+  projectPath?: string | null
+): ChatSession | null {
+  return (
+    Object.values(readSessions())
+      .filter(
+        (session) =>
+          session.status === "open" &&
+          isDefaultEmptyLocalChatSession(session) &&
+          projectPathMatches(session.projectPath, projectPath)
+      )
+      .sort(compareLocalChatSessionRecency)[0] ?? null
+  );
+}
+
 export function persistLocalChatSession(session: ChatSession): Promise<boolean> {
   const sessions = readSessions();
   const serialized = serializeSession(session, sessions[session.id]);
@@ -609,6 +624,20 @@ export function persistLocalChatSession(session: ChatSession): Promise<boolean> 
     return writeSessions(sessions);
   }
   sessions[session.id] = serialized;
+  if (isDefaultEmptyLocalChatSession(serialized)) {
+    const projectKey = serialized.projectPath ?? null;
+    const emptySessions = Object.values(sessions)
+      .filter(
+        (candidate) =>
+          candidate.status === "open" &&
+          isDefaultEmptyLocalChatSession(candidate) &&
+          (candidate.projectPath ?? null) === projectKey
+      )
+      .sort(compareLocalChatSessionRecency);
+    for (const duplicate of emptySessions.slice(1)) {
+      delete sessions[duplicate.id];
+    }
+  }
   const persistence = writeSessions(sessions);
   clearLocalChatSessionCleared(session.id);
   return persistence;
