@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
 import { commands } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
+import {
+  hasDurableLocalChatContent,
+  projectPathMatches,
+} from "../../utils/localChatPersistence";
 
 /** Max gap (ms) between the two Alt taps that toggle the chat. */
 const DOUBLE_TAP_MS = 400;
@@ -36,7 +40,8 @@ export function FloatingChatLauncher() {
 
   // Open the panel when closed; close when already open. Reads panelOpen from
   // the store at call time so it works from the key handler too. The panel is
-  // opened before the project lookup, then receives a fresh ephemeral chat.
+  // opened before the project lookup, then resumes a durable active chat or
+  // receives a fresh ephemeral chat.
   const toggleChat = useCallback(async () => {
     if (useChatStore.getState().panelOpen) {
       toggleRequestRef.current += 1;
@@ -50,6 +55,18 @@ export function FloatingChatLauncher() {
     if (
       toggleRequestRef.current !== requestId ||
       !useChatStore.getState().panelOpen
+    ) {
+      return;
+    }
+
+    const state = useChatStore.getState();
+    const activeSession = state.activeSessionId
+      ? state.sessions[state.activeSessionId]
+      : null;
+    if (
+      activeSession &&
+      projectPathMatches(activeSession.projectPath, projectPath) &&
+      hasDurableLocalChatContent(activeSession)
     ) {
       return;
     }

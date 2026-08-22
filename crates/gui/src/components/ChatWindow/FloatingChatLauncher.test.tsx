@@ -88,7 +88,13 @@ describe("FloatingChatLauncher", () => {
       text: "still here",
       timestamp: "2026-01-01T00:00:00Z",
     });
-    useChatStore.getState().setPanelOpen(false);
+    useChatStore.setState({
+      sessions: {},
+      activeSessionId: null,
+      paneLayout: { panes: [], activePaneId: null },
+      localSessionSummaries: {},
+      panelOpen: false,
+    });
 
     render(<FloatingChatLauncher />);
 
@@ -123,6 +129,38 @@ describe("FloatingChatLauncher", () => {
         .listLocalSessions("/test/project")
         .some((session) => session.id === freshId)
     ).toBe(true);
+  });
+
+  it("reopens the active project chat with its transcript", async () => {
+    const user = userEvent.setup();
+    const id = useChatStore
+      .getState()
+      .openSession("Task Chat", "/test/project");
+    useChatStore.getState().addMessage(id, {
+      kind: "user",
+      text: "continue this chat",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    useChatStore.getState().addMessage(id, {
+      kind: "assistant",
+      text: "previous reply",
+      timestamp: "2026-01-01T00:00:01Z",
+    });
+    useChatStore.getState().setPanelOpen(false);
+
+    render(<FloatingChatLauncher />);
+
+    await user.click(screen.getByRole("button", { name: "Open project chat" }));
+
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(id);
+      expect(useChatStore.getState().panelOpen).toBe(true);
+    });
+    expect(useChatStore.getState().sessions[id]?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "assistant", text: "previous reply" }),
+      ])
+    );
   });
 
   it("does not reopen an active session from another project", async () => {
