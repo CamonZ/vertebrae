@@ -152,6 +152,24 @@ impl GuiWorld {
         )
     }
 
+    pub fn project_path(&self, project: &str) -> String {
+        match project {
+            "primary" => self
+                .temp_dir
+                .as_ref()
+                .expect("primary project path not provisioned")
+                .to_string_lossy()
+                .into_owned(),
+            "second" => self
+                .second_temp_dir
+                .as_ref()
+                .expect("second project path requires @multi_project")
+                .to_string_lossy()
+                .into_owned(),
+            other => panic!("unknown acceptance project {other:?}; use primary or second"),
+        }
+    }
+
     /// Spawn vtb-daemon for the project this scenario configured, sharing
     /// HOME=/root with the GUI (the setup hook registers the project there).
     /// Blocks until the daemon logs that it joined the Phoenix channel.

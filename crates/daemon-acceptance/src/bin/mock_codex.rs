@@ -30,6 +30,11 @@ async fn main() {
     let args: Vec<String> = std::env::args().collect();
     capture_invocation(&args);
 
+    if is_model_discovery(&args) {
+        print_model_catalog();
+        return;
+    }
+
     let address = listen_address(&args);
     let listener = TcpListener::bind(address)
         .await
@@ -48,6 +53,26 @@ async fn main() {
             }
         });
     }
+}
+
+fn is_model_discovery(args: &[String]) -> bool {
+    args.windows(3)
+        .any(|window| window[0] == "debug" && window[1] == "models" && window[2] == "--bundled")
+}
+
+fn print_model_catalog() {
+    println!(
+        "{}",
+        json!({
+            "models": [{
+                "slug": "gpt-5.5",
+                "display_name": "GPT-5.5",
+                "visibility": "list",
+                "priority": 0,
+                "supported_reasoning_levels": [{"effort": "medium"}]
+            }]
+        })
+    );
 }
 
 fn listen_address(args: &[String]) -> std::net::SocketAddr {

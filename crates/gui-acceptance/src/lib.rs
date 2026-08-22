@@ -39,6 +39,8 @@ pub async fn webdriver() -> Arc<Mutex<Client>> {
             let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
             let claude_code_path = std::env::var("CLAUDE_CODE_PATH")
                 .unwrap_or_else(|_| "/usr/local/bin/mock-claude".to_string());
+            let codex_path = std::env::var("CODEX_PATH")
+                .unwrap_or_else(|_| "/usr/local/bin/mock-codex".to_string());
             let mock_output_dir =
                 std::env::var("MOCK_OUTPUT_DIR").unwrap_or_else(|_| "/mocks".to_string());
 
@@ -47,6 +49,10 @@ pub async fn webdriver() -> Arc<Mutex<Client>> {
             app_env.insert(
                 "CLAUDE_CODE_PATH".to_string(),
                 serde_json::Value::String(claude_code_path),
+            );
+            app_env.insert(
+                "CODEX_PATH".to_string(),
+                serde_json::Value::String(codex_path),
             );
             app_env.insert(
                 "MOCK_OUTPUT_DIR".to_string(),

@@ -27,6 +27,8 @@ function makeGroup(
   return {
     id: "g1",
     label: "Test Project",
+    projectId: "project-1",
+    projectPath: "/test/project",
     isCurrentProject: false,
     isFallback: false,
     sessions: [makeSummary()],
@@ -37,8 +39,16 @@ function makeGroup(
 describe("SessionGroupList", () => {
   it("renders groups with the provided group renderer", () => {
     const groups = [
-      makeGroup({ id: "g1", label: "Alpha", sessions: [makeSummary({ id: "s1" })] }),
-      makeGroup({ id: "g2", label: "Beta", sessions: [makeSummary({ id: "s2" })] }),
+      makeGroup({
+        id: "g1",
+        label: "Alpha",
+        sessions: [makeSummary({ id: "s1" })],
+      }),
+      makeGroup({
+        id: "g2",
+        label: "Beta",
+        sessions: [makeSummary({ id: "s2" })],
+      }),
     ];
     render(
       <SessionGroupList
@@ -97,9 +107,7 @@ describe("SessionGroupList", () => {
   });
 
   it("passes isDeleting=true for the session matching deletingSessionId", () => {
-    const groups = [
-      makeGroup({ sessions: [makeSummary({ id: "s1" })] }),
-    ];
+    const groups = [makeGroup({ sessions: [makeSummary({ id: "s1" })] })];
     render(
       <SessionGroupList
         sessionGroups={groups}
@@ -127,9 +135,7 @@ describe("SessionGroupList", () => {
         sessionGroups={[]}
         activeSessionId=""
         deletingSessionId={null}
-        renderGroup={(group) => (
-          <div key={group.id} data-testid="group" />
-        )}
+        renderGroup={(group) => <div key={group.id} data-testid="group" />}
         renderRow={(session) => <div key={session.id} />}
       />
     );
@@ -137,16 +143,18 @@ describe("SessionGroupList", () => {
   });
 
   it("keys rows by session id so re-renders are stable", () => {
-    const groups = [
-      makeGroup({ sessions: [makeSummary({ id: "s1" })] }),
-    ];
+    const groups = [makeGroup({ sessions: [makeSummary({ id: "s1" })] })];
     const { rerender } = render(
       <SessionGroupList
         sessionGroups={groups}
         activeSessionId=""
         deletingSessionId={null}
         renderGroup={(_g, rows) => <div key="g1">{rows}</div>}
-        renderRow={(s) => <div key={s.id} data-testid="row">{s.id}</div>}
+        renderRow={(s) => (
+          <div key={s.id} data-testid="row">
+            {s.id}
+          </div>
+        )}
       />
     );
     rerender(
@@ -155,7 +163,11 @@ describe("SessionGroupList", () => {
         activeSessionId=""
         deletingSessionId={null}
         renderGroup={(_g, rows) => <div key="g1">{rows}</div>}
-        renderRow={(s) => <div key={s.id} data-testid="row">{s.id}</div>}
+        renderRow={(s) => (
+          <div key={s.id} data-testid="row">
+            {s.id}
+          </div>
+        )}
       />
     );
     expect(screen.getAllByTestId("row")).toHaveLength(1);

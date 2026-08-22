@@ -20,7 +20,10 @@ import { useChatKeyboardShortcuts } from "../../hooks/useChatKeyboardShortcuts";
 import { useLocalChatHistory } from "../../hooks/useLocalChatHistory";
 import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
-import { projectLocalChatSessionGroups } from "../../utils/localChatSessionGroups";
+import {
+  projectLocalChatSessionGroups,
+  type LocalChatSessionGroup,
+} from "../../utils/localChatSessionGroups";
 import { ChatPaneList } from "./ChatPaneList";
 import { ChatResizeHandle } from "./ChatResizeHandle";
 import { ChatHistoryResizeHandle } from "./ChatHistoryResizeHandle";
@@ -65,6 +68,7 @@ export function ChatWindowManager() {
   );
   const deleteLocalSession = useChatStore((s) => s.deleteLocalSession);
   const startFreshSession = useChatStore((s) => s.startFreshSession);
+  const openProjectSession = useChatStore((s) => s.openProjectSession);
   const startFreshSessionInNewPane = useChatStore(
     (s) => s.startFreshSessionInNewPane
   );
@@ -342,6 +346,28 @@ export function ChatWindowManager() {
     startFreshSessionInNewPane,
   ]);
 
+  const startProjectChat = useCallback(
+    (group: LocalChatSessionGroup) => {
+      if (!group.projectId || !group.projectPath) {
+        setDeleteError(
+          `Cannot start a chat in ${group.label}: project directory unavailable`
+        );
+        return;
+      }
+      try {
+        openProjectSession("New Chat", group.projectPath);
+        setDeleteError(null);
+      } catch (error) {
+        setDeleteError(
+          error instanceof Error
+            ? error.message
+            : `Could not start a chat in ${group.label}`
+        );
+      }
+    },
+    [openProjectSession]
+  );
+
   const toggleHistorySelector = useCallback(() => {
     if (!isMaximized) {
       toggleMaximized();
@@ -538,6 +564,7 @@ export function ChatWindowManager() {
               onSelectAgent={(sessionId, agent) => {
                 void selectAgentThreadForActivePane(sessionId, agent);
               }}
+              onStartProjectChat={startProjectChat}
               deletingSessionId={deletingSessionId}
               deleteError={deleteError}
               onDelete={(sessionId) => void handleDeleteSession(sessionId)}

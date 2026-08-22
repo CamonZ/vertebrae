@@ -13,6 +13,7 @@ import {
   listPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
   markLocalChatSessionCleared,
+  normalizeProjectPath,
   persistLastUsedLocalChatModelId,
   persistLocalChatSession,
   projectPathMatches,
@@ -489,6 +490,8 @@ interface ChatStoreState {
 interface ChatStoreActions {
   /** Open or reuse a local chat session */
   openSession: (label: string, projectPath?: string | null) => string;
+  /** Open a project chat, reusing only an eligible empty session. */
+  openProjectSession: (label: string, projectPath: string) => string;
   /** Close a chat session */
   closeSession: (sessionId: string) => void;
   /** Focus a chat session tab */
@@ -1105,6 +1108,30 @@ function findMatchingSession(
   );
 }
 
+function isEligibleEmptyProjectSession(session: ChatSession): boolean {
+  return (
+    session.status === "open" &&
+    !session.providerResumeId?.trim() &&
+    session.messages.length === 0 &&
+    (session.messageCount ?? 0) === 0
+  );
+}
+
+function findEligibleEmptyProjectSession(
+  sessions: Record<string, ChatSession>,
+  projectPath: string
+): string | null {
+  return (
+    Object.values(sessions)
+      .filter(
+        (session) =>
+          isEligibleEmptyProjectSession(session) &&
+          projectPathMatches(session.projectPath, projectPath)
+      )
+      .sort(compareLocalChatSessionRecency)[0]?.id ?? null
+  );
+}
+
 function latestSessionId(sessions: Record<string, ChatSession>): string | null {
   return (
     Object.values(sessions)
@@ -1495,6 +1522,65 @@ export const useChatStore = create<ChatStore>((set, get) => {
       });
 
       return id;
+    },
+
+    openProjectSession: (label, projectPath) => {
+      const targetPath = normalizeProjectPath(projectPath) ?? projectPath;
+      const existing = findEligibleEmptyProjectSession(
+        get().sessions,
+        targetPath
+      );
+      if (existing) {
+        set((state) => ({
+          ...focusSessionInPaneLayout(state, existing),
+          panelOpen: true,
+        }));
+        return existing;
+      }
+
+      const persisted = listPersistedLocalChatSessions(targetPath)
+        .map((summary) => loadPersistedLocalChatSession(summary.id))
+        .find(
+          (session): session is ChatSession =>
+            !!session && isEligibleEmptyProjectSession(session)
+        );
+      if (persisted && !get().sessions[persisted.id]) {
+        const hydrated = hydrateLocalSession({
+          ...persisted,
+          projectPath: persisted.projectPath ?? targetPath,
+        });
+        set((state) => {
+          const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
+          return {
+            sessions: nextSessions,
+            ...focusSessionInPaneLayout(
+              { ...state, sessions: nextSessions },
+              hydrated.id
+            ),
+            panelOpen: true,
+          };
+        });
+        return hydrated.id;
+      }
+
+      const session = createLocalSession(label, targetPath);
+      persistLocalChatSession(session);
+      set((state) => {
+        const nextSessions = { ...state.sessions, [session.id]: session };
+        return {
+          sessions: nextSessions,
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            session
+          ),
+          ...focusSessionInPaneLayout(
+            { ...state, sessions: nextSessions },
+            session.id
+          ),
+          panelOpen: true,
+        };
+      });
+      return session.id;
     },
 
     closeSession: (sessionId) => {

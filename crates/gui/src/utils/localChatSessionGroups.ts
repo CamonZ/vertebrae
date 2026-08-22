@@ -1,6 +1,9 @@
 import type { SavedProject } from "../bindings";
 import type { LocalChatSessionSummary } from "./localChatPersistence";
-import { compareLocalChatSessionRecency } from "./localChatPersistence";
+import {
+  compareLocalChatSessionRecency,
+  normalizeProjectPath,
+} from "./localChatPersistence";
 
 export const FALLBACK_CHAT_PROJECT_LABEL = "Unknown project";
 export const LOCAL_CHAT_SESSION_ROW_LIMIT = 7;
@@ -8,6 +11,10 @@ export const LOCAL_CHAT_SESSION_ROW_LIMIT = 7;
 export interface LocalChatSessionGroup {
   id: string;
   label: string;
+  /** Stable saved-project identity represented by this group, when known. */
+  projectId: string | null;
+  /** Project directory captured from the saved-project record, when known. */
+  projectPath: string | null;
   isCurrentProject: boolean;
   isFallback: boolean;
   sessions: LocalChatSessionSummary[];
@@ -80,6 +87,8 @@ export function projectLocalChatSessionGroups(
 interface ResolvedProjectGroup {
   id: string;
   label: string;
+  projectId: string | null;
+  projectPath: string | null;
   isCurrentProject: boolean;
   isFallback: boolean;
 }
@@ -87,21 +96,6 @@ interface ResolvedProjectGroup {
 interface ProjectResolutionContext {
   projectsByPath: Map<string, SavedProject>;
   currentProjectPath: string | null;
-}
-
-function normalizeProjectPath(path: string | null | undefined): string | null {
-  const trimmed = path?.trim();
-  if (!trimmed) return null;
-
-  let normalized = trimmed;
-  while (
-    normalized.length > 1 &&
-    /[\\/]$/.test(normalized) &&
-    !/^[A-Za-z]:[\\/]$/.test(normalized)
-  ) {
-    normalized = normalized.slice(0, -1);
-  }
-  return normalized;
 }
 
 function displayProjectName(project: SavedProject): string {
@@ -146,6 +140,8 @@ function resolveLocalChatSessionProject(
     return {
       id: "fallback",
       label: FALLBACK_CHAT_PROJECT_LABEL,
+      projectId: null,
+      projectPath: null,
       isCurrentProject: false,
       isFallback: true,
     };
@@ -155,6 +151,8 @@ function resolveLocalChatSessionProject(
   return {
     id: `project:${slug}`,
     label: displayProjectName(project),
+    projectId: project.project_id,
+    projectPath: normalizedPath,
     isCurrentProject: normalizedPath === context.currentProjectPath,
     isFallback: false,
   };

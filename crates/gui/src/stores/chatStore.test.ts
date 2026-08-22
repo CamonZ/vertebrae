@@ -455,6 +455,131 @@ describe("chatStore", () => {
     });
   });
 
+  describe("openProjectSession", () => {
+    it("creates and focuses a project-scoped session in the active pane", () => {
+      const existing = useChatStore
+        .getState()
+        .openSession("Existing", "/other/project");
+
+      const opened = useChatStore
+        .getState()
+        .openProjectSession("New Chat", "/target/project");
+
+      expect(opened).not.toBe(existing);
+      expect(useChatStore.getState().sessions[opened]).toMatchObject({
+        label: "New Chat",
+        projectPath: "/target/project",
+        messages: [],
+        providerResumeId: null,
+      });
+      expect(useChatStore.getState().activeSessionId).toBe(opened);
+      expect(useChatStore.getState().paneLayout.panes).toEqual([
+        expect.objectContaining({ sessionId: opened }),
+      ]);
+      expect(useChatStore.getState().sessions[existing]).toBeDefined();
+    });
+
+    it("reuses only an empty session and leaves a non-empty project session intact", () => {
+      const empty = useChatStore
+        .getState()
+        .openSession("Empty", "/target/project");
+      const durable = useChatStore
+        .getState()
+        .startFreshSession("Durable", "/target/project");
+      useChatStore.getState().addMessage(durable, {
+        kind: "user",
+        text: "Keep this conversation",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+
+      const opened = useChatStore
+        .getState()
+        .openProjectSession("New Chat", "/target/project");
+
+      expect(opened).toBe(empty);
+      expect(useChatStore.getState().activeSessionId).toBe(empty);
+      expect(useChatStore.getState().sessions[durable].messages).toEqual([
+        {
+          kind: "user",
+          text: "Keep this conversation",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
+    });
+
+    it("reuses an empty session when equivalent project paths differ by a trailing separator", () => {
+      const existing = useChatStore
+        .getState()
+        .openSession("Empty", "/target/project/");
+
+      const opened = useChatStore
+        .getState()
+        .openProjectSession("New Chat", "/target/project");
+
+      expect(opened).toBe(existing);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
+    });
+
+    it("creates a new project session when the persisted session is untouched", () => {
+      const persisted = useChatStore
+        .getState()
+        .openSession("Persisted empty", "/target/project");
+      useChatStore.getState().closeSession(persisted);
+
+      const opened = useChatStore
+        .getState()
+        .openProjectSession("New Chat", "/target/project");
+
+      expect(opened).not.toBe(persisted);
+      expect(useChatStore.getState().sessions[opened]).toMatchObject({
+        label: "New Chat",
+        projectPath: "/target/project",
+        messages: [],
+      });
+      expect(useChatStore.getState().sessions[persisted]).toBeUndefined();
+    });
+
+    it("replaces only the active pane and reuses the new empty session on repeat clicks", () => {
+      const preserved = useChatStore
+        .getState()
+        .openSession("Preserved", "/preserved/project");
+      const durableTarget = useChatStore
+        .getState()
+        .startFreshSessionInNewPane("Durable target", "/target/project");
+      useChatStore.getState().addMessage(durableTarget, {
+        kind: "user",
+        text: "Do not replace this conversation",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+      const preservedPane = useChatStore.getState().paneLayout.panes[0];
+      expect(preservedPane.sessionId).toBe(preserved);
+
+      useChatStore.getState().focusPane(preservedPane.id);
+      const opened = useChatStore
+        .getState()
+        .openProjectSession("New Chat", "/target/project");
+      const repeated = useChatStore
+        .getState()
+        .openProjectSession("New Chat", "/target/project");
+
+      const state = useChatStore.getState();
+      expect(repeated).toBe(opened);
+      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+        opened,
+        durableTarget,
+      ]);
+      expect(state.activeSessionId).toBe(opened);
+      expect(state.sessions[durableTarget].messages).toEqual([
+        {
+          kind: "user",
+          text: "Do not replace this conversation",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ]);
+    });
+  });
+
   describe("closeSession", () => {
     it("removes the session from the store", () => {
       const id = useChatStore.getState().openSession("T1");

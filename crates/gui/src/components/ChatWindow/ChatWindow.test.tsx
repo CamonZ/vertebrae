@@ -188,6 +188,22 @@ describe("ChatWindow", () => {
     expect(screen.queryByText("this task")).not.toBeInTheDocument();
   });
 
+  it("exposes the active session project path for GUI acceptance assertions", () => {
+    const session = createSession({ projectPath: "/selected/project" });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("local-chat-window")).toHaveAttribute(
+      "data-project-path",
+      "/selected/project"
+    );
+  });
+
   it("renders the inferred session title in the header", () => {
     const session = createSession({
       label: "New Chat",

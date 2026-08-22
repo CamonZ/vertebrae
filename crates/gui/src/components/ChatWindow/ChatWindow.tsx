@@ -62,7 +62,11 @@ export function ChatWindow({
   const isEmpty = chat.session.messages.length === 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      className="flex h-full min-h-0 flex-col"
+      data-testid="local-chat-window"
+      data-project-path={chat.session.projectPath ?? ""}
+    >
       <ChatHeader
         label={chat.session.title?.trim() || chat.session.label}
         lifecycle={chat.lifecycle}

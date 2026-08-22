@@ -61,6 +61,8 @@ describe("local chat session project grouping", () => {
     ]);
     expect(groups[0]).toMatchObject({
       id: "project:alpha",
+      projectId: "project-alpha",
+      projectPath: "/work/alpha",
       isCurrentProject: true,
       isFallback: false,
     });
@@ -236,6 +238,8 @@ describe("local chat session history search", () => {
       {
         id: "project:alpha",
         label: "alpha",
+        projectId: "project-alpha",
+        projectPath: "/work/alpha",
         isCurrentProject: true,
         isFallback: false,
         sessions: [
@@ -274,6 +278,8 @@ describe("local chat session display projection", () => {
         {
           id: "project:alpha",
           label: "alpha",
+          projectId: "project-alpha",
+          projectPath: "/work/alpha",
           isCurrentProject: true,
           isFallback: false,
           sessions,
@@ -305,6 +311,8 @@ describe("local chat session display projection", () => {
       {
         id: "project:alpha",
         label: "alpha",
+        projectId: "project-alpha",
+        projectPath: "/work/alpha",
         isCurrentProject: true,
         isFallback: false,
         sessions: alphaSessions,
@@ -312,6 +320,8 @@ describe("local chat session display projection", () => {
       {
         id: "project:beta",
         label: "beta",
+        projectId: "project-beta",
+        projectPath: "/work/beta",
         isCurrentProject: false,
         isFallback: false,
         sessions: betaSessions,

@@ -32,6 +32,7 @@ interface LocalChatMiniPanelProps {
     parentSessionId: string,
     agent: SpawnOutlineItem
   ) => void | Promise<void>;
+  onStartProjectChat?: (group: LocalChatSessionGroup) => void | Promise<void>;
   onDelete: (sessionId: string) => void | Promise<void>;
 }
 
@@ -54,6 +55,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   spawnOutlineBySessionId,
   onSelect,
   onSelectAgent,
+  onStartProjectChat,
   onDelete,
 }: LocalChatMiniPanelProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -116,6 +118,9 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     activeSessionId
   );
   const hasSearchQuery = normalizeLocalChatSessionQuery(searchQuery) !== "";
+  const [startingProjectId, setStartingProjectId] = useState<string | null>(
+    null
+  );
 
   const focusSearchInput = useCallback(() => {
     searchInputRef.current?.focus();
@@ -146,7 +151,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     (event: ReactKeyboardEvent<HTMLElement>) => {
       if (
         (event.target as HTMLElement).closest(
-          "[data-mini-history-search], [data-mini-delete], [data-mini-history-toggle]"
+          "[data-mini-history-search], [data-mini-delete], [data-mini-history-toggle], [data-mini-project-chat]"
         )
       ) {
         return;
@@ -269,6 +274,12 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                   group.allSessions?.length ?? group.sessions.length;
                 const isExpanded = expandedGroupIds.has(group.id);
                 const groupRowsId = `local-chat-history-group-${encodeURIComponent(group.id)}`;
+                const canStartProjectChat =
+                  !!onStartProjectChat &&
+                  !!group.projectId &&
+                  !!group.projectPath;
+                const isStartingProjectChat =
+                  startingProjectId === group.projectId;
                 return (
                   <section
                     key={group.id}
@@ -276,7 +287,35 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                     aria-label={`${group.label} chats`}
                   >
                     <h3 className="hc-mini-history-group-title">
-                      {group.label}
+                      <span>{group.label}</span>
+                      <button
+                        type="button"
+                        className="hc-mini-history-new"
+                        data-mini-project-chat
+                        data-testid={`new-project-chat-${group.id}`}
+                        aria-label={`Start new chat in ${group.label}`}
+                        aria-busy={isStartingProjectChat || undefined}
+                        disabled={
+                          !canStartProjectChat || startingProjectId !== null
+                        }
+                        title={
+                          canStartProjectChat
+                            ? `Start a new chat in ${group.label}`
+                            : `Cannot start a chat in ${group.label}: project directory unavailable`
+                        }
+                        onClick={() => {
+                          if (!canStartProjectChat || !onStartProjectChat) {
+                            return;
+                          }
+                          setStartingProjectId(group.projectId);
+                          void Promise.resolve()
+                            .then(() => onStartProjectChat(group))
+                            .catch(() => undefined)
+                            .finally(() => setStartingProjectId(null));
+                        }}
+                      >
+                        <span aria-hidden="true">+</span>
+                      </button>
                     </h3>
                     <div id={groupRowsId}>{rows}</div>
                     {allSessionCount > LOCAL_CHAT_SESSION_ROW_LIMIT && (
