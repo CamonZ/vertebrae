@@ -26,7 +26,6 @@ function clampToAvailableWidth(width: number, maxWidth: number): number {
   return Math.min(safeMaxWidth(maxWidth), clampHistoryWidth(width));
 }
 
-/** Focusable separator between the maximized history sidebar and chat panes. */
 export function ChatHistoryResizeHandle({
   historyWidth,
   maxWidth,
@@ -108,7 +107,6 @@ export function ChatHistoryResizeHandle({
       tabIndex={0}
       data-testid="chat-history-resize-handle"
       data-resizing={isDragging || undefined}
-      data-resize-step={HISTORY_RESIZE_STEP}
       style={{ left: `${Math.max(0, effectiveWidth - 4)}px` }}
       onMouseDown={(event) => {
         if (event.button !== 0) return;

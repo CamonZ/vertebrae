@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { MIN_SPLIT_PANE_WIDTH } from "./useChatPaneManagement";
 
-/** Persisted width for the history sidebar inside the maximized chat panel. */
 export const HISTORY_WIDTH_STORAGE_KEY = "chat-window-manager-history-width";
 export const MIN_HISTORY_WIDTH = 272;
 export const MAX_HISTORY_WIDTH = 400;
 export const DEFAULT_HISTORY_WIDTH = 272;
-/** Keyboard and pointer resize increment in pixels. */
 export const HISTORY_RESIZE_STEP = 16;
 
 export function clampHistoryWidth(width: number): number {
@@ -64,7 +62,6 @@ interface UseChatHistoryPanelLayoutResult {
   resizeHistoryWidth: (nextWidth: number) => void;
 }
 
-/** Owns the maximized chat history sidebar width and its client persistence. */
 export function useChatHistoryPanelLayout(): UseChatHistoryPanelLayoutResult {
   const [historyWidth, setHistoryWidth] = useState(readPersistedHistoryWidth);
 

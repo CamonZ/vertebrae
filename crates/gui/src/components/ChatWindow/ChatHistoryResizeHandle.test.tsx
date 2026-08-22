@@ -35,7 +35,6 @@ describe("ChatHistoryResizeHandle", () => {
       "aria-valuetext",
       "300px; arrow keys adjust by 16px"
     );
-    expect(handle).toHaveAttribute("data-resize-step", "16");
     expect(handle).toHaveAttribute("tabindex", "0");
   });
 

@@ -198,19 +198,6 @@ export function ChatWindowManager() {
     renderedPanelWidth,
     visiblePanes.length
   );
-  const resizeHistoryWidthForLayout = useCallback(
-    (nextWidth: number) => {
-      resizeHistoryWidth(
-        clampHistoryWidthForLayout(
-          nextWidth,
-          renderedPanelWidth,
-          visiblePanes.length
-        )
-      );
-    },
-    [renderedPanelWidth, resizeHistoryWidth, visiblePanes.length]
-  );
-
   const open = panelOpen && sessionList.length > 0;
   const setChatLayout = usePanelLayoutStore((s) => s.setChatLayout);
   const clearChatLayout = usePanelLayoutStore((s) => s.clearChatLayout);
@@ -448,7 +435,7 @@ export function ChatWindowManager() {
             <ChatHistoryResizeHandle
               historyWidth={effectiveHistoryWidth}
               maxWidth={historyMaxWidth}
-              onResize={resizeHistoryWidthForLayout}
+              onResize={resizeHistoryWidth}
             />
           )}
           <ChatPaneList
