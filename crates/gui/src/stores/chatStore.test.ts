@@ -1905,6 +1905,38 @@ describe("chatStore", () => {
       });
     });
 
+    it("ignores a regeneration result from before the session was cleared", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "Old conversation",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+      const beforeClear = useChatStore.getState().sessions[id];
+
+      useChatStore.getState().clearMessages(id);
+      useChatStore.getState().setSessionTitleCandidate(
+        id,
+        {
+          title: "Stale Old Title",
+          confidence: 0.95,
+          sufficientSignal: true,
+          userMessageCount: 1,
+        },
+        {
+          replaceGenerated: true,
+          expectedUpdatedAt: beforeClear.updatedAt,
+          expectedMessageCount: beforeClear.messages.length,
+        }
+      );
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: null,
+        titleStatus: "pending",
+        messages: [],
+      });
+    });
+
     it("allows explicit regeneration to replace a generated title", () => {
       const id = useChatStore.getState().openSession("New Chat");
       useChatStore.getState().setSessionTitleCandidate(id, {
@@ -1956,6 +1988,27 @@ describe("chatStore", () => {
       expect(loadPersistedLocalChatSession(id)).toMatchObject({
         title: "Manual title",
         titleStatus: "manual",
+      });
+    });
+
+    it("keeps a failed manual save out of the confirmed title state", async () => {
+      vi.spyOn(commands, "saveLocalChatSessionIndex").mockResolvedValue({
+        status: "error",
+        error: { message: "disk full" },
+      });
+      const id = useChatStore.getState().openSession("New Chat");
+
+      await expect(
+        useChatStore.getState().setSessionManualTitle(id, "Unconfirmed title")
+      ).resolves.toBe(false);
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: null,
+        titleStatus: "pending",
+      });
+      expect(loadPersistedLocalChatSession(id)).toMatchObject({
+        title: null,
+        titleStatus: "pending",
       });
     });
 

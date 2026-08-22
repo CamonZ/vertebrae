@@ -1675,6 +1675,7 @@ describe("doRegenerateSessionTitle", () => {
           "Assistant: I will inspect the shared title path.",
           "User: Also cover reload persistence",
           "Assistant: The title should survive reopening.",
+          "Assistant (partial): partial response",
         ],
         working_dir: "/captured/project",
       });
@@ -1686,7 +1687,10 @@ describe("doRegenerateSessionTitle", () => {
           sufficientSignal: true,
           userMessageCount: 2,
         },
-        { replaceGenerated: true }
+        {
+          replaceGenerated: true,
+          expectedMessageCount: session.messages.length,
+        }
       );
     }
   );
@@ -1740,7 +1744,7 @@ describe("doRegenerateSessionTitle", () => {
     expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
   });
 
-  it("formats user and assistant entries while excluding tool and partial records", () => {
+  it("formats every active transcript record for neutral inference", () => {
     expect(
       titleInferenceTranscript([
         {
@@ -1752,18 +1756,65 @@ describe("doRegenerateSessionTitle", () => {
           kind: "tool_call",
           toolName: "Read",
           toolId: "tool-1",
-          input: "{}",
+          input: '{"path":"src/title.ts"}',
+          timestamp: "2026-01-01T00:00:01Z",
+        },
+        {
+          kind: "tool_result",
+          toolId: "tool-1",
+          result: "file contents",
+          isError: false,
           timestamp: "2026-01-01T00:00:01Z",
         },
         {
           kind: "assistant",
           text: "A response",
           timestamp: "2026-01-01T00:00:02Z",
+          isPartial: true,
         },
       ])
     ).toEqual({
-      entries: ["User: A request", "Assistant: A response"],
+      entries: [
+        "User: A request",
+        'Tool call (Read): {"path":"src/title.ts"}',
+        "Tool result: file contents",
+        "Assistant (partial): A response",
+      ],
       userMessageCount: 1,
+    });
+  });
+
+  it("passes an exact-threshold candidate to the shared title policy", async () => {
+    mockedCommands.inferLocalChatSessionTitle.mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        title: "Exact Threshold Title",
+        confidence: 0.72,
+        sufficient_signal: true,
+      },
+    });
+    const setSessionTitleCandidate = vi.fn();
+
+    await expect(
+      doRegenerateSessionTitle(
+        makeSession({
+          messages: [
+            {
+              kind: "user",
+              text: "Use the exact threshold",
+              timestamp: "2026-01-01T00:00:00Z",
+            },
+          ],
+        }),
+        SESSION_ID,
+        setSessionTitleCandidate
+      )
+    ).resolves.toBeNull();
+
+    expect(setSessionTitleCandidate.mock.calls[0]?.[1]).toMatchObject({
+      title: "Exact Threshold Title",
+      confidence: 0.72,
+      sufficientSignal: true,
     });
   });
 });

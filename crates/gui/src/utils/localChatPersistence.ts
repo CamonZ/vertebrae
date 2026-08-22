@@ -53,6 +53,7 @@ type LocalChatSessionIndexCommands = typeof commands & {
 let sessionIndexCache: Record<string, ChatSession> = {};
 let indexSaveInFlight = false;
 let indexSaveQueued = false;
+let indexSavePromise: Promise<boolean> | null = null;
 let sessionIndexHydrated = false;
 let sessionIndexHydratePromise: Promise<boolean> | null = null;
 
@@ -350,47 +351,56 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
   };
 }
 
-function writeSessions(sessions: Record<string, ChatSession>): void {
+function writeSessions(sessions: Record<string, ChatSession>): Promise<boolean> {
   sessionIndexCache = sessions;
-  scheduleIndexSave();
+  return scheduleIndexSave();
 }
 
-function scheduleIndexSave(): void {
+function scheduleIndexSave(): Promise<boolean> {
   indexSaveQueued = true;
-  void flushIndexSaveQueue();
+  if (!indexSavePromise) {
+    indexSavePromise = flushIndexSaveQueue().finally(() => {
+      indexSavePromise = null;
+    });
+  }
+  return indexSavePromise;
 }
 
-async function flushIndexSaveQueue(): Promise<void> {
-  if (indexSaveInFlight) return;
+async function flushIndexSaveQueue(): Promise<boolean> {
+  if (indexSaveInFlight) return false;
   const indexCommands = commands as LocalChatSessionIndexCommands;
   const save = indexCommands.saveLocalChatSessionIndex;
-  if (!save) return;
+  if (!save) return true;
 
   indexSaveInFlight = true;
   let blockedByHydration = false;
+  let succeeded = true;
   try {
     const hydrated = await hydrateSessionIndexCache();
     if (!hydrated) {
       indexSaveQueued = true;
       blockedByHydration = true;
-      return;
+      return false;
     }
     while (indexSaveQueued) {
       indexSaveQueued = false;
       const sessions = Object.values(sessionIndexCache).map(toIndexEntry);
       const result = await save({ sessions });
       if (result.status === "error") {
+        succeeded = false;
         console.warn("Failed to save local chat session index", result.error);
       }
     }
   } catch (error) {
+    succeeded = false;
     console.warn("Failed to save local chat session index", error);
   } finally {
     indexSaveInFlight = false;
     if (indexSaveQueued && !blockedByHydration) {
-      void flushIndexSaveQueue();
+      void scheduleIndexSave();
     }
   }
+  return succeeded;
 }
 
 async function loadSessionIndexFromCommand(): Promise<Record<
@@ -539,7 +549,7 @@ export function findPersistedLocalChatSession(
   );
 }
 
-export function persistLocalChatSession(session: ChatSession): void {
+export function persistLocalChatSession(session: ChatSession): Promise<boolean> {
   const sessions = readSessions();
   const serialized = serializeSession(session, sessions[session.id]);
   recordLocalChatTrace({
@@ -552,12 +562,12 @@ export function persistLocalChatSession(session: ChatSession): void {
   });
   if (isDisposableClosedLocalChatSession(session)) {
     delete sessions[session.id];
-    writeSessions(sessions);
-    return;
+    return writeSessions(sessions);
   }
   sessions[session.id] = serialized;
-  writeSessions(sessions);
+  const persistence = writeSessions(sessions);
   clearLocalChatSessionCleared(session.id);
+  return persistence;
 }
 
 export function removePersistedLocalChatSession(sessionId: string): void {

@@ -82,26 +82,56 @@ function earlyTitleUserMessages(
  * shared command aware of the conversation shape without exposing Claude or
  * Codex wire formats to the UI.
  */
+function formatTitleInferenceEntry(message: ChatMessage): string {
+  switch (message.kind) {
+    case "user":
+      return `User: ${message.text}`;
+    case "assistant":
+      return `Assistant${message.isPartial ? " (partial)" : ""}: ${message.text}`;
+    case "tool_call":
+      return `Tool call (${message.toolName}): ${message.input}`;
+    case "tool_result":
+      return `Tool result${message.isError ? " (error)" : ""}: ${message.result}`;
+    case "file_edit":
+      return `File edit (${message.status}): ${JSON.stringify(message.changes)}`;
+    case "permission_request":
+      return `Permission request (${message.toolName}): ${message.message}${
+        message.input ? ` Input: ${message.input}` : ""
+      }`;
+    case "user_question":
+      return `User question: ${JSON.stringify(message.questions)}${
+        message.inputError ? ` Error: ${message.inputError}` : ""
+      }`;
+    case "session_start":
+      return `Session started (${message.model})`;
+    case "warning":
+      return `Warning: ${message.message}`;
+    case "task_notification":
+      return `Task notification: ${message.message}`;
+    case "session_end":
+      return `Session ended after ${message.numTurns} turns (${message.durationMs}ms, ${message.costUsd} USD)`;
+    case "error":
+      return `Error: ${message.message}`;
+  }
+}
+
+function hasTitleInferenceContent(entry: string): boolean {
+  const separator = entry.indexOf(": ");
+  return entry.trim().length > separator + 2;
+}
+
 export function titleInferenceTranscript(messages: ChatMessage[]): {
   entries: string[];
   userMessageCount: number;
 } {
   let userMessageCount = 0;
-  const entries = messages
-    .flatMap((message) => {
-      if (message.kind === "user") {
-        userMessageCount += 1;
-        return [`User: ${message.text.trim()}`];
-      }
-      if (message.kind === "assistant" && !message.isPartial) {
-        return [`Assistant: ${message.text.trim()}`];
-      }
-      return [];
-    })
-    .filter((entry) => {
-      const separator = entry.indexOf(": ");
-      return separator >= 0 && entry.slice(separator + 2).trim().length > 0;
-    });
+  const entries = messages.flatMap((message) => {
+    if (message.kind === "user") {
+      userMessageCount += 1;
+    }
+    const entry = formatTitleInferenceEntry(message);
+    return hasTitleInferenceContent(entry) ? [entry] : [];
+  });
   return { entries, userMessageCount };
 }
 
@@ -172,6 +202,9 @@ export async function doRegenerateSessionTitle(
   ) => void
 ): Promise<string | null> {
   if (session.titleStatus === "manual") return null;
+  if (session.providerMessagesHydrating) {
+    return "Chat history is still loading. Try again in a moment.";
+  }
 
   const transcript = titleInferenceTranscript(session.messages);
   if (transcript.entries.length === 0) {
@@ -188,6 +221,13 @@ export async function doRegenerateSessionTitle(
       return commandErrorMessage(result.error);
     }
 
+    const candidateOptions: TitleCandidateOptions = {
+      replaceGenerated: true,
+      expectedMessageCount: session.messages.length,
+    };
+    if (session.updatedAt) {
+      candidateOptions.expectedUpdatedAt = session.updatedAt;
+    }
     setSessionTitleCandidate(
       sessionId,
       {
@@ -196,7 +236,7 @@ export async function doRegenerateSessionTitle(
         sufficientSignal: result.data.sufficient_signal,
         userMessageCount: transcript.userMessageCount,
       },
-      { replaceGenerated: true }
+      candidateOptions
     );
     return null;
   } catch (error) {
@@ -891,7 +931,14 @@ export function useLocalChat(sessionId: string | null) {
   );
 
   const regenerateTitle = useCallback(async () => {
-    if (!session || !sessionId || isTitleRegenerating) return;
+    if (
+      !session ||
+      !sessionId ||
+      isTitleRegenerating ||
+      session.providerMessagesHydrating
+    ) {
+      return;
+    }
     setIsTitleRegenerating(true);
     setTitleError(null);
     const error = await doRegenerateSessionTitle(

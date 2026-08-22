@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use specta::Type;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -94,10 +94,9 @@ Conversation transcript:\n{messages}"
     )
 }
 
-fn claude_title_args(schema: &str, prompt: &str) -> Vec<String> {
+fn claude_title_args(schema: &str) -> Vec<String> {
     vec![
-        "-p".to_string(),
-        prompt.to_string(),
+        "--print".to_string(),
         "--model".to_string(),
         CLAUDE_TITLE_MODEL.to_string(),
         "--output-format".to_string(),
@@ -118,15 +117,25 @@ async fn infer_with_claude(
     let mut command = Command::new(binary);
     command.env("PATH", build_augmented_path());
     command
-        .args(claude_title_args(&schema, &prompt))
-        .stdin(Stdio::null())
+        .args(claude_title_args(&schema))
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(working_dir) = working_dir.filter(|path| !path.trim().is_empty()) {
         command.current_dir(working_dir);
     }
 
-    let output = tokio::time::timeout(TITLE_TIMEOUT, command.output())
+    let mut child = command
+        .spawn()
+        .map_err(|err| format!("Failed to run Claude title inference: {err}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(prompt.as_bytes())
+            .await
+            .map_err(|err| format!("Failed to send Claude title prompt: {err}"))?;
+    }
+
+    let output = tokio::time::timeout(TITLE_TIMEOUT, child.wait_with_output())
         .await
         .map_err(|_| "Claude title inference timed out.".to_string())?
         .map_err(|err| format!("Failed to run Claude title inference: {err}"))?;
@@ -151,18 +160,7 @@ async fn infer_with_codex(
 
     let mut command = Command::new(binary);
     command
-        .arg("exec")
-        .arg("--model")
-        .arg(CODEX_TITLE_MODEL)
-        .arg("--output-schema")
-        .arg(&schema_path)
-        .arg("--output-last-message")
-        .arg(&output_path)
-        .arg("--ephemeral")
-        .arg("--sandbox")
-        .arg("read-only")
-        .arg("--skip-git-repo-check")
-        .arg("-")
+        .args(codex_title_args(&schema_path, &output_path))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -199,6 +197,23 @@ async fn infer_with_codex(
         &output.stdout,
         &output.stderr,
     )
+}
+
+fn codex_title_args(schema_path: &Path, output_path: &Path) -> Vec<String> {
+    vec![
+        "exec".to_string(),
+        "--model".to_string(),
+        CODEX_TITLE_MODEL.to_string(),
+        "--output-schema".to_string(),
+        schema_path.to_string_lossy().into_owned(),
+        "--output-last-message".to_string(),
+        output_path.to_string_lossy().into_owned(),
+        "--ephemeral".to_string(),
+        "--sandbox".to_string(),
+        "read-only".to_string(),
+        "--skip-git-repo-check".to_string(),
+        "-".to_string(),
+    ]
 }
 
 fn temp_json_path(prefix: &str) -> PathBuf {
@@ -399,13 +414,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builds_claude_title_command_with_prompt_flag_and_no_tool_flags() {
+    fn builds_claude_title_command_with_stdin_prompt_and_no_tool_flags() {
         let schema = title_schema().to_string();
-        let prompt = "Create a concise title.";
-        let args = claude_title_args(&schema, prompt);
+        let args = claude_title_args(&schema);
 
-        assert_eq!(args[0], "-p");
-        assert_eq!(args[1], prompt);
+        assert_eq!(args[0], "--print");
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&CLAUDE_TITLE_MODEL.to_string()));
         assert!(args.contains(&"--output-format".to_string()));
@@ -416,6 +429,32 @@ mod tests {
         assert!(!args.contains(&"--allowedTools".to_string()));
         assert!(!args.contains(&"--allowed-tools".to_string()));
         assert!(!args.contains(&"--tools".to_string()));
+    }
+
+    #[test]
+    fn builds_codex_title_command_with_stdin_prompt_and_output_file() {
+        let schema_path = PathBuf::from("/tmp/title-schema.json");
+        let output_path = PathBuf::from("/tmp/title-output.json");
+        let args = codex_title_args(&schema_path, &output_path);
+
+        assert_eq!(args[0], "exec");
+        assert_eq!(args.last(), Some(&"-".to_string()));
+        assert_eq!(
+            args[args
+                .iter()
+                .position(|arg| arg == "--output-schema")
+                .unwrap()
+                + 1],
+            schema_path.to_string_lossy()
+        );
+        assert_eq!(
+            args[args
+                .iter()
+                .position(|arg| arg == "--output-last-message")
+                .unwrap()
+                + 1],
+            output_path.to_string_lossy()
+        );
     }
 
     #[test]

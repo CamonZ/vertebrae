@@ -435,8 +435,11 @@ export function useChatSession(sessionId: string) {
   ]);
 
   const handleTitleSave = useCallback(
-    (title: string) => {
-      setSessionManualTitle(sessionId, title);
+    async (title: string) => {
+      const saved = await setSessionManualTitle(sessionId, title);
+      if (!saved) {
+        throw new Error("Failed to save chat title.");
+      }
     },
     [sessionId, setSessionManualTitle]
   );
