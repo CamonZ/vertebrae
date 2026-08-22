@@ -33,14 +33,18 @@ function makeSession(
 function makeGroup(
   id: string,
   label: string,
-  sessions: LocalChatSessionSummary[]
+  sessions: LocalChatSessionSummary[],
+  overrides: Partial<LocalChatSessionGroup> = {}
 ): LocalChatSessionGroup {
   return {
     id,
     label,
+    projectId: id === "fallback" ? null : `project-${id}`,
+    projectPath: id === "fallback" ? null : `/test/${id}`,
     isCurrentProject: id === "current",
     isFallback: false,
     sessions,
+    ...overrides,
   };
 }
 
@@ -53,6 +57,7 @@ interface ControlledPanelProps {
   onQueryChange?: (query: string) => void;
   onSelect?: (sessionId: string) => void;
   onSelectAgent?: (parentSessionId: string, agent: SpawnOutlineItem) => void;
+  onStartProjectChat?: (group: LocalChatSessionGroup) => void | Promise<void>;
   onDelete?: (sessionId: string) => void;
 }
 
@@ -65,6 +70,7 @@ function ControlledPanel({
   onQueryChange,
   onSelect = vi.fn(),
   onSelectAgent = vi.fn(),
+  onStartProjectChat,
   onDelete = vi.fn(),
 }: ControlledPanelProps) {
   const [query, setQuery] = useState(initialQuery);
@@ -87,6 +93,7 @@ function ControlledPanel({
       spawnOutlineBySessionId={spawnOutlineBySessionId}
       onSelect={onSelect}
       onSelectAgent={onSelectAgent}
+      onStartProjectChat={onStartProjectChat}
       onDelete={onDelete}
     />
   );
@@ -166,6 +173,59 @@ function ExpandableDeletingPanel() {
 }
 
 describe("LocalChatMiniPanel search", () => {
+  it("renders one project-scoped plus action per group and dispatches group metadata", async () => {
+    const user = userEvent.setup();
+    const onStartProjectChat = vi.fn();
+    const alpha = makeGroup("alpha", "Alpha", [
+      makeSession("alpha-session", { projectPath: "/test/alpha" }),
+    ]);
+    const beta = makeGroup("beta", "Beta", [
+      makeSession("beta-session", { projectPath: "/test/beta" }),
+    ]);
+    const fallback = makeGroup("fallback", "Unknown project", [
+      makeSession("fallback-session", { projectPath: null }),
+    ]);
+
+    render(
+      <ControlledPanel
+        sessionGroups={[alpha, beta, fallback]}
+        onStartProjectChat={onStartProjectChat}
+      />
+    );
+
+    const panel = within(screen.getByTestId("local-chat-mini-panel"));
+    const alphaButton = panel.getByRole("button", {
+      name: "Start new chat in Alpha",
+    });
+    const betaButton = panel.getByRole("button", {
+      name: "Start new chat in Beta",
+    });
+    const fallbackButton = panel.getByRole("button", {
+      name: "Start new chat in Unknown project",
+    });
+
+    expect(panel.getAllByTestId(/^new-project-chat-/)).toHaveLength(3);
+    expect(alphaButton).toHaveAttribute("title", "Start a new chat in Alpha");
+    expect(fallbackButton).toBeDisabled();
+
+    await user.click(alphaButton);
+    expect(onStartProjectChat).toHaveBeenCalledTimes(1);
+    expect(onStartProjectChat.mock.calls[0][0]).toMatchObject({
+      id: alpha.id,
+      projectId: alpha.projectId,
+      projectPath: alpha.projectPath,
+    });
+
+    betaButton.focus();
+    await user.keyboard("{Enter}");
+    expect(onStartProjectChat).toHaveBeenCalledTimes(2);
+    expect(onStartProjectChat.mock.calls[1][0]).toMatchObject({
+      id: beta.id,
+      projectId: beta.projectId,
+      projectPath: beta.projectPath,
+    });
+  });
+
   it("keeps the history chrome outside the bounded scroll region", () => {
     const sessions = Array.from({ length: 24 }, (_, index) =>
       makeSession(`overflow-${index + 1}`, {

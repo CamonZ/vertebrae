@@ -8,6 +8,10 @@ export const LOCAL_CHAT_SESSION_ROW_LIMIT = 7;
 export interface LocalChatSessionGroup {
   id: string;
   label: string;
+  /** Stable saved-project identity represented by this group, when known. */
+  projectId: string | null;
+  /** Project directory captured from the saved-project record, when known. */
+  projectPath: string | null;
   isCurrentProject: boolean;
   isFallback: boolean;
   sessions: LocalChatSessionSummary[];
@@ -80,6 +84,8 @@ export function projectLocalChatSessionGroups(
 interface ResolvedProjectGroup {
   id: string;
   label: string;
+  projectId: string | null;
+  projectPath: string | null;
   isCurrentProject: boolean;
   isFallback: boolean;
 }
@@ -146,6 +152,8 @@ function resolveLocalChatSessionProject(
     return {
       id: "fallback",
       label: FALLBACK_CHAT_PROJECT_LABEL,
+      projectId: null,
+      projectPath: null,
       isCurrentProject: false,
       isFallback: true,
     };
@@ -155,6 +163,8 @@ function resolveLocalChatSessionProject(
   return {
     id: `project:${slug}`,
     label: displayProjectName(project),
+    projectId: project.project_id,
+    projectPath: normalizedPath,
     isCurrentProject: normalizedPath === context.currentProjectPath,
     isFallback: false,
   };
