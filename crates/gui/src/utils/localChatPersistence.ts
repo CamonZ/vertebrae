@@ -38,16 +38,21 @@ type LocalChatSessionIndexEntry = LocalChatSessionSummary & {
 };
 
 type LocalChatSessionIndexCommands = typeof commands & {
-  loadLocalChatSessionIndex?: () => Promise<{
-    status: "ok";
-    data: unknown[];
-  } | {
-    status: "error";
-    error: unknown;
-  }>;
+  loadLocalChatSessionIndex?: () => Promise<
+    | {
+        status: "ok";
+        data: unknown[];
+      }
+    | {
+        status: "error";
+        error: unknown;
+      }
+  >;
   saveLocalChatSessionIndex?: (input: {
     sessions: LocalChatSessionIndexEntry[];
-  }) => Promise<{ status: "ok"; data: null } | { status: "error"; error: unknown }>;
+  }) => Promise<
+    { status: "ok"; data: null } | { status: "error"; error: unknown }
+  >;
 };
 
 let sessionIndexCache: Record<string, ChatSession> = {};
@@ -137,7 +142,6 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
       : rawMessages.some((message) => message.kind === "user") ||
         messageCount > 0 ||
         !!providerResumeId?.trim();
-  const resumeNoticeDismissed = candidate.resumeNoticeDismissed === true;
   const title = typeof candidate.title === "string" ? candidate.title : null;
   const titleStatus =
     typeof candidate.titleStatus === "string" &&
@@ -168,7 +172,6 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     titleUserMessageCount,
     messages,
     hasUserMessage,
-    resumeNoticeDismissed,
     status: candidate.status,
     harness: normalizeHarness(candidate.harness),
     backendSessionId: null,
@@ -202,7 +205,7 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
         ? {
             used: candidate.tokenUsage.used,
             max: candidate.tokenUsage.max,
-        }
+          }
         : undefined,
     threadTotalTokens:
       typeof candidate.threadTotalTokens === "number" &&
@@ -262,20 +265,6 @@ export function hasDurableLocalChatContent(
   );
 }
 
-/**
- * Index rows intentionally retain only metadata, so use their durable
- * message count and provider resume handle when choosing a session to resume.
- * An empty placeholder must never become the "last session" prompt target.
- */
-export function hasDurableLocalChatSummary(
-  session: Pick<
-    LocalChatSessionSummary,
-    "hasUserMessage" | "providerResumeId" | "messageCount"
-  >
-): boolean {
-  return hasLocalChatUserMessageSummary(session);
-}
-
 export function isAutomaticLocalChatLabel(label: string): boolean {
   const normalized = label.trim();
   return normalized === "New Chat" || normalized === "Project Chat";
@@ -287,7 +276,7 @@ export function isDefaultEmptyLocalChatSession(
   session: Pick<
     ChatSession,
     "label" | "messages" | "providerResumeId" | "messageCount"
->
+  >
 ): boolean {
   return (
     isAutomaticLocalChatLabel(session.label) &&
@@ -345,22 +334,6 @@ export function compareLocalChatSessionRecency(
   return b.id.localeCompare(a.id);
 }
 
-/** Select the newest durable session in the requested project bucket. */
-export function findLatestResumableLocalChatSession(
-  sessions: LocalChatSessionSummary[],
-  projectPath?: string | null
-): LocalChatSessionSummary | null {
-  return (
-    sessions
-      .filter(
-        (session) =>
-          projectPathMatches(session.projectPath, projectPath) &&
-          hasDurableLocalChatSummary(session)
-      )
-      .sort(compareLocalChatSessionRecency)[0] ?? null
-  );
-}
-
 function serializeSession(
   session: ChatSession,
   previous?: ChatSession | null
@@ -372,25 +345,20 @@ function serializeSession(
     previous?.messageCount ?? 0
   );
   const createdAt =
-    session.createdAt ??
-    previous?.createdAt ??
-    new Date().toISOString();
-  const updatedAt =
-    session.updatedAt ?? previous?.updatedAt ?? createdAt;
+    session.createdAt ?? previous?.createdAt ?? new Date().toISOString();
+  const updatedAt = session.updatedAt ?? previous?.updatedAt ?? createdAt;
 
   return {
     id: session.id,
     label: session.label,
     title: session.title ?? null,
     titleStatus:
-      session.titleStatus ??
-      (session.title?.trim() ? "generated" : "pending"),
+      session.titleStatus ?? (session.title?.trim() ? "generated" : "pending"),
     titleConfidence:
       session.titleConfidence ?? (session.title?.trim() ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
     messages,
     hasUserMessage: hasLocalChatUserMessage(session),
-    resumeNoticeDismissed: session.resumeNoticeDismissed === true,
     status: session.status,
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
     backendSessionId: null,
@@ -443,7 +411,9 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
   };
 }
 
-function writeSessions(sessions: Record<string, ChatSession>): Promise<boolean> {
+function writeSessions(
+  sessions: Record<string, ChatSession>
+): Promise<boolean> {
   sessionIndexCache = sessions;
   return scheduleIndexSave();
 }
@@ -705,7 +675,9 @@ export function findPersistedDefaultEmptyLocalChatSession(
   );
 }
 
-export function persistLocalChatSession(session: ChatSession): Promise<boolean> {
+export function persistLocalChatSession(
+  session: ChatSession
+): Promise<boolean> {
   const sessions = readSessions();
   const serialized = serializeSession(session, sessions[session.id]);
   recordLocalChatTrace({

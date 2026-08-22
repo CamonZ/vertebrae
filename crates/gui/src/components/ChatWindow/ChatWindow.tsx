@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import type { ReactNode } from "react";
 import { useChatSession } from "../../hooks/useChatSession";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
@@ -26,8 +25,6 @@ interface ChatWindowProps {
   onClosePane?: () => void;
   /** Whether this pane should receive composer autofocus. */
   autoFocusComposer?: boolean;
-  /** Optional notice rendered in the empty message state. */
-  emptyStateNotice?: ReactNode;
   /** Label resolved from this session's captured project association. */
   projectLabel?: string;
 }
@@ -48,7 +45,6 @@ export function ChatWindow({
   onUnsplitPanes,
   onClosePane,
   autoFocusComposer = true,
-  emptyStateNotice,
   projectLabel,
 }: ChatWindowProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -104,7 +100,6 @@ export function ChatWindow({
         assistantLabel={chat.assistantLabel}
         isEmpty={isEmpty}
         isActive={chat.isActive}
-        notice={emptyStateNotice}
         isWaiting={chat.isWaiting}
         activityLabel={chat.activityLabel}
         compactionSummary={chat.compactionSummary}

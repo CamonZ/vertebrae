@@ -5,7 +5,6 @@ import {
   DEFAULT_LOCAL_CHAT_HARNESS,
   findPersistedDefaultEmptyLocalChatSession,
   findPersistedLocalChatSession,
-  findLatestResumableLocalChatSession,
   hasLocalChatUserMessageSummary,
   isDefaultEmptyLocalChatSession,
   isDisposableClosedLocalChatSession,
@@ -403,8 +402,6 @@ export interface ChatSession {
   messages: ChatMessage[];
   /** Whether the user has sent at least one message in this session. */
   hasUserMessage?: boolean;
-  /** Whether the user chose to start a new chat instead of resuming history. */
-  resumeNoticeDismissed?: boolean;
   /** Session status */
   status: "open" | "closed";
   /** Local chat harness that owns the runtime session. */
@@ -465,13 +462,6 @@ export interface ChatPaneLayout {
   activePaneId: string | null;
 }
 
-export interface PendingLocalChatResume {
-  /** Durable session offered by the launcher when the panel is opened. */
-  candidate: LocalChatSessionSummary;
-  /** Project context used if the user chooses a fresh chat instead. */
-  projectPath: string | null;
-}
-
 interface ChatStoreState {
   /** All open chat sessions, keyed by session ID */
   sessions: Record<string, ChatSession>;
@@ -483,8 +473,6 @@ interface ChatStoreState {
   panelOpen: boolean;
   /** Persisted metadata index used by history surfaces. */
   localSessionSummaries: Record<string, LocalChatSessionSummary>;
-  /** Resume choice waiting for the chat panel to render it. */
-  pendingLocalChatResume: PendingLocalChatResume | null;
 }
 
 interface ChatStoreActions {
@@ -511,10 +499,6 @@ interface ChatStoreActions {
   unsplitPanes: (paneId?: string) => void;
   /** List persisted local chat sessions, newest first */
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
-  /** Find the newest persisted session with durable content in a project. */
-  findLatestResumableSession: (
-    projectPath?: string | null
-  ) => Promise<LocalChatSessionSummary | null>;
   /** Hydrate local chat metadata from the app-managed index file. */
   hydrateLocalSessionIndex: () => Promise<void>;
   /** Hydrate and focus a persisted local chat session, optionally in a pane. */
@@ -599,10 +583,7 @@ interface ChatStoreActions {
   /** Set the inferred display title for a local chat session */
   setSessionTitle: (sessionId: string, title: string | null) => void;
   /** Set a user-authored display title and protect it from inference. */
-  setSessionManualTitle: (
-    sessionId: string,
-    title: string
-  ) => Promise<boolean>;
+  setSessionManualTitle: (sessionId: string, title: string) => Promise<boolean>;
   /** Apply a generated title candidate when it is confident enough */
   setSessionTitleCandidate: (
     sessionId: string,
@@ -641,19 +622,10 @@ interface ChatStoreActions {
   markSessionClosed: (sessionId: string) => void;
   /** Clear messages in a session */
   clearMessages: (sessionId: string) => void;
-  /** Hide the resume notice for an empty session after choosing new chat. */
-  dismissResumeNotice: (sessionId: string) => void;
   /** Toggle the chat panel open/closed */
   togglePanel: () => void;
   /** Set panel open state explicitly */
   setPanelOpen: (open: boolean) => void;
-  /** Show a durable-session resume choice inside the chat panel. */
-  setPendingLocalChatResume: (
-    candidate: LocalChatSessionSummary,
-    projectPath?: string | null
-  ) => void;
-  /** Clear the pending resume choice. */
-  clearPendingLocalChatResume: () => void;
   /** Reset local chat sessions */
   reset: () => void;
 }
@@ -673,7 +645,6 @@ const emptyState: ChatStoreState = {
   paneLayout: emptyPaneLayout,
   panelOpen: false,
   localSessionSummaries: {},
-  pendingLocalChatResume: null,
 };
 
 const GENERATED_TITLE_CONFIDENCE_THRESHOLD = 0.72;
@@ -711,7 +682,6 @@ function createLocalSession(
     titleUserMessageCount: 0,
     messages: [],
     hasUserMessage: false,
-    resumeNoticeDismissed: false,
     status: "open",
     harness:
       useLocalChatDefaultsStore.getState().defaultHarness ??
@@ -1414,10 +1384,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     const messages = await loadReplayedProviderMessages(session);
     set((state) => {
       const current = state.sessions[sessionId];
-      if (
-        !current ||
-        current.providerResumeId !== expectedProviderResumeId
-      ) {
+      if (!current || current.providerResumeId !== expectedProviderResumeId) {
         return state;
       }
       const merged = mergeHydratedMessages(messages, current.messages);
@@ -1718,14 +1685,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
         .filter(hasLocalChatUserMessageSummary)
         .sort(compareLocalChatSessionRecency),
 
-    findLatestResumableSession: async (projectPath) => {
-      await get().hydrateLocalSessionIndex();
-      return findLatestResumableLocalChatSession(
-        get().listLocalSessions(projectPath),
-        projectPath
-      );
-    },
-
     hydrateLocalSessionIndex: async () => {
       const { sessions } = await hydrateLocalChatSessionIndex();
       set((state) => ({
@@ -1845,7 +1804,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           return runtime.id;
         }
 
-        const persisted = findPersistedDefaultEmptyLocalChatSession(projectPath);
+        const persisted =
+          findPersistedDefaultEmptyLocalChatSession(projectPath);
         if (persisted) {
           const hydrated = hydrateLocalSession({
             ...persisted,
@@ -2423,10 +2383,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (saved) return true;
 
       const current = get().sessions[sessionId];
-      if (
-        current?.title === normalized &&
-        current.titleStatus === "manual"
-      ) {
+      if (current?.title === normalized && current.titleStatus === "manual") {
         updateSession(
           sessionId,
           (session) => ({
@@ -2476,8 +2433,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }
         if (
           session.titleStatus === "manual" ||
-          (session.titleStatus === "generated" &&
-            !options?.replaceGenerated) ||
+          (session.titleStatus === "generated" && !options?.replaceGenerated) ||
           (session.title?.trim() && session.titleStatus !== "generated")
         ) {
           return session;
@@ -2639,7 +2595,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
               ...session,
               messages: [],
               hasUserMessage: false,
-              resumeNoticeDismissed: false,
               title: null,
               titleStatus: "pending",
               titleConfidence: null,
@@ -2671,37 +2626,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     setPanelOpen: (open) => {
       set({ panelOpen: open });
-    },
-
-    setPendingLocalChatResume: (candidate, projectPath = null) => {
-      set({ pendingLocalChatResume: { candidate, projectPath } });
-    },
-
-    dismissResumeNotice: (sessionId) => {
-      let updatedSession: ChatSession | null = null;
-      set((state) => {
-        const session = state.sessions[sessionId];
-        if (!session || session.resumeNoticeDismissed) return state;
-        updatedSession = {
-          ...session,
-          resumeNoticeDismissed: true,
-        };
-        return {
-          sessions: {
-            ...state.sessions,
-            [sessionId]: updatedSession,
-          },
-          localSessionSummaries: upsertLocalSessionSummary(
-            state.localSessionSummaries,
-            updatedSession
-          ),
-        };
-      });
-      if (updatedSession) persistLocalChatSession(updatedSession);
-    },
-
-    clearPendingLocalChatResume: () => {
-      set({ pendingLocalChatResume: null });
     },
 
     reset: () => set(emptyState),

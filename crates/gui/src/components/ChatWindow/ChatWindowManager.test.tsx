@@ -204,7 +204,6 @@ describe("ChatWindowManager", () => {
       paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
       localSessionSummaries: {},
-      pendingLocalChatResume: null,
     });
     usePanelFocusStore.getState().reset();
     usePanelLayoutStore.getState().reset();
@@ -235,8 +234,8 @@ describe("ChatWindowManager", () => {
     expect(screen.queryByTestId("chat-pane")).not.toBeInTheDocument();
   });
 
-  it("refreshes the resume notice for an existing empty pane", async () => {
-    const persisted = createPersistedHistorySession(
+  it("does not show a resume notice for an empty pane with history available", () => {
+    createPersistedHistorySession(
       "resume-session",
       "Task Chat",
       "/test/project",
@@ -256,147 +255,15 @@ describe("ChatWindowManager", () => {
         activePaneId: "pane-empty",
       },
       panelOpen: true,
-      pendingLocalChatResume: null,
     });
 
     render(<ChatWindowManager />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("local-chat-resume-prompt")).toHaveTextContent(
-        "continue with the last session Task Chat"
-      );
-      expect(useChatStore.getState().pendingLocalChatResume?.candidate.id).toBe(
-        persisted.id
-      );
-    });
-    expect(
-      screen.getByRole("link", { name: "last session" })
-    ).toBeInTheDocument();
-  });
-
-  it("renders the resume notice inside the panel and continues the selected session", async () => {
-    const user = userEvent.setup();
-    const persisted = createPersistedHistorySession(
-      "resume-session",
-      "Task Chat",
-      "/test/project",
-      "2026-01-01T00:00:00Z"
-    );
-    const candidate = useChatStore
-      .getState()
-      .listLocalSessions("/test/project")
-      .find((session) => session.id === persisted.id);
-    expect(candidate).toBeDefined();
-
-    useChatStore.setState({
-      panelOpen: true,
-      pendingLocalChatResume: {
-        candidate: candidate!,
-        projectPath: "/test/project",
-      },
-    });
-
-    render(<ChatWindowManager />);
-
-    const panel = screen.getByTestId("chat-window-manager");
-    const emptyState = within(panel).getByTestId("chat-empty-state");
-    const prompt = within(panel).getByTestId("local-chat-resume-prompt");
-    expect(emptyState).toContainElement(prompt);
-    expect(prompt).toHaveTextContent(
-      "continue with the last session Task Chat"
-    );
-    expect(panel).toContainElement(prompt);
-
-    await user.click(
-      within(prompt).getByRole("link", {
-        name: "last session",
-      })
-    );
-
-    await waitFor(() => {
-      expect(useChatStore.getState().activeSessionId).toBe(persisted.id);
-      expect(useChatStore.getState().pendingLocalChatResume).toBeNull();
-    });
     expect(screen.queryByTestId("local-chat-resume-prompt")).toBeNull();
-  });
-
-  it("keeps new chat available when continuing fails", async () => {
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: 1200,
-    });
-    const user = userEvent.setup();
-    const persisted = createPersistedHistorySession(
-      "unavailable-session",
-      "Unavailable Task",
-      "/test/project",
-      "2026-01-01T00:00:00Z"
-    );
-    const candidate = useChatStore
-      .getState()
-      .listLocalSessions("/test/project")
-      .find((session) => session.id === persisted.id);
-    expect(candidate).toBeDefined();
-    const selectPersistedSession =
-      useChatStore.getState().selectPersistedSession;
-    useChatStore.setState({
-      panelOpen: true,
-      pendingLocalChatResume: {
-        candidate: candidate!,
-        projectPath: "/test/project",
-      },
-      selectPersistedSession: vi.fn().mockResolvedValue(false),
-    });
-
-    try {
-      render(<ChatWindowManager />);
-
-      await user.click(
-        screen.getByRole("link", {
-          name: "last session",
-        })
-      );
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        "You can still start a new chat"
-      );
-
-      await user.click(screen.getByRole("button", { name: "new chat" }));
-      await waitFor(() => {
-        expect(useChatStore.getState().activeSessionId).not.toBe(persisted.id);
-        expect(
-          useChatStore.getState().pendingLocalChatResume?.candidate.id
-        ).toBe(persisted.id);
-        expect(
-          useChatStore.getState().sessions[
-            useChatStore.getState().activeSessionId!
-          ]?.resumeNoticeDismissed
-        ).toBe(true);
-      });
-      expect(screen.queryByTestId("local-chat-resume-prompt")).toBeNull();
-      expect(
-        screen.getByText("Create, edit, and delete tasks, steps, and workflows")
-      ).toBeInTheDocument();
-
-      const sessionCountBeforeSplit = Object.keys(
-        useChatStore.getState().sessions
-      ).length;
-      fireEvent.keyDown(window, { key: "\\", metaKey: true });
-      const splitButton = await screen.findByLabelText("Split chat pane");
-      expect(splitButton).toBeEnabled();
-      await user.click(splitButton);
-      expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
-      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(
-        sessionCountBeforeSplit + 1
-      );
-      expect(screen.getAllByTestId("local-chat-resume-prompt")).toHaveLength(1);
-      expect(
-        screen.getAllByText(
-          "Create, edit, and delete tasks, steps, and workflows"
-        )
-      ).toHaveLength(1);
-    } finally {
-      useChatStore.setState({ selectPersistedSession });
-    }
+    expect(
+      screen.getByText("Create, edit, and delete tasks, steps, and workflows")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "last session" })).toBeNull();
   });
 
   it("renders the active session as a single header band, with no tabs", () => {
