@@ -501,7 +501,7 @@ interface ChatStoreActions {
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
   /** Hydrate local chat metadata from the app-managed index file. */
   hydrateLocalSessionIndex: () => Promise<void>;
-  /** Hydrate and focus a persisted local chat session, optionally in a pane. */
+  /** Hydrate and focus a persisted local chat session */
   selectPersistedSession: (
     sessionId: string,
     preferredPaneId?: string

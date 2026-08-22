@@ -2,9 +2,7 @@ export type ChatShortcutModifier = "meta" | "shift";
 
 export interface ChatShortcutDefinition {
   readonly modifiers: readonly ChatShortcutModifier[];
-  /** KeyboardEvent.key values accepted by the binding. */
   readonly keys: readonly string[];
-  /** The key shown to users for this shortcut. */
   readonly displayKey: string;
   readonly label: string;
 }
@@ -56,10 +54,6 @@ export interface ChatShortcutPresentation {
   ariaLabel: string;
 }
 
-/**
- * Formats a shortcut for both visual and assistive-technology consumers.
- * Passing no definition represents unavailable shortcut metadata.
- */
 export function presentChatShortcut(
   shortcut: ChatShortcutDefinition | null | undefined,
   platform = currentPlatform()
