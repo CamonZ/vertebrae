@@ -1041,6 +1041,75 @@ describe("doStartSession", () => {
     });
   });
 
+  it.each(["claude", "codex"] as const)(
+    "passes the selected project path to %s startup without consulting the global project",
+    async (harness) => {
+      const deps = {
+        setBackendSessionId: vi.fn(),
+        setBackendSessionIdRef: vi.fn(),
+        setContextSummary: vi.fn(),
+        addMessage: vi.fn(),
+        setSessionLifecycle: vi.fn(),
+      };
+
+      await doStartSession(
+        makeSession({
+          harness,
+          projectPath: "/selected/project",
+        }),
+        SESSION_ID,
+        deps
+      );
+
+      expect(mockedCommands.getCurrentProjectPath).not.toHaveBeenCalled();
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          harness,
+          working_dir: "/selected/project",
+        })
+      );
+    }
+  );
+
+  it.each(["claude", "codex"] as const)(
+    "reports a selected %s directory startup failure without falling back",
+    async (harness) => {
+      mockedCommands.createLocalChatSession.mockResolvedValueOnce({
+        status: "error",
+        error: { StartFailed: "selected directory is unavailable" },
+      } as never);
+      const deps = {
+        setBackendSessionId: vi.fn(),
+        setBackendSessionIdRef: vi.fn(),
+        setContextSummary: vi.fn(),
+        addMessage: vi.fn(),
+        setSessionLifecycle: vi.fn(),
+      };
+
+      await doStartSession(
+        makeSession({
+          harness,
+          projectPath: "/missing/selected/project",
+        }),
+        SESSION_ID,
+        deps
+      );
+
+      expect(mockedCommands.getCurrentProjectPath).not.toHaveBeenCalled();
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          harness,
+          working_dir: "/missing/selected/project",
+        })
+      );
+      expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
+        SESSION_ID,
+        "error",
+        "selected directory is unavailable"
+      );
+    }
+  );
+
   it("fetches the current project path when the captured project path is null", async () => {
     const deps = {
       setBackendSessionId: vi.fn(),

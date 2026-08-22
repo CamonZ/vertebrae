@@ -621,7 +621,7 @@ export async function doStartSession(
     }
 
     let workingDir: string | null = session.projectPath ?? null;
-    if (!workingDir) {
+    if (workingDir === null) {
       const pathResult = await commands.getCurrentProjectPath();
       if (pathResult.status === "ok" && pathResult.data) {
         workingDir = pathResult.data;
