@@ -137,7 +137,9 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 
   const focusHistorySession = useCallback((sessionId: string) => {
     setKeyboardSessionId(sessionId);
-    sessionButtonRefs.current.get(sessionId)?.focus();
+    const button = sessionButtonRefs.current.get(sessionId);
+    button?.focus();
+    button?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, []);
 
   const handleHistoryKeyDown = useCallback(

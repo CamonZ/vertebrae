@@ -363,6 +363,7 @@ describe("LocalChatMiniPanel search", () => {
     });
     deleteButton.focus();
     fireEvent.keyDown(deleteButton, { key: "Enter" });
+    fireEvent.keyDown(deleteButton, { key: " " });
     expect(onSelect).toHaveBeenCalledTimes(1);
 
     await user.click(deleteButton);
@@ -407,6 +408,78 @@ describe("LocalChatMiniPanel search", () => {
 
     fireEvent.keyDown(sessionButton, { key: "Enter" });
     expect(onSelect).toHaveBeenCalledWith(session.id);
+  });
+
+  it("keeps keyboard focus moving through long-list boundaries and selects the focused row", () => {
+    const sessions = [
+      makeSession("top", { title: "Top session", label: "Top session" }),
+      makeSession("middle", {
+        title: "Middle session",
+        label: "Middle session",
+      }),
+      makeSession("bottom", {
+        title: "Bottom session",
+        label: "Bottom session",
+      }),
+    ];
+    const onSelect = vi.fn();
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView"
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    try {
+      render(
+        <ControlledPanel
+          sessionGroups={[makeGroup("current", "Current project", sessions)]}
+          onSelect={onSelect}
+        />
+      );
+
+      const panel = screen.getByTestId("local-chat-mini-panel");
+      const buttons = screen.getAllByRole("button", {
+        name: /^Load local chat/,
+      });
+
+      fireEvent.keyDown(panel, { key: "Home" });
+      expect(buttons[0]).toHaveFocus();
+
+      fireEvent.keyDown(buttons[0], { key: "ArrowDown" });
+      expect(buttons[1]).toHaveFocus();
+
+      fireEvent.keyDown(buttons[1], { key: "End" });
+      expect(buttons[2]).toHaveFocus();
+
+      fireEvent.keyDown(buttons[2], { key: " " });
+      expect(onSelect).toHaveBeenCalledWith("bottom");
+      expect(scrollIntoView).toHaveBeenNthCalledWith(1, {
+        block: "nearest",
+        inline: "nearest",
+      });
+      expect(scrollIntoView).toHaveBeenNthCalledWith(2, {
+        block: "nearest",
+        inline: "nearest",
+      });
+      expect(scrollIntoView).toHaveBeenNthCalledWith(3, {
+        block: "nearest",
+        inline: "nearest",
+      });
+    } finally {
+      if (originalScrollIntoView) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          originalScrollIntoView
+        );
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+      }
+    }
   });
 
   it("keeps the history list and row controls usable at the minimum and wider widths", () => {
