@@ -22,26 +22,42 @@ import { UserQuestionTurn } from "./UserQuestionTurn";
 import { useChatStore } from "../../stores/chatStore";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MarkdownProjectRootProvider } from "../shared/MarkdownContent";
+import {
+  CHAT_HELP_SHORTCUT,
+  presentChatShortcut,
+  type ChatShortcutDefinition,
+} from "./chatShortcuts";
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 const BOTTOM_SCROLL_TOLERANCE_PX = 24;
 
 interface ChatEmptyStateProps {
   notice?: ReactNode;
+  chatHelpShortcut?: ChatShortcutDefinition | null;
 }
 
-export function ChatEmptyState({ notice }: ChatEmptyStateProps) {
+export function ChatEmptyState({
+  notice,
+  chatHelpShortcut = CHAT_HELP_SHORTCUT,
+}: ChatEmptyStateProps) {
+  const shortcut = presentChatShortcut(chatHelpShortcut);
+
   return (
     <div
       className="flex h-full flex-col items-center justify-center text-center"
       data-testid="chat-empty-state"
     >
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent)]/10">
+      <div
+        className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-fg)]/8"
+        data-chat-icon-tone="grayscale"
+        data-testid="chat-empty-state-icon"
+      >
         <svg
-          className="h-6 w-6 text-[var(--color-accent)]"
+          className="h-6 w-6 text-[var(--color-fg-mute)]"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
+          aria-hidden="true"
         >
           <path
             strokeLinecap="round"
@@ -59,6 +75,26 @@ export function ChatEmptyState({ notice }: ChatEmptyStateProps) {
           <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
             Or run a task through a workflow
           </p>
+          {shortcut ? (
+            <p
+              className="mt-3 text-xs text-[var(--color-fg-mute)]"
+              data-testid="chat-help-shortcut-hint"
+              aria-label={`Press ${shortcut.ariaLabel} to show keyboard shortcuts`}
+            >
+              Press{" "}
+              {shortcut.keys.map((key) => (
+                <kbd key={key}>{key}</kbd>
+              ))}{" "}
+              for chat help
+            </p>
+          ) : (
+            <p
+              className="mt-3 text-xs text-[var(--color-fg-mute)]"
+              data-testid="chat-help-shortcut-fallback"
+            >
+              Use the chat panel&apos;s keyboard shortcuts for help
+            </p>
+          )}
         </>
       )}
     </div>

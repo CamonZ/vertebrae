@@ -68,7 +68,22 @@ export function ChatPaneList({
             aria-label={`Chat pane ${index + 1}: ${session.label}`}
             aria-selected={paneIsActive}
             tabIndex={0}
-            onMouseDownCapture={() => focusPane(pane.id)}
+            onMouseDownCapture={(event) => {
+              focusPane(pane.id);
+              const target = event.target as HTMLElement;
+              if (
+                target.closest(
+                  "button, input, select, textarea, a, [contenteditable='true']"
+                )
+              ) {
+                return;
+              }
+              event.currentTarget
+                .querySelector<HTMLTextAreaElement>(
+                  '[data-testid="local-chat-composer"]'
+                )
+                ?.focus();
+            }}
             onKeyDown={(event) => {
               if (event.target !== event.currentTarget) return;
               if (event.key !== "Enter" && event.key !== " ") return;

@@ -112,7 +112,10 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     );
 
     return (
-      <div className="relative rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg)] focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]">
+      <div
+        className="chat-input-shell relative rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg)]"
+        data-testid="chat-input-shell"
+      >
         <textarea
           ref={setRefs}
           value={value}

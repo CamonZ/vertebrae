@@ -1,10 +1,14 @@
+import { CHAT_HELP_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
+
+const chatHelpKeys = presentChatShortcut(CHAT_HELP_SHORTCUT)?.keys ?? [];
+
 export const CHAT_SHORTCUT_SECTIONS = [
   {
     title: "Panel",
     shortcuts: [
       { keys: ["⌥", "⌥"], label: "Toggle chat" },
       { keys: ["⌘", "\\"], label: "Maximize or collapse" },
-      { keys: ["⌘", "?"], label: "Show keyboard shortcuts" },
+      { keys: chatHelpKeys, label: CHAT_HELP_SHORTCUT.label },
       { keys: ["Esc"], label: "Close hints or focused panel" },
     ],
   },

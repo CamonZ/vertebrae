@@ -1,4 +1,8 @@
 import { useEffect, useRef } from "react";
+import {
+  CHAT_HELP_SHORTCUT,
+  matchesChatShortcut,
+} from "../components/ChatWindow/chatShortcuts";
 
 export type ShortcutDispatchState = {
   shortcutsOpen: boolean;
@@ -24,9 +28,7 @@ interface UseChatKeyboardShortcutsOptions {
 }
 
 export function isShortcutHintsKey(event: KeyboardEvent): boolean {
-  return (
-    event.metaKey && event.shiftKey && (event.key === "?" || event.key === "/")
-  );
+  return matchesChatShortcut(event, CHAT_HELP_SHORTCUT);
 }
 
 export function isBackslashShortcutKey(event: KeyboardEvent): boolean {

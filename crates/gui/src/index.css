@@ -2514,6 +2514,22 @@ html.light ::selection {
     color-mix(in oklch, var(--accent) 58%, transparent);
 }
 
+/* The active chat input uses a quiet neutral state. Accent orange is reserved
+   for actions and status signals, so selecting a pane does not look like an
+   error or warning. */
+.chat-input-shell {
+  transition:
+    border-color var(--t-fast, 120ms) var(--ease, ease),
+    background-color var(--t-fast, 120ms) var(--ease, ease),
+    box-shadow var(--t-fast, 120ms) var(--ease, ease);
+}
+.chat-input-shell:focus-within {
+  border-color: var(--color-line-strong);
+  background-color: color-mix(in oklch, var(--color-fg) 4%, var(--color-bg));
+  box-shadow: 0 0 0 1px
+    color-mix(in oklch, var(--color-fg-mute) 28%, transparent);
+}
+
 /* Side-panel "drill" open: the panel slides from its anchored screen edge in
    toward the center, fading as it lands. */
 @keyframes panel-drill-right {
