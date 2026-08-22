@@ -2186,6 +2186,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
         ) {
           return session;
         }
+        if (
+          options?.replaceGenerated &&
+          session.titleStatus === "generated" &&
+          !confident
+        ) {
+          return session;
+        }
         return {
           ...session,
           title: confident ? normalized : null,

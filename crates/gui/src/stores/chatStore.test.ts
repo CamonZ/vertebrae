@@ -1977,6 +1977,33 @@ describe("chatStore", () => {
       });
     });
 
+    it("preserves a generated title when explicit regeneration is low confidence", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "Existing Generated Title",
+        confidence: 0.86,
+        sufficientSignal: true,
+        userMessageCount: 1,
+      });
+
+      useChatStore.getState().setSessionTitleCandidate(
+        id,
+        {
+          title: null,
+          confidence: 0.2,
+          sufficientSignal: false,
+          userMessageCount: 2,
+        },
+        { replaceGenerated: true }
+      );
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: "Existing Generated Title",
+        titleStatus: "generated",
+        titleConfidence: 0.86,
+      });
+    });
+
     it("restores a manual title through persisted session selection", async () => {
       const id = useChatStore.getState().openSession("New Chat");
       useChatStore.getState().setSessionManualTitle(id, "Keep This Title");
