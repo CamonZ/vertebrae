@@ -564,6 +564,8 @@ interface ChatStoreActions {
   ) => void;
   /** Set the inferred display title for a local chat session */
   setSessionTitle: (sessionId: string, title: string | null) => void;
+  /** Set a user-authored display title and protect it from inference. */
+  setSessionManualTitle: (sessionId: string, title: string) => void;
   /** Apply a generated title candidate when it is confident enough */
   setSessionTitleCandidate: (
     sessionId: string,
@@ -2153,6 +2155,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
           titleConfidence: 1,
         };
       });
+    },
+
+    setSessionManualTitle: (sessionId, title) => {
+      const normalized = title.replace(/\s+/g, " ").trim();
+      if (!normalized) return;
+      updateSession(sessionId, (session) => ({
+        ...session,
+        title: normalized,
+        titleStatus: "manual",
+        titleConfidence: null,
+      }));
     },
 
     setSessionTitleCandidate: (sessionId, candidate, options) => {

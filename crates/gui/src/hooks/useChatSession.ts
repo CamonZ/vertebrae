@@ -52,6 +52,9 @@ export function useChatSession(sessionId: string) {
   } = useLocalChat(sessionId);
 
   const clearMessages = useChatStore((s) => s.clearMessages);
+  const setSessionManualTitle = useChatStore(
+    (s) => s.setSessionManualTitle
+  );
   const setSessionSelectedModel = useChatStore(
     (s) => s.setSessionSelectedModel
   );
@@ -431,6 +434,13 @@ export function useChatSession(sessionId: string) {
     sessionId,
   ]);
 
+  const handleTitleSave = useCallback(
+    (title: string) => {
+      setSessionManualTitle(sessionId, title);
+    },
+    [sessionId, setSessionManualTitle]
+  );
+
   const handleModelChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       setSessionSelectedModel(sessionId, event.target.value || null);
@@ -549,6 +559,7 @@ export function useChatSession(sessionId: string) {
     handleStartSession,
     handleClearMessages,
     handleStopGeneration,
+    handleTitleSave,
     handleRegenerateTitle: regenerateTitle,
     isTitleRegenerating,
     titleError,

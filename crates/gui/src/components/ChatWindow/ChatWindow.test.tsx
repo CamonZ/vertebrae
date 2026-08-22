@@ -237,6 +237,54 @@ describe("ChatWindow", () => {
     });
   });
 
+  it("saves a normalized manual title and protects it from regeneration", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      title: "Generated Title",
+      titleStatus: "generated",
+      messages: [
+        {
+          kind: "user",
+          text: "Keep this conversation title",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Rename chat: Generated Title" })
+    );
+    const input = screen.getByRole("textbox", { name: "Chat title" });
+    await user.clear(input);
+    await user.type(input, "  Manual   conversation title  ");
+    await user.click(screen.getByRole("button", { name: "Save chat title" }));
+
+    await waitFor(() => {
+      expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
+        title: "Manual conversation title",
+        titleStatus: "manual",
+        titleConfidence: null,
+      });
+    });
+    expect(loadPersistedLocalChatSession("test-session")).toMatchObject({
+      title: "Manual conversation title",
+      titleStatus: "manual",
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Regenerate chat title" })
+    );
+    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
+    expect(screen.getByText("Manual conversation title")).toBeInTheDocument();
+  });
+
   it("does not render old entity copy", () => {
     const session = createSession({
       label: "Deploy Pipeline",
