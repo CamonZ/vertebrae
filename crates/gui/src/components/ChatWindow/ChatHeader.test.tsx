@@ -88,7 +88,9 @@ describe("ChatHeader", () => {
     const onTitleRegenerate = vi.fn();
     renderHeader({ onTitleRegenerate });
 
-    const button = screen.getByRole("button", { name: "Regenerate chat title" });
+    const button = screen.getByRole("button", {
+      name: "Regenerate chat title",
+    });
     fireEvent.click(button);
 
     expect(onTitleRegenerate).toHaveBeenCalledTimes(1);
@@ -101,9 +103,13 @@ describe("ChatHeader", () => {
       isTitleRegenerating: true,
     });
 
+    const regenerateButton = screen.getByRole("button", {
+      name: "Regenerating chat title",
+    });
+    expect(regenerateButton).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Regenerating chat title" })
-    ).toBeDisabled();
+      regenerateButton.querySelector("svg.animate-spin")
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Rename chat: Test Chat" })
     ).toBeDisabled();
@@ -206,7 +212,9 @@ describe("ChatHeader", () => {
     const onToggleHistory = vi.fn();
     renderHeader({ onToggleHistory, isWide: false });
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle chat history" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle chat history" })
+    );
     expect(onToggleHistory).toHaveBeenCalledTimes(1);
   });
 
@@ -274,9 +282,7 @@ describe("ChatHeader", () => {
     const onClosePanel = vi.fn();
     renderHeader({ onClosePanel });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Close chat panel" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Close chat panel" }));
     expect(onClosePanel).toHaveBeenCalledTimes(1);
   });
 

@@ -39,14 +39,16 @@ interface HeaderAction {
 
 function SvgIcon({
   size,
+  className,
   children,
 }: {
   size: string;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
     <svg
-      className={size}
+      className={[size, className].filter(Boolean).join(" ")}
       fill="none"
       stroke="currentColor"
       viewBox="0 0 24 24"
@@ -390,7 +392,10 @@ export function ChatHeader({
                   }
                   data-testid="local-chat-title-regenerate"
                 >
-                  <SvgIcon size="h-3.5 w-3.5">
+                  <SvgIcon
+                    size="h-3.5 w-3.5"
+                    className={isTitleRegenerating ? "animate-spin" : undefined}
+                  >
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
