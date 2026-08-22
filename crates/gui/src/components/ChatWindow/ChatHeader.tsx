@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StopIcon } from "../panels";
 import type { LocalChatLifecycle } from "../../stores/chatStore";
+import { FALLBACK_CHAT_PROJECT_LABEL } from "../../utils/localChatSessionGroups";
 
 interface ChatHeaderProps {
   label: string;
@@ -23,6 +24,7 @@ interface ChatHeaderProps {
   onTitleRegenerate?: () => void;
   isTitleRegenerating?: boolean;
   titleError?: string | null;
+  projectLabel?: string;
 }
 
 interface HeaderAction {
@@ -79,6 +81,7 @@ export function ChatHeader({
   onTitleRegenerate,
   isTitleRegenerating = false,
   titleError,
+  projectLabel = FALLBACK_CHAT_PROJECT_LABEL,
 }: ChatHeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(label);
@@ -407,6 +410,15 @@ export function ChatHeader({
               )}
             </>
           )}
+          <span
+            className="hc-project-context"
+            data-testid="local-chat-project-context"
+            role="note"
+            aria-label={`Project: ${projectLabel}`}
+            title={`Project: ${projectLabel}`}
+          >
+            {projectLabel}
+          </span>
           {lifecycle === "error" ? (
             <span
               data-testid="chat-error-dot"

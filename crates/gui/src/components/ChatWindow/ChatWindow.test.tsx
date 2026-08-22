@@ -204,6 +204,27 @@ describe("ChatWindow", () => {
     );
   });
 
+  it("renders the project label from the session's captured path", () => {
+    const session = createSession({
+      label: "Captured project chat",
+      projectPath: "/persisted/project-alpha",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("local-chat-project-context")).toHaveTextContent(
+      "project-alpha"
+    );
+    expect(
+      screen.getByRole("button", { name: /Rename chat/ })
+    ).toBeInTheDocument();
+  });
+
   it("renders the inferred session title in the header", () => {
     const session = createSession({
       label: "New Chat",
@@ -366,7 +387,9 @@ describe("ChatWindow", () => {
       const input = screen.getByRole("textbox", { name: "Chat title" });
       await user.clear(input);
       await user.type(input, "Canceled title");
-      await user.click(screen.getByRole("button", { name: "Cancel chat title edit" }));
+      await user.click(
+        screen.getByRole("button", { name: "Cancel chat title edit" })
+      );
       expect(screen.getByText("Inferred Title")).toBeInTheDocument();
 
       await user.click(

@@ -1029,6 +1029,12 @@ describe("ChatWindowManager", () => {
       expect(commands.getCurrentProjectPath).toHaveBeenCalled();
     });
 
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("local-chat-project-context")
+      ).toHaveTextContent("old-project");
+    });
+
     await user.click(screen.getByLabelText("Widen chat panel"));
     await user.click(screen.getByLabelText("Start fresh local chat"));
 
@@ -1193,6 +1199,18 @@ describe("ChatWindowManager", () => {
     expect(miniPanel.getByText("Current Project Chat")).toBeInTheDocument();
     expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
     expect(miniPanel.getByText("No Project Chat")).toBeInTheDocument();
+
+    await user.click(
+      currentGroup.getByRole("button", {
+        name: "Load local chat Current Project Chat into active pane",
+      })
+    );
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(current);
+      expect(
+        screen.getByTestId("local-chat-project-context")
+      ).toHaveTextContent("new-project");
+    });
   });
 
   it("keeps long multi-project history scrollable through full-list, search, focus, agent, and deletion flows", async () => {

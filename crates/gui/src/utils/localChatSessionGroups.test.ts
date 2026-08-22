@@ -7,6 +7,7 @@ import {
   filterLocalChatSessionGroups,
   groupLocalChatSessionsByProject,
   localChatSessionDisplayTitle,
+  localChatSessionProjectDisplayName,
   normalizeLocalChatSessionQuery,
   projectLocalChatSessionGroups,
 } from "./localChatSessionGroups";
@@ -37,6 +38,17 @@ function makeSummary(
 }
 
 describe("local chat session project grouping", () => {
+  it.each([
+    ["/work/alpha", "alpha"],
+    ["/work/alpha/", "alpha"],
+    ["C:\\work\\alpha", "alpha"],
+    [null, FALLBACK_CHAT_PROJECT_LABEL],
+    ["  ", FALLBACK_CHAT_PROJECT_LABEL],
+    ["relative-project", FALLBACK_CHAT_PROJECT_LABEL],
+  ])("derives a stable project label from captured path %j", (path, label) => {
+    expect(localChatSessionProjectDisplayName(path)).toBe(label);
+  });
+
   it("orders the current project first, sorts sessions by recency within groups, and keeps fallback last", () => {
     const groups = groupLocalChatSessionsByProject(
       [
@@ -73,6 +85,38 @@ describe("local chat session project grouping", () => {
     expect(groups[2].sessions.map((session) => session.id)).toEqual([
       "fallback-unknown",
       "fallback-missing",
+    ]);
+  });
+
+  it("keeps Claude and Codex summaries tied to their captured project groups", () => {
+    const groups = groupLocalChatSessionsByProject(
+      [
+        makeSummary("claude-current", "/work/alpha", "2026-01-02T00:00:00Z", {
+          harness: "claude",
+        }),
+        makeSummary("codex-switched", "/work/beta", "2026-01-03T00:00:00Z", {
+          harness: "codex",
+        }),
+        makeSummary("missing-project", null, "2026-01-04T00:00:00Z", {
+          harness: "codex",
+        }),
+      ],
+      projects,
+      "/work/alpha"
+    );
+
+    expect(
+      groups.flatMap((group) =>
+        group.sessions.map((session) => [
+          session.id,
+          group.label,
+          session.harness,
+        ])
+      )
+    ).toEqual([
+      ["claude-current", "alpha", "claude"],
+      ["codex-switched", "beta", "codex"],
+      ["missing-project", FALLBACK_CHAT_PROJECT_LABEL, "codex"],
     ]);
   });
 });

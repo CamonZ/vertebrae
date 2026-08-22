@@ -6,8 +6,10 @@ import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import {
   filterLocalChatSessionGroups,
   groupLocalChatSessionsByProject,
+  savedProjectDisplayName,
   type LocalChatSessionGroup,
 } from "../utils/localChatSessionGroups";
+import { normalizeProjectPath } from "../utils/localChatPersistence";
 
 export type ProjectLoadStatus = "idle" | "loaded" | "error";
 
@@ -34,6 +36,8 @@ interface UseLocalChatHistoryResult {
   setSessionQuery: (query: string) => void;
   /** Warning string shown when saved-project loading failed; null when ok. */
   projectGroupingWarning: string | null;
+  /** Saved-project labels keyed by their normalized path. */
+  projectLabelsByPath: ReadonlyMap<string, string>;
   /** Bump to force the grouping memo to re-read the local chat index after deletes. */
   bumpHistoryRevision: () => void;
 }
@@ -140,6 +144,14 @@ export function useLocalChatHistory({
     projectGroupingState.generation === projectScopeGeneration
       ? projectGroupingState.projects
       : EMPTY_SAVED_PROJECTS;
+  const projectLabelsByPath = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const project of savedProjects) {
+      const path = normalizeProjectPath(project.path);
+      if (path) labels.set(path, savedProjectDisplayName(project));
+    }
+    return labels;
+  }, [savedProjects]);
 
   const allLocalSessionGroups = useMemo(() => {
     // Persisted-only deletes need a React-side invalidation even when the
@@ -186,6 +198,7 @@ export function useLocalChatHistory({
     sessionQuery,
     setSessionQuery,
     projectGroupingWarning,
+    projectLabelsByPath,
     bumpHistoryRevision,
   };
 }

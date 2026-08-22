@@ -2623,6 +2623,7 @@ html.light ::selection {
   white-space: nowrap;
 }
 .hc-panel .hc-title-button {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   padding: 0;
@@ -2669,6 +2670,24 @@ html.light ::selection {
 }
 .hc-panel .hc-title-regenerate {
   flex-shrink: 0;
+}
+.hc-panel .hc-project-context {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(14rem, 32%);
+  overflow: hidden;
+  color: var(--fg-mute);
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 520px) {
+  .hc-panel .hc-project-context {
+    flex-basis: 27%;
+  }
 }
 .hc-panel .hc-title-error {
   position: absolute;

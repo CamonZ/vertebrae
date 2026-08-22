@@ -24,6 +24,7 @@ import {
   projectLocalChatSessionGroups,
   type LocalChatSessionGroup,
 } from "../../utils/localChatSessionGroups";
+import { normalizeProjectPath } from "../../utils/localChatPersistence";
 import { ChatPaneList } from "./ChatPaneList";
 import { ChatResizeHandle } from "./ChatResizeHandle";
 import { ChatHistoryResizeHandle } from "./ChatHistoryResizeHandle";
@@ -166,8 +167,24 @@ export function ChatWindowManager() {
     sessionQuery,
     setSessionQuery,
     projectGroupingWarning,
+    projectLabelsByPath,
     bumpHistoryRevision,
   } = useLocalChatHistory({ sessionChangeToken });
+  const projectLabelBySessionId = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const group of allLocalSessionGroups) {
+      for (const session of group.allSessions ?? group.sessions) {
+        labels.set(session.id, group.label);
+      }
+    }
+    for (const session of Object.values(sessions)) {
+      if (labels.has(session.id)) continue;
+      const path = normalizeProjectPath(session.projectPath);
+      const label = path ? projectLabelsByPath.get(path) : undefined;
+      if (label) labels.set(session.id, label);
+    }
+    return labels;
+  }, [allLocalSessionGroups, projectLabelsByPath, sessions]);
   const visibleLocalSessionGroups = useMemo(() => {
     // Search and child-thread filtering must precede the cap so older
     // matching sessions remain eligible for the visible seven rows.
@@ -593,6 +610,7 @@ export function ChatWindowManager() {
             toggleMaximized={toggleMaximized}
             startFreshActiveSession={startFreshActiveSession}
             splitWithFreshSession={splitWithFreshSession}
+            projectLabelBySessionId={projectLabelBySessionId}
           />
         </div>
       )}
