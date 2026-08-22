@@ -1888,6 +1888,195 @@ describe("chatStore", () => {
       });
     });
 
+    it("accepts a candidate at the exact confidence threshold", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "Exact Threshold Title",
+        confidence: 0.72,
+        sufficientSignal: true,
+        userMessageCount: 1,
+      });
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: "Exact Threshold Title",
+        titleStatus: "generated",
+        titleConfidence: 0.72,
+      });
+    });
+
+    it("ignores a regeneration result from before the session was cleared", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "Old conversation",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+      const beforeClear = useChatStore.getState().sessions[id];
+
+      useChatStore.getState().clearMessages(id);
+      useChatStore.getState().setSessionTitleCandidate(
+        id,
+        {
+          title: "Stale Old Title",
+          confidence: 0.95,
+          sufficientSignal: true,
+          userMessageCount: 1,
+        },
+        {
+          replaceGenerated: true,
+          expectedUpdatedAt: beforeClear.updatedAt,
+          expectedMessageCount: beforeClear.messages.length,
+        }
+      );
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: null,
+        titleStatus: "pending",
+        messages: [],
+      });
+    });
+
+    it("allows explicit regeneration to replace a generated title", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "First Generated Title",
+        confidence: 0.86,
+        sufficientSignal: true,
+        userMessageCount: 1,
+      });
+
+      useChatStore.getState().setSessionTitleCandidate(
+        id,
+        {
+          title: "Regenerated Title",
+          confidence: 0.72,
+          sufficientSignal: true,
+          userMessageCount: 2,
+        },
+        { replaceGenerated: true }
+      );
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: "Regenerated Title",
+        titleStatus: "generated",
+        titleConfidence: 0.72,
+        titleUserMessageCount: 2,
+      });
+    });
+
+    it("persists manual titles and blocks later generated candidates", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+
+      useChatStore.getState().setSessionManualTitle(id, "  Manual   title  ");
+      useChatStore.getState().setSessionTitleCandidate(
+        id,
+        {
+          title: "Later Generated Title",
+          confidence: 0.95,
+          sufficientSignal: true,
+          userMessageCount: 3,
+        },
+        { replaceGenerated: true }
+      );
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: "Manual title",
+        titleStatus: "manual",
+        titleConfidence: null,
+      });
+      expect(loadPersistedLocalChatSession(id)).toMatchObject({
+        title: "Manual title",
+        titleStatus: "manual",
+      });
+    });
+
+    it("keeps a failed manual save out of the confirmed title state", async () => {
+      vi.spyOn(commands, "saveLocalChatSessionIndex").mockResolvedValue({
+        status: "error",
+        error: { message: "disk full" },
+      });
+      const id = useChatStore.getState().openSession("New Chat");
+
+      await expect(
+        useChatStore.getState().setSessionManualTitle(id, "Unconfirmed title")
+      ).resolves.toBe(false);
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: null,
+        titleStatus: "pending",
+      });
+      expect(loadPersistedLocalChatSession(id)).toMatchObject({
+        title: null,
+        titleStatus: "pending",
+      });
+    });
+
+    it("preserves the prior title when a blank manual title is submitted", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "Existing Generated Title",
+        confidence: 0.86,
+        sufficientSignal: true,
+        userMessageCount: 1,
+      });
+
+      useChatStore.getState().setSessionManualTitle(id, " \t ");
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: "Existing Generated Title",
+        titleStatus: "generated",
+        titleConfidence: 0.86,
+      });
+    });
+
+    it("preserves a generated title when explicit regeneration is low confidence", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "Existing Generated Title",
+        confidence: 0.86,
+        sufficientSignal: true,
+        userMessageCount: 1,
+      });
+
+      useChatStore.getState().setSessionTitleCandidate(
+        id,
+        {
+          title: null,
+          confidence: 0.2,
+          sufficientSignal: false,
+          userMessageCount: 2,
+        },
+        { replaceGenerated: true }
+      );
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: "Existing Generated Title",
+        titleStatus: "generated",
+        titleConfidence: 0.86,
+      });
+    });
+
+    it("restores a manual title through persisted session selection", async () => {
+      const id = useChatStore.getState().openSession("New Chat");
+      useChatStore.getState().setSessionManualTitle(id, "Keep This Title");
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        paneLayout: { panes: [], activePaneId: null },
+        localSessionSummaries: {},
+      });
+
+      await expect(useChatStore.getState().selectPersistedSession(id)).resolves.toBe(
+        true
+      );
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: "Keep This Title",
+        titleStatus: "manual",
+      });
+    });
+
     it("freezes the mini-panel summary after a generated title is set", () => {
       const id = useChatStore.getState().openSession("New Chat");
       useChatStore.getState().setSessionTitleCandidate(id, {

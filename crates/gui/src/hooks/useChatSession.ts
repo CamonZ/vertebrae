@@ -46,9 +46,15 @@ export function useChatSession(sessionId: string) {
     sendMessage,
     closeLocalChatSession,
     stopActiveTurn,
+    regenerateTitle,
+    isTitleRegenerating,
+    titleError,
   } = useLocalChat(sessionId);
 
   const clearMessages = useChatStore((s) => s.clearMessages);
+  const setSessionManualTitle = useChatStore(
+    (s) => s.setSessionManualTitle
+  );
   const setSessionSelectedModel = useChatStore(
     (s) => s.setSessionSelectedModel
   );
@@ -428,6 +434,16 @@ export function useChatSession(sessionId: string) {
     sessionId,
   ]);
 
+  const handleTitleSave = useCallback(
+    async (title: string) => {
+      const saved = await setSessionManualTitle(sessionId, title);
+      if (!saved) {
+        throw new Error("Failed to save chat title.");
+      }
+    },
+    [sessionId, setSessionManualTitle]
+  );
+
   const handleModelChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       setSessionSelectedModel(sessionId, event.target.value || null);
@@ -546,6 +562,10 @@ export function useChatSession(sessionId: string) {
     handleStartSession,
     handleClearMessages,
     handleStopGeneration,
+    handleTitleSave,
+    handleRegenerateTitle: regenerateTitle,
+    isTitleRegenerating,
+    titleError,
     handleModelChange,
     handleReasoningEffortChange,
     handleHarnessChange,

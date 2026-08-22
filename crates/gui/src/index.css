@@ -2564,6 +2564,7 @@ html.light ::selection {
    (the panel is fixed-anchored, not draggable), so `.hc-head` is not a grab
    handle here. */
 .hc-panel .hc-head {
+  position: relative;
   flex-shrink: 0;
   background: color-mix(in oklch, var(--bg-3) 26%, transparent);
   border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
@@ -2591,6 +2592,68 @@ html.light ::selection {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.hc-panel .hc-title-button {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.hc-panel .hc-title-button:hover,
+.hc-panel .hc-title-button:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+.hc-panel .hc-title-button:disabled {
+  cursor: default;
+}
+.hc-panel .hc-title-editor {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--s-1h);
+}
+.hc-panel .hc-title-input {
+  min-width: 0;
+  width: 100%;
+  padding: 2px var(--s-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.2;
+  outline: none;
+}
+.hc-panel .hc-title-edit-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+.hc-panel .hc-title-regenerate {
+  flex-shrink: 0;
+}
+.hc-panel .hc-title-error {
+  position: absolute;
+  top: calc(100% + var(--s-1));
+  left: var(--s-3);
+  z-index: 2;
+  max-width: calc(100% - var(--s-6));
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid color-mix(in oklch, var(--err) 35%, transparent);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--err);
+  font-family: var(--mono);
+  font-size: var(--text-11);
 }
 /* Resting status ember; the active/closed dots reuse this footprint. */
 .hc-panel .hc-title .em {

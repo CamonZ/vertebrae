@@ -11,6 +11,7 @@ import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
 import { commands } from "../../bindings";
+import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
 import {
   routeLocalChatSessionEndEvent,
   routeLocalChatSessionErrorEvent,
@@ -68,6 +69,10 @@ vi.mock("../../bindings", () => ({
       },
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    getLocalFileRoots: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: ["/test/project"],
+    }),
     inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
       status: "ok",
       data: {
@@ -129,6 +134,28 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
   };
 }
 
+function mockAvailableCodexHarness() {
+  mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+    status: "ok",
+    data: {
+      default_harness: "codex",
+      harnesses: [
+        {
+          harness: "codex",
+          label: "Codex",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "default",
+          default_reasoning_effort: "medium",
+          reasoning_efforts: [{ id: "medium", label: "Medium" }],
+          supports_resume: true,
+          models: [{ id: "default", label: "Default" }],
+        },
+      ],
+    },
+  });
+}
+
 describe("ChatWindow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -178,6 +205,237 @@ describe("ChatWindow", () => {
     expect(screen.getByText("Simple PR Review")).toBeInTheDocument();
     expect(screen.queryByText("New Chat")).not.toBeInTheDocument();
   });
+
+  it("regenerates the title in the current pane and persists the session index", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      title: "Old Generated Title",
+      titleStatus: "generated",
+      projectPath: "/test/project",
+      messages: [
+        {
+          kind: "user",
+          text: "Regenerate this title from the complete conversation",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+        {
+          kind: "assistant",
+          text: "I will use the shared inference command.",
+          timestamp: "2026-01-01T00:00:01Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Regenerate chat title" })
+    );
+
+    await waitFor(() => {
+      expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
+        harness: "claude",
+        initial_prompts: [
+          "User: Regenerate this title from the complete conversation",
+          "Assistant: I will use the shared inference command.",
+        ],
+        working_dir: "/test/project",
+      });
+      expect(useChatStore.getState().sessions["test-session"].title).toBe(
+        "Inferred Title"
+      );
+    });
+
+    expect(screen.getByText("Inferred Title")).toBeInTheDocument();
+    expect(loadPersistedLocalChatSession("test-session")).toMatchObject({
+      title: "Inferred Title",
+      titleStatus: "generated",
+      titleConfidence: 0.91,
+    });
+  });
+
+  it("saves a normalized manual title and protects it from regeneration", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      title: "Generated Title",
+      titleStatus: "generated",
+      messages: [
+        {
+          kind: "user",
+          text: "Keep this conversation title",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Rename chat: Generated Title" })
+    );
+    const input = screen.getByRole("textbox", { name: "Chat title" });
+    await user.clear(input);
+    await user.type(input, "  Manual   conversation title  ");
+    await user.click(screen.getByRole("button", { name: "Save chat title" }));
+
+    await waitFor(() => {
+      expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
+        title: "Manual conversation title",
+        titleStatus: "manual",
+        titleConfidence: null,
+      });
+    });
+    expect(loadPersistedLocalChatSession("test-session")).toMatchObject({
+      title: "Manual conversation title",
+      titleStatus: "manual",
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Regenerate chat title" })
+    );
+    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
+    expect(screen.getByText("Manual conversation title")).toBeInTheDocument();
+  });
+
+  it.each(["claude", "codex"] as const)(
+    "supports regenerate, cancel, and rename controls for %s sessions",
+    async (harness) => {
+      const user = userEvent.setup();
+      if (harness === "codex") mockAvailableCodexHarness();
+      const session = createSession({
+        harness,
+        title: `Generated ${harness} title`,
+        titleStatus: "generated",
+        messages: [
+          {
+            kind: "user",
+            text: `Summarize the ${harness} session`,
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+        ],
+      });
+      useChatStore.setState({
+        sessions: { "test-session": session },
+        activeSessionId: "test-session",
+        panelOpen: true,
+      });
+
+      render(<ChatWindow sessionId="test-session" />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Regenerate chat title" })
+      );
+      await waitFor(() => {
+        expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith(
+          expect.objectContaining({ harness })
+        );
+        expect(useChatStore.getState().sessions["test-session"].title).toBe(
+          "Inferred Title"
+        );
+      });
+
+      await user.click(
+        screen.getByRole("button", { name: "Rename chat: Inferred Title" })
+      );
+      const input = screen.getByRole("textbox", { name: "Chat title" });
+      await user.clear(input);
+      await user.type(input, "Canceled title");
+      await user.click(screen.getByRole("button", { name: "Cancel chat title edit" }));
+      expect(screen.getByText("Inferred Title")).toBeInTheDocument();
+
+      await user.click(
+        screen.getByRole("button", { name: "Rename chat: Inferred Title" })
+      );
+      await user.clear(screen.getByRole("textbox", { name: "Chat title" }));
+      await user.type(
+        screen.getByRole("textbox", { name: "Chat title" }),
+        "Manual title"
+      );
+      await user.click(screen.getByRole("button", { name: "Save chat title" }));
+
+      await waitFor(() => {
+        expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
+          title: "Manual title",
+          titleStatus: "manual",
+        });
+      });
+      expect(loadPersistedLocalChatSession("test-session")).toMatchObject({
+        title: "Manual title",
+        titleStatus: "manual",
+      });
+    }
+  );
+
+  it.each(["claude", "codex"] as const)(
+    "keeps an existing title after failed or low-confidence %s inference",
+    async (harness) => {
+      const user = userEvent.setup();
+      if (harness === "codex") mockAvailableCodexHarness();
+      const session = createSession({
+        harness,
+        title: "Existing Usable Title",
+        titleStatus: "generated",
+        messages: [
+          {
+            kind: "user",
+            text: "Keep the existing title if inference fails",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+        ],
+      });
+      useChatStore.setState({
+        sessions: { "test-session": session },
+        activeSessionId: "test-session",
+        panelOpen: true,
+      });
+
+      mockedCommands.inferLocalChatSessionTitle.mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          title: null,
+          confidence: 0.2,
+          sufficient_signal: false,
+        },
+      });
+      render(<ChatWindow sessionId="test-session" />);
+      await user.click(
+        screen.getByRole("button", { name: "Regenerate chat title" })
+      );
+      await waitFor(() => {
+        expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith(
+          expect.objectContaining({ harness })
+        );
+      });
+      expect(screen.getByText("Existing Usable Title")).toBeInTheDocument();
+      expect(useChatStore.getState().sessions["test-session"].title).toBe(
+        "Existing Usable Title"
+      );
+
+      mockedCommands.inferLocalChatSessionTitle.mockResolvedValueOnce({
+        status: "error",
+        error: { message: "provider unavailable" },
+      });
+      await user.click(
+        screen.getByRole("button", { name: "Regenerate chat title" })
+      );
+      await waitFor(() => {
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          "provider unavailable"
+        );
+      });
+      expect(screen.getByText("Existing Usable Title")).toBeInTheDocument();
+    }
+  );
 
   it("does not render old entity copy", () => {
     const session = createSession({

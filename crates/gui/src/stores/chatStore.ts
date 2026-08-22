@@ -366,6 +366,15 @@ export interface ChatTitleCandidate {
   userMessageCount: number;
 }
 
+export interface TitleCandidateOptions {
+  /** Explicit regeneration may replace a prior generated title. */
+  replaceGenerated?: boolean;
+  /** Reject a result produced from an older session revision. */
+  expectedUpdatedAt?: string;
+  /** Reject a result produced before replay or new messages completed. */
+  expectedMessageCount?: number;
+}
+
 export interface StreamingAssistantMessage {
   text: string;
   timestamp: string;
@@ -422,6 +431,8 @@ export interface ChatSession {
   streamingAssistant?: StreamingAssistantMessage | null;
   /** Runtime-only user messages queued while a local turn is still active */
   queuedMessages?: string[];
+  /** Runtime-only guard while a persisted provider transcript is replayed. */
+  providerMessagesHydrating?: boolean;
   /** Durable local metadata for session-history ordering */
   createdAt?: string;
   /** Durable local metadata for session-history ordering */
@@ -559,10 +570,16 @@ interface ChatStoreActions {
   ) => void;
   /** Set the inferred display title for a local chat session */
   setSessionTitle: (sessionId: string, title: string | null) => void;
+  /** Set a user-authored display title and protect it from inference. */
+  setSessionManualTitle: (
+    sessionId: string,
+    title: string
+  ) => Promise<boolean>;
   /** Apply a generated title candidate when it is confident enough */
   setSessionTitleCandidate: (
     sessionId: string,
-    candidate: ChatTitleCandidate
+    candidate: ChatTitleCandidate,
+    options?: TitleCandidateOptions
   ) => void;
   /** Set the model reported by the Claude CLI for a session */
   setSessionModel: (sessionId: string, model: string) => void;
@@ -1288,28 +1305,39 @@ export const useChatStore = create<ChatStore>((set, get) => {
     }
   };
 
-  const hydrateProviderMessagesInPlace = (
+  const hydrateProviderMessagesInPlace = async (
     sessionId: string,
     session: ChatSession
-  ) => {
-    void loadReplayedProviderMessages(session).then((messages) => {
-      if (messages.length === 0) return;
-      set((state) => {
-        const current = state.sessions[sessionId];
-        if (!current) return state;
-        const merged = mergeHydratedMessages(messages, current.messages);
-        if (merged === current.messages) return state;
-        return {
-          sessions: {
-            ...state.sessions,
-            [sessionId]: {
-              ...current,
-              messages: merged,
-              messageCount: Math.max(merged.length, current.messageCount ?? 0),
-            },
+  ): Promise<void> => {
+    const expectedProviderResumeId = session.providerResumeId;
+    const messages = await loadReplayedProviderMessages(session);
+    set((state) => {
+      const current = state.sessions[sessionId];
+      if (
+        !current ||
+        current.providerResumeId !== expectedProviderResumeId
+      ) {
+        return state;
+      }
+      const merged = mergeHydratedMessages(messages, current.messages);
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: {
+            ...current,
+            ...(merged === current.messages
+              ? {}
+              : {
+                  messages: merged,
+                  messageCount: Math.max(
+                    merged.length,
+                    current.messageCount ?? 0
+                  ),
+                }),
+            providerMessagesHydrating: false,
           },
-        };
-      });
+        },
+      };
     });
   };
 
@@ -1317,7 +1345,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     sessionId: string,
     updater: (session: ChatSession) => ChatSession,
     options: { persist?: boolean } = {}
-  ) => {
+  ): Promise<boolean> => {
     let updated: ChatSession | null = null;
     set((state) => {
       const session = state.sessions[sessionId];
@@ -1338,14 +1366,16 @@ export const useChatStore = create<ChatStore>((set, get) => {
     });
     const updatedSession = updated as ChatSession | null;
     if (updatedSession && options.persist !== false) {
-      persistLocalChatSession(updatedSession);
+      const persistence = persistLocalChatSession(updatedSession);
       set((state) => ({
         localSessionSummaries: upsertLocalSessionSummary(
           state.localSessionSummaries,
           updatedSession
         ),
       }));
+      return persistence;
     }
+    return Promise.resolve(true);
   };
 
   return {
@@ -1367,6 +1397,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const hydrated: ChatSession = hydrateLocalSession({
           ...persisted,
           projectPath: persisted.projectPath ?? projectPath,
+          providerMessagesHydrating: !!persisted.providerResumeId,
         });
         if (hydrated.permissionMode !== persisted.permissionMode) {
           persistLocalChatSession(hydrated);
@@ -1537,7 +1568,18 @@ export const useChatStore = create<ChatStore>((set, get) => {
     selectPersistedSession: async (sessionId) => {
       const existing = get().sessions[sessionId];
       if (existing) {
-        hydrateProviderMessagesInPlace(sessionId, existing);
+        const hydrationSession = existing.providerResumeId
+          ? { ...existing, providerMessagesHydrating: true }
+          : existing;
+        if (hydrationSession !== existing) {
+          set((state) => ({
+            sessions: {
+              ...state.sessions,
+              [sessionId]: hydrationSession,
+            },
+          }));
+        }
+        void hydrateProviderMessagesInPlace(sessionId, hydrationSession);
         set((state) => {
           const current = state.sessions[sessionId];
           if (!current) return state;
@@ -1557,7 +1599,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (!persisted || persisted.status !== "open") {
         return false;
       }
-      const hydrated = hydrateLocalSession(persisted);
+      const hydrated = hydrateLocalSession({
+        ...persisted,
+        providerMessagesHydrating: !!persisted.providerResumeId,
+      });
       if (hydrated.permissionMode !== persisted.permissionMode) {
         persistLocalChatSession(hydrated);
       }
@@ -1575,7 +1620,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           panelOpen: true,
         };
       });
-      hydrateProviderMessagesInPlace(hydrated.id, hydrated);
+      void hydrateProviderMessagesInPlace(hydrated.id, hydrated);
       return true;
     },
 
@@ -2149,7 +2194,50 @@ export const useChatStore = create<ChatStore>((set, get) => {
       });
     },
 
-    setSessionTitleCandidate: (sessionId, candidate) => {
+    setSessionManualTitle: async (sessionId, title) => {
+      const normalized = title.replace(/\s+/g, " ").trim();
+      if (!normalized) return false;
+      const previous = get().sessions[sessionId];
+      if (!previous) return false;
+      const saved = await updateSession(sessionId, (session) => ({
+        ...session,
+        title: normalized,
+        titleStatus: "manual",
+        titleConfidence: null,
+      }));
+      if (saved) return true;
+
+      const current = get().sessions[sessionId];
+      if (
+        current?.title === normalized &&
+        current.titleStatus === "manual"
+      ) {
+        updateSession(
+          sessionId,
+          (session) => ({
+            ...session,
+            title: previous.title,
+            titleStatus: previous.titleStatus,
+            titleConfidence: previous.titleConfidence,
+            titleUserMessageCount: previous.titleUserMessageCount,
+          }),
+          { persist: false }
+        );
+        const restored = get().sessions[sessionId];
+        if (restored) {
+          persistLocalChatSession(restored);
+          set((state) => ({
+            localSessionSummaries: upsertLocalSessionSummary(
+              state.localSessionSummaries,
+              restored
+            ),
+          }));
+        }
+      }
+      return false;
+    },
+
+    setSessionTitleCandidate: (sessionId, candidate, options) => {
       const normalized = candidate.title?.replace(/\s+/g, " ").trim() || null;
       const confidence = Number.isFinite(candidate.confidence)
         ? Math.max(0, Math.min(1, candidate.confidence))
@@ -2160,9 +2248,29 @@ export const useChatStore = create<ChatStore>((set, get) => {
         confidence >= GENERATED_TITLE_CONFIDENCE_THRESHOLD;
       updateSession(sessionId, (session) => {
         if (
+          options?.expectedUpdatedAt !== undefined &&
+          session.updatedAt !== options.expectedUpdatedAt
+        ) {
+          return session;
+        }
+        if (
+          options?.expectedMessageCount !== undefined &&
+          session.messages.length !== options.expectedMessageCount
+        ) {
+          return session;
+        }
+        if (
           session.titleStatus === "manual" ||
-          session.titleStatus === "generated" ||
-          session.title?.trim()
+          (session.titleStatus === "generated" &&
+            !options?.replaceGenerated) ||
+          (session.title?.trim() && session.titleStatus !== "generated")
+        ) {
+          return session;
+        }
+        if (
+          options?.replaceGenerated &&
+          session.titleStatus === "generated" &&
+          !confident
         ) {
           return session;
         }
@@ -2330,6 +2438,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               activeTurn: null,
               streamingAssistant: null,
               queuedMessages: undefined,
+              providerMessagesHydrating: false,
               updatedAt: timestamp,
               messageCount: 0,
             },
