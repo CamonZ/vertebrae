@@ -7,11 +7,17 @@ Feature: Project chat plus actions
     Given the GUI is showing the task list
     When I click on the element with test id "local-chat-launcher"
     Then the GUI should show "New Chat" within 5 seconds
+    When I type "seed primary project chat" into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the GUI should show "local-chat-acceptance reply" within 10 seconds
     When I click on the element with title "Close chat panel"
     And I click on the element with test id "sidebar-project-avatar"
     And I switch to the second project
     And I click on the element with test id "local-chat-launcher"
     Then the GUI should show "New Chat" within 5 seconds
+    When I type "seed second project chat" into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the GUI should show "local-chat-acceptance reply" within 10 seconds
     When I click on the element with title "Toggle chat history"
     Then the local chat history drawer should show the active project within 5 seconds
     When I click the local chat plus action for the "primary" project
@@ -29,6 +35,9 @@ Feature: Project chat plus actions
     Given the GUI is showing the task list
     When I click on the element with test id "local-chat-launcher"
     Then the GUI should show "New Chat" within 5 seconds
+    When I type "seed codex project chat" into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the GUI should show "local-chat-acceptance reply" within 10 seconds
     When I click on the element with title "Toggle chat history"
     And I click the local chat plus action for the "primary" project
     Then the active local chat should use the "primary" project directory within 5 seconds

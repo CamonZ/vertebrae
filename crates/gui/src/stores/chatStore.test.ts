@@ -521,7 +521,7 @@ describe("chatStore", () => {
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
     });
 
-    it("hydrates a persisted empty project session instead of creating a duplicate", () => {
+    it("creates a new project session when the persisted session is untouched", () => {
       const persisted = useChatStore
         .getState()
         .openSession("Persisted empty", "/target/project");
@@ -531,12 +531,13 @@ describe("chatStore", () => {
         .getState()
         .openProjectSession("New Chat", "/target/project");
 
-      expect(opened).toBe(persisted);
+      expect(opened).not.toBe(persisted);
       expect(useChatStore.getState().sessions[opened]).toMatchObject({
-        label: "Persisted empty",
+        label: "New Chat",
         projectPath: "/target/project",
         messages: [],
       });
+      expect(useChatStore.getState().sessions[persisted]).toBeUndefined();
     });
 
     it("replaces only the active pane and reuses the new empty session on repeat clicks", () => {
