@@ -1044,6 +1044,79 @@ describe("ChatWindowManager", () => {
     });
   });
 
+  it("starts a new project chat from each visible project group and focuses it", async () => {
+    vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
+      status: "ok",
+      data: "/new/project",
+    });
+    const user = userEvent.setup();
+    const oldProject = useChatStore
+      .getState()
+      .openSession("Old Project Chat", "/old/project");
+    useChatStore.getState().addMessage(oldProject, {
+      kind: "user",
+      text: "Keep old project chat",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    const newProject = useChatStore
+      .getState()
+      .openSession("New Project Chat", "/new/project");
+    useChatStore.getState().addMessage(newProject, {
+      kind: "user",
+      text: "Keep new project chat",
+      timestamp: "2026-01-02T00:00:00Z",
+    });
+
+    render(<ChatWindowManager />);
+    await user.click(screen.getByLabelText("Widen chat panel"));
+
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
+    await waitFor(() => {
+      expect(
+        miniPanel.getByRole("button", {
+          name: "Start new chat in old-project",
+        })
+      ).toBeEnabled();
+    });
+
+    await user.click(
+      miniPanel.getByRole("button", {
+        name: "Start new chat in old-project",
+      })
+    );
+    await waitFor(() => {
+      const active = useChatStore.getState().activeSessionId;
+      expect(active).not.toBe(oldProject);
+      expect(useChatStore.getState().sessions[active!]).toMatchObject({
+        label: "New Chat",
+        projectPath: "/old/project",
+        messages: [],
+      });
+    });
+
+    await user.click(
+      miniPanel.getByRole("button", {
+        name: "Start new chat in new-project",
+      })
+    );
+    await waitFor(() => {
+      const active = useChatStore.getState().activeSessionId;
+      expect(useChatStore.getState().sessions[active!]).toMatchObject({
+        label: "New Chat",
+        projectPath: "/new/project",
+        messages: [],
+      });
+    });
+
+    expect(useChatStore.getState().sessions[oldProject].messages).toHaveLength(
+      1
+    );
+    expect(useChatStore.getState().sessions[newProject].messages).toHaveLength(
+      1
+    );
+    expect(useChatStore.getState().panelOpen).toBe(true);
+  });
+
   it("groups local chat history by project with the current project first and fallback last", async () => {
     vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
       status: "ok",
@@ -1102,7 +1175,7 @@ describe("ChatWindowManager", () => {
     expect(
       miniPanel
         .getAllByRole("heading", { level: 3 })
-        .map((heading) => heading.textContent)
+        .map((heading) => heading.querySelector("span")?.textContent)
     ).toEqual(["new-project", "old-project", "Unknown project"]);
 
     const currentGroup = within(
@@ -1196,7 +1269,7 @@ describe("ChatWindowManager", () => {
       expect(
         miniPanel
           .getAllByRole("heading", { level: 3 })
-          .map((heading) => heading.textContent)
+          .map((heading) => heading.querySelector("span")?.textContent)
       ).toEqual(["test-project", "old-project"]);
     });
 
@@ -1455,7 +1528,7 @@ describe("ChatWindowManager", () => {
       expect(
         miniPanel
           .getAllByRole("heading", { level: 3 })
-          .map((heading) => heading.textContent)
+          .map((heading) => heading.querySelector("span")?.textContent)
       ).toEqual(["test-project", "old-project", "Unknown project"]);
     });
     const currentGroup = within(
@@ -2558,7 +2631,7 @@ describe("ChatWindowManager", () => {
     expect(
       miniPanel
         .getAllByRole("heading", { level: 3 })
-        .map((heading) => heading.textContent)
+        .map((heading) => heading.querySelector("span")?.textContent)
     ).toEqual(["new-project", "old-project", "Unknown project"]);
 
     const currentGroup = within(

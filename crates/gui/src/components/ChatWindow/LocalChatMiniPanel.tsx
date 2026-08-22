@@ -308,9 +308,10 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                             return;
                           }
                           setStartingProjectId(group.projectId);
-                          void Promise.resolve(
-                            onStartProjectChat(group)
-                          ).finally(() => setStartingProjectId(null));
+                          void Promise.resolve()
+                            .then(() => onStartProjectChat(group))
+                            .catch(() => undefined)
+                            .finally(() => setStartingProjectId(null));
                         }}
                       >
                         <span aria-hidden="true">+</span>
