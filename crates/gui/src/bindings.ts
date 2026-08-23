@@ -2631,6 +2631,14 @@ export type Task = {
    */
   dependency_ids?: string[];
   /**
+   * IDs of tasks that depend on this task (populated by get_task)
+   */
+  dependent_ids?: string[];
+  /**
+   * IDs of child tasks (populated by get_task)
+   */
+  child_ids?: string[];
+  /**
    * Embedded sections
    */
   sections?: Section[];

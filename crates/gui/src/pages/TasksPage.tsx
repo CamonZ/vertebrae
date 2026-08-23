@@ -90,7 +90,7 @@ function matchesScope(task: Task, scope: TaskScope, activeRuns: ReadonlyMap<stri
     case "waiting":
       return status === "waiting";
     case "blocked":
-      return (task.dependency_ids?.length ?? 0) > 0;
+      return task.run_controls?.disabled_reason_code === "blocked";
     case "recent": {
       const updated = task.updated_at
         ? new Date(task.updated_at).getTime()

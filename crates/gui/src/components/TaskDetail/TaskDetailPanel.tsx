@@ -216,8 +216,15 @@ export function TaskDetailPanel({
 
   const children = useMemo(() => {
     if (!taskId || allTasks.length === 0) return [];
+    const relationIds = taskData?.child_ids;
+    if (relationIds) {
+      const tasksById = new Map(allTasks.map((task) => [task.id, task]));
+      return relationIds
+        .map((id) => tasksById.get(id))
+        .filter((task): task is Task => Boolean(task));
+    }
     return allTasks.filter((t) => t.parent_id === taskId);
-  }, [taskId, allTasks]);
+  }, [taskId, taskData?.child_ids, allTasks]);
   const { activeRunsByTaskId: childActiveRuns } = useActiveTaskRunsForTasks(
     children.map((child) => child.id)
   );
@@ -225,11 +232,13 @@ export function TaskDetailPanel({
   const childrenIds = useMemo(() => children.map((t) => t.id), [children]);
 
   const dependentIds = useMemo(() => {
-    if (!taskId || allTasks.length === 0) return [];
+    if (!taskId) return [];
+    if (taskData?.dependent_ids) return taskData.dependent_ids;
+    if (allTasks.length === 0) return [];
     return allTasks
       .filter((t) => t.dependency_ids?.includes(taskId))
       .map((t) => t.id);
-  }, [taskId, allTasks]);
+  }, [taskId, taskData?.dependent_ids, allTasks]);
 
   const [fetchedLevels, setFetchedLevels] = useState<
     Record<string, Task["level"]>
@@ -265,11 +274,9 @@ export function TaskDetailPanel({
 
   useEffect(() => {
     if (!taskData) return;
-    const relationIds = [
-      ...(taskData.parent_id ? [taskData.parent_id] : []),
-      ...(taskData.dependency_ids ?? []),
-      ...dependentIds,
-    ];
+    // Relation IDs come from the detail response. Only the parent title needs
+    // a fallback fetch; dependency/dependent IDs render without per-row GETs.
+    const relationIds = taskData.parent_id ? [taskData.parent_id] : [];
     const missing = relationIds.filter(
       (id) => !taskLevelById.has(id) && !(id in fetchedLevels)
     );
@@ -299,7 +306,7 @@ export function TaskDetailPanel({
     return () => {
       cancelled = true;
     };
-  }, [taskData, dependentIds, taskLevelById, fetchedLevels]);
+  }, [taskData, taskLevelById, fetchedLevels]);
 
   const acceptanceCriteria = useMemo(
     () =>

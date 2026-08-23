@@ -202,6 +202,8 @@ export function createMockTask(overrides?: Partial<Task>): Task {
     rejection_reason: null,
     parent_id: null,
     dependency_ids: [],
+    dependent_ids: [],
+    child_ids: [],
     sections: [],
     code_refs: [],
     created_at: new Date().toISOString(),

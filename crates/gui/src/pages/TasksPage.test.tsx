@@ -116,6 +116,41 @@ describe("TasksPage", () => {
     expect(screen.queryByText("Idle Task")).not.toBeInTheDocument();
   });
 
+  it("uses the server blocked state instead of dependency presence", async () => {
+    const user = userEvent.setup();
+    const blockedTask = createMockTask({
+      title: "Blocked Task",
+      dependency_ids: [],
+      run_controls: {
+        runnable: false,
+        stoppable: false,
+        disabled_reason_code: "blocked",
+        disabled_reason: "Task has incomplete blockers",
+        active_run: null,
+      },
+    });
+    const completedDependencyTask = createMockTask({
+      title: "Completed Dependency Task",
+      dependency_ids: ["completed-blocker"],
+      run_controls: {
+        runnable: true,
+        stoppable: false,
+        disabled_reason_code: null,
+        disabled_reason: null,
+        active_run: null,
+      },
+    });
+    const unblockedTask = createMockTask({ title: "Unblocked Task" });
+    mockTasks = [blockedTask, completedDependencyTask, unblockedTask];
+
+    render(<TasksPageWithHeader />);
+    await user.click(screen.getByRole("button", { name: /blocked1/i }));
+
+    expect(screen.getByText("Blocked Task")).toBeInTheDocument();
+    expect(screen.queryByText("Completed Dependency Task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unblocked Task")).not.toBeInTheDocument();
+  });
+
   it("keeps URL workflow filtering in the backend filter while using local scopes", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/tasks?workflowId=workflow-123");

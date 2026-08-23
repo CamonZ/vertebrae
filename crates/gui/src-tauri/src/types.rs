@@ -267,6 +267,12 @@ pub struct Task {
     /// IDs of tasks this task depends on
     #[serde(default)]
     pub dependency_ids: Vec<String>,
+    /// IDs of tasks that depend on this task (populated by get_task)
+    #[serde(default)]
+    pub dependent_ids: Vec<String>,
+    /// IDs of child tasks (populated by get_task)
+    #[serde(default)]
+    pub child_ids: Vec<String>,
     /// Embedded sections
     #[serde(default)]
     pub sections: Vec<Section>,
@@ -286,6 +292,9 @@ pub struct Task {
 
 impl From<vertebrae_core::Task> for Task {
     fn from(task: vertebrae_core::Task) -> Self {
+        let dependent_ids = task.dependents.iter().map(|task| task.id.clone()).collect();
+        let child_ids = task.children.iter().map(|task| task.id.clone()).collect();
+
         Task {
             id: task.id,
             title: task.title,
@@ -304,6 +313,8 @@ impl From<vertebrae_core::Task> for Task {
             rejection_reason: task.rejection_reason,
             parent_id: task.parent_id,
             dependency_ids: task.dependency_ids,
+            dependent_ids,
+            child_ids,
             sections: task.sections.into_iter().map(Into::into).collect(),
             code_refs: task.code_refs.into_iter().map(Into::into).collect(),
             created_at: task.created_at.map(|dt| dt.to_rfc3339()),
@@ -1605,6 +1616,22 @@ mod tests {
         assert!(gui.updated_at.is_some());
         assert!(gui.started_at.is_some());
         assert!(gui.completed_at.is_some());
+    }
+
+    #[test]
+    fn task_from_core_exposes_relation_ids_without_nested_payloads() {
+        let mut core = vertebrae_core::Task::new("Task", vertebrae_core::Level::Task);
+        let mut dependent = vertebrae_core::Task::new("Dependent", vertebrae_core::Level::Task);
+        dependent.id = "dependent-id".to_string();
+        core.dependents.push(dependent);
+        let mut child = vertebrae_core::Task::new("Child", vertebrae_core::Level::Task);
+        child.id = "child-id".to_string();
+        core.children.push(child);
+
+        let gui = Task::from(core);
+
+        assert_eq!(gui.dependent_ids, vec!["dependent-id"]);
+        assert_eq!(gui.child_ids, vec!["child-id"]);
     }
 
     // ─── TaskFilterOptions Conversion Tests ─────────────────────────
