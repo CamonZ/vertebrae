@@ -86,6 +86,24 @@ describe("RunHistoryRail (flat run history)", () => {
     expect(screen.getAllByTestId("run-history-row")).toHaveLength(2);
   });
 
+  it("renders the persisted maximum concurrency in run history", () => {
+    const run = createMockTaskRun({
+      id: "run-limited",
+      task_id: "root",
+      max_concurrency: 3,
+    });
+    render(
+      <RunHistoryRail {...baseProps} runs={[run]} activeRunId="run-limited" />
+    );
+
+    expect(
+      screen.getByTestId("run-history-row-max-concurrency")
+    ).toHaveTextContent("max 3");
+    expect(
+      screen.getByTestId("run-history-hero-max-concurrency")
+    ).toHaveTextContent("max 3");
+  });
+
   it("expands the active run into flattened thread nodes", () => {
     const runs = [createMockTaskRun({ id: "run-1", task_id: "root" })];
     render(

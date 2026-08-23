@@ -40,6 +40,7 @@ pub const TASK_RUN_FIELDS: &str = r#"
         task_id
         project_id
         user_id
+        max_concurrency
         status
         started_at
         ended_at
@@ -129,8 +130,8 @@ pub const TASK_RUN_TRACE: &str = r#"
 /// Start or schedule a workflow run for a task.
 /// NOTE: Prepend TASK_RUN_FIELDS when sending.
 pub const RUN_WORKFLOW: &str = r#"
-    mutation RunWorkflow($task_id: Uuid4!) {
-        run_workflow(task_id: $task_id) {
+    mutation RunWorkflow($task_id: Uuid4!, $max_concurrency: Int) {
+        run_workflow(task_id: $task_id, max_concurrency: $max_concurrency) {
             ...TaskRunFields
         }
     }

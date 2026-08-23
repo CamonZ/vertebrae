@@ -1164,7 +1164,11 @@ impl ExecutionService for MockExecutionService {
         })
     }
 
-    async fn run_workflow(&self, task_id: &str) -> ServiceResult<TaskRun> {
+    async fn run_workflow(
+        &self,
+        task_id: &str,
+        max_concurrency: Option<i32>,
+    ) -> ServiceResult<TaskRun> {
         let mut s = self.state.lock().unwrap();
         let has_workflow = s
             .tasks
@@ -1193,6 +1197,7 @@ impl ExecutionService for MockExecutionService {
             project_id: "mock-project".to_string(),
             user_id: None,
             status: TaskRunStatus::Executing,
+            max_concurrency,
             started_at: Some(now),
             ended_at: None,
             stop_requested_at: None,

@@ -13,6 +13,7 @@ function makeRun(overrides: Partial<TaskRun> & { id: string }): TaskRun {
     project_id: overrides.project_id ?? "project-1",
     user_id: null,
     status: overrides.status ?? "waiting",
+    max_concurrency: overrides.max_concurrency ?? null,
     started_at: overrides.started_at ?? "2026-05-08T10:00:00Z",
     ended_at: overrides.ended_at ?? null,
     stop_requested_at: null,

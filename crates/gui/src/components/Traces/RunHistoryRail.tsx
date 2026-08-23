@@ -171,6 +171,10 @@ function formatStartedAt(iso: string | null): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatMaxConcurrency(run: TaskRun): string {
+  return run.max_concurrency == null ? "global" : String(run.max_concurrency);
+}
+
 interface TaskTreeRow {
   task: Task | null;
   taskId: string;
@@ -344,6 +348,9 @@ function RunNode({
           </span>
           <span className="flex items-center gap-1 truncate font-mono text-2xs text-[var(--color-fg-mute)]">
             <span>{formatStartedAt(run.started_at)} ·</span>
+            <span data-testid="run-history-row-max-concurrency">
+              max {formatMaxConcurrency(run)} ·
+            </span>
             <ScanIdentifier
               id={run.id}
               kind="task run"
@@ -757,6 +764,10 @@ export function RunHistoryRail({
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-1 font-mono text-2xs text-[var(--color-fg-soft)]">
               <span>{formatStartedAt(activeRun.started_at)}</span>
+              <span className="text-[var(--color-fg-mute)]">·</span>
+              <span data-testid="run-history-hero-max-concurrency">
+                max {formatMaxConcurrency(activeRun)}
+              </span>
               <span className="text-[var(--color-fg-mute)]">·</span>
               <ScanIdentifier id={activeRun.id} kind="task run" />
             </div>

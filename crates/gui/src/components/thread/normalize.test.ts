@@ -33,6 +33,7 @@ function taskRun(startedAt: string): TaskRun {
     project_id: "proj-1",
     user_id: null,
     status: "executing",
+    max_concurrency: null,
     started_at: startedAt,
     ended_at: null,
     stop_requested_at: null,

@@ -275,7 +275,15 @@ pub trait ExecutionService: Send + Sync {
     async fn task_run_trace(&self, root_task_run_id: &str) -> ServiceResult<TaskRunTrace>;
 
     /// Start or schedule a durable workflow run for a task.
-    async fn run_workflow(&self, task_id: &str) -> ServiceResult<TaskRun>;
+    ///
+    /// `max_concurrency` configures only the root TaskRun. `None` preserves
+    /// Sacrum's global execution-pool default, and child TaskRuns inherit the
+    /// root's effective budget from the backend.
+    async fn run_workflow(
+        &self,
+        task_id: &str,
+        max_concurrency: Option<i32>,
+    ) -> ServiceResult<TaskRun>;
 
     /// Stop a durable TaskRun by explicit run ID or by task ID fallback.
     async fn stop_run(&self, target: StopRunTarget) -> ServiceResult<Option<TaskRun>>;

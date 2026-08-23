@@ -109,6 +109,7 @@ impl SacrumExecutionService {
             task_id: response.task_id.clone(),
             project_id: response.project_id.clone().unwrap_or_default(),
             user_id: response.user_id.clone(),
+            max_concurrency: response.max_concurrency,
             status: TaskRunStatus::parse(&response.status).unwrap_or(TaskRunStatus::Queued),
             started_at: parse_datetime(response.started_at.as_deref()),
             ended_at: parse_datetime(response.ended_at.as_deref()),
@@ -363,9 +364,16 @@ impl ExecutionService for SacrumExecutionService {
         })
     }
 
-    async fn run_workflow(&self, task_id: &str) -> ServiceResult<TaskRun> {
+    async fn run_workflow(
+        &self,
+        task_id: &str,
+        max_concurrency: Option<i32>,
+    ) -> ServiceResult<TaskRun> {
         let query = with_fragments(RUN_WORKFLOW, &[TASK_RUN_FIELDS]);
-        let variables = json!({ "task_id": task_id });
+        let variables = json!({
+            "task_id": task_id,
+            "max_concurrency": max_concurrency,
+        });
 
         let response: TaskRunResponse = self
             .client
@@ -707,6 +715,49 @@ mod tests {
         assert_eq!(exec.task_id, "task-1");
         assert_eq!(exec.status, ExecutionStatus::Completed);
         assert_eq!(exec.model_used.as_deref(), Some("claude-opus"));
+    }
+
+    #[tokio::test]
+    async fn test_run_workflow_serializes_concurrency_and_maps_response() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "run_workflow": {
+                        "id": "run-1",
+                        "task_id": "task-1",
+                        "project_id": "project-1",
+                        "user_id": "user-1",
+                        "max_concurrency": 3,
+                        "status": "queued"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let run = service.run_workflow("task-1", Some(3)).await.unwrap();
+        assert_eq!(run.max_concurrency, Some(3));
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let request: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(request["variables"]["task_id"], "task-1");
+        assert_eq!(request["variables"]["max_concurrency"], 3);
+        assert!(
+            request["query"]
+                .as_str()
+                .unwrap()
+                .contains("max_concurrency")
+        );
+
+        let _run = service.run_workflow("task-1", None).await.unwrap();
+        let requests = server.received_requests().await.unwrap();
+        let omitted_request: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert!(omitted_request["variables"]["max_concurrency"].is_null());
     }
 
     #[tokio::test]

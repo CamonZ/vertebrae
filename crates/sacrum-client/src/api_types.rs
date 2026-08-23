@@ -555,6 +555,8 @@ pub struct TaskRunResponse {
     pub project_id: Option<String>,
     #[serde(default)]
     pub user_id: Option<String>,
+    #[serde(default)]
+    pub max_concurrency: Option<i32>,
     pub status: String,
     #[serde(default)]
     pub started_at: Option<String>,
@@ -1027,6 +1029,7 @@ mod tests {
             "id": "run-1",
             "task_id": "task-1",
             "project_id": "project-1",
+            "max_concurrency": 4,
             "status": "waiting",
             "started_at": "2026-05-07T12:00:00Z",
             "latest_step_execution_id": "exec-1",
@@ -1042,6 +1045,7 @@ mod tests {
         assert_eq!(run.id, "run-1");
         assert_eq!(run.task_id, "task-1");
         assert_eq!(run.project_id.as_deref(), Some("project-1"));
+        assert_eq!(run.max_concurrency, Some(4));
         assert_eq!(run.status, "waiting");
         assert_eq!(run.latest_step_execution_id.as_deref(), Some("exec-1"));
         assert_eq!(
@@ -1060,6 +1064,19 @@ mod tests {
     }
 
     #[test]
+    fn test_task_run_response_deserializes_null_max_concurrency() {
+        let json = r#"{
+            "id": "run-unlimited",
+            "task_id": "task-1",
+            "status": "queued",
+            "max_concurrency": null
+        }"#;
+
+        let run: TaskRunResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(run.max_concurrency, None);
+    }
+
+    #[test]
     fn test_task_run_trace_response_deserialization() {
         let json = r#"{
             "root_task_run_id": "run-root",
@@ -1068,6 +1085,7 @@ mod tests {
                     "id": "run-root",
                     "task_id": "task-root",
                     "project_id": "project-1",
+                    "max_concurrency": 3,
                     "status": "executing",
                     "parent_task_run_id": null,
                     "root_task_run_id": null,
@@ -1077,6 +1095,7 @@ mod tests {
                     "id": "run-child",
                     "task_id": "task-child",
                     "project_id": "project-1",
+                    "max_concurrency": 3,
                     "status": "queued",
                     "parent_task_run_id": "run-root",
                     "root_task_run_id": "run-root",
@@ -1105,6 +1124,8 @@ mod tests {
         let trace: TaskRunTraceResponse = serde_json::from_str(json).unwrap();
         assert_eq!(trace.root_task_run_id, "run-root");
         assert_eq!(trace.task_runs.len(), 2);
+        assert_eq!(trace.task_runs[0].max_concurrency, Some(3));
+        assert_eq!(trace.task_runs[1].max_concurrency, Some(3));
         assert_eq!(
             trace.task_runs[1].parent_task_run_id.as_deref(),
             Some("run-root")

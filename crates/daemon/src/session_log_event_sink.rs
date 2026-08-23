@@ -193,7 +193,11 @@ mod tests {
             unused()
         }
 
-        async fn run_workflow(&self, _task_id: &str) -> ServiceResult<TaskRun> {
+        async fn run_workflow(
+            &self,
+            _task_id: &str,
+            _max_concurrency: Option<i32>,
+        ) -> ServiceResult<TaskRun> {
             unused()
         }
 

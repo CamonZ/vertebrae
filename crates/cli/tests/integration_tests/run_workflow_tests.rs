@@ -63,6 +63,7 @@ mod run_workflow_command_tests {
         let services = mock_services();
         let cmd = RunWorkflowCommand {
             task_id: "nonexistent-task-id".to_string(),
+            max_concurrency: None,
         };
 
         let result = cmd.execute(&services).await;
@@ -94,6 +95,7 @@ mod run_workflow_command_tests {
 
         let cmd = RunWorkflowCommand {
             task_id: task_id.clone(),
+            max_concurrency: None,
         };
         let result = cmd.execute(&services).await;
         assert!(result.is_err());
@@ -120,6 +122,7 @@ mod run_workflow_command_tests {
 
         let cmd = RunWorkflowCommand {
             task_id: task_id.clone(),
+            max_concurrency: None,
         };
         let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -140,6 +143,27 @@ mod run_workflow_command_tests {
             "Expected message to contain latest step execution ID, got: {}",
             msg
         );
+        assert!(
+            msg.contains("maxConcurrency=null"),
+            "Expected omitted max concurrency to remain null, got: {}",
+            msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_workflow_surfaces_requested_max_concurrency() {
+        let services = mock_services();
+        let (task_id, _) = create_task_with_workflow(&services, "Limited task").await;
+
+        let cmd = RunWorkflowCommand {
+            task_id,
+            max_concurrency: Some(2),
+        };
+        let result = cmd.execute_result(&services).await.unwrap();
+        assert_eq!(result.max_concurrency, Some(2));
+
+        let human = cmd.execute(&services).await.unwrap();
+        assert!(human.contains("maxConcurrency=2"), "human output: {human}");
     }
 
     #[tokio::test]
@@ -149,6 +173,7 @@ mod run_workflow_command_tests {
 
         let run_msg = RunWorkflowCommand {
             task_id: task_id.clone(),
+            max_concurrency: None,
         }
         .execute(&services)
         .await
@@ -216,7 +241,7 @@ mod run_workflow_command_tests {
         let display = detail.to_string();
         assert!(
             display.contains(&format!(
-                "Run: executing taskRun={} latestStep={}",
+                "Run: executing taskRun={} maxConcurrency=null latestStep={}",
                 active_run.id,
                 active_run.latest_step_execution_id.as_deref().unwrap()
             )),
@@ -241,7 +266,10 @@ mod run_workflow_command_tests {
         .await
         .unwrap();
         assert!(
-            stop_msg.contains(&format!("Stopped run: stopping taskRun={}", active_run.id)),
+            stop_msg.contains(&format!(
+                "Stopped run: stopping taskRun={} maxConcurrency=null",
+                active_run.id
+            )),
             "stop should prefer active TaskRun ID, got: {}",
             stop_msg
         );
@@ -252,6 +280,7 @@ mod run_workflow_command_tests {
         let services = mock_services();
         let cmd = RunWorkflowCommand {
             task_id: "".to_string(),
+            max_concurrency: None,
         };
 
         let result = cmd.execute(&services).await;
@@ -265,8 +294,14 @@ mod run_workflow_command_tests {
         let (task1_id, _) = create_task_with_workflow(&services, "First orchestration task").await;
         let (task2_id, _) = create_task_with_workflow(&services, "Second orchestration task").await;
 
-        let cmd1 = RunWorkflowCommand { task_id: task1_id };
-        let cmd2 = RunWorkflowCommand { task_id: task2_id };
+        let cmd1 = RunWorkflowCommand {
+            task_id: task1_id,
+            max_concurrency: None,
+        };
+        let cmd2 = RunWorkflowCommand {
+            task_id: task2_id,
+            max_concurrency: None,
+        };
 
         let result1 = cmd1.execute(&services).await;
         let result2 = cmd2.execute(&services).await;
@@ -299,6 +334,7 @@ mod run_workflow_command_tests {
 
         let cmd = RunWorkflowCommand {
             task_id: task_id.clone(),
+            max_concurrency: None,
         };
         let result = cmd.execute(&services).await;
 
