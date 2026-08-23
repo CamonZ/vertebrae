@@ -269,7 +269,7 @@ export interface AgentMessage extends BaseMessage {
 }
 
 /**
- * A terminal wait message for `wait_for_children`. Rendered with the yellow
+ * A terminal wait message for `wait_for_children`. Rendered with the amber
  * "wait" treatment and an animated flow bar. Optional `childRunIds` become
  * navigable links to OTHER Runs — they are NEVER inlined as a child subtree
  * (constraint #3).
