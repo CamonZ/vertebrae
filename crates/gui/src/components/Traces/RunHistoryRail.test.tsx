@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { RunHistoryRail } from "./RunHistoryRail";
 import { createMockTask, createMockTaskRun } from "../../test/test-utils";
 import type { Thread } from "../thread/types";
@@ -102,97 +102,6 @@ describe("RunHistoryRail (flat run history)", () => {
     expect(
       screen.getByTestId("run-history-hero-max-concurrency")
     ).toHaveTextContent("max 3");
-  });
-
-  it("shows and edits the next run maximum concurrency in the run detail", async () => {
-    const onRunWorkflow = vi.fn().mockResolvedValue(undefined);
-    const task = createMockTask({
-      id: "root",
-      workflow_id: "workflow-1",
-      run_controls: {
-        runnable: true,
-        stoppable: false,
-        disabled_reason_code: null,
-        disabled_reason: null,
-        active_run: null,
-      },
-    });
-    render(
-      <RunHistoryRail
-        {...baseProps}
-        currentTask={task}
-        runs={[]}
-        activeRunId={null}
-        onRunWorkflow={onRunWorkflow}
-      />
-    );
-
-    const input = screen.getByTestId("run-history-max-concurrency");
-    expect(input).toHaveAttribute("placeholder", "∞");
-    fireEvent.change(input, { target: { value: "4" } });
-    fireEvent.click(screen.getByTestId("run-history-run-button"));
-
-    await waitFor(() => expect(onRunWorkflow).toHaveBeenCalledWith(4));
-  });
-
-  it("uses the global execution limit when the editor is blank", async () => {
-    const onRunWorkflow = vi.fn().mockResolvedValue(undefined);
-    const task = createMockTask({
-      id: "root",
-      workflow_id: "workflow-1",
-      run_controls: {
-        runnable: true,
-        stoppable: false,
-        disabled_reason_code: null,
-        disabled_reason: null,
-        active_run: null,
-      },
-    });
-    render(
-      <RunHistoryRail
-        {...baseProps}
-        currentTask={task}
-        runs={[]}
-        activeRunId={null}
-        onRunWorkflow={onRunWorkflow}
-      />
-    );
-
-    fireEvent.click(screen.getByTestId("run-history-run-button"));
-
-    await waitFor(() => expect(onRunWorkflow).toHaveBeenCalledWith(null));
-  });
-
-  it("rejects an invalid maximum concurrency before starting a run", () => {
-    const onRunWorkflow = vi.fn().mockResolvedValue(undefined);
-    const task = createMockTask({
-      id: "root",
-      workflow_id: "workflow-1",
-      run_controls: {
-        runnable: true,
-        stoppable: false,
-        disabled_reason_code: null,
-        disabled_reason: null,
-        active_run: null,
-      },
-    });
-    render(
-      <RunHistoryRail
-        {...baseProps}
-        currentTask={task}
-        runs={[]}
-        activeRunId={null}
-        onRunWorkflow={onRunWorkflow}
-      />
-    );
-
-    fireEvent.change(screen.getByTestId("run-history-max-concurrency"), {
-      target: { value: "0" },
-    });
-    fireEvent.click(screen.getByTestId("run-history-run-button"));
-
-    expect(onRunWorkflow).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent("positive integer");
   });
 
   it("expands the active run into flattened thread nodes", () => {

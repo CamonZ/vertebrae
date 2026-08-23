@@ -116,6 +116,17 @@ function formatDateTime(isoString: string | null): string {
   }
 }
 
+function parseMaxConcurrency(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!/^\d+$/.test(trimmed)) return undefined;
+
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647
+    ? parsed
+    : undefined;
+}
+
 function DetailRow({
   label,
   children,
@@ -185,6 +196,7 @@ export function TaskDetailPanel({
   const [isWorkflowRunRequested, setIsWorkflowRunRequested] = useState(false);
   const [isStoppingWorkflow, setIsStoppingWorkflow] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
+  const [maxConcurrencyInput, setMaxConcurrencyInput] = useState("");
 
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const taskLocation = useTaskLocation(taskData);
@@ -198,6 +210,7 @@ export function TaskDetailPanel({
   }, [activeRun, isWorkflowRunRequested]);
   useEffect(() => {
     setIsWorkflowRunRequested(false);
+    setMaxConcurrencyInput("");
   }, [taskId]);
   const { stepExecutions: activeRunExecutions } = useRunTrace(
     taskId,
@@ -513,13 +526,16 @@ export function TaskDetailPanel({
 
   const handleRunWorkflow = useCallback(async () => {
     if (!taskData?.id) return;
+    const maxConcurrency = parseMaxConcurrency(maxConcurrencyInput);
+    if (maxConcurrency === undefined) {
+      setWorkflowError("Max concurrency must be a positive integer.");
+      return;
+    }
     setIsRunningWorkflow(true);
     setIsWorkflowRunRequested(true);
     setWorkflowError(null);
     try {
-      // Concurrency is configured from the TaskRun detail surface. Keep this
-      // compact task-header action as the global-limit shortcut.
-      const result = await commands.runWorkflow(taskData.id, null);
+      const result = await commands.runWorkflow(taskData.id, maxConcurrency);
       if (result.status === "error") {
         setWorkflowError(result.error.message);
         setIsWorkflowRunRequested(false);
@@ -536,7 +552,7 @@ export function TaskDetailPanel({
     } finally {
       setIsRunningWorkflow(false);
     }
-  }, [taskData?.id]);
+  }, [maxConcurrencyInput, taskData?.id]);
 
   const handleStopWorkflow = useCallback(async () => {
     if (!taskData?.id) return;
@@ -587,6 +603,11 @@ export function TaskDetailPanel({
       !isRunningWorkflow &&
       !isWorkflowRunRequested);
   const isPendingReview = humanInputGate !== null;
+  const showMaxConcurrencyInput = Boolean(
+    taskLocation.workflowId &&
+      !runControlsState.hasActiveRun &&
+      !isWorkflowRunRequested
+  );
 
   const deleteConfirmation =
     taskData && isDeleteDialogOpen ? (
@@ -630,7 +651,7 @@ export function TaskDetailPanel({
             onClick={handleRunWorkflow}
             disabled={runWorkflowDisabled}
             ariaLabel="Run entire workflow"
-            title="Run the entire workflow for this task with the global concurrency limit"
+            title="Run the entire workflow for this task"
           >
             {isRunningWorkflow ? (
               <Spinner className="h-3.5 w-3.5" />
@@ -832,12 +853,38 @@ export function TaskDetailPanel({
                   : undefined
               }
               right={
-                activeRun || children.length > 0 ? (
+                activeRun || children.length > 0 || showMaxConcurrencyInput ? (
                   <span className="flex items-center gap-2 font-mono text-2xs text-[var(--color-fg-faint)]">
                     {activeRun && (
                       <span data-testid="task-detail-run-max-concurrency">
                         max concurrency: {activeRun.max_concurrency ?? "global"}
                       </span>
+                    )}
+                    {showMaxConcurrencyInput && (
+                      <label
+                        htmlFor="task-detail-max-concurrency"
+                        className="flex items-center gap-1 font-mono text-[length:var(--text-9)] uppercase tracking-wider text-[var(--color-fg-mute)]"
+                        title="Leave blank to use Sacrum's global execution limit"
+                      >
+                        <span className="sr-only">Maximum concurrency</span>
+                        <input
+                          id="task-detail-max-concurrency"
+                          data-testid="task-detail-max-concurrency"
+                          type="number"
+                          min={1}
+                          max={2147483647}
+                          step={1}
+                          inputMode="numeric"
+                          value={maxConcurrencyInput}
+                          onChange={(event) =>
+                            setMaxConcurrencyInput(event.target.value)
+                          }
+                          placeholder="∞"
+                          aria-label="Maximum concurrency"
+                          className="h-7 w-14 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-1.5 text-center font-mono text-2xs text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] focus:border-[var(--color-accent)] focus:outline-none"
+                          disabled={runWorkflowDisabled}
+                        />
+                      </label>
                     )}
                     {children.length > 0 && (
                       <span>

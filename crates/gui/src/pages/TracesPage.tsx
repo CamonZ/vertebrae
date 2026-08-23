@@ -37,7 +37,6 @@ import { useShellHeader } from "../hooks/useShellHeader";
 import { runToThreads, type ThreadModel } from "../components/thread";
 import { computeExecutionRollups } from "../utils";
 import { isEditableShortcutTarget } from "../utils/keyboard";
-import { upsertTaskRunInQueryCache } from "../query";
 
 function taskChildrenFilter(parentId: string): TaskFilterOptions {
   return {
@@ -384,22 +383,8 @@ export function TracesPage(): ReactNode {
     [setSearchParams]
   );
 
-  const handleRunWorkflow = useCallback(
-    async (maxConcurrency: number | null): Promise<void> => {
-      if (!currentTaskId) return;
-      const result = await commands.runWorkflow(currentTaskId, maxConcurrency);
-      if (result.status === "error") {
-        throw new Error(result.error.message);
-      }
-      // Seed the authoritative mutation result while the realtime event
-      // updates the task's server-derived run_controls projection.
-      upsertTaskRunInQueryCache(result.data);
-    },
-    [currentTaskId]
-  );
-
   const showPickerRail = !taskId || pickerInRail;
-  const showRunHistoryRail = Boolean(currentTaskId);
+  const showRunHistoryRail = runs.length > 0;
 
   const headerError = taskId ? (taskError ?? runsError ?? traceError) : null;
   const headerLoading = taskId
@@ -445,7 +430,6 @@ export function TracesPage(): ReactNode {
             runs={runs}
             tasks={traceTasks}
             currentTaskId={currentTaskId}
-            currentTask={task}
             activeRunId={activeRunId}
             activeRunSource={activeRunSource}
             activeRunThreads={threads}
@@ -453,7 +437,6 @@ export function TracesPage(): ReactNode {
             onJump={jumpTo}
             onSelectTask={handleSelectTreeTask}
             onSelectRun={handleSelectRun}
-            onRunWorkflow={handleRunWorkflow}
             onSwitchTask={() => setPickerInRail(true)}
             collapsed={railCollapsed}
             onToggleCollapsed={handleToggleRail}
