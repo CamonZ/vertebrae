@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 interface PanelPresence {
   /** Render the panel node while true (stays true through the exit animation). */
@@ -10,7 +16,10 @@ interface PanelPresence {
    * the node unmounts — so the panel stays mounted for the *full* animation
    * regardless of render/timer timing.
    */
-  onAnimationEnd: (event: { target: EventTarget; currentTarget: EventTarget }) => void;
+  onAnimationEnd: (event: {
+    target: EventTarget;
+    currentTarget: EventTarget;
+  }) => void;
 }
 
 /**
@@ -26,9 +35,10 @@ export function usePanelExitTransition(
   open: boolean,
   durationMs: number
 ): PanelPresence {
-  const [presence, setPresence] = useState<{ mounted: boolean; closing: boolean }>(
-    { mounted: open, closing: false }
-  );
+  const [presence, setPresence] = useState<{
+    mounted: boolean;
+    closing: boolean;
+  }>({ mounted: open, closing: false });
   const timer = useRef<number | null>(null);
   const mountedRef = useRef(presence.mounted);
   mountedRef.current = presence.mounted;
@@ -47,7 +57,7 @@ export function usePanelExitTransition(
     setPresence((p) => (p.closing ? { mounted: false, closing: false } : p));
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (open) {
       clearTimer();
       setPresence({ mounted: true, closing: false });

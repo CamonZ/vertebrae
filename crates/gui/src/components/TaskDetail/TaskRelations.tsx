@@ -1,7 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { commands } from '../../bindings';
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { commands } from "../../bindings";
+import { useTasks } from "../../hooks/useTasks";
 import { NavigableReference, ScanIdentifier } from '../shared/EntityId';
 import { Badge } from '../atoms/Badge';
 
@@ -105,31 +106,11 @@ function RelationSection({
  * Hook to fetch available tasks
  */
 function useAvailableTasks(taskId: string) {
-  const [availableTasks, setAvailableTasks] = useState<TaskOption[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchTasks = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const result = await commands.listTasks(null);
-        if (result.status === 'ok') {
-          // Filter out current task
-          const filtered = result.data.filter((t) => t.id !== taskId);
-          setAvailableTasks(filtered);
-        } else {
-          setError(result.error.message);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch tasks');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchTasks();
-  }, [taskId]);
+  const { tasks, isLoading, error } = useTasks();
+  const availableTasks = useMemo<TaskOption[]>(
+    () => tasks.filter((task) => task.id !== taskId),
+    [taskId, tasks]
+  );
 
   return { availableTasks, isLoading, error };
 }
@@ -441,7 +422,7 @@ export function TaskRelations({
     } finally {
       setIsSaving(false);
     }
-  }, [taskId, dependsOnIds, onRelationshipChange]);
+  }, [taskId, onRelationshipChange]);
 
   // Handle keyboard escape
   useEffect(() => {

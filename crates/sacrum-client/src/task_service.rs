@@ -295,6 +295,27 @@ impl SacrumTaskService {
 
         variables
     }
+
+    async fn fetch_task_list(&self, filter: &TaskFilter) -> ServiceResult<Vec<TaskResponse>> {
+        let variables = self.filter_to_variables(filter);
+        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_LIST_FIELDS]);
+        Ok(self.client.execute(&query, variables, "tasks").await?)
+    }
+
+    async fn list_tasks_with_optional_lookups(
+        &self,
+        filter: &TaskFilter,
+        workflow_names: Option<&HashMap<String, String>>,
+        step_names: Option<&HashMap<String, String>>,
+        step_types: Option<&HashMap<String, StepType>>,
+    ) -> ServiceResult<Vec<Task>> {
+        let responses = self.fetch_task_list(filter).await?;
+
+        responses
+            .iter()
+            .map(|t| self.response_to_task_with_lookups(t, workflow_names, step_names, step_types))
+            .collect()
+    }
 }
 
 fn parse_level(s: &str) -> Option<Level> {
@@ -701,10 +722,7 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
-        let variables = self.filter_to_variables(filter);
-
-        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_FIELDS]);
-        let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
+        let responses = self.fetch_task_list(filter).await?;
 
         // Fetch lookups once for all tasks
         let (workflow_names, step_names, step_types) =
@@ -712,15 +730,20 @@ impl TaskService for SacrumTaskService {
 
         responses
             .iter()
-            .map(|t| {
+            .map(|task| {
                 self.response_to_task_with_lookups(
-                    t,
+                    task,
                     Some(&workflow_names),
                     Some(&step_names),
                     Some(&step_types),
                 )
             })
             .collect()
+    }
+
+    async fn list_tasks_without_lookups(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
+        self.list_tasks_with_optional_lookups(filter, None, None, None)
+            .await
     }
 
     async fn list_tasks_with_lookups(
@@ -730,15 +753,8 @@ impl TaskService for SacrumTaskService {
         step_names: Option<&HashMap<String, String>>,
         step_types: Option<&HashMap<String, StepType>>,
     ) -> ServiceResult<Vec<Task>> {
-        let variables = self.filter_to_variables(filter);
-
-        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_FIELDS]);
-        let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
-
-        responses
-            .iter()
-            .map(|t| self.response_to_task_with_lookups(t, workflow_names, step_names, step_types))
-            .collect()
+        self.list_tasks_with_optional_lookups(filter, workflow_names, step_names, step_types)
+            .await
     }
 
     async fn list_ready(&self) -> ServiceResult<Vec<Task>> {
@@ -1464,6 +1480,27 @@ mod tests {
     }
 
     #[test]
+    fn test_response_to_task_preserves_list_timestamp_and_defaults_detail_fields() {
+        let service = SacrumTaskService::new(create_test_client());
+        let mut response = make_task_response("task-list", "List Task");
+        response.updated_at = Some("2026-08-23T12:34:56Z".to_string());
+
+        let task = service.response_to_task(&response).unwrap();
+
+        assert_eq!(task.title, "List Task");
+        assert_eq!(
+            task.updated_at.unwrap().to_rfc3339(),
+            "2026-08-23T12:34:56+00:00"
+        );
+        assert!(task.description.is_none());
+        assert!(task.sections.is_empty());
+        assert!(task.code_refs.is_empty());
+        assert!(task.worktree.is_none());
+        assert!(task.rejection_reason.is_none());
+        assert!(task.dependency_ids.is_empty());
+    }
+
+    #[test]
     fn test_parse_level() {
         assert_eq!(parse_level("epic"), Some(Level::Epic));
         assert_eq!(parse_level("ticket"), Some(Level::Ticket));
@@ -2020,13 +2057,16 @@ mod tests {
     async fn test_list_tasks_success() {
         let server = MockServer::start().await;
 
+        let mut first_task = gql_task_data("task-1", "First");
+        first_task["description"] = json!("Searchable list description");
+
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_string_contains("ListTasks"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
                     "tasks": [
-                        gql_task_data("task-1", "First"),
+                        first_task,
                         gql_task_data("task-2", "Second")
                     ]
                 }
@@ -2040,7 +2080,131 @@ mod tests {
 
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].title, "First");
+        assert_eq!(
+            tasks[0].description.as_deref(),
+            Some("Searchable list description")
+        );
         assert_eq!(tasks[1].title, "Second");
+
+        let bodies = captured_graphql_bodies(&server).await;
+        let query = bodies
+            .iter()
+            .find(|body| body["query"].as_str().unwrap().contains("ListTasks"))
+            .and_then(|body| body["query"].as_str())
+            .expect("list_tasks should send a ListTasks request");
+        assert!(query.contains("fragment TaskListFields on Task"));
+        assert!(query.contains("...TaskListFields"));
+        assert!(!query.contains("fragment TaskFields on Task"));
+        for detail_field in ["sections", "code_refs", "worktree"] {
+            assert!(
+                !query.contains(detail_field),
+                "list query requested {detail_field}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_list_tasks_with_lookups_preserves_cli_names() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "Named task");
+        task_data["workflow_id"] = json!("workflow-1");
+        task_data["current_step_id"] = json!("step-1");
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListTasks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "tasks": [task_data] }
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListWorkflows"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "workflows": [{
+                        "id": "workflow-1",
+                        "name": "Implementation",
+                        "workflow_steps": [{
+                            "id": "step-1",
+                            "name": "Review",
+                            "step_type": "review",
+                            "step_order": 0
+                        }]
+                    }]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let tasks = service.list_tasks(&TaskFilter::default()).await.unwrap();
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].workflow_name.as_deref(), Some("Implementation"));
+        assert_eq!(tasks[0].step_name.as_deref(), Some("Review"));
+        assert_eq!(tasks[0].workflow_id.as_deref(), Some("workflow-1"));
+        assert_eq!(tasks[0].current_step_id.as_deref(), Some("step-1"));
+
+        let bodies = captured_graphql_bodies(&server).await;
+        assert_eq!(bodies.len(), 2);
+        assert!(bodies[0]["query"].as_str().unwrap().contains("ListTasks"));
+        assert!(
+            bodies[1]["query"]
+                .as_str()
+                .unwrap()
+                .contains("ListWorkflows")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_tasks_without_lookups_skips_workflow_query_and_keeps_summary_state() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "Summary task");
+        task_data["workflow_id"] = json!("workflow-1");
+        task_data["current_step_id"] = json!("step-1");
+        task_data["run_controls"] = json!({
+            "runnable": false,
+            "stoppable": true,
+            "disabled_reason_code": "blocked",
+            "disabled_reason": "Task has incomplete blockers",
+            "active_run": null
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListTasks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "tasks": [task_data] }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let tasks = service
+            .list_tasks_without_lookups(&TaskFilter::default())
+            .await
+            .unwrap();
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, "task-1");
+        assert_eq!(tasks[0].workflow_id.as_deref(), Some("workflow-1"));
+        assert_eq!(tasks[0].current_step_id.as_deref(), Some("step-1"));
+        let controls = tasks[0].run_controls.as_ref().unwrap();
+        assert!(!controls.runnable);
+        assert!(controls.stoppable);
+        assert_eq!(controls.disabled_reason_code.as_deref(), Some("blocked"));
+
+        let bodies = captured_graphql_bodies(&server).await;
+        assert_eq!(
+            bodies.len(),
+            1,
+            "no-lookup listing must not fetch workflows"
+        );
+        assert!(bodies[0]["query"].as_str().unwrap().contains("ListTasks"));
     }
 
     #[tokio::test]

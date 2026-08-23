@@ -4,6 +4,7 @@ import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import {
   errorMessage,
   hydrateActiveTaskRunsFromTasks,
+  normalizeTaskFilter,
   queryClient,
   queryKeys,
   unwrapCommand,
@@ -37,7 +38,7 @@ function preferCurrentTaskWhenNewer(fetched: Task, current: Task): Task {
  * TanStack Query owns the server-state cache for task list data.
  */
 export function useTasks(filter?: TaskFilterOptions) {
-  const activeFilter = filter ?? null;
+  const activeFilter = normalizeTaskFilter(filter);
   const projectScopeGeneration = useProjectScopeGeneration();
   const queryKey = queryKeys.tasks.list(projectScopeGeneration, activeFilter);
 

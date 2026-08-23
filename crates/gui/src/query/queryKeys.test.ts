@@ -1,8 +1,44 @@
 import { describe, expect, it } from "vitest";
 import type { TaskFilterOptions } from "../bindings";
-import { queryKeys } from "./queryKeys";
+import { normalizeTaskFilter, queryKeys } from "./queryKeys";
 
 describe("queryKeys", () => {
+  it("canonicalizes null and all-null task filters", () => {
+    const emptyFilter: TaskFilterOptions = {
+      step_names: null,
+      levels: null,
+      tags: null,
+      root_only: null,
+      children_of: null,
+      search: null,
+      workflow_id: null,
+      step_id: null,
+    };
+
+    expect(normalizeTaskFilter(undefined)).toBeNull();
+    expect(normalizeTaskFilter(emptyFilter)).toBeNull();
+    expect(queryKeys.tasks.list(3, emptyFilter)).toEqual(
+      queryKeys.tasks.list(3, null)
+    );
+  });
+
+  it("keeps non-empty task filters distinct", () => {
+    const filter: TaskFilterOptions = {
+      levels: ["ticket"],
+      search: null,
+      step_names: null,
+      tags: null,
+      root_only: null,
+      children_of: null,
+      workflow_id: null,
+      step_id: null,
+    };
+
+    expect(queryKeys.tasks.list(3, filter)).not.toEqual(
+      queryKeys.tasks.list(3, null)
+    );
+  });
+
   it("builds project-scoped task keys", () => {
     const filter: TaskFilterOptions = {
       levels: ["ticket"],

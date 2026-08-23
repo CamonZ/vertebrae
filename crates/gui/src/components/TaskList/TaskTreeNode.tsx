@@ -1,9 +1,8 @@
 import { useCallback, useMemo } from "react";
-import type { Task, TaskRunStatus } from "../../bindings";
+import type { Task, TaskRun, TaskRunStatus } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import type { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
-import { useActiveTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { computeVisibleChildren } from "../../utils/computeVisibleChildren";
 import { formatRelative } from "../../utils/formatRelative";
 import { getPriorityIndicator } from "../../utils/taskPriority";
@@ -32,6 +31,7 @@ interface TaskTreeNodeProps {
   hideCompleted?: boolean;
   filtering?: boolean;
   summaryExpanded?: ReturnType<typeof useSummaryExpanded>;
+  activeRunsByTaskId: ReadonlyMap<string, TaskRun>;
 }
 
 /**
@@ -181,12 +181,9 @@ export function TaskTreeNode({
   hideCompleted = false,
   filtering = false,
   summaryExpanded,
+  activeRunsByTaskId,
 }: TaskTreeNodeProps) {
   const task = node.task;
-  const { activeRunsByTaskId } = useActiveTaskRunsForTasks([
-    task.id,
-    ...node.children.map((child) => child.task.id),
-  ]);
   const hasChildren = node.children.length > 0;
   const isSelected = selectedTaskId === task.id;
   const isExpanded = expandedNodes
@@ -218,7 +215,11 @@ export function TaskTreeNode({
   const tags = task.tags ?? [];
   const childLine = task.level === "task" ? null : childSummary(node);
   const breakdown = useMemo(
-    () => deriveHearthStateBreakdown(node.children.map((child) => child.task), activeRunsByTaskId),
+    () =>
+      deriveHearthStateBreakdown(
+        node.children.map((child) => child.task),
+        activeRunsByTaskId
+      ),
     [activeRunsByTaskId, node.children]
   );
   const hasBreakdown = hasHearthStateBreakdown(breakdown);
@@ -395,6 +396,7 @@ export function TaskTreeNode({
                 selectedTaskId={selectedTaskId}
                 onTaskSelect={onTaskSelect}
                 expandedNodes={expandedNodes}
+                activeRunsByTaskId={activeRunsByTaskId}
                 hideCompleted={hideCompleted}
                 filtering={filtering}
                 summaryExpanded={summaryExpanded}

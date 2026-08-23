@@ -15,7 +15,9 @@ export function useTaskArtifacts(taskId: string | null | undefined) {
     queryKey: queryKeys.artifacts.task(generation, taskId ?? ""),
     enabled: Boolean(taskId),
     queryFn: async () => {
-      const artifacts = await unwrapCommand(commands.listTaskArtifacts(taskId!));
+      const artifacts = await unwrapCommand(
+        commands.listTaskArtifacts(taskId!)
+      );
       return isCurrentProjectScopeGeneration(generation) ? artifacts : [];
     },
   });

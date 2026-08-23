@@ -93,11 +93,45 @@ pub const TASK_SUMMARY_FIELDS: &str = r#"
     }
 "#;
 
+/// Slim fragment for the task list. Keep this separate from TASK_FIELDS so
+/// list callers do not load relationships or other detail-only associations.
+/// Description is included because list surfaces such as the traces picker
+/// support client-side description search.
+pub const TASK_LIST_FIELDS: &str = r#"
+    fragment TaskListFields on Task {
+        id
+        project_id
+        title
+        description
+        level
+        priority
+        tags
+        workflow_id
+        current_step_id
+        archived
+        parent_id
+        completed_at
+        updated_at
+        run_controls {
+            runnable
+            stoppable
+            disabled_reason_code
+            disabled_reason
+            active_run {
+                id
+                task_id
+                status
+                latest_step_execution_id
+            }
+        }
+    }
+"#;
+
 /// Slim fragment for ready tasks. Keep active run state for RunConsole.
 pub const READY_TASK_FIELDS: &str = TASK_SUMMARY_FIELDS;
 
 /// List tasks with optional filters.
-/// NOTE: Prepend TASK_FIELDS when sending.
+/// NOTE: Prepend TASK_LIST_FIELDS when sending.
 pub const LIST_TASKS: &str = r#"
     query ListTasks(
         $project_id: Uuid4!,
@@ -127,7 +161,7 @@ pub const LIST_TASKS: &str = r#"
             blocked: $blocked,
             includeArchived: $includeArchived
         ) {
-            ...TaskFields
+            ...TaskListFields
         }
     }
 "#;
@@ -524,6 +558,62 @@ mod tests {
     #[test]
     fn task_fields_do_not_request_unused_short_id() {
         assert!(!TASK_FIELDS.contains("short_id"));
+    }
+
+    #[test]
+    fn task_list_fields_include_list_contract_without_detail_associations() {
+        let query = compact_graphql(TASK_LIST_FIELDS);
+
+        for field in [
+            "id",
+            "project_id",
+            "title",
+            "description",
+            "level",
+            "priority",
+            "tags",
+            "workflow_id",
+            "current_step_id",
+            "archived",
+            "parent_id",
+            "completed_at",
+            "updated_at",
+            "runnable",
+            "stoppable",
+            "disabled_reason_code",
+            "active_run",
+        ] {
+            assert!(query.contains(field), "list fragment is missing {field}");
+        }
+
+        for detail_field in [
+            "sections",
+            "code_refs",
+            "worktree",
+            "rejection_reason",
+            "started_at",
+            "inserted_at",
+        ] {
+            assert!(
+                !query.contains(detail_field),
+                "list fragment unexpectedly requests {detail_field}"
+            );
+        }
+    }
+
+    #[test]
+    fn list_tasks_uses_only_the_slim_fragment() {
+        let query = compact_graphql(LIST_TASKS);
+
+        assert!(query.contains("...TaskListFields"));
+        assert!(!query.contains("...TaskFields"));
+    }
+
+    #[test]
+    fn full_task_fragment_remains_detail_complete() {
+        for field in ["description", "sections", "code_refs", "worktree"] {
+            assert!(TASK_FIELDS.contains(field), "full fragment lost {field}");
+        }
     }
 
     #[test]

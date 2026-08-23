@@ -343,11 +343,7 @@ describe("Router Acceptance Tests", () => {
       );
 
       await waitFor(() => {
-        expect(commands.listTasks).toHaveBeenCalledWith(
-          expect.objectContaining({
-            step_names: null,
-          })
-        );
+        expect(commands.listTasks).toHaveBeenCalledWith(null);
       });
       expect(commands.listTasks).toHaveBeenLastCalledWith(
         expect.not.objectContaining({

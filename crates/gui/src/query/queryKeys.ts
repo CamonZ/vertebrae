@@ -1,5 +1,13 @@
 import type { TaskFilterOptions } from "../bindings";
 
+/** Collapse equivalent unfiltered filters to one project-scoped cache key. */
+export function normalizeTaskFilter(
+  filter: TaskFilterOptions | null | undefined
+): TaskFilterOptions | null {
+  if (!filter) return null;
+  return Object.values(filter).every((value) => value === null) ? null : filter;
+}
+
 export const queryKeys = {
   project: (generation: number) => ["project", generation] as const,
   tasks: {
@@ -7,8 +15,11 @@ export const queryKeys = {
       [...queryKeys.project(generation), "tasks"] as const,
     lists: (generation: number) =>
       [...queryKeys.tasks.all(generation), "list"] as const,
-    list: (generation: number, filter: TaskFilterOptions | null) =>
-      [...queryKeys.tasks.lists(generation), filter] as const,
+    list: (generation: number, filter: TaskFilterOptions | null | undefined) =>
+      [
+        ...queryKeys.tasks.lists(generation),
+        normalizeTaskFilter(filter),
+      ] as const,
     ready: (generation: number) =>
       [...queryKeys.tasks.all(generation), "ready"] as const,
     details: (generation: number) =>

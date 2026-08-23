@@ -9,7 +9,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 import type { TaskFilterOptions, Task, TaskLevel } from "../bindings";
 import { useTasks } from "../hooks/useTasks";
-import { useActiveTaskRunsForTasks } from "../hooks/useTaskRuns";
+import { activeRunsFromTasks } from "../hooks/useTaskRuns";
 import {
   buildTreeFromTasks,
   collectExpandableIds,
@@ -81,7 +81,11 @@ const INITIAL_FILTERS: TaskFilterOptions = {
   step_id: null,
 };
 
-function matchesScope(task: Task, scope: TaskScope, activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>): boolean {
+function matchesScope(
+  task: Task,
+  scope: TaskScope,
+  activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>
+): boolean {
   const status = activeRuns.get(task.id)?.status ?? null;
 
   switch (scope) {
@@ -90,7 +94,7 @@ function matchesScope(task: Task, scope: TaskScope, activeRuns: ReadonlyMap<stri
     case "waiting":
       return status === "waiting";
     case "blocked":
-      return (task.dependency_ids?.length ?? 0) > 0;
+      return task.run_controls?.disabled_reason_code === "blocked";
     case "recent": {
       const updated = task.updated_at
         ? new Date(task.updated_at).getTime()
@@ -107,7 +111,11 @@ function matchesScope(task: Task, scope: TaskScope, activeRuns: ReadonlyMap<stri
   }
 }
 
-function deriveScopedTasks(tasks: Task[], scope: TaskScope, activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>): Task[] {
+function deriveScopedTasks(
+  tasks: Task[],
+  scope: TaskScope,
+  activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>
+): Task[] {
   if (scope === "all") return tasks;
 
   const byId = new Map(tasks.map((task) => [task.id, task]));
@@ -129,7 +137,10 @@ function deriveScopedTasks(tasks: Task[], scope: TaskScope, activeRuns: Readonly
   return tasks.filter((task) => include.has(task.id));
 }
 
-function scopeCounts(tasks: Task[], activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>) {
+function scopeCounts(
+  tasks: Task[],
+  activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>
+) {
   return tasks.reduce(
     (counts, task) => {
       COUNTED_TASK_SCOPE_CHIPS.forEach(({ key, countKey }) => {
@@ -230,14 +241,15 @@ export function TasksPage() {
   }, [openLinkedTask, searchParams]);
 
   const { tasks, isLoading, error } = useTasks(filters);
-  const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
-    tasks.map((task) => task.id)
-  );
+  const activeRunsByTaskId = useMemo(() => activeRunsFromTasks(tasks), [tasks]);
   const scopedTasks = useMemo(
     () => deriveScopedTasks(tasks, scope, activeRunsByTaskId),
     [activeRunsByTaskId, tasks, scope]
   );
-  const counts = useMemo(() => scopeCounts(tasks, activeRunsByTaskId), [activeRunsByTaskId, tasks]);
+  const counts = useMemo(
+    () => scopeCounts(tasks, activeRunsByTaskId),
+    [activeRunsByTaskId, tasks]
+  );
 
   const hierarchy = useMemo(
     () => buildTreeFromTasks(scopedTasks),

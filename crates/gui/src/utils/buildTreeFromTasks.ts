@@ -3,8 +3,9 @@ import type { TaskTreeNode } from "../types/ui";
 
 /**
  * Build a TaskTreeNode[] hierarchy from a flat array of tasks.
- * Uses parent_id to establish parent-child relationships and
- * dependency_ids to compute blocker info.
+ * Uses parent_id to establish parent-child relationships. Blocker metadata is
+ * derived from the server's run-controls state because list tasks do not carry
+ * relationship payloads.
  *
  * Root nodes are tasks whose parent_id is null or whose parent
  * is not present in the provided task set.
@@ -30,12 +31,15 @@ export function buildTreeFromTasks(tasks: Task[]): TaskTreeNode[] {
   }
 
   function buildNode(task: Task): TaskTreeNode {
-    const depCount = task.dependency_ids?.length ?? 0;
+    const hasBlockers = task.run_controls?.disabled_reason_code === "blocked";
     const children = (childrenMap.get(task.id) ?? []).map(buildNode);
     return {
       task,
-      has_blockers: depCount > 0,
-      blocker_count: depCount,
+      has_blockers: hasBlockers,
+      // The list contract exposes server-derived blocked state, not the
+      // complete blocker collection. Preserve the useful boolean semantics
+      // while representing the count as an at-least-one indicator.
+      blocker_count: hasBlockers ? 1 : 0,
       children,
     };
   }
