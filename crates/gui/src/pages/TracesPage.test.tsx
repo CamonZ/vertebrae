@@ -16,7 +16,7 @@ import {
 import { queryClient } from "../query/queryClient";
 import { queryKeys } from "../query/queryKeys";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
-import type { Task } from "../bindings";
+import { commands, type Task } from "../bindings";
 import { TracesPage } from "./TracesPage";
 
 const mockNavigate = vi.fn();
@@ -53,6 +53,10 @@ vi.mock("../bindings", () => ({
     getExecutionLogs: vi.fn(async () => ({ status: "ok", data: [] })),
     getTaskExecutions: vi.fn(async () => ({ status: "ok", data: [] })),
     stopRun: vi.fn(async () => ({ status: "ok", data: null })),
+    runWorkflow: vi.fn(async () => ({
+      status: "error",
+      error: { message: "not configured" },
+    })),
   },
 }));
 
@@ -132,6 +136,7 @@ describe("TracesPage (single-run)", () => {
     mockActiveRun = null;
     mockExecutions = [];
     lastRunsTaskId = null;
+    vi.mocked(commands.runWorkflow).mockClear();
   });
 
   it("renders the header with the task title", () => {
@@ -144,6 +149,45 @@ describe("TracesPage (single-run)", () => {
     mockActiveRun = mockRuns[0];
     renderAt("/traces/root");
     expect(screen.getByTestId("run-history-rail")).toBeInTheDocument();
+  });
+
+  it("starts a configured run from the TaskRun detail rail", async () => {
+    const taskRun = createMockTaskRun({
+      id: "run-limited",
+      task_id: "root",
+      status: "queued",
+      max_concurrency: 4,
+    });
+    mockTask = createMockTask({
+      id: "root",
+      workflow_id: "workflow-1",
+      run_controls: {
+        runnable: true,
+        stoppable: false,
+        disabled_reason_code: null,
+        disabled_reason: null,
+        active_run: null,
+      },
+    });
+    vi.mocked(commands.runWorkflow).mockResolvedValue({
+      status: "ok",
+      data: taskRun,
+    });
+    renderAt("/traces/root");
+
+    fireEvent.change(await screen.findByTestId("run-history-max-concurrency"), {
+      target: { value: "4" },
+    });
+    fireEvent.click(screen.getByTestId("run-history-run-button"));
+
+    await waitFor(() => {
+      expect(commands.runWorkflow).toHaveBeenCalledWith("root", 4);
+    });
+    expect(
+      queryClient.getQueryData(
+        queryKeys.taskRuns.byTask(getProjectScopeGeneration(), "root")
+      )
+    ).toEqual([taskRun]);
   });
 
   it("renders the empty stream when the run has no executions", () => {

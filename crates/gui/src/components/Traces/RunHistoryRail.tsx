@@ -35,6 +35,8 @@ interface RunHistoryRailProps {
   runs: readonly TaskRun[];
   /** The page's currently routed task. Highlighted in TASKS, scopes RUNS. */
   currentTaskId: string | null;
+  /** The fully hydrated task currently scoped by the RUNS panel. */
+  currentTask?: Task | null;
   /**
    * The run that the trace view is currently showing. May come from an
    * explicit selection, the active run, or the latest terminal run.
@@ -48,6 +50,8 @@ interface RunHistoryRailProps {
   onSelectTask: (taskId: string) => void;
   /** Select a run from the RUNS panel (scopes the trace to it). */
   onSelectRun: (runId: string) => void;
+  /** Start a new root run with the selected maximum concurrency. */
+  onRunWorkflow?: (maxConcurrency: number | null) => Promise<void>;
   /** The active run's root threads — expanded inline under the active run. */
   activeRunThreads?: ThreadModel[];
   /** Currently selected evt / thread id (drives the .sel ring in the tree). */
@@ -173,6 +177,17 @@ function formatStartedAt(iso: string | null): string {
 
 function formatMaxConcurrency(run: TaskRun): string {
   return run.max_concurrency == null ? "global" : String(run.max_concurrency);
+}
+
+function parseMaxConcurrency(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!/^\d+$/.test(trimmed)) return undefined;
+
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647
+    ? parsed
+    : undefined;
 }
 
 interface TaskTreeRow {
@@ -407,14 +422,116 @@ function RunNode({
   );
 }
 
+interface RunConcurrencyEditorProps {
+  onRunWorkflow: (maxConcurrency: number | null) => Promise<void>;
+  latestRun: TaskRun | null;
+  activeRootRun: TaskRun | null;
+}
+
+function RunConcurrencyEditor({
+  onRunWorkflow,
+  latestRun,
+  activeRootRun,
+}: RunConcurrencyEditorProps): ReactNode {
+  const [input, setInput] = useState(() =>
+    latestRun?.max_concurrency == null ? "" : String(latestRun.max_concurrency)
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setInput(
+      latestRun?.max_concurrency == null
+        ? ""
+        : String(latestRun.max_concurrency)
+    );
+    setError(null);
+  }, [latestRun?.id, latestRun?.max_concurrency]);
+
+  const handleRun = async (): Promise<void> => {
+    const maxConcurrency = parseMaxConcurrency(input);
+    if (maxConcurrency === undefined) {
+      setError("Max concurrency must be a positive integer.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await onRunWorkflow(maxConcurrency);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start workflow");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const disabled = isSubmitting || activeRootRun !== null;
+  return (
+    <div
+      data-testid="run-history-concurrency-editor"
+      className="border-b border-[var(--color-line)] bg-[var(--color-bg-2)]/20 px-3 py-2"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <label
+          htmlFor="run-history-max-concurrency"
+          className="flex min-w-0 flex-1 items-center gap-2 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]"
+          title="Leave blank to use Sacrum's global execution limit"
+        >
+          <span className="shrink-0">Max concurrency</span>
+          <input
+            id="run-history-max-concurrency"
+            data-testid="run-history-max-concurrency"
+            type="number"
+            min={1}
+            max={2147483647}
+            step={1}
+            inputMode="numeric"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="∞"
+            aria-label="Maximum concurrency"
+            className="h-7 w-14 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-1.5 text-center font-mono text-2xs normal-case tracking-normal text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] focus:border-[var(--color-accent)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={disabled}
+          />
+        </label>
+        <button
+          type="button"
+          data-testid="run-history-run-button"
+          onClick={() => void handleRun()}
+          disabled={disabled}
+          aria-label="Run workflow with selected maximum concurrency"
+          className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-accent)] bg-[var(--color-accent)]/10 px-2 py-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isSubmitting ? "Starting…" : "Run"}
+        </button>
+      </div>
+      <p className="mt-1 font-mono text-[length:var(--text-9)] text-[var(--color-fg-faint)]">
+        Blank uses the global execution limit.
+      </p>
+      {error && (
+        <p
+          role="alert"
+          data-testid="run-history-concurrency-error"
+          className="mt-1 text-2xs text-[var(--color-err)]"
+        >
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function RunHistoryRail({
   tasks,
   runs,
   currentTaskId,
+  currentTask,
   activeRunId,
   activeRunSource,
   onSelectTask,
   onSelectRun,
+  onRunWorkflow,
   activeRunThreads,
   selectedEvt,
   onJump,
@@ -465,6 +582,20 @@ export function RunHistoryRail({
   const activeRun = useMemo(
     () => currentTaskRuns.find((r) => r.id === activeRunId) ?? null,
     [activeRunId, currentTaskRuns]
+  );
+  const activeRootRun = useMemo(() => {
+    const projectedRun = currentTask?.run_controls?.active_run;
+    if (projectedRun && isActiveRunStatus(projectedRun.status)) {
+      return projectedRun;
+    }
+    return currentTaskRuns.find((run) => isActiveRunStatus(run.status)) ?? null;
+  }, [currentTask, currentTaskRuns]);
+  const canRunWorkflow = Boolean(
+    currentTask &&
+    onRunWorkflow &&
+    (currentTask.workflow_id || currentTask.current_step_id) &&
+    currentTask.run_controls?.runnable !== false &&
+    !activeRootRun
   );
 
   // Group the task's runs by day (Today / Yesterday / Earlier), newest first.
@@ -772,6 +903,13 @@ export function RunHistoryRail({
               <ScanIdentifier id={activeRun.id} kind="task run" />
             </div>
           </div>
+        )}
+        {canRunWorkflow && currentTask && onRunWorkflow && (
+          <RunConcurrencyEditor
+            onRunWorkflow={onRunWorkflow}
+            latestRun={activeRun}
+            activeRootRun={activeRootRun}
+          />
         )}
         <div className="flex-1 overflow-y-auto">
           {!currentTaskId ? (
