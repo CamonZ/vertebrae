@@ -185,7 +185,6 @@ export function StepInspector({
   const kindCls = kindClass(step.kind);
   const isFinish = step.kind === "finish";
   const isStop = step.kind === "stop";
-  const isTerminal = isFinish;
   const agents = cfg?.agents ?? [];
   const skills = cfg?.skills ?? [];
   const model_ = cfg?.agent_config?.model ?? null;
@@ -423,12 +422,6 @@ export function StepInspector({
             <div className="wfd-row">
               <span className="rk">Order</span>
               <span className="wfd-pill">{step.order}</span>
-            </div>
-            <div className="wfd-row">
-              <span className="rk">{isStop ? "Run boundary" : "Terminal step"}</span>
-              <span className={"wfd-toggle" + (isTerminal ? " on" : "")}>
-                <span className="knob" />
-              </span>
             </div>
             <div className="wfd-row">
               <span className="rk">Tasks parked</span>

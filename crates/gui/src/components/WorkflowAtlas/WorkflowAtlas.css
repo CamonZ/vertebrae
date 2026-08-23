@@ -1188,7 +1188,6 @@
 }
 .wfd-row .wfd-pill,
 .wfd-row .wfd-tag,
-.wfd-row .wfd-toggle,
 .wfd-row .wfd-placeholder {
   margin-left: auto;
 }
@@ -1221,40 +1220,6 @@
   text-transform: none;
 }
 
-.wfd-toggle {
-  width: 34px;
-  height: 18px;
-  flex-shrink: 0;
-  padding: 0;
-  border-radius: var(--r-full);
-  background: color-mix(in oklch, var(--fg) 14%, transparent);
-  border: 1px solid var(--line-strong);
-  position: relative;
-  cursor: pointer;
-  transition: background var(--t-fast) var(--ease);
-}
-.wfd-toggle:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-.wfd-toggle .knob {
-  position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--fg-mute);
-  transition: all var(--t-fast) var(--ease);
-}
-.wfd-toggle.on {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-.wfd-toggle.on .knob {
-  left: 17px;
-  background: #fff;
-}
 .wfd-error {
   margin-top: var(--s-1h);
   font-family: var(--mono);

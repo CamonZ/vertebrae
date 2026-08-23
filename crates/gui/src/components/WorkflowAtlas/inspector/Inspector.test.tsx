@@ -462,7 +462,7 @@ describe("StepInspector", () => {
 
     const root = document.querySelector(".wfd.kindspine");
     expect(root).toHaveClass("k-stop");
-    expect(screen.getByText("Run boundary")).toBeInTheDocument();
+    expect(screen.queryByText("Run boundary")).not.toBeInTheDocument();
     expect(screen.queryByText("Terminal step")).not.toBeInTheDocument();
     expect(
       screen.getByText("No prompt — run boundary is not dispatched")
