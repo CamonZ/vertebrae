@@ -20,7 +20,7 @@ pub async fn list_tasks(
         .ok_or_else(CommandError::no_project_selected)?;
 
     let db_filter: vertebrae_core::TaskFilter = filter.unwrap_or_default().into();
-    match service.tasks().list_tasks(&db_filter).await {
+    match service.tasks().list_tasks_without_lookups(&db_filter).await {
         Ok(summaries) => {
             log::info!("list_tasks returned {} tasks", summaries.len());
             Ok(summaries.into_iter().map(Into::into).collect())

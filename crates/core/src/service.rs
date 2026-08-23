@@ -330,6 +330,16 @@ pub trait TaskService: Send + Sync {
     /// List tasks with optional filters
     async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>>;
 
+    /// List task summaries without fetching workflow and step name lookups.
+    ///
+    /// GUI list consumers use IDs and server-provided run state only. The
+    /// default delegates to `list_tasks` so existing service implementations
+    /// remain source-compatible; backends that have an expensive lookup-aware
+    /// `list_tasks` implementation can override this method.
+    async fn list_tasks_without_lookups(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
+        self.list_tasks(filter).await
+    }
+
     /// List tasks with pre-fetched workflow and step name lookups.
     ///
     /// This is an optimization for callers who already have the workflow/step name
