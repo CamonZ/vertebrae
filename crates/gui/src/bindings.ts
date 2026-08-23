@@ -1547,6 +1547,10 @@ export const events = __makeEvents__<{
  */
 export type AgentConfig = {
   /**
+   * Built-in execution provider
+   */
+  provider?: AgentProvider | null;
+  /**
    * Model for the current session
    */
   model: string | null;
@@ -1607,6 +1611,7 @@ export type AgentConfig = {
    */
   json_schema: string | null;
 };
+export type AgentProvider = "anthropic" | "openai";
 /**
  * A file projection returned from the project artifact list or Task.artifacts.
  */
@@ -1722,8 +1727,10 @@ export type CreateStepOptions = {
   workflow_id: string;
   name: string;
   goal: string | null;
+  prompt?: string | null;
   agents: string[];
   skills: string[];
+  agent_config?: AgentConfig | null;
   order: number;
   transitions_to: string[];
   step_type?: StepType;
@@ -2549,6 +2556,7 @@ export type StepType =
   | "route"
   | "wait_children"
   | "human_input"
+  | "stop"
   | "finish"
   | { unsupported: string };
 /**
@@ -2926,7 +2934,6 @@ export type UpdateComponentState =
 /**
  * Options for updating a workflow step.
  * Only fields that are Some will be updated.
- * Note: agent_config is intentionally omitted — not editable from the GUI.
  */
 export type UpdateStepOptions = {
   step_id: string;
@@ -2935,8 +2942,10 @@ export type UpdateStepOptions = {
   prompt: string | null;
   agents: string[] | null;
   skills: string[] | null;
+  agent_config?: AgentConfig | null;
   step_type: StepType | null;
   output_schema: JsonValue | null;
+  clear_output_schema?: boolean;
   order: number | null;
   transitions_to: string[] | null;
 };
