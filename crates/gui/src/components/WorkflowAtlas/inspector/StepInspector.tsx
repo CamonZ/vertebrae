@@ -32,7 +32,6 @@ export interface StepInspectorProps {
   onSelect: (sel: AtlasSelection) => void;
   /** Close the panel (also reachable via Escape through the glass-panel stack). */
   onClose: () => void;
-  /** Remove the inspected step and close the panel. */
   onDeleted?: () => void;
 }
 

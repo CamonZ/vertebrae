@@ -1546,9 +1546,6 @@ export const events = __makeEvents__<{
  * Agent configuration for workflow steps - mirrors db::AgentConfig
  */
 export type AgentConfig = {
-  /**
-   * Built-in execution provider
-   */
   provider?: AgentProvider | null;
   /**
    * Model for the current session
@@ -2360,9 +2357,7 @@ export type Step = {
    * Agent configuration for this step
    */
   agent_config?: AgentConfig;
-  /**
-   * The type of this step (execute, evaluate, route)
-   */
+  /** Step type mirrored from core::StepType. */
   step_type?: StepType;
   /**
    * JSON Schema describing the expected output of this step

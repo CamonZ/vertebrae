@@ -84,7 +84,6 @@ pub async fn create_step(
     Ok(created)
 }
 
-/// Inner logic for create_step, separated from runtime-specific event emission.
 pub(crate) async fn create_step_inner(
     state: State<'_, AppState>,
     options: crate::types::CreateStepOptions,

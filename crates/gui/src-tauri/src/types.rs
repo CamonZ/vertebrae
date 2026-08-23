@@ -446,7 +446,6 @@ pub enum PermissionMode {
     Plan,
 }
 
-/// Built-in execution provider for a workflow step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentProvider {
@@ -496,7 +495,6 @@ impl From<PermissionMode> for vertebrae_core::PermissionMode {
 /// Agent configuration for workflow steps - mirrors db::AgentConfig
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct AgentConfig {
-    /// Built-in execution provider
     #[serde(default)]
     pub provider: Option<AgentProvider>,
     /// Model for the current session
@@ -659,7 +657,7 @@ pub struct Step {
     /// Agent configuration for this step
     #[serde(default)]
     pub agent_config: AgentConfig,
-    /// The type of this step (execute, evaluate, route, wait_children, human_input, stop, finish)
+    /// Step type mirrored from core::StepType.
     #[serde(default)]
     pub step_type: StepType,
     /// JSON Schema describing the expected output of this step
