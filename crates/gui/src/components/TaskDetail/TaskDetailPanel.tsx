@@ -866,7 +866,9 @@ export function TaskDetailPanel({
                         className="flex items-center gap-1 font-mono text-[length:var(--text-9)] uppercase tracking-wider text-[var(--color-fg-mute)]"
                         title="Leave blank to use Sacrum's global execution limit"
                       >
-                        <span className="sr-only">Maximum concurrency</span>
+                        <span data-testid="task-detail-max-concurrency-label">
+                          max concurrency:
+                        </span>
                         <input
                           id="task-detail-max-concurrency"
                           data-testid="task-detail-max-concurrency"

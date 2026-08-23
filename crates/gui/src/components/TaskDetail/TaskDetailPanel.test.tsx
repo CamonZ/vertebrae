@@ -766,6 +766,9 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(concurrencyInput.closest('[data-testid="task-detail-hero"]')).toBe(
         screen.getByTestId("task-detail-hero")
       );
+      expect(
+        screen.getByTestId("task-detail-max-concurrency-label")
+      ).toHaveTextContent("max concurrency:");
       fireEvent.change(concurrencyInput, {
         target: { value: "4" },
       });
