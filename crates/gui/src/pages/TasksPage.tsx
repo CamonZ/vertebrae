@@ -4,7 +4,10 @@ import {
   useMemo,
   useEffect,
   useRef,
+  useLayoutEffect,
   Fragment,
+  Profiler,
+  type ProfilerOnRenderCallback,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { TaskFilterOptions, Task, TaskLevel } from "../bindings";
@@ -20,7 +23,11 @@ import { TaskTreeView, ExpandCollapseAllButton } from "../components/TaskList";
 import { SearchInput } from "../components/molecules/SearchInput";
 import { Select } from "../components/atoms/Select";
 import { TaskDetailPanel } from "../components/TaskDetail";
-import { startTaskDetailTrace } from "../utils/taskDetailTrace";
+import {
+  startTaskDetailTrace,
+  traceTaskDetailPhaseOnce,
+  traceTaskDetailProfilerRender,
+} from "../utils/taskDetailTrace";
 import { Badge } from "../components/atoms/Badge";
 import { LiveCount } from "../components/shared/LiveCount";
 import { isActiveRunStatus, isTaskDone } from "../utils/runState";
@@ -296,6 +303,29 @@ export function TasksPage() {
     setSelectedTaskId(task.id);
   }, []);
 
+  const handleProfilerRender = useCallback<ProfilerOnRenderCallback>(
+    (profilerId, profilerPhase, actualDuration, baseDuration) => {
+      traceTaskDetailProfilerRender(
+        selectedTaskId,
+        profilerId,
+        profilerPhase,
+        actualDuration,
+        baseDuration
+      );
+    },
+    [selectedTaskId]
+  );
+
+  useLayoutEffect(() => {
+    if (!selectedTaskId) return;
+    const page = document.querySelector(".tasks-v2");
+    const tree = page?.querySelector(".tasks-v2-tree");
+    traceTaskDetailPhaseOnce(selectedTaskId, "selection-commit", {
+      taskPageDomNodes: page?.querySelectorAll("*").length ?? 0,
+      taskTreeDomNodes: tree?.querySelectorAll("*").length ?? 0,
+    });
+  }, [selectedTaskId]);
+
   const handleClosePanel = useCallback(() => {
     setSelectedTaskId(null);
   }, []);
@@ -371,126 +401,134 @@ export function TasksPage() {
   useShellHeader("Tasks", headerActions);
 
   return (
-    <div className="tasks-v2 flex min-h-0 flex-1">
-      <div className="list-col">
-        {/* Visually-hidden heading: the visible page title lives in the shell
+    <Profiler id="tasks-page" onRender={handleProfilerRender}>
+      <div className="tasks-v2 flex min-h-0 flex-1">
+        <div className="list-col">
+          {/* Visually-hidden heading: the visible page title lives in the shell
             header via useShellHeader above. We keep an in-page <h1> so screen
             readers and route/page-isolation tests see a stable heading even
             when the AppShell wrapper isn't mounted in a test environment. */}
-        <h1 className="sr-only">Tasks</h1>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="list-head">
-            <div className="scope-row" data-testid="tasks-scope-bar">
-              <div className="scope-primary">
-                {TASK_SCOPE_CHIPS.map((item) => (
-                  <Fragment key={item.key}>
-                    <ScopeChip
-                      active={scope === item.key}
-                      count={item.countKey ? counts[item.countKey] : undefined}
-                      label={item.label}
-                      onClick={() =>
-                        setScope(scope === item.key ? "all" : item.key)
-                      }
-                    />
-                    {item.key === "recent" && (
-                      <span className="scope-sep" aria-hidden />
-                    )}
-                  </Fragment>
-                ))}
-              </div>
-              <div className="scope-secondary">
-                <button
-                  type="button"
-                  className={["hide-done", hideCompleted ? "on" : ""]
-                    .filter(Boolean)
-                    .join(" ")}
-                  aria-pressed={hideCompleted}
-                  onClick={() => setHideCompleted((v) => !v)}
-                  title={
-                    hideCompleted
-                      ? "Show completed tasks"
-                      : "Hide completed tasks"
-                  }
-                  data-testid="tasks-hide-done"
-                >
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    aria-hidden
+          <h1 className="sr-only">Tasks</h1>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="list-head">
+              <div className="scope-row" data-testid="tasks-scope-bar">
+                <div className="scope-primary">
+                  {TASK_SCOPE_CHIPS.map((item) => (
+                    <Fragment key={item.key}>
+                      <ScopeChip
+                        active={scope === item.key}
+                        count={
+                          item.countKey ? counts[item.countKey] : undefined
+                        }
+                        label={item.label}
+                        onClick={() =>
+                          setScope(scope === item.key ? "all" : item.key)
+                        }
+                      />
+                      {item.key === "recent" && (
+                        <span className="scope-sep" aria-hidden />
+                      )}
+                    </Fragment>
+                  ))}
+                </div>
+                <div className="scope-secondary">
+                  <button
+                    type="button"
+                    className={["hide-done", hideCompleted ? "on" : ""]
+                      .filter(Boolean)
+                      .join(" ")}
+                    aria-pressed={hideCompleted}
+                    onClick={() => setHideCompleted((v) => !v)}
+                    title={
+                      hideCompleted
+                        ? "Show completed tasks"
+                        : "Hide completed tasks"
+                    }
+                    data-testid="tasks-hide-done"
                   >
-                    {hideCompleted ? (
-                      <>
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                      </>
-                    ) : (
-                      <>
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </>
-                    )}
-                  </svg>
-                  {hideCompleted ? "Done hidden" : "Hide done"}
-                </button>
-                <div className="scope-level">
-                  <Select
-                    options={LEVEL_SELECT_OPTIONS}
-                    value={selectedLevel}
-                    onChange={handleLevelChange}
-                    aria-label="Filter by level"
-                    id="level-filter"
-                  />
-                </div>
-                <div className="scope-expand">
-                  <ExpandCollapseAllButton
-                    allExpanded={allExpanded}
-                    onToggle={handleToggleExpandAll}
-                    disabled={expandableIds.length === 0}
-                  />
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      aria-hidden
+                    >
+                      {hideCompleted ? (
+                        <>
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </>
+                      ) : (
+                        <>
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </>
+                      )}
+                    </svg>
+                    {hideCompleted ? "Done hidden" : "Hide done"}
+                  </button>
+                  <div className="scope-level">
+                    <Select
+                      options={LEVEL_SELECT_OPTIONS}
+                      value={selectedLevel}
+                      onChange={handleLevelChange}
+                      aria-label="Filter by level"
+                      id="level-filter"
+                    />
+                  </div>
+                  <div className="scope-expand">
+                    <ExpandCollapseAllButton
+                      allExpanded={allExpanded}
+                      onToggle={handleToggleExpandAll}
+                      disabled={expandableIds.length === 0}
+                    />
+                  </div>
                 </div>
               </div>
+              <SearchInput
+                ref={searchInputRef}
+                value={filters.search ?? ""}
+                onChange={handleSearchChange}
+                debounceMs={0}
+                hint="/"
+                placeholder="Search tasks by title, id, or tag…"
+                aria-label="Search tasks by title, id, or tag"
+                data-testid="task-search-input"
+              />
             </div>
-            <SearchInput
-              ref={searchInputRef}
-              value={filters.search ?? ""}
-              onChange={handleSearchChange}
-              debounceMs={0}
-              hint="/"
-              placeholder="Search tasks by title, id, or tag…"
-              aria-label="Search tasks by title, id, or tag"
-              data-testid="task-search-input"
-            />
-          </div>
 
-          <div className="list">
-            <TaskTreeView
-              hierarchy={hierarchy}
-              isLoading={isLoading && tasks.length === 0}
-              error={error}
-              selectedTaskId={selectedTaskId}
-              onTaskSelect={handleTaskSelect}
-              expandedNodes={expandedNodes}
-              hideCompleted={hideCompleted}
-              filtering={filtering}
-              summaryExpanded={summaryExpanded}
-            />
+            <div className="list">
+              <Profiler id="task-tree" onRender={handleProfilerRender}>
+                <TaskTreeView
+                  hierarchy={hierarchy}
+                  isLoading={isLoading && tasks.length === 0}
+                  error={error}
+                  selectedTaskId={selectedTaskId}
+                  onTaskSelect={handleTaskSelect}
+                  expandedNodes={expandedNodes}
+                  hideCompleted={hideCompleted}
+                  filtering={filtering}
+                  summaryExpanded={summaryExpanded}
+                />
+              </Profiler>
+            </div>
           </div>
         </div>
-      </div>
 
-      {detailMounted && (
-        <TaskDetailPanel
-          taskId={detailTaskId}
-          closing={detailClosing}
-          onExitAnimationEnd={detailOnAnimationEnd}
-          onClose={handleClosePanel}
-          onTaskSelect={handleRelatedTaskSelect}
-        />
-      )}
-    </div>
+        {detailMounted && (
+          <Profiler id="task-detail" onRender={handleProfilerRender}>
+            <TaskDetailPanel
+              taskId={detailTaskId}
+              closing={detailClosing}
+              onExitAnimationEnd={detailOnAnimationEnd}
+              onClose={handleClosePanel}
+              onTaskSelect={handleRelatedTaskSelect}
+            />
+          </Profiler>
+        )}
+      </div>
+    </Profiler>
   );
 }

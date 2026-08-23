@@ -8,7 +8,8 @@ import {
   computeVisibleRoots,
 } from "../../utils/computeVisibleChildren";
 import { EmptyState } from "../molecules/EmptyState";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { traceTaskDetailPhaseOnce } from "../../utils/taskDetailTrace";
 
 interface TaskTreeViewProps {
   hierarchy: TaskTreeNodeType[];
@@ -172,6 +173,14 @@ export function TaskTreeView({
       }),
     [hierarchy, hideCompleted, filtering, summaryExpandedIds]
   );
+
+  useEffect(() => {
+    if (!selectedTaskId || !onTaskSelect) return;
+    traceTaskDetailPhaseOnce(selectedTaskId, "task-tree-data-ready", {
+      visibleRows: visibleNodes.length,
+      rootRows: visibleRoots.length,
+    });
+  }, [onTaskSelect, selectedTaskId, visibleNodes.length, visibleRoots.length]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {

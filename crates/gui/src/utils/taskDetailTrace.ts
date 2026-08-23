@@ -12,6 +12,10 @@ interface TaskDetailTrace {
   startedAt: number;
   startMark: string;
   phases: Set<string>;
+  renderStats: {
+    taskTreeRowRenders: number;
+    taskRunObserverSlots: number;
+  };
 }
 
 const activeTraces = new Map<string, TaskDetailTrace>();
@@ -83,12 +87,54 @@ export function startTaskDetailTrace(taskId: string, source: string): string {
     startedAt: taskDetailTraceNow(),
     startMark,
     phases: new Set(),
+    renderStats: {
+      taskTreeRowRenders: 0,
+      taskRunObserverSlots: 0,
+    },
   };
 
   activeTraces.set(taskId, trace);
   safePerformanceMark(startMark);
-  recordPhase(trace, "selection-start");
+  recordPhase(trace, "selection-start", {
+    debugPanelOpen: useDebugStore.getState().debugPanelOpen,
+  });
   return traceId;
+}
+
+/** Count task-tree work without emitting one log entry per rendered row. */
+export function noteTaskDetailTreeRowRender(
+  taskId: string,
+  taskRunObserverSlots: number
+): void {
+  const trace = activeTraces.get(taskId);
+  if (!trace) return;
+  trace.renderStats.taskTreeRowRenders += 1;
+  trace.renderStats.taskRunObserverSlots += taskRunObserverSlots;
+}
+
+/** Record the first React Profiler sample for a named task-detail surface. */
+export function traceTaskDetailProfilerRender(
+  taskId: string | null | undefined,
+  profilerId: string,
+  profilerPhase: string,
+  actualDurationMs: number,
+  baseDurationMs: number
+): string | null {
+  if (!taskId) return null;
+  const trace = activeTraces.get(taskId);
+  if (!trace) return null;
+
+  const details: TaskDetailTraceDetails = {
+    profilerPhase,
+    actualDurationMs: roundMilliseconds(actualDurationMs),
+    baseDurationMs: roundMilliseconds(baseDurationMs),
+  };
+  if (profilerId === "task-tree") {
+    details.taskTreeRowRenders = trace.renderStats.taskTreeRowRenders;
+    details.taskRunObserverSlots = trace.renderStats.taskRunObserverSlots;
+  }
+
+  return traceTaskDetailPhaseOnce(taskId, `${profilerId}-profiler`, details);
 }
 
 /** Ensure panels opened from another surface still get a correlated trace. */

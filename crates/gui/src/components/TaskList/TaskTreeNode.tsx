@@ -5,6 +5,7 @@ import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import type { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
 import { useActiveTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { computeVisibleChildren } from "../../utils/computeVisibleChildren";
+import { noteTaskDetailTreeRowRender } from "../../utils/taskDetailTrace";
 import { formatRelative } from "../../utils/formatRelative";
 import { getPriorityIndicator } from "../../utils/taskPriority";
 import {
@@ -183,6 +184,9 @@ export function TaskTreeNode({
   summaryExpanded,
 }: TaskTreeNodeProps) {
   const task = node.task;
+  if (selectedTaskId) {
+    noteTaskDetailTreeRowRender(selectedTaskId, 1 + node.children.length);
+  }
   const { activeRunsByTaskId } = useActiveTaskRunsForTasks([
     task.id,
     ...node.children.map((child) => child.task.id),
@@ -218,7 +222,11 @@ export function TaskTreeNode({
   const tags = task.tags ?? [];
   const childLine = task.level === "task" ? null : childSummary(node);
   const breakdown = useMemo(
-    () => deriveHearthStateBreakdown(node.children.map((child) => child.task), activeRunsByTaskId),
+    () =>
+      deriveHearthStateBreakdown(
+        node.children.map((child) => child.task),
+        activeRunsByTaskId
+      ),
     [activeRunsByTaskId, node.children]
   );
   const hasBreakdown = hasHearthStateBreakdown(breakdown);
