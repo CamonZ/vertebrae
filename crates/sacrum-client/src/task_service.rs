@@ -703,7 +703,7 @@ impl TaskService for SacrumTaskService {
     async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
         let variables = self.filter_to_variables(filter);
 
-        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_FIELDS]);
+        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_LIST_FIELDS]);
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
 
         // Fetch lookups once for all tasks
@@ -732,7 +732,7 @@ impl TaskService for SacrumTaskService {
     ) -> ServiceResult<Vec<Task>> {
         let variables = self.filter_to_variables(filter);
 
-        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_FIELDS]);
+        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_LIST_FIELDS]);
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
 
         responses
@@ -1464,6 +1464,27 @@ mod tests {
     }
 
     #[test]
+    fn test_response_to_task_preserves_list_timestamp_and_defaults_detail_fields() {
+        let service = SacrumTaskService::new(create_test_client());
+        let mut response = make_task_response("task-list", "List Task");
+        response.updated_at = Some("2026-08-23T12:34:56Z".to_string());
+
+        let task = service.response_to_task(&response).unwrap();
+
+        assert_eq!(task.title, "List Task");
+        assert_eq!(
+            task.updated_at.unwrap().to_rfc3339(),
+            "2026-08-23T12:34:56+00:00"
+        );
+        assert!(task.description.is_none());
+        assert!(task.sections.is_empty());
+        assert!(task.code_refs.is_empty());
+        assert!(task.worktree.is_none());
+        assert!(task.rejection_reason.is_none());
+        assert!(task.dependency_ids.is_empty());
+    }
+
+    #[test]
     fn test_parse_level() {
         assert_eq!(parse_level("epic"), Some(Level::Epic));
         assert_eq!(parse_level("ticket"), Some(Level::Ticket));
@@ -2041,6 +2062,18 @@ mod tests {
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].title, "First");
         assert_eq!(tasks[1].title, "Second");
+
+        let bodies = captured_graphql_bodies(&server).await;
+        let query = bodies[0]["query"].as_str().unwrap();
+        assert!(query.contains("fragment TaskListFields on Task"));
+        assert!(query.contains("...TaskListFields"));
+        assert!(!query.contains("fragment TaskFields on Task"));
+        for detail_field in ["description", "sections", "code_refs", "worktree"] {
+            assert!(
+                !query.contains(detail_field),
+                "list query requested {detail_field}"
+            );
+        }
     }
 
     #[tokio::test]
