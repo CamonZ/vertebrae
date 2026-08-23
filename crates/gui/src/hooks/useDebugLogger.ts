@@ -37,9 +37,10 @@ export function useDebugLogger() {
   const addTrace = useDebugStore((s) => s.addTrace);
 
   useEffect(() => {
+    let disposed = false;
     let detach: (() => void) | undefined;
 
-    attachLogger(({ level, message }) => {
+    void attachLogger(({ level, message }) => {
       const trace = parseLocalChatTrace(message);
       const { target } = splitDebugLogTarget(message);
       addLog({
@@ -49,12 +50,18 @@ export function useDebugLogger() {
         target,
         message,
       });
-      if (trace && typeof trace.source === "string" && typeof trace.kind === "string") {
+      if (
+        trace &&
+        typeof trace.source === "string" &&
+        typeof trace.kind === "string"
+      ) {
         addTrace({
           source: trace.source,
           kind: trace.kind,
-          direction: typeof trace.direction === "string" ? trace.direction : undefined,
-          sessionId: typeof trace.session_id === "string" ? trace.session_id : undefined,
+          direction:
+            typeof trace.direction === "string" ? trace.direction : undefined,
+          sessionId:
+            typeof trace.session_id === "string" ? trace.session_id : undefined,
           backendSessionId:
             typeof trace.backend_session_id === "string"
               ? trace.backend_session_id
@@ -62,7 +69,8 @@ export function useDebugLogger() {
           turnId: typeof trace.turn_id === "string" ? trace.turn_id : undefined,
           state: typeof trace.state === "string" ? trace.state : undefined,
           detail: typeof trace.detail === "string" ? trace.detail : undefined,
-          payload: typeof trace.payload === "string" ? trace.payload : undefined,
+          payload:
+            typeof trace.payload === "string" ? trace.payload : undefined,
           timestamp:
             typeof trace.timestamp_ms === "number"
               ? trace.timestamp_ms
@@ -70,10 +78,15 @@ export function useDebugLogger() {
         });
       }
     }).then((fn) => {
-      detach = fn;
+      if (disposed) {
+        fn();
+      } else {
+        detach = fn;
+      }
     });
 
     return () => {
+      disposed = true;
       detach?.();
     };
   }, [addLog, addTrace]);

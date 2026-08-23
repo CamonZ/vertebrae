@@ -1,3 +1,5 @@
+import { useDebugStore } from "../stores/debugStore";
+
 export type TaskDetailTraceDetails = Record<
   string,
   boolean | number | string | null | undefined
@@ -49,13 +51,22 @@ function recordPhase(
     }
   }
 
-  console.debug("[TaskDetailTrace]", {
+  const event = {
     traceId: trace.traceId,
     taskId: trace.taskId,
     source: trace.source,
     phase,
     elapsedMs: roundMilliseconds(timestamp - trace.startedAt),
     ...details,
+  };
+
+  console.debug("[TaskDetailTrace]", event);
+  useDebugStore.getState().addLog({
+    timestamp: Date.now(),
+    level: "DEBUG",
+    crateName: "gui-webview",
+    target: "task-detail-trace",
+    message: `[TaskDetailTrace] ${JSON.stringify(event)}`,
   });
 
   return trace.traceId;

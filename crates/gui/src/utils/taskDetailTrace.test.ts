@@ -6,10 +6,12 @@ import {
   startTaskDetailTrace,
   traceTaskDetailPhaseOnce,
 } from "./taskDetailTrace";
+import { useDebugStore } from "../stores/debugStore";
 
 describe("task detail tracing", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    useDebugStore.getState().clearLogs();
     performance.clearMarks();
     performance.clearMeasures();
   });
