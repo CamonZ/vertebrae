@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import type { TaskRun } from "../bindings";
+import type { Task, TaskRun } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import { errorMessage, queryClient, taskRunsQueryOptions } from "../query";
 import { isActiveRunStatus } from "../utils/runState";
@@ -38,6 +38,20 @@ export function selectActiveTaskRun(
     sortRunsNewestFirst(runs ?? []).find((run) =>
       isActiveRunStatus(run.status)
     ) ?? null
+  );
+}
+
+/** Derive the active-run index already embedded in the task-list response. */
+export function activeRunsFromTasks(
+  tasks: readonly Pick<Task, "id" | "run_controls">[]
+): ReadonlyMap<string, TaskRun> {
+  return new Map(
+    tasks.flatMap((task) => {
+      const activeRun = task.run_controls?.active_run;
+      return activeRun && isActiveRunStatus(activeRun.status)
+        ? [[task.id, activeRun] as [string, TaskRun]]
+        : [];
+    })
   );
 }
 
@@ -104,9 +118,10 @@ export function useActiveTaskRunsForTasks(
   );
   const result = useQueries(
     {
-      queries: stableTaskIds.map((taskId) =>
-        ({ ...taskRunsQueryOptions(generation, taskId), enabled: false })
-      ),
+      queries: stableTaskIds.map((taskId) => ({
+        ...taskRunsQueryOptions(generation, taskId),
+        enabled: false,
+      })),
       combine: (queries) => ({
         queries,
       }),

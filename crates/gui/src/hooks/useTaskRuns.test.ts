@@ -2,7 +2,10 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createMockTaskRun } from "../test/test-utils";
+import {
+  createMockTaskRun,
+  createMockTaskRunControls,
+} from "../test/test-utils";
 import { queryClient } from "../query";
 import {
   getProjectScopeGeneration,
@@ -16,6 +19,7 @@ vi.mock("../bindings", () => ({
 }));
 
 import {
+  activeRunsFromTasks,
   selectActiveTaskRun,
   useActiveTaskRunsForTasks,
   useTaskRuns,
@@ -47,6 +51,40 @@ describe("useTaskRuns", () => {
     });
 
     expect(selectActiveTaskRun([older, newer])).toEqual(newer);
+  });
+
+  it("derives active runs from the task-list controls without query observers", () => {
+    const activeRun = createMockTaskRun({
+      id: "run-active",
+      task_id: "task-active",
+      status: "executing",
+    });
+    const completedRun = createMockTaskRun({
+      id: "run-completed",
+      task_id: "task-completed",
+      status: "completed",
+    });
+
+    expect(
+      activeRunsFromTasks([
+        {
+          id: "task-active",
+          run_controls: createMockTaskRunControls(activeRun),
+        },
+        {
+          id: "task-completed",
+          run_controls: createMockTaskRunControls(completedRun),
+        },
+      ]).get("task-active")
+    ).toEqual(activeRun);
+    expect(
+      activeRunsFromTasks([
+        {
+          id: "task-completed",
+          run_controls: createMockTaskRunControls(completedRun),
+        },
+      ]).has("task-completed")
+    ).toBe(false);
   });
 
   it("loads TaskRuns into the query-backed active-run selector", async () => {
@@ -87,9 +125,7 @@ describe("useTaskRuns", () => {
       { wrapper: QueryWrapper }
     );
 
-    expect(result.current.activeRunsByTaskId.get("task-bulk")).toEqual(
-      taskRun
-    );
+    expect(result.current.activeRunsByTaskId.get("task-bulk")).toEqual(taskRun);
     expect(mockGetTaskRuns).not.toHaveBeenCalled();
   });
 

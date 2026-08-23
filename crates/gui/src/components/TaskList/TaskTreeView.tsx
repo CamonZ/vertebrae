@@ -1,4 +1,4 @@
-import type { Task } from "../../bindings";
+import type { Task, TaskRun } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { SummaryRow, TaskTreeNode } from "./TaskTreeNode";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
@@ -9,7 +9,14 @@ import {
 } from "../../utils/computeVisibleChildren";
 import { EmptyState } from "../molecules/EmptyState";
 import { useCallback, useEffect, useMemo } from "react";
+import { activeRunsFromTasks } from "../../hooks/useTaskRuns";
 import { traceTaskDetailPhaseOnce } from "../../utils/taskDetailTrace";
+
+const EMPTY_ACTIVE_RUNS: ReadonlyMap<string, TaskRun> = new Map();
+
+function flattenTasks(nodes: TaskTreeNodeType[]): Task[] {
+  return nodes.flatMap((node) => [node.task, ...flattenTasks(node.children)]);
+}
 
 interface TaskTreeViewProps {
   hierarchy: TaskTreeNodeType[];
@@ -21,6 +28,7 @@ interface TaskTreeViewProps {
   hideCompleted?: boolean;
   filtering?: boolean;
   summaryExpanded?: ReturnType<typeof useSummaryExpanded>;
+  activeRunsByTaskId?: ReadonlyMap<string, TaskRun>;
 }
 
 function LoadingSkeleton() {
@@ -142,7 +150,16 @@ export function TaskTreeView({
   hideCompleted = false,
   filtering = false,
   summaryExpanded,
+  activeRunsByTaskId,
 }: TaskTreeViewProps) {
+  const resolvedActiveRuns = useMemo(
+    () =>
+      activeRunsByTaskId ??
+      (hierarchy.length > 0
+        ? activeRunsFromTasks(flattenTasks(hierarchy))
+        : EMPTY_ACTIVE_RUNS),
+    [activeRunsByTaskId, hierarchy]
+  );
   const summaryExpandedIds = summaryExpanded?.summaryExpandedIds;
   const visibleNodes = useMemo(
     () =>
@@ -235,6 +252,7 @@ export function TaskTreeView({
               selectedTaskId={selectedTaskId}
               onTaskSelect={onTaskSelect}
               expandedNodes={expandedNodes}
+              activeRunsByTaskId={resolvedActiveRuns}
               hideCompleted={hideCompleted}
               filtering={filtering}
               summaryExpanded={summaryExpanded}

@@ -5,8 +5,6 @@ import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeView } from "./TaskTreeView";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
-import { queryClient, queryKeys } from "../../query";
-import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 
 function createTask(overrides?: Partial<Task>): Task {
   return {
@@ -42,17 +40,6 @@ function node(task: Task, children: TaskTreeNodeType[] = []): TaskTreeNodeType {
 }
 
 function renderTree(hierarchy: TaskTreeNodeType[]) {
-  const seed = (entry: TaskTreeNodeType) => {
-    const activeRun = entry.task.run_controls?.active_run;
-    if (activeRun) {
-      queryClient.setQueryData(
-        queryKeys.taskRuns.byTask(getProjectScopeGeneration(), entry.task.id),
-        [activeRun]
-      );
-    }
-    entry.children.forEach(seed);
-  };
-  hierarchy.forEach(seed);
   return render(
     <TaskTreeView hierarchy={hierarchy} isLoading={false} error={null} />
   );
