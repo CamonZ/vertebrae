@@ -72,6 +72,7 @@ describe("kindFor", () => {
       ["wait_children", "wait"],
       ["human_input", "human"],
       ["route", "route"],
+      ["stop", "stop"],
       ["finish", "finish"],
       [null, "execute"],
       ["totally-unknown", "execute"],
@@ -96,6 +97,7 @@ describe("roleFor", () => {
     expect(roleFor("route", false)).toBe("exit");
     expect(roleFor("execute", false)).toBe("process");
     expect(roleFor("finish", false)).toBe("exit");
+    expect(roleFor("stop", false)).toBe("process");
   });
   it("labels everything else process", () => {
     expect(roleFor("execute", false)).toBe("process");
@@ -116,7 +118,8 @@ describe("buildAtlasModel", () => {
             makeStep("ai", "wf", 1, { step_type: "execute" }),
             makeStep("gate", "wf", 2, { step_type: "evaluate" }),
             makeStep("router", "wf", 3, { step_type: "route" }),
-            makeStep("done", "wf", 4, { step_type: "finish" }),
+            makeStep("pause", "wf", 4, { step_type: "stop" }),
+            makeStep("done", "wf", 5, { step_type: "finish" }),
           ],
           { initial_step_id: "entry" }
         ),
@@ -132,6 +135,7 @@ describe("buildAtlasModel", () => {
     expect(byId.get("ai")!.kind).toBe("execute");
     expect(byId.get("gate")!.kind).toBe("eval");
     expect(byId.get("router")!.kind).toBe("route");
+    expect(byId.get("pause")!.kind).toBe("stop");
     expect(byId.get("done")!.kind).toBe("finish");
     expect(byId.get("done")!.role).toBe("exit");
     expect(byId.get("gate")!.stepType).toBe("evaluate");

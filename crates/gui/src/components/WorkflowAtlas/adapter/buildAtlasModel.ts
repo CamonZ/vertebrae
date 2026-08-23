@@ -51,6 +51,7 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
     "route",
     "human_input",
     "wait_children",
+    "stop",
     "finish",
   ]);
   const raw = step.step_type;
@@ -66,6 +67,8 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
       return "human";
     case "route":
       return "route";
+    case "stop":
+      return "stop";
     case "finish":
       return "finish";
     case "execute":

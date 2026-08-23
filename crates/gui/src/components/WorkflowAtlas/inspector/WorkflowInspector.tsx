@@ -12,8 +12,10 @@
 
    Ported from docs/design/wf-detail.jsx (WfInspector, workflow branch).
    ────────────────────────────────────────────────────────────────── */
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { CloseIcon, IconButton } from "../../panels";
+import { commands, type StepType } from "../../../bindings";
+import { unwrapCommand } from "../../../query";
 import { splitRef } from "../layout/geometry";
 import type { AtlasModel, AtlasWorkflow } from "../layout/types";
 import type { AtlasSelection } from "./selection";
@@ -55,6 +57,12 @@ export function WorkflowInspector({
   }, [model.workflows]);
 
   const wf = wfById.get(workflowId);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState<StepType>("execute");
+  const [newTransition, setNewTransition] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addingBusy, setAddingBusy] = useState(false);
 
   // Resolve the workflow's outgoing / incoming handoffs and same-workflow
   // loop-backs from the model edges. Endpoints are `wf.step` refs.
@@ -102,6 +110,46 @@ export function WorkflowInspector({
     onSelect({ type: "workflow", workflowId: id });
   const selectStep = (stepId: string) => () =>
     onSelect({ type: "step", workflowId: wf.id, stepId });
+
+  const addStep = async () => {
+    const transition = newTransition.trim();
+    if (!newName.trim()) {
+      setAddError("Step name is required.");
+      return;
+    }
+    if (newType === "stop" && !transition) {
+      setAddError("Stop steps require exactly one outgoing transition.");
+      return;
+    }
+
+    setAddingBusy(true);
+    setAddError(null);
+    try {
+      const created = await unwrapCommand(
+        commands.createStep({
+          workflow_id: wf.id,
+          name: newName.trim(),
+          goal: null,
+          prompt: null,
+          agents: [],
+          skills: [],
+          agent_config: null,
+          order: wf.stepIds.length,
+          transitions_to: transition ? [transition] : [],
+          step_type: newType,
+          output_schema: null,
+        })
+      );
+      setNewName("");
+      setNewTransition("");
+      setAdding(false);
+      if (created.id) onSelect({ type: "step", workflowId: wf.id, stepId: created.id });
+    } catch (cause) {
+      setAddError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAddingBusy(false);
+    }
+  };
   return (
     <div className="wfd kindspine" data-no-pan>
       <div className="wfd-hd">
@@ -176,9 +224,64 @@ export function WorkflowInspector({
         </section>
 
         <section className="wfd-sec">
-          <div className="wfd-lbl">
-            Steps <span className="n">{steps.length}</span>
+          <div className="wfd-lbl wfd-lbl-actions">
+            <span>
+              Steps <span className="n">{steps.length}</span>
+            </span>
+            <button
+              className="wfd-action"
+              onClick={() => setAdding((value) => !value)}
+              type="button"
+            >
+              {adding ? "Cancel" : "Add step"}
+            </button>
           </div>
+          {adding ? (
+            <div className="wfd-editor" data-testid="step-create-editor">
+              <label>
+                Name
+                <input
+                  value={newName}
+                  onChange={(event) => setNewName(event.target.value)}
+                  placeholder="Step name"
+                />
+              </label>
+              <label>
+                Type
+                <select
+                  value={typeof newType === "string" ? newType : "execute"}
+                  onChange={(event) => setNewType(event.target.value as StepType)}
+                >
+                  <option value="execute">execute</option>
+                  <option value="evaluate">evaluate</option>
+                  <option value="route">route</option>
+                  <option value="wait_children">wait_children</option>
+                  <option value="human_input">human_input</option>
+                  <option value="stop">stop</option>
+                  <option value="finish">finish</option>
+                </select>
+              </label>
+              <label>
+                Transition target
+                <input
+                  value={newTransition}
+                  onChange={(event) => setNewTransition(event.target.value)}
+                  placeholder={
+                    newType === "stop" ? "Required step id" : "Optional step id"
+                  }
+                />
+              </label>
+              {addError ? <div className="wfd-error">{addError}</div> : null}
+              <button
+                className="wfd-save"
+                disabled={addingBusy || !newName.trim()}
+                onClick={addStep}
+                type="button"
+              >
+                {addingBusy ? "Creating…" : "Create step"}
+              </button>
+            </div>
+          ) : null}
           <div className="wfd-steps">
             {steps.map((s, i) => (
               <button

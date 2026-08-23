@@ -750,6 +750,7 @@ export function WorkflowAtlas() {
               stepId={sel.stepId}
               onSelect={setSel}
               onClose={() => setSel(null)}
+              onDeleted={() => setSel(null)}
             />
           )}
         </FloatingDetailPanel>

@@ -102,6 +102,18 @@ SUMMARY.workflows[0].transitions = [
 ];
 
 const MODEL = buildAtlasModel(SUMMARY);
+const STOP_MODEL = buildAtlasModel({
+  workflows: [
+    makeWorkflow("wf-stop", [
+      makeStep("pause", "wf-stop", 0, {
+        name: "Pause run",
+        step_type: "stop",
+        transitions_to: ["next"],
+      }),
+      makeStep("next", "wf-stop", 1, { name: "Continue" }),
+    ]),
+  ],
+});
 
 const stepFixture = (overrides: Partial<Step> = {}): Step => ({
   id: "s1",
@@ -426,6 +438,36 @@ describe("StepInspector", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders stop as a run boundary with one explicit continuation", () => {
+    mockUseStep(
+      stepFixture({
+        id: "pause",
+        name: "Pause run",
+        step_type: "stop",
+        prompt: null,
+        transitions_to: ["next"],
+      })
+    );
+    render(
+      <StepInspector
+        model={STOP_MODEL}
+        workflowId="wf-stop"
+        stepId="pause"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    const root = document.querySelector(".wfd.kindspine");
+    expect(root).toHaveClass("k-stop");
+    expect(screen.getByText("Run boundary")).toBeInTheDocument();
+    expect(screen.queryByText("Terminal step")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("No prompt — run boundary is not dispatched")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Continue")).toBeInTheDocument();
   });
 });
 

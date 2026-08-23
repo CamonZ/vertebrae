@@ -22,7 +22,8 @@ export type Kind =
   | "route"
   | "wait"
   | "human"
-  | "finish";
+  | "finish"
+  | "stop";
 
 /** Cosmetic foot label on a step node — flow position, not the step type. */
 export type Role = "entry" | "process" | "exit";

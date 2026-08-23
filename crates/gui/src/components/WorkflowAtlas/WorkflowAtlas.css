@@ -817,6 +817,89 @@
 .wfd-lbl .n {
   color: var(--fg-ghost);
 }
+.wfd-lbl-actions {
+  justify-content: space-between;
+}
+.wfd-action {
+  flex-shrink: 0;
+  padding: 2px var(--s-1h);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xs);
+  background: color-mix(in oklch, var(--bg) 30%, transparent);
+  color: var(--fg-mute);
+  font-family: var(--mono);
+  font-size: var(--text-9);
+  cursor: pointer;
+}
+.wfd-action:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.wfd-action.danger {
+  color: var(--err);
+}
+.wfd-editor {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  border: 1px solid color-mix(in oklch, var(--kc, var(--accent)) 24%, var(--line));
+  border-radius: var(--r-sm);
+  background: color-mix(in oklch, var(--bg) 35%, transparent);
+  max-height: 48vh;
+  overflow-y: auto;
+}
+.wfd-editor label {
+  display: grid;
+  gap: var(--s-1);
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: var(--text-9);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.wfd-editor input,
+.wfd-editor select,
+.wfd-editor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--s-1h) var(--s-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xs);
+  background: var(--bg-2);
+  color: var(--fg);
+  font: var(--text-11) var(--sans);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.wfd-editor textarea {
+  min-height: 54px;
+  resize: vertical;
+}
+.wfd-editor .wfd-help {
+  color: var(--fg-ghost);
+  font-size: var(--text-8);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.wfd-save {
+  padding: var(--s-1h) var(--s-2);
+  border: 1px solid color-mix(in oklch, var(--accent) 50%, var(--line));
+  border-radius: var(--r-xs);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  cursor: pointer;
+}
+.wfd-save:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+.wfd-error {
+  color: var(--err);
+  font-family: var(--sans);
+  font-size: var(--text-10);
+}
 .wfd-text {
   font-family: var(--sans);
   font-size: var(--text-12);

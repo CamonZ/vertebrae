@@ -11,9 +11,11 @@
 
    Ported from docs/design/wf-detail.jsx (WfInspector, step branch).
    ────────────────────────────────────────────────────────────────── */
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CloseIcon, IconButton } from "../../panels";
 import { useStep } from "../../../hooks";
+import { commands, type JsonValue, type StepType } from "../../../bindings";
+import { unwrapCommand } from "../../../query";
 import { LiquidHighlight } from "../../StepDetail/LiquidHighlight";
 import { SchemaTree } from "../../StepDetail/SchemaTree";
 import { splitRef, shortId } from "../layout/geometry";
@@ -30,6 +32,8 @@ export interface StepInspectorProps {
   onSelect: (sel: AtlasSelection) => void;
   /** Close the panel (also reachable via Escape through the glass-panel stack). */
   onClose: () => void;
+  /** Remove the inspected step and close the panel. */
+  onDeleted?: () => void;
 }
 
 /** A resolved, clickable transition out of the inspected step. */
@@ -52,6 +56,8 @@ function backendTypeForKind(kind: string): string {
       return "route";
     case "finish":
       return "finish";
+    case "stop":
+      return "stop";
     default:
       return "execute";
   }
@@ -74,6 +80,7 @@ export function StepInspector({
   stepId,
   onSelect,
   onClose,
+  onDeleted,
 }: StepInspectorProps) {
   const wfById = useMemo(() => {
     const m = new Map<string, AtlasWorkflow>();
@@ -88,15 +95,41 @@ export function StepInspector({
 
   // Rich config — fetched live; PipelineStep has no goal/prompt/agents/etc.
   const { step: cfg, isLoading } = useStep(stepId);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [goal, setGoal] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [type, setType] = useState<StepType>("execute");
+  const [agentsText, setAgentsText] = useState("");
+  const [skillsText, setSkillsText] = useState("");
+  const [transitionsTo, setTransitionsTo] = useState("");
+  const [modelValue, setModelValue] = useState("");
+  const [outputSchema, setOutputSchema] = useState("");
+
+  useEffect(() => {
+    if (!cfg || editing) return;
+    setName(cfg.name);
+    setGoal(cfg.goal ?? "");
+    setPrompt(cfg.prompt ?? "");
+    setType(cfg.step_type ?? "execute");
+    setAgentsText((cfg.agents ?? []).join(", "));
+    setSkillsText((cfg.skills ?? []).join(", "));
+    setTransitionsTo((cfg.transitions_to ?? []).join(", "));
+    setModelValue(cfg.agent_config?.model ?? "");
+    setOutputSchema(
+      cfg.output_schema ? JSON.stringify(cfg.output_schema, null, 2) : ""
+    );
+  }, [cfg, editing]);
 
   const transitions = useMemo<Transition[]>(() => {
     if (!wf || !step) return [];
-    if (step.kind === "finish") return [];
     const list: Transition[] = [];
     // implicit forward step (next in order)
     const nextStepId =
       idx >= 0 && idx < wf.stepIds.length - 1 ? wf.stepIds[idx + 1] : null;
-    if (nextStepId) {
+    if (nextStepId && step.kind !== "finish" && step.kind !== "stop") {
       const next = model.steps.find((s) => s.id === `${wf.id}.${nextStepId}`);
       list.push({
         key: "next",
@@ -126,6 +159,25 @@ export function StepInspector({
             : onSelect({ type: "workflow", workflowId: tw }),
       });
     }
+
+    // Forward intra-workflow edges are intentionally omitted from AtlasModel
+    // because ordinary steps already expose their implicit next step. A stop
+    // boundary has no implicit continuation, so surface its explicit target.
+    if (step.kind === "stop") {
+      for (const targetId of step.transitionsTo) {
+        const key = `${ref}->${wf.id}.${targetId}`;
+        if (list.some((transition) => transition.key === key)) continue;
+        list.push({
+          key,
+          label:
+            model.steps.find((candidate) => candidate.id === `${wf.id}.${targetId}`)
+              ?.name ?? targetId,
+          loop: false,
+          onClick: () =>
+            onSelect({ type: "step", workflowId: wf.id, stepId: targetId }),
+        });
+      }
+    }
     return list;
   }, [model.edges, model.steps, wf, step, idx, ref, wfById, onSelect]);
 
@@ -133,6 +185,7 @@ export function StepInspector({
 
   const kindCls = kindClass(step.kind);
   const isFinish = step.kind === "finish";
+  const isStop = step.kind === "stop";
   const isTerminal = isFinish;
   const agents = cfg?.agents ?? [];
   const skills = cfg?.skills ?? [];
@@ -142,6 +195,72 @@ export function StepInspector({
     stepTypeLabelFor(cfg?.step_type) ??
     backendTypeForKind(step.kind);
 
+  const listValue = (value: string) =>
+    value
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  const save = async () => {
+    const nextTransitions = listValue(transitionsTo);
+    if (type === "stop" && nextTransitions.length !== 1) {
+      setError("Stop steps require exactly one outgoing transition.");
+      return;
+    }
+
+    let parsedSchema: JsonValue | null = null;
+    if (outputSchema.trim()) {
+      try {
+        parsedSchema = JSON.parse(outputSchema) as JsonValue;
+      } catch {
+        setError("Output schema must be valid JSON.");
+        return;
+      }
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      await unwrapCommand(
+        commands.updateStep({
+          step_id: stepId,
+          name,
+          goal,
+          prompt,
+          agents: listValue(agentsText),
+          skills: listValue(skillsText),
+          agent_config: cfg?.agent_config
+            ? { ...cfg.agent_config, model: modelValue || null }
+            : undefined,
+          step_type: type,
+          output_schema: parsedSchema,
+          clear_output_schema: !outputSchema.trim(),
+          order: step.order,
+          transitions_to: nextTransitions,
+        })
+      );
+      setEditing(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!window.confirm(`Delete step “${step.name}”?`)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await unwrapCommand(commands.deleteStep(stepId));
+      onDeleted?.();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className={"wfd kindspine " + kindCls} data-no-pan>
       <div className="wfd-hd">
@@ -150,6 +269,16 @@ export function StepInspector({
             <span className="dot" />
             Step Configuration
           </span>
+          <button
+            className="wfd-action"
+            onClick={() => setEditing((value) => !value)}
+            type="button"
+          >
+            {editing ? "Cancel" : "Edit"}
+          </button>
+          <button className="wfd-action danger" onClick={remove} type="button">
+            Delete
+          </button>
           <span className="wfd-close">
             <IconButton onClick={onClose} ariaLabel="Close panel">
               <CloseIcon />
@@ -164,6 +293,90 @@ export function StepInspector({
           </div>
         </div>
       </div>
+
+      {editing ? (
+        <section className="wfd-sec wfd-editor" data-testid="step-editor">
+          <div className="wfd-lbl">Edit step</div>
+          <label>
+            Name
+            <input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label>
+            Type
+            <select
+              value={typeof type === "string" ? type : "execute"}
+              onChange={(e) => setType(e.target.value as StepType)}
+            >
+              <option value="execute">execute</option>
+              <option value="evaluate">evaluate</option>
+              <option value="route">route</option>
+              <option value="wait_children">wait_children</option>
+              <option value="human_input">human_input</option>
+              <option value="stop">stop</option>
+              <option value="finish">finish</option>
+            </select>
+          </label>
+          <label>
+            Goal
+            <textarea value={goal} onChange={(e) => setGoal(e.target.value)} />
+          </label>
+          <label>
+            Prompt
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder={
+                isStop ? "Not dispatched for a stop boundary" : "Optional prompt"
+              }
+            />
+          </label>
+          <label>
+            Agents <span className="wfd-help">comma or newline separated</span>
+            <input
+              value={agentsText}
+              onChange={(e) => setAgentsText(e.target.value)}
+            />
+          </label>
+          <label>
+            Skills <span className="wfd-help">comma or newline separated</span>
+            <input
+              value={skillsText}
+              onChange={(e) => setSkillsText(e.target.value)}
+            />
+          </label>
+          <label>
+            Model
+            <input
+              value={modelValue}
+              onChange={(e) => setModelValue(e.target.value)}
+            />
+          </label>
+          <label>
+            Transitions <span className="wfd-help">stop requires exactly one</span>
+            <input
+              value={transitionsTo}
+              onChange={(e) => setTransitionsTo(e.target.value)}
+            />
+          </label>
+          <label>
+            Output schema
+            <textarea
+              value={outputSchema}
+              onChange={(e) => setOutputSchema(e.target.value)}
+              placeholder="JSON Schema (optional)"
+            />
+          </label>
+          {error ? <div className="wfd-error">{error}</div> : null}
+          <button
+            className="wfd-save"
+            disabled={saving || !name.trim()}
+            onClick={save}
+            type="button"
+          >
+            {saving ? "Saving…" : "Save step"}
+          </button>
+        </section>
+      ) : null}
 
       <div className="wfd-body">
         <section className="wfd-sec">
@@ -189,7 +402,9 @@ export function StepInspector({
                 ? "Loading…"
                 : isFinish
                   ? "No prompt — completes task immediately"
-                  : "No prompt"}
+                  : isStop
+                    ? "No prompt — run boundary is not dispatched"
+                    : "No prompt"}
             </div>
           )}
         </section>
@@ -211,7 +426,7 @@ export function StepInspector({
               <span className="wfd-pill">{step.order}</span>
             </div>
             <div className="wfd-row">
-              <span className="rk">Terminal step</span>
+              <span className="rk">{isStop ? "Run boundary" : "Terminal step"}</span>
               <span className={"wfd-toggle" + (isTerminal ? " on" : "")}>
                 <span className="knob" />
               </span>
