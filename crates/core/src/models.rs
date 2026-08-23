@@ -152,7 +152,12 @@ impl SectionType {
     }
 }
 
-/// The type of a workflow step
+/// The type of a workflow step.
+///
+/// `Stop` marks a run boundary: reaching it stops the current TaskRun without
+/// completing the task, and the single outgoing transition is followed by a
+/// later TaskRun. `Finish` is the promptless terminal step that completes the
+/// task.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum StepType {
     #[default]

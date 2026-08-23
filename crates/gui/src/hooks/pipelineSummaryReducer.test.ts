@@ -646,6 +646,24 @@ describe("applyStepUpdated", () => {
       "s1",
     ]);
   });
+
+  it("preserves pipeline counts when a step becomes a stop boundary", () => {
+    const summary = makeSummary([
+      makeWorkflow("wf-1", [
+        makeStep("s1", "wf-1", "pause", 0, { epic: 1, ticket: 2, task: 3 }, 2),
+      ]),
+    ]);
+
+    const next = applyStepUpdated(
+      summary,
+      fakeStep("s1", "wf-1", 0, { step_type: "stop" }),
+    );
+
+    const step = next.workflows[0].workflow_steps[0];
+    expect(step.step_type).toBe("stop");
+    expect(step.task_counts).toEqual({ epic: 1, ticket: 2, task: 3 });
+    expect(step.pipeline_counts.active).toBe(2);
+  });
 });
 
 describe("applyStepDeleted", () => {

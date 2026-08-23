@@ -745,7 +745,11 @@ mod tests {
 
         let error = service.create_step(&step).await.unwrap_err();
 
-        assert!(error.to_string().contains("exactly one outgoing transition"));
+        assert!(
+            error
+                .to_string()
+                .contains("exactly one outgoing transition")
+        );
     }
 
     #[tokio::test]
@@ -757,7 +761,11 @@ mod tests {
 
         let error = service.update_step("step-1", &updates).await.unwrap_err();
 
-        assert!(error.to_string().contains("exactly one outgoing transition"));
+        assert!(
+            error
+                .to_string()
+                .contains("exactly one outgoing transition")
+        );
     }
 
     #[tokio::test]

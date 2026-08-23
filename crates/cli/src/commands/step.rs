@@ -1457,11 +1457,19 @@ mod tests {
     #[test]
     fn test_stop_requires_exactly_one_transition() {
         let error = validate_step_constraints(&StepType::Stop, None, &[]).unwrap_err();
-        assert!(error.to_string().contains("exactly one outgoing transition"));
+        assert!(
+            error
+                .to_string()
+                .contains("exactly one outgoing transition")
+        );
 
         let transitions = vec!["step-1".to_string(), "step-2".to_string()];
         let error = validate_step_constraints(&StepType::Stop, None, &transitions).unwrap_err();
-        assert!(error.to_string().contains("exactly one outgoing transition"));
+        assert!(
+            error
+                .to_string()
+                .contains("exactly one outgoing transition")
+        );
 
         validate_step_constraints(
             &StepType::Stop,

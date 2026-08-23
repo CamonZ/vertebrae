@@ -103,7 +103,8 @@ export interface ChatMsg {
 /**
  * Map a Sacrum {@link StepType} to a {@link StepKind}.
  *   execute → "execute", evaluate → "eval", route → "route",
- *   human_input → "human", wait_children → "wait", finish → "finish".
+ *   human_input → "human", wait_children → "wait", stop → "stop",
+ *   finish → "finish".
  * Unknown / `{ unsupported }` types fall back to "execute".
  *
  * `StepExecution.step_type` arrives as a nullable string (not the union), so
@@ -123,6 +124,8 @@ export function stepKindFromStepType(
       return "human";
     case "wait_children":
       return "wait";
+    case "stop":
+      return "stop";
     case "finish":
       return "finish";
     default:
