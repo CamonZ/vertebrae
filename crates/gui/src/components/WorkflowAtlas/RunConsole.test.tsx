@@ -193,7 +193,7 @@ describe("RunConsole", () => {
     openConsole();
 
     fireEvent.click(screen.getByRole("button", { name: "Run task" }));
-    expect(runWorkflow).toHaveBeenCalledExactlyOnceWith("ready-aaaa");
+    expect(runWorkflow).toHaveBeenCalledExactlyOnceWith("ready-aaaa", null);
     expect(stopRun).not.toHaveBeenCalled();
   });
 
@@ -220,7 +220,7 @@ describe("RunConsole", () => {
     openConsole();
 
     fireEvent.click(screen.getByRole("button", { name: "Run all" }));
-    expect(runWorkflow).toHaveBeenCalledExactlyOnceWith("ready-aaaa");
+    expect(runWorkflow).toHaveBeenCalledExactlyOnceWith("ready-aaaa", null);
   });
 
   it("opens the task detail panel on row click", () => {

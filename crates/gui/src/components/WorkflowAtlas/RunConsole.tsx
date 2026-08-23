@@ -13,7 +13,7 @@
      • mini-pipe   — each row renders its task's workflow steps through the kind
                      adapter, the current step `running`, earlier `done`, later
                      `queued` (`miniPipeline`).
-     • actions     — Run → runWorkflow(taskId); Stop → stopRun({task_id});
+     • actions     — Run → runWorkflow(taskId, null); Stop → stopRun({task_id});
                      Run-all over the head of the ready queue. A 1s tick advances
                      live runtimes from each run's started_at.
      • row click   — opens the canonical TaskDetailPanel (right-docked floating
@@ -287,7 +287,7 @@ export function RunConsole({ summary }: RunConsoleProps) {
 
   const onRun = useCallback(async (taskId: string) => {
     setTab("running");
-    await commands.runWorkflow(taskId);
+    await commands.runWorkflow(taskId, null);
   }, []);
 
   const onStop = useCallback(async (taskId: string) => {
@@ -298,7 +298,7 @@ export function RunConsole({ summary }: RunConsoleProps) {
     const head = readyRows.slice(0, RUN_ALL_HEAD);
     if (head.length === 0) return;
     setTab("running");
-    await Promise.all(head.map((r) => commands.runWorkflow(r.task.id)));
+    await Promise.all(head.map((r) => commands.runWorkflow(r.task.id, null)));
   }, [readyRows]);
 
   return (

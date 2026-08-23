@@ -801,6 +801,8 @@ pub struct TaskRun {
     pub user_id: Option<String>,
     /// Durable run lifecycle status
     pub status: TaskRunStatus,
+    /// Effective maximum concurrent step attempts for the root TaskRun tree
+    pub max_concurrency: Option<i32>,
     /// When this run started (ISO 8601 string)
     pub started_at: Option<String>,
     /// When this run ended (ISO 8601 string)
@@ -833,6 +835,7 @@ impl From<vertebrae_core::TaskRun> for TaskRun {
             project_id: run.project_id,
             user_id: run.user_id,
             status: run.status.into(),
+            max_concurrency: run.max_concurrency,
             started_at: run.started_at.map(|dt| dt.to_rfc3339()),
             ended_at: run.ended_at.map(|dt| dt.to_rfc3339()),
             stop_requested_at: run.stop_requested_at.map(|dt| dt.to_rfc3339()),

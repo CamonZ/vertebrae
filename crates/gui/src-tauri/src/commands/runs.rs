@@ -31,8 +31,12 @@ pub async fn run_step(
 async fn run_workflow_inner(
     service: &VertebraeServices,
     task_id: &str,
+    max_concurrency: Option<i32>,
 ) -> Result<TaskRun, CommandError> {
-    let run = service.executions().run_workflow(task_id).await?;
+    let run = service
+        .executions()
+        .run_workflow(task_id, max_concurrency)
+        .await?;
     Ok(run.into())
 }
 
@@ -50,15 +54,20 @@ async fn stop_run_inner(
 pub async fn run_workflow(
     state: State<'_, AppState>,
     task_id: String,
+    max_concurrency: Option<i32>,
 ) -> Result<TaskRun, CommandError> {
-    log::info!("run_workflow called for task: {}", task_id);
+    log::info!(
+        "run_workflow called for task: {}, max_concurrency: {:?}",
+        task_id,
+        max_concurrency
+    );
 
     let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let run = run_workflow_inner(service, &task_id).await?;
+    let run = run_workflow_inner(service, &task_id, max_concurrency).await?;
 
     log::info!("TaskRun started for task: {}, run: {}", task_id, run.id);
     Ok(run)
@@ -81,7 +90,7 @@ pub async fn orchestrate_task(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let run = run_workflow_inner(service, &task_id).await?;
+    let run = run_workflow_inner(service, &task_id, None).await?;
 
     log::info!(
         "Workflow orchestration started for task: {}, run: {}",
@@ -167,7 +176,7 @@ mod tests {
         assert_no_project_error(get_active_run(state.clone(), "task-1".to_string()).await);
         assert_no_project_error(get_task_runs(state.clone(), "task-1".to_string()).await);
         assert_no_project_error(get_task_run_trace(state.clone(), "run-1".to_string()).await);
-        assert_no_project_error(run_workflow(state.clone(), "task-1".to_string()).await);
+        assert_no_project_error(run_workflow(state.clone(), "task-1".to_string(), None).await);
         assert_no_project_error(
             stop_run(
                 state,
@@ -186,7 +195,7 @@ mod tests {
         let task_id = create_task_with_workflow(&app).await;
         let state: tauri::State<'_, AppState> = app.state();
 
-        let run = run_workflow(state, task_id.clone())
+        let run = run_workflow(state, task_id.clone(), None)
             .await
             .expect("run workflow succeeds");
 
@@ -206,12 +215,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn run_workflow_passes_and_returns_max_concurrency() {
+        let app = build_app_with_services();
+        let task_id = create_task_with_workflow(&app).await;
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let run = run_workflow(state, task_id, Some(3))
+            .await
+            .expect("run workflow succeeds");
+
+        assert_eq!(run.max_concurrency, Some(3));
+    }
+
+    #[tokio::test]
     async fn stop_run_by_task_run_id_returns_serialized_task_run() {
         let app = build_app_with_services();
         let task_id = create_task_with_workflow(&app).await;
         let state: tauri::State<'_, AppState> = app.state();
 
-        let run = run_workflow(state.clone(), task_id)
+        let run = run_workflow(state.clone(), task_id, None)
             .await
             .expect("run workflow succeeds");
         let stopped = stop_run(
@@ -242,7 +264,7 @@ mod tests {
         let task_id = create_task_with_workflow(&app).await;
         let state: tauri::State<'_, AppState> = app.state();
 
-        let run = run_workflow(state.clone(), task_id.clone())
+        let run = run_workflow(state.clone(), task_id.clone(), None)
             .await
             .expect("run workflow succeeds");
         let stopped = stop_run(

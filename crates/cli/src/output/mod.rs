@@ -34,9 +34,11 @@ fn format_workflow_position_display(task: &TaskSummary) -> String {
 /// Format a compact TaskRun summary for user-facing CLI output.
 pub fn format_task_run_brief(run: &TaskRunSummary) -> String {
     format!(
-        "{} taskRun={} latestStep={}",
+        "{} taskRun={} maxConcurrency={} latestStep={}",
         run.status,
         run.id,
+        run.max_concurrency
+            .map_or_else(|| "null".to_string(), |value| value.to_string()),
         run.latest_step_execution_id.as_deref().unwrap_or("none")
     )
 }

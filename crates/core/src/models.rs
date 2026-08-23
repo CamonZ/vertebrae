@@ -2148,6 +2148,11 @@ pub struct TaskRun {
     /// Durable run lifecycle status.
     pub status: TaskRunStatus,
 
+    /// Effective maximum number of concurrent step attempts for this run's
+    /// root TaskRun tree. `None` uses Sacrum's global execution-pool limit.
+    #[serde(default)]
+    pub max_concurrency: Option<i32>,
+
     /// When the run started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at: Option<DateTime<Utc>>,
@@ -2213,6 +2218,8 @@ pub struct TaskRunSummary {
     pub id: String,
     pub task_id: String,
     pub status: TaskRunStatus,
+    #[serde(default)]
+    pub max_concurrency: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2233,6 +2240,7 @@ impl From<&TaskRun> for TaskRunSummary {
             id: run.id.clone(),
             task_id: run.task_id.clone(),
             status: run.status.clone(),
+            max_concurrency: run.max_concurrency,
             started_at: run.started_at,
             ended_at: run.ended_at,
             latest_step_execution_id: run.latest_step_execution_id.clone(),
@@ -2880,6 +2888,7 @@ mod tests {
             "project_id": "project-1",
             "user_id": "user-1",
             "status": "waiting",
+            "max_concurrency": 3,
             "started_at": "2026-05-07T12:00:00Z",
             "ended_at": null,
             "stop_requested_at": null,
@@ -2900,6 +2909,7 @@ mod tests {
         assert_eq!(run.project_id, "project-1");
         assert_eq!(run.user_id.as_deref(), Some("user-1"));
         assert_eq!(run.status, TaskRunStatus::Waiting);
+        assert_eq!(run.max_concurrency, Some(3));
         assert!(run.is_active());
         assert!(run.is_stoppable());
         assert_eq!(run.latest_step_execution_id.as_deref(), Some("exec-child"));
@@ -2931,6 +2941,7 @@ mod tests {
                     "task_id": "task-root",
                     "project_id": "project-1",
                     "status": "executing",
+                    "max_concurrency": 3,
                     "started_at": "2026-05-07T12:00:00Z",
                     "parent_task_run_id": null,
                     "root_task_run_id": null,
@@ -2941,6 +2952,7 @@ mod tests {
                     "task_id": "task-child",
                     "project_id": "project-1",
                     "status": "queued",
+                    "max_concurrency": 3,
                     "started_at": "2026-05-07T12:02:00Z",
                     "parent_task_run_id": "run-root",
                     "root_task_run_id": "run-root",
@@ -2973,6 +2985,8 @@ mod tests {
 
         assert_eq!(trace.root_task_run_id, "run-root");
         assert_eq!(trace.task_runs.len(), 2);
+        assert_eq!(trace.task_runs[0].max_concurrency, Some(3));
+        assert_eq!(trace.task_runs[1].max_concurrency, Some(3));
         assert_eq!(trace.task_runs[0].parent_task_run_id, None);
         assert_eq!(
             trace.task_runs[1].parent_task_run_id.as_deref(),

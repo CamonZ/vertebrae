@@ -1056,11 +1056,14 @@ export const commands = {
   /**
    * Start or schedule a durable TaskRun workflow via Sacrum.
    */
-  async runWorkflow(taskId: string): Promise<Result<TaskRun, CommandError>> {
+  async runWorkflow(
+    taskId: string,
+    maxConcurrency: number | null
+  ): Promise<Result<TaskRun, CommandError>> {
     try {
       return {
         status: "ok",
-        data: await TAURI_INVOKE("run_workflow", { taskId }),
+        data: await TAURI_INVOKE("run_workflow", { taskId, maxConcurrency }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;
@@ -2770,6 +2773,10 @@ export type TaskRun = {
    * Durable run lifecycle status
    */
   status: TaskRunStatus;
+  /**
+   * Effective maximum concurrent step attempts for the root TaskRun tree.
+   */
+  max_concurrency: number | null;
   /**
    * When this run started (ISO 8601 string)
    */

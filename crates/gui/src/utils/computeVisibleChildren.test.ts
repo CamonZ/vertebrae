@@ -75,6 +75,7 @@ describe("isFullyComplete", () => {
           project_id: "p",
           user_id: null,
           status: "completed",
+          max_concurrency: null,
           started_at: null,
           ended_at: null,
           stop_requested_at: null,

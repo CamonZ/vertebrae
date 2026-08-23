@@ -151,6 +151,7 @@ export function createMockTaskRun(overrides?: Partial<TaskRun>): TaskRun {
     project_id: "project-1",
     user_id: null,
     status: "executing",
+    max_concurrency: null,
     started_at: new Date().toISOString(),
     ended_at: null,
     stop_requested_at: null,

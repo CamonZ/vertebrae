@@ -280,7 +280,7 @@ mod tests {
             .expect("active run command succeeds before run");
         assert!(no_active.is_none());
 
-        let run = run_workflow(state.clone(), task_id.clone())
+        let run = run_workflow(state.clone(), task_id.clone(), None)
             .await
             .expect("run workflow succeeds");
         let active = get_active_run(state.clone(), task_id.clone())
@@ -303,7 +303,7 @@ mod tests {
         let task_id = create_task_with_workflow(&app).await;
         let state: tauri::State<'_, AppState> = app.state();
 
-        let run = run_workflow(state.clone(), task_id)
+        let run = run_workflow(state.clone(), task_id, None)
             .await
             .expect("run workflow succeeds");
         let trace = get_task_run_trace(state, run.id.clone())

@@ -11,6 +11,7 @@ const RUN: TaskRun = {
   project_id: "project-1",
   user_id: null,
   status: "waiting",
+  max_concurrency: null,
   started_at: "2026-05-08T10:00:00Z",
   ended_at: null,
   stop_requested_at: null,

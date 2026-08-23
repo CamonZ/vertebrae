@@ -734,7 +734,8 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       fireEvent.click(screen.getByTestId("task-detail-run-button"));
 
       expect(eventsModule.commands.runWorkflow).toHaveBeenCalledWith(
-        mockTaskData.id
+        mockTaskData.id,
+        null
       );
       expect(
         await screen.findByTestId("task-detail-stop-button")
@@ -747,6 +748,54 @@ describe("TaskDetailPanel - Restructured Layout", () => {
           )
         )
       ).toEqual([taskRun]);
+    });
+
+    it("sends a selected positive concurrency limit and seeds it in the cache", async () => {
+      const taskRun = activeRun(mockTaskData.id, {
+        status: "queued",
+        max_concurrency: 4,
+      });
+      vi.mocked(eventsModule.commands.runWorkflow).mockResolvedValue({
+        status: "ok",
+        data: taskRun,
+      });
+
+      renderWithTaskOverrides({ run_controls: runnableControls() });
+
+      fireEvent.change(screen.getByTestId("task-detail-max-concurrency"), {
+        target: { value: "4" },
+      });
+      fireEvent.click(screen.getByTestId("task-detail-run-button"));
+
+      expect(eventsModule.commands.runWorkflow).toHaveBeenCalledWith(
+        mockTaskData.id,
+        4
+      );
+      expect(
+        await screen.findByTestId("task-detail-stop-button")
+      ).toBeInTheDocument();
+      expect(
+        queryClient.getQueryData(
+          queryKeys.taskRuns.byTask(
+            getProjectScopeGeneration(),
+            mockTaskData.id
+          )
+        )
+      ).toEqual([taskRun]);
+    });
+
+    it("rejects a non-positive concurrency limit before starting", () => {
+      renderWithTaskOverrides({ run_controls: runnableControls() });
+
+      fireEvent.change(screen.getByTestId("task-detail-max-concurrency"), {
+        target: { value: "0" },
+      });
+      fireEvent.click(screen.getByTestId("task-detail-run-button"));
+
+      expect(eventsModule.commands.runWorkflow).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole("alert").textContent
+      ).toContain("positive integer");
     });
 
     it("shows an enabled Stop while the GUI start command is pending", async () => {

@@ -59,6 +59,7 @@ function withActiveRun(task: Task, status: TaskRunStatus, startedAt: string) {
         project_id: "project-1",
         user_id: null,
         status,
+        max_concurrency: null,
         started_at: startedAt,
         ended_at: null,
         stop_requested_at: null,
