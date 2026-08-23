@@ -8,7 +8,8 @@
    VERTEBRAE · HEARTH — Neutral dark identity
    Copper accent on neutral charcoal surfaces, serif moments via Newsreader, mono
    via JetBrains.
-   Five step types: execute / eval / route / human_review / wait_for_children.
+   Seven step types: execute / eval / route / human_review / wait_for_children /
+   stop / finish.
    Tokens are layered: Hearth primitives (--color-*, --spacing-*, --radius-*)
    are the single source of truth and own all values; the docs/design v2 adapter
    below re-exports them under the compact prototype vocabulary (--bg, --fg,

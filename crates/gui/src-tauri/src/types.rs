@@ -1348,8 +1348,8 @@ pub struct CreateStepOptions {
 }
 
 /// Options for updating a workflow step.
-/// Only fields that are Some will be updated.
-/// Note: agent_config is intentionally omitted — not editable from the GUI.
+/// Only fields that are Some will be updated. `clear_output_schema` explicitly
+/// removes an existing schema when no replacement value is supplied.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct UpdateStepOptions {
     pub step_id: String,
