@@ -28,6 +28,30 @@ describe("useTasks", () => {
     vi.clearAllMocks();
   });
 
+  it("shares one request for null and all-null unfiltered filters", async () => {
+    queryClient.clear();
+    resetProjectScopedStores();
+    mockListTasks.mockResolvedValue({ status: "ok", data: [] });
+    const emptyFilter: TaskFilterOptions = {
+      step_names: null,
+      levels: null,
+      tags: null,
+      root_only: null,
+      children_of: null,
+      search: null,
+      workflow_id: null,
+      step_id: null,
+    };
+
+    const first = renderHook(() => useTasks(emptyFilter), { wrapper });
+    await waitFor(() => expect(first.result.current.isLoading).toBe(false));
+    const second = renderHook(() => useTasks(), { wrapper });
+    await waitFor(() => expect(second.result.current.isLoading).toBe(false));
+
+    expect(mockListTasks).toHaveBeenCalledTimes(1);
+    expect(mockListTasks).toHaveBeenCalledWith(null);
+  });
+
   it("returns tasks from the query cache", async () => {
     const task1 = createMockTask({ id: "t-1", title: "Query Task" });
     mockListTasks.mockResolvedValue({ status: "ok", data: [task1] });

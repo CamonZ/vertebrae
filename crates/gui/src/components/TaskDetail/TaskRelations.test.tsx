@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "../../test/test-utils";
 import userEvent from "@testing-library/user-event";
 import { TaskRelations } from "./TaskRelations";
 import * as bindingsModule from "../../bindings";
 import type { Task } from "../../bindings";
+import { resetProjectScopedStores } from "../../stores/projectScopedStores";
 
 // Helper to create mock Task with all required fields
 const createMockTask = (id: string, title: string): Task => ({
@@ -61,6 +62,7 @@ describe("TaskRelations", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resetProjectScopedStores();
     // Set up default mocks
     vi.mocked(bindingsModule.commands.listTasks).mockResolvedValue({
       status: "ok",
