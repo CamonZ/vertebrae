@@ -4,7 +4,6 @@ import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import type { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
 import { computeVisibleChildren } from "../../utils/computeVisibleChildren";
-import { noteTaskDetailTreeRowRender } from "../../utils/taskDetailTrace";
 import { formatRelative } from "../../utils/formatRelative";
 import { getPriorityIndicator } from "../../utils/taskPriority";
 import {
@@ -185,9 +184,6 @@ export function TaskTreeNode({
   activeRunsByTaskId,
 }: TaskTreeNodeProps) {
   const task = node.task;
-  if (selectedTaskId) {
-    noteTaskDetailTreeRowRender(selectedTaskId, 0);
-  }
   const hasChildren = node.children.length > 0;
   const isSelected = selectedTaskId === task.id;
   const isExpanded = expandedNodes

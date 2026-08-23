@@ -18,10 +18,6 @@ import {
   queryKeys,
   unwrapCommand,
 } from "../query";
-import {
-  taskDetailTraceNow,
-  traceTaskDetailPhase,
-} from "../utils/taskDetailTrace";
 
 function seedSessionLogs(
   logs: readonly SessionLog[],
@@ -133,7 +129,7 @@ export interface UseRunTraceResult {
  * pass the concrete run id they want to display.
  */
 export function useRunTrace(
-  taskId: string | null | undefined,
+  _taskId: string | null | undefined,
   activeRunId: string | null | undefined
 ): UseRunTraceResult {
   const projectScopeGeneration = useProjectScopeGeneration();
@@ -146,38 +142,14 @@ export function useRunTrace(
   const query = useQuery({
     queryKey,
     queryFn: async () => {
-      const startedAt = taskDetailTraceNow();
-      if (taskId) {
-        traceTaskDetailPhase(taskId, "run-trace-query-start", {
-          command: "getTaskRunTrace",
-          runId: activeRunId,
-        });
-      }
       const generationAtFetchStart = projectScopeGeneration;
       const traceAtFetchStart =
         queryClient.getQueryData<TaskRunTrace>(queryKey);
       const logsByExecutionIdAtFetchStart =
         useSessionLogStore.getState().logsByExecutionId;
-      let fetchedTrace: TaskRunTrace;
-      try {
-        fetchedTrace = await unwrapCommand(
-          commands.getTaskRunTrace(activeRunId!)
-        );
-      } catch (error) {
-        if (taskId) {
-          traceTaskDetailPhase(taskId, "run-trace-query-error", {
-            durationMs: taskDetailTraceNow() - startedAt,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-        throw error;
-      }
-      if (taskId) {
-        traceTaskDetailPhase(taskId, "run-trace-query-success", {
-          durationMs: taskDetailTraceNow() - startedAt,
-          executions: fetchedTrace.step_executions?.length ?? 0,
-        });
-      }
+      const fetchedTrace = await unwrapCommand(
+        commands.getTaskRunTrace(activeRunId!)
+      );
       if (isCurrentProjectScopeGeneration(generationAtFetchStart)) {
         seedSessionLogs(
           fetchedTrace.session_logs ?? [],
