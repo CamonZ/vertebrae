@@ -879,6 +879,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_update_stop_step_serializes_type_and_transition_sync() {
+        let server = MockServer::start().await;
+
+        let response = json!({
+            "data": {
+                "update_workflow_step": make_step_response("step-1", "Pause", "wf-1", 0),
+                "sync_step_transitions": make_step_response("step-1", "Pause", "wf-1", 0)
+            }
+        });
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let updates = StepUpdate::new()
+            .with_step_type(StepType::Stop)
+            .with_transitions_to(vec!["step-next".to_string()]);
+        service.update_step("step-1", &updates).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2, "update and transition sync requests");
+        let update_body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(update_body["variables"]["step_type"], "stop");
+        let sync_body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(
+            sync_body["variables"]["transitions"],
+            json!([{ "to_step_id": "step-next" }])
+        );
+    }
+
+    #[tokio::test]
     async fn test_delete_step_via_graphql() {
         let server = MockServer::start().await;
 
