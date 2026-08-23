@@ -94,13 +94,15 @@ pub const TASK_SUMMARY_FIELDS: &str = r#"
 "#;
 
 /// Slim fragment for the task list. Keep this separate from TASK_FIELDS so
-/// list callers do not load descriptions, relationships, or other detail-only
-/// associations.
+/// list callers do not load relationships or other detail-only associations.
+/// Description is included because list surfaces such as the traces picker
+/// support client-side description search.
 pub const TASK_LIST_FIELDS: &str = r#"
     fragment TaskListFields on Task {
         id
         project_id
         title
+        description
         level
         priority
         tags
@@ -566,6 +568,7 @@ mod tests {
             "id",
             "project_id",
             "title",
+            "description",
             "level",
             "priority",
             "tags",
@@ -584,7 +587,6 @@ mod tests {
         }
 
         for detail_field in [
-            "description",
             "sections",
             "code_refs",
             "worktree",

@@ -2057,13 +2057,16 @@ mod tests {
     async fn test_list_tasks_success() {
         let server = MockServer::start().await;
 
+        let mut first_task = gql_task_data("task-1", "First");
+        first_task["description"] = json!("Searchable list description");
+
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_string_contains("ListTasks"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
                     "tasks": [
-                        gql_task_data("task-1", "First"),
+                        first_task,
                         gql_task_data("task-2", "Second")
                     ]
                 }
@@ -2077,6 +2080,10 @@ mod tests {
 
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].title, "First");
+        assert_eq!(
+            tasks[0].description.as_deref(),
+            Some("Searchable list description")
+        );
         assert_eq!(tasks[1].title, "Second");
 
         let bodies = captured_graphql_bodies(&server).await;
@@ -2088,7 +2095,7 @@ mod tests {
         assert!(query.contains("fragment TaskListFields on Task"));
         assert!(query.contains("...TaskListFields"));
         assert!(!query.contains("fragment TaskFields on Task"));
-        for detail_field in ["description", "sections", "code_refs", "worktree"] {
+        for detail_field in ["sections", "code_refs", "worktree"] {
             assert!(
                 !query.contains(detail_field),
                 "list query requested {detail_field}"
