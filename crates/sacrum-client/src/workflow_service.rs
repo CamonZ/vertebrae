@@ -246,6 +246,14 @@ impl WorkflowService for SacrumWorkflowService {
                         .await?;
                 }
             }
+
+            let initial_step_variables = json!({
+                "id": workflow_id,
+                "initial_step_id": created_step_ids[0],
+            });
+            self.client
+                .execute_void(UPDATE_WORKFLOW, initial_step_variables)
+                .await?;
         }
 
         Ok(response.id)
@@ -937,7 +945,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_workflow_with_steps() {
+    async fn test_create_workflow_with_steps_sets_initial_step() {
         let server = MockServer::start().await;
 
         // First call: create_workflow returns the workflow ID
@@ -951,6 +959,19 @@ mod tests {
                 }
             })))
             .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpdateWorkflow"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "update_workflow": {
+                        "id": "wf-with-steps"
+                    }
+                }
+            })))
             .mount(&server)
             .await;
 
@@ -1038,6 +1059,15 @@ mod tests {
         let id = service.create_workflow(opts).await.unwrap();
 
         assert_eq!(id, "wf-with-steps");
+
+        let requests = server.received_requests().await.unwrap();
+        let update_request = requests
+            .iter()
+            .find(|request| String::from_utf8_lossy(&request.body).contains("UpdateWorkflow"))
+            .expect("workflow initial step update request");
+        let body: serde_json::Value = serde_json::from_slice(&update_request.body).unwrap();
+        assert_eq!(body["variables"]["id"], "wf-with-steps");
+        assert_eq!(body["variables"]["initial_step_id"], "step-1");
     }
 
     #[tokio::test]

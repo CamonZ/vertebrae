@@ -17,6 +17,8 @@ pub async fn stop_boundary_workflow(world: &mut DaemonWorld) {
             "add",
             &workflow_name,
             "--step",
+            "work:claude-sonnet-4-6",
+            "--step",
             "pause:claude-sonnet-4-6",
             "--step",
             "finish:claude-sonnet-4-6",
@@ -34,8 +36,21 @@ pub async fn stop_boundary_workflow(world: &mut DaemonWorld) {
     world.workflow_id = Some(workflow_id.clone());
     world.created_workflow_ids.push(workflow_id.clone());
 
+    let work_id = step_id_by_name(world, &workflow_id, "work").await;
     let pause_id = step_id_by_name(world, &workflow_id, "pause").await;
     let finish_id = step_id_by_name(world, &workflow_id, "finish").await;
+
+    let prompt = world
+        .mock_response("stop-work")
+        .with_stdout_line(
+            r#"{"type":"result","subtype":"success","result":"work complete","session_id":"stop-work"}"#,
+        )
+        .build()
+        .expect("stop boundary work response builds");
+    world
+        .run_vtb(&["step", "update", &work_id, "--prompt", &prompt])
+        .await;
+    world.assert_vtb_ok("step update (stop boundary work)");
 
     world
         .run_vtb(&[
@@ -130,7 +145,9 @@ pub async fn stop_boundary_was_not_dispatched(world: &mut DaemonWorld) {
         .await
         .expect("step_executions query failed");
     assert!(
-        executions.is_empty(),
+        executions
+            .iter()
+            .all(|execution| execution["step_id"].as_str() != world.step_id.as_deref()),
         "stop boundary should not create a step execution: {executions:?}"
     );
 }
