@@ -7,6 +7,10 @@ import {
   queryKeys,
   unwrapCommand,
 } from "../query";
+import {
+  taskDetailTraceNow,
+  traceTaskDetailPhase,
+} from "../utils/taskDetailTrace";
 
 const NO_TASK_SELECTED_KEY = "__vertebrae_no_task_selected__";
 
@@ -22,9 +26,24 @@ export function useTask(id: string | null | undefined) {
   const query = useQuery({
     queryKey: queryKeys.tasks.detail(projectScopeGeneration, taskId),
     queryFn: async () => {
-      const task = await unwrapCommand(commands.getTask(id!));
-      hydrateActiveTaskRunsFromTasks([task], projectScopeGeneration);
-      return task;
+      const startedAt = taskDetailTraceNow();
+      traceTaskDetailPhase(id!, "detail-query-start", { command: "getTask" });
+      try {
+        const task = await unwrapCommand(commands.getTask(id!));
+        hydrateActiveTaskRunsFromTasks([task], projectScopeGeneration);
+        traceTaskDetailPhase(id!, "detail-query-success", {
+          durationMs: taskDetailTraceNow() - startedAt,
+          sections: task.sections?.length ?? 0,
+          codeRefs: task.code_refs?.length ?? 0,
+        });
+        return task;
+      } catch (error) {
+        traceTaskDetailPhase(id!, "detail-query-error", {
+          durationMs: taskDetailTraceNow() - startedAt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
     },
     enabled: Boolean(id),
   });

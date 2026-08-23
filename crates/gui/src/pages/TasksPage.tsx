@@ -20,6 +20,7 @@ import { TaskTreeView, ExpandCollapseAllButton } from "../components/TaskList";
 import { SearchInput } from "../components/molecules/SearchInput";
 import { Select } from "../components/atoms/Select";
 import { TaskDetailPanel } from "../components/TaskDetail";
+import { startTaskDetailTrace } from "../utils/taskDetailTrace";
 import { Badge } from "../components/atoms/Badge";
 import { LiveCount } from "../components/shared/LiveCount";
 import { isActiveRunStatus, isTaskDone } from "../utils/runState";
@@ -81,7 +82,11 @@ const INITIAL_FILTERS: TaskFilterOptions = {
   step_id: null,
 };
 
-function matchesScope(task: Task, scope: TaskScope, activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>): boolean {
+function matchesScope(
+  task: Task,
+  scope: TaskScope,
+  activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>
+): boolean {
   const status = activeRuns.get(task.id)?.status ?? null;
 
   switch (scope) {
@@ -107,7 +112,11 @@ function matchesScope(task: Task, scope: TaskScope, activeRuns: ReadonlyMap<stri
   }
 }
 
-function deriveScopedTasks(tasks: Task[], scope: TaskScope, activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>): Task[] {
+function deriveScopedTasks(
+  tasks: Task[],
+  scope: TaskScope,
+  activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>
+): Task[] {
   if (scope === "all") return tasks;
 
   const byId = new Map(tasks.map((task) => [task.id, task]));
@@ -129,7 +138,10 @@ function deriveScopedTasks(tasks: Task[], scope: TaskScope, activeRuns: Readonly
   return tasks.filter((task) => include.has(task.id));
 }
 
-function scopeCounts(tasks: Task[], activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>) {
+function scopeCounts(
+  tasks: Task[],
+  activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>
+) {
   return tasks.reduce(
     (counts, task) => {
       COUNTED_TASK_SCOPE_CHIPS.forEach(({ key, countKey }) => {
@@ -237,7 +249,10 @@ export function TasksPage() {
     () => deriveScopedTasks(tasks, scope, activeRunsByTaskId),
     [activeRunsByTaskId, tasks, scope]
   );
-  const counts = useMemo(() => scopeCounts(tasks, activeRunsByTaskId), [activeRunsByTaskId, tasks]);
+  const counts = useMemo(
+    () => scopeCounts(tasks, activeRunsByTaskId),
+    [activeRunsByTaskId, tasks]
+  );
 
   const hierarchy = useMemo(
     () => buildTreeFromTasks(scopedTasks),
@@ -277,6 +292,7 @@ export function TasksPage() {
   const selectedLevel = filters.levels?.[0] ?? "";
 
   const handleTaskSelect = useCallback((task: Task) => {
+    startTaskDetailTrace(task.id, "tasks-page");
     setSelectedTaskId(task.id);
   }, []);
 
@@ -298,6 +314,7 @@ export function TasksPage() {
   const detailTaskId = selectedTaskId ?? lastSelectedTaskIdRef.current;
 
   const handleRelatedTaskSelect = useCallback((taskId: string) => {
+    startTaskDetailTrace(taskId, "task-detail-relation");
     setSelectedTaskId(taskId);
   }, []);
 

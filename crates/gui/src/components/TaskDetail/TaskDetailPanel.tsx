@@ -58,6 +58,14 @@ import {
   taskLocationWorkflowLabel,
 } from "../../utils/taskLocation";
 import { upsertTaskRunInQueryCache } from "../../query";
+import {
+  ensureTaskDetailTrace,
+  finishTaskDetailTrace,
+  getTaskDetailTraceId,
+  taskDetailTraceNow,
+  traceTaskDetailPhase,
+  traceTaskDetailPhaseOnce,
+} from "../../utils/taskDetailTrace";
 
 /** Canonical uppercase mono eyebrow used for every collapsible section header.
  * Muted (not accent), matching the reference `.acc-hd .name` (var(--fg-mute)) —
@@ -85,6 +93,24 @@ function TaskLocationBadge({ task }: { task: Task }) {
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
+
+function scheduleTaskDetailFrame(callback: FrameRequestCallback): number {
+  if (typeof requestAnimationFrame === "function") {
+    return requestAnimationFrame(callback);
+  }
+  return setTimeout(
+    () => callback(taskDetailTraceNow()),
+    0
+  ) as unknown as number;
+}
+
+function cancelTaskDetailFrame(frame: number): void {
+  if (typeof cancelAnimationFrame === "function") {
+    cancelAnimationFrame(frame);
+  } else {
+    clearTimeout(frame);
+  }
+}
 
 interface TaskDetailPanelProps {
   taskId: string | null;
@@ -188,7 +214,7 @@ export function TaskDetailPanel({
 
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const taskLocation = useTaskLocation(taskData);
-  const { tasks: allTasks } = useTasks();
+  const { tasks: allTasks, isLoading: allTasksLoading } = useTasks();
   const activeRun = useActiveTaskRun(taskId);
   useEffect(() => {
     if (!isWorkflowRunRequested || !activeRun) return;
@@ -199,10 +225,59 @@ export function TaskDetailPanel({
   useEffect(() => {
     setIsWorkflowRunRequested(false);
   }, [taskId]);
-  const { stepExecutions: activeRunExecutions } = useRunTrace(
-    taskId,
-    activeRun?.id
-  );
+  const {
+    stepExecutions: activeRunExecutions,
+    isLoading: activeRunTraceLoading,
+  } = useRunTrace(taskId, activeRun?.id);
+
+  const paintFrameRef = useRef<number | null>(null);
+  const secondPaintFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!taskId) return;
+
+    paintFrameRef.current = null;
+    secondPaintFrameRef.current = null;
+    ensureTaskDetailTrace(taskId, "task-detail-panel");
+    traceTaskDetailPhaseOnce(taskId, "panel-mounted", {
+      closing,
+    });
+  }, [closing, taskId]);
+
+  useEffect(() => {
+    if (!taskId) return;
+    if (taskData && !isLoading && !error) {
+      traceTaskDetailPhaseOnce(taskId, "detail-data-ready", {
+        sections: taskData.sections?.length ?? 0,
+        codeRefs: taskData.code_refs?.length ?? 0,
+      });
+    }
+    if (error && !isLoading) {
+      traceTaskDetailPhaseOnce(taskId, "detail-data-error", { error });
+    }
+  }, [error, isLoading, taskData, taskId]);
+
+  useEffect(() => {
+    if (!taskId || artifactsLoading) return;
+    traceTaskDetailPhaseOnce(taskId, "artifacts-data-ready", {
+      count: artifacts.length,
+      error: artifactsError,
+    });
+  }, [artifacts.length, artifactsError, artifactsLoading, taskId]);
+
+  useEffect(() => {
+    if (!taskId || allTasksLoading) return;
+    traceTaskDetailPhaseOnce(taskId, "related-tasks-data-ready", {
+      count: allTasks.length,
+    });
+  }, [allTasks.length, allTasksLoading, taskId]);
+
+  useEffect(() => {
+    if (!taskId || activeRunTraceLoading) return;
+    traceTaskDetailPhaseOnce(taskId, "run-trace-data-ready", {
+      executions: activeRunExecutions.length,
+    });
+  }, [activeRunExecutions.length, activeRunTraceLoading, taskId]);
   const {
     isDeleteDialogOpen,
     openDeleteDialog,
@@ -249,6 +324,7 @@ export function TaskDetailPanel({
   const [fetchedTitles, setFetchedTitles] = useState<Record<string, string>>(
     {}
   );
+  const [relationFetchPending, setRelationFetchPending] = useState(false);
   const taskLevelById = useMemo(() => {
     const map = new Map<string, Task["level"]>();
     for (const t of allTasks) map.set(t.id, t.level);
@@ -273,15 +349,27 @@ export function TaskDetailPanel({
   }, [taskData?.parent_id, allTasks, fetchedTitles]);
 
   useEffect(() => {
-    if (!taskData) return;
+    if (!taskData) {
+      setRelationFetchPending(false);
+      return;
+    }
     // Relation IDs come from the detail response. Only the parent title needs
     // a fallback fetch; dependency/dependent IDs render without per-row GETs.
     const relationIds = taskData.parent_id ? [taskData.parent_id] : [];
     const missing = relationIds.filter(
       (id) => !taskLevelById.has(id) && !(id in fetchedLevels)
     );
-    if (missing.length === 0) return;
+    if (missing.length === 0) {
+      setRelationFetchPending(false);
+      return;
+    }
     let cancelled = false;
+    const startedAt = taskDetailTraceNow();
+    setRelationFetchPending(true);
+    traceTaskDetailPhase(taskData.id, "relation-query-start", {
+      command: "getTask",
+      count: missing.length,
+    });
     void Promise.all(
       missing.map(async (id) => {
         const result = await commands.getTask(id);
@@ -289,24 +377,105 @@ export function TaskDetailPanel({
           ? ([id, result.data.level, result.data.title] as const)
           : null;
       })
-    ).then((entries) => {
-      if (cancelled) return;
-      const levelUpdates: Record<string, Task["level"]> = {};
-      const titleUpdates: Record<string, string> = {};
-      for (const entry of entries) {
-        if (!entry) continue;
-        levelUpdates[entry[0]] = entry[1];
-        titleUpdates[entry[0]] = entry[2];
-      }
-      if (Object.keys(levelUpdates).length > 0) {
-        setFetchedLevels((prev) => ({ ...prev, ...levelUpdates }));
-        setFetchedTitles((prev) => ({ ...prev, ...titleUpdates }));
-      }
-    });
+    )
+      .then((entries) => {
+        if (cancelled) return;
+        const levelUpdates: Record<string, Task["level"]> = {};
+        const titleUpdates: Record<string, string> = {};
+        for (const entry of entries) {
+          if (!entry) continue;
+          levelUpdates[entry[0]] = entry[1];
+          titleUpdates[entry[0]] = entry[2];
+        }
+        if (Object.keys(levelUpdates).length > 0) {
+          setFetchedLevels((prev) => ({ ...prev, ...levelUpdates }));
+          setFetchedTitles((prev) => ({ ...prev, ...titleUpdates }));
+        }
+        traceTaskDetailPhase(taskData.id, "relation-query-success", {
+          durationMs: taskDetailTraceNow() - startedAt,
+          count: entries.filter(Boolean).length,
+        });
+      })
+      .catch((error) => {
+        traceTaskDetailPhase(taskData.id, "relation-query-error", {
+          durationMs: taskDetailTraceNow() - startedAt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setRelationFetchPending(false);
+      });
     return () => {
       cancelled = true;
     };
   }, [taskData, taskLevelById, fetchedLevels]);
+
+  useEffect(() => {
+    if (
+      !taskId ||
+      !taskData ||
+      isLoading ||
+      error ||
+      artifactsLoading ||
+      allTasksLoading ||
+      activeRunTraceLoading ||
+      relationFetchPending
+    ) {
+      return;
+    }
+
+    const traceId = getTaskDetailTraceId(taskId);
+    if (!traceId) return;
+    if (
+      paintFrameRef.current !== null ||
+      secondPaintFrameRef.current !== null
+    ) {
+      return;
+    }
+
+    const renderedDetails = {
+      artifacts: artifacts.length,
+      children: children.length,
+      dependencies: taskData.dependency_ids?.length ?? 0,
+      dependents: dependentIds.length,
+      sections: taskData.sections?.length ?? 0,
+      codeRefs: taskData.code_refs?.length ?? 0,
+      activeRun: Boolean(activeRun),
+    };
+
+    paintFrameRef.current = scheduleTaskDetailFrame(() => {
+      paintFrameRef.current = null;
+      traceTaskDetailPhaseOnce(taskId, "content-committed", renderedDetails);
+      secondPaintFrameRef.current = scheduleTaskDetailFrame(() => {
+        secondPaintFrameRef.current = null;
+        finishTaskDetailTrace(taskId, renderedDetails);
+      });
+    });
+
+    return () => {
+      if (paintFrameRef.current !== null) {
+        cancelTaskDetailFrame(paintFrameRef.current);
+        paintFrameRef.current = null;
+      }
+      if (secondPaintFrameRef.current !== null) {
+        cancelTaskDetailFrame(secondPaintFrameRef.current);
+        secondPaintFrameRef.current = null;
+      }
+    };
+  }, [
+    activeRun,
+    activeRunTraceLoading,
+    allTasksLoading,
+    artifacts.length,
+    artifactsLoading,
+    children.length,
+    dependentIds.length,
+    error,
+    isLoading,
+    relationFetchPending,
+    taskData,
+    taskId,
+  ]);
 
   const acceptanceCriteria = useMemo(
     () =>
