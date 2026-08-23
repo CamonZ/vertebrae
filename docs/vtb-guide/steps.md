@@ -12,6 +12,10 @@ vtb step add "Testing" -w <workflow-id> \
 # Add a finish step (completes the task when reached)
 vtb step add "Approved" -w <workflow-id> --step-type finish
 
+# Add a stop boundary (ends this run and continues to the one target later)
+vtb step add "Pause Run" -w <workflow-id> --step-type stop \
+  --transition-to <next-step-id>
+
 # Add step with transition restrictions
 vtb step add "Needs Work" -w <workflow-id> --transition-to <step-id>
 
@@ -50,6 +54,7 @@ vtb step show <step-id>
 vtb step update <step-id> --goal "New goal" --model opus
 vtb step update <step-id> --prompt "New prompt for {{task.id}}"
 vtb step update <step-id> --step-type evaluate
+vtb step update <step-id> --step-type stop --transition-to <next-step-id>
 vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
 vtb step update <step-id> --clear-agents --clear-skills
@@ -143,7 +148,7 @@ request with no property changes before reporting success.
 | `--provider <PROVIDER>` | | Set `agent_config.provider`; accepts `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
 | `--codex-model-provider <PROVIDER>` | | Set `agent_config.codex_model_provider`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
 | `--reasoning-effort <EFFORT>` | | Set `agent_config.reasoning_effort`; valid values are `low`, `medium`, `high`, and `xhigh`; only valid when the resulting provider is OpenAI/Codex |
-| `--step-type <STEP_TYPE>` | | Set the step type; values are `execute`, `evaluate`, `route`, `wait_children`, `human_input`, and `finish` |
+| `--step-type <STEP_TYPE>` | | Set the step type; values are `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, and `finish` |
 | `--output-schema <JSON>` | | Replace the step output schema from a JSON string |
 | `--clear-output-schema` | | Remove the output schema |
 | `--order <ORDER>` | `-o` | Replace the 0-indexed step order |
@@ -225,7 +230,7 @@ matching step exists, the command fails with `Step not found: <id>`. If an
 | `agents` | Agent file paths for AI-assisted execution |
 | `skills` | Slash commands available during this step |
 | `transition-to` | Restrict which steps can follow this one |
-| `step-type` | Type of step: `execute`, `evaluate`, `route`, `wait_children`, `human_input`, or `finish` (see below) |
+| `step-type` | Type of step: `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (see below) |
 | `output-schema` | JSON Schema for structured output enforcement (see below) |
 
 ### Step Types
@@ -239,6 +244,7 @@ Each step has a `--step-type` that determines its role in the workflow:
 | `route` | Directs work to different paths based on conditions. Uses a fixed routing contract schema. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
 | `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. |
+| `stop` | Run boundary. Ends the current TaskRun as `stopped` without completing the task or dispatching the step; it must have exactly one outgoing transition, which a later TaskRun follows. |
 | `finish` | Promptless terminal step. Completes the task immediately, has no outgoing transitions, and is never dispatched to a daemon executor. |
 
 ```bash
@@ -251,6 +257,9 @@ vtb step add "Needs Input" -w <wf-id> --step-type human_input
 # Create a promptless terminal step
 vtb step add "Complete" -w <wf-id> --step-type finish
 
+# Create a stop boundary with one continuation
+vtb step add "Pause Run" -w <wf-id> --step-type stop --transition-to <next-step-id>
+
 # Change step type later
 vtb step update <step-id> --step-type route
 ```
@@ -262,7 +271,14 @@ schema, and outgoing transitions must be empty. Sacrum owns task completion and
 dependent-task readiness; the daemon and GUI render that backend state and treat
 finish as a completion event rather than an AI execution.
 
-The six step types are carried unchanged through the Sacrum API, core models,
+`stop` is a run boundary, not a completion step and not the same as the operator
+`vtb stop-taskrun` control. When the orchestrator reaches it, Sacrum stops the
+current TaskRun with `outcome_kind=run_boundary`, leaves the task incomplete, and
+does not dispatch the stop step. A later TaskRun bypasses the stop through its
+single outgoing transition. The CLI and client reject stop steps unless exactly
+one outgoing transition is provided.
+
+The seven step types are carried unchanged through the Sacrum API, core models,
 CLI JSON output, Tauri bindings, Atlas/task-location surfaces, and trace
 normalization. Unknown future wire values remain available through the
 `unsupported` compatibility variant.

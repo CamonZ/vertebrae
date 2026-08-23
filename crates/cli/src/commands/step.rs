@@ -19,6 +19,8 @@ pub enum CliStepType {
     WaitChildren,
     #[value(name = "human_input")]
     HumanInput,
+    #[value(name = "stop")]
+    Stop,
     Finish,
 }
 
@@ -30,12 +32,13 @@ impl From<CliStepType> for StepType {
             CliStepType::Route => StepType::Route,
             CliStepType::WaitChildren => StepType::WaitChildren,
             CliStepType::HumanInput => StepType::HumanInput,
+            CliStepType::Stop => StepType::Stop,
             CliStepType::Finish => StepType::Finish,
         }
     }
 }
 
-fn validate_finish_constraints(
+fn validate_step_constraints(
     step_type: &StepType,
     prompt: Option<&str>,
     transitions_to: &[String],
@@ -43,6 +46,12 @@ fn validate_finish_constraints(
     if matches!(step_type, StepType::Finish) && (prompt.is_some() || !transitions_to.is_empty()) {
         return Err(ServiceError::validation_failed(
             "Finish steps cannot define a prompt or outgoing transitions",
+        ));
+    }
+
+    if matches!(step_type, StepType::Stop) && transitions_to.len() != 1 {
+        return Err(ServiceError::validation_failed(
+            "Stop steps must define exactly one outgoing transition",
         ));
     }
 
@@ -146,7 +155,7 @@ pub struct StepAddCommand {
     #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
     pub provider: Option<Provider>,
 
-    /// Type of this step (execute, evaluate, route, wait_children, human_input, finish)
+    /// Type of this step (execute, evaluate, route, wait_children, human_input, stop, finish)
     #[arg(long, value_enum, default_value = "execute")]
     pub step_type: CliStepType,
 
@@ -244,7 +253,7 @@ impl StepAddCommand {
             .transpose()?;
 
         let step_type: StepType = self.step_type.clone().into();
-        validate_finish_constraints(&step_type, self.prompt.as_deref(), &transitions_to)?;
+        validate_step_constraints(&step_type, self.prompt.as_deref(), &transitions_to)?;
 
         let mut step = Step::new(&self.name, workflow_id)
             .with_agent_config(agent_config)
@@ -532,7 +541,7 @@ pub struct StepUpdateCommand {
     #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
     pub provider: Option<Provider>,
 
-    /// New step type (execute, evaluate, route, wait_children, human_input, finish)
+    /// New step type (execute, evaluate, route, wait_children, human_input, stop, finish)
     #[arg(long, value_enum)]
     pub step_type: Option<CliStepType>,
 
@@ -594,7 +603,7 @@ impl StepUpdateCommand {
         } else {
             existing.transitions_to.clone()
         };
-        validate_finish_constraints(
+        validate_step_constraints(
             &resulting_step_type,
             resulting_prompt,
             &resulting_transitions,
@@ -1344,6 +1353,30 @@ mod tests {
     }
 
     #[test]
+    fn test_step_add_with_step_type_stop() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Stop",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "stop",
+            "--transition-to",
+            "a1b2c3d4-0000-4000-8000-000000000007",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                let core_type: StepType = cmd.step_type.into();
+                assert_eq!(core_type, StepType::Stop);
+                assert_eq!(cmd.transitions_to.len(), 1);
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
     fn test_step_add_with_step_type_finish() {
         let cli = TestCli::try_parse_from([
             "test",
@@ -1400,6 +1433,42 @@ mod tests {
             }
             _ => panic!("Expected Update command"),
         }
+    }
+
+    #[test]
+    fn test_step_update_with_step_type_stop() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--step-type",
+            "stop",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                let core_type: StepType = cmd.step_type.unwrap().into();
+                assert_eq!(core_type, StepType::Stop);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_stop_requires_exactly_one_transition() {
+        let error = validate_step_constraints(&StepType::Stop, None, &[]).unwrap_err();
+        assert!(error.to_string().contains("exactly one outgoing transition"));
+
+        let transitions = vec!["step-1".to_string(), "step-2".to_string()];
+        let error = validate_step_constraints(&StepType::Stop, None, &transitions).unwrap_err();
+        assert!(error.to_string().contains("exactly one outgoing transition"));
+
+        validate_step_constraints(
+            &StepType::Stop,
+            Some("ignored by the orchestrator"),
+            &["step-1".to_string()],
+        )
+        .unwrap();
     }
 
     #[test]
