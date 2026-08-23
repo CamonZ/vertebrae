@@ -36,7 +36,7 @@ export function stepRef(workflowId: string, stepId: string): string {
  *
  *  Maps the REAL backend `StepType` via `hearthStepKind`, renaming the Hearth
  *  kinds to the Atlas vocabulary: `eval` (evaluate), `wait` (wait_children),
- *  `human` (human_input). `execute`/`route`/`finish` pass through. `unknown`
+ *  `human` (human_input). `execute`/`route`/`stop`/`finish` pass through. `unknown`
  *  collapses to `execute` (a generic process box). There is no synthetic
  *  entry/final kind — the backend has no such types; position is `Role`,
  *  terminality is the finish type.
@@ -51,6 +51,7 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
     "route",
     "human_input",
     "wait_children",
+    "stop",
     "finish",
   ]);
   const raw = step.step_type;
@@ -66,6 +67,8 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
       return "human";
     case "route":
       return "route";
+    case "stop":
+      return "stop";
     case "finish":
       return "finish";
     case "execute":

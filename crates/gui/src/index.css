@@ -8,7 +8,8 @@
    VERTEBRAE · HEARTH — Neutral dark identity
    Copper accent on neutral charcoal surfaces, serif moments via Newsreader, mono
    via JetBrains.
-   Five step types: execute / eval / route / human_review / wait_for_children.
+   Seven step types: execute / eval / route / human_review / wait_for_children /
+   stop / finish.
    Tokens are layered: Hearth primitives (--color-*, --spacing-*, --radius-*)
    are the single source of truth and own all values; the docs/design v2 adapter
    below re-exports them under the compact prototype vocabulary (--bg, --fg,
@@ -77,7 +78,7 @@
   --color-info: oklch(0.78 0.13 220);
   --color-info-wash: oklch(0.32 0.1 220);
 
-  /* Step types — SIX Vertebrae step kinds, each with bar / wash / fg variants.
+  /* Step types — SEVEN Vertebrae step kinds, each with bar / wash / fg variants.
      bar  = top accent strip on a step node
      wash = subtle background tint on tinted surfaces
      fg   = readable foreground on the wash background */
@@ -97,9 +98,13 @@
   --color-step-human-wash: oklch(0.32 0.1 70);
   --color-step-human-fg: oklch(0.85 0.14 70);
 
-  --color-step-wait: oklch(0.62 0.04 250); /* slate — paused on children */
-  --color-step-wait-wash: oklch(0.28 0.02 250);
-  --color-step-wait-fg: oklch(0.75 0.04 250);
+  --color-step-wait: oklch(0.72 0.08 70); /* muted amber — paused on children */
+  --color-step-wait-wash: oklch(0.3 0.05 70);
+  --color-step-wait-fg: oklch(0.79 0.08 70);
+
+  --color-step-stop: oklch(0.56 0.07 65); /* dark warm neutral — inactive boundary */
+  --color-step-stop-wash: oklch(0.26 0.03 65);
+  --color-step-stop-fg: oklch(0.68 0.07 65);
 
   --color-step-finish: oklch(0.78 0.15 145); /* green — completes the task */
   --color-step-finish-wash: oklch(0.32 0.1 145);
@@ -250,6 +255,9 @@
   --step-wait: var(--color-step-wait);
   --step-wait-wash: var(--color-step-wait-wash);
   --step-wait-fg: var(--color-step-wait-fg);
+  --step-stop: var(--color-step-stop);
+  --step-stop-wash: var(--color-step-stop-wash);
+  --step-stop-fg: var(--color-step-stop-fg);
   --step-finish: var(--color-step-finish);
   --step-finish-wash: var(--color-step-finish-wash);
   --step-finish-fg: var(--color-step-finish-fg);
@@ -414,9 +422,13 @@
   --color-step-human-wash: oklch(0.93 0.06 75);
   --color-step-human-fg: oklch(0.45 0.15 70);
 
-  --color-step-wait: oklch(0.5 0.04 250);
-  --color-step-wait-wash: oklch(0.92 0.02 250);
-  --color-step-wait-fg: oklch(0.42 0.04 250);
+  --color-step-wait: oklch(0.52 0.08 70);
+  --color-step-wait-wash: oklch(0.92 0.03 70);
+  --color-step-wait-fg: oklch(0.42 0.08 70);
+
+  --color-step-stop: oklch(0.38 0.07 65);
+  --color-step-stop-wash: oklch(0.9 0.03 65);
+  --color-step-stop-fg: oklch(0.32 0.07 65);
 
   --color-step-finish: oklch(0.55 0.15 145);
   --color-step-finish-wash: oklch(0.93 0.06 145);
@@ -3970,6 +3982,11 @@ html.light ::selection {
   --kc: var(--step-wait);
   --kf: var(--step-wait-fg);
   --kw: var(--step-wait-wash);
+}
+.k-stop {
+  --kc: var(--step-stop);
+  --kf: var(--step-stop-fg);
+  --kw: var(--step-stop-wash);
 }
 .k-finish {
   --kc: var(--step-finish);

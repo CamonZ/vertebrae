@@ -68,6 +68,24 @@ pub async fn get_step(
 #[specta::specta]
 pub async fn create_step(
     state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    options: crate::types::CreateStepOptions,
+) -> Result<Step, CommandError> {
+    let created = create_step_inner(state, options).await?;
+    let _ = app_handle.emit(
+        "step-changed-event",
+        crate::events::StepChangedEvent {
+            step_id: created.id.clone().unwrap_or_default(),
+            workflow_id: created.workflow_id.clone(),
+            change_type: crate::events::StepChangeType::Created,
+            step: Some(created.clone()),
+        },
+    );
+    Ok(created)
+}
+
+pub(crate) async fn create_step_inner(
+    state: State<'_, AppState>,
     options: crate::types::CreateStepOptions,
 ) -> Result<Step, CommandError> {
     log::info!(
@@ -90,6 +108,7 @@ pub async fn create_step(
 
     // Build the step
     let mut step = vertebrae_core::Step::new(&options.name, options.workflow_id)
+        .with_agent_config(options.agent_config.unwrap_or_default().into())
         .with_agents(options.agents)
         .with_skills(options.skills)
         .with_order(options.order)
@@ -98,6 +117,10 @@ pub async fn create_step(
 
     if let Some(goal) = options.goal {
         step = step.with_goal(&goal);
+    }
+
+    if let Some(prompt) = options.prompt {
+        step = step.with_prompt(&prompt);
     }
 
     if let Some(schema) = options.output_schema {
@@ -140,6 +163,7 @@ pub async fn update_step(
         .ok_or_else(CommandError::no_project_selected)?;
 
     let workflow_id = update_step_inner(service, &step_id, options.into()).await?;
+    let updated_step = service.steps().get_step(&step_id).await?.map(Into::into);
 
     // Emit step changed event for detail panel listeners
     let _ = app_handle.emit(
@@ -148,7 +172,7 @@ pub async fn update_step(
             step_id: step_id.clone(),
             workflow_id,
             change_type: crate::events::StepChangeType::Updated,
-            step: None,
+            step: updated_step,
         },
     );
 
@@ -242,14 +266,16 @@ mod tests {
     async fn create_and_get_step() {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
-        let step = create_step(
+        let step = create_step_inner(
             state.clone(),
             crate::types::CreateStepOptions {
                 workflow_id: "wf-1".to_string(),
                 name: "Review".to_string(),
                 goal: Some("Review the code".to_string()),
+                prompt: Some("Review the code carefully".to_string()),
                 agents: vec!["sonnet".to_string()],
                 skills: vec![],
+                agent_config: None,
                 order: 0,
                 transitions_to: vec![],
                 step_type: Default::default(),
@@ -270,14 +296,16 @@ mod tests {
     async fn create_finish_step_preserves_terminal_type_without_legacy_final_flag() {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
-        let step = create_step(
+        let step = create_step_inner(
             state,
             crate::types::CreateStepOptions {
                 workflow_id: "wf-finish".to_string(),
                 name: "Finish".to_string(),
                 goal: None,
+                prompt: None,
                 agents: vec![],
                 skills: vec![],
+                agent_config: None,
                 order: 0,
                 transitions_to: vec![],
                 step_type: crate::types::StepType::Finish,
@@ -292,6 +320,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_stop_step_preserves_boundary_fields() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let step = create_step_inner(
+            state,
+            crate::types::CreateStepOptions {
+                workflow_id: "wf-stop".to_string(),
+                name: "Pause run".to_string(),
+                goal: Some("Pause this TaskRun".to_string()),
+                prompt: Some("This prompt is not dispatched".to_string()),
+                agents: vec!["reviewer".to_string()],
+                skills: vec!["simplify".to_string()],
+                agent_config: Some(crate::types::AgentConfig {
+                    model: Some("gpt-5.5".to_string()),
+                    provider: Some(crate::types::AgentProvider::Openai),
+                    ..Default::default()
+                }),
+                order: 1,
+                transitions_to: vec!["next-step".to_string()],
+                step_type: crate::types::StepType::Stop,
+                output_schema: Some(serde_json::json!({"type": "object"})),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(step.step_type, crate::types::StepType::Stop);
+        assert_eq!(
+            step.prompt.as_deref(),
+            Some("This prompt is not dispatched")
+        );
+        assert_eq!(step.transitions_to, vec!["next-step"]);
+        assert_eq!(step.agent_config.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(
+            step.agent_config.provider,
+            Some(crate::types::AgentProvider::Openai)
+        );
+    }
+
+    #[tokio::test]
     async fn get_step_nonexistent_returns_none() {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
@@ -303,14 +371,16 @@ mod tests {
     async fn list_steps_for_workflow_returns_created_steps() {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
-        create_step(
+        create_step_inner(
             state.clone(),
             crate::types::CreateStepOptions {
                 workflow_id: "wf-x".to_string(),
                 name: "Step1".to_string(),
                 goal: None,
+                prompt: None,
                 agents: vec![],
                 skills: vec![],
+                agent_config: None,
                 order: 0,
                 transitions_to: vec![],
                 step_type: Default::default(),
@@ -319,14 +389,16 @@ mod tests {
         )
         .await
         .unwrap();
-        create_step(
+        create_step_inner(
             state.clone(),
             crate::types::CreateStepOptions {
                 workflow_id: "wf-x".to_string(),
                 name: "Step2".to_string(),
                 goal: None,
+                prompt: None,
                 agents: vec![],
                 skills: vec![],
+                agent_config: None,
                 order: 1,
                 transitions_to: vec![],
                 step_type: Default::default(),

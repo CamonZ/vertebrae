@@ -53,6 +53,69 @@ async fn when_add_step_to_workflow(world: &mut SmokeWorld, name: String) {
     store_step_id_if_created(world, &name);
 }
 
+#[when(expr = "I add a stop step {string} to the workflow continuing to {string}")]
+async fn when_add_stop_step_with_continuation(
+    world: &mut SmokeWorld,
+    name: String,
+    target_name: String,
+) {
+    let wf_id = workflow_id(world);
+    let target_id = get_step_json(world, &target_name)
+        .await
+        .and_then(|step| step["id"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", target_name));
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--step-type",
+            "stop",
+            "--transition-to",
+            &target_id,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
+#[when(
+    expr = "I add a stop step {string} to the workflow with continuations {string} and {string}"
+)]
+async fn when_add_stop_step_with_two_continuations(
+    world: &mut SmokeWorld,
+    name: String,
+    first_target_name: String,
+    second_target_name: String,
+) {
+    let wf_id = workflow_id(world);
+    let first_target_id = get_step_json(world, &first_target_name)
+        .await
+        .and_then(|step| step["id"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", first_target_name));
+    let second_target_id = get_step_json(world, &second_target_name)
+        .await
+        .and_then(|step| step["id"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", second_target_name));
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--step-type",
+            "stop",
+            "--transition-to",
+            &first_target_id,
+            "--transition-to",
+            &second_target_id,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
 #[when(expr = "I add a step {string} to the workflow with flag {string} and value {string}")]
 async fn when_add_step_with_flag(
     world: &mut SmokeWorld,
@@ -233,6 +296,34 @@ async fn when_update_step_with_flag(
         .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
     world
         .run_vtb(&["step", "update", &step_id, &flag, &value])
+        .await;
+}
+
+#[when(expr = "I update the step {string} to stop and continue to {string}")]
+async fn when_update_step_to_stop_with_continuation(
+    world: &mut SmokeWorld,
+    name: String,
+    target_name: String,
+) {
+    let step_id = world
+        .stored_ids
+        .get(&format!("step:{}", name))
+        .cloned()
+        .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
+    let target_id = get_step_json(world, &target_name)
+        .await
+        .and_then(|step| step["id"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", target_name));
+    world
+        .run_vtb(&[
+            "step",
+            "update",
+            &step_id,
+            "--step-type",
+            "stop",
+            "--transition-to",
+            &target_id,
+        ])
         .await;
 }
 

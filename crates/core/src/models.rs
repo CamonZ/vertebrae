@@ -152,7 +152,12 @@ impl SectionType {
     }
 }
 
-/// The type of a workflow step
+/// The type of a workflow step.
+///
+/// `Stop` marks a run boundary: reaching it stops the current TaskRun without
+/// completing the task, and the single outgoing transition is followed by a
+/// later TaskRun. `Finish` is the promptless terminal step that completes the
+/// task.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum StepType {
     #[default]
@@ -161,6 +166,8 @@ pub enum StepType {
     Route,
     WaitChildren,
     HumanInput,
+    /// Ends the current task run at a workflow boundary without completing the task.
+    Stop,
     Finish,
     Unsupported(String),
 }
@@ -173,6 +180,7 @@ impl StepType {
             "route" => StepType::Route,
             "wait_children" => StepType::WaitChildren,
             "human_input" => StepType::HumanInput,
+            "stop" => StepType::Stop,
             "finish" => StepType::Finish,
             _ => StepType::Unsupported(value.to_string()),
         }
@@ -185,6 +193,7 @@ impl StepType {
             StepType::Route => "route",
             StepType::WaitChildren => "wait_children",
             StepType::HumanInput => "human_input",
+            StepType::Stop => "stop",
             StepType::Finish => "finish",
             StepType::Unsupported(value) => value.as_str(),
         }
@@ -3194,6 +3203,7 @@ mod tests {
         assert_eq!(StepType::Route.as_str(), "route");
         assert_eq!(StepType::WaitChildren.as_str(), "wait_children");
         assert_eq!(StepType::HumanInput.as_str(), "human_input");
+        assert_eq!(StepType::Stop.as_str(), "stop");
         assert_eq!(StepType::Finish.as_str(), "finish");
         assert_eq!(
             StepType::Unsupported("manual_gate".to_string()).as_str(),
@@ -3208,6 +3218,7 @@ mod tests {
         assert_eq!(StepType::Route.to_string(), "route");
         assert_eq!(StepType::WaitChildren.to_string(), "wait_children");
         assert_eq!(StepType::HumanInput.to_string(), "human_input");
+        assert_eq!(StepType::Stop.to_string(), "stop");
         assert_eq!(StepType::Finish.to_string(), "finish");
         assert_eq!(
             StepType::Unsupported("manual_gate".to_string()).to_string(),
@@ -3259,6 +3270,7 @@ mod tests {
             (StepType::Route, "\"route\""),
             (StepType::WaitChildren, "\"wait_children\""),
             (StepType::HumanInput, "\"human_input\""),
+            (StepType::Stop, "\"stop\""),
             (StepType::Finish, "\"finish\""),
         ] {
             let serialized = serde_json::to_string(&variant).unwrap();

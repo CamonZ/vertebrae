@@ -446,6 +446,13 @@ pub enum PermissionMode {
     Plan,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentProvider {
+    Anthropic,
+    Openai,
+}
+
 impl PermissionMode {
     pub fn as_claude_arg(&self) -> &'static str {
         match self {
@@ -472,9 +479,24 @@ impl From<vertebrae_core::PermissionMode> for PermissionMode {
     }
 }
 
+impl From<PermissionMode> for vertebrae_core::PermissionMode {
+    fn from(mode: PermissionMode) -> Self {
+        match mode {
+            PermissionMode::AcceptEdits => vertebrae_core::PermissionMode::AcceptEdits,
+            PermissionMode::Auto => vertebrae_core::PermissionMode::Auto,
+            PermissionMode::BypassPermissions => vertebrae_core::PermissionMode::BypassPermissions,
+            PermissionMode::Default => vertebrae_core::PermissionMode::Default,
+            PermissionMode::DontAsk => vertebrae_core::PermissionMode::DontAsk,
+            PermissionMode::Plan => vertebrae_core::PermissionMode::Plan,
+        }
+    }
+}
+
 /// Agent configuration for workflow steps - mirrors db::AgentConfig
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct AgentConfig {
+    #[serde(default)]
+    pub provider: Option<AgentProvider>,
     /// Model for the current session
     pub model: Option<String>,
     /// Codex upstream model provider configured in ~/.codex/config.toml
@@ -515,6 +537,10 @@ pub struct AgentConfig {
 impl From<vertebrae_core::AgentConfig> for AgentConfig {
     fn from(config: vertebrae_core::AgentConfig) -> Self {
         AgentConfig {
+            provider: config.provider.map(|provider| match provider {
+                vertebrae_core::Provider::Anthropic => AgentProvider::Anthropic,
+                vertebrae_core::Provider::Openai => AgentProvider::Openai,
+            }),
             model: config.model,
             codex_model_provider: config.codex_model_provider,
             fallback_model: config.fallback_model,
@@ -534,6 +560,36 @@ impl From<vertebrae_core::AgentConfig> for AgentConfig {
     }
 }
 
+impl From<AgentConfig> for vertebrae_core::AgentConfig {
+    fn from(config: AgentConfig) -> Self {
+        vertebrae_core::AgentConfig {
+            provider: config.provider.map(|provider| match provider {
+                AgentProvider::Anthropic => vertebrae_core::Provider::Anthropic,
+                AgentProvider::Openai => vertebrae_core::Provider::Openai,
+            }),
+            model: config.model,
+            codex_model_provider: config.codex_model_provider,
+            fallback_model: config.fallback_model,
+            reasoning_effort: config.reasoning_effort,
+            system_prompt: config.system_prompt,
+            append_system_prompt: config.append_system_prompt,
+            agents: config.agents.map(|value| {
+                serde_json::from_str(&value).unwrap_or(serde_json::Value::String(value))
+            }),
+            tools: config.tools,
+            allowed_tools: config.allowed_tools,
+            disallowed_tools: config.disallowed_tools,
+            permission_mode: config.permission_mode.map(Into::into),
+            max_budget_usd: config.max_budget_usd,
+            mcp_config: config.mcp_config,
+            plugin_dirs: config.plugin_dirs,
+            json_schema: config.json_schema.map(|value| {
+                serde_json::from_str(&value).unwrap_or(serde_json::Value::String(value))
+            }),
+        }
+    }
+}
+
 /// Step type - mirrors core::StepType
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -544,6 +600,7 @@ pub enum StepType {
     Route,
     WaitChildren,
     HumanInput,
+    Stop,
     Finish,
     Unsupported(String),
 }
@@ -556,6 +613,7 @@ impl From<vertebrae_core::StepType> for StepType {
             vertebrae_core::StepType::Route => StepType::Route,
             vertebrae_core::StepType::WaitChildren => StepType::WaitChildren,
             vertebrae_core::StepType::HumanInput => StepType::HumanInput,
+            vertebrae_core::StepType::Stop => StepType::Stop,
             vertebrae_core::StepType::Finish => StepType::Finish,
             vertebrae_core::StepType::Unsupported(value) => StepType::Unsupported(value),
         }
@@ -570,6 +628,7 @@ impl From<StepType> for vertebrae_core::StepType {
             StepType::Route => vertebrae_core::StepType::Route,
             StepType::WaitChildren => vertebrae_core::StepType::WaitChildren,
             StepType::HumanInput => vertebrae_core::StepType::HumanInput,
+            StepType::Stop => vertebrae_core::StepType::Stop,
             StepType::Finish => vertebrae_core::StepType::Finish,
             StepType::Unsupported(value) => vertebrae_core::StepType::Unsupported(value),
         }
@@ -598,7 +657,7 @@ pub struct Step {
     /// Agent configuration for this step
     #[serde(default)]
     pub agent_config: AgentConfig,
-    /// The type of this step (execute, evaluate, route)
+    /// Step type mirrored from core::StepType.
     #[serde(default)]
     pub step_type: StepType,
     /// JSON Schema describing the expected output of this step
@@ -1273,8 +1332,12 @@ pub struct CreateStepOptions {
     pub workflow_id: String,
     pub name: String,
     pub goal: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
     pub agents: Vec<String>,
     pub skills: Vec<String>,
+    #[serde(default)]
+    pub agent_config: Option<AgentConfig>,
     pub order: i32,
     pub transitions_to: Vec<String>,
     #[serde(default)]
@@ -1283,8 +1346,8 @@ pub struct CreateStepOptions {
 }
 
 /// Options for updating a workflow step.
-/// Only fields that are Some will be updated.
-/// Note: agent_config is intentionally omitted — not editable from the GUI.
+/// Only fields that are Some will be updated. `clear_output_schema` explicitly
+/// removes an existing schema when no replacement value is supplied.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct UpdateStepOptions {
     pub step_id: String,
@@ -1293,8 +1356,12 @@ pub struct UpdateStepOptions {
     pub prompt: Option<String>,
     pub agents: Option<Vec<String>>,
     pub skills: Option<Vec<String>>,
+    #[serde(default)]
+    pub agent_config: Option<AgentConfig>,
     pub step_type: Option<StepType>,
     pub output_schema: Option<serde_json::Value>,
+    #[serde(default)]
+    pub clear_output_schema: bool,
     pub order: Option<i32>,
     pub transitions_to: Option<Vec<String>>,
 }
@@ -1317,13 +1384,20 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
         if let Some(skills) = opts.skills {
             update = update.with_skills(skills);
         }
+        if let Some(agent_config) = opts.agent_config {
+            let config: vertebrae_core::AgentConfig = agent_config.into();
+            let value = serde_json::to_value(config).unwrap_or_else(|_| serde_json::json!({}));
+            update = update.with_agent_config(value);
+        }
         if let Some(order) = opts.order {
             update = update.with_order(order);
         }
         if let Some(step_type) = opts.step_type {
             update = update.with_step_type(step_type.into());
         }
-        if let Some(output_schema) = opts.output_schema {
+        if opts.clear_output_schema {
+            update = update.with_output_schema(None);
+        } else if let Some(output_schema) = opts.output_schema {
             update = update.with_output_schema(Some(output_schema));
         }
         if let Some(transitions) = opts.transitions_to {
@@ -1870,6 +1944,40 @@ mod tests {
     }
 
     #[test]
+    fn step_type_stop_round_trips_between_core_and_gui() {
+        let gui = StepType::from(vertebrae_core::StepType::Stop);
+        assert_eq!(gui, StepType::Stop);
+        assert_eq!(
+            vertebrae_core::StepType::from(gui),
+            vertebrae_core::StepType::Stop
+        );
+        assert_eq!(serde_json::to_string(&StepType::Stop).unwrap(), "\"stop\"");
+    }
+
+    #[test]
+    fn agent_config_round_trips_provider_and_json_fields() {
+        let gui = AgentConfig {
+            provider: Some(AgentProvider::Openai),
+            model: Some("gpt-5.5".to_string()),
+            agents: Some(r#"{"reviewer":"strict"}"#.to_string()),
+            json_schema: Some(r#"{"type":"object"}"#.to_string()),
+            ..Default::default()
+        };
+        let core: vertebrae_core::AgentConfig = gui.clone().into();
+        assert_eq!(core.provider, Some(vertebrae_core::Provider::Openai));
+        assert_eq!(core.agents, Some(serde_json::json!({"reviewer": "strict"})));
+        assert_eq!(
+            core.json_schema,
+            Some(serde_json::json!({"type": "object"}))
+        );
+
+        let round_tripped = AgentConfig::from(core);
+        assert_eq!(round_tripped.provider, gui.provider);
+        assert_eq!(round_tripped.agents, gui.agents);
+        assert_eq!(round_tripped.json_schema, gui.json_schema);
+    }
+
+    #[test]
     fn update_step_options_preserves_finish_type() {
         let update: vertebrae_core::StepUpdate = UpdateStepOptions {
             step_id: "finish".to_string(),
@@ -1878,8 +1986,10 @@ mod tests {
             prompt: None,
             agents: None,
             skills: None,
+            agent_config: None,
             step_type: Some(StepType::Finish),
             output_schema: None,
+            clear_output_schema: false,
             order: None,
             transitions_to: Some(vec![]),
         }
@@ -1887,6 +1997,37 @@ mod tests {
 
         assert_eq!(update.step_type, Some(vertebrae_core::StepType::Finish));
         assert_eq!(update.transitions_to, Some(vec![]));
+    }
+
+    #[test]
+    fn update_step_options_can_replace_agent_config_and_clear_schema() {
+        let update: vertebrae_core::StepUpdate = UpdateStepOptions {
+            step_id: "stop".to_string(),
+            name: None,
+            goal: None,
+            prompt: None,
+            agents: None,
+            skills: None,
+            agent_config: Some(AgentConfig {
+                model: Some("gpt-5.5".to_string()),
+                provider: Some(AgentProvider::Openai),
+                ..Default::default()
+            }),
+            step_type: Some(StepType::Stop),
+            output_schema: None,
+            clear_output_schema: true,
+            order: None,
+            transitions_to: Some(vec!["next".to_string()]),
+        }
+        .into();
+
+        assert_eq!(update.step_type, Some(vertebrae_core::StepType::Stop));
+        assert_eq!(update.transitions_to, Some(vec!["next".to_string()]));
+        assert_eq!(update.output_schema, Some(None));
+        assert_eq!(
+            update.agent_config,
+            Some(serde_json::json!({"provider": "openai", "model": "gpt-5.5"}))
+        );
     }
 
     #[test]

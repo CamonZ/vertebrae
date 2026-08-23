@@ -92,6 +92,27 @@ Feature: Step fields: prompt and agent-config
     When I show the step "Complete"
     Then the output should contain "Step Type:     finish"
 
+  Scenario: Create a stop step with exactly one continuation
+    When I add a stop step "Pause" to the workflow continuing to "done"
+    Then the command should succeed
+    And the step "Pause" in the workflow should have step_type "stop"
+    When I show the step "Pause"
+    Then the output should contain "Step Type:     stop"
+
+  Scenario: Update a step to a stop boundary with one continuation
+    When I add a step "PauseUpdate" to the workflow
+    And I update the step "PauseUpdate" to stop and continue to "done"
+    Then the command should succeed
+    And the step "PauseUpdate" in the workflow should have step_type "stop"
+
+  Scenario: Stop step creation requires a continuation
+    When I add a step "InvalidPause" to the workflow with flag "--step-type" and value "stop"
+    Then the command should fail with "exactly one outgoing transition"
+
+  Scenario: Stop step creation rejects multiple continuations
+    When I add a stop step "AmbiguousPause" to the workflow with continuations "backlog" and "done"
+    Then the command should fail with "exactly one outgoing transition"
+
   Scenario: Step show JSON preserves finish step type
     When I add a step "JsonComplete" to the workflow with flag "--step-type" and value "finish"
     And I show the step "JsonComplete" as JSON

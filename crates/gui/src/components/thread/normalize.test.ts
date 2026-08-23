@@ -161,12 +161,13 @@ function harnessConversationLogs(execId: string, model: string): SessionLog[] {
 // ===========================================================================
 
 describe("stepKindFromStepType", () => {
-  it("maps the six known step types and falls back to execute", () => {
+  it("maps the seven known step types and falls back to execute", () => {
     expect(stepKindFromStepType("execute")).toBe("execute");
     expect(stepKindFromStepType("evaluate")).toBe("eval");
     expect(stepKindFromStepType("route")).toBe("route");
     expect(stepKindFromStepType("human_input")).toBe("human");
     expect(stepKindFromStepType("wait_children")).toBe("wait");
+    expect(stepKindFromStepType("stop")).toBe("stop");
     expect(stepKindFromStepType("finish")).toBe("finish");
     expect(stepKindFromStepType(null)).toBe("execute");
     expect(stepKindFromStepType({ unsupported: "x" })).toBe("execute");

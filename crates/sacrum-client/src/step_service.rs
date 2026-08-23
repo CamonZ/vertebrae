@@ -77,11 +77,26 @@ impl SacrumStepService {
             updated_at,
         }
     }
+
+    fn validate_stop_transitions(
+        step_type: &StepType,
+        transitions_to: &[String],
+    ) -> ServiceResult<()> {
+        if matches!(step_type, StepType::Stop) && transitions_to.len() != 1 {
+            return Err(ServiceError::validation_failed(
+                "stop steps must have exactly one outgoing transition",
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl StepService for SacrumStepService {
     async fn create_step(&self, step: &Step) -> ServiceResult<Step> {
+        Self::validate_stop_transitions(&step.step_type, &step.transitions_to)?;
+
         let query = with_fragments(CREATE_STEP, &[STEP_FIELDS]);
         let agent_config_str = serde_json::to_string(&step.agent_config)
             .map_err(|e| ServiceError::validation_failed(format!("Invalid agent config: {}", e)))?;
@@ -228,6 +243,12 @@ impl StepService for SacrumStepService {
     }
 
     async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String> {
+        if let (Some(StepType::Stop), Some(transitions_to)) =
+            (&updates.step_type, &updates.transitions_to)
+        {
+            Self::validate_stop_transitions(&StepType::Stop, transitions_to)?;
+        }
+
         let query = with_fragments(UPDATE_STEP, &[STEP_FIELDS]);
         let mut variables = json!({ "id": id });
 
@@ -501,6 +522,7 @@ mod tests {
             ("route", StepType::Route),
             ("wait_children", StepType::WaitChildren),
             ("human_input", StepType::HumanInput),
+            ("stop", StepType::Stop),
             ("finish", StepType::Finish),
         ] {
             let response = WorkflowStepResponse {
@@ -689,6 +711,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_step_maps_stop_step_type() {
+        let server = MockServer::start().await;
+
+        let mut response = make_step_response("step-1", "Stop", "wf-1", 0);
+        response["step_type"] = json!("stop");
+        response["transitions"] = json!([{
+            "id": "t-1",
+            "to_step_id": "step-next",
+            "label": "continue"
+        }]);
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(graphql_response("workflow_step", response)),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let step = service.get_step("step-1").await.unwrap().unwrap();
+
+        assert_eq!(step.step_type, StepType::Stop);
+        assert_eq!(step.transitions_to, vec!["step-next"]);
+    }
+
+    #[tokio::test]
+    async fn test_create_stop_step_requires_exactly_one_transition() {
+        let service = create_wiremock_service("http://localhost:4000");
+        let step = Step::new("Stop", "wf-1").with_step_type(StepType::Stop);
+
+        let error = service.create_step(&step).await.unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("exactly one outgoing transition")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_stop_step_requires_exactly_one_transition() {
+        let service = create_wiremock_service("http://localhost:4000");
+        let updates = StepUpdate::new()
+            .with_step_type(StepType::Stop)
+            .with_transitions_to(Vec::new());
+
+        let error = service.update_step("step-1", &updates).await.unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("exactly one outgoing transition")
+        );
+    }
+
+    #[tokio::test]
     async fn test_get_step_preserves_unsupported_step_type() {
         let server = MockServer::start().await;
 
@@ -796,6 +876,39 @@ mod tests {
         let result = service.update_step("step-1", &updates).await;
 
         assert_eq!(result.unwrap(), "wf-1");
+    }
+
+    #[tokio::test]
+    async fn test_update_stop_step_serializes_type_and_transition_sync() {
+        let server = MockServer::start().await;
+
+        let response = json!({
+            "data": {
+                "update_workflow_step": make_step_response("step-1", "Pause", "wf-1", 0),
+                "sync_step_transitions": make_step_response("step-1", "Pause", "wf-1", 0)
+            }
+        });
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let updates = StepUpdate::new()
+            .with_step_type(StepType::Stop)
+            .with_transitions_to(vec!["step-next".to_string()]);
+        service.update_step("step-1", &updates).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2, "update and transition sync requests");
+        let update_body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(update_body["variables"]["step_type"], "stop");
+        let sync_body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(
+            sync_body["variables"]["transitions"],
+            json!([{ "to_step_id": "step-next" }])
+        );
     }
 
     #[tokio::test]

@@ -1099,6 +1099,30 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_run_step_stop_rejection_is_returned_without_execution() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "stop steps cannot be dispatched directly"}]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.run_step("task-1", "stop-step").await;
+
+        let error = result.expect_err("direct stop dispatch should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("stop steps cannot be dispatched")
+        );
+    }
+
     // =========================================================================
     // update_execution_status tests
     // =========================================================================
