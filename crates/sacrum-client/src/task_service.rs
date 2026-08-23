@@ -296,6 +296,12 @@ impl SacrumTaskService {
         variables
     }
 
+    async fn fetch_task_list(&self, filter: &TaskFilter) -> ServiceResult<Vec<TaskResponse>> {
+        let variables = self.filter_to_variables(filter);
+        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_LIST_FIELDS]);
+        Ok(self.client.execute(&query, variables, "tasks").await?)
+    }
+
     async fn list_tasks_with_optional_lookups(
         &self,
         filter: &TaskFilter,
@@ -303,10 +309,7 @@ impl SacrumTaskService {
         step_names: Option<&HashMap<String, String>>,
         step_types: Option<&HashMap<String, StepType>>,
     ) -> ServiceResult<Vec<Task>> {
-        let variables = self.filter_to_variables(filter);
-
-        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_LIST_FIELDS]);
-        let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
+        let responses = self.fetch_task_list(filter).await?;
 
         responses
             .iter()
@@ -719,17 +722,23 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
+        let responses = self.fetch_task_list(filter).await?;
+
         // Fetch lookups once for all tasks
         let (workflow_names, step_names, step_types) =
             self.fetch_lookups().await.unwrap_or_default();
 
-        self.list_tasks_with_optional_lookups(
-            filter,
-            Some(&workflow_names),
-            Some(&step_names),
-            Some(&step_types),
-        )
-        .await
+        responses
+            .iter()
+            .map(|task| {
+                self.response_to_task_with_lookups(
+                    task,
+                    Some(&workflow_names),
+                    Some(&step_names),
+                    Some(&step_types),
+                )
+            })
+            .collect()
     }
 
     async fn list_tasks_without_lookups(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
@@ -2131,6 +2140,16 @@ mod tests {
         assert_eq!(tasks[0].step_name.as_deref(), Some("Review"));
         assert_eq!(tasks[0].workflow_id.as_deref(), Some("workflow-1"));
         assert_eq!(tasks[0].current_step_id.as_deref(), Some("step-1"));
+
+        let bodies = captured_graphql_bodies(&server).await;
+        assert_eq!(bodies.len(), 2);
+        assert!(bodies[0]["query"].as_str().unwrap().contains("ListTasks"));
+        assert!(
+            bodies[1]["query"]
+                .as_str()
+                .unwrap()
+                .contains("ListWorkflows")
+        );
     }
 
     #[tokio::test]
