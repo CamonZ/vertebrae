@@ -20,7 +20,9 @@ import {
 import {
   hasStaleModelDefault,
   hasStaleReasoningEffort,
+  hasStaleSpeedTier,
   resolvePermissionDefault,
+  speedTiersForModel,
   useLocalChatDefaultsStore,
 } from "../utils/localChatDefaults";
 import {
@@ -61,6 +63,7 @@ export function useChatSession(sessionId: string) {
   const setSessionReasoningEffort = useChatStore(
     (s) => s.setSessionReasoningEffort
   );
+  const setSessionSpeedTier = useChatStore((s) => s.setSessionSpeedTier);
   const setSessionHarness = useChatStore((s) => s.setSessionHarness);
   const setSessionPermissionMode = useChatStore(
     (s) => s.setSessionPermissionMode
@@ -164,6 +167,7 @@ export function useChatSession(sessionId: string) {
   );
   const selectedModelId = session?.selectedModelId;
   const selectedReasoningEffort = session?.selectedReasoningEffort;
+  const selectedSpeedTier = session?.selectedSpeedTier;
   const reasoningEfforts = useMemo(() => {
     const efforts = visibleHarness?.reasoning_efforts ?? [];
     const selectedModel = visibleHarness?.models.find(
@@ -178,6 +182,17 @@ export function useChatSession(sessionId: string) {
   const supportedReasoningEffortIds = useMemo(
     () => new Set(reasoningEfforts.map((effort) => effort.id)),
     [reasoningEfforts]
+  );
+  const speedTiers = useMemo(
+    () =>
+      visibleHarness
+        ? speedTiersForModel(visibleHarness, selectedModelId)
+        : [],
+    [selectedModelId, visibleHarness]
+  );
+  const supportedSpeedTierIds = useMemo(
+    () => new Set(speedTiers.map((tier) => tier.id)),
+    [speedTiers]
   );
 
   // --- Lifecycle derived flags ---
@@ -253,6 +268,19 @@ export function useChatSession(sessionId: string) {
         savedHarnessDefaults.reasoningEffort
       );
     }
+
+    if (
+      selectedSpeedTier === undefined &&
+      savedHarnessDefaults?.speedTier &&
+      !hasStaleSpeedTier(
+        visibleHarness,
+        savedHarnessDefaults.speedTier,
+        selectedModelId
+      ) &&
+      supportedSpeedTierIds.has(savedHarnessDefaults.speedTier)
+    ) {
+      setSessionSpeedTier(sessionId, savedHarnessDefaults.speedTier);
+    }
   }, [
     hasConversation,
     hasSession,
@@ -261,12 +289,15 @@ export function useChatSession(sessionId: string) {
     savedHarnessDefaults,
     selectedModelId,
     selectedReasoningEffort,
+    selectedSpeedTier,
     session?.permissionMode,
     sessionId,
     setSessionPermissionMode,
     setSessionReasoningEffort,
     setSessionSelectedModel,
+    setSessionSpeedTier,
     supportedReasoningEffortIds,
+    supportedSpeedTierIds,
     visibleHarness,
   ]);
 
@@ -300,6 +331,23 @@ export function useChatSession(sessionId: string) {
     sessionId,
     setSessionSelectedModel,
     supportedModelIds,
+  ]);
+
+  useEffect(() => {
+    if (!hasSession || !visibleHarness) return;
+    if (lockedHarness || hasConversation) return;
+    if (!selectedSpeedTier) return;
+    if (supportedSpeedTierIds.has(selectedSpeedTier)) return;
+    setSessionSpeedTier(sessionId, null);
+  }, [
+    hasConversation,
+    hasSession,
+    lockedHarness,
+    selectedSpeedTier,
+    sessionId,
+    setSessionSpeedTier,
+    supportedSpeedTierIds,
+    visibleHarness,
   ]);
 
   useEffect(() => {
@@ -456,6 +504,12 @@ export function useChatSession(sessionId: string) {
     },
     [sessionId, setSessionReasoningEffort]
   );
+  const handleSpeedTierChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      setSessionSpeedTier(sessionId, event.target.value || null);
+    },
+    [sessionId, setSessionSpeedTier]
+  );
   const handleHarnessChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       setSessionHarness(sessionId, event.target.value as LocalChatHarnessKind);
@@ -538,8 +592,11 @@ export function useChatSession(sessionId: string) {
     supportedModelIds,
     reasoningEfforts,
     supportedReasoningEffortIds,
+    speedTiers,
+    supportedSpeedTierIds,
     selectedModelId,
     selectedReasoningEffort,
+    selectedSpeedTier,
     lockedHarness,
 
     // messages
@@ -568,6 +625,7 @@ export function useChatSession(sessionId: string) {
     titleError,
     handleModelChange,
     handleReasoningEffortChange,
+    handleSpeedTierChange,
     handleHarnessChange,
     handlePermissionModeChange,
 

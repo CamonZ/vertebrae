@@ -73,6 +73,7 @@ export interface LocalChatSessionSummary {
   model?: string;
   selectedModelId?: string | null;
   selectedReasoningEffort?: string | null;
+  selectedSpeedTier?: string | null;
   createdAt: string;
   updatedAt: string;
   projectPath: string | null;
@@ -188,6 +189,12 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
       typeof candidate.selectedReasoningEffort === "string"
         ? candidate.selectedReasoningEffort
         : candidate.selectedReasoningEffort === null
+          ? null
+          : undefined,
+    selectedSpeedTier:
+      typeof candidate.selectedSpeedTier === "string"
+        ? candidate.selectedSpeedTier
+        : candidate.selectedSpeedTier === null
           ? null
           : undefined,
     permissionMode:
@@ -367,6 +374,7 @@ function serializeSession(
     projectPath: session.projectPath ?? null,
     selectedModelId: session.selectedModelId,
     selectedReasoningEffort: session.selectedReasoningEffort,
+    selectedSpeedTier: session.selectedSpeedTier,
     permissionMode: session.permissionMode ?? "default",
     model: session.model,
     tokenUsage: session.tokenUsage,
@@ -397,6 +405,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     model: session.model,
     selectedModelId: session.selectedModelId,
     selectedReasoningEffort: session.selectedReasoningEffort,
+    selectedSpeedTier: session.selectedSpeedTier,
     permissionMode: session.permissionMode ?? "default",
     createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
@@ -610,6 +619,7 @@ export function summarizeLocalChatSession(
     model: session.model,
     selectedModelId: session.selectedModelId,
     selectedReasoningEffort: session.selectedReasoningEffort,
+    selectedSpeedTier: session.selectedSpeedTier,
     createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
     projectPath: session.projectPath ?? null,

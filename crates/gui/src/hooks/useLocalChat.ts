@@ -632,6 +632,7 @@ export async function doStartSession(
     const reasoningEffort = resumeId
       ? null
       : (session.selectedReasoningEffort ?? null);
+    const speedTier = resumeId ? null : (session.selectedSpeedTier ?? null);
     const permissionMode = session.permissionMode ?? "default";
 
     const titleUserMessages = earlyTitleUserMessages(
@@ -656,6 +657,7 @@ export async function doStartSession(
       provider_resume_id: resumeId,
       model_id: modelId,
       reasoning_effort: reasoningEffort,
+      ...(speedTier ? { speed_tier: speedTier } : {}),
       permission_mode: permissionMode,
     });
     if (result.status === "error") {

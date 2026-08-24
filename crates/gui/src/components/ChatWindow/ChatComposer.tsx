@@ -58,7 +58,8 @@ function useHarnessPickerState(
   hasAvailableHarness: boolean,
   supportedModelIds: Set<string>,
   reasoningEfforts: LocalChatHarnessInfo["reasoning_efforts"],
-  supportedReasoningEffortIds: Set<string>
+  supportedReasoningEffortIds: Set<string>,
+  supportedSpeedTierIds: Set<string>
 ) {
   if (!visibleHarness) return null;
 
@@ -68,6 +69,9 @@ function useHarnessPickerState(
   const selectedReasoningEffortUnsupported =
     !!session.selectedReasoningEffort &&
     !supportedReasoningEffortIds.has(session.selectedReasoningEffort);
+  const selectedSpeedTierUnsupported =
+    !!session.selectedSpeedTier &&
+    !supportedSpeedTierIds.has(session.selectedSpeedTier);
 
   const modelPickerDisabled =
     isBusy ||
@@ -93,6 +97,24 @@ function useHarnessPickerState(
     : visibleHarness.default_reasoning_effort
       ? "Default effort"
       : "Provider default";
+  const speedPickerDisabled =
+    isBusy ||
+    isActive ||
+    lockedHarness ||
+    hasResume ||
+    !visibleHarness.available;
+  const speedDefaultLabel = hasResume ? "Original speed" : "Default speed";
+  const speedPickerDisabledReason = isBusy
+    ? "Speed tier cannot change while a request is running"
+    : isActive
+      ? "Speed tier cannot change during an active session"
+      : lockedHarness
+        ? "Speed tier cannot change for a resumed session"
+        : hasResume
+          ? "Speed tier cannot change while resuming"
+          : !visibleHarness.available
+            ? LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE
+            : undefined;
 
   const unavailableMessage = !visibleHarness.available
     ? lockedHarness
@@ -109,6 +131,10 @@ function useHarnessPickerState(
     modelDefaultLabel,
     effortPickerDisabled,
     effortDefaultLabel,
+    selectedSpeedTierUnsupported,
+    speedPickerDisabled,
+    speedDefaultLabel,
+    speedPickerDisabledReason,
     unavailableMessage,
   };
 }
@@ -124,6 +150,8 @@ interface ChatComposerProps {
   supportedModelIds: Set<string>;
   reasoningEfforts?: LocalChatHarnessInfo["reasoning_efforts"];
   supportedReasoningEffortIds: Set<string>;
+  speedTiers?: NonNullable<LocalChatHarnessInfo["speed_tiers"]>;
+  supportedSpeedTierIds?: Set<string>;
   isBusy: boolean;
   isActive: boolean;
   lockedHarness: boolean;
@@ -145,6 +173,7 @@ interface ChatComposerProps {
   onReasoningEffortChange: (
     event: React.ChangeEvent<HTMLSelectElement>
   ) => void;
+  onSpeedTierChange?: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onPermissionModeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
 }
 
@@ -159,6 +188,8 @@ export function ChatComposer({
   supportedModelIds,
   reasoningEfforts,
   supportedReasoningEffortIds,
+  speedTiers,
+  supportedSpeedTierIds = new Set(),
   isBusy,
   isActive,
   lockedHarness,
@@ -178,10 +209,12 @@ export function ChatComposer({
   onHarnessChange,
   onModelChange,
   onReasoningEffortChange,
+  onSpeedTierChange = () => {},
   onPermissionModeChange,
 }: ChatComposerProps) {
   const availableReasoningEfforts =
     reasoningEfforts ?? visibleHarness?.reasoning_efforts ?? [];
+  const availableSpeedTiers = speedTiers ?? visibleHarness?.speed_tiers ?? [];
   const availablePermissionModes = permissionModeOptions(
     session.harness,
     visibleHarness?.permission_modes
@@ -196,7 +229,8 @@ export function ChatComposer({
     hasAvailableHarness,
     supportedModelIds,
     availableReasoningEfforts,
-    supportedReasoningEffortIds
+    supportedReasoningEffortIds,
+    supportedSpeedTierIds
   );
 
   return (
@@ -308,6 +342,33 @@ export function ChatComposer({
                           {effort.id === visibleHarness.default_reasoning_effort
                             ? " (default)"
                             : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {(availableSpeedTiers.length > 1 ||
+                  picker.selectedSpeedTierUnsupported) && (
+                  <label
+                    className="hc-speed-picker"
+                    title={picker.speedPickerDisabledReason}
+                  >
+                    <select
+                      aria-label={`${visibleHarness.label} speed tier`}
+                      data-testid="local-chat-speed-tier-picker"
+                      value={session.selectedSpeedTier ?? ""}
+                      onChange={onSpeedTierChange}
+                      disabled={picker.speedPickerDisabled}
+                    >
+                      <option value="">{picker.speedDefaultLabel}</option>
+                      {picker.selectedSpeedTierUnsupported && (
+                        <option value={session.selectedSpeedTier ?? ""}>
+                          Unsupported: {session.selectedSpeedTier}
+                        </option>
+                      )}
+                      {availableSpeedTiers.map((tier) => (
+                        <option key={tier.id} value={tier.id}>
+                          {tier.label}{tier.is_default ? " (default)" : ""}
                         </option>
                       ))}
                     </select>

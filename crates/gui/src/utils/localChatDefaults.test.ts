@@ -8,6 +8,9 @@ import {
   resolveModelDefaultId,
   resolvePermissionDefault,
   resolveReasoningEffortDefault,
+  resolveSpeedTierDefault,
+  hasStaleSpeedTier,
+  speedTiersForModel,
   useLocalChatDefaultsStore,
 } from "./localChatDefaults";
 
@@ -41,12 +44,17 @@ const codexInfo: LocalChatHarnessInfo = {
       id: "gpt-5.6-luna",
       label: "GPT-5.6-Luna",
       supported_reasoning_effort_ids: ["medium", "high"],
+      supported_speed_tier_ids: ["default", "fast"],
     },
   ],
   default_reasoning_effort: "medium",
   reasoning_efforts: [
     { id: "medium", label: "Medium" },
     { id: "high", label: "High" },
+  ],
+  speed_tiers: [
+    { id: "default", label: "Standard", is_default: true },
+    { id: "fast", label: "Fast", is_default: false },
   ],
   permission_modes: [],
   supports_resume: true,
@@ -62,17 +70,18 @@ describe("local chat defaults", () => {
     });
   });
 
-  it("persists harness, model, effort, and permission overrides", () => {
+  it("persists harness, model, effort, speed, and permission overrides", () => {
     useLocalChatDefaultsStore.getState().setDefaultHarness("codex");
     useLocalChatDefaultsStore.getState().setModelDefault("claude", "opus");
     useLocalChatDefaultsStore
       .getState()
       .setReasoningEffortDefault("codex", "high");
+    useLocalChatDefaultsStore.getState().setSpeedTierDefault("codex", "fast");
     useLocalChatDefaultsStore.getState().setPermissionDefault("claude", "plan");
 
     expect(useLocalChatDefaultsStore.getState().defaults).toEqual({
       claude: { modelId: "opus", permissionMode: "plan" },
-      codex: { reasoningEffort: "high" },
+      codex: { reasoningEffort: "high", speedTier: "fast" },
     });
     expect(useLocalChatDefaultsStore.getState().defaultHarness).toBe("codex");
     expect(
@@ -83,7 +92,7 @@ describe("local chat defaults", () => {
       defaultHarness: "codex",
       harnesses: {
         claude: { modelId: "opus", permissionMode: "plan" },
-        codex: { reasoningEffort: "high" },
+        codex: { reasoningEffort: "high", speedTier: "fast" },
       },
     });
   });
@@ -96,6 +105,12 @@ describe("local chat defaults", () => {
     expect(resolveReasoningEffortDefault(codexInfo, "high")).toBe("high");
     expect(resolveReasoningEffortDefault(codexInfo, "missing")).toBe("medium");
     expect(hasStaleReasoningEffort(codexInfo, "missing")).toBe(true);
+    expect(speedTiersForModel(codexInfo)).toHaveLength(2);
+    expect(resolveSpeedTierDefault(codexInfo, "fast")).toBe("fast");
+    expect(resolveSpeedTierDefault(codexInfo, "fast", "missing")).toBe(
+      "default"
+    );
+    expect(hasStaleSpeedTier(codexInfo, "fast", "missing")).toBe(true);
   });
 
   it("removes an override when reset or cleared", () => {

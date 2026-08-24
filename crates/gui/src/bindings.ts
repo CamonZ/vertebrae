@@ -1713,6 +1713,7 @@ export type CreateLocalChatSessionInput = {
   provider_resume_id: string | null;
   model_id: string | null;
   reasoning_effort: string | null;
+  speed_tier?: string | null;
   permission_mode: PermissionMode | null;
 };
 /**
@@ -1892,6 +1893,7 @@ export type LocalChatHarnessInfo = {
   models: LocalChatModelOption[];
   default_reasoning_effort: string | null;
   reasoning_efforts: LocalChatReasoningEffortOption[];
+  speed_tiers?: LocalChatSpeedTierOption[];
   permission_modes?: LocalChatPermissionModeOption[] | null;
   supports_resume: boolean;
 };
@@ -1900,6 +1902,12 @@ export type LocalChatModelOption = {
   id: string;
   label: string;
   supported_reasoning_effort_ids?: string[] | null;
+  supported_speed_tier_ids?: string[] | null;
+};
+export type LocalChatSpeedTierOption = {
+  id: string;
+  label: string;
+  is_default?: boolean;
 };
 export type LocalChatPermissionModeOption = {
   id: PermissionMode;
@@ -1969,6 +1977,14 @@ export type LocalChatSessionInitEvent = {
   provider_resume_id: string | null;
   model: string;
   tools: string[];
+  speed_tier_status?: LocalChatSpeedTierStatus | null;
+};
+export type LocalChatSpeedTierStatus = {
+  requested: string | null;
+  active: string | null;
+  eligible: boolean;
+  available: boolean;
+  diagnostic: string | null;
 };
 export type LocalChatSessionUsageEvent = {
   backend_session_id: string;

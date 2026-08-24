@@ -23,6 +23,7 @@ pub struct LocalChatSessionInitEvent {
     pub model: String,
     pub tools: Vec<String>,
     #[serde(default)]
+    #[specta(optional)]
     pub speed_tier_status: Option<LocalChatSpeedTierStatus>,
 }
 

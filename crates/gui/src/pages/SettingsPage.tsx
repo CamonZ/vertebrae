@@ -37,10 +37,13 @@ import {
   hasStaleModelDefault,
   hasStalePermissionDefault,
   hasStaleReasoningEffort,
+  hasStaleSpeedTier,
   resolveDefaultHarness,
   resolveModelDefaultId,
   resolvePermissionDefault,
   resolveReasoningEffortDefault,
+  resolveSpeedTierDefault,
+  speedTiersForModel,
   useLocalChatDefaultsStore,
 } from "../utils/localChatDefaults";
 
@@ -122,6 +125,9 @@ function HarnessDefaultsSection({
   const setReasoningEffortDefault = useLocalChatDefaultsStore(
     (state) => state.setReasoningEffortDefault
   );
+  const setSpeedTierDefault = useLocalChatDefaultsStore(
+    (state) => state.setSpeedTierDefault
+  );
   const setPermissionDefault = useLocalChatDefaultsStore(
     (state) => state.setPermissionDefault
   );
@@ -146,6 +152,12 @@ function HarnessDefaultsSection({
     saved?.reasoningEffort,
     effectiveModelId
   );
+  const speedTiers = speedTiersForModel(info, effectiveModelId);
+  const effectiveSpeedTier = resolveSpeedTierDefault(
+    info,
+    saved?.speedTier,
+    effectiveModelId
+  );
   const staleModel = hasStaleModelDefault(info, saved?.modelId);
   const stalePermission = hasStalePermissionDefault(
     info,
@@ -156,8 +168,16 @@ function HarnessDefaultsSection({
     saved?.reasoningEffort,
     effectiveModelId
   );
+  const staleSpeedTier = hasStaleSpeedTier(
+    info,
+    saved?.speedTier,
+    effectiveModelId
+  );
   const hasSavedOverride =
-    !!saved?.modelId || !!saved?.reasoningEffort || !!saved?.permissionMode;
+    !!saved?.modelId ||
+    !!saved?.reasoningEffort ||
+    !!saved?.speedTier ||
+    !!saved?.permissionMode;
 
   return (
     <section
@@ -253,6 +273,52 @@ function HarnessDefaultsSection({
             </p>
           )}
         </SettingRow>
+
+        {(speedTiers.length > 1 || staleSpeedTier) && (
+          <SettingRow
+            label="Speed tier"
+            description="Controls whether a new chat uses the standard or fast provider path."
+          >
+            <Select
+              aria-label={`${info.label} speed tier`}
+              data-testid={`${info.harness}-default-speed-tier`}
+              value={saved?.speedTier ?? ""}
+              onChange={(event) => {
+                setSpeedTierDefault(info.harness, event.target.value || null);
+                onSaved();
+              }}
+              disabled={!info.available}
+              options={[
+                {
+                  value: "",
+                  label: `Provider default${
+                    effectiveSpeedTier
+                      ? ` (${speedTiers.find((tier) => tier.id === effectiveSpeedTier)?.label ?? effectiveSpeedTier})`
+                      : ""
+                  }`,
+                },
+                ...(staleSpeedTier
+                  ? [
+                      {
+                        value: saved?.speedTier ?? "",
+                        label: `Unavailable: ${saved?.speedTier}`,
+                      },
+                    ]
+                  : []),
+                ...speedTiers.map((tier) => ({
+                  value: tier.id,
+                  label: `${tier.label}${tier.is_default ? " (harness default)" : ""}`,
+                })),
+              ]}
+            />
+            {staleSpeedTier && (
+              <p className="mt-1 text-xs text-[var(--color-warn)]">
+                Saved speed tier is unavailable for the selected model; new
+                chats use the provider default.
+              </p>
+            )}
+          </SettingRow>
+        )}
 
         {info.reasoning_efforts.length > 0 && (
           <SettingRow

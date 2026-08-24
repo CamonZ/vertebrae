@@ -309,6 +309,7 @@ describe("chatStore", () => {
 
       useChatStore.getState().setSessionSelectedModel(id, "sonnet");
       useChatStore.getState().setSessionReasoningEffort(id, "high");
+      useChatStore.getState().setSessionSpeedTier(id, "fast");
       useChatStore.getState().setSessionPermissionMode(id, "plan");
       useChatStore.getState().setSessionModel(id, "claude-sonnet");
       useChatStore.getState().setSessionTokenUsage(id, { used: 10, max: 100 });
@@ -318,6 +319,7 @@ describe("chatStore", () => {
         harness: "codex",
         selectedModelId: undefined,
         selectedReasoningEffort: undefined,
+        selectedSpeedTier: undefined,
         permissionMode: "default",
         model: undefined,
         tokenUsage: undefined,

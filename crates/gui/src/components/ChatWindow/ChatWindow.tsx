@@ -116,6 +116,8 @@ export function ChatWindow({
         supportedModelIds={chat.supportedModelIds}
         reasoningEfforts={chat.reasoningEfforts}
         supportedReasoningEffortIds={chat.supportedReasoningEffortIds}
+        speedTiers={chat.speedTiers}
+        supportedSpeedTierIds={chat.supportedSpeedTierIds}
         isBusy={chat.isBusy}
         isActive={chat.isActive}
         lockedHarness={chat.lockedHarness}
@@ -135,6 +137,7 @@ export function ChatWindow({
         onHarnessChange={chat.handleHarnessChange}
         onModelChange={chat.handleModelChange}
         onReasoningEffortChange={chat.handleReasoningEffortChange}
+        onSpeedTierChange={chat.handleSpeedTierChange}
         onPermissionModeChange={chat.handlePermissionModeChange}
       />
     </div>

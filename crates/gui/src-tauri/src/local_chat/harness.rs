@@ -20,8 +20,10 @@ pub struct LocalChatModelOption {
     pub id: String,
     pub label: String,
     #[serde(default)]
+    #[specta(optional)]
     pub supported_reasoning_effort_ids: Option<Vec<String>>,
     #[serde(default)]
+    #[specta(optional)]
     pub supported_speed_tier_ids: Option<Vec<String>>,
 }
 
@@ -58,6 +60,7 @@ pub struct LocalChatHarnessInfo {
     pub default_reasoning_effort: Option<String>,
     pub reasoning_efforts: Vec<LocalChatReasoningEffortOption>,
     #[serde(default)]
+    #[specta(optional)]
     pub speed_tiers: Vec<LocalChatSpeedTierOption>,
     #[serde(default)]
     #[specta(optional)]
@@ -81,6 +84,7 @@ pub struct CreateLocalChatSessionInput {
     pub model_id: Option<String>,
     pub reasoning_effort: Option<String>,
     #[serde(default)]
+    #[specta(optional)]
     pub speed_tier: Option<String>,
     pub permission_mode: Option<PermissionMode>,
 }

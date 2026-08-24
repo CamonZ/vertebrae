@@ -12,6 +12,7 @@ export const LOCAL_CHAT_DEFAULTS_STORAGE_KEY =
 export interface LocalChatHarnessDefaults {
   modelId?: string;
   reasoningEffort?: string;
+  speedTier?: string;
   permissionMode?: PermissionMode;
 }
 
@@ -32,6 +33,10 @@ interface LocalChatDefaultsState {
     harness: LocalChatHarnessKind,
     reasoningEffort: string | null
   ) => void;
+  setSpeedTierDefault: (
+    harness: LocalChatHarnessKind,
+    speedTier: string | null
+  ) => void;
   setPermissionDefault: (
     harness: LocalChatHarnessKind,
     permissionMode: PermissionMode | null
@@ -48,6 +53,7 @@ const PERMISSION_MODES: PermissionMode[] = [
   "dont_ask",
   "plan",
 ];
+const SPEED_TIERS = ["default", "fast"] as const;
 
 function isHarnessKind(value: unknown): value is LocalChatHarnessKind {
   return (
@@ -61,6 +67,10 @@ function isPermissionMode(value: unknown): value is PermissionMode {
     typeof value === "string" &&
     PERMISSION_MODES.includes(value as PermissionMode)
   );
+}
+
+function isSpeedTier(value: unknown): value is (typeof SPEED_TIERS)[number] {
+  return typeof value === "string" && SPEED_TIERS.includes(value as never);
 }
 
 function readStoredDefaults(): {
@@ -108,11 +118,19 @@ function readStoredDefaults(): {
         record.reasoningEffort.trim()
           ? record.reasoningEffort.trim()
           : undefined;
+      const speedTier = isSpeedTier(record.speedTier)
+        ? record.speedTier
+        : undefined;
       const permissionMode = isPermissionMode(record.permissionMode)
         ? record.permissionMode
         : undefined;
-      if (modelId || reasoningEffort || permissionMode) {
-        defaults[harness] = { modelId, reasoningEffort, permissionMode };
+      if (modelId || reasoningEffort || speedTier || permissionMode) {
+        defaults[harness] = {
+          modelId,
+          reasoningEffort,
+          speedTier,
+          permissionMode,
+        };
       }
     }
     const defaultHarness = isHarnessKind(parsedRecord.defaultHarness)
@@ -206,6 +224,23 @@ export const useLocalChatDefaultsStore = create<LocalChatDefaultsState>(
             storageWarning: writeStoredDefaults(defaults, state.defaultHarness),
           };
         }),
+      setSpeedTierDefault: (harness, speedTier) =>
+        set((state) => {
+          const defaults = updateHarnessDefaults(
+            state.defaults,
+            harness,
+            (current) => {
+              const next = { ...current };
+              if (isSpeedTier(speedTier)) next.speedTier = speedTier;
+              else delete next.speedTier;
+              return next;
+            }
+          );
+          return {
+            defaults,
+            storageWarning: writeStoredDefaults(defaults, state.defaultHarness),
+          };
+        }),
       setPermissionDefault: (harness, permissionMode) =>
         set((state) => {
           const defaults = updateHarnessDefaults(
@@ -278,6 +313,51 @@ function reasoningEffortsForModel(
   if (!supportedIds) return info.reasoning_efforts;
   const supported = new Set(supportedIds);
   return info.reasoning_efforts.filter((effort) => supported.has(effort.id));
+}
+
+export function speedTiersForModel(
+  info: Pick<LocalChatHarnessInfo, "models" | "speed_tiers" | "default_model_id">,
+  modelId?: string | null
+) {
+  const speedTiers = info.speed_tiers ?? [];
+  const selectedModel = info.models.find(
+    (model) => model.id === (modelId ?? info.default_model_id)
+  );
+  const supportedIds = selectedModel?.supported_speed_tier_ids;
+  if (supportedIds) {
+    const supported = new Set(supportedIds);
+    return speedTiers.filter((tier) => supported.has(tier.id));
+  }
+
+  const standard = speedTiers.find((tier) => tier.id === "default");
+  return standard ? [standard] : speedTiers.slice(0, 1);
+}
+
+export function resolveSpeedTierDefault(
+  info: Pick<
+    LocalChatHarnessInfo,
+    "models" | "speed_tiers" | "default_model_id"
+  >,
+  override?: string,
+  modelId?: string | null
+): string | null {
+  const tiers = speedTiersForModel(info, modelId);
+  if (override && tiers.some((tier) => tier.id === override)) return override;
+  return tiers.find((tier) => tier.is_default)?.id ?? tiers[0]?.id ?? null;
+}
+
+export function hasStaleSpeedTier(
+  info: Pick<
+    LocalChatHarnessInfo,
+    "models" | "speed_tiers" | "default_model_id"
+  >,
+  override?: string,
+  modelId?: string | null
+): boolean {
+  return (
+    !!override &&
+    !speedTiersForModel(info, modelId).some((tier) => tier.id === override)
+  );
 }
 
 export function resolveReasoningEffortDefault(
