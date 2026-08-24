@@ -481,6 +481,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_containers_without_the_preserved_volume_are_unsafe() {
+        let detection = detect_legacy([
+            CommandOutput::success("postgres-id\nsacrum-id\n"),
+            CommandOutput::success(legacy_inspect_json(LEGACY_POSTGRES_IMAGE, LEGACY_VOLUME)),
+            CommandOutput::success(""),
+        ])
+        .await
+        .expect("detect legacy stack");
+
+        assert!(matches!(
+            detection,
+            LegacyStackDetection::Unsafe(reason) if reason.contains("volume is missing")
+        ));
+    }
+
+    #[tokio::test]
     async fn compatible_legacy_stack_is_adopted_without_changing_its_v17_volume() {
         assert!(!LEGACY_INSPECT_FORMAT.contains("Env"));
         assert!(!LEGACY_INSPECT_FORMAT.contains("Config.Env"));

@@ -320,8 +320,9 @@ fn current_backend_release_metadata(
 #[cfg(test)]
 mod tests {
     use super::{
-        adoption_required_result, backend_management_for_url, current_backend_release_metadata,
-        legacy_backend_update_status, loopback_backend_port, LocalBackendAdoptionStatus,
+        adoption_required_result, backend_management_for_url, configured_api_token_from_config,
+        current_backend_release_metadata, legacy_backend_update_status, loopback_backend_port,
+        LocalBackendAdoptionStatus,
     };
     use crate::local_backend::compose::{LegacyStackCandidate, LegacyStackDetection};
 
@@ -357,6 +358,25 @@ mod tests {
     #[test]
     fn remote_backend_cannot_supply_an_adoption_port() {
         assert!(loopback_backend_port("https://backend.example.test:4400").is_err());
+    }
+
+    #[test]
+    fn adoption_requires_and_reuses_the_configured_api_token() {
+        let token = format!("sac_{}", "a".repeat(64));
+        let mut config = vertebrae_sacrum_client::VertebraeConfigFile::default();
+        config.sacrum.token = Some(token.clone());
+
+        assert_eq!(
+            configured_api_token_from_config(&config)
+                .expect("configured token should be accepted")
+                .as_str(),
+            token
+        );
+
+        config.sacrum.token = None;
+        let error = configured_api_token_from_config(&config)
+            .expect_err("adoption must not generate a replacement token");
+        assert!(error.to_string().contains("requires an API token"));
     }
 
     #[test]
@@ -689,6 +709,12 @@ fn configured_api_token() -> Result<ApiToken, LocalBackendError> {
             "could not load the configured backend token for adoption: {error}"
         ))
     })?;
+    configured_api_token_from_config(&config)
+}
+
+fn configured_api_token_from_config(
+    config: &vertebrae_sacrum_client::VertebraeConfigFile,
+) -> Result<ApiToken, LocalBackendError> {
     let token = config
         .sacrum
         .token

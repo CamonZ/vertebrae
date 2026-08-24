@@ -314,4 +314,47 @@ mod tests {
         assert!(error.to_string().contains("adopted development stack"));
         assert_eq!(state.provisioning_state, ProvisioningState::Unverified);
     }
+
+    #[tokio::test]
+    async fn adopted_provisioning_reuses_configured_token_without_seeding() {
+        let (_temp, paths, mut state) = stack_fixture(StackKind::AdoptedLegacy);
+        let volume = state.postgres_volume();
+        let mut outputs = prerequisites().to_vec();
+        outputs.extend([
+            CommandOutput::success(format!("{volume}\n")),
+            CommandOutput::success(legacy_volume_inspect("vertebrae-dev", "pgdata")),
+            CommandOutput::success(""),
+            CommandOutput::failure(1, "safe Docker reconciliation failure"),
+        ]);
+        let runner = MockRunner::with_outputs(outputs);
+        let controller = controller(runner.clone(), MockHealth::default());
+        let configured_token =
+            ApiToken::new(format!("sac_{}", "b".repeat(64))).expect("valid configured token");
+
+        let result = controller
+            .provision_adopted(&paths, &mut state, configured_token.clone(), |_| {})
+            .await
+            .expect_err("reconciliation failure should stop before health");
+
+        assert!(result
+            .to_string()
+            .contains("safe Docker reconciliation failure"));
+        assert_eq!(state.provisioning_state, ProvisioningState::Failed);
+        assert_eq!(
+            paths.load_api_token().expect("load token"),
+            configured_token
+        );
+        assert_eq!(
+            paths
+                .load_runtime_secrets(StackKind::AdoptedLegacy)
+                .expect("load legacy secrets"),
+            RuntimeSecrets::legacy_development()
+        );
+        assert!(runner.requests().iter().all(|request| {
+            !request
+                .args_as_strings()
+                .iter()
+                .any(|argument| matches!(argument.as_str(), "seed" | "init"))
+        }));
+    }
 }

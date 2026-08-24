@@ -448,6 +448,61 @@ describe("SettingsPage", () => {
     ).toHaveTextContent("Retry adoption");
   });
 
+  it("refreshes the Settings backend branch after successful adoption", async () => {
+    const user = userEvent.setup();
+    invokeMock
+      .mockResolvedValueOnce({
+        status: "ready",
+        backend_url: "http://127.0.0.1:4400",
+        adoption_message: null,
+      })
+      .mockResolvedValueOnce({
+        management: "managed_local",
+        configured: true,
+        channel: "release",
+        current_version: "0.4.0",
+        current_build: "backend-build",
+        current_image_ref: "current-image",
+        current_generated_at: null,
+        latest: null,
+        available: false,
+        adoption_message: null,
+        diagnostic: null,
+      });
+    useGuiUpdateStore.setState({
+      ...initialGuiUpdateState,
+      localBackend: {
+        ...initialGuiUpdateState.localBackend,
+        management: "adoptable_legacy",
+        configured: true,
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-updates"));
+    await user.click(screen.getByTestId("settings-adopt-local-backend"));
+    await user.click(screen.getByTestId("settings-adopt-local-backend-confirm"));
+
+    expect(
+      await screen.findByTestId("settings-backend-current-status")
+    ).toHaveTextContent("up to date");
+    expect(screen.getByTestId("settings-local-backend-adoption-result")).toHaveTextContent(
+      "preserved"
+    );
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "adopt_local_backend", {
+      confirmed: true,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(
+      2,
+      "check_local_backend_update"
+    );
+  });
+
   it("renders ordered apply progress and offers only a deferred relaunch", async () => {
     const user = userEvent.setup();
     const result = {

@@ -320,6 +320,32 @@ describe("GUI update checker", () => {
     });
   });
 
+  it("keeps Docker detection errors out of the adoption action branch", async () => {
+    invokeMock.mockResolvedValue({
+      management: "adoption_recovery_required",
+      configured: true,
+      channel: null,
+      current_image_ref: null,
+      latest: null,
+      available: false,
+      adoption_message: null,
+      diagnostic: {
+        code: "docker_unavailable",
+        retryable: true,
+        message: "Start Docker Desktop and check again; no resources were changed.",
+      },
+    });
+
+    await expect(checkLocalBackendUpdate()).resolves.toMatchObject({
+      management: "adoption_recovery_required",
+      diagnostic: {
+        code: "docker_unavailable",
+        retryable: true,
+      },
+      update: null,
+    });
+  });
+
   it("keeps remote and absent backend statuses distinct", async () => {
     for (const status of [
       {
