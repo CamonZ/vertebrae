@@ -5,8 +5,8 @@ use tokio::sync::{Mutex, OnceCell, RwLock};
 use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
-    EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId, StartSessionRequest,
-    StreamId, TurnHandle, TurnId,
+    EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId, SpeedTier,
+    StartSessionRequest, StreamId, TurnHandle, TurnId,
 };
 
 use crate::local_chat::{
@@ -111,6 +111,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
         let model = requested_model_override(input.model_id.as_deref()).map(str::to_owned);
         let reasoning_effort =
             requested_reasoning_effort(input.reasoning_effort.as_deref()).map(str::to_owned);
+        let speed_tier = requested_speed_tier(input.speed_tier.as_deref());
         let agent_config = AgentConfig {
             provider: Some(Provider::Openai),
             model: model.clone(),
@@ -126,6 +127,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
                 working_directory: input.working_dir.map(PathBuf::from),
                 model,
                 reasoning_effort,
+                speed_tier,
                 developer_instructions: Some(CHAT_REFERENCE_INSTRUCTIONS.to_string()),
                 ..Default::default()
             },
@@ -323,6 +325,14 @@ fn core_permission_mode(mode: &crate::types::PermissionMode) -> CorePermissionMo
         crate::types::PermissionMode::Default => CorePermissionMode::Default,
         crate::types::PermissionMode::DontAsk => CorePermissionMode::DontAsk,
         crate::types::PermissionMode::Plan => CorePermissionMode::Plan,
+    }
+}
+
+fn requested_speed_tier(speed_tier: Option<&str>) -> Option<SpeedTier> {
+    match speed_tier {
+        Some("default") => Some(SpeedTier::Default),
+        Some("fast") => Some(SpeedTier::Fast),
+        _ => None,
     }
 }
 

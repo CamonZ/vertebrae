@@ -242,6 +242,7 @@ fn input(session_id: &str, initial_prompt: Option<&str>) -> HarnessCreateSession
         provider_resume_id: Some("resume-request-1".into()),
         model_id: Some("opus".into()),
         reasoning_effort: Some("high".into()),
+        speed_tier: None,
         permission_mode: Some(PermissionMode::Plan),
     }
 }

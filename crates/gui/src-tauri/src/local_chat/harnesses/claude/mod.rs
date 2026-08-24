@@ -303,6 +303,7 @@ mod tests {
             provider_resume_id: Some("claude-conversation-1".to_string()),
             model_id: Some("opus".to_string()),
             reasoning_effort: Some("high".to_string()),
+            speed_tier: None,
             permission_mode: Some(PermissionMode::Plan),
         };
 

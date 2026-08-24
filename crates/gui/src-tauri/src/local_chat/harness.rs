@@ -80,6 +80,8 @@ pub struct CreateLocalChatSessionInput {
     pub provider_resume_id: Option<String>,
     pub model_id: Option<String>,
     pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub speed_tier: Option<String>,
     pub permission_mode: Option<PermissionMode>,
 }
 
@@ -91,6 +93,7 @@ pub(crate) struct HarnessCreateSessionInput {
     pub(crate) provider_resume_id: Option<String>,
     pub(crate) model_id: Option<String>,
     pub(crate) reasoning_effort: Option<String>,
+    pub(crate) speed_tier: Option<String>,
     pub(crate) permission_mode: Option<PermissionMode>,
 }
 
@@ -103,6 +106,7 @@ impl CreateLocalChatSessionInput {
             provider_resume_id: self.provider_resume_id,
             model_id: self.model_id,
             reasoning_effort: self.reasoning_effort,
+            speed_tier: self.speed_tier,
             permission_mode: self.permission_mode,
         }
     }
