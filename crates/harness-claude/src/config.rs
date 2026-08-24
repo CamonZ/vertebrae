@@ -19,8 +19,15 @@ pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
     ("opus", "Opus"),
     ("haiku", "Haiku"),
     ("fable", "Fable"),
-    ("claude-opus-4-6", "Claude Opus 4.6"),
+    ("claude-opus-5", "Claude Opus 5"),
+    ("claude-opus-4-8", "Claude Opus 4.8"),
 ];
+
+pub(crate) fn claude_model_supports_fast_mode(model: &str) -> bool {
+    matches!(model, "claude-opus-5" | "claude-opus-4-8")
+        || model.starts_with("claude-opus-5-")
+        || model.starts_with("claude-opus-4-8-")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -335,7 +342,22 @@ mod tests {
     use tempfile::tempdir;
     use vertebrae_harness_core::RequestConfig;
 
-    use super::{ClaudeLaunchMode, ClaudeProviderConfig};
+    use super::{ClaudeLaunchMode, ClaudeProviderConfig, claude_model_supports_fast_mode};
+
+    #[test]
+    fn fast_mode_only_matches_current_supported_opus_models() {
+        for model in [
+            "claude-opus-5",
+            "claude-opus-5-20260101",
+            "claude-opus-4-8",
+            "claude-opus-4-8-20260101",
+        ] {
+            assert!(claude_model_supports_fast_mode(model), "{model}");
+        }
+        for model in ["opus", "claude-opus-4-6", "claude-opus-4-7"] {
+            assert!(!claude_model_supports_fast_mode(model), "{model}");
+        }
+    }
 
     #[test]
     fn appends_developer_instructions_without_replacing_provider_defaults() {

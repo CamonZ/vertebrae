@@ -20,8 +20,12 @@ const SUPPORTED_CLAUDE_MODELS: &[ClaudeModelDefinition] = &[
         label: "Fable",
     },
     ClaudeModelDefinition {
-        id: "claude-opus-4-6",
-        label: "Claude Opus 4.6",
+        id: "claude-opus-5",
+        label: "Claude Opus 5",
+    },
+    ClaudeModelDefinition {
+        id: "claude-opus-4-8",
+        label: "Claude Opus 4.8",
     },
 ];
 
@@ -68,7 +72,8 @@ pub fn supported_claude_model_catalog() -> ClaudeModelCatalog {
 }
 
 fn claude_model_speed_tier_ids(model_id: &str) -> Option<Vec<String>> {
-    matches!(model_id, "claude-opus-4-6").then(|| vec!["default".into(), "fast".into()])
+    matches!(model_id, "claude-opus-5" | "claude-opus-4-8")
+        .then(|| vec!["default".into(), "fast".into()])
 }
 
 fn is_supported_claude_model_id(model_id: &str) -> bool {

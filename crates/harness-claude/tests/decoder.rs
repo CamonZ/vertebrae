@@ -38,7 +38,7 @@ fn init_reports_fast_mode_state_and_requested_tier() {
     let mut decoder = configured_decoder(context);
     let events = decoder
         .decode_line(
-            r#"{"type":"system","subtype":"init","session_id":"fast-session","model":"claude-opus-4-6","fast_mode_state":"on"}"#,
+            r#"{"type":"system","subtype":"init","session_id":"fast-session","model":"claude-opus-5","fast_mode_state":"on"}"#,
         )
         .unwrap();
     let status = events.iter().find_map(|draft| match &draft.payload {
@@ -67,7 +67,7 @@ fn fast_mode_cooldown_emits_a_fallback_diagnostic() {
     let mut decoder = configured_decoder(context);
     decoder
         .decode_line(
-            r#"{"type":"system","subtype":"init","session_id":"cooldown-session","model":"claude-opus-4-6","fast_mode_state":"on"}"#,
+            r#"{"type":"system","subtype":"init","session_id":"cooldown-session","model":"claude-opus-5","fast_mode_state":"on"}"#,
         )
         .unwrap();
     let events = decoder

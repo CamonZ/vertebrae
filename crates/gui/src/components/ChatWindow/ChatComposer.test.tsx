@@ -408,11 +408,11 @@ describe("ChatComposer", () => {
   it("renders speed tiers advertised by the selected model", () => {
     const speedHarness: LocalChatHarnessInfo = {
       ...CLAUDE_INFO,
-      default_model_id: "claude-opus-4-6",
+      default_model_id: "claude-opus-5",
       models: [
         {
-          id: "claude-opus-4-6",
-          label: "Claude Opus 4.6",
+          id: "claude-opus-5",
+          label: "Claude Opus 5",
           supported_speed_tier_ids: ["default", "fast"],
         },
       ],
@@ -426,7 +426,7 @@ describe("ChatComposer", () => {
       <ChatComposer
         {...defaultProps({
           visibleHarness: speedHarness,
-          session: createSession({ selectedModelId: "claude-opus-4-6" }),
+          session: createSession({ selectedModelId: "claude-opus-5" }),
           speedTiers: speedHarness.speed_tiers,
           supportedSpeedTierIds: new Set(["default", "fast"]),
           onSpeedTierChange,

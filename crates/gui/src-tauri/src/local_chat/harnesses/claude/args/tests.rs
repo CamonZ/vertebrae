@@ -30,8 +30,13 @@ fn supported_claude_model_catalog_uses_expected_aliases_and_default() {
                     supported_speed_tier_ids: None,
                 },
                 ClaudeModelOption {
-                    id: "claude-opus-4-6".to_string(),
-                    label: "Claude Opus 4.6".to_string(),
+                    id: "claude-opus-5".to_string(),
+                    label: "Claude Opus 5".to_string(),
+                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                },
+                ClaudeModelOption {
+                    id: "claude-opus-4-8".to_string(),
+                    label: "Claude Opus 4.8".to_string(),
                     supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                 },
             ],

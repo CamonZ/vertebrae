@@ -10,7 +10,10 @@ use vertebrae_harness_core::{
     TurnOutcome,
 };
 
-use crate::{ClaudeDecodeContext, ClaudeLaunchMode, ClaudeProviderConfig, DEFAULT_CLAUDE_MODELS};
+use crate::{
+    ClaudeDecodeContext, ClaudeLaunchMode, ClaudeProviderConfig, DEFAULT_CLAUDE_MODELS,
+    config::claude_model_supports_fast_mode,
+};
 
 mod controls;
 mod events;
@@ -64,9 +67,11 @@ fn claude_model_speed_tiers(model: &str) -> BTreeSet<SpeedTier> {
     // Fast-capable: the provider may resolve them to a model version for
     // which Fast mode is unavailable. Only resolved model IDs advertised by
     // Claude's Fast-mode contract get the alternate tier.
-    matches!(model, "claude-opus-4-6")
-        .then(|| BTreeSet::from([SpeedTier::Default, SpeedTier::Fast]))
-        .unwrap_or_default()
+    if claude_model_supports_fast_mode(model) {
+        BTreeSet::from([SpeedTier::Default, SpeedTier::Fast])
+    } else {
+        BTreeSet::new()
+    }
 }
 
 enum SessionCommand {

@@ -13,6 +13,7 @@ use super::drafts::{
     required_nonempty_string, string,
 };
 use super::{ClaudeDecodeError, ClaudeStreamDecoder};
+use crate::config::claude_model_supports_fast_mode;
 
 impl ClaudeStreamDecoder {
     pub(super) fn decode_canonical_value(
@@ -322,7 +323,7 @@ impl ClaudeStreamDecoder {
         if requested.is_none() && state.is_none() {
             return None;
         }
-        let model_is_eligible = model.is_some_and(|model| model.contains("opus-4-6"));
+        let model_is_eligible = model.is_some_and(claude_model_supports_fast_mode);
         let eligible = requested != Some(SpeedTier::Fast)
             || model_is_eligible
             || matches!(state, Some("on" | "cooldown"));

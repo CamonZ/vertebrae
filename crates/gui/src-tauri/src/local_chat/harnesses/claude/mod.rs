@@ -227,8 +227,14 @@ mod tests {
                     supported_speed_tier_ids: None,
                 },
                 LocalChatModelOption {
-                    id: "claude-opus-4-6".to_string(),
-                    label: "Claude Opus 4.6".to_string(),
+                    id: "claude-opus-5".to_string(),
+                    label: "Claude Opus 5".to_string(),
+                    supported_reasoning_effort_ids: None,
+                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                },
+                LocalChatModelOption {
+                    id: "claude-opus-4-8".to_string(),
+                    label: "Claude Opus 4.8".to_string(),
                     supported_reasoning_effort_ids: None,
                     supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                 },
@@ -260,8 +266,13 @@ mod tests {
                         supported_speed_tier_ids: None,
                     },
                     ClaudeModelOption {
-                        id: "claude-opus-4-6".to_string(),
-                        label: "Claude Opus 4.6".to_string(),
+                        id: "claude-opus-5".to_string(),
+                        label: "Claude Opus 5".to_string(),
+                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                    },
+                    ClaudeModelOption {
+                        id: "claude-opus-4-8".to_string(),
+                        label: "Claude Opus 4.8".to_string(),
                         supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                     },
                 ],
