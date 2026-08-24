@@ -103,7 +103,6 @@ function useHarnessPickerState(
     lockedHarness ||
     hasResume ||
     !visibleHarness.available;
-  const speedDefaultLabel = hasResume ? "Original speed" : "Default speed";
   const speedPickerDisabledReason = isBusy
     ? "Speed tier cannot change while a request is running"
     : isActive
@@ -133,7 +132,6 @@ function useHarnessPickerState(
     effortDefaultLabel,
     selectedSpeedTierUnsupported,
     speedPickerDisabled,
-    speedDefaultLabel,
     speedPickerDisabledReason,
     unavailableMessage,
   };
@@ -231,6 +229,8 @@ export function ChatComposer({
     supportedReasoningEffortIds,
     supportedSpeedTierIds
   );
+  const defaultSpeedTierId =
+    speedTiers.find((tier) => tier.is_default)?.id ?? speedTiers[0]?.id ?? "";
 
   return (
     <div className="hc-foot">
@@ -355,11 +355,10 @@ export function ChatComposer({
                     <select
                       aria-label={`${visibleHarness.label} speed tier`}
                       data-testid="local-chat-speed-tier-picker"
-                      value={session.selectedSpeedTier ?? ""}
+                      value={session.selectedSpeedTier ?? defaultSpeedTierId}
                       onChange={onSpeedTierChange}
                       disabled={picker.speedPickerDisabled}
                     >
-                      <option value="">{picker.speedDefaultLabel}</option>
                       {picker.selectedSpeedTierUnsupported && (
                         <option value={session.selectedSpeedTier ?? ""}>
                           Unsupported: {session.selectedSpeedTier}

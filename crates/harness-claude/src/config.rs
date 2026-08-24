@@ -24,7 +24,7 @@ pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
 ];
 
 pub(crate) fn claude_model_supports_fast_mode(model: &str) -> bool {
-    matches!(model, "claude-opus-5" | "claude-opus-4-8")
+    matches!(model, "opus" | "claude-opus-5" | "claude-opus-4-8")
         || model.starts_with("claude-opus-5-")
         || model.starts_with("claude-opus-4-8-")
 }
@@ -347,6 +347,7 @@ mod tests {
     #[test]
     fn fast_mode_only_matches_current_supported_opus_models() {
         for model in [
+            "opus",
             "claude-opus-5",
             "claude-opus-5-20260101",
             "claude-opus-4-8",
@@ -354,7 +355,7 @@ mod tests {
         ] {
             assert!(claude_model_supports_fast_mode(model), "{model}");
         }
-        for model in ["opus", "claude-opus-4-6", "claude-opus-4-7"] {
+        for model in ["sonnet", "claude-opus-4-6", "claude-opus-4-7"] {
             assert!(!claude_model_supports_fast_mode(model), "{model}");
         }
     }

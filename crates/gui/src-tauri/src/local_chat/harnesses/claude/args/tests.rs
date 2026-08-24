@@ -17,7 +17,7 @@ fn supported_claude_model_catalog_uses_expected_aliases_and_default() {
                 ClaudeModelOption {
                     id: "opus".to_string(),
                     label: "Opus".to_string(),
-                    supported_speed_tier_ids: None,
+                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                 },
                 ClaudeModelOption {
                     id: "haiku".to_string(),

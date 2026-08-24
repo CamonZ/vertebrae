@@ -408,11 +408,11 @@ describe("ChatComposer", () => {
   it("renders speed tiers advertised by the selected model", () => {
     const speedHarness: LocalChatHarnessInfo = {
       ...CLAUDE_INFO,
-      default_model_id: "claude-opus-5",
+      default_model_id: "opus",
       models: [
         {
-          id: "claude-opus-5",
-          label: "Claude Opus 5",
+          id: "opus",
+          label: "Opus",
           supported_speed_tier_ids: ["default", "fast"],
         },
       ],
@@ -426,7 +426,7 @@ describe("ChatComposer", () => {
       <ChatComposer
         {...defaultProps({
           visibleHarness: speedHarness,
-          session: createSession({ selectedModelId: "claude-opus-5" }),
+          session: createSession({ selectedModelId: "opus" }),
           speedTiers: speedHarness.speed_tiers,
           supportedSpeedTierIds: new Set(["default", "fast"]),
           onSpeedTierChange,
@@ -438,10 +438,10 @@ describe("ChatComposer", () => {
       "local-chat-speed-tier-picker"
     ) as HTMLSelectElement;
     expect(Array.from(picker.options).map((option) => option.value)).toEqual([
-      "",
       "default",
       "fast",
     ]);
+    expect(picker).toHaveValue("default");
     fireEvent.change(picker, { target: { value: "fast" } });
     expect(onSpeedTierChange).toHaveBeenCalledOnce();
   });

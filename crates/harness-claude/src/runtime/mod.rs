@@ -63,10 +63,6 @@ fn claude_permission_modes() -> Vec<PermissionModeCapability> {
 }
 
 fn claude_model_speed_tiers(model: &str) -> BTreeSet<SpeedTier> {
-    // Claude Code aliases such as `opus` are deliberately not treated as
-    // Fast-capable: the provider may resolve them to a model version for
-    // which Fast mode is unavailable. Only resolved model IDs advertised by
-    // Claude's Fast-mode contract get the alternate tier.
     if claude_model_supports_fast_mode(model) {
         BTreeSet::from([SpeedTier::Default, SpeedTier::Fast])
     } else {

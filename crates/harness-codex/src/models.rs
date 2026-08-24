@@ -26,7 +26,16 @@ struct CodexCatalogModel {
     #[serde(default)]
     supported_reasoning_levels: Vec<CodexReasoningLevel>,
     #[serde(default)]
-    supported_service_tiers: Vec<String>,
+    supported_service_tiers: Option<Vec<String>>,
+    #[serde(default)]
+    additional_speed_tiers: Option<Vec<String>>,
+    #[serde(default)]
+    service_tiers: Option<Vec<CodexServiceTier>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexServiceTier {
+    id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +94,7 @@ fn capabilities_from_catalog(mut catalog: CodexModelCatalog) -> HarnessCapabilit
         .into_iter()
         .filter(|model| model.visibility == "list")
         .map(|model| {
+            let supported_speed_tiers = supported_speed_tiers(&model);
             let reasoning_efforts = model
                 .supported_reasoning_levels
                 .into_iter()
@@ -94,15 +104,7 @@ fn capabilities_from_catalog(mut catalog: CodexModelCatalog) -> HarnessCapabilit
                 model.slug,
                 model.display_name,
                 reasoning_efforts,
-                model
-                    .supported_service_tiers
-                    .into_iter()
-                    .filter_map(|tier| match tier.as_str() {
-                        "default" => Some(SpeedTier::Default),
-                        "fast" | "priority" => Some(SpeedTier::Fast),
-                        _ => None,
-                    })
-                    .collect::<BTreeSet<_>>(),
+                supported_speed_tiers,
             )
         })
         .collect();
@@ -171,6 +173,25 @@ fn capabilities_from_catalog(mut catalog: CodexModelCatalog) -> HarnessCapabilit
     }
 }
 
+fn supported_speed_tiers(model: &CodexCatalogModel) -> BTreeSet<SpeedTier> {
+    let mut tiers = model
+        .supported_service_tiers
+        .iter()
+        .flatten()
+        .chain(model.additional_speed_tiers.iter().flatten())
+        .chain(model.service_tiers.iter().flatten().map(|tier| &tier.id))
+        .filter_map(|tier| match tier.as_str() {
+            "default" => Some(SpeedTier::Default),
+            "fast" | "priority" => Some(SpeedTier::Fast),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    if tiers.contains(&SpeedTier::Fast) {
+        tiers.insert(SpeedTier::Default);
+    }
+    tiers
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use std::{
@@ -204,7 +225,9 @@ mod tests {
                 {"effort": "ultra"},
                 {"effort": "medium"}
               ],
-              "supported_service_tiers": ["default", "priority"]
+              "supported_service_tiers": null,
+              "additional_speed_tiers": ["fast"],
+              "service_tiers": [{"id": "priority"}]
             },
             {
               "slug": "earlier-model",

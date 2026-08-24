@@ -212,7 +212,7 @@ mod tests {
                     id: "opus".to_string(),
                     label: "Opus".to_string(),
                     supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: None,
+                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                 },
                 LocalChatModelOption {
                     id: "haiku".to_string(),
@@ -253,7 +253,7 @@ mod tests {
                     ClaudeModelOption {
                         id: "opus".to_string(),
                         label: "Opus".to_string(),
-                        supported_speed_tier_ids: None,
+                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                     },
                     ClaudeModelOption {
                         id: "haiku".to_string(),
