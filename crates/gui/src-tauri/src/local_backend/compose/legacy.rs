@@ -19,6 +19,16 @@ pub struct LegacyStackCandidate {
     bind_host: String,
 }
 
+#[cfg(test)]
+impl LegacyStackCandidate {
+    pub(crate) fn for_test(host_port: u16) -> Self {
+        Self {
+            host_port,
+            bind_host: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LegacyStackDetection {
     Absent,

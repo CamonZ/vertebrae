@@ -1867,6 +1867,13 @@ export type LocalBackendUpdateStatus = {
   current_generated_at: string | null;
   latest: LocalBackendUpdateRelease | null;
   available: boolean;
+  adoption_message: string | null;
+  diagnostic: LocalBackendUpdateDiagnostic | null;
+};
+export type LocalBackendUpdateDiagnostic = {
+  code: string;
+  retryable: boolean;
+  message: string;
 };
 export type LocalBackendUpdateResult = {
   channel: string;

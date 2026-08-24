@@ -79,7 +79,18 @@ export interface LocalBackendUpdateResult {
   generated_at?: string | null;
 }
 
-export type BackendManagement = "managed_local" | "external" | "not_configured";
+export interface LocalBackendUpdateDiagnostic {
+  code: string;
+  retryable: boolean;
+  message: string;
+}
+
+export type BackendManagement =
+  | "managed_local"
+  | "adoptable_legacy"
+  | "adoption_recovery_required"
+  | "external"
+  | "not_configured";
 
 export type LocalBackendUpdateApplyState =
   | { status: "idle" }
@@ -96,6 +107,8 @@ export interface LocalBackendUpdateState {
   currentImageRef: string | null;
   currentImageCreatedAt: string | null;
   update: LocalBackendUpdateInfo | null;
+  adoptionMessage: string | null;
+  diagnostic: LocalBackendUpdateDiagnostic | null;
   error: string | null;
   apply: LocalBackendUpdateApplyState;
 }
@@ -227,6 +240,8 @@ export const initialGuiUpdateState: GuiUpdateState = {
     currentImageRef: null,
     currentImageCreatedAt: null,
     update: null,
+    adoptionMessage: null,
+    diagnostic: null,
     error: null,
     apply: { status: "idle" },
   },

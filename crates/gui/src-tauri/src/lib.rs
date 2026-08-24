@@ -421,6 +421,7 @@ mod tests {
             "export type LocalBackendProgressEvent",
             "export type LocalBackendSetupResult",
             "export type LocalBackendAdoptionResult",
+            "export type LocalBackendUpdateDiagnostic",
             "export type LocalBackendUpdateStatus",
             "export type LocalBackendUpdateResult",
         ] {

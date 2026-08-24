@@ -48,6 +48,13 @@ pub struct LocalBackendUpdateRelease {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LocalBackendUpdateDiagnostic {
+    pub code: String,
+    pub retryable: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct LocalBackendUpdateStatus {
     pub management: String,
     pub configured: bool,
@@ -58,6 +65,8 @@ pub struct LocalBackendUpdateStatus {
     pub current_generated_at: Option<String>,
     pub latest: Option<LocalBackendUpdateRelease>,
     pub available: bool,
+    pub adoption_message: Option<String>,
+    pub diagnostic: Option<LocalBackendUpdateDiagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -72,32 +81,22 @@ pub struct LocalBackendUpdateResult {
 #[tauri::command]
 #[specta::specta]
 pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, CommandError> {
-    let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
-    let configured_management = configured_backend_management()?;
-    if configured_management == "external" {
-        return Ok(LocalBackendUpdateStatus {
-            management: configured_management.to_string(),
-            configured: true,
-            channel: None,
-            current_version: None,
-            current_build: None,
-            current_image_ref: None,
-            current_generated_at: None,
-            latest: None,
-            available: false,
-        });
+    let Some(configured_url) = configured_backend_url()? else {
+        return Ok(empty_backend_update_status("not_configured", false));
+    };
+    if backend_management_for_url(&configured_url) == "external" {
+        return Ok(empty_backend_update_status("external", true));
     }
+
+    let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
     let Some(state) = paths.load_state().map_err(local_backend_error)? else {
-        return Ok(LocalBackendUpdateStatus {
-            management: configured_management.to_string(),
-            configured: false,
-            channel: None,
-            current_version: None,
-            current_build: None,
-            current_image_ref: None,
-            current_generated_at: None,
-            latest: None,
-            available: false,
+        let compose = match DockerCompose::system().await {
+            Ok(compose) => compose,
+            Err(error) => return Ok(diagnostic_backend_update_status(error)),
+        };
+        return Ok(match compose.detect_legacy_stack().await {
+            Ok(detection) => legacy_backend_update_status(detection),
+            Err(error) => diagnostic_backend_update_status(error),
         });
     };
 
@@ -132,6 +131,8 @@ pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, Co
             generated_at: manifest.generated_at,
         }),
         available,
+        adoption_message: None,
+        diagnostic: None,
     })
 }
 
@@ -209,20 +210,75 @@ pub async fn apply_approved_local_backend_update(
     })
 }
 
-fn configured_backend_management() -> Result<&'static str, CommandError> {
+fn configured_backend_url() -> Result<Option<String>, CommandError> {
     if let Some(url) = std::env::var_os("VTB_URL").filter(|url| !url.is_empty()) {
-        return Ok(backend_management_for_url(&url.to_string_lossy()));
+        return Ok(Some(url.to_string_lossy().into_owned()));
     }
 
     let config_path = vertebrae_sacrum_client::config_path();
     if !config_path.as_ref().is_some_and(|path| path.exists()) {
-        return Ok("not_configured");
+        return Ok(None);
     }
 
     let config = vertebrae_sacrum_client::load_config_file().map_err(|error| CommandError {
         message: format!("Failed to load config file: {error}"),
     })?;
-    Ok(backend_management_for_url(&config.sacrum.url))
+    Ok(Some(config.sacrum.url))
+}
+
+fn empty_backend_update_status(management: &str, configured: bool) -> LocalBackendUpdateStatus {
+    LocalBackendUpdateStatus {
+        management: management.to_string(),
+        configured,
+        channel: None,
+        current_version: None,
+        current_build: None,
+        current_image_ref: None,
+        current_generated_at: None,
+        latest: None,
+        available: false,
+        adoption_message: None,
+        diagnostic: None,
+    }
+}
+
+fn legacy_backend_update_status(detection: LegacyStackDetection) -> LocalBackendUpdateStatus {
+    match detection {
+        LegacyStackDetection::Compatible(_) => LocalBackendUpdateStatus {
+            management: "adoptable_legacy".to_string(),
+            configured: true,
+            adoption_message: Some(LEGACY_ADOPTION_MESSAGE.to_string()),
+            ..empty_backend_update_status("adoptable_legacy", true)
+        },
+        LegacyStackDetection::HostPortRequired => {
+            diagnostic_backend_update_status(LocalBackendError::LegacyHostPortRequired)
+        }
+        LegacyStackDetection::Unsafe(reason) => {
+            diagnostic_backend_update_status(LocalBackendError::UnsafeLegacyStack(reason))
+        }
+        LegacyStackDetection::Absent => empty_backend_update_status("not_configured", false),
+    }
+}
+
+fn diagnostic_backend_update_status(error: LocalBackendError) -> LocalBackendUpdateStatus {
+    let diagnostic = error.diagnostic();
+    LocalBackendUpdateStatus {
+        management: "adoption_recovery_required".to_string(),
+        configured: true,
+        channel: None,
+        current_version: None,
+        current_build: None,
+        current_image_ref: None,
+        current_generated_at: None,
+        latest: None,
+        available: false,
+        adoption_message: None,
+        diagnostic: Some(LocalBackendUpdateDiagnostic {
+            code: diagnostic.code,
+            retryable: diagnostic.retryable,
+            message: diagnostic.message,
+        }),
+    }
 }
 
 fn backend_management_for_url(url: &str) -> &'static str {
@@ -265,8 +321,9 @@ fn current_backend_release_metadata(
 mod tests {
     use super::{
         adoption_required_result, backend_management_for_url, current_backend_release_metadata,
-        loopback_backend_port, LocalBackendAdoptionStatus,
+        legacy_backend_update_status, loopback_backend_port, LocalBackendAdoptionStatus,
     };
+    use crate::local_backend::compose::{LegacyStackCandidate, LegacyStackDetection};
 
     #[test]
     fn unconfirmed_adoption_returns_confirmation_without_a_backend_url() {
@@ -300,6 +357,44 @@ mod tests {
     #[test]
     fn remote_backend_cannot_supply_an_adoption_port() {
         assert!(loopback_backend_port("https://backend.example.test:4400").is_err());
+    }
+
+    #[test]
+    fn legacy_detection_statuses_are_safe_and_actionable() {
+        let adoptable = legacy_backend_update_status(LegacyStackDetection::Compatible(
+            LegacyStackCandidate::for_test(4400),
+        ));
+        assert_eq!(adoptable.management, "adoptable_legacy");
+        assert!(adoptable.configured);
+        assert!(adoptable.adoption_message.is_some());
+        assert!(adoptable.diagnostic.is_none());
+
+        let recovery = legacy_backend_update_status(LegacyStackDetection::HostPortRequired);
+        assert_eq!(recovery.management, "adoption_recovery_required");
+        assert_eq!(
+            recovery
+                .diagnostic
+                .as_ref()
+                .map(|diagnostic| diagnostic.code.as_str()),
+            Some("legacy_host_port_required")
+        );
+
+        let unsafe_stack = legacy_backend_update_status(LegacyStackDetection::Unsafe(
+            "postgres must keep postgres:17-alpine".to_string(),
+        ));
+        assert_eq!(unsafe_stack.management, "adoption_recovery_required");
+        assert_eq!(
+            unsafe_stack
+                .diagnostic
+                .as_ref()
+                .map(|diagnostic| diagnostic.code.as_str()),
+            Some("legacy_stack_unsafe")
+        );
+
+        let absent = legacy_backend_update_status(LegacyStackDetection::Absent);
+        assert_eq!(absent.management, "not_configured");
+        assert!(!absent.configured);
+        assert!(absent.diagnostic.is_none());
     }
 
     #[test]
