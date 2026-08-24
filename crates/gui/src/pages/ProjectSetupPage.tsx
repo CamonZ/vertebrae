@@ -27,10 +27,10 @@ type SetupView = "saved" | "backend" | "project" | "ignition";
 type BackendChoice = "remote" | "local";
 
 const secondaryButtonClass =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-[var(--r-md)] border border-[var(--line-strong)] bg-transparent px-4 text-sm font-medium text-[var(--fg)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-9 items-center justify-center gap-2 rounded-[var(--r-md)] border border-[var(--line-strong)] bg-transparent px-4 text-sm font-medium text-[var(--fg)] transition-colors hover:border-[var(--line-strong)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50";
 
 const primaryButtonClass =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-[var(--r-md)] border border-[var(--accent)] bg-[var(--accent)] px-4 text-sm font-semibold text-[var(--bg)] transition-colors hover:border-[var(--accent-deep)] hover:bg-[var(--accent-deep)] disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-9 items-center justify-center gap-2 rounded-[var(--r-md)] border border-[var(--line-strong)] bg-[var(--accent)] px-4 text-sm font-semibold text-[var(--bg)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--accent-deep)] disabled:cursor-not-allowed disabled:opacity-50";
 
 function projectNameFromPath(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -589,7 +589,7 @@ export function ProjectSetupPage() {
               <div
                 key={project.slug}
                 onClick={() => handleSelectProject(project)}
-                className="flex cursor-pointer items-center justify-between rounded-lg border border-border p-4 transition-colors hover:border-accent hover:bg-bg-2"
+                className="flex cursor-pointer items-center justify-between rounded-lg border border-border p-4 transition-colors hover:bg-bg-2"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -736,8 +736,8 @@ export function ProjectSetupPage() {
             type="button"
             className={`w-full rounded-lg border p-4 text-left transition-colors ${
               backendChoice === "remote"
-                ? "border-accent bg-bg-2"
-                : "border-border hover:border-accent"
+                ? "border-border bg-bg-2"
+                : "border-border hover:bg-bg-2"
             }`}
             onClick={() => {
               setBackendChoice("remote");
@@ -756,8 +756,8 @@ export function ProjectSetupPage() {
             type="button"
             className={`w-full rounded-lg border p-4 text-left transition-colors ${
               backendChoice === "local"
-                ? "border-accent bg-bg-2"
-                : "border-border hover:border-accent"
+                ? "border-border bg-bg-2"
+                : "border-border hover:bg-bg-2"
             }`}
             onClick={() => {
               setBackendChoice("local");

@@ -808,12 +808,10 @@ html.light ::selection {
   -webkit-backdrop-filter: blur(34px) brightness(1.5) saturate(1);
   backdrop-filter: blur(34px) brightness(1.5) saturate(1);
   border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
-  border-top: 3px solid var(--accent);
   border-radius: var(--r-xl);
   box-shadow:
     var(--shadow-3),
     0 0 70px rgba(0, 0, 0, 0.45),
-    0 -1px 0 var(--accent) inset,
     inset 0 1px 0 color-mix(in oklch, var(--fg) 14%, transparent);
   overflow: hidden;
   animation: fr-rise var(--t-slow) var(--ease) both;
@@ -936,10 +934,6 @@ html.light ::selection {
   background: var(--line-strong);
 }
 
-.fr-phase.done + .fr-phase::before {
-  background: var(--accent);
-}
-
 .fr-pnum {
   width: 26px;
   height: 26px;
@@ -961,15 +955,15 @@ html.light ::selection {
 }
 
 .fr-phase.active .fr-pnum {
-  border-color: var(--accent);
-  background: var(--accent-wash);
-  color: var(--accent);
-  box-shadow: 0 0 14px var(--accent-glow);
+  border-color: var(--fg-mute);
+  background: var(--bg-2);
+  color: var(--fg);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--fg) 10%, transparent);
 }
 
 .fr-phase.done .fr-pnum {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--fg-soft);
+  background: var(--fg-soft);
   color: var(--bg);
 }
 
@@ -1117,8 +1111,8 @@ html.light ::selection {
 }
 
 .fr-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-wash);
+  border-color: var(--fg-mute);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--fg) 10%, transparent);
 }
 
 .fr-input::placeholder {
@@ -1129,10 +1123,10 @@ html.light ::selection {
   display: flex;
   gap: var(--s-2h);
   padding: var(--s-2h) var(--s-3);
-  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
-  border-left: 3px solid var(--accent);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--line-strong);
   border-radius: var(--r-md);
-  background: var(--accent-wash);
+  background: color-mix(in oklch, var(--bg-2) 75%, transparent);
   font-family: var(--serif);
   font-size: var(--text-13);
   line-height: 1.5;
@@ -1177,7 +1171,7 @@ html.light ::selection {
 }
 
 .fr-skill.on {
-  border-color: color-mix(in oklch, var(--accent) 42%, var(--line-strong));
+  border-color: var(--line-strong);
 }
 
 .fr-skill .si {
@@ -1210,7 +1204,7 @@ html.light ::selection {
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  border: 1px solid color-mix(in oklch, var(--accent) 45%, transparent);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-full);
   color: var(--accent);
 }
@@ -1281,8 +1275,8 @@ html.light ::selection {
 }
 
 .fr-tr .fstate.work {
-  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
-  color: var(--accent);
+  border-color: var(--line-strong);
+  color: var(--fg-mute);
 }
 
 .fr-tr .fstate.done {
@@ -1386,7 +1380,7 @@ html.light ::selection {
   content: "";
   position: absolute;
   inset: -8px;
-  border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-full);
   animation: fr-ring 2.4s var(--ease) infinite;
 }
