@@ -258,6 +258,7 @@ fn prepared(model: Option<&str>) -> PreparedSession {
         working_dir: PathBuf::from("/tmp/gui-claude-adapter-test"),
         model: model.map(str::to_owned),
         model_warning: None,
+        personality: None,
         factory_config,
         plugin_resolution: ClaudePluginDirResolution {
             plugin_root: None,
@@ -346,7 +347,6 @@ fn provider_config_preserves_every_gui_claude_process_setting() {
         "backend-config",
         locator_root.clone(),
         Some(&permission_socket),
-        None,
     );
 
     assert_eq!(config.anthropic_executable.as_ref(), Some(&claude_binary));

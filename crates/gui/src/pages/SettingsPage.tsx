@@ -46,6 +46,7 @@ import {
   personalityOptionsForModel,
   resolveDefaultHarness,
   resolveModelDefaultId,
+  resolvePersonalityDefault,
   resolvePermissionDefault,
   resolveReasoningEffortDefault,
   resolveSpeedTierDefault,
@@ -168,10 +169,11 @@ function HarnessDefaultsSection({
     return info.reasoning_efforts.filter((effort) => supported.has(effort.id));
   }, [effectiveModelId, info]);
   const personalityOptions = personalityOptionsForModel(info, effectiveModelId);
-  const effectivePersonality = saved?.personality &&
-    personalityOptions.some((option) => option.id === saved.personality)
-    ? saved.personality
-    : null;
+  const effectivePersonality = resolvePersonalityDefault(
+    info,
+    saved?.personality,
+    effectiveModelId
+  );
   const effectiveReasoningEffort = resolveReasoningEffortDefault(
     info,
     saved?.reasoningEffort,

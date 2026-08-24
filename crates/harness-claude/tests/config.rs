@@ -24,7 +24,6 @@ fn persistent_and_resumed_specs_preserve_exact_provider_configuration() {
         environment: BTreeMap::from([("CLAUDE_COMPAT".into(), "provider".into())]),
         prelude: ClaudeProviderPrelude {
             settings_path: Some(settings.clone()),
-            settings_json: None,
             args: vec!["--strict-mcp-config".into()],
         },
         plugin_roots: vec![plugin.clone()],
@@ -117,6 +116,28 @@ fn persistent_and_resumed_specs_preserve_exact_provider_configuration() {
         index_of(&resumed.args, "--resume=conversation-1") < index_of(&resumed.args, "--debug")
     );
     assert_eq!(resumed.args.last().unwrap(), "--debug");
+}
+
+#[test]
+fn request_personality_is_translated_by_the_claude_adapter() {
+    let temp = TempDir::new().expect("temporary directory");
+    let executable = temp.path().join("claude");
+    fs::write(&executable, "fixture").expect("placeholder executable");
+    let config = ClaudeProviderConfig {
+        executable: Some(executable),
+        ..ClaudeProviderConfig::default()
+    };
+    let request = RequestConfig {
+        personality: Some("Explanatory".into()),
+        ..RequestConfig::default()
+    };
+
+    let spec = config
+        .command_spec(ClaudeLaunchMode::Persistent { resume_id: None }, &request)
+        .expect("command spec");
+
+    assert_eq!(spec.args[0], "--settings");
+    assert_eq!(spec.args[1], r#"{"outputStyle":"Explanatory"}"#);
 }
 
 #[test]

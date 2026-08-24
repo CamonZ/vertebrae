@@ -19,10 +19,9 @@ import {
 } from "../utils/localChatPersistence";
 import {
   hasStaleModelDefault,
-  hasStalePersonalityDefault,
   hasStaleReasoningEffort,
   hasStaleSpeedTier,
-  personalityOptionsForModel,
+  resolvePersonalityDefault,
   resolvePermissionDefault,
   speedTiersForModel,
   useLocalChatDefaultsStore,
@@ -200,17 +199,6 @@ export function useChatSession(sessionId: string) {
     () => new Set(speedTiers.map((tier) => tier.id)),
     [speedTiers]
   );
-  const personalityOptions = useMemo(
-    () =>
-      visibleHarness
-        ? personalityOptionsForModel(
-            visibleHarness,
-            selectedModelId ?? visibleHarness.default_model_id
-          )
-        : [],
-    [selectedModelId, visibleHarness]
-  );
-
   // --- Lifecycle derived flags ---
   const lifecycle = getLocalChatLifecycle(session);
   const isBusy = isLocalChatLifecycleBusy(lifecycle);
@@ -298,19 +286,16 @@ export function useChatSession(sessionId: string) {
       setSessionSpeedTier(sessionId, savedHarnessDefaults.speedTier);
     }
 
-    if (
-      selectedPersonality === undefined &&
-      savedHarnessDefaults?.personality &&
-      !hasStalePersonalityDefault(
-        visibleHarness,
-        savedHarnessDefaults.personality,
-        selectedModelId ?? visibleHarness.default_model_id
-      ) &&
-      personalityOptions.some(
-        (option) => option.id === savedHarnessDefaults.personality
-      )
-    ) {
-      setSessionPersonality(sessionId, savedHarnessDefaults.personality);
+    const savedPersonality = resolvePersonalityDefault(
+      visibleHarness,
+      savedHarnessDefaults?.personality,
+      selectedModelId ?? visibleHarness.default_model_id
+    );
+    if (selectedPersonality === undefined && savedPersonality) {
+      setSessionPersonality(
+        sessionId,
+        savedPersonality
+      );
     }
   }, [
     hasConversation,
@@ -329,7 +314,6 @@ export function useChatSession(sessionId: string) {
     setSessionPersonality,
     setSessionSelectedModel,
     setSessionSpeedTier,
-    personalityOptions,
     supportedReasoningEffortIds,
     supportedSpeedTierIds,
     visibleHarness,

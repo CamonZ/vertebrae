@@ -46,7 +46,6 @@ pub struct HarnessFactoryConfig {
     pub environment: BTreeMap<String, String>,
     pub installed_skills_roots: Vec<PathBuf>,
     pub claude_settings_path: Option<PathBuf>,
-    pub claude_settings_json: Option<String>,
     pub claude_agent_paths: Vec<PathBuf>,
     pub claude_permission_prompt_tool: Option<String>,
     pub claude_mcp_config: Option<Value>,
@@ -156,7 +155,6 @@ impl HarnessRuntimeFactory {
             environment: self.config.environment.clone(),
             prelude: ClaudeProviderPrelude {
                 settings_path: self.config.claude_settings_path.clone(),
-                settings_json: self.config.claude_settings_json.clone(),
                 args: Vec::new(),
             },
             plugin_roots: self.config.claude_plugin_roots.clone(),

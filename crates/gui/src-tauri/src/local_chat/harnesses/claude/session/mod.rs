@@ -655,6 +655,7 @@ impl ClaudeSessionRuntime {
             working_dir,
             model,
             model_warning,
+            personality,
             style_warning,
             factory_config,
             plugin_resolution,
@@ -706,6 +707,7 @@ impl ClaudeSessionRuntime {
                 model,
                 reasoning_effort: input.reasoning_effort,
                 speed_tier: input.speed_tier.as_deref().and_then(SpeedTier::parse),
+                personality,
                 developer_instructions: Some(CHAT_REFERENCE_INSTRUCTIONS.to_string()),
                 ..RequestConfig::default()
             },
@@ -933,6 +935,7 @@ struct PreparedSession {
     working_dir: PathBuf,
     model: Option<String>,
     model_warning: Option<String>,
+    personality: Option<String>,
     style_warning: Option<String>,
     factory_config: HarnessFactoryConfig,
     plugin_resolution: ClaudePluginDirResolution,
@@ -993,8 +996,6 @@ impl PreparedSession {
             &output_styles,
             input.provider_resume_id.is_some(),
         );
-        let settings_json =
-            style.map(|style| serde_json::json!({ "outputStyle": style }).to_string());
         let root_locator_dir = claude_project_directory(&working_dir);
         let factory_config = build_factory_config(
             claude_binary,
@@ -1007,13 +1008,13 @@ impl PreparedSession {
             Some(permission_socket.path()),
             #[cfg(not(unix))]
             None,
-            settings_json,
         );
 
         Ok(Self {
             working_dir,
             model: resolved_model.model_id,
             model_warning: resolved_model.warning,
+            personality: style,
             style_warning,
             factory_config,
             plugin_resolution,
@@ -1032,7 +1033,6 @@ fn build_factory_config(
     backend_session_id: &str,
     root_locator_dir: PathBuf,
     permission_socket: Option<&Path>,
-    settings_json: Option<String>,
 ) -> HarnessFactoryConfig {
     let mut environment = BTreeMap::from([(
         "VTB_CLAUDE_SESSION_ID".to_string(),
@@ -1050,7 +1050,6 @@ fn build_factory_config(
         search_path: Some(augmented_path.into()),
         environment,
         claude_plugin_roots: plugin_resolution.plugin_root.clone().into_iter().collect(),
-        claude_settings_json: settings_json,
         claude_permission_prompt_tool: Some("mcp__vtb-gate__permission_prompt".into()),
         claude_mcp_config: Some(serde_json::json!({
             "mcpServers": { "vtb-gate": { "command": gate } }
