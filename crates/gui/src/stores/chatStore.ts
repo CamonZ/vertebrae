@@ -418,6 +418,8 @@ export interface ChatSession {
   selectedReasoningEffort?: string | null;
   /** User-selected provider speed tier for session startup overrides. */
   selectedSpeedTier?: string | null;
+  /** User-selected provider personality/output style for session startup. */
+  selectedPersonality?: string | null;
   /** User-selected Claude Code permission mode for local session startup. */
   permissionMode?: PermissionMode | null;
   /** Model name reported by the Claude CLI (from init or per-turn usage) */
@@ -605,6 +607,11 @@ interface ChatStoreActions {
   ) => void;
   /** Set the user-selected provider speed tier for this session */
   setSessionSpeedTier: (sessionId: string, speedTier: string | null) => void;
+  /** Set the user-selected provider personality/output style. */
+  setSessionPersonality: (
+    sessionId: string,
+    personality: string | null
+  ) => void;
   /** Set the user-selected Claude Code permission mode for this session */
   setSessionPermissionMode: (
     sessionId: string,
@@ -2478,6 +2485,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           selectedModelId: undefined,
           selectedReasoningEffort: undefined,
           selectedSpeedTier: undefined,
+          selectedPersonality: undefined,
           model: undefined,
           tokenUsage: undefined,
         };
@@ -2514,6 +2522,15 @@ export const useChatStore = create<ChatStore>((set, get) => {
         session.selectedSpeedTier === normalized
           ? session
           : { ...session, selectedSpeedTier: normalized }
+      );
+    },
+
+    setSessionPersonality: (sessionId, personality) => {
+      const normalized = personality?.trim() || null;
+      updateSession(sessionId, (session) =>
+        session.selectedPersonality === normalized
+          ? session
+          : { ...session, selectedPersonality: normalized }
       );
     },
 

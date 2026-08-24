@@ -112,6 +112,23 @@ impl LocalChatHarness for CodexLocalChatHarness {
         let reasoning_effort =
             requested_reasoning_effort(input.reasoning_effort.as_deref()).map(str::to_owned);
         let speed_tier = input.speed_tier.as_deref().and_then(SpeedTier::parse);
+        let (personality, personality_warning) = resolve_codex_personality(
+            &self.info().await,
+            input.model_id.as_deref(),
+            input.personality,
+        );
+        if let Some(warning) = personality_warning {
+            runtime.event_sink().emit(LocalChatEvent::Warning(
+                crate::local_chat::LocalChatSessionWarningEvent {
+                    backend_session_id: backend_session_id.clone(),
+                    harness: LocalChatHarnessKind::Codex,
+                    turn_id: None,
+                    thread_id: None,
+                    is_root: true,
+                    warning,
+                },
+            ));
+        }
         let agent_config = AgentConfig {
             provider: Some(Provider::Openai),
             model: model.clone(),
@@ -128,6 +145,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
                 model,
                 reasoning_effort,
                 speed_tier,
+                personality,
                 developer_instructions: Some(CHAT_REFERENCE_INSTRUCTIONS.to_string()),
                 ..Default::default()
             },
@@ -266,6 +284,7 @@ fn unavailable_codex_info(reason: String) -> LocalChatHarnessInfo {
         reasoning_efforts: Vec::new(),
         speed_tiers: Vec::new(),
         permission_modes: Some(Vec::new()),
+        personality_options: None,
         supports_resume: true,
     }
 }
@@ -326,6 +345,42 @@ fn core_permission_mode(mode: &crate::types::PermissionMode) -> CorePermissionMo
         crate::types::PermissionMode::DontAsk => CorePermissionMode::DontAsk,
         crate::types::PermissionMode::Plan => CorePermissionMode::Plan,
     }
+}
+
+fn resolve_codex_personality(
+    info: &LocalChatHarnessInfo,
+    model_id: Option<&str>,
+    requested: Option<String>,
+) -> (Option<String>, Option<String>) {
+    let Some(requested) = requested
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return (None, None);
+    };
+    let supported_option = info
+        .personality_options
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .any(|option| option.id == requested);
+    let selected_model = model_id
+        .and_then(|id| info.models.iter().find(|model| model.id == id))
+        .or_else(|| info.models.iter().find(|model| model.id == "default"));
+    let supports_personality = selected_model.and_then(|model| model.supports_personality);
+    let supported = supported_option
+        && (supports_personality == Some(true)
+            || (requested == "none" && supports_personality == Some(false)));
+    if supported {
+        return (Some(requested), None);
+    }
+    (
+        None,
+        Some(format!(
+            "Codex personality '{}' is unavailable for the selected model; using the provider default.",
+            requested
+        )),
+    )
 }
 
 fn emit_error(runtime: &LocalChatRuntime, backend_session_id: &str, error: String) {

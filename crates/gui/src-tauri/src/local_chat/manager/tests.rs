@@ -72,11 +72,13 @@ impl LocalChatHarness for MockHarness {
                 label: "Default Model".to_string(),
                 supported_reasoning_effort_ids: None,
                 supported_speed_tier_ids: None,
+                supports_personality: None,
             }],
             default_reasoning_effort: None,
             reasoning_efforts: Vec::new(),
             speed_tiers: Vec::new(),
             permission_modes: None,
+            personality_options: None,
             supports_resume: true,
         }
     }
@@ -147,6 +149,7 @@ fn create_input(
         reasoning_effort: Some("high".to_string()),
         speed_tier: None,
         permission_mode: None,
+        personality: None,
     }
 }
 
@@ -257,6 +260,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
                 reasoning_effort: Some("high".to_string()),
                 speed_tier: None,
                 permission_mode: None,
+                personality: None,
             }),
             MockCall::Send {
                 backend_session_id: "backend-claude".to_string(),
@@ -281,6 +285,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
                 reasoning_effort: Some("high".to_string()),
                 speed_tier: None,
                 permission_mode: None,
+                personality: None,
             }),
             MockCall::Send {
                 backend_session_id: "backend-codex".to_string(),

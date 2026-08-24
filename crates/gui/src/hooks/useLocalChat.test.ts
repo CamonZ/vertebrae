@@ -1009,6 +1009,7 @@ describe("doStartSession", () => {
       provider_resume_id: null,
       model_id: null,
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
   });
@@ -1037,6 +1038,7 @@ describe("doStartSession", () => {
       provider_resume_id: null,
       model_id: null,
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
   });
@@ -1130,6 +1132,7 @@ describe("doStartSession", () => {
       provider_resume_id: null,
       model_id: null,
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
   });
@@ -1157,6 +1160,7 @@ describe("doStartSession", () => {
       provider_resume_id: null,
       model_id: "opus",
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
   });
@@ -1187,6 +1191,7 @@ describe("doStartSession", () => {
       provider_resume_id: null,
       model_id: "catalog-codex-alt",
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
   });
@@ -1218,6 +1223,7 @@ describe("doStartSession", () => {
       provider_resume_id: null,
       model_id: "gpt-5.5",
       reasoning_effort: "high",
+      personality: null,
       permission_mode: "default",
     });
   });
@@ -1273,6 +1279,7 @@ describe("doStartSession", () => {
       provider_resume_id: null,
       model_id: null,
       reasoning_effort: null,
+      personality: null,
       permission_mode: "auto",
     });
   });
@@ -1474,6 +1481,7 @@ describe("doStartSession", () => {
       provider_resume_id: null,
       model_id: null,
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
   });
@@ -1501,6 +1509,7 @@ describe("doStartSession", () => {
       provider_resume_id: "conv-xyz",
       model_id: null,
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
     expect(deps.setSessionLifecycle).toHaveBeenCalledWith(
@@ -1536,6 +1545,7 @@ describe("doStartSession", () => {
       provider_resume_id: "conv-xyz",
       model_id: null,
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
   });
@@ -1564,6 +1574,7 @@ describe("doStartSession", () => {
       provider_resume_id: null,
       model_id: null,
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
   });
@@ -1587,6 +1598,7 @@ describe("doStartSession", () => {
       provider_resume_id: null,
       model_id: null,
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
   });
@@ -2183,6 +2195,7 @@ describe("doSendMessage", () => {
       provider_resume_id: "claude-conv-1",
       model_id: null,
       reasoning_effort: null,
+      personality: null,
       permission_mode: "default",
     });
   });

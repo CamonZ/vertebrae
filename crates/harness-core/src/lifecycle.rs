@@ -28,6 +28,8 @@ pub struct RequestConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed_tier: Option<SpeedTier>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub personality: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<Value>,
     /// Additive instructions for the provider's developer/system layer.
     /// Adapters preserve their built-in instructions and merge this value

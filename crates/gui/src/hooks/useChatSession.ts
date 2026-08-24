@@ -19,8 +19,10 @@ import {
 } from "../utils/localChatPersistence";
 import {
   hasStaleModelDefault,
+  hasStalePersonalityDefault,
   hasStaleReasoningEffort,
   hasStaleSpeedTier,
+  personalityOptionsForModel,
   resolvePermissionDefault,
   speedTiersForModel,
   useLocalChatDefaultsStore,
@@ -64,6 +66,9 @@ export function useChatSession(sessionId: string) {
     (s) => s.setSessionReasoningEffort
   );
   const setSessionSpeedTier = useChatStore((s) => s.setSessionSpeedTier);
+  const setSessionPersonality = useChatStore(
+    (s) => s.setSessionPersonality
+  );
   const setSessionHarness = useChatStore((s) => s.setSessionHarness);
   const setSessionPermissionMode = useChatStore(
     (s) => s.setSessionPermissionMode
@@ -168,6 +173,7 @@ export function useChatSession(sessionId: string) {
   const selectedModelId = session?.selectedModelId;
   const selectedReasoningEffort = session?.selectedReasoningEffort;
   const selectedSpeedTier = session?.selectedSpeedTier;
+  const selectedPersonality = session?.selectedPersonality;
   const reasoningEfforts = useMemo(() => {
     const efforts = visibleHarness?.reasoning_efforts ?? [];
     const selectedModel = visibleHarness?.models.find(
@@ -193,6 +199,16 @@ export function useChatSession(sessionId: string) {
   const supportedSpeedTierIds = useMemo(
     () => new Set(speedTiers.map((tier) => tier.id)),
     [speedTiers]
+  );
+  const personalityOptions = useMemo(
+    () =>
+      visibleHarness
+        ? personalityOptionsForModel(
+            visibleHarness,
+            selectedModelId ?? visibleHarness.default_model_id
+          )
+        : [],
+    [selectedModelId, visibleHarness]
   );
 
   // --- Lifecycle derived flags ---
@@ -281,6 +297,21 @@ export function useChatSession(sessionId: string) {
     ) {
       setSessionSpeedTier(sessionId, savedHarnessDefaults.speedTier);
     }
+
+    if (
+      selectedPersonality === undefined &&
+      savedHarnessDefaults?.personality &&
+      !hasStalePersonalityDefault(
+        visibleHarness,
+        savedHarnessDefaults.personality,
+        selectedModelId ?? visibleHarness.default_model_id
+      ) &&
+      personalityOptions.some(
+        (option) => option.id === savedHarnessDefaults.personality
+      )
+    ) {
+      setSessionPersonality(sessionId, savedHarnessDefaults.personality);
+    }
   }, [
     hasConversation,
     hasSession,
@@ -290,12 +321,15 @@ export function useChatSession(sessionId: string) {
     selectedModelId,
     selectedReasoningEffort,
     selectedSpeedTier,
+    selectedPersonality,
     session?.permissionMode,
     sessionId,
     setSessionPermissionMode,
     setSessionReasoningEffort,
+    setSessionPersonality,
     setSessionSelectedModel,
     setSessionSpeedTier,
+    personalityOptions,
     supportedReasoningEffortIds,
     supportedSpeedTierIds,
     visibleHarness,

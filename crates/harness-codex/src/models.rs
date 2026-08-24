@@ -31,6 +31,8 @@ struct CodexCatalogModel {
     additional_speed_tiers: Option<Vec<String>>,
     #[serde(default)]
     service_tiers: Option<Vec<CodexServiceTier>>,
+    #[serde(default)]
+    supports_personality: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,29 +107,48 @@ fn capabilities_from_catalog(mut catalog: CodexModelCatalog) -> HarnessCapabilit
                 model.display_name,
                 reasoning_efforts,
                 supported_speed_tiers,
+                model.supports_personality,
             )
         })
         .collect();
     let default_reasoning_efforts = visible_models
         .iter()
-        .flat_map(|(_, _, efforts, _)| efforts.iter().cloned())
+        .flat_map(|(_, _, efforts, _, _)| efforts.iter().cloned())
         .collect();
     let default_speed_tiers = visible_models
         .iter()
-        .flat_map(|(_, _, _, tiers)| tiers.iter().copied())
+        .flat_map(|(_, _, _, tiers, _)| tiers.iter().copied())
         .collect();
+    let default_supports_personality = if visible_models
+        .iter()
+        .any(|(_, _, _, _, supports)| *supports == Some(true))
+    {
+        Some(true)
+    } else if visible_models
+        .iter()
+        .all(|(_, _, _, _, supports)| *supports == Some(false))
+        && !visible_models.is_empty()
+    {
+        Some(false)
+    } else {
+        None
+    };
     let mut models = vec![ModelCapability {
         id: CODEX_DEFAULT_MODEL_ID.into(),
         label: CODEX_DEFAULT_MODEL_LABEL.into(),
         reasoning_efforts: default_reasoning_efforts,
         supported_speed_tiers: default_speed_tiers,
+        supports_personality: default_supports_personality,
     }];
-    for (id, label, reasoning_efforts, supported_speed_tiers) in visible_models {
+    for (id, label, reasoning_efforts, supported_speed_tiers, supports_personality) in
+        visible_models
+    {
         models.push(ModelCapability {
             id,
             label,
             reasoning_efforts,
             supported_speed_tiers,
+            supports_personality,
         });
     }
 

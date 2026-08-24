@@ -413,6 +413,7 @@ fn gui_persistent_and_daemon_one_shot_own_distinct_exact_launch_policies() {
         search_path: Some("/daemon/bin".into()),
         prelude: ClaudeProviderPrelude {
             settings_path: Some(settings.clone()),
+            settings_json: None,
             args: vec!["--system-prompt".into(), "daemon-policy".into()],
         },
         plugin_roots: vec![daemon_plugin.clone()],

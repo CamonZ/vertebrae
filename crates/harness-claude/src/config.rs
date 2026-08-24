@@ -76,6 +76,8 @@ where
 pub struct ClaudeProviderPrelude {
     /// Synthesized Claude settings bundle. Later CLI flags intentionally win.
     pub settings_path: Option<PathBuf>,
+    /// Inline settings JSON accepted by Claude's `--settings` flag.
+    pub settings_json: Option<String>,
     /// Other provider-owned leading arguments, preserved verbatim.
     pub args: Vec<String>,
 }
@@ -217,7 +219,10 @@ impl ClaudeProviderConfig {
         }
         let program = self.resolve_executable()?;
         let mut args = Vec::new();
-        if let Some(path) = &self.prelude.settings_path {
+        if let Some(settings) = &self.prelude.settings_json {
+            args.push("--settings".into());
+            args.push(settings.clone());
+        } else if let Some(path) = &self.prelude.settings_path {
             args.push("--settings".into());
             args.push(path.to_string_lossy().into_owned());
         }

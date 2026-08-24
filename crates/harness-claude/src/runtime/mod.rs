@@ -112,6 +112,7 @@ impl HarnessRuntime for ClaudeRuntime {
                         label: (*label).into(),
                         reasoning_efforts: BTreeSet::new(),
                         supported_speed_tiers: claude_model_speed_tiers(id),
+                        supports_personality: None,
                     })
                     .collect(),
                 default_permission_mode: Some("default".into()),

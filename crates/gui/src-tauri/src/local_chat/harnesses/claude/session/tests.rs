@@ -245,6 +245,7 @@ fn input(session_id: &str, initial_prompt: Option<&str>) -> HarnessCreateSession
         reasoning_effort: Some("high".into()),
         speed_tier: None,
         permission_mode: Some(PermissionMode::Plan),
+        personality: None,
     }
 }
 
@@ -262,6 +263,7 @@ fn prepared(model: Option<&str>) -> PreparedSession {
             plugin_root: None,
             warning: None,
         },
+        style_warning: None,
         #[cfg(unix)]
         permission_socket: None,
     }
@@ -344,6 +346,7 @@ fn provider_config_preserves_every_gui_claude_process_setting() {
         "backend-config",
         locator_root.clone(),
         Some(&permission_socket),
+        None,
     );
 
     assert_eq!(config.anthropic_executable.as_ref(), Some(&claude_binary));

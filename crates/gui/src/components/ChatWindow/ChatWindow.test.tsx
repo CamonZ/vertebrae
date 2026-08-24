@@ -943,6 +943,7 @@ describe("ChatWindow", () => {
         provider_resume_id: null,
         model_id: "catalog-codex-alt",
         reasoning_effort: "medium",
+        personality: null,
         permission_mode: "default",
       });
     });
@@ -1152,6 +1153,7 @@ describe("ChatWindow", () => {
         provider_resume_id: "codex-resume-1",
         model_id: null,
         reasoning_effort: null,
+        personality: null,
         permission_mode: "default",
       });
     });
@@ -1184,6 +1186,7 @@ describe("ChatWindow", () => {
         provider_resume_id: null,
         model_id: "opus",
         reasoning_effort: null,
+        personality: null,
         permission_mode: "default",
       });
     });
@@ -1219,6 +1222,7 @@ describe("ChatWindow", () => {
         provider_resume_id: null,
         model_id: null,
         reasoning_effort: null,
+        personality: null,
         permission_mode: "plan",
       });
     });
@@ -1294,6 +1298,7 @@ describe("ChatWindow", () => {
         provider_resume_id: null,
         model_id: null,
         reasoning_effort: null,
+        personality: null,
         permission_mode: "default",
       });
     });

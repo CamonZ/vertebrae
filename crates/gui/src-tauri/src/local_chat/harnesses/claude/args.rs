@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::local_chat::LocalChatPersonalityOption;
+
 const DEFAULT_CLAUDE_MODEL_ID: &str = "sonnet";
 const SUPPORTED_CLAUDE_MODELS: &[ClaudeModelDefinition] = &[
     ClaudeModelDefinition {
@@ -28,6 +30,25 @@ const SUPPORTED_CLAUDE_MODELS: &[ClaudeModelDefinition] = &[
         label: "Claude Opus 4.8",
     },
 ];
+
+const BUILTIN_CLAUDE_OUTPUT_STYLES: &[(&str, &str, bool)] = &[
+    ("Default", "Default", true),
+    ("Proactive", "Proactive", false),
+    ("Concise", "Concise", false),
+    ("Explanatory", "Explanatory", false),
+    ("Learning", "Learning", false),
+];
+
+pub(crate) fn builtin_claude_output_styles() -> Vec<LocalChatPersonalityOption> {
+    BUILTIN_CLAUDE_OUTPUT_STYLES
+        .iter()
+        .map(|(id, label, is_default)| LocalChatPersonalityOption {
+            id: (*id).into(),
+            label: (*label).into(),
+            is_default: *is_default,
+        })
+        .collect()
+}
 
 #[derive(Debug, Clone, Copy)]
 struct ClaudeModelDefinition {

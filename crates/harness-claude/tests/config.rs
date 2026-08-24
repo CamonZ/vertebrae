@@ -24,6 +24,7 @@ fn persistent_and_resumed_specs_preserve_exact_provider_configuration() {
         environment: BTreeMap::from([("CLAUDE_COMPAT".into(), "provider".into())]),
         prelude: ClaudeProviderPrelude {
             settings_path: Some(settings.clone()),
+            settings_json: None,
             args: vec!["--strict-mcp-config".into()],
         },
         plugin_roots: vec![plugin.clone()],
