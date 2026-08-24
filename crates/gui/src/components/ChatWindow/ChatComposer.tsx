@@ -150,8 +150,8 @@ interface ChatComposerProps {
   supportedModelIds: Set<string>;
   reasoningEfforts?: LocalChatHarnessInfo["reasoning_efforts"];
   supportedReasoningEffortIds: Set<string>;
-  speedTiers?: NonNullable<LocalChatHarnessInfo["speed_tiers"]>;
-  supportedSpeedTierIds?: Set<string>;
+  speedTiers: NonNullable<LocalChatHarnessInfo["speed_tiers"]>;
+  supportedSpeedTierIds: Set<string>;
   isBusy: boolean;
   isActive: boolean;
   lockedHarness: boolean;
@@ -173,7 +173,7 @@ interface ChatComposerProps {
   onReasoningEffortChange: (
     event: React.ChangeEvent<HTMLSelectElement>
   ) => void;
-  onSpeedTierChange?: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  onSpeedTierChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onPermissionModeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
 }
 
@@ -189,7 +189,7 @@ export function ChatComposer({
   reasoningEfforts,
   supportedReasoningEffortIds,
   speedTiers,
-  supportedSpeedTierIds = new Set(),
+  supportedSpeedTierIds,
   isBusy,
   isActive,
   lockedHarness,
@@ -209,12 +209,11 @@ export function ChatComposer({
   onHarnessChange,
   onModelChange,
   onReasoningEffortChange,
-  onSpeedTierChange = () => {},
+  onSpeedTierChange,
   onPermissionModeChange,
 }: ChatComposerProps) {
   const availableReasoningEfforts =
     reasoningEfforts ?? visibleHarness?.reasoning_efforts ?? [];
-  const availableSpeedTiers = speedTiers ?? visibleHarness?.speed_tiers ?? [];
   const availablePermissionModes = permissionModeOptions(
     session.harness,
     visibleHarness?.permission_modes
@@ -347,7 +346,7 @@ export function ChatComposer({
                     </select>
                   </label>
                 )}
-                {(availableSpeedTiers.length > 1 ||
+                {(speedTiers.length > 1 ||
                   picker.selectedSpeedTierUnsupported) && (
                   <label
                     className="hc-speed-picker"
@@ -366,7 +365,7 @@ export function ChatComposer({
                           Unsupported: {session.selectedSpeedTier}
                         </option>
                       )}
-                      {availableSpeedTiers.map((tier) => (
+                      {speedTiers.map((tier) => (
                         <option key={tier.id} value={tier.id}>
                           {tier.label}{tier.is_default ? " (default)" : ""}
                         </option>

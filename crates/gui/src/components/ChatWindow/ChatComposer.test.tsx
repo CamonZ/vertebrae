@@ -66,6 +66,8 @@ function defaultProps(overrides: Record<string, unknown> = {}) {
     providerOptions: [{ info: CLAUDE_INFO }],
     supportedModelIds: new Set(["sonnet", "opus"]),
     supportedReasoningEffortIds: new Set<string>(),
+    speedTiers: [],
+    supportedSpeedTierIds: new Set<string>(),
     isBusy: false,
     isActive: false,
     lockedHarness: false,
@@ -84,6 +86,7 @@ function defaultProps(overrides: Record<string, unknown> = {}) {
     onHarnessChange: vi.fn(),
     onModelChange: vi.fn(),
     onReasoningEffortChange: vi.fn(),
+    onSpeedTierChange: vi.fn(),
     onPermissionModeChange: vi.fn(),
     ...overrides,
   };
