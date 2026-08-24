@@ -1,6 +1,11 @@
 import { check } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
-import type { LocalBackendAdoptionResult } from "./bindings";
+import {
+  commands,
+  type LocalBackendAdoptionResult,
+  type LocalBackendUpdateStatus,
+} from "./bindings";
+import { errorMessage, unwrapCommand } from "./query/commandResult";
 import { useNotificationStore } from "./stores/notificationStore";
 import {
   GUI_UPDATE_CHANNELS,
@@ -201,26 +206,6 @@ interface NativeGuiUpdateChannelStatus {
   error: string | null;
 }
 
-interface NativeLocalBackendUpdateStatus {
-  management?: BackendManagement;
-  configured: boolean;
-  channel: GuiUpdateChannel | null;
-  current_version?: string | null;
-  current_build?: string | null;
-  current_image_ref: string | null;
-  current_generated_at?: string | null;
-  latest: {
-    channel: GuiUpdateChannel;
-    version: string;
-    build: string;
-    image_ref: string;
-    generated_at?: string | null;
-  } | null;
-  available: boolean;
-  adoption_message?: string | null;
-  diagnostic?: LocalBackendUpdateDiagnostic | null;
-}
-
 export interface LocalBackendUpdateCheck {
   management: BackendManagement;
   configured: boolean;
@@ -236,7 +221,7 @@ export interface LocalBackendUpdateCheck {
 }
 
 function backendManagement(
-  status: NativeLocalBackendUpdateStatus
+  status: LocalBackendUpdateStatus
 ): BackendManagement {
   if (
     status.management === "managed_local" ||
@@ -250,6 +235,12 @@ function backendManagement(
   return status.management === undefined && status.configured
     ? "managed_local"
     : "not_configured";
+}
+
+function backendUpdateChannel(
+  channel: string | null | undefined
+): GuiUpdateChannel | null {
+  return channel === "master" || channel === "release" ? channel : null;
 }
 
 function updateFromChannelRelease(
@@ -317,15 +308,14 @@ export async function checkGuiUpdateChannels(): Promise<
 
 export async function checkLocalBackendUpdate(): Promise<LocalBackendUpdateCheck> {
   try {
-    const status = await invoke<NativeLocalBackendUpdateStatus>(
-      "check_local_backend_update"
-    );
+    const status = await unwrapCommand(commands.checkLocalBackendUpdate());
     const latest = status.latest;
     const management = backendManagement(status);
+    const channel = backendUpdateChannel(status.channel);
     return {
       management,
       configured: status.configured,
-      channel: status.channel,
+      channel,
       currentVersion: status.current_version ?? null,
       currentBuild: status.current_build ?? null,
       currentImageRef: status.current_image_ref,
@@ -333,9 +323,9 @@ export async function checkLocalBackendUpdate(): Promise<LocalBackendUpdateCheck
       adoptionMessage: status.adoption_message ?? null,
       diagnostic: status.diagnostic ?? null,
       update:
-        status.available && latest && status.channel
+        status.available && latest && channel
           ? {
-              channel: status.channel,
+              channel,
               currentImageRef: status.current_image_ref ?? "unknown",
               currentImageCreatedAt: status.current_generated_at ?? null,
               version: latest.version,
@@ -363,13 +353,38 @@ export async function checkLocalBackendUpdate(): Promise<LocalBackendUpdateCheck
   }
 }
 
-function updateLocalBackendStore(checkResult: LocalBackendUpdateCheck): void {
+let localBackendRequestGeneration = 0;
+let localBackendAdoptionInFlight = false;
+
+function beginLocalBackendRead(): number {
+  localBackendRequestGeneration += 1;
+  return localBackendRequestGeneration;
+}
+
+function canCommitLocalBackendRead(
+  generation: number,
+  allowDuringAdoption = false
+): boolean {
+  return (
+    generation === localBackendRequestGeneration &&
+    (allowDuringAdoption || !localBackendAdoptionInFlight)
+  );
+}
+
+function updateLocalBackendStore(
+  checkResult: LocalBackendUpdateCheck,
+  generation: number,
+  allowDuringAdoption = false
+): void {
+  if (!canCommitLocalBackendRead(generation, allowDuringAdoption)) return;
+
   useGuiUpdateStore.setState((state) => ({
     ...state,
     localBackend: checkResult.error
       ? {
           ...state.localBackend,
           error: checkResult.error,
+          checking: false,
         }
       : {
           ...state.localBackend,
@@ -384,14 +399,24 @@ function updateLocalBackendStore(checkResult: LocalBackendUpdateCheck): void {
           adoptionMessage: checkResult.adoptionMessage,
           diagnostic: checkResult.diagnostic,
           error: null,
+          checking: false,
         },
   }));
 }
 
 /** Refresh the backend status in the shared update store without any mutation. */
-export async function refreshLocalBackendUpdateState(): Promise<LocalBackendUpdateCheck> {
+export async function refreshLocalBackendUpdateState(
+  allowDuringAdoption = false
+): Promise<LocalBackendUpdateCheck> {
+  const generation = beginLocalBackendRead();
+  if (canCommitLocalBackendRead(generation, allowDuringAdoption)) {
+    useGuiUpdateStore.setState((state) => ({
+      ...state,
+      localBackend: { ...state.localBackend, checking: true },
+    }));
+  }
   const checkResult = await checkLocalBackendUpdate();
-  updateLocalBackendStore(checkResult);
+  updateLocalBackendStore(checkResult, generation, allowDuringAdoption);
   return checkResult;
 }
 
@@ -400,6 +425,8 @@ export async function refreshLocalBackendUpdateState(): Promise<LocalBackendUpda
  * update status. This command never initializes a project or selects one.
  */
 export async function adoptLocalBackend(): Promise<LocalBackendAdoptionResult | null> {
+  localBackendAdoptionInFlight = true;
+  beginLocalBackendRead();
   useGuiUpdateStore.setState((state) => ({
     ...state,
     localBackend: {
@@ -409,10 +436,7 @@ export async function adoptLocalBackend(): Promise<LocalBackendAdoptionResult | 
   }));
 
   try {
-    const result = await invoke<LocalBackendAdoptionResult>(
-      "adopt_local_backend",
-      { confirmed: true }
-    );
+    const result = await unwrapCommand(commands.adoptLocalBackend(true));
     if (result.status !== "ready") {
       throw new Error(
         result.adoption_message ??
@@ -420,12 +444,10 @@ export async function adoptLocalBackend(): Promise<LocalBackendAdoptionResult | 
       );
     }
 
-    const refreshed = await refreshLocalBackendUpdateState();
-    if (refreshed.error) {
-      throw new Error(
-        `Backend adoption completed, but its status could not be refreshed: ${refreshed.error}`
-      );
-    }
+    const refreshed = await refreshLocalBackendUpdateState(true);
+    const message = refreshed.error
+      ? "The existing backend was adopted successfully, but its status could not be refreshed. Use Check again to retry the read-only status check."
+      : "The existing PostgreSQL 17 volume and backend account/token were preserved.";
 
     useGuiUpdateStore.setState((state) => ({
       ...state,
@@ -433,17 +455,24 @@ export async function adoptLocalBackend(): Promise<LocalBackendAdoptionResult | 
         ...state.localBackend,
         adoption: {
           status: "success",
-          message:
-            "The existing PostgreSQL 17 volume and backend account/token were preserved.",
+          message,
         },
       },
     }));
     return result;
   } catch (reason) {
     const message = updateCheckErrorMessage(reason);
-    const refreshed = await refreshLocalBackendUpdateState();
+    let refreshed: LocalBackendUpdateCheck | null = null;
+    try {
+      refreshed = await refreshLocalBackendUpdateState(true);
+    } catch {
+      // The command failure is already actionable; retain it if the read-only
+      // recovery check cannot be completed.
+    }
     const retryable =
-      refreshed.error !== null || refreshed.management === "adoptable_legacy";
+      refreshed === null ||
+      refreshed.error !== null ||
+      refreshed.management === "adoptable_legacy";
     useGuiUpdateStore.setState((state) => ({
       ...state,
       localBackend: {
@@ -452,6 +481,9 @@ export async function adoptLocalBackend(): Promise<LocalBackendAdoptionResult | 
       },
     }));
     return null;
+  } finally {
+    localBackendAdoptionInFlight = false;
+    beginLocalBackendRead();
   }
 }
 
@@ -491,16 +523,10 @@ const notifiedGuiUpdateIds = new Set<string>();
 const notifiedLocalBackendUpdateIds = new Set<string>();
 
 function updateCheckErrorMessage(reason: unknown): string {
-  if (reason instanceof Error && reason.message) return reason.message;
-  if (typeof reason === "string" && reason.length > 0) return reason;
-  if (reason && typeof reason === "object") {
-    try {
-      return JSON.stringify(reason);
-    } catch {
-      // Fall through to the generic message for non-serializable errors.
-    }
-  }
-  return "Update check failed";
+  const message = errorMessage(reason);
+  return message && message !== "[object Object]"
+    ? message
+    : "Update check failed";
 }
 
 const browserTimers: GuiUpdateSchedulerTimers = {
@@ -554,6 +580,18 @@ export function createGuiUpdateScheduler(
     try {
       if (checkChannels) {
         const channelChecks = await checkChannels();
+        const localBackendGeneration = checkLocalBackend
+          ? beginLocalBackendRead()
+          : null;
+        if (
+          localBackendGeneration !== null &&
+          canCommitLocalBackendRead(localBackendGeneration)
+        ) {
+          useGuiUpdateStore.setState((state) => ({
+            ...state,
+            localBackend: { ...state.localBackend, checking: true },
+          }));
+        }
         const localBackendCheck = checkLocalBackend
           ? await checkLocalBackend()
           : null;
@@ -598,7 +636,10 @@ export function createGuiUpdateScheduler(
           error: selected.error,
           selectedChannel,
           status,
-          localBackend: localBackendCheck
+          localBackend:
+            localBackendCheck &&
+            localBackendGeneration !== null &&
+            canCommitLocalBackendRead(localBackendGeneration)
             ? {
                 ...state.localBackend,
                 management: localBackendCheck.error
@@ -632,6 +673,7 @@ export function createGuiUpdateScheduler(
                   ? state.localBackend.diagnostic
                   : localBackendCheck.diagnostic,
                 error: localBackendCheck.error,
+                checking: false,
               }
             : state.localBackend,
         }));

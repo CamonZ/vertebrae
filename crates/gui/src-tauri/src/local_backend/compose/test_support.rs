@@ -11,8 +11,8 @@ use crate::local_backend::command::{
     CommandOutput, CommandRequest, ProcessRunner, SystemProcessRunner,
 };
 use crate::local_backend::state::{
-    BackendImageChannel, DockerTarget, LocalBackendError, ManagedStackPaths, ManagedStackState,
-    RuntimeSecrets, StackKind,
+    ApiToken, BackendImageChannel, DockerTarget, LocalBackendError, ManagedStackPaths,
+    ManagedStackState, RuntimeSecrets, StackKind,
 };
 
 pub(crate) const DIGEST_IMAGE: &str =
@@ -61,12 +61,31 @@ impl ProcessRunner for MockRunner {
 #[derive(Clone, Default)]
 pub(crate) struct MockHealth {
     results: Arc<Mutex<VecDeque<bool>>>,
+    auth_results: Arc<Mutex<VecDeque<bool>>>,
 }
 
 impl MockHealth {
     pub(crate) fn with_results(results: impl IntoIterator<Item = bool>) -> Self {
         Self {
             results: Arc::new(Mutex::new(results.into_iter().collect())),
+            auth_results: Arc::default(),
+        }
+    }
+
+    pub(crate) fn with_auth_results(results: impl IntoIterator<Item = bool>) -> Self {
+        Self {
+            results: Arc::default(),
+            auth_results: Arc::new(Mutex::new(results.into_iter().collect())),
+        }
+    }
+
+    pub(crate) fn with_results_and_auth(
+        results: impl IntoIterator<Item = bool>,
+        auth_results: impl IntoIterator<Item = bool>,
+    ) -> Self {
+        Self {
+            results: Arc::new(Mutex::new(results.into_iter().collect())),
+            auth_results: Arc::new(Mutex::new(auth_results.into_iter().collect())),
         }
     }
 }
@@ -79,6 +98,27 @@ impl HealthProbe for MockHealth {
             .expect("health lock")
             .pop_front()
             .unwrap_or(false)
+    }
+
+    async fn authenticate(
+        &self,
+        _url: &str,
+        _api_token: &ApiToken,
+    ) -> Result<(), LocalBackendError> {
+        if self
+            .auth_results
+            .lock()
+            .expect("auth lock")
+            .pop_front()
+            .unwrap_or(true)
+        {
+            Ok(())
+        } else {
+            Err(LocalBackendError::BackendAuthenticationFailed {
+                status: "401 Unauthorized".to_string(),
+                message: "mock token rejected".to_string(),
+            })
+        }
     }
 }
 
@@ -203,6 +243,28 @@ pub(crate) fn legacy_inspect_json_with(
     volume: &str,
     host_ip: &str,
 ) -> String {
+    legacy_inspect_json_with_sacrum_and_host(
+        postgres_image,
+        volume,
+        "ghcr.io/camonz/sacrum:master",
+        host_ip,
+    )
+}
+
+pub(crate) fn legacy_inspect_json_with_sacrum(
+    postgres_image: &str,
+    volume: &str,
+    sacrum_image: &str,
+) -> String {
+    legacy_inspect_json_with_sacrum_and_host(postgres_image, volume, sacrum_image, "")
+}
+
+pub(crate) fn legacy_inspect_json_with_sacrum_and_host(
+    postgres_image: &str,
+    volume: &str,
+    sacrum_image: &str,
+    host_ip: &str,
+) -> String {
     let postgres = serde_json::json!({
         "Image": postgres_image,
         "Project": "vertebrae-dev",
@@ -215,7 +277,7 @@ pub(crate) fn legacy_inspect_json_with(
         }]
     });
     let sacrum = serde_json::json!({
-        "Image": "ghcr.io/camonz/sacrum:latest",
+        "Image": sacrum_image,
         "Project": "vertebrae-dev",
         "Service": "sacrum",
         "PortBindings": {

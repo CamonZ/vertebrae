@@ -122,10 +122,11 @@ where
 
         let result = async {
             progress(ProvisioningStage::Pulling);
-            self.up_detached(paths, state).await?;
+            self.up_adopted(paths, state).await?;
             progress(ProvisioningStage::Health);
             self.wait_until_healthy(paths, state).await?;
             let services = self.status(paths, state).await?;
+            self.authenticate_backend(state, &api_token).await?;
             persist_local_client_config(&state.backend_url(), &api_token)?;
             state.provisioning_state = ProvisioningState::Ready;
             paths.save_state(state)?;
@@ -356,5 +357,68 @@ mod tests {
                 .iter()
                 .any(|argument| matches!(argument.as_str(), "seed" | "init"))
         }));
+    }
+
+    #[tokio::test]
+    async fn adopted_provisioning_authenticates_before_ready_or_config_persistence() {
+        let (_temp, paths, mut state) = stack_fixture(StackKind::AdoptedLegacy);
+        let volume = state.postgres_volume();
+        let status = r#"[{"Name":"legacy-postgres-1","Service":"postgres","State":"running","Health":"healthy","ExitCode":0},{"Name":"legacy-sacrum-1","Service":"sacrum","State":"running","Health":"healthy","ExitCode":0}]"#;
+        let runner = MockRunner::with_outputs(
+            prerequisites()
+                .into_iter()
+                .chain([
+                    CommandOutput::success(format!("{volume}\n")),
+                    CommandOutput::success(legacy_volume_inspect("vertebrae-dev", "pgdata")),
+                    CommandOutput::success(""),
+                    CommandOutput::success(""),
+                    CommandOutput::success(status),
+                ])
+                .chain([
+                    CommandOutput::success("unix:///tmp/docker.sock"),
+                    CommandOutput::success("unix:///tmp/docker.sock"),
+                    CommandOutput::success("28.0.0"),
+                    CommandOutput::success("2.30.0"),
+                    CommandOutput::success(status),
+                ]),
+        );
+        let controller = controller(
+            runner.clone(),
+            MockHealth::with_results_and_auth([true], [false]),
+        );
+        let configured_token = ApiToken::new("sac_dev-local-token").expect("legacy token");
+
+        let error = controller
+            .provision_adopted(&paths, &mut state, configured_token.clone(), |_| {})
+            .await
+            .expect_err("wrong token must prevent adoption from becoming ready");
+
+        assert!(
+            matches!(error, LocalBackendError::BackendAuthenticationFailed { .. }),
+            "unexpected adoption error: {error:?}"
+        );
+        assert_eq!(state.provisioning_state, ProvisioningState::Failed);
+        assert_eq!(
+            paths.load_api_token().expect("private token"),
+            configured_token
+        );
+        assert!(runner.requests().iter().all(|request| {
+            let args = request.args_as_strings();
+            !args.iter().any(|argument| {
+                matches!(
+                    argument.as_str(),
+                    "down" | "rm" | "--volumes" | "seed" | "init"
+                )
+            })
+        }));
+        let requests = runner.requests();
+        let start = requests
+            .iter()
+            .find(|request| request.action.contains("start preserved"))
+            .expect("preserved start request");
+        let args = start.args_as_strings();
+        assert!(args.windows(2).any(|pair| pair == ["--pull", "never"]));
+        assert!(args.iter().any(|argument| argument == "--no-recreate"));
+        assert!(!args.windows(2).any(|pair| pair == ["--pull", "missing"]));
     }
 }

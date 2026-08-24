@@ -84,6 +84,10 @@ pub enum LocalBackendError {
         timeout_seconds: u64,
         logs: String,
     },
+    #[error("The configured backend API token was rejected ({status}): {message}")]
+    BackendAuthenticationFailed { status: String, message: String },
+    #[error("Adopting the existing local backend requires a configured API token")]
+    BackendTokenMissing,
     #[error("The vertebrae-dev stack cannot be adopted safely: {0}")]
     UnsafeLegacyStack(String),
     #[error("Adopting the vertebrae-dev stack requires explicit confirmation")]
@@ -159,6 +163,16 @@ impl LocalBackendError {
                 };
                 ("sacrum_health_timeout", true, hint)
             }
+            Self::BackendAuthenticationFailed { .. } => (
+                "backend_authentication_failed",
+                true,
+                "The configured backend API token was rejected. Set VTB_TOKEN or update [sacrum].token, then retry; adoption did not overwrite the shared config.",
+            ),
+            Self::BackendTokenMissing => (
+                "backend_token_missing",
+                false,
+                "Configure VTB_TOKEN or [sacrum].token before adopting the existing local backend; Vertebrae will not generate or replace its credentials.",
+            ),
             Self::CommandFailed { action, output, .. }
             | Self::CommandTimedOut { action, output, .. } => {
                 classify_command_failure(action, output)
@@ -340,17 +354,39 @@ impl ApiToken {
     ) -> Result<Self, LocalBackendError> {
         let mut entropy = [0_u8; 32];
         fill_entropy(entropy_source, &mut entropy)?;
-        Self::new(format!("sac_{}", to_hex(&entropy)))
+        Self::new_generated(format!("sac_{}", to_hex(&entropy)))
     }
 
     pub fn new(value: impl Into<String>) -> Result<Self, LocalBackendError> {
-        let token = Self(value.into());
+        Self::new_external(value)
+    }
+
+    pub(crate) fn new_generated(value: impl Into<String>) -> Result<Self, LocalBackendError> {
+        let token = Self::new_external(value)?;
         if !token.0.strip_prefix("sac_").is_some_and(|suffix| {
             suffix.len() == 64 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
         }) {
             return Err(LocalBackendError::InvalidState(
                 "local API token must use the sac_ prefix and contain 32 bytes of hex entropy"
                     .to_string(),
+            ));
+        }
+        Ok(token)
+    }
+
+    /// Accept tokens issued by an existing backend, including the legacy
+    /// `sac_dev-local-token` default, while rejecting values that cannot be
+    /// safely sent in an HTTP Authorization header.
+    fn new_external(value: impl Into<String>) -> Result<Self, LocalBackendError> {
+        let token = Self(value.into());
+        if token.0.is_empty()
+            || token
+                .0
+                .bytes()
+                .any(|byte| byte < 0x20 || byte == 0x7f || !byte.is_ascii())
+        {
+            return Err(LocalBackendError::InvalidState(
+                "local API token must be non-empty ASCII without control characters".to_string(),
             ));
         }
         Ok(token)
@@ -682,9 +718,21 @@ impl ManagedStackState {
                 "Backend bind host does not match the stack kind".to_string(),
             ));
         }
-        if !is_valid_backend_image_ref(&self.sacrum_image_ref) {
+        let valid_image = match self.kind {
+            StackKind::Managed => is_valid_backend_image_ref(&self.sacrum_image_ref),
+            StackKind::AdoptedLegacy => is_valid_legacy_backend_image_ref(&self.sacrum_image_ref),
+        };
+        if !valid_image {
             return Err(LocalBackendError::InvalidState(
-                "Backend image must be the official digest-pinned image".to_string(),
+                match self.kind {
+                    StackKind::Managed => {
+                        "Backend image must be an official digest-pinned Sacrum image reference"
+                    }
+                    StackKind::AdoptedLegacy => {
+                        "Backend image must be an official Sacrum image reference"
+                    }
+                }
+                .to_string(),
             ));
         }
         Ok(())
@@ -696,6 +744,30 @@ pub(crate) fn is_valid_backend_image_ref(image_ref: &str) -> bool {
         return false;
     };
     digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+pub(crate) fn is_valid_legacy_backend_image_ref(image_ref: &str) -> bool {
+    let Some(reference) = image_ref.strip_prefix("ghcr.io/camonz/sacrum") else {
+        return false;
+    };
+    let Some(reference) = reference
+        .strip_prefix(':')
+        .or_else(|| reference.strip_prefix('@'))
+    else {
+        return false;
+    };
+    if reference.is_empty()
+        || reference
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace() || byte < 0x20)
+    {
+        return false;
+    }
+    if let Some(digest) = reference.strip_prefix("sha256:") {
+        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    } else {
+        reference != "latest"
+    }
 }
 
 impl BackendImageChannel {

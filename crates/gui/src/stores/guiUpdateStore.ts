@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { LocalBackendProgressStage } from "../bindings";
 
 /** The updater channel configured for this GUI build. */
 export const GUI_UPDATE_CHANNEL = "release";
@@ -100,7 +101,11 @@ export type LocalBackendUpdateApplyState =
 
 export type LocalBackendAdoptionState =
   | { status: "idle" }
-  | { status: "adopting" }
+  | {
+      status: "adopting";
+      stage?: LocalBackendProgressStage;
+      message?: string;
+    }
   | { status: "success"; message: string }
   | { status: "error"; message: string; retryable: boolean };
 
@@ -116,6 +121,7 @@ export interface LocalBackendUpdateState {
   adoptionMessage: string | null;
   diagnostic: LocalBackendUpdateDiagnostic | null;
   error: string | null;
+  checking: boolean;
   apply: LocalBackendUpdateApplyState;
   adoption: LocalBackendAdoptionState;
 }
@@ -250,6 +256,7 @@ export const initialGuiUpdateState: GuiUpdateState = {
     adoptionMessage: null,
     diagnostic: null,
     error: null,
+    checking: false,
     apply: { status: "idle" },
     adoption: { status: "idle" },
   },

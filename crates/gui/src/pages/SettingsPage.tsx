@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   commands,
+  events,
   type LocalChatHarnessCatalog,
   type LocalChatHarnessInfo,
   type LocalChatHarnessKind,
@@ -32,6 +33,7 @@ import {
   adoptLocalBackend,
   applyApprovedGuiUpdate,
   applyApprovedLocalBackendUpdate,
+  refreshLocalBackendUpdateState,
   relaunchGuiApplication,
 } from "../update";
 import { useUIStore } from "../stores/uiStore";
@@ -516,10 +518,12 @@ function UpdateStateMessage({
   children,
   intent,
   testId,
+  busy = false,
 }: {
   children: ReactNode;
   intent: "status" | "alert";
   testId: string;
+  busy?: boolean;
 }) {
   return (
     <div
@@ -531,6 +535,7 @@ function UpdateStateMessage({
       ].join(" ")}
       data-testid={testId}
       role={intent === "alert" ? "alert" : "status"}
+      aria-busy={busy}
     >
       {children}
     </div>
@@ -683,10 +688,16 @@ function LocalBackendAdoptionStatus({
       <UpdateStateMessage
         intent="status"
         testId="settings-local-backend-adoption-progress"
+        busy
       >
-        Adopting the existing local backend. Its PostgreSQL 17 volume and
-        account/token will be preserved while the backend container is
-        reconciled…
+        <span className="inline-flex items-center gap-2">
+          <span
+            className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+            aria-hidden="true"
+          />
+          {adoption.message ??
+            "Adopting the existing local backend. Its PostgreSQL 17 volume and account/token will be preserved while the backend container is reconciled…"}
+        </span>
       </UpdateStateMessage>
     );
   }
@@ -766,8 +777,12 @@ function LocalBackendAdoptionSection({
 
 function LocalBackendAdoptionRecovery({
   diagnostic,
+  checking,
+  onCheckAgain,
 }: {
   diagnostic: GuiUpdateState["localBackend"]["diagnostic"];
+  checking: boolean;
+  onCheckAgain: () => void;
 }) {
   return (
     <UpdateStateMessage
@@ -779,6 +794,15 @@ function LocalBackendAdoptionRecovery({
         {diagnostic?.message ??
           "The existing backend could not be adopted safely. Resolve the reported condition and check again."}
       </p>
+      <Button
+        className="mt-4"
+        variant="secondary"
+        onClick={onCheckAgain}
+        disabled={checking}
+        data-testid="settings-local-backend-check-again"
+      >
+        {checking ? "Checking…" : "Check again"}
+      </Button>
     </UpdateStateMessage>
   );
 }
@@ -1372,10 +1396,12 @@ function BackendUpdatesSection({
   state,
   onReview,
   onAdopt,
+  onCheckAgain,
 }: {
   state: GuiUpdateState;
   onReview: () => void;
   onAdopt: () => void;
+  onCheckAgain: () => void;
 }) {
   const backend = state.localBackend;
   const management =
@@ -1414,7 +1440,11 @@ function BackendUpdatesSection({
           onAdopt={onAdopt}
         />
       ) : management === "adoption_recovery_required" ? (
-        <LocalBackendAdoptionRecovery diagnostic={backend.diagnostic} />
+        <LocalBackendAdoptionRecovery
+          diagnostic={backend.diagnostic}
+          checking={backend.checking}
+          onCheckAgain={onCheckAgain}
+        />
       ) : management === "managed_local" ? (
         <>
           <BackendCurrentDetails state={state} />
@@ -1461,11 +1491,13 @@ function UpdatesSection({
   onReview,
   onReviewBackend,
   onAdoptBackend,
+  onCheckBackend,
 }: {
   state: GuiUpdateState;
   onReview: () => void;
   onReviewBackend: () => void;
   onAdoptBackend: () => void;
+  onCheckBackend: () => void;
 }) {
   return (
     <div className="mt-8 space-y-8" data-testid="settings-updates">
@@ -1474,6 +1506,7 @@ function UpdatesSection({
         state={state}
         onReview={onReviewBackend}
         onAdopt={onAdoptBackend}
+        onCheckAgain={onCheckBackend}
       />
     </div>
   );
@@ -1628,6 +1661,38 @@ export function SettingsPage({
       cancelled = true;
     };
   }, [activeSection]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void events.localBackendProgressEvent
+      .listen((event) => {
+        if (cancelled) return;
+        useGuiUpdateStore.setState((state) => {
+          if (state.localBackend.adoption.status !== "adopting") return state;
+          return {
+            ...state,
+            localBackend: {
+              ...state.localBackend,
+              adoption: {
+                status: "adopting",
+                stage: event.payload.stage,
+                message: event.payload.message,
+              },
+            },
+          };
+        });
+      })
+      .then((cleanup) => {
+        if (cancelled) cleanup();
+        else unlisten = cleanup;
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   const fileLinkSettings = (
     <div className="mt-8 border-t border-[var(--color-line)]">
@@ -1806,6 +1871,9 @@ export function SettingsPage({
                   ) {
                     setLocalBackendAdoptionReviewOpen(true);
                   }
+                }}
+                onCheckBackend={() => {
+                  void refreshLocalBackendUpdateState();
                 }}
               />
             </>

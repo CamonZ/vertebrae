@@ -15,6 +15,7 @@ import {
 
 const mockGetSupportedLocalChatHarnesses = vi.fn();
 const mockGetLocalFileEditors = vi.fn();
+const mockLocalBackendProgressListen = vi.fn();
 const invokeMock = vi.mocked(invoke);
 
 vi.mock("../bindings", () => ({
@@ -23,6 +24,21 @@ vi.mock("../bindings", () => ({
       mockGetSupportedLocalChatHarnesses(...args),
     getLocalFileEditors: (...args: unknown[]) =>
       mockGetLocalFileEditors(...args),
+    adoptLocalBackend: (confirmed: boolean) =>
+      invoke("adopt_local_backend", { confirmed }).then((data) => ({
+        status: "ok",
+        data,
+      })),
+    checkLocalBackendUpdate: () =>
+      invoke("check_local_backend_update").then((data) => ({
+        status: "ok",
+        data,
+      })),
+  },
+  events: {
+    localBackendProgressEvent: {
+      listen: (...args: unknown[]) => mockLocalBackendProgressListen(...args),
+    },
   },
 }));
 
@@ -119,6 +135,7 @@ describe("SettingsPage", () => {
       status: "ok",
       data: catalog,
     });
+    mockLocalBackendProgressListen.mockResolvedValue(() => {});
     mockGetLocalFileEditors.mockResolvedValue({
       status: "ok",
       data: [
@@ -446,6 +463,56 @@ describe("SettingsPage", () => {
     expect(
       screen.getByTestId("settings-adopt-local-backend")
     ).toHaveTextContent("Retry adoption");
+  });
+
+  it("offers a read-only check again action for adoption recovery", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockResolvedValueOnce({
+      management: "adoption_recovery_required",
+      configured: true,
+      channel: null,
+      current_version: null,
+      current_build: null,
+      current_image_ref: null,
+      current_generated_at: null,
+      latest: null,
+      available: false,
+      adoption_message: null,
+      diagnostic: {
+        code: "legacy_host_port_required",
+        retryable: false,
+        message: "Provide the prior host port; existing data was preserved.",
+      },
+    });
+    useGuiUpdateStore.setState({
+      ...initialGuiUpdateState,
+      localBackend: {
+        ...initialGuiUpdateState.localBackend,
+        management: "adoption_recovery_required",
+        configured: true,
+        diagnostic: {
+          code: "legacy_host_port_required",
+          retryable: false,
+          message: "Provide the prior host port; existing data was preserved.",
+        },
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-updates"));
+    await user.click(screen.getByTestId("settings-local-backend-check-again"));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("check_local_backend_update");
+    });
+    expect(
+      screen.getByTestId("settings-local-backend-adoption-recovery")
+    ).toHaveTextContent("Check again");
   });
 
   it("refreshes the Settings backend branch after successful adoption", async () => {

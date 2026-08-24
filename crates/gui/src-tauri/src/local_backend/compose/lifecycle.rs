@@ -141,6 +141,56 @@ where
             .await
     }
 
+    /// Start an adopted legacy stack without changing its existing images or
+    /// recreating containers. Image changes are reserved for the explicit
+    /// backend-update command.
+    pub async fn up_adopted(
+        &self,
+        paths: &ManagedStackPaths,
+        state: &mut ManagedStackState,
+    ) -> Result<Vec<ServiceStatus>, LocalBackendError> {
+        if state.kind != StackKind::AdoptedLegacy {
+            return Err(LocalBackendError::InvalidState(
+                "legacy adoption startup requires an adopted development stack".to_string(),
+            ));
+        }
+        let _ = self.check_prerequisites().await?;
+        let secrets = self.validate_stack_files(paths, state)?;
+        self.validate_persistent_volume(state).await?;
+        self.checked_stack(
+            self.compose_request(
+                paths,
+                state,
+                "validate adopted Compose configuration",
+                ["config", "--quiet"],
+                self.quick_timeout,
+            ),
+            &secrets,
+        )
+        .await?;
+        self.checked_stack(
+            self.compose_request(
+                paths,
+                state,
+                "start preserved legacy backend",
+                [
+                    "up",
+                    "--detach",
+                    "--no-recreate",
+                    "--pull",
+                    "never",
+                    "postgres",
+                    "sacrum",
+                ],
+                self.reconcile_timeout,
+            ),
+            &secrets,
+        )
+        .await?;
+        self.status_without_prerequisite(paths, state, &secrets)
+            .await
+    }
+
     pub async fn status(
         &self,
         paths: &ManagedStackPaths,
