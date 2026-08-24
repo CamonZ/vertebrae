@@ -245,6 +245,7 @@ fn input(session_id: &str, initial_prompt: Option<&str>) -> HarnessCreateSession
         reasoning_effort: Some("high".into()),
         speed_tier: None,
         permission_mode: Some(PermissionMode::Plan),
+        personality: None,
     }
 }
 
@@ -257,11 +258,13 @@ fn prepared(model: Option<&str>) -> PreparedSession {
         working_dir: PathBuf::from("/tmp/gui-claude-adapter-test"),
         model: model.map(str::to_owned),
         model_warning: None,
+        personality: None,
         factory_config,
         plugin_resolution: ClaudePluginDirResolution {
             plugin_root: None,
             warning: None,
         },
+        style_warning: None,
         #[cfg(unix)]
         permission_socket: None,
     }

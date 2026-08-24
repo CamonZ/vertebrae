@@ -119,6 +119,28 @@ fn persistent_and_resumed_specs_preserve_exact_provider_configuration() {
 }
 
 #[test]
+fn request_personality_is_translated_by_the_claude_adapter() {
+    let temp = TempDir::new().expect("temporary directory");
+    let executable = temp.path().join("claude");
+    fs::write(&executable, "fixture").expect("placeholder executable");
+    let config = ClaudeProviderConfig {
+        executable: Some(executable),
+        ..ClaudeProviderConfig::default()
+    };
+    let request = RequestConfig {
+        personality: Some("Explanatory".into()),
+        ..RequestConfig::default()
+    };
+
+    let spec = config
+        .command_spec(ClaudeLaunchMode::Persistent { resume_id: None }, &request)
+        .expect("command spec");
+
+    assert_eq!(spec.args[0], "--settings");
+    assert_eq!(spec.args[1], r#"{"outputStyle":"Explanatory"}"#);
+}
+
+#[test]
 fn one_shot_spec_uses_print_stream_json_and_verbatim_prompt() {
     let temp = TempDir::new().unwrap();
     let executable = temp.path().join("claude");

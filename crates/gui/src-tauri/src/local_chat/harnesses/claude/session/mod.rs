@@ -22,11 +22,12 @@ use vertebrae_harness_core::{
 
 use crate::commands::AppState;
 use crate::helpers::{build_augmented_path, find_claude_binary, find_vtb_gate_binary};
+use crate::local_chat::harnesses::claude::args::builtin_claude_output_styles;
 use crate::local_chat::harnesses::claude::args::resolve_requested_claude_model;
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind,
-    LocalChatRuntime, LocalChatSessionError, LocalChatSessionErrorEvent,
-    LocalChatSessionWarningEvent, CHAT_REFERENCE_INSTRUCTIONS,
+    LocalChatPersonalityOption, LocalChatRuntime, LocalChatSessionError,
+    LocalChatSessionErrorEvent, LocalChatSessionWarningEvent, CHAT_REFERENCE_INSTRUCTIONS,
 };
 use crate::types::PermissionMode;
 use vertebrae_installer::{resolve_claude_plugin_dir, ClaudePluginDirResolution};
@@ -48,6 +49,7 @@ pub(crate) struct ClaudeStartupCapabilities {
     pub(crate) binary_diagnostic: Option<String>,
     pub(crate) augmented_path: String,
     pub(crate) plugin_resolution: ClaudePluginDirResolution,
+    pub(crate) output_styles: Vec<LocalChatPersonalityOption>,
 }
 
 impl ClaudeStartupCapabilities {
@@ -68,11 +70,14 @@ impl ClaudeStartupCapabilities {
             |binary| resolve_claude_plugin_dir(binary, working_dir, &augmented_path),
         );
 
+        let output_styles =
+            discover_claude_output_styles(working_dir, plugin_resolution.plugin_root.as_deref());
         Self {
             binary,
             binary_diagnostic,
             augmented_path,
             plugin_resolution,
+            output_styles,
         }
     }
 
@@ -92,6 +97,7 @@ impl ClaudeStartupCapabilities {
                 plugin_root: None,
                 warning: None,
             },
+            output_styles: builtin_claude_output_styles(),
         }
     }
 }
@@ -649,6 +655,8 @@ impl ClaudeSessionRuntime {
             working_dir,
             model,
             model_warning,
+            personality,
+            style_warning,
             factory_config,
             plugin_resolution,
             #[cfg(unix)]
@@ -657,6 +665,9 @@ impl ClaudeSessionRuntime {
         #[cfg(unix)]
         let mut permission_socket = permission_socket;
         if let Some(warning) = &model_warning {
+            emit_warning(&runtime.event_sink(), &backend_session_id, warning.clone());
+        }
+        if let Some(warning) = &style_warning {
             emit_warning(&runtime.event_sink(), &backend_session_id, warning.clone());
         }
         report_plugin_dir_resolution(
@@ -696,6 +707,7 @@ impl ClaudeSessionRuntime {
                 model,
                 reasoning_effort: input.reasoning_effort,
                 speed_tier: input.speed_tier.as_deref().and_then(SpeedTier::parse),
+                personality,
                 developer_instructions: Some(CHAT_REFERENCE_INSTRUCTIONS.to_string()),
                 ..RequestConfig::default()
             },
@@ -923,6 +935,8 @@ struct PreparedSession {
     working_dir: PathBuf,
     model: Option<String>,
     model_warning: Option<String>,
+    personality: Option<String>,
+    style_warning: Option<String>,
     factory_config: HarnessFactoryConfig,
     plugin_resolution: ClaudePluginDirResolution,
     #[cfg(unix)]
@@ -975,6 +989,13 @@ impl PreparedSession {
             input.model_id.clone(),
             input.provider_resume_id.is_some(),
         );
+        let output_styles =
+            discover_claude_output_styles(&working_dir, plugin_resolution.plugin_root.as_deref());
+        let (style, style_warning) = resolve_requested_claude_output_style(
+            input.personality.as_deref(),
+            &output_styles,
+            input.provider_resume_id.is_some(),
+        );
         let root_locator_dir = claude_project_directory(&working_dir);
         let factory_config = build_factory_config(
             claude_binary,
@@ -993,6 +1014,8 @@ impl PreparedSession {
             working_dir,
             model: resolved_model.model_id,
             model_warning: resolved_model.warning,
+            personality: style,
+            style_warning,
             factory_config,
             plugin_resolution,
             #[cfg(unix)]
@@ -1041,6 +1064,126 @@ fn build_factory_config(
         })),
         ..HarnessFactoryConfig::default()
     }
+}
+
+fn resolve_requested_claude_output_style(
+    requested: Option<&str>,
+    available: &[LocalChatPersonalityOption],
+    is_resume: bool,
+) -> (Option<String>, Option<String>) {
+    let Some(requested) = requested.map(str::trim).filter(|value| !value.is_empty()) else {
+        return (None, None);
+    };
+    if is_resume {
+        return (
+            None,
+            Some(format!(
+                "Claude output style '{}' is session-scoped; the resumed conversation keeps its existing style.",
+                safe_style_id(requested)
+            )),
+        );
+    }
+    if available.iter().any(|style| style.id == requested) {
+        return (Some(requested.to_string()), None);
+    }
+    (
+        None,
+        Some(format!(
+            "Claude output style '{}' is unavailable in the installed Claude Code configuration; using the provider default.",
+            safe_style_id(requested)
+        )),
+    )
+}
+
+fn safe_style_id(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|character| character.escape_default())
+        .collect()
+}
+
+fn discover_claude_output_styles(
+    working_dir: &Path,
+    managed_root: Option<&Path>,
+) -> Vec<LocalChatPersonalityOption> {
+    let mut styles = builtin_claude_output_styles()
+        .into_iter()
+        .map(|style| (style.id.clone(), style))
+        .collect::<BTreeMap<_, _>>();
+
+    if let Some(home) = dirs::home_dir() {
+        read_output_style_directory(&home.join(".claude/output-styles"), &mut styles);
+    }
+
+    let mut ancestors = working_dir
+        .ancestors()
+        .map(|path| path.join(".claude/output-styles"))
+        .collect::<Vec<_>>();
+    ancestors.reverse();
+    for directory in ancestors {
+        read_output_style_directory(&directory, &mut styles);
+    }
+    if let Some(managed_root) = managed_root {
+        read_output_style_directory(&managed_root.join("output-styles"), &mut styles);
+    }
+
+    styles.into_values().collect()
+}
+
+fn read_output_style_directory(
+    directory: &Path,
+    styles: &mut BTreeMap<String, LocalChatPersonalityOption>,
+) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("md") {
+            continue;
+        }
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Some(name) = output_style_name(&contents).or_else(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_string)
+        }) else {
+            continue;
+        };
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        styles.insert(
+            name.clone(),
+            LocalChatPersonalityOption {
+                id: name.clone(),
+                label: name,
+                is_default: false,
+            },
+        );
+    }
+}
+
+fn output_style_name(contents: &str) -> Option<String> {
+    let mut lines = contents.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    for line in lines {
+        let line = line.trim();
+        if line == "---" {
+            break;
+        }
+        if let Some(value) = line.strip_prefix("name:") {
+            return Some(value.trim().trim_matches(['\"', '\'']).to_string());
+        }
+    }
+    None
 }
 
 async fn send_turn(

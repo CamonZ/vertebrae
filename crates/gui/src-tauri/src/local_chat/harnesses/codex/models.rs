@@ -4,12 +4,18 @@ use vertebrae_harness_core::HarnessCapabilities;
 
 use crate::local_chat::{
     LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
-    LocalChatPermissionModeOption, LocalChatReasoningEffortOption, LocalChatSpeedTierOption,
+    LocalChatPermissionModeOption, LocalChatPersonalityOption, LocalChatReasoningEffortOption,
+    LocalChatSpeedTierOption,
 };
 use crate::types::PermissionMode;
 
 pub(super) const CODEX_DEFAULT_MODEL_ID: &str = "default";
 pub(super) const CODEX_DEFAULT_REASONING_EFFORT: &str = "default";
+const CODEX_PERSONALITIES: &[(&str, &str)] = &[
+    ("friendly", "Friendly"),
+    ("pragmatic", "Pragmatic"),
+    ("none", "None"),
+];
 
 pub(super) fn requested_model_override(model_id: Option<&str>) -> Option<&str> {
     match model_id {
@@ -28,6 +34,10 @@ pub(super) fn requested_reasoning_effort(reasoning_effort: Option<&str>) -> Opti
 pub(super) fn local_chat_harness_info_from_capabilities(
     capabilities: HarnessCapabilities,
 ) -> LocalChatHarnessInfo {
+    let supports_personality = capabilities
+        .models
+        .iter()
+        .any(|model| model.supports_personality == Some(true));
     let mut reasoning_effort_ids = BTreeSet::new();
     let supports_fast = capabilities.models.iter().any(|model| {
         model
@@ -60,6 +70,7 @@ pub(super) fn local_chat_harness_info_from_capabilities(
                 label: model.label,
                 supported_reasoning_effort_ids,
                 supported_speed_tier_ids,
+                supports_personality: model.supports_personality,
             }
         })
         .collect();
@@ -110,6 +121,16 @@ pub(super) fn local_chat_harness_info_from_capabilities(
             Vec::new()
         },
         permission_modes: Some(permission_modes),
+        personality_options: supports_personality.then(|| {
+            CODEX_PERSONALITIES
+                .iter()
+                .map(|(id, label)| LocalChatPersonalityOption {
+                    id: (*id).into(),
+                    label: (*label).into(),
+                    is_default: false,
+                })
+                .collect()
+        }),
         supports_resume: capabilities.session_resumption,
     }
 }
@@ -163,6 +184,7 @@ mod tests {
                     label: "Codex default".into(),
                     reasoning_efforts: BTreeSet::new(),
                     supported_speed_tiers: BTreeSet::new(),
+                    supports_personality: Some(false),
                 },
                 ModelCapability {
                     id: "server-only-model".into(),
@@ -172,6 +194,7 @@ mod tests {
                         vertebrae_harness_core::SpeedTier::Default,
                         vertebrae_harness_core::SpeedTier::Fast,
                     ]),
+                    supports_personality: Some(true),
                 },
             ],
             default_permission_mode: Some("default".into()),

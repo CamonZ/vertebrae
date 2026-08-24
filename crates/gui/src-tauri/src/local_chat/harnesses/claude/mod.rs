@@ -14,6 +14,9 @@ pub(crate) use session::{ClaudeSessionRuntime, ClaudeStartupCapabilities};
 
 use self::args::supported_claude_model_catalog;
 
+#[cfg(test)]
+use self::args::builtin_claude_output_styles;
+
 // Re-export public catalog types for tests.
 #[cfg(test)]
 pub(crate) use self::args::{ClaudeModelCatalog, ClaudeModelOption};
@@ -47,6 +50,7 @@ impl Default for ClaudeLocalChatHarness {
 
 fn claude_local_chat_harness_info_from_resolution(
     resolution: Result<(), String>,
+    output_styles: Vec<crate::local_chat::LocalChatPersonalityOption>,
 ) -> LocalChatHarnessInfo {
     let catalog = supported_claude_model_catalog();
     let speed_tiers = if catalog.models.iter().any(|model| {
@@ -88,6 +92,7 @@ fn claude_local_chat_harness_info_from_resolution(
                 label: model.label,
                 supported_reasoning_effort_ids: None,
                 supported_speed_tier_ids: model.supported_speed_tier_ids,
+                supports_personality: None,
             })
             .collect(),
         default_reasoning_effort: None,
@@ -125,6 +130,7 @@ fn claude_local_chat_harness_info_from_resolution(
                 is_default: false,
             },
         ]),
+        personality_options: Some(output_styles),
         supports_resume: true,
     }
 }
@@ -136,7 +142,10 @@ impl LocalChatHarness for ClaudeLocalChatHarness {
     }
 
     async fn info(&self) -> LocalChatHarnessInfo {
-        claude_local_chat_harness_info_from_resolution(self.runtime.startup_binary_resolution())
+        claude_local_chat_harness_info_from_resolution(
+            self.runtime.startup_binary_resolution(),
+            self.runtime.startup_capabilities.output_styles.clone(),
+        )
     }
 
     async fn create_session(
@@ -176,7 +185,8 @@ mod tests {
 
     #[test]
     fn neutral_claude_catalog_matches_supported_claude_models() {
-        let info = claude_local_chat_harness_info_from_resolution(Ok(()));
+        let info =
+            claude_local_chat_harness_info_from_resolution(Ok(()), builtin_claude_output_styles());
 
         assert_eq!(info.harness, LocalChatHarnessKind::Claude);
         assert_eq!(info.label, "Claude");
@@ -207,36 +217,42 @@ mod tests {
                     label: "Sonnet".to_string(),
                     supported_reasoning_effort_ids: None,
                     supported_speed_tier_ids: None,
+                    supports_personality: None,
                 },
                 LocalChatModelOption {
                     id: "opus".to_string(),
                     label: "Opus".to_string(),
                     supported_reasoning_effort_ids: None,
                     supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                    supports_personality: None,
                 },
                 LocalChatModelOption {
                     id: "haiku".to_string(),
                     label: "Haiku".to_string(),
                     supported_reasoning_effort_ids: None,
                     supported_speed_tier_ids: None,
+                    supports_personality: None,
                 },
                 LocalChatModelOption {
                     id: "fable".to_string(),
                     label: "Fable".to_string(),
                     supported_reasoning_effort_ids: None,
                     supported_speed_tier_ids: None,
+                    supports_personality: None,
                 },
                 LocalChatModelOption {
                     id: "claude-opus-5".to_string(),
                     label: "Claude Opus 5".to_string(),
                     supported_reasoning_effort_ids: None,
                     supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                    supports_personality: None,
                 },
                 LocalChatModelOption {
                     id: "claude-opus-4-8".to_string(),
                     label: "Claude Opus 4.8".to_string(),
                     supported_reasoning_effort_ids: None,
                     supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                    supports_personality: None,
                 },
             ]
         );
@@ -282,9 +298,10 @@ mod tests {
 
     #[test]
     fn neutral_claude_catalog_retains_cli_resolution_error() {
-        let info = claude_local_chat_harness_info_from_resolution(Err(
-            "Claude Code CLI not found".to_string()
-        ));
+        let info = claude_local_chat_harness_info_from_resolution(
+            Err("Claude Code CLI not found".to_string()),
+            builtin_claude_output_styles(),
+        );
 
         assert!(!info.available);
         assert_eq!(
@@ -305,6 +322,7 @@ mod tests {
             reasoning_effort: Some("high".to_string()),
             speed_tier: None,
             permission_mode: Some(PermissionMode::Plan),
+            personality: Some("Explanatory".to_string()),
         };
 
         assert_eq!(input.backend_session_id, "backend-1");
@@ -316,5 +334,6 @@ mod tests {
         );
         assert_eq!(input.model_id, Some("opus".to_string()));
         assert_eq!(input.permission_mode, Some(PermissionMode::Plan));
+        assert_eq!(input.personality, Some("Explanatory".to_string()));
     }
 }

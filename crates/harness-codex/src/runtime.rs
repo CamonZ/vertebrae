@@ -1750,6 +1750,9 @@ async fn setup_session(
         params["effort"] = json!(effort);
     }
     add_service_tier(&mut params, &request_config);
+    if let Some(personality) = &request_config.personality {
+        params["personality"] = json!(personality);
+    }
     if let Some(provider) = &config.model_provider {
         params["modelProvider"] = json!(provider);
     }

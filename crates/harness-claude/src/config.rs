@@ -217,7 +217,15 @@ impl ClaudeProviderConfig {
         }
         let program = self.resolve_executable()?;
         let mut args = Vec::new();
-        if let Some(path) = &self.prelude.settings_path {
+        if let Some(personality) = request
+            .personality
+            .as_deref()
+            .map(str::trim)
+            .filter(|personality| !personality.is_empty())
+        {
+            args.push("--settings".into());
+            args.push(json!({ "outputStyle": personality }).to_string());
+        } else if let Some(path) = &self.prelude.settings_path {
             args.push("--settings".into());
             args.push(path.to_string_lossy().into_owned());
         }

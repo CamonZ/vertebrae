@@ -634,6 +634,7 @@ export async function doStartSession(
       : (session.selectedReasoningEffort ?? null);
     const speedTier = resumeId ? null : (session.selectedSpeedTier ?? null);
     const permissionMode = session.permissionMode ?? "default";
+    const personality = session.selectedPersonality ?? null;
 
     const titleUserMessages = earlyTitleUserMessages(
       session.messages,
@@ -659,6 +660,7 @@ export async function doStartSession(
       reasoning_effort: reasoningEffort,
       ...(speedTier ? { speed_tier: speedTier } : {}),
       permission_mode: permissionMode,
+      personality,
     });
     if (result.status === "error") {
       recordLocalChatTrace({

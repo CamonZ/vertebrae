@@ -14,6 +14,7 @@ export interface LocalChatHarnessDefaults {
   reasoningEffort?: string;
   speedTier?: string;
   permissionMode?: PermissionMode;
+  personality?: string;
 }
 
 export type LocalChatDefaults = Partial<
@@ -40,6 +41,10 @@ interface LocalChatDefaultsState {
   setPermissionDefault: (
     harness: LocalChatHarnessKind,
     permissionMode: PermissionMode | null
+  ) => void;
+  setPersonalityDefault: (
+    harness: LocalChatHarnessKind,
+    personality: string | null
   ) => void;
   resetHarness: (harness: LocalChatHarnessKind) => void;
 }
@@ -124,12 +129,17 @@ function readStoredDefaults(): {
       const permissionMode = isPermissionMode(record.permissionMode)
         ? record.permissionMode
         : undefined;
-      if (modelId || reasoningEffort || speedTier || permissionMode) {
+      const personality =
+        typeof record.personality === "string" && record.personality.trim()
+          ? record.personality.trim()
+          : undefined;
+      if (modelId || reasoningEffort || speedTier || permissionMode || personality) {
         defaults[harness] = {
           modelId,
           reasoningEffort,
           speedTier,
           permissionMode,
+          personality,
         };
       }
     }
@@ -250,6 +260,23 @@ export const useLocalChatDefaultsStore = create<LocalChatDefaultsState>(
               const next = { ...current };
               if (permissionMode) next.permissionMode = permissionMode;
               else delete next.permissionMode;
+              return next;
+            }
+          );
+          return {
+            defaults,
+            storageWarning: writeStoredDefaults(defaults, state.defaultHarness),
+          };
+        }),
+      setPersonalityDefault: (harness, personality) =>
+        set((state) => {
+          const defaults = updateHarnessDefaults(
+            state.defaults,
+            harness,
+            (current) => {
+              const next = { ...current };
+              if (personality?.trim()) next.personality = personality.trim();
+              else delete next.personality;
               return next;
             }
           );
@@ -423,4 +450,40 @@ export function hasStalePermissionDefault(
     !!override &&
     !(info.permission_modes ?? []).some((mode) => mode.id === override)
   );
+}
+
+export function personalityOptionsForModel(
+  info: Pick<LocalChatHarnessInfo, "harness" | "models" | "personality_options">,
+  modelId?: string | null
+) {
+  const options = info.personality_options ?? [];
+  if (info.harness !== "codex") return options;
+  const model = info.models.find((candidate) => candidate.id === modelId);
+  if (model?.supports_personality === true) return options;
+  if (model?.supports_personality === false) {
+    return options.filter((option) => option.id === "none");
+  }
+  return [];
+}
+
+export function resolvePersonalityDefault(
+  info: Pick<LocalChatHarnessInfo, "harness" | "models" | "personality_options">,
+  override?: string,
+  modelId?: string | null
+): string | null {
+  const options = personalityOptionsForModel(info, modelId);
+  return override && options.some((option) => option.id === override)
+    ? override
+    : null;
+}
+
+export function hasStalePersonalityDefault(
+  info: Pick<LocalChatHarnessInfo, "harness" | "models" | "personality_options">,
+  override?: string,
+  modelId?: string | null
+): boolean {
+  return !!override &&
+    !personalityOptionsForModel(info, modelId).some(
+      (option) => option.id === override
+    );
 }

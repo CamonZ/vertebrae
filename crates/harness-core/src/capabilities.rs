@@ -61,6 +61,10 @@ pub struct ModelCapability {
     pub reasoning_efforts: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub supported_speed_tiers: BTreeSet<SpeedTier>,
+    /// Whether this model exposes provider personality instructions. `None`
+    /// means the installed provider did not report the capability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_personality: Option<bool>,
 }
 
 /// A permission policy exposed by a provider during capability discovery.

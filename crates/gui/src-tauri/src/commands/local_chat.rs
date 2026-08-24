@@ -142,6 +142,7 @@ pub struct LocalChatSessionIndexEntry {
     pub model: Option<String>,
     pub selected_model_id: Option<String>,
     pub selected_reasoning_effort: Option<String>,
+    pub selected_personality: Option<String>,
     pub permission_mode: Option<PermissionMode>,
     pub created_at: String,
     pub updated_at: String,

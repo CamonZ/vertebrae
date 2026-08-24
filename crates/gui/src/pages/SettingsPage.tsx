@@ -40,10 +40,13 @@ import { useUIStore } from "../stores/uiStore";
 import {
   hasStaleModelDefault,
   hasStalePermissionDefault,
+  hasStalePersonalityDefault,
   hasStaleReasoningEffort,
   hasStaleSpeedTier,
+  personalityOptionsForModel,
   resolveDefaultHarness,
   resolveModelDefaultId,
+  resolvePersonalityDefault,
   resolvePermissionDefault,
   resolveReasoningEffortDefault,
   resolveSpeedTierDefault,
@@ -67,6 +70,17 @@ function permissionLabel(
   return (
     info.permission_modes?.find((mode) => mode.id === permissionMode)?.label ??
     permissionMode
+  );
+}
+
+function personalityLabel(
+  info: LocalChatHarnessInfo,
+  personality: string | null
+): string {
+  if (!personality) return "Provider default";
+  return (
+    info.personality_options?.find((option) => option.id === personality)
+      ?.label ?? personality
   );
 }
 
@@ -135,6 +149,9 @@ function HarnessDefaultsSection({
   const setPermissionDefault = useLocalChatDefaultsStore(
     (state) => state.setPermissionDefault
   );
+  const setPersonalityDefault = useLocalChatDefaultsStore(
+    (state) => state.setPersonalityDefault
+  );
   const resetHarness = useLocalChatDefaultsStore((state) => state.resetHarness);
   const permissionModes = info.permission_modes ?? [];
   const effectiveModelId = resolveModelDefaultId(info, saved?.modelId);
@@ -151,6 +168,12 @@ function HarnessDefaultsSection({
     const supported = new Set(supportedIds);
     return info.reasoning_efforts.filter((effort) => supported.has(effort.id));
   }, [effectiveModelId, info]);
+  const personalityOptions = personalityOptionsForModel(info, effectiveModelId);
+  const effectivePersonality = resolvePersonalityDefault(
+    info,
+    saved?.personality,
+    effectiveModelId
+  );
   const effectiveReasoningEffort = resolveReasoningEffortDefault(
     info,
     saved?.reasoningEffort,
@@ -177,11 +200,17 @@ function HarnessDefaultsSection({
     saved?.speedTier,
     effectiveModelId
   );
+  const stalePersonality = hasStalePersonalityDefault(
+    info,
+    saved?.personality,
+    effectiveModelId
+  );
   const hasSavedOverride =
     !!saved?.modelId ||
     !!saved?.reasoningEffort ||
     !!saved?.speedTier ||
-    !!saved?.permissionMode;
+    !!saved?.permissionMode ||
+    !!saved?.personality;
 
   return (
     <section
@@ -323,6 +352,59 @@ function HarnessDefaultsSection({
             )}
           </SettingRow>
         )}
+
+        <SettingRow
+          label={info.harness === "claude" ? "Output style" : "Personality"}
+          description={
+            info.harness === "claude"
+              ? "Changes how new Claude sessions communicate; resumed sessions keep their existing style."
+              : "Changes how a supported Codex model communicates in new sessions."
+          }
+        >
+          <Select
+            aria-label={`${info.label} ${info.harness === "claude" ? "output style" : "personality"}`}
+            data-testid={`${info.harness}-default-personality`}
+            value={saved?.personality ?? ""}
+            onChange={(event) => {
+              setPersonalityDefault(info.harness, event.target.value || null);
+              onSaved();
+            }}
+            disabled={!info.available || personalityOptions.length === 0}
+            options={[
+              {
+                value: "",
+                label: `Provider default${
+                  effectivePersonality
+                    ? ` (${personalityLabel(info, effectivePersonality)})`
+                    : ""
+                }`,
+              },
+              ...(stalePersonality
+                ? [
+                    {
+                      value: saved?.personality ?? "",
+                      label: `Unavailable: ${saved?.personality}`,
+                    },
+                  ]
+                : []),
+              ...personalityOptions.map((option) => ({
+                value: option.id,
+                label: `${option.label}${option.is_default ? " (harness default)" : ""}`,
+              })),
+            ]}
+          />
+          {stalePersonality && (
+            <p className="mt-1 text-xs text-[var(--color-warn)]">
+              Saved {info.harness === "claude" ? "style" : "personality"} is unavailable;
+              new chats use the provider default.
+            </p>
+          )}
+          {!info.available && personalityOptions.length === 0 && (
+            <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
+              Unavailable until this harness is installed and its capabilities are discovered.
+            </p>
+          )}
+        </SettingRow>
 
         {info.reasoning_efforts.length > 0 && (
           <SettingRow

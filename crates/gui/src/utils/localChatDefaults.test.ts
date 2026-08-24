@@ -3,9 +3,12 @@ import type { LocalChatHarnessInfo } from "../bindings";
 import {
   hasStaleModelDefault,
   hasStalePermissionDefault,
+  hasStalePersonalityDefault,
   hasStaleReasoningEffort,
   LOCAL_CHAT_DEFAULTS_STORAGE_KEY,
+  personalityOptionsForModel,
   resolveModelDefaultId,
+  resolvePersonalityDefault,
   resolvePermissionDefault,
   resolveReasoningEffortDefault,
   resolveSpeedTierDefault,
@@ -30,6 +33,10 @@ const claudeInfo: LocalChatHarnessInfo = {
     { id: "default", label: "Ask before edits", is_default: true },
     { id: "plan", label: "Plan mode", is_default: false },
   ],
+  personality_options: [
+    { id: "Default", label: "Default", is_default: true },
+    { id: "Explanatory", label: "Explanatory", is_default: false },
+  ],
   supports_resume: true,
 };
 
@@ -45,6 +52,7 @@ const codexInfo: LocalChatHarnessInfo = {
       label: "GPT-5.6-Luna",
       supported_reasoning_effort_ids: ["medium", "high"],
       supported_speed_tier_ids: ["default", "fast"],
+      supports_personality: true,
     },
   ],
   default_reasoning_effort: "medium",
@@ -57,6 +65,11 @@ const codexInfo: LocalChatHarnessInfo = {
     { id: "fast", label: "Fast", is_default: false },
   ],
   permission_modes: [],
+  personality_options: [
+    { id: "friendly", label: "Friendly", is_default: false },
+    { id: "pragmatic", label: "Pragmatic", is_default: false },
+    { id: "none", label: "None", is_default: false },
+  ],
   supports_resume: true,
 };
 
@@ -78,9 +91,16 @@ describe("local chat defaults", () => {
       .setReasoningEffortDefault("codex", "high");
     useLocalChatDefaultsStore.getState().setSpeedTierDefault("codex", "fast");
     useLocalChatDefaultsStore.getState().setPermissionDefault("claude", "plan");
+    useLocalChatDefaultsStore
+      .getState()
+      .setPersonalityDefault("claude", "Explanatory");
 
     expect(useLocalChatDefaultsStore.getState().defaults).toEqual({
-      claude: { modelId: "opus", permissionMode: "plan" },
+      claude: {
+        modelId: "opus",
+        permissionMode: "plan",
+        personality: "Explanatory",
+      },
       codex: { reasoningEffort: "high", speedTier: "fast" },
     });
     expect(useLocalChatDefaultsStore.getState().defaultHarness).toBe("codex");
@@ -91,7 +111,11 @@ describe("local chat defaults", () => {
     ).toEqual({
       defaultHarness: "codex",
       harnesses: {
-        claude: { modelId: "opus", permissionMode: "plan" },
+        claude: {
+          modelId: "opus",
+          permissionMode: "plan",
+          personality: "Explanatory",
+        },
         codex: { reasoningEffort: "high", speedTier: "fast" },
       },
     });
@@ -102,6 +126,10 @@ describe("local chat defaults", () => {
     expect(resolvePermissionDefault(claudeInfo, "dont_ask")).toBe("default");
     expect(hasStaleModelDefault(claudeInfo, "missing-model")).toBe(true);
     expect(hasStalePermissionDefault(claudeInfo, "dont_ask")).toBe(true);
+    expect(resolvePersonalityDefault(claudeInfo, "Explanatory")).toBe(
+      "Explanatory"
+    );
+    expect(hasStalePersonalityDefault(claudeInfo, "missing-style")).toBe(true);
     expect(resolveReasoningEffortDefault(codexInfo, "high")).toBe("high");
     expect(resolveReasoningEffortDefault(codexInfo, "missing")).toBe("medium");
     expect(hasStaleReasoningEffort(codexInfo, "missing")).toBe(true);
@@ -111,6 +139,39 @@ describe("local chat defaults", () => {
       "default"
     );
     expect(hasStaleSpeedTier(codexInfo, "fast", "missing")).toBe(true);
+  });
+
+  it("filters Codex personalities by the selected model capability", () => {
+    const mixedCodexInfo: LocalChatHarnessInfo = {
+      ...codexInfo,
+      models: [
+        {
+          id: "supported",
+          label: "Supported",
+          supports_personality: true,
+        },
+        {
+          id: "unsupported",
+          label: "Unsupported",
+          supports_personality: false,
+        },
+      ],
+    };
+
+    expect(
+      personalityOptionsForModel(mixedCodexInfo, "supported").map(
+        (option) => option.id
+      )
+    ).toEqual(["friendly", "pragmatic", "none"]);
+    expect(
+      personalityOptionsForModel(mixedCodexInfo, "unsupported").map(
+        (option) => option.id
+      )
+    ).toEqual(["none"]);
+    expect(personalityOptionsForModel(mixedCodexInfo, "unknown")).toEqual([]);
+    expect(
+      hasStalePersonalityDefault(mixedCodexInfo, "friendly", "unsupported")
+    ).toBe(true);
   });
 
   it("removes an override when reset or cleared", () => {

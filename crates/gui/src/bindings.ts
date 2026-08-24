@@ -1390,6 +1390,42 @@ export const commands = {
   async checkGuiUpdateChannels(): Promise<GuiUpdateChannelStatus[]> {
     return await TAURI_INVOKE("check_gui_update_channels");
   },
+  async checkLocalBackendUpdate(): Promise<
+    Result<LocalBackendUpdateStatus, CommandError>
+  > {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("check_local_backend_update"),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async applyApprovedLocalBackendUpdate(
+    approved: boolean,
+    channel: string,
+    version: string,
+    build: string,
+    imageRef: string
+  ): Promise<Result<LocalBackendUpdateResult, CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("apply_approved_local_backend_update", {
+          approved,
+          channel,
+          version,
+          build,
+          imageRef,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   /**
    * Record useful native diagnostics after the updater plugin reports a failed
    * check. The plugin currently logs only that the endpoint returned a
@@ -1736,6 +1772,7 @@ export type CreateLocalChatSessionInput = {
   reasoning_effort: string | null;
   speed_tier?: string | null;
   permission_mode: PermissionMode | null;
+  personality: string | null;
 };
 /**
  * Options for creating a workflow step.
@@ -1842,10 +1879,7 @@ export type LocalBackendProgressEvent = {
   message: string;
 };
 export type LocalBackendProgressStage =
-  | "pulling"
-  | "migrating"
-  | "health"
-  | "seeding";
+  "pulling" | "migrating" | "health" | "seeding";
 export type LocalBackendSetupResult = {
   status: LocalBackendSetupStatus;
   backend_url: string | null;
@@ -1859,6 +1893,13 @@ export type LocalBackendAdoptionResult = {
 };
 export type LocalBackendAdoptionStatus = "ready" | "adoption_required";
 export type LocalBackendUpdateRelease = {
+  channel: string;
+  version: string;
+  build: string;
+  image_ref: string;
+  generated_at: string | null;
+};
+export type LocalBackendUpdateResult = {
   channel: string;
   version: string;
   build: string;
@@ -1882,13 +1923,6 @@ export type LocalBackendUpdateDiagnostic = {
   code: string;
   retryable: boolean;
   message: string;
-};
-export type LocalBackendUpdateResult = {
-  channel: string;
-  version: string;
-  build: string;
-  image_ref: string;
-  generated_at: string | null;
 };
 export type LocalChatCompactionEvent = {
   backend_session_id: string;
@@ -1931,6 +1965,7 @@ export type LocalChatHarnessInfo = {
   reasoning_efforts: LocalChatReasoningEffortOption[];
   speed_tiers?: LocalChatSpeedTierOption[];
   permission_modes?: LocalChatPermissionModeOption[] | null;
+  personality_options?: LocalChatPersonalityOption[] | null;
   supports_resume: boolean;
 };
 export type LocalChatHarnessKind = "claude" | "codex";
@@ -1939,6 +1974,7 @@ export type LocalChatModelOption = {
   label: string;
   supported_reasoning_effort_ids?: string[] | null;
   supported_speed_tier_ids?: string[] | null;
+  supports_personality?: boolean | null;
 };
 export type LocalChatSpeedTierOption = {
   id: string;
@@ -1947,6 +1983,11 @@ export type LocalChatSpeedTierOption = {
 };
 export type LocalChatPermissionModeOption = {
   id: PermissionMode;
+  label: string;
+  is_default?: boolean;
+};
+export type LocalChatPersonalityOption = {
+  id: string;
   label: string;
   is_default?: boolean;
 };
@@ -1997,6 +2038,7 @@ export type LocalChatSessionIndexEntry = {
   model: string | null;
   selectedModelId: string | null;
   selectedReasoningEffort: string | null;
+  selectedPersonality: string | null;
   permissionMode: PermissionMode | null;
   createdAt: string;
   updatedAt: string;
@@ -2194,10 +2236,7 @@ export type ResolvePermissionRequestError = {
   message: string;
 };
 export type ResolvePermissionRequestErrorKind =
-  | "unavailable"
-  | "not_found"
-  | "invalid"
-  | "internal";
+  "unavailable" | "not_found" | "invalid" | "internal";
 export type ResolvePermissionRequestInput = {
   request_id: string;
   behavior: PermissionDecisionBehavior;
@@ -2566,10 +2605,7 @@ export type StepExecutionChangedEvent = {
  * Status of a step execution (mirrors db::ExecutionStatus for frontend)
  */
 export type StepExecutionStatus =
-  | "Pending"
-  | "Running"
-  | "Completed"
-  | "Failed";
+  "Pending" | "Running" | "Completed" | "Failed";
 /**
  * The type of change that occurred on a step transition.
  */
@@ -2718,10 +2754,7 @@ export type Task = {
  * The type of change that occurred on a task.
  */
 export type TaskChangeType =
-  | "Created"
-  | "Updated"
-  | "Deleted"
-  | "StatusChanged";
+  "Created" | "Updated" | "Deleted" | "StatusChanged";
 /**
  * Event payload for task changes.
  * Emitted when a task is created, updated, deleted, or its status changes.
@@ -3251,8 +3284,7 @@ type __EventObj__<T> = {
 };
 
 export type Result<T, E> =
-  | { status: "ok"; data: T }
-  | { status: "error"; error: E };
+  { status: "ok"; data: T } | { status: "error"; error: E };
 
 function __makeEvents__<T extends Record<string, any>>(
   mappings: Record<keyof T, string>

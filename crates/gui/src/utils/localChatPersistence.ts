@@ -74,6 +74,7 @@ export interface LocalChatSessionSummary {
   selectedModelId?: string | null;
   selectedReasoningEffort?: string | null;
   selectedSpeedTier?: string | null;
+  selectedPersonality?: string | null;
   createdAt: string;
   updatedAt: string;
   projectPath: string | null;
@@ -195,6 +196,12 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
       typeof candidate.selectedSpeedTier === "string"
         ? candidate.selectedSpeedTier
         : candidate.selectedSpeedTier === null
+          ? null
+          : undefined,
+    selectedPersonality:
+      typeof candidate.selectedPersonality === "string"
+        ? candidate.selectedPersonality
+        : candidate.selectedPersonality === null
           ? null
           : undefined,
     permissionMode:
@@ -375,6 +382,7 @@ function serializeSession(
     selectedModelId: session.selectedModelId,
     selectedReasoningEffort: session.selectedReasoningEffort,
     selectedSpeedTier: session.selectedSpeedTier,
+    selectedPersonality: session.selectedPersonality,
     permissionMode: session.permissionMode ?? "default",
     model: session.model,
     tokenUsage: session.tokenUsage,
@@ -406,6 +414,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     selectedModelId: session.selectedModelId,
     selectedReasoningEffort: session.selectedReasoningEffort,
     selectedSpeedTier: session.selectedSpeedTier,
+    selectedPersonality: session.selectedPersonality,
     permissionMode: session.permissionMode ?? "default",
     createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
@@ -620,6 +629,7 @@ export function summarizeLocalChatSession(
     selectedModelId: session.selectedModelId,
     selectedReasoningEffort: session.selectedReasoningEffort,
     selectedSpeedTier: session.selectedSpeedTier,
+    selectedPersonality: session.selectedPersonality,
     createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
     projectPath: session.projectPath ?? null,

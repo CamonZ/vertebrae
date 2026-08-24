@@ -1924,6 +1924,31 @@ describe("chatStore", () => {
     });
   });
 
+  describe("setSessionPersonality", () => {
+    it("stores and persists the selected personality", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().setSessionPersonality(id, "Explanatory");
+
+      expect(useChatStore.getState().sessions[id].selectedPersonality).toBe(
+        "Explanatory"
+      );
+      expect(loadPersistedLocalChatSession(id)?.selectedPersonality).toBe(
+        "Explanatory"
+      );
+    });
+
+    it("normalizes an empty personality to provider default", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().setSessionPersonality(id, "Explanatory");
+      useChatStore.getState().setSessionPersonality(id, "  ");
+
+      expect(useChatStore.getState().sessions[id].selectedPersonality).toBe(
+        null
+      );
+      expect(loadPersistedLocalChatSession(id)?.selectedPersonality).toBeNull();
+    });
+  });
+
   describe("setSessionTokenUsage", () => {
     it("stores used + max on the session", () => {
       const id = useChatStore.getState().openSession("T1");
