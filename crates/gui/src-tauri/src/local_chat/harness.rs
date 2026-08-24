@@ -21,6 +21,16 @@ pub struct LocalChatModelOption {
     pub label: String,
     #[serde(default)]
     pub supported_reasoning_effort_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub supported_speed_tier_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct LocalChatSpeedTierOption {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub is_default: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -47,6 +57,8 @@ pub struct LocalChatHarnessInfo {
     pub models: Vec<LocalChatModelOption>,
     pub default_reasoning_effort: Option<String>,
     pub reasoning_efforts: Vec<LocalChatReasoningEffortOption>,
+    #[serde(default)]
+    pub speed_tiers: Vec<LocalChatSpeedTierOption>,
     #[serde(default)]
     #[specta(optional)]
     pub permission_modes: Option<Vec<LocalChatPermissionModeOption>>,

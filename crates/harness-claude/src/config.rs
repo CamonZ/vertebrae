@@ -17,6 +17,8 @@ pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
     ("opus", "Opus"),
     ("haiku", "Haiku"),
     ("fable", "Fable"),
+    ("claude-opus-4-6", "Claude Opus 4.6"),
+    ("claude-opus-4-7", "Claude Opus 4.7"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

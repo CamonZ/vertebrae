@@ -399,6 +399,7 @@ fn capabilities_and_all_control_decisions_are_serializable() {
             id: "m".into(),
             label: "Model".into(),
             reasoning_efforts: BTreeSet::from(["high".into()]),
+            supported_speed_tiers: BTreeSet::new(),
         }],
         default_permission_mode: Some("default".into()),
         permission_modes: vec![PermissionModeCapability {

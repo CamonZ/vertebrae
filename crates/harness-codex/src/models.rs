@@ -4,7 +4,7 @@ use serde::Deserialize;
 use tokio::process::Command;
 use vertebrae_harness_core::{
     ApprovalCategory, HarnessCapabilities, HarnessError, ModelCapability, PermissionModeCapability,
-    QuestionCapabilities,
+    QuestionCapabilities, SpeedTier,
 };
 
 use crate::CodexProviderConfig;
@@ -25,6 +25,8 @@ struct CodexCatalogModel {
     priority: u32,
     #[serde(default)]
     supported_reasoning_levels: Vec<CodexReasoningLevel>,
+    #[serde(default)]
+    supported_service_tiers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,23 +90,42 @@ fn capabilities_from_catalog(mut catalog: CodexModelCatalog) -> HarnessCapabilit
                 .into_iter()
                 .map(|level| level.effort)
                 .collect::<BTreeSet<_>>();
-            (model.slug, model.display_name, reasoning_efforts)
+            (
+                model.slug,
+                model.display_name,
+                reasoning_efforts,
+                model
+                    .supported_service_tiers
+                    .into_iter()
+                    .filter_map(|tier| match tier.as_str() {
+                        "default" => Some(SpeedTier::Default),
+                        "fast" | "priority" => Some(SpeedTier::Fast),
+                        _ => None,
+                    })
+                    .collect::<BTreeSet<_>>(),
+            )
         })
         .collect();
     let default_reasoning_efforts = visible_models
         .iter()
-        .flat_map(|(_, _, efforts)| efforts.iter().cloned())
+        .flat_map(|(_, _, efforts, _)| efforts.iter().cloned())
+        .collect();
+    let default_speed_tiers = visible_models
+        .iter()
+        .flat_map(|(_, _, _, tiers)| tiers.iter().copied())
         .collect();
     let mut models = vec![ModelCapability {
         id: CODEX_DEFAULT_MODEL_ID.into(),
         label: CODEX_DEFAULT_MODEL_LABEL.into(),
         reasoning_efforts: default_reasoning_efforts,
+        supported_speed_tiers: default_speed_tiers,
     }];
-    for (id, label, reasoning_efforts) in visible_models {
+    for (id, label, reasoning_efforts, supported_speed_tiers) in visible_models {
         models.push(ModelCapability {
             id,
             label,
             reasoning_efforts,
+            supported_speed_tiers,
         });
     }
 
@@ -182,14 +203,16 @@ mod tests {
               "supported_reasoning_levels": [
                 {"effort": "ultra"},
                 {"effort": "medium"}
-              ]
+              ],
+              "supported_service_tiers": ["default", "priority"]
             },
             {
               "slug": "earlier-model",
               "display_name": "Earlier model",
               "visibility": "list",
               "priority": 1,
-              "supported_reasoning_levels": [{"effort": "ultra"}]
+              "supported_reasoning_levels": [{"effort": "ultra"}],
+              "supported_service_tiers": ["default"]
             }
           ]
         }"#
@@ -227,6 +250,14 @@ mod tests {
         assert_eq!(
             capabilities.models[2].reasoning_efforts,
             BTreeSet::from(["medium".into(), "ultra".into()])
+        );
+        assert_eq!(
+            capabilities.models[2].supported_speed_tiers,
+            BTreeSet::from([SpeedTier::Default, SpeedTier::Fast])
+        );
+        assert_eq!(
+            capabilities.models[1].supported_speed_tiers,
+            BTreeSet::from([SpeedTier::Default])
         );
         assert_eq!(
             capabilities.models[0].reasoning_efforts,

@@ -262,6 +262,7 @@ fn unavailable_codex_info(reason: String) -> LocalChatHarnessInfo {
         models: Vec::new(),
         default_reasoning_effort: None,
         reasoning_efforts: Vec::new(),
+        speed_tiers: Vec::new(),
         permission_modes: Some(Vec::new()),
         supports_resume: true,
     }

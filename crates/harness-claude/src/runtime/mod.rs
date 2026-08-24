@@ -6,7 +6,8 @@ use tokio::sync::{mpsc, oneshot, watch};
 use vertebrae_harness_core::{
     HarnessCapabilities, HarnessError, HarnessRuntime, ModelCapability, PermissionModeCapability,
     ProviderResumeId, QuestionCapabilities, RunHandle, RunRequest, SendTurnRequest,
-    SessionCloseOutcome, SessionHandle, SessionId, StartSessionRequest, TurnId, TurnOutcome,
+    SessionCloseOutcome, SessionHandle, SessionId, SpeedTier, StartSessionRequest, TurnId,
+    TurnOutcome,
 };
 
 use crate::{ClaudeDecodeContext, ClaudeLaunchMode, ClaudeProviderConfig, DEFAULT_CLAUDE_MODELS};
@@ -58,6 +59,16 @@ fn claude_permission_modes() -> Vec<PermissionModeCapability> {
     .collect()
 }
 
+fn claude_model_speed_tiers(model: &str) -> BTreeSet<SpeedTier> {
+    // Claude Code aliases such as `opus` are deliberately not treated as
+    // Fast-capable: the provider may resolve them to a model version for
+    // which Fast mode is unavailable. Only resolved model IDs advertised by
+    // Claude's Fast-mode contract get the alternate tier.
+    matches!(model, "claude-opus-4-6" | "claude-opus-4-7")
+        .then(|| BTreeSet::from([SpeedTier::Default, SpeedTier::Fast]))
+        .unwrap_or_default()
+}
+
 enum SessionCommand {
     Send {
         request: SendTurnRequest,
@@ -99,6 +110,7 @@ impl HarnessRuntime for ClaudeRuntime {
                         id: (*id).into(),
                         label: (*label).into(),
                         reasoning_efforts: BTreeSet::new(),
+                        supported_speed_tiers: claude_model_speed_tiers(id),
                     })
                     .collect(),
                 default_permission_mode: Some("default".into()),

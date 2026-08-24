@@ -619,6 +619,7 @@ impl StepExecutor {
             working_directory: Some(state.config.working_dir().to_path_buf()),
             model: agent_config.model.clone(),
             reasoning_effort: agent_config.reasoning_effort.clone(),
+            speed_tier: None,
             output_schema: agent_config.json_schema.clone(),
             developer_instructions: None,
             environment: std::iter::once((

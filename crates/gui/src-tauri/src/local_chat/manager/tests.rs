@@ -71,9 +71,11 @@ impl LocalChatHarness for MockHarness {
                 id: "default-model".to_string(),
                 label: "Default Model".to_string(),
                 supported_reasoning_effort_ids: None,
+                supported_speed_tier_ids: None,
             }],
             default_reasoning_effort: None,
             reasoning_efforts: Vec::new(),
+            speed_tiers: Vec::new(),
             permission_modes: None,
             supports_resume: true,
         }

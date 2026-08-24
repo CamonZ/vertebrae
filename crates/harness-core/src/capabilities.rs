@@ -4,6 +4,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::ApprovalCategory;
 
+/// Provider-neutral speed tiers exposed by local-chat providers.
+///
+/// Adapters map these values to their native request settings. In particular,
+/// Codex uses `priority` for `Fast`, while Claude uses its `fastMode` setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeedTier {
+    Default,
+    Fast,
+}
+
+impl SpeedTier {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Fast => "fast",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Default => "Standard",
+            Self::Fast => "Fast",
+        }
+    }
+}
+
 /// A provider model exposed during harness discovery.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelCapability {
@@ -11,6 +38,8 @@ pub struct ModelCapability {
     pub label: String,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub reasoning_efforts: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub supported_speed_tiers: BTreeSet<SpeedTier>,
 }
 
 /// A permission policy exposed by a provider during capability discovery.
