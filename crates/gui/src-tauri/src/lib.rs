@@ -71,6 +71,7 @@ fn create_builder() -> Builder {
             commands::sacrum_config_status,
             commands::save_sacrum_settings,
             commands::setup_local_backend,
+            commands::adopt_local_backend,
             commands::initialize_project,
             commands::add_project,
             commands::remove_project,
@@ -388,6 +389,7 @@ mod tests {
             "async closeLocalChatSession(",
             "async inferLocalChatSessionTitle(",
             "async setupLocalBackend(",
+            "async adoptLocalBackend(",
             "async checkLocalBackendUpdate(",
             "async applyApprovedLocalBackendUpdate(",
         ] {
@@ -418,6 +420,8 @@ mod tests {
             "export type LocalChatSessionError",
             "export type LocalBackendProgressEvent",
             "export type LocalBackendSetupResult",
+            "export type LocalBackendAdoptionResult",
+            "export type LocalBackendUpdateDiagnostic",
             "export type LocalBackendUpdateStatus",
             "export type LocalBackendUpdateResult",
         ] {

@@ -245,13 +245,20 @@ where
         request: CommandRequest,
         secrets: &RuntimeSecrets,
     ) -> Result<CommandOutput, LocalBackendError> {
-        let mut output = self
-            .checked(request)
-            .await
-            .map_err(|error| redact_command_error(error, secrets))?;
+        let mut output = self.checked_stack_raw(request, secrets).await?;
         output.stdout = secrets.redact(&output.stdout);
         output.stderr = secrets.redact(&output.stderr);
         Ok(output)
+    }
+
+    pub(super) async fn checked_stack_raw(
+        &self,
+        request: CommandRequest,
+        secrets: &RuntimeSecrets,
+    ) -> Result<CommandOutput, LocalBackendError> {
+        self.checked(request)
+            .await
+            .map_err(|error| redact_command_error(error, secrets))
     }
 
     /// Credentials stay in the child process environment and are not persisted.

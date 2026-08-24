@@ -18,6 +18,20 @@ pub struct LocalBackendSetupResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LocalBackendAdoptionResult {
+    pub status: LocalBackendAdoptionStatus,
+    pub backend_url: Option<String>,
+    pub adoption_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalBackendAdoptionStatus {
+    Ready,
+    AdoptionRequired,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalBackendSetupStatus {
     Ready,
@@ -34,6 +48,13 @@ pub struct LocalBackendUpdateRelease {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LocalBackendUpdateDiagnostic {
+    pub code: String,
+    pub retryable: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct LocalBackendUpdateStatus {
     pub management: String,
     pub configured: bool,
@@ -44,6 +65,8 @@ pub struct LocalBackendUpdateStatus {
     pub current_generated_at: Option<String>,
     pub latest: Option<LocalBackendUpdateRelease>,
     pub available: bool,
+    pub adoption_message: Option<String>,
+    pub diagnostic: Option<LocalBackendUpdateDiagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -58,32 +81,24 @@ pub struct LocalBackendUpdateResult {
 #[tauri::command]
 #[specta::specta]
 pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, CommandError> {
-    let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
-    let configured_management = configured_backend_management()?;
-    if configured_management == "external" {
-        return Ok(LocalBackendUpdateStatus {
-            management: configured_management.to_string(),
-            configured: true,
-            channel: None,
-            current_version: None,
-            current_build: None,
-            current_image_ref: None,
-            current_generated_at: None,
-            latest: None,
-            available: false,
-        });
+    let Some(configured_url) = configured_backend_url()? else {
+        return Ok(empty_backend_update_status("not_configured", false));
+    };
+    if backend_management_for_url(&configured_url) == "external" {
+        return Ok(empty_backend_update_status("external", true));
     }
+
+    let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
     let Some(state) = paths.load_state().map_err(local_backend_error)? else {
-        return Ok(LocalBackendUpdateStatus {
-            management: configured_management.to_string(),
-            configured: false,
-            channel: None,
-            current_version: None,
-            current_build: None,
-            current_image_ref: None,
-            current_generated_at: None,
-            latest: None,
-            available: false,
+        let compose = match DockerCompose::system().await {
+            Ok(compose) => compose,
+            Err(error) => return Ok(diagnostic_backend_update_status(error)),
+        };
+        return Ok(match compose.detect_legacy_stack().await {
+            Ok(detection) => {
+                legacy_backend_update_status(detection, configured_api_token().is_ok())
+            }
+            Err(error) => diagnostic_backend_update_status(error),
         });
     };
 
@@ -118,6 +133,8 @@ pub async fn check_local_backend_update() -> Result<LocalBackendUpdateStatus, Co
             generated_at: manifest.generated_at,
         }),
         available,
+        adoption_message: None,
+        diagnostic: None,
     })
 }
 
@@ -195,20 +212,81 @@ pub async fn apply_approved_local_backend_update(
     })
 }
 
-fn configured_backend_management() -> Result<&'static str, CommandError> {
+fn configured_backend_url() -> Result<Option<String>, CommandError> {
     if let Some(url) = std::env::var_os("VTB_URL").filter(|url| !url.is_empty()) {
-        return Ok(backend_management_for_url(&url.to_string_lossy()));
+        return Ok(Some(url.to_string_lossy().into_owned()));
     }
 
     let config_path = vertebrae_sacrum_client::config_path();
     if !config_path.as_ref().is_some_and(|path| path.exists()) {
-        return Ok("not_configured");
+        return Ok(None);
     }
 
     let config = vertebrae_sacrum_client::load_config_file().map_err(|error| CommandError {
         message: format!("Failed to load config file: {error}"),
     })?;
-    Ok(backend_management_for_url(&config.sacrum.url))
+    Ok(Some(config.sacrum.url))
+}
+
+fn empty_backend_update_status(management: &str, configured: bool) -> LocalBackendUpdateStatus {
+    LocalBackendUpdateStatus {
+        management: management.to_string(),
+        configured,
+        channel: None,
+        current_version: None,
+        current_build: None,
+        current_image_ref: None,
+        current_generated_at: None,
+        latest: None,
+        available: false,
+        adoption_message: None,
+        diagnostic: None,
+    }
+}
+
+fn legacy_backend_update_status(
+    detection: LegacyStackDetection,
+    has_configured_api_token: bool,
+) -> LocalBackendUpdateStatus {
+    match detection {
+        LegacyStackDetection::Compatible(_) if !has_configured_api_token => {
+            diagnostic_backend_update_status(LocalBackendError::BackendTokenMissing)
+        }
+        LegacyStackDetection::Compatible(_) => LocalBackendUpdateStatus {
+            management: "adoptable_legacy".to_string(),
+            configured: true,
+            adoption_message: Some(LEGACY_ADOPTION_MESSAGE.to_string()),
+            ..empty_backend_update_status("adoptable_legacy", true)
+        },
+        LegacyStackDetection::HostPortRequired => {
+            diagnostic_backend_update_status(LocalBackendError::LegacyHostPortRequired)
+        }
+        LegacyStackDetection::Unsafe(reason) => {
+            diagnostic_backend_update_status(LocalBackendError::UnsafeLegacyStack(reason))
+        }
+        LegacyStackDetection::Absent => empty_backend_update_status("not_configured", false),
+    }
+}
+
+fn diagnostic_backend_update_status(error: LocalBackendError) -> LocalBackendUpdateStatus {
+    let diagnostic = error.diagnostic();
+    LocalBackendUpdateStatus {
+        management: "adoption_recovery_required".to_string(),
+        configured: true,
+        channel: None,
+        current_version: None,
+        current_build: None,
+        current_image_ref: None,
+        current_generated_at: None,
+        latest: None,
+        available: false,
+        adoption_message: None,
+        diagnostic: Some(LocalBackendUpdateDiagnostic {
+            code: diagnostic.code,
+            retryable: diagnostic.retryable,
+            message: diagnostic.message,
+        }),
+    }
 }
 
 fn backend_management_for_url(url: &str) -> &'static str {
@@ -249,7 +327,120 @@ fn current_backend_release_metadata(
 
 #[cfg(test)]
 mod tests {
-    use super::{backend_management_for_url, current_backend_release_metadata};
+    use super::{
+        adoption_required_result, backend_management_for_url, configured_api_token_from_sources,
+        current_backend_release_metadata, legacy_backend_update_status, loopback_backend_port,
+        LocalBackendAdoptionStatus,
+    };
+    use crate::local_backend::compose::{LegacyStackCandidate, LegacyStackDetection};
+
+    #[test]
+    fn unconfirmed_adoption_returns_confirmation_without_a_backend_url() {
+        let result = adoption_required_result();
+
+        assert!(matches!(
+            result.status,
+            LocalBackendAdoptionStatus::AdoptionRequired
+        ));
+        assert_eq!(result.backend_url, None);
+        assert_eq!(
+            result.adoption_message.as_deref(),
+            Some(
+                "A compatible vertebrae-dev backend was found. Confirm adoption to preserve its PostgreSQL 17 volume and existing account."
+            )
+        );
+    }
+
+    #[test]
+    fn configured_loopback_port_is_available_for_volume_only_recovery() {
+        assert_eq!(
+            loopback_backend_port("http://localhost:4400").expect("loopback URL should parse"),
+            Some(4400)
+        );
+        assert_eq!(
+            loopback_backend_port("http://localhost").expect("loopback URL should parse"),
+            None
+        );
+    }
+
+    #[test]
+    fn remote_backend_cannot_supply_an_adoption_port() {
+        assert!(loopback_backend_port("https://backend.example.test:4400").is_err());
+    }
+
+    #[test]
+    fn adoption_requires_and_reuses_the_configured_api_token() {
+        assert_eq!(
+            configured_api_token_from_sources(Some("sac_dev-local-token"), None)
+                .expect("configured token should be accepted")
+                .as_str(),
+            "sac_dev-local-token"
+        );
+
+        assert_eq!(
+            configured_api_token_from_sources(Some("config-token"), Some("sac_env-override"),)
+                .expect("environment token should override config")
+                .as_str(),
+            "sac_env-override"
+        );
+
+        let error = configured_api_token_from_sources(None, None)
+            .expect_err("adoption must not generate a replacement token");
+        assert!(error.to_string().contains("requires an API token"));
+    }
+
+    #[test]
+    fn legacy_detection_statuses_are_safe_and_actionable() {
+        let adoptable = legacy_backend_update_status(
+            LegacyStackDetection::Compatible(LegacyStackCandidate::for_test(4400)),
+            true,
+        );
+        assert_eq!(adoptable.management, "adoptable_legacy");
+        assert!(adoptable.configured);
+        assert!(adoptable.adoption_message.is_some());
+        assert!(adoptable.diagnostic.is_none());
+
+        let recovery = legacy_backend_update_status(LegacyStackDetection::HostPortRequired, true);
+        assert_eq!(recovery.management, "adoption_recovery_required");
+        assert_eq!(
+            recovery
+                .diagnostic
+                .as_ref()
+                .map(|diagnostic| diagnostic.code.as_str()),
+            Some("legacy_host_port_required")
+        );
+
+        let unsafe_stack = legacy_backend_update_status(
+            LegacyStackDetection::Unsafe("postgres must keep postgres:17-alpine".to_string()),
+            true,
+        );
+        assert_eq!(unsafe_stack.management, "adoption_recovery_required");
+        assert_eq!(
+            unsafe_stack
+                .diagnostic
+                .as_ref()
+                .map(|diagnostic| diagnostic.code.as_str()),
+            Some("legacy_stack_unsafe")
+        );
+
+        let absent = legacy_backend_update_status(LegacyStackDetection::Absent, true);
+        assert_eq!(absent.management, "not_configured");
+        assert!(!absent.configured);
+        assert!(absent.diagnostic.is_none());
+
+        let missing_token = legacy_backend_update_status(
+            LegacyStackDetection::Compatible(LegacyStackCandidate::for_test(4400)),
+            false,
+        );
+        assert_eq!(missing_token.management, "adoption_recovery_required");
+        assert_eq!(
+            missing_token
+                .diagnostic
+                .as_ref()
+                .map(|diagnostic| diagnostic.code.as_str()),
+            Some("backend_token_missing")
+        );
+    }
 
     #[test]
     fn classifies_backend_urls_by_management() {
@@ -305,6 +496,141 @@ mod tests {
     }
 }
 
+const LEGACY_ADOPTION_MESSAGE: &str = "A compatible vertebrae-dev backend was found. Confirm adoption to preserve its PostgreSQL 17 volume and existing account.";
+
+fn adoption_required_result() -> LocalBackendAdoptionResult {
+    LocalBackendAdoptionResult {
+        status: LocalBackendAdoptionStatus::AdoptionRequired,
+        backend_url: None,
+        adoption_message: Some(LEGACY_ADOPTION_MESSAGE.to_string()),
+    }
+}
+
+fn loopback_backend_port(url: &str) -> Result<Option<u16>, LocalBackendError> {
+    let parsed = url::Url::parse(url).map_err(|_| {
+        LocalBackendError::InvalidState(
+            "local backend adoption requires a valid configured backend URL".to_string(),
+        )
+    })?;
+    let host = parsed.host_str().ok_or_else(|| {
+        LocalBackendError::InvalidState(
+            "local backend adoption requires a configured loopback backend URL".to_string(),
+        )
+    })?;
+    if !is_loopback_host(host) {
+        return Err(LocalBackendError::InvalidState(
+            "local backend adoption is available only for a configured loopback backend"
+                .to_string(),
+        ));
+    }
+    Ok(parsed.port())
+}
+
+fn configured_backend_port() -> Result<Option<u16>, LocalBackendError> {
+    let url = match std::env::var_os("VTB_URL")
+        .filter(|url| !url.is_empty())
+        .map(|url| url.to_string_lossy().into_owned())
+    {
+        Some(url) => url,
+        None => {
+            vertebrae_sacrum_client::load_config_file()
+                .map_err(|error| {
+                    LocalBackendError::InvalidState(format!(
+                        "could not load the configured backend URL: {error}"
+                    ))
+                })?
+                .sacrum
+                .url
+        }
+    };
+    loopback_backend_port(&url)
+}
+
+/// Adopt an existing legacy development backend without selecting or
+/// initializing a project.
+#[tauri::command]
+#[specta::specta]
+pub async fn adopt_local_backend(
+    app_handle: AppHandle,
+    confirmed: bool,
+) -> Result<LocalBackendAdoptionResult, CommandError> {
+    if !confirmed {
+        return Ok(adoption_required_result());
+    }
+
+    let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
+    let compose = DockerCompose::system().await.map_err(local_backend_error)?;
+    let detection = compose
+        .detect_legacy_stack()
+        .await
+        .map_err(local_backend_error)?;
+
+    match &detection {
+        LegacyStackDetection::Compatible(_) => {}
+        LegacyStackDetection::HostPortRequired => {
+            let _configured_port = configured_backend_port().map_err(local_backend_error)?;
+            return Err(local_backend_error(
+                LocalBackendError::LegacyHostPortRequired,
+            ));
+        }
+        LegacyStackDetection::Unsafe(reason) => {
+            return Err(local_backend_error(LocalBackendError::UnsafeLegacyStack(
+                reason.clone(),
+            )));
+        }
+        LegacyStackDetection::Absent => {
+            return Err(local_backend_error(LocalBackendError::UnsafeLegacyStack(
+                "the vertebrae-dev stack and volume were not detected".to_string(),
+            )));
+        }
+    };
+    let api_token = configured_api_token().map_err(local_backend_error)?;
+    let mut state = compose
+        .adopt_legacy_stack(&paths, &detection, BackendImageChannel::BackendMaster, true)
+        .await
+        .map_err(local_backend_error)?;
+
+    let progress = |stage| emit_progress(&app_handle, stage);
+    if state.provisioning_state == ProvisioningState::Ready {
+        progress(ProvisioningStage::Health);
+        compose
+            .wait_until_healthy(&paths, &state)
+            .await
+            .map_err(local_backend_error)?;
+        compose
+            .status(&paths, &state)
+            .await
+            .map_err(local_backend_error)?;
+        compose
+            .authenticate_backend(&state, &api_token)
+            .await
+            .map_err(local_backend_error)?;
+        provisioning::persist_local_client_config(&state.backend_url(), &api_token)
+            .map_err(local_backend_error)?;
+        return Ok(adoption_ready_result(state.backend_url()));
+    }
+
+    compose
+        .provision_adopted(&paths, &mut state, api_token, progress)
+        .await
+        .map(adoption_ready_result_from_provisioning)
+        .map_err(local_backend_error)
+}
+
+fn adoption_ready_result_from_provisioning(
+    result: ProvisioningResult,
+) -> LocalBackendAdoptionResult {
+    adoption_ready_result(result.backend_url)
+}
+
+fn adoption_ready_result(backend_url: String) -> LocalBackendAdoptionResult {
+    LocalBackendAdoptionResult {
+        status: LocalBackendAdoptionStatus::Ready,
+        backend_url: Some(backend_url),
+        adoption_message: None,
+    }
+}
+
 /// Provision or adopt the local Sacrum backend and persist its generated
 /// connection settings before project initialization begins.
 #[tauri::command]
@@ -340,15 +666,8 @@ pub async fn setup_local_backend(
                 reason.clone(),
             )));
         }
-        LegacyStackDetection::Compatible(candidate) => compose
-            .adopt_legacy_stack(
-                &paths,
-                &detection,
-                Some(candidate.host_port),
-                LOCAL_SACRUM_IMAGE_REF,
-                BackendImageChannel::BackendMaster,
-                true,
-            )
+        LegacyStackDetection::Compatible(_candidate) => compose
+            .adopt_legacy_stack(&paths, &detection, BackendImageChannel::BackendMaster, true)
             .await
             .map_err(local_backend_error)?,
         LegacyStackDetection::Absent => match paths.load_state().map_err(local_backend_error)? {
@@ -380,6 +699,10 @@ pub async fn setup_local_backend(
             .await
             .map_err(local_backend_error)?;
         let api_token = provisioning::ensure_api_token(&paths).map_err(local_backend_error)?;
+        compose
+            .authenticate_backend(&state, &api_token)
+            .await
+            .map_err(local_backend_error)?;
         provisioning::persist_local_client_config(&state.backend_url(), &api_token)
             .map_err(local_backend_error)?;
         return Ok(ready_result(state.backend_url()));
@@ -404,15 +727,26 @@ pub async fn setup_local_backend(
 }
 
 fn configured_api_token() -> Result<ApiToken, LocalBackendError> {
+    let env_token = std::env::var_os("VTB_TOKEN")
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_string_lossy().into_owned());
+    if let Some(token) = env_token.as_deref() {
+        return configured_api_token_from_sources(None, Some(token));
+    }
     let config = vertebrae_sacrum_client::load_config_file().map_err(|error| {
         LocalBackendError::InvalidState(format!(
             "could not load the configured backend token for adoption: {error}"
         ))
     })?;
-    let token = config
-        .sacrum
-        .token
-        .as_deref()
+    configured_api_token_from_sources(config.sacrum.token.as_deref(), None)
+}
+
+fn configured_api_token_from_sources(
+    configured_token: Option<&str>,
+    environment_token: Option<&str>,
+) -> Result<ApiToken, LocalBackendError> {
+    let token = environment_token
+        .or(configured_token)
         .map(str::trim)
         .filter(|token| !token.is_empty())
         .ok_or_else(|| {

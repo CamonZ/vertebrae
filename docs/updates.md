@@ -87,6 +87,32 @@ The first-run component installer remains an explicit install of the binaries
 bundled with the GUI. It is separate from the channel check and does not run
 at startup.
 
+## Existing local backend adoption
+
+The **Settings > Updates** page also reports the management state of a local
+backend. This status check is passive: it only reads the configured loopback
+URL and Docker metadata, and never starts a container, initializes a project,
+seeds data, or changes a PostgreSQL volume.
+
+When a compatible `vertebrae-dev` stack is found without GUI-managed state, the
+page shows **Adopt existing backend**. Adoption is a separate, explicitly
+confirmed action. It preserves the existing `vertebrae-dev_pgdata`
+PostgreSQL 17 volume, database account, and configured API token. The GUI may
+reconcile the backend container so that it can manage the existing service, but
+it does not initialize a project, reseed the database, or delete, replace, or
+upgrade the existing volume. A configured API token is required.
+
+After successful adoption, Settings performs another read-only status check and
+shows the backend as GUI-managed. Backend image updates remain a separate
+review-and-apply action; adoption does not silently apply an update or change
+the current project.
+
+If Docker metadata is incomplete or unsafe, the legacy volume is missing, the
+configured port cannot be determined, or another prerequisite is unavailable,
+Settings reports `adoption_recovery_required` with an actionable diagnostic and
+does not offer a destructive retry. Remote backends and genuinely unconfigured
+backends keep their existing behavior.
+
 ## Release procedure
 
 1. Push `master` for a preview build, or create a `vX.Y.Z` tag for a stable

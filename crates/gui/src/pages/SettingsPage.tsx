@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   commands,
+  events,
   type LocalChatHarnessCatalog,
   type LocalChatHarnessInfo,
   type LocalChatHarnessKind,
@@ -24,12 +25,15 @@ import {
   type GuiUpdateInfo,
   type GuiUpdateApplyState,
   type GuiUpdateState,
+  type LocalBackendAdoptionState,
   type LocalBackendUpdateApplyState,
   type LocalBackendUpdateInfo,
 } from "../stores/guiUpdateStore";
 import {
+  adoptLocalBackend,
   applyApprovedGuiUpdate,
   applyApprovedLocalBackendUpdate,
+  refreshLocalBackendUpdateState,
   relaunchGuiApplication,
 } from "../update";
 import { useUIStore } from "../stores/uiStore";
@@ -580,10 +584,12 @@ function UpdateStateMessage({
   children,
   intent,
   testId,
+  busy = false,
 }: {
   children: ReactNode;
   intent: "status" | "alert";
   testId: string;
+  busy?: boolean;
 }) {
   return (
     <div
@@ -595,6 +601,7 @@ function UpdateStateMessage({
       ].join(" ")}
       data-testid={testId}
       role={intent === "alert" ? "alert" : "status"}
+      aria-busy={busy}
     >
       {children}
     </div>
@@ -736,6 +743,186 @@ function LocalBackendUpdateApplyStatus({
   );
 }
 
+function LocalBackendAdoptionStatus({
+  adoption,
+}: {
+  adoption: LocalBackendAdoptionState;
+}) {
+  if (adoption.status === "idle") return null;
+  if (adoption.status === "adopting") {
+    return (
+      <UpdateStateMessage
+        intent="status"
+        testId="settings-local-backend-adoption-progress"
+        busy
+      >
+        <span className="inline-flex items-center gap-2">
+          <span
+            className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+            aria-hidden="true"
+          />
+          {adoption.message ??
+            "Adopting the existing local backend. Its PostgreSQL 17 volume and account/token will be preserved while the backend container is reconciled…"}
+        </span>
+      </UpdateStateMessage>
+    );
+  }
+  if (adoption.status === "error") {
+    return (
+      <UpdateStateMessage
+        intent="alert"
+        testId="settings-local-backend-adoption-error"
+      >
+        Backend adoption failed: {adoption.message}
+      </UpdateStateMessage>
+    );
+  }
+
+  return (
+    <UpdateStateMessage
+      intent="status"
+      testId="settings-local-backend-adoption-result"
+    >
+      {adoption.message}
+    </UpdateStateMessage>
+  );
+}
+
+function LocalBackendAdoptionSection({
+  message,
+  adoption,
+  onAdopt,
+}: {
+  message: string | null;
+  adoption: LocalBackendAdoptionState;
+  onAdopt: () => void;
+}) {
+  const adopting = adoption.status === "adopting";
+  const canRetry = adoption.status !== "error" || adoption.retryable;
+  return (
+    <article
+      className="mt-7 rounded-[var(--radius-lg)] border border-[var(--color-warn)]/40 bg-[var(--color-warn-wash)] p-5 sm:p-6"
+      data-testid="settings-local-backend-adoption"
+    >
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-warn)]">
+            Existing local backend detected
+          </p>
+          <h3 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
+            Adopt this backend in Vertebrae
+          </h3>
+        </div>
+        <Button
+          variant="primary"
+          onClick={onAdopt}
+          disabled={adopting || !canRetry}
+          data-testid="settings-adopt-local-backend"
+        >
+          {adopting
+            ? "Adopting…"
+            : adoption.status === "error"
+              ? canRetry
+                ? "Retry adoption"
+                : "Adoption needs attention"
+              : "Adopt existing backend"}
+        </Button>
+      </div>
+      <div className="mt-5 space-y-2 text-sm leading-6 text-[var(--color-fg-soft)]">
+        <p>
+          Adoption preserves the existing PostgreSQL 17 volume, database
+          account, and configured API token. It may reconcile the backend
+          container so Vertebrae can manage the existing service.
+        </p>
+        {message && <p>{message}</p>}
+      </div>
+      <LocalBackendAdoptionStatus adoption={adoption} />
+    </article>
+  );
+}
+
+function LocalBackendAdoptionRecovery({
+  diagnostic,
+  checking,
+  onCheckAgain,
+}: {
+  diagnostic: GuiUpdateState["localBackend"]["diagnostic"];
+  checking: boolean;
+  onCheckAgain: () => void;
+}) {
+  return (
+    <UpdateStateMessage
+      intent="alert"
+      testId="settings-local-backend-adoption-recovery"
+    >
+      <p className="font-medium">Local backend adoption needs recovery.</p>
+      <p className="mt-2 leading-6">
+        {diagnostic?.message ??
+          "The existing backend could not be adopted safely. Resolve the reported condition and check again."}
+      </p>
+      <Button
+        className="mt-4"
+        variant="secondary"
+        onClick={onCheckAgain}
+        disabled={checking}
+        data-testid="settings-local-backend-check-again"
+      >
+        {checking ? "Checking…" : "Check again"}
+      </Button>
+    </UpdateStateMessage>
+  );
+}
+
+function AdoptLocalBackendDialog({
+  message,
+  onConfirm,
+  onClose,
+}: {
+  message: string | null;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Confirm local backend adoption"
+      variant="sheet"
+      className="max-w-[calc(100vw-2rem)]"
+    >
+      <div className="space-y-5">
+        <p className="text-sm leading-6 text-[var(--color-fg-soft)]">
+          This is an explicit adoption of the existing backend. Vertebrae will
+          preserve the PostgreSQL 17 volume, database account, and configured
+          API token. It may reconcile the Docker container, but it will not
+          initialize a project, reseed data, or replace/delete the volume.
+        </p>
+        {message && (
+          <p className="rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 text-sm leading-6 text-[var(--color-fg-soft)]">
+            {message}
+          </p>
+        )}
+        <div className="flex flex-col-reverse gap-2 border-t border-[var(--color-line)] pt-4 sm:flex-row sm:justify-end">
+          <Button
+            variant="ghost"
+            onClick={onClose}
+            data-testid="settings-adopt-local-backend-cancel"
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={onConfirm}
+            data-testid="settings-adopt-local-backend-confirm"
+          >
+            Confirm adoption
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function ReviewLocalBackendUpdateDialog({
   update,
   onApprove,
@@ -848,37 +1035,37 @@ function LocalBackendUpdateSection({
         </Button>
       </div>
       <dl className="mt-6 grid gap-4 border-y border-[var(--color-line)] py-4 sm:grid-cols-4">
-        <div>
+        <div className="min-w-0">
           <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
           <dd className="mt-1 text-sm text-[var(--color-fg)]">
             {channelLabel(update.channel)}
           </dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-xs text-[var(--color-fg-mute)]">Current image</dt>
-          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
             {imageDigest(update.currentImageRef)}
           </dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
-          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
             {update.build}
           </dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-xs text-[var(--color-fg-mute)]">
             Current published
           </dt>
-          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
             {backendImageTimestamp(update.currentImageCreatedAt)}
           </dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-xs text-[var(--color-fg-mute)]">
             Target published
           </dt>
-          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
             {backendImageTimestamp(update.generatedAt)}
           </dd>
         </div>
@@ -1082,29 +1269,29 @@ function BackendCurrentDetails({ state }: { state: GuiUpdateState }) {
       className="mt-5 grid gap-4 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 sm:grid-cols-4"
       data-testid="settings-backend-current"
     >
-      <div>
+      <div className="min-w-0">
         <dt className="text-xs text-[var(--color-fg-mute)]">Current version</dt>
-        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
           {backend.currentVersion ?? NOT_PROVIDED}
         </dd>
       </div>
-      <div>
-        <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
-        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
-          {backend.currentBuild ?? NOT_PROVIDED}
-        </dd>
-      </div>
-      <div>
+      <div className="min-w-0">
         <dt className="text-xs text-[var(--color-fg-mute)]">Image</dt>
-        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
           {backend.currentImageRef
             ? imageDigest(backend.currentImageRef)
             : NOT_PROVIDED}
         </dd>
       </div>
-      <div>
+      <div className="min-w-0">
+        <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
+        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
+          {backend.currentBuild ?? NOT_PROVIDED}
+        </dd>
+      </div>
+      <div className="min-w-0">
         <dt className="text-xs text-[var(--color-fg-mute)]">Published</dt>
-        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
           {backendImageTimestamp(backend.currentImageCreatedAt)}
         </dd>
       </div>
@@ -1274,9 +1461,13 @@ function FrontendUpdatesSection({
 function BackendUpdatesSection({
   state,
   onReview,
+  onAdopt,
+  onCheckAgain,
 }: {
   state: GuiUpdateState;
   onReview: () => void;
+  onAdopt: () => void;
+  onCheckAgain: () => void;
 }) {
   const backend = state.localBackend;
   const management =
@@ -1308,9 +1499,22 @@ function BackendUpdatesSection({
             automatically.
           </UpdateStateMessage>
         </>
+      ) : management === "adoptable_legacy" ? (
+        <LocalBackendAdoptionSection
+          message={backend.adoptionMessage}
+          adoption={backend.adoption}
+          onAdopt={onAdopt}
+        />
+      ) : management === "adoption_recovery_required" ? (
+        <LocalBackendAdoptionRecovery
+          diagnostic={backend.diagnostic}
+          checking={backend.checking}
+          onCheckAgain={onCheckAgain}
+        />
       ) : management === "managed_local" ? (
         <>
           <BackendCurrentDetails state={state} />
+          <LocalBackendAdoptionStatus adoption={backend.adoption} />
           {backendApply.status !== "idle" && (
             <LocalBackendUpdateApplyStatus apply={backendApply} />
           )}
@@ -1352,15 +1556,24 @@ function UpdatesSection({
   state,
   onReview,
   onReviewBackend,
+  onAdoptBackend,
+  onCheckBackend,
 }: {
   state: GuiUpdateState;
   onReview: () => void;
   onReviewBackend: () => void;
+  onAdoptBackend: () => void;
+  onCheckBackend: () => void;
 }) {
   return (
     <div className="mt-8 space-y-8" data-testid="settings-updates">
       <FrontendUpdatesSection state={state} onReview={onReview} />
-      <BackendUpdatesSection state={state} onReview={onReviewBackend} />
+      <BackendUpdatesSection
+        state={state}
+        onReview={onReviewBackend}
+        onAdopt={onAdoptBackend}
+        onCheckAgain={onCheckBackend}
+      />
     </div>
   );
 }
@@ -1389,6 +1602,8 @@ export function SettingsPage({
   const [activeSection, setActiveSection] = useState<SettingsSection>("chat");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [localBackendReviewOpen, setLocalBackendReviewOpen] = useState(false);
+  const [localBackendAdoptionReviewOpen, setLocalBackendAdoptionReviewOpen] =
+    useState(false);
   const updateState = useGuiUpdateStore();
   const storageWarning = useLocalChatDefaultsStore(
     (state) => state.storageWarning
@@ -1512,6 +1727,38 @@ export function SettingsPage({
       cancelled = true;
     };
   }, [activeSection]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void events.localBackendProgressEvent
+      .listen((event) => {
+        if (cancelled) return;
+        useGuiUpdateStore.setState((state) => {
+          if (state.localBackend.adoption.status !== "adopting") return state;
+          return {
+            ...state,
+            localBackend: {
+              ...state.localBackend,
+              adoption: {
+                status: "adopting",
+                stage: event.payload.stage,
+                message: event.payload.message,
+              },
+            },
+          };
+        });
+      })
+      .then((cleanup) => {
+        if (cancelled) cleanup();
+        else unlisten = cleanup;
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   const fileLinkSettings = (
     <div className="mt-8 border-t border-[var(--color-line)]">
@@ -1684,6 +1931,16 @@ export function SettingsPage({
                     setLocalBackendReviewOpen(true);
                   }
                 }}
+                onAdoptBackend={() => {
+                  if (
+                    updateState.localBackend.management === "adoptable_legacy"
+                  ) {
+                    setLocalBackendAdoptionReviewOpen(true);
+                  }
+                }}
+                onCheckBackend={() => {
+                  void refreshLocalBackendUpdateState();
+                }}
               />
             </>
           ) : (
@@ -1779,6 +2036,16 @@ export function SettingsPage({
           update={updateState.localBackend.update}
           onApprove={approveLocalBackendUpdate}
           onClose={() => setLocalBackendReviewOpen(false)}
+        />
+      )}
+      {localBackendAdoptionReviewOpen && (
+        <AdoptLocalBackendDialog
+          message={updateState.localBackend.adoptionMessage}
+          onConfirm={() => {
+            setLocalBackendAdoptionReviewOpen(false);
+            void adoptLocalBackend();
+          }}
+          onClose={() => setLocalBackendAdoptionReviewOpen(false)}
         />
       )}
     </main>

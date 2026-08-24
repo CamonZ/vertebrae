@@ -59,6 +59,7 @@ where
     compose.up_detached(paths, &mut state).await?;
     compose.wait_until_healthy(paths, &state).await?;
     let api_token = paths.load_api_token()?;
+    compose.authenticate_backend(&state, &api_token).await?;
     persist_client_config(&state.backend_url(), &api_token)?;
     Ok(state)
 }

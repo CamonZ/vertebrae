@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -14,6 +15,8 @@ import {
 
 const mockGetSupportedLocalChatHarnesses = vi.fn();
 const mockGetLocalFileEditors = vi.fn();
+const mockLocalBackendProgressListen = vi.fn();
+const invokeMock = vi.mocked(invoke);
 
 vi.mock("../bindings", () => ({
   commands: {
@@ -21,6 +24,21 @@ vi.mock("../bindings", () => ({
       mockGetSupportedLocalChatHarnesses(...args),
     getLocalFileEditors: (...args: unknown[]) =>
       mockGetLocalFileEditors(...args),
+    adoptLocalBackend: (confirmed: boolean) =>
+      invoke("adopt_local_backend", { confirmed }).then((data) => ({
+        status: "ok",
+        data,
+      })),
+    checkLocalBackendUpdate: () =>
+      invoke("check_local_backend_update").then((data) => ({
+        status: "ok",
+        data,
+      })),
+  },
+  events: {
+    localBackendProgressEvent: {
+      listen: (...args: unknown[]) => mockLocalBackendProgressListen(...args),
+    },
   },
 }));
 
@@ -109,6 +127,7 @@ describe("SettingsPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    invokeMock.mockReset();
     window.localStorage.clear();
     resetGuiUpdateState();
     useLocalChatDefaultsStore.setState({
@@ -121,6 +140,7 @@ describe("SettingsPage", () => {
       status: "ok",
       data: catalog,
     });
+    mockLocalBackendProgressListen.mockResolvedValue(() => {});
     mockGetLocalFileEditors.mockResolvedValue({
       status: "ok",
       data: [
@@ -368,6 +388,190 @@ describe("SettingsPage", () => {
     );
     expect(screen.getByTestId("settings-backend-external")).toHaveTextContent(
       "This backend is managed externally, so the app cannot update it automatically."
+    );
+  });
+
+  it("offers safe adoption for a compatible legacy backend", async () => {
+    const user = userEvent.setup();
+    useGuiUpdateStore.setState({
+      ...initialGuiUpdateState,
+      localBackend: {
+        ...initialGuiUpdateState.localBackend,
+        management: "adoptable_legacy",
+        configured: true,
+        adoptionMessage:
+          "Confirm adoption to preserve the existing PostgreSQL 17 volume.",
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-updates"));
+    expect(
+      screen.getByTestId("settings-local-backend-adoption")
+    ).toHaveTextContent("Adopt this backend in Vertebrae");
+    expect(
+      screen.queryByTestId("settings-backend-not-configured")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("settings-local-backend-adoption")
+    ).toHaveTextContent("PostgreSQL 17 volume");
+
+    await user.click(screen.getByTestId("settings-adopt-local-backend"));
+    expect(
+      screen.getByRole("dialog", { name: "Confirm local backend adoption" })
+    ).toBeVisible();
+    await user.click(screen.getByTestId("settings-adopt-local-backend-cancel"));
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("shows adoption progress and a retryable failure after confirmation", async () => {
+    const user = userEvent.setup();
+    let rejectAdoption!: (reason: unknown) => void;
+    const adoption = new Promise<never>((_, reject) => {
+      rejectAdoption = reject;
+    });
+    invokeMock.mockReturnValueOnce(adoption);
+    useGuiUpdateStore.setState({
+      ...initialGuiUpdateState,
+      localBackend: {
+        ...initialGuiUpdateState.localBackend,
+        management: "adoptable_legacy",
+        configured: true,
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-updates"));
+    await user.click(screen.getByTestId("settings-adopt-local-backend"));
+    await user.click(
+      screen.getByTestId("settings-adopt-local-backend-confirm")
+    );
+    expect(
+      await screen.findByTestId("settings-local-backend-adoption-progress")
+    ).toBeVisible();
+    expect(screen.getByTestId("settings-adopt-local-backend")).toBeDisabled();
+
+    rejectAdoption(new Error("Docker is unavailable"));
+    expect(
+      await screen.findByTestId("settings-local-backend-adoption-error")
+    ).toHaveTextContent("Docker is unavailable");
+    expect(
+      screen.getByTestId("settings-adopt-local-backend")
+    ).toHaveTextContent("Retry adoption");
+  });
+
+  it("offers a read-only check again action for adoption recovery", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockResolvedValueOnce({
+      management: "adoption_recovery_required",
+      configured: true,
+      channel: null,
+      current_version: null,
+      current_build: null,
+      current_image_ref: null,
+      current_generated_at: null,
+      latest: null,
+      available: false,
+      adoption_message: null,
+      diagnostic: {
+        code: "legacy_host_port_required",
+        retryable: false,
+        message: "Provide the prior host port; existing data was preserved.",
+      },
+    });
+    useGuiUpdateStore.setState({
+      ...initialGuiUpdateState,
+      localBackend: {
+        ...initialGuiUpdateState.localBackend,
+        management: "adoption_recovery_required",
+        configured: true,
+        diagnostic: {
+          code: "legacy_host_port_required",
+          retryable: false,
+          message: "Provide the prior host port; existing data was preserved.",
+        },
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-updates"));
+    await user.click(screen.getByTestId("settings-local-backend-check-again"));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("check_local_backend_update");
+    });
+    expect(
+      screen.getByTestId("settings-local-backend-adoption-recovery")
+    ).toHaveTextContent("Check again");
+  });
+
+  it("refreshes the Settings backend branch after successful adoption", async () => {
+    const user = userEvent.setup();
+    invokeMock
+      .mockResolvedValueOnce({
+        status: "ready",
+        backend_url: "http://127.0.0.1:4400",
+        adoption_message: null,
+      })
+      .mockResolvedValueOnce({
+        management: "managed_local",
+        configured: true,
+        channel: "release",
+        current_version: "0.4.0",
+        current_build: "backend-build",
+        current_image_ref: "current-image",
+        current_generated_at: null,
+        latest: null,
+        available: false,
+        adoption_message: null,
+        diagnostic: null,
+      });
+    useGuiUpdateStore.setState({
+      ...initialGuiUpdateState,
+      localBackend: {
+        ...initialGuiUpdateState.localBackend,
+        management: "adoptable_legacy",
+        configured: true,
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-updates"));
+    await user.click(screen.getByTestId("settings-adopt-local-backend"));
+    await user.click(screen.getByTestId("settings-adopt-local-backend-confirm"));
+
+    expect(
+      await screen.findByTestId("settings-backend-current-status")
+    ).toHaveTextContent("up to date");
+    expect(screen.getByTestId("settings-local-backend-adoption-result")).toHaveTextContent(
+      "preserved"
+    );
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "adopt_local_backend", {
+      confirmed: true,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(
+      2,
+      "check_local_backend_update"
     );
   });
 

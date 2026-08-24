@@ -4,7 +4,9 @@ use async_trait::async_trait;
 
 use super::DockerCompose;
 use crate::local_backend::command::ProcessRunner;
-use crate::local_backend::state::{LocalBackendError, ManagedStackPaths, ManagedStackState};
+use crate::local_backend::state::{
+    ApiToken, LocalBackendError, ManagedStackPaths, ManagedStackState,
+};
 
 pub(super) const HEALTH_TIMEOUT: Duration = Duration::from_secs(120);
 pub(super) const HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -12,6 +14,8 @@ pub(super) const HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 #[async_trait]
 pub trait HealthProbe: Send + Sync {
     async fn is_healthy(&self, url: &str) -> bool;
+
+    async fn authenticate(&self, url: &str, api_token: &ApiToken) -> Result<(), LocalBackendError>;
 }
 
 #[derive(Clone)]
@@ -38,6 +42,59 @@ impl HealthProbe for ReqwestHealthProbe {
             .send()
             .await
             .is_ok_and(|response| response.status().is_success())
+    }
+
+    async fn authenticate(&self, url: &str, api_token: &ApiToken) -> Result<(), LocalBackendError> {
+        let response = self
+            .client
+            .post(format!("{url}/graphql"))
+            .bearer_auth(api_token.as_str())
+            .json(&serde_json::json!({
+                "query": "query VerifyBackendToken { projects { id } }"
+            }))
+            .send()
+            .await
+            .map_err(|error| LocalBackendError::BackendAuthenticationFailed {
+                status: "network error".to_string(),
+                message: error.to_string(),
+            })?;
+        let status = response.status();
+        let body = response.text().await.map_err(|error| {
+            LocalBackendError::BackendAuthenticationFailed {
+                status: status.to_string(),
+                message: error.to_string(),
+            }
+        })?;
+        let redacted_body = api_token.redact(&body);
+        let parsed = serde_json::from_str::<serde_json::Value>(&body).map_err(|error| {
+            LocalBackendError::BackendAuthenticationFailed {
+                status: status.to_string(),
+                message: format!("backend returned invalid JSON: {error}"),
+            }
+        })?;
+        let has_graphql_errors = parsed
+            .get("errors")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|errors| !errors.is_empty());
+        if !status.is_success() || has_graphql_errors || parsed.get("data").is_none() {
+            return Err(LocalBackendError::BackendAuthenticationFailed {
+                status: status.to_string(),
+                message: truncate_authentication_detail(&redacted_body),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn truncate_authentication_detail(detail: &str) -> String {
+    const MAX_DETAIL_BYTES: usize = 512;
+    if detail.len() <= MAX_DETAIL_BYTES {
+        detail.to_string()
+    } else {
+        format!(
+            "{}…",
+            detail.chars().take(MAX_DETAIL_BYTES).collect::<String>()
+        )
     }
 }
 
@@ -82,6 +139,16 @@ where
             }
             tokio::time::sleep(self.health_poll_interval).await;
         }
+    }
+
+    pub async fn authenticate_backend(
+        &self,
+        state: &ManagedStackState,
+        api_token: &ApiToken,
+    ) -> Result<(), LocalBackendError> {
+        self.health_probe
+            .authenticate(&state.backend_url(), api_token)
+            .await
     }
 }
 

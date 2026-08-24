@@ -6,8 +6,9 @@ use serde::Deserialize;
 use super::DockerCompose;
 use crate::local_backend::command::ProcessRunner;
 use crate::local_backend::state::{
-    BackendImageChannel, LocalBackendError, ManagedStackPaths, ManagedStackState, RuntimeSecrets,
-    StackKind, LEGACY_POSTGRES_IMAGE, LEGACY_PROJECT, LEGACY_VOLUME,
+    is_valid_legacy_backend_image_ref, BackendImageChannel, LocalBackendError, ManagedStackPaths,
+    ManagedStackState, RuntimeSecrets, StackKind, LEGACY_POSTGRES_IMAGE, LEGACY_PROJECT,
+    LEGACY_VOLUME,
 };
 
 pub(super) const LEGACY_INSPECT_FORMAT: &str = r#"{"Image":{{json .Config.Image}},"Project":{{json (index .Config.Labels "com.docker.compose.project")}},"Service":{{json (index .Config.Labels "com.docker.compose.service")}},"PortBindings":{{json .HostConfig.PortBindings}},"Mounts":{{json .Mounts}}}"#;
@@ -16,7 +17,19 @@ const LEGACY_VOLUME_INSPECT_FORMAT: &str = r#"{"Name":{{json .Name}},"Project":{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyStackCandidate {
     pub host_port: u16,
+    pub sacrum_image_ref: String,
     bind_host: String,
+}
+
+#[cfg(test)]
+impl LegacyStackCandidate {
+    pub(crate) fn for_test(host_port: u16) -> Self {
+        Self {
+            host_port,
+            sacrum_image_ref: "ghcr.io/camonz/sacrum:master".to_string(),
+            bind_host: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,8 +128,6 @@ where
         &self,
         paths: &ManagedStackPaths,
         detection: &LegacyStackDetection,
-        legacy_host_port: Option<u16>,
-        sacrum_image_ref: impl Into<String>,
         image_channel: BackendImageChannel,
         confirmed: bool,
     ) -> Result<ManagedStackState, LocalBackendError> {
@@ -132,13 +143,7 @@ where
         let candidate = match &current {
             LegacyStackDetection::Compatible(candidate) => candidate.clone(),
             LegacyStackDetection::HostPortRequired => {
-                let host_port = legacy_host_port
-                    .filter(|host_port| *host_port != 0)
-                    .ok_or(LocalBackendError::LegacyHostPortRequired)?;
-                LegacyStackCandidate {
-                    host_port,
-                    bind_host: String::new(),
-                }
+                return Err(LocalBackendError::LegacyHostPortRequired);
             }
             LegacyStackDetection::Unsafe(reason) => {
                 return Err(LocalBackendError::UnsafeLegacyStack(reason.clone()));
@@ -167,6 +172,15 @@ where
                         .to_string(),
                 ));
             }
+            if existing.host_port != candidate.host_port
+                || existing.sacrum_bind_host != candidate.bind_host
+                || existing.sacrum_image_ref != candidate.sacrum_image_ref
+            {
+                return Err(LocalBackendError::UnsafeLegacyStack(
+                    "saved adopted state does not match the detected legacy port, bind host, or image"
+                        .to_string(),
+                ));
+            }
             return Ok(existing);
         }
         if paths.secrets_file.exists()
@@ -177,7 +191,7 @@ where
             ));
         }
         let state = ManagedStackState::adopted_legacy(
-            sacrum_image_ref,
+            candidate.sacrum_image_ref,
             candidate.host_port,
             candidate.bind_host,
             image_channel,
@@ -349,8 +363,15 @@ fn validate_legacy_containers(
             "sacrum has an unsupported host binding address '{bind_host}'"
         ));
     }
+    if !is_valid_legacy_backend_image_ref(&sacrum.image) {
+        return Err(format!(
+            "sacrum must use an official ghcr.io/camonz/sacrum image; found {}",
+            sacrum.image
+        ));
+    }
     Ok(LegacyStackCandidate {
         host_port,
+        sacrum_image_ref: sacrum.image.clone(),
         bind_host,
     })
 }
@@ -395,8 +416,6 @@ mod tests {
             .adopt_legacy_stack(
                 &paths,
                 &detection,
-                None,
-                DIGEST_IMAGE,
                 BackendImageChannel::BackendRelease,
                 true,
             )
@@ -411,22 +430,7 @@ mod tests {
                 .all(|argument| !matches!(argument.as_str(), "up" | "down" | "rm"))
         }));
 
-        runner.push_outputs(legacy_outputs(None));
-        let state = controller
-            .adopt_legacy_stack(
-                &paths,
-                &detection,
-                Some(4400),
-                DIGEST_IMAGE,
-                BackendImageChannel::BackendRelease,
-                true,
-            )
-            .await
-            .expect("adopt preserved volume");
-        assert_eq!(state.host_port, 4400);
-        assert_eq!(state.provisioning_state, ProvisioningState::Unverified);
-        assert_eq!(state.sacrum_bind_host, "");
-        assert_eq!(state.postgres_image_ref(), LEGACY_POSTGRES_IMAGE);
+        assert!(!paths.root.exists());
     }
 
     #[tokio::test]
@@ -461,6 +465,17 @@ mod tests {
                 ],
                 "postgres:17-alpine",
             ),
+            (
+                vec![
+                    CommandOutput::success("postgres-id\nsacrum-id\n"),
+                    CommandOutput::success(legacy_inspect_json_with_sacrum(
+                        LEGACY_POSTGRES_IMAGE,
+                        LEGACY_VOLUME,
+                        "docker.io/other/sacrum:latest",
+                    )),
+                ],
+                "official ghcr.io/camonz/sacrum image",
+            ),
         ] {
             let detection = detect_legacy(outputs).await.expect("detect unsafe legacy");
             assert!(matches!(
@@ -468,6 +483,22 @@ mod tests {
                 LegacyStackDetection::Unsafe(reason) if reason.contains(expected)
             ));
         }
+    }
+
+    #[tokio::test]
+    async fn legacy_containers_without_the_preserved_volume_are_unsafe() {
+        let detection = detect_legacy([
+            CommandOutput::success("postgres-id\nsacrum-id\n"),
+            CommandOutput::success(legacy_inspect_json(LEGACY_POSTGRES_IMAGE, LEGACY_VOLUME)),
+            CommandOutput::success(""),
+        ])
+        .await
+        .expect("detect legacy stack");
+
+        assert!(matches!(
+            detection,
+            LegacyStackDetection::Unsafe(reason) if reason.contains("volume is missing")
+        ));
     }
 
     #[tokio::test]
@@ -491,8 +522,6 @@ mod tests {
             .adopt_legacy_stack(
                 &paths,
                 &detection,
-                None,
-                DIGEST_IMAGE,
                 BackendImageChannel::BackendRelease,
                 false,
             )
@@ -508,8 +537,6 @@ mod tests {
             .adopt_legacy_stack(
                 &paths,
                 &detection,
-                None,
-                DIGEST_IMAGE,
                 BackendImageChannel::BackendRelease,
                 true,
             )
@@ -522,6 +549,7 @@ mod tests {
         assert_eq!(state.postgres_image_ref(), "postgres:17-alpine");
         assert_eq!(state.host_port, 4400);
         assert_eq!(state.sacrum_bind_host, "");
+        assert_eq!(state.sacrum_image_ref, "ghcr.io/camonz/sacrum:master");
         assert_eq!(state.provisioning_state, ProvisioningState::Unverified);
         assert_eq!(
             paths
@@ -549,14 +577,7 @@ mod tests {
         );
 
         let error = controller
-            .adopt_legacy_stack(
-                &paths,
-                &offered,
-                None,
-                DIGEST_IMAGE,
-                BackendImageChannel::BackendRelease,
-                true,
-            )
+            .adopt_legacy_stack(&paths, &offered, BackendImageChannel::BackendRelease, true)
             .await
             .expect_err("changed evidence must not be adopted");
 
@@ -565,5 +586,53 @@ mod tests {
             LocalBackendError::UnsafeLegacyStack(reason) if reason.contains("changed")
         ));
         assert!(!paths.root.exists());
+    }
+
+    #[tokio::test]
+    async fn adoption_rejects_saved_state_that_does_not_match_new_docker_evidence() {
+        let base = legacy_inspect_json(LEGACY_POSTGRES_IMAGE, LEGACY_VOLUME);
+        let changed = [
+            base.replace("\"HostPort\":\"4400\"", "\"HostPort\":\"4401\""),
+            legacy_inspect_json_with(LEGACY_POSTGRES_IMAGE, LEGACY_VOLUME, "127.0.0.1"),
+            legacy_inspect_json_with_sacrum(
+                LEGACY_POSTGRES_IMAGE,
+                LEGACY_VOLUME,
+                "ghcr.io/camonz/sacrum:release",
+            ),
+        ];
+
+        for changed in changed {
+            let mut outputs = legacy_outputs(Some(base.clone()));
+            outputs.extend(legacy_outputs(Some(base.clone())));
+            outputs.extend(legacy_outputs(Some(changed.clone())));
+            outputs.extend(legacy_outputs(Some(changed)));
+            let runner = MockRunner::with_outputs(outputs);
+            let controller = controller(runner, MockHealth::default());
+            let temp = tempfile::tempdir().expect("temp dir");
+            let paths = ManagedStackPaths::from_data_dir(temp.path());
+
+            let offered = controller
+                .detect_legacy_stack()
+                .await
+                .expect("detect initial legacy stack");
+            controller
+                .adopt_legacy_stack(&paths, &offered, BackendImageChannel::BackendRelease, true)
+                .await
+                .expect("adopt initial legacy stack");
+            let updated = controller
+                .detect_legacy_stack()
+                .await
+                .expect("detect updated legacy stack");
+            let error = controller
+                .adopt_legacy_stack(&paths, &updated, BackendImageChannel::BackendRelease, true)
+                .await
+                .expect_err("stale saved state must be rejected");
+
+            assert!(matches!(
+                error,
+                LocalBackendError::UnsafeLegacyStack(reason)
+                    if reason.contains("saved adopted state does not match")
+            ));
+        }
     }
 }

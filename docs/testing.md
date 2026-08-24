@@ -122,6 +122,14 @@ cargo test -p gui --lib docker_smoke_adopts_dev_backend_without_reseeding_or_rep
   -- --ignored --nocapture
 ```
 
+The default Rust and GUI test suites do not require Docker for local-backend
+adoption. Unit and component tests use temporary application-data paths and
+mocked Docker runners; they must not write the user's shared `config.toml`,
+start or remove containers, or delete/replace volumes. The ignored adoption
+smoke test is the only adoption-specific test that creates Docker resources,
+and it is opt-in, requires an isolated Docker environment, and cleans up only
+resources it created.
+
 ## Linting and Formatting
 
 ```bash

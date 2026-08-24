@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { LocalBackendProgressStage } from "../bindings";
 
 /** The updater channel configured for this GUI build. */
 export const GUI_UPDATE_CHANNEL = "release";
@@ -79,13 +80,34 @@ export interface LocalBackendUpdateResult {
   generated_at?: string | null;
 }
 
-export type BackendManagement = "managed_local" | "external" | "not_configured";
+export interface LocalBackendUpdateDiagnostic {
+  code: string;
+  retryable: boolean;
+  message: string;
+}
+
+export type BackendManagement =
+  | "managed_local"
+  | "adoptable_legacy"
+  | "adoption_recovery_required"
+  | "external"
+  | "not_configured";
 
 export type LocalBackendUpdateApplyState =
   | { status: "idle" }
   | { status: "applying" }
   | { status: "success"; result: LocalBackendUpdateResult }
   | { status: "error"; message: string };
+
+export type LocalBackendAdoptionState =
+  | { status: "idle" }
+  | {
+      status: "adopting";
+      stage?: LocalBackendProgressStage;
+      message?: string;
+    }
+  | { status: "success"; message: string }
+  | { status: "error"; message: string; retryable: boolean };
 
 export interface LocalBackendUpdateState {
   management: BackendManagement;
@@ -96,8 +118,12 @@ export interface LocalBackendUpdateState {
   currentImageRef: string | null;
   currentImageCreatedAt: string | null;
   update: LocalBackendUpdateInfo | null;
+  adoptionMessage: string | null;
+  diagnostic: LocalBackendUpdateDiagnostic | null;
   error: string | null;
+  checking: boolean;
   apply: LocalBackendUpdateApplyState;
+  adoption: LocalBackendAdoptionState;
 }
 
 export type GuiUpdateComponentState =
@@ -227,8 +253,12 @@ export const initialGuiUpdateState: GuiUpdateState = {
     currentImageRef: null,
     currentImageCreatedAt: null,
     update: null,
+    adoptionMessage: null,
+    diagnostic: null,
     error: null,
+    checking: false,
     apply: { status: "idle" },
+    adoption: { status: "idle" },
   },
 };
 

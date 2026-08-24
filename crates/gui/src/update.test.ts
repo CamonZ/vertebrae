@@ -8,6 +8,7 @@ import {
 import {
   GUI_UPDATE_CHANNEL,
   GUI_UPDATE_INTERVAL_MS,
+  adoptLocalBackend,
   applyApprovedGuiUpdate,
   applyApprovedLocalBackendUpdate,
   checkGuiUpdate,
@@ -220,9 +221,157 @@ describe("GUI update checker", () => {
           "ghcr.io/camonz/sacrum@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
         generatedAt: "2026-08-21T00:00:00Z",
       },
+      adoptionMessage: null,
+      diagnostic: null,
       error: null,
     });
     expect(invokeMock).toHaveBeenCalledWith("check_local_backend_update");
+  });
+
+  it("reports an adoptable loopback legacy backend without auto-adopting it", async () => {
+    invokeMock.mockResolvedValue({
+      management: "adoptable_legacy",
+      configured: true,
+      channel: null,
+      current_image_ref: null,
+      latest: null,
+      available: false,
+      adoption_message:
+        "Confirm adoption to preserve the PostgreSQL 17 volume.",
+      diagnostic: null,
+    });
+
+    await expect(checkLocalBackendUpdate()).resolves.toMatchObject({
+      management: "adoptable_legacy",
+      configured: true,
+      adoptionMessage: "Confirm adoption to preserve the PostgreSQL 17 volume.",
+      diagnostic: null,
+      update: null,
+    });
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("confirms adoption explicitly and refreshes the managed backend status", async () => {
+    const adoptionResult = {
+      status: "ready" as const,
+      backend_url: "http://127.0.0.1:8000",
+      adoption_message: null,
+    };
+    const managedStatus = {
+      management: "managed_local",
+      configured: true,
+      channel: "release",
+      current_version: "0.4.0",
+      current_build: "backend-build",
+      current_image_ref: "current-image",
+      current_generated_at: "2026-08-21T00:00:00Z",
+      latest: null,
+      available: false,
+      adoption_message: null,
+      diagnostic: null,
+    };
+    invokeMock
+      .mockResolvedValueOnce(adoptionResult)
+      .mockResolvedValueOnce(managedStatus);
+
+    await expect(adoptLocalBackend()).resolves.toEqual(adoptionResult);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "adopt_local_backend", {
+      confirmed: true,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "check_local_backend_update");
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "initialize_project",
+      expect.anything()
+    );
+    expect(useGuiUpdateStore.getState().localBackend).toMatchObject({
+      management: "managed_local",
+      currentVersion: "0.4.0",
+      adoption: {
+        status: "success",
+      },
+    });
+  });
+
+  it("reports a volume-only or unsafe legacy backend as recovery-required", async () => {
+    invokeMock.mockResolvedValue({
+      management: "adoption_recovery_required",
+      configured: true,
+      channel: null,
+      current_image_ref: null,
+      latest: null,
+      available: false,
+      adoption_message: null,
+      diagnostic: {
+        code: "legacy_host_port_required",
+        retryable: false,
+        message: "Provide the prior host port; existing data was preserved.",
+      },
+    });
+
+    await expect(checkLocalBackendUpdate()).resolves.toMatchObject({
+      management: "adoption_recovery_required",
+      configured: true,
+      diagnostic: {
+        code: "legacy_host_port_required",
+        retryable: false,
+      },
+      update: null,
+    });
+  });
+
+  it("keeps Docker detection errors out of the adoption action branch", async () => {
+    invokeMock.mockResolvedValue({
+      management: "adoption_recovery_required",
+      configured: true,
+      channel: null,
+      current_image_ref: null,
+      latest: null,
+      available: false,
+      adoption_message: null,
+      diagnostic: {
+        code: "docker_unavailable",
+        retryable: true,
+        message: "Start Docker Desktop and check again; no resources were changed.",
+      },
+    });
+
+    await expect(checkLocalBackendUpdate()).resolves.toMatchObject({
+      management: "adoption_recovery_required",
+      diagnostic: {
+        code: "docker_unavailable",
+        retryable: true,
+      },
+      update: null,
+    });
+  });
+
+  it("keeps remote and absent backend statuses distinct", async () => {
+    for (const status of [
+      {
+        management: "external",
+        configured: true,
+        channel: null,
+        current_image_ref: null,
+        latest: null,
+        available: false,
+      },
+      {
+        management: "not_configured",
+        configured: false,
+        channel: null,
+        current_image_ref: null,
+        latest: null,
+        available: false,
+      },
+    ]) {
+      invokeMock.mockResolvedValueOnce(status);
+      await expect(checkLocalBackendUpdate()).resolves.toMatchObject({
+        management: status.management,
+        configured: status.configured,
+        update: null,
+      });
+    }
   });
 
   it("applies a local backend image only after explicit approval", async () => {
@@ -375,6 +524,8 @@ describe("GUI update checker", () => {
       currentBuild: "backend-current-build",
       currentImageRef: "current-image",
       currentImageCreatedAt: "2026-08-20T00:00:00Z",
+      adoptionMessage: null,
+      diagnostic: null,
       update: {
         channel: "release" as const,
         currentImageRef: "current-image",

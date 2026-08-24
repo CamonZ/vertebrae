@@ -490,8 +490,6 @@ mod tests {
                 .adopt_legacy_stack(
                     &paths,
                     &LegacyStackDetection::Compatible(detection),
-                    None,
-                    image_ref.clone(),
                     BackendImageChannel::BackendMaster,
                     true,
                 )
@@ -501,9 +499,10 @@ mod tests {
             assert_eq!(state.postgres_volume(), "vertebrae-dev_pgdata");
             let saved_token = paths.ensure_api_token(&api_token)?;
             assert_eq!(saved_token, api_token);
-            controller.up_detached(&paths, &mut state).await?;
+            controller.up_adopted(&paths, &mut state).await?;
             controller.wait_until_healthy(&paths, &state).await?;
             let status = controller.status(&paths, &state).await?;
+            controller.authenticate_backend(&state, &api_token).await?;
             let settings = postgres_exec(
                 &controller,
                 &paths,
@@ -521,6 +520,18 @@ mod tests {
             assert_eq!(settings_lines.next().unwrap_or_default().trim(), "logical 10 10");
             let authenticated = graphql_projects(&state, &api_token).await?;
             assert!(authenticated["data"]["projects"].is_array());
+            let mut status = status;
+            for _ in 0..30 {
+                if status.iter().all(|service| {
+                    matches!(service.service.as_str(), "postgres" | "sacrum")
+                        && service.state == "running"
+                        && service.health.as_deref() == Some("healthy")
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                status = controller.status(&paths, &state).await?;
+            }
             Ok::<_, LocalBackendError>(status)
         }
         .await;
@@ -532,10 +543,13 @@ mod tests {
             String::from_utf8_lossy(&cleanup.stderr)
         );
         let status = outcome.expect("run legacy adoption smoke test");
-        assert!(status.iter().all(|service| {
-            matches!(service.service.as_str(), "postgres" | "sacrum")
-                && service.state == "running"
-                && service.health.as_deref() == Some("healthy")
-        }));
+        assert!(
+            status.iter().all(|service| {
+                matches!(service.service.as_str(), "postgres" | "sacrum")
+                    && service.state == "running"
+                    && service.health.as_deref() == Some("healthy")
+            }),
+            "unexpected adopted stack status: {status:?}"
+        );
     }
 }

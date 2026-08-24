@@ -85,6 +85,22 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  /**
+   * Adopt an existing legacy development backend without initializing a project.
+   */
+  async adoptLocalBackend(
+    confirmed: boolean
+  ): Promise<Result<LocalBackendAdoptionResult, CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("adopt_local_backend", { confirmed }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async checkLocalBackendUpdate(): Promise<
     Result<LocalBackendUpdateStatus, CommandError>
   > {
@@ -1836,6 +1852,12 @@ export type LocalBackendSetupResult = {
   adoption_message: string | null;
 };
 export type LocalBackendSetupStatus = "ready" | "adoption_required";
+export type LocalBackendAdoptionResult = {
+  status: LocalBackendAdoptionStatus;
+  backend_url: string | null;
+  adoption_message: string | null;
+};
+export type LocalBackendAdoptionStatus = "ready" | "adoption_required";
 export type LocalBackendUpdateRelease = {
   channel: string;
   version: string;
@@ -1853,6 +1875,13 @@ export type LocalBackendUpdateStatus = {
   current_generated_at: string | null;
   latest: LocalBackendUpdateRelease | null;
   available: boolean;
+  adoption_message: string | null;
+  diagnostic: LocalBackendUpdateDiagnostic | null;
+};
+export type LocalBackendUpdateDiagnostic = {
+  code: string;
+  retryable: boolean;
+  message: string;
 };
 export type LocalBackendUpdateResult = {
   channel: string;
