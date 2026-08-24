@@ -969,37 +969,37 @@ function LocalBackendUpdateSection({
         </Button>
       </div>
       <dl className="mt-6 grid gap-4 border-y border-[var(--color-line)] py-4 sm:grid-cols-4">
-        <div>
+        <div className="min-w-0">
           <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
           <dd className="mt-1 text-sm text-[var(--color-fg)]">
             {channelLabel(update.channel)}
           </dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-xs text-[var(--color-fg-mute)]">Current image</dt>
-          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
             {imageDigest(update.currentImageRef)}
           </dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
-          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
             {update.build}
           </dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-xs text-[var(--color-fg-mute)]">
             Current published
           </dt>
-          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
             {backendImageTimestamp(update.currentImageCreatedAt)}
           </dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-xs text-[var(--color-fg-mute)]">
             Target published
           </dt>
-          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
             {backendImageTimestamp(update.generatedAt)}
           </dd>
         </div>
@@ -1203,29 +1203,29 @@ function BackendCurrentDetails({ state }: { state: GuiUpdateState }) {
       className="mt-5 grid gap-4 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 sm:grid-cols-4"
       data-testid="settings-backend-current"
     >
-      <div>
+      <div className="min-w-0">
         <dt className="text-xs text-[var(--color-fg-mute)]">Current version</dt>
-        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
           {backend.currentVersion ?? NOT_PROVIDED}
         </dd>
       </div>
-      <div>
-        <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
-        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
-          {backend.currentBuild ?? NOT_PROVIDED}
-        </dd>
-      </div>
-      <div>
+      <div className="min-w-0">
         <dt className="text-xs text-[var(--color-fg-mute)]">Image</dt>
-        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
           {backend.currentImageRef
             ? imageDigest(backend.currentImageRef)
             : NOT_PROVIDED}
         </dd>
       </div>
-      <div>
+      <div className="min-w-0">
+        <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
+        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
+          {backend.currentBuild ?? NOT_PROVIDED}
+        </dd>
+      </div>
+      <div className="min-w-0">
         <dt className="text-xs text-[var(--color-fg-mute)]">Published</dt>
-        <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
           {backendImageTimestamp(backend.currentImageCreatedAt)}
         </dd>
       </div>
