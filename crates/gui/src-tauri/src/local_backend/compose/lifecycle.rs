@@ -308,7 +308,7 @@ where
         secrets: &RuntimeSecrets,
     ) -> Result<Vec<ServiceStatus>, LocalBackendError> {
         let output = self
-            .checked_stack(
+            .checked_stack_raw(
                 self.compose_request(
                     paths,
                     state,
@@ -714,7 +714,7 @@ mod tests {
     #[tokio::test]
     async fn adopted_mutation_requires_the_compatible_external_volume() {
         let (_temp, paths, mut state) = stack_fixture(StackKind::AdoptedLegacy);
-        let status_json = r#"[{"Name":"vertebrae-dev-postgres-1","Service":"postgres","State":"running","Health":"healthy","ExitCode":0}]"#;
+        let status_json = r#"[{"Name":"vertebrae-dev-postgres-1","Service":"postgres","State":"running","Health":"healthy","ExitCode":0},{"Name":"vertebrae-dev-sacrum-1","Service":"sacrum","State":"running","Health":"healthy","ExitCode":0}]"#;
         let runner = MockRunner::after_prerequisites([
             CommandOutput::success("vertebrae-dev_pgdata\n"),
             CommandOutput::success(legacy_volume_inspect("vertebrae-dev", "pgdata")),
@@ -724,10 +724,12 @@ mod tests {
         ]);
         let controller = controller(runner.clone(), MockHealth::default());
 
-        controller
-            .up_detached(&paths, &mut state)
+        let status = controller
+            .up_adopted(&paths, &mut state)
             .await
             .expect("reconcile adopted stack");
+        assert_eq!(status[0].service, "postgres");
+        assert_eq!(status[1].service, "sacrum");
 
         let requests = runner.requests();
         let up = &requests[6];
@@ -738,6 +740,15 @@ mod tests {
         ] {
             assert_eq!(up.env_value(name), Some(std::ffi::OsStr::new(value)));
         }
+        assert!(up.args_as_strings().ends_with(&[
+            "up".to_string(),
+            "--detach".to_string(),
+            "--no-recreate".to_string(),
+            "--pull".to_string(),
+            "never".to_string(),
+            "postgres".to_string(),
+            "sacrum".to_string(),
+        ]));
     }
 
     #[tokio::test]

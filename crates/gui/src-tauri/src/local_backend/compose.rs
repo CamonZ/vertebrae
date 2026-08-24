@@ -520,6 +520,18 @@ mod tests {
             assert_eq!(settings_lines.next().unwrap_or_default().trim(), "logical 10 10");
             let authenticated = graphql_projects(&state, &api_token).await?;
             assert!(authenticated["data"]["projects"].is_array());
+            let mut status = status;
+            for _ in 0..30 {
+                if status.iter().all(|service| {
+                    matches!(service.service.as_str(), "postgres" | "sacrum")
+                        && service.state == "running"
+                        && service.health.as_deref() == Some("healthy")
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                status = controller.status(&paths, &state).await?;
+            }
             Ok::<_, LocalBackendError>(status)
         }
         .await;
@@ -531,10 +543,13 @@ mod tests {
             String::from_utf8_lossy(&cleanup.stderr)
         );
         let status = outcome.expect("run legacy adoption smoke test");
-        assert!(status.iter().all(|service| {
-            matches!(service.service.as_str(), "postgres" | "sacrum")
-                && service.state == "running"
-                && service.health.as_deref() == Some("healthy")
-        }));
+        assert!(
+            status.iter().all(|service| {
+                matches!(service.service.as_str(), "postgres" | "sacrum")
+                    && service.state == "running"
+                    && service.health.as_deref() == Some("healthy")
+            }),
+            "unexpected adopted stack status: {status:?}"
+        );
     }
 }
