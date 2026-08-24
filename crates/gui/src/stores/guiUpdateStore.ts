@@ -98,6 +98,12 @@ export type LocalBackendUpdateApplyState =
   | { status: "success"; result: LocalBackendUpdateResult }
   | { status: "error"; message: string };
 
+export type LocalBackendAdoptionState =
+  | { status: "idle" }
+  | { status: "adopting" }
+  | { status: "success"; message: string }
+  | { status: "error"; message: string; retryable: boolean };
+
 export interface LocalBackendUpdateState {
   management: BackendManagement;
   configured: boolean;
@@ -111,6 +117,7 @@ export interface LocalBackendUpdateState {
   diagnostic: LocalBackendUpdateDiagnostic | null;
   error: string | null;
   apply: LocalBackendUpdateApplyState;
+  adoption: LocalBackendAdoptionState;
 }
 
 export type GuiUpdateComponentState =
@@ -244,6 +251,7 @@ export const initialGuiUpdateState: GuiUpdateState = {
     diagnostic: null,
     error: null,
     apply: { status: "idle" },
+    adoption: { status: "idle" },
   },
 };
 

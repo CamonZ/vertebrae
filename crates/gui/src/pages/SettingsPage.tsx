@@ -24,10 +24,12 @@ import {
   type GuiUpdateInfo,
   type GuiUpdateApplyState,
   type GuiUpdateState,
+  type LocalBackendAdoptionState,
   type LocalBackendUpdateApplyState,
   type LocalBackendUpdateInfo,
 } from "../stores/guiUpdateStore";
 import {
+  adoptLocalBackend,
   applyApprovedGuiUpdate,
   applyApprovedLocalBackendUpdate,
   relaunchGuiApplication,
@@ -670,6 +672,167 @@ function LocalBackendUpdateApplyStatus({
   );
 }
 
+function LocalBackendAdoptionStatus({
+  adoption,
+}: {
+  adoption: LocalBackendAdoptionState;
+}) {
+  if (adoption.status === "idle") return null;
+  if (adoption.status === "adopting") {
+    return (
+      <UpdateStateMessage
+        intent="status"
+        testId="settings-local-backend-adoption-progress"
+      >
+        Adopting the existing local backend. Its PostgreSQL 17 volume and
+        account/token will be preserved while the backend container is
+        reconciled…
+      </UpdateStateMessage>
+    );
+  }
+  if (adoption.status === "error") {
+    return (
+      <UpdateStateMessage
+        intent="alert"
+        testId="settings-local-backend-adoption-error"
+      >
+        Backend adoption failed: {adoption.message}
+      </UpdateStateMessage>
+    );
+  }
+
+  return (
+    <UpdateStateMessage
+      intent="status"
+      testId="settings-local-backend-adoption-result"
+    >
+      {adoption.message}
+    </UpdateStateMessage>
+  );
+}
+
+function LocalBackendAdoptionSection({
+  message,
+  adoption,
+  onAdopt,
+}: {
+  message: string | null;
+  adoption: LocalBackendAdoptionState;
+  onAdopt: () => void;
+}) {
+  const adopting = adoption.status === "adopting";
+  const canRetry = adoption.status !== "error" || adoption.retryable;
+  return (
+    <article
+      className="mt-7 rounded-[var(--radius-lg)] border border-[var(--color-warn)]/40 bg-[var(--color-warn-wash)] p-5 sm:p-6"
+      data-testid="settings-local-backend-adoption"
+    >
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-warn)]">
+            Existing local backend detected
+          </p>
+          <h3 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
+            Adopt this backend in Vertebrae
+          </h3>
+        </div>
+        <Button
+          variant="primary"
+          onClick={onAdopt}
+          disabled={adopting || !canRetry}
+          data-testid="settings-adopt-local-backend"
+        >
+          {adopting
+            ? "Adopting…"
+            : adoption.status === "error"
+              ? canRetry
+                ? "Retry adoption"
+                : "Adoption needs attention"
+              : "Adopt existing backend"}
+        </Button>
+      </div>
+      <div className="mt-5 space-y-2 text-sm leading-6 text-[var(--color-fg-soft)]">
+        <p>
+          Adoption preserves the existing PostgreSQL 17 volume, database
+          account, and configured API token. It may reconcile the backend
+          container so Vertebrae can manage the existing service.
+        </p>
+        {message && <p>{message}</p>}
+      </div>
+      <LocalBackendAdoptionStatus adoption={adoption} />
+    </article>
+  );
+}
+
+function LocalBackendAdoptionRecovery({
+  diagnostic,
+}: {
+  diagnostic: GuiUpdateState["localBackend"]["diagnostic"];
+}) {
+  return (
+    <UpdateStateMessage
+      intent="alert"
+      testId="settings-local-backend-adoption-recovery"
+    >
+      <p className="font-medium">Local backend adoption needs recovery.</p>
+      <p className="mt-2 leading-6">
+        {diagnostic?.message ??
+          "The existing backend could not be adopted safely. Resolve the reported condition and check again."}
+      </p>
+    </UpdateStateMessage>
+  );
+}
+
+function AdoptLocalBackendDialog({
+  message,
+  onConfirm,
+  onClose,
+}: {
+  message: string | null;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Confirm local backend adoption"
+      variant="sheet"
+      className="max-w-[calc(100vw-2rem)]"
+    >
+      <div className="space-y-5">
+        <p className="text-sm leading-6 text-[var(--color-fg-soft)]">
+          This is an explicit adoption of the existing backend. Vertebrae will
+          preserve the PostgreSQL 17 volume, database account, and configured
+          API token. It may reconcile the Docker container, but it will not
+          initialize a project, reseed data, or replace/delete the volume.
+        </p>
+        {message && (
+          <p className="rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 text-sm leading-6 text-[var(--color-fg-soft)]">
+            {message}
+          </p>
+        )}
+        <div className="flex flex-col-reverse gap-2 border-t border-[var(--color-line)] pt-4 sm:flex-row sm:justify-end">
+          <Button
+            variant="ghost"
+            onClick={onClose}
+            data-testid="settings-adopt-local-backend-cancel"
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={onConfirm}
+            data-testid="settings-adopt-local-backend-confirm"
+          >
+            Confirm adoption
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function ReviewLocalBackendUpdateDialog({
   update,
   onApprove,
@@ -1208,9 +1371,11 @@ function FrontendUpdatesSection({
 function BackendUpdatesSection({
   state,
   onReview,
+  onAdopt,
 }: {
   state: GuiUpdateState;
   onReview: () => void;
+  onAdopt: () => void;
 }) {
   const backend = state.localBackend;
   const management =
@@ -1242,9 +1407,18 @@ function BackendUpdatesSection({
             automatically.
           </UpdateStateMessage>
         </>
+      ) : management === "adoptable_legacy" ? (
+        <LocalBackendAdoptionSection
+          message={backend.adoptionMessage}
+          adoption={backend.adoption}
+          onAdopt={onAdopt}
+        />
+      ) : management === "adoption_recovery_required" ? (
+        <LocalBackendAdoptionRecovery diagnostic={backend.diagnostic} />
       ) : management === "managed_local" ? (
         <>
           <BackendCurrentDetails state={state} />
+          <LocalBackendAdoptionStatus adoption={backend.adoption} />
           {backendApply.status !== "idle" && (
             <LocalBackendUpdateApplyStatus apply={backendApply} />
           )}
@@ -1286,15 +1460,21 @@ function UpdatesSection({
   state,
   onReview,
   onReviewBackend,
+  onAdoptBackend,
 }: {
   state: GuiUpdateState;
   onReview: () => void;
   onReviewBackend: () => void;
+  onAdoptBackend: () => void;
 }) {
   return (
     <div className="mt-8 space-y-8" data-testid="settings-updates">
       <FrontendUpdatesSection state={state} onReview={onReview} />
-      <BackendUpdatesSection state={state} onReview={onReviewBackend} />
+      <BackendUpdatesSection
+        state={state}
+        onReview={onReviewBackend}
+        onAdopt={onAdoptBackend}
+      />
     </div>
   );
 }
@@ -1323,6 +1503,8 @@ export function SettingsPage({
   const [activeSection, setActiveSection] = useState<SettingsSection>("chat");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [localBackendReviewOpen, setLocalBackendReviewOpen] = useState(false);
+  const [localBackendAdoptionReviewOpen, setLocalBackendAdoptionReviewOpen] =
+    useState(false);
   const updateState = useGuiUpdateStore();
   const storageWarning = useLocalChatDefaultsStore(
     (state) => state.storageWarning
@@ -1618,6 +1800,13 @@ export function SettingsPage({
                     setLocalBackendReviewOpen(true);
                   }
                 }}
+                onAdoptBackend={() => {
+                  if (
+                    updateState.localBackend.management === "adoptable_legacy"
+                  ) {
+                    setLocalBackendAdoptionReviewOpen(true);
+                  }
+                }}
               />
             </>
           ) : (
@@ -1713,6 +1902,16 @@ export function SettingsPage({
           update={updateState.localBackend.update}
           onApprove={approveLocalBackendUpdate}
           onClose={() => setLocalBackendReviewOpen(false)}
+        />
+      )}
+      {localBackendAdoptionReviewOpen && (
+        <AdoptLocalBackendDialog
+          message={updateState.localBackend.adoptionMessage}
+          onConfirm={() => {
+            setLocalBackendAdoptionReviewOpen(false);
+            void adoptLocalBackend();
+          }}
+          onClose={() => setLocalBackendAdoptionReviewOpen(false)}
         />
       )}
     </main>

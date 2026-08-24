@@ -1,5 +1,6 @@
 import { check } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
+import type { LocalBackendAdoptionResult } from "./bindings";
 import { useNotificationStore } from "./stores/notificationStore";
 import {
   GUI_UPDATE_CHANNELS,
@@ -359,6 +360,98 @@ export async function checkLocalBackendUpdate(): Promise<LocalBackendUpdateCheck
       diagnostic: null,
       error: updateCheckErrorMessage(reason),
     };
+  }
+}
+
+function updateLocalBackendStore(checkResult: LocalBackendUpdateCheck): void {
+  useGuiUpdateStore.setState((state) => ({
+    ...state,
+    localBackend: checkResult.error
+      ? {
+          ...state.localBackend,
+          error: checkResult.error,
+        }
+      : {
+          ...state.localBackend,
+          management: checkResult.management,
+          configured: checkResult.configured,
+          channel: checkResult.channel,
+          currentVersion: checkResult.currentVersion,
+          currentBuild: checkResult.currentBuild,
+          currentImageRef: checkResult.currentImageRef,
+          currentImageCreatedAt: checkResult.currentImageCreatedAt,
+          update: checkResult.update,
+          adoptionMessage: checkResult.adoptionMessage,
+          diagnostic: checkResult.diagnostic,
+          error: null,
+        },
+  }));
+}
+
+/** Refresh the backend status in the shared update store without any mutation. */
+export async function refreshLocalBackendUpdateState(): Promise<LocalBackendUpdateCheck> {
+  const checkResult = await checkLocalBackendUpdate();
+  updateLocalBackendStore(checkResult);
+  return checkResult;
+}
+
+/**
+ * Explicitly adopt a detected legacy backend, then refresh its read-only
+ * update status. This command never initializes a project or selects one.
+ */
+export async function adoptLocalBackend(): Promise<LocalBackendAdoptionResult | null> {
+  useGuiUpdateStore.setState((state) => ({
+    ...state,
+    localBackend: {
+      ...state.localBackend,
+      adoption: { status: "adopting" },
+    },
+  }));
+
+  try {
+    const result = await invoke<LocalBackendAdoptionResult>(
+      "adopt_local_backend",
+      { confirmed: true }
+    );
+    if (result.status !== "ready") {
+      throw new Error(
+        result.adoption_message ??
+          "Backend adoption still requires explicit confirmation."
+      );
+    }
+
+    const refreshed = await refreshLocalBackendUpdateState();
+    if (refreshed.error) {
+      throw new Error(
+        `Backend adoption completed, but its status could not be refreshed: ${refreshed.error}`
+      );
+    }
+
+    useGuiUpdateStore.setState((state) => ({
+      ...state,
+      localBackend: {
+        ...state.localBackend,
+        adoption: {
+          status: "success",
+          message:
+            "The existing PostgreSQL 17 volume and backend account/token were preserved.",
+        },
+      },
+    }));
+    return result;
+  } catch (reason) {
+    const message = updateCheckErrorMessage(reason);
+    const refreshed = await refreshLocalBackendUpdateState();
+    const retryable =
+      refreshed.error !== null || refreshed.management === "adoptable_legacy";
+    useGuiUpdateStore.setState((state) => ({
+      ...state,
+      localBackend: {
+        ...state.localBackend,
+        adoption: { status: "error", message, retryable },
+      },
+    }));
+    return null;
   }
 }
 

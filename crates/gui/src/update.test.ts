@@ -8,6 +8,7 @@ import {
 import {
   GUI_UPDATE_CHANNEL,
   GUI_UPDATE_INTERVAL_MS,
+  adoptLocalBackend,
   applyApprovedGuiUpdate,
   applyApprovedLocalBackendUpdate,
   checkGuiUpdate,
@@ -248,6 +249,48 @@ describe("GUI update checker", () => {
       update: null,
     });
     expect(invokeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("confirms adoption explicitly and refreshes the managed backend status", async () => {
+    const adoptionResult = {
+      status: "ready" as const,
+      backend_url: "http://127.0.0.1:8000",
+      adoption_message: null,
+    };
+    const managedStatus = {
+      management: "managed_local",
+      configured: true,
+      channel: "release",
+      current_version: "0.4.0",
+      current_build: "backend-build",
+      current_image_ref: "current-image",
+      current_generated_at: "2026-08-21T00:00:00Z",
+      latest: null,
+      available: false,
+      adoption_message: null,
+      diagnostic: null,
+    };
+    invokeMock
+      .mockResolvedValueOnce(adoptionResult)
+      .mockResolvedValueOnce(managedStatus);
+
+    await expect(adoptLocalBackend()).resolves.toEqual(adoptionResult);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "adopt_local_backend", {
+      confirmed: true,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "check_local_backend_update");
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "initialize_project",
+      expect.anything()
+    );
+    expect(useGuiUpdateStore.getState().localBackend).toMatchObject({
+      management: "managed_local",
+      currentVersion: "0.4.0",
+      adoption: {
+        status: "success",
+      },
+    });
   });
 
   it("reports a volume-only or unsafe legacy backend as recovery-required", async () => {
