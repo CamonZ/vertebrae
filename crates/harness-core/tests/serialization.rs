@@ -451,6 +451,32 @@ fn capabilities_and_all_control_decisions_are_serializable() {
 }
 
 #[test]
+fn legacy_capabilities_default_missing_speed_tier_declarations() {
+    let legacy = serde_json::json!({
+        "provider": "test",
+        "available": true,
+        "persistent_sessions": true,
+        "one_shot_runs": true,
+        "session_resumption": true,
+        "models": [{
+            "id": "model",
+            "label": "Model",
+            "reasoning_efforts": ["high"]
+        }],
+        "permission_modes": [],
+        "approval_categories": [],
+        "questions": {
+            "multiple_selection": false,
+            "free_form_answers": false,
+            "automatic_resolution": false
+        }
+    });
+
+    let capabilities: HarnessCapabilities = serde_json::from_value(legacy).unwrap();
+    assert!(capabilities.models[0].supported_speed_tiers.is_empty());
+}
+
+#[test]
 fn control_scenarios_round_trip_as_correlated_durable_pairs() {
     let scenarios = vec![
         (

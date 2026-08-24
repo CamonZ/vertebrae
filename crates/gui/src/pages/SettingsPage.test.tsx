@@ -56,12 +56,17 @@ const catalog = {
           id: "gpt-5.6-luna",
           label: "GPT-5.6-Luna",
           supported_reasoning_effort_ids: ["medium", "high"],
+          supported_speed_tier_ids: ["default", "fast"],
         },
       ],
       default_reasoning_effort: "medium",
       reasoning_efforts: [
         { id: "medium", label: "Medium" },
         { id: "high", label: "High" },
+      ],
+      speed_tiers: [
+        { id: "default", label: "Standard", is_default: true },
+        { id: "fast", label: "Fast", is_default: false },
       ],
       permission_modes: [
         { id: "default" as const, label: "Default", is_default: true },
@@ -622,11 +627,15 @@ describe("SettingsPage", () => {
       screen.getByTestId("codex-default-reasoning-effort"),
       "high"
     );
+    await user.selectOptions(
+      screen.getByTestId("codex-default-speed-tier"),
+      "fast"
+    );
 
     await waitFor(() => {
       expect(useLocalChatDefaultsStore.getState().defaults).toEqual({
         claude: { modelId: "opus", permissionMode: "plan" },
-        codex: { reasoningEffort: "high" },
+        codex: { reasoningEffort: "high", speedTier: "fast" },
       });
       expect(useLocalChatDefaultsStore.getState().defaultHarness).toBe("codex");
       expect(useUIStore.getState().theme).toBe("dark");
@@ -644,7 +653,7 @@ describe("SettingsPage", () => {
       defaultHarness: "codex",
       harnesses: {
         claude: { modelId: "opus", permissionMode: "plan" },
-        codex: { reasoningEffort: "high" },
+        codex: { reasoningEffort: "high", speedTier: "fast" },
       },
     });
   });

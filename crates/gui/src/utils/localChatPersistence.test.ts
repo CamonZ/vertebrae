@@ -32,6 +32,7 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     projectPath: "/repo",
     selectedModelId: "opus",
     selectedReasoningEffort: "high",
+    selectedSpeedTier: "fast",
     model: "claude-sonnet-4",
     tokenUsage: { used: 120, max: 200000 },
     createdAt: "2026-01-01T00:00:00Z",
@@ -79,6 +80,7 @@ describe("localChatPersistence", () => {
       projectPath: "/repo",
       selectedModelId: "opus",
       selectedReasoningEffort: "high",
+      selectedSpeedTier: "fast",
       permissionMode: "auto",
       model: "claude-sonnet-4",
       tokenUsage: { used: 120, max: 200000 },
@@ -128,6 +130,14 @@ describe("localChatPersistence", () => {
     expect(
       listPersistedLocalChatSessions().map((session) => session.id)
     ).toEqual(["untouched"]);
+  });
+
+  it("loads legacy sessions without a speed tier", () => {
+    const legacy = makeSession();
+    delete (legacy as Partial<ChatSession>).selectedSpeedTier;
+
+    const normalized = normalizeLocalChatSession(legacy);
+    expect(normalized?.selectedSpeedTier).toBeUndefined();
   });
 
   it("ignores old browser localStorage session records", () => {
