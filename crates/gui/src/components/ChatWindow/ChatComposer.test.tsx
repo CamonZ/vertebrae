@@ -441,6 +441,9 @@ describe("ChatComposer", () => {
       "default",
       "fast",
     ]);
+    expect(
+      Array.from(picker.options).map((option) => option.textContent)
+    ).toEqual(["Standard", "Fast"]);
     expect(picker).toHaveValue("default");
     fireEvent.change(picker, { target: { value: "fast" } });
     expect(onSpeedTierChange).toHaveBeenCalledOnce();

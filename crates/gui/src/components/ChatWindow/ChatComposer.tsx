@@ -366,7 +366,7 @@ export function ChatComposer({
                       )}
                       {speedTiers.map((tier) => (
                         <option key={tier.id} value={tier.id}>
-                          {tier.label}{tier.is_default ? " (default)" : ""}
+                          {tier.label}
                         </option>
                       ))}
                     </select>
