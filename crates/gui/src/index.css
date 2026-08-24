@@ -2797,6 +2797,7 @@ html.light ::selection {
 }
 .hc-panel .hc-model-picker,
 .hc-panel .hc-effort-picker,
+.hc-panel .hc-speed-picker,
 .hc-panel .hc-provider-picker {
   display: inline-flex;
   min-width: 0;
@@ -2819,6 +2820,7 @@ html.light ::selection {
 }
 .hc-panel .hc-model-picker select,
 .hc-panel .hc-effort-picker select,
+.hc-panel .hc-speed-picker select,
 .hc-panel .hc-provider-picker select,
 .hc-panel .hc-permission-picker select {
   min-width: 78px;
@@ -2842,6 +2844,7 @@ html.light ::selection {
 }
 .hc-panel .hc-model-picker select:focus-visible,
 .hc-panel .hc-effort-picker select:focus-visible,
+.hc-panel .hc-speed-picker select:focus-visible,
 .hc-panel .hc-provider-picker select:focus-visible,
 .hc-panel .hc-permission-picker select:focus-visible {
   border-color: var(--line-strong);
@@ -2849,6 +2852,7 @@ html.light ::selection {
 }
 .hc-panel .hc-model-picker select:disabled,
 .hc-panel .hc-effort-picker select:disabled,
+.hc-panel .hc-speed-picker select:disabled,
 .hc-panel .hc-provider-picker select:disabled,
 .hc-panel .hc-permission-picker select:disabled {
   cursor: not-allowed;

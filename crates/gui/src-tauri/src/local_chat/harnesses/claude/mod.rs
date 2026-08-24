@@ -6,6 +6,7 @@ pub(crate) mod session;
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatHarness, LocalChatHarnessInfo, LocalChatHarnessKind,
     LocalChatModelOption, LocalChatPermissionModeOption, LocalChatRuntime, LocalChatSessionError,
+    LocalChatSpeedTierOption,
 };
 use crate::types::PermissionMode;
 
@@ -48,6 +49,27 @@ fn claude_local_chat_harness_info_from_resolution(
     resolution: Result<(), String>,
 ) -> LocalChatHarnessInfo {
     let catalog = supported_claude_model_catalog();
+    let speed_tiers = if catalog.models.iter().any(|model| {
+        model
+            .supported_speed_tier_ids
+            .as_ref()
+            .is_some_and(|ids| ids.iter().any(|id| id == "fast"))
+    }) {
+        vec![
+            LocalChatSpeedTierOption {
+                id: "default".into(),
+                label: "Standard".into(),
+                is_default: true,
+            },
+            LocalChatSpeedTierOption {
+                id: "fast".into(),
+                label: "Fast".into(),
+                is_default: false,
+            },
+        ]
+    } else {
+        Vec::new()
+    };
     let (available, unavailable_reason) = match resolution {
         Ok(()) => (true, None),
         Err(error) => (false, Some(error)),
@@ -65,10 +87,12 @@ fn claude_local_chat_harness_info_from_resolution(
                 id: model.id,
                 label: model.label,
                 supported_reasoning_effort_ids: None,
+                supported_speed_tier_ids: model.supported_speed_tier_ids,
             })
             .collect(),
         default_reasoning_effort: None,
         reasoning_efforts: Vec::new(),
+        speed_tiers,
         permission_modes: Some(vec![
             LocalChatPermissionModeOption {
                 id: PermissionMode::Default,
@@ -161,27 +185,58 @@ mod tests {
         assert_eq!(info.default_model_id, Some("sonnet".to_string()));
         assert!(info.supports_resume);
         assert_eq!(
+            info.speed_tiers,
+            vec![
+                LocalChatSpeedTierOption {
+                    id: "default".into(),
+                    label: "Standard".into(),
+                    is_default: true,
+                },
+                LocalChatSpeedTierOption {
+                    id: "fast".into(),
+                    label: "Fast".into(),
+                    is_default: false,
+                },
+            ]
+        );
+        assert_eq!(
             info.models,
             vec![
                 LocalChatModelOption {
                     id: "sonnet".to_string(),
                     label: "Sonnet".to_string(),
                     supported_reasoning_effort_ids: None,
+                    supported_speed_tier_ids: None,
                 },
                 LocalChatModelOption {
                     id: "opus".to_string(),
                     label: "Opus".to_string(),
                     supported_reasoning_effort_ids: None,
+                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                 },
                 LocalChatModelOption {
                     id: "haiku".to_string(),
                     label: "Haiku".to_string(),
                     supported_reasoning_effort_ids: None,
+                    supported_speed_tier_ids: None,
                 },
                 LocalChatModelOption {
                     id: "fable".to_string(),
                     label: "Fable".to_string(),
                     supported_reasoning_effort_ids: None,
+                    supported_speed_tier_ids: None,
+                },
+                LocalChatModelOption {
+                    id: "claude-opus-5".to_string(),
+                    label: "Claude Opus 5".to_string(),
+                    supported_reasoning_effort_ids: None,
+                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                },
+                LocalChatModelOption {
+                    id: "claude-opus-4-8".to_string(),
+                    label: "Claude Opus 4.8".to_string(),
+                    supported_reasoning_effort_ids: None,
+                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                 },
             ]
         );
@@ -193,18 +248,32 @@ mod tests {
                     ClaudeModelOption {
                         id: "sonnet".to_string(),
                         label: "Sonnet".to_string(),
+                        supported_speed_tier_ids: None,
                     },
                     ClaudeModelOption {
                         id: "opus".to_string(),
                         label: "Opus".to_string(),
+                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                     },
                     ClaudeModelOption {
                         id: "haiku".to_string(),
                         label: "Haiku".to_string(),
+                        supported_speed_tier_ids: None,
                     },
                     ClaudeModelOption {
                         id: "fable".to_string(),
                         label: "Fable".to_string(),
+                        supported_speed_tier_ids: None,
+                    },
+                    ClaudeModelOption {
+                        id: "claude-opus-5".to_string(),
+                        label: "Claude Opus 5".to_string(),
+                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                    },
+                    ClaudeModelOption {
+                        id: "claude-opus-4-8".to_string(),
+                        label: "Claude Opus 4.8".to_string(),
+                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                     },
                 ],
             }
@@ -234,6 +303,7 @@ mod tests {
             provider_resume_id: Some("claude-conversation-1".to_string()),
             model_id: Some("opus".to_string()),
             reasoning_effort: Some("high".to_string()),
+            speed_tier: None,
             permission_mode: Some(PermissionMode::Plan),
         };
 

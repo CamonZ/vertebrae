@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use vertebrae_harness_core::{
     AgentMetadata, ControlRequestId, FileChange, HarnessEventDraftV1, ProviderResumeId,
-    ProviderThreadRef, RunId, SessionId, StreamId, ThreadId, ToolCallId, TurnId,
+    ProviderThreadRef, RunId, SessionId, SpeedTier, StreamId, ThreadId, ToolCallId, TurnId,
 };
 
 use crate::ClaudeRootLocatorResolver;
@@ -33,6 +33,7 @@ pub struct ClaudeDecodeContext {
     pub turn_id: Option<TurnId>,
     pub run_id: Option<RunId>,
     pub provider_resume_id: Option<ProviderResumeId>,
+    pub requested_speed_tier: Option<SpeedTier>,
 }
 
 impl ClaudeDecodeContext {
@@ -44,6 +45,7 @@ impl ClaudeDecodeContext {
             turn_id: None,
             run_id: None,
             provider_resume_id: None,
+            requested_speed_tier: None,
         }
     }
 
@@ -55,6 +57,7 @@ impl ClaudeDecodeContext {
             turn_id: None,
             run_id: Some(run_id),
             provider_resume_id: None,
+            requested_speed_tier: None,
         }
     }
 }
@@ -109,6 +112,7 @@ pub struct ClaudeStreamDecoder {
     compaction_active: bool,
     compaction_boundary_emitted: bool,
     event_timestamp: Option<DateTime<Utc>>,
+    fast_mode_state: Option<String>,
 }
 
 impl ClaudeStreamDecoder {
@@ -139,6 +143,7 @@ impl ClaudeStreamDecoder {
             compaction_active: false,
             compaction_boundary_emitted: false,
             event_timestamp: None,
+            fast_mode_state: None,
         }
     }
 

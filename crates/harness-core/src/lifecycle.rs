@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::{
     ControlRequestEnvelope, ControlResolution, HarnessCapabilities, HarnessEventV1,
-    ProviderResumeId, RunId, SessionId, StreamId, TurnId,
+    ProviderResumeId, RunId, SessionId, SpeedTier, StreamId, TurnId,
 };
 
 /// Portable, per-request behavior shared by provider adapters.
@@ -23,6 +23,10 @@ pub struct RequestConfig {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Optional provider-neutral serving speed override. When unset, the
+    /// provider's existing default behavior is preserved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed_tier: Option<SpeedTier>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<Value>,
     /// Additive instructions for the provider's developer/system layer.

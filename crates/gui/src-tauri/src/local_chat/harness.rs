@@ -20,7 +20,19 @@ pub struct LocalChatModelOption {
     pub id: String,
     pub label: String,
     #[serde(default)]
+    #[specta(optional)]
     pub supported_reasoning_effort_ids: Option<Vec<String>>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub supported_speed_tier_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct LocalChatSpeedTierOption {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub is_default: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -49,6 +61,9 @@ pub struct LocalChatHarnessInfo {
     pub reasoning_efforts: Vec<LocalChatReasoningEffortOption>,
     #[serde(default)]
     #[specta(optional)]
+    pub speed_tiers: Vec<LocalChatSpeedTierOption>,
+    #[serde(default)]
+    #[specta(optional)]
     pub permission_modes: Option<Vec<LocalChatPermissionModeOption>>,
     pub supports_resume: bool,
 }
@@ -68,6 +83,9 @@ pub struct CreateLocalChatSessionInput {
     pub provider_resume_id: Option<String>,
     pub model_id: Option<String>,
     pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub speed_tier: Option<String>,
     pub permission_mode: Option<PermissionMode>,
 }
 
@@ -79,6 +97,7 @@ pub(crate) struct HarnessCreateSessionInput {
     pub(crate) provider_resume_id: Option<String>,
     pub(crate) model_id: Option<String>,
     pub(crate) reasoning_effort: Option<String>,
+    pub(crate) speed_tier: Option<String>,
     pub(crate) permission_mode: Option<PermissionMode>,
 }
 
@@ -91,6 +110,7 @@ impl CreateLocalChatSessionInput {
             provider_resume_id: self.provider_resume_id,
             model_id: self.model_id,
             reasoning_effort: self.reasoning_effort,
+            speed_tier: self.speed_tier,
             permission_mode: self.permission_mode,
         }
     }

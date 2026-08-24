@@ -6,10 +6,14 @@ use tokio::sync::{mpsc, oneshot, watch};
 use vertebrae_harness_core::{
     HarnessCapabilities, HarnessError, HarnessRuntime, ModelCapability, PermissionModeCapability,
     ProviderResumeId, QuestionCapabilities, RunHandle, RunRequest, SendTurnRequest,
-    SessionCloseOutcome, SessionHandle, SessionId, StartSessionRequest, TurnId, TurnOutcome,
+    SessionCloseOutcome, SessionHandle, SessionId, SpeedTier, StartSessionRequest, TurnId,
+    TurnOutcome,
 };
 
-use crate::{ClaudeDecodeContext, ClaudeLaunchMode, ClaudeProviderConfig, DEFAULT_CLAUDE_MODELS};
+use crate::{
+    ClaudeDecodeContext, ClaudeLaunchMode, ClaudeProviderConfig, DEFAULT_CLAUDE_MODELS,
+    config::claude_model_supports_fast_mode,
+};
 
 mod controls;
 mod events;
@@ -58,6 +62,14 @@ fn claude_permission_modes() -> Vec<PermissionModeCapability> {
     .collect()
 }
 
+fn claude_model_speed_tiers(model: &str) -> BTreeSet<SpeedTier> {
+    if claude_model_supports_fast_mode(model) {
+        BTreeSet::from([SpeedTier::Default, SpeedTier::Fast])
+    } else {
+        BTreeSet::new()
+    }
+}
+
 enum SessionCommand {
     Send {
         request: SendTurnRequest,
@@ -99,6 +111,7 @@ impl HarnessRuntime for ClaudeRuntime {
                         id: (*id).into(),
                         label: (*label).into(),
                         reasoning_efforts: BTreeSet::new(),
+                        supported_speed_tiers: claude_model_speed_tiers(id),
                     })
                     .collect(),
                 default_permission_mode: Some("default".into()),
@@ -164,6 +177,7 @@ impl HarnessRuntime for ClaudeRuntime {
             turn_id: None,
             run_id: None,
             provider_resume_id: request.resume_id.clone(),
+            requested_speed_tier: request.config.speed_tier,
         };
         let cleanup_timeout = self.config.cleanup_timeout;
         let initialization_timeout = self.config.initialization_timeout;
@@ -218,7 +232,8 @@ impl HarnessRuntime for ClaudeRuntime {
         })?;
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
         let (outcome_tx, outcome_rx) = watch::channel(OutcomeState::Pending);
-        let context = ClaudeDecodeContext::one_shot(request.run_id.clone(), request.stream_id);
+        let mut context = ClaudeDecodeContext::one_shot(request.run_id.clone(), request.stream_id);
+        context.requested_speed_tier = request.config.speed_tier;
         let cleanup_timeout = self.config.cleanup_timeout;
         let terminal_exit_timeout = self.config.terminal_exit_timeout;
         let root_locator_resolver = self.config.root_locator_resolver.clone();

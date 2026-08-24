@@ -9,15 +9,25 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use vertebrae_harness_core::{HarnessError, ProviderThreadRef, RequestConfig, SessionId};
+use serde_json::{Value, json};
+use vertebrae_harness_core::{
+    HarnessError, ProviderThreadRef, RequestConfig, SessionId, SpeedTier,
+};
 
 pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
     ("sonnet", "Sonnet"),
     ("opus", "Opus"),
     ("haiku", "Haiku"),
     ("fable", "Fable"),
+    ("claude-opus-5", "Claude Opus 5"),
+    ("claude-opus-4-8", "Claude Opus 4.8"),
 ];
+
+pub(crate) fn claude_model_supports_fast_mode(model: &str) -> bool {
+    matches!(model, "opus" | "claude-opus-5" | "claude-opus-4-8")
+        || model.starts_with("claude-opus-5-")
+        || model.starts_with("claude-opus-4-8-")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -211,6 +221,10 @@ impl ClaudeProviderConfig {
             args.push("--settings".into());
             args.push(path.to_string_lossy().into_owned());
         }
+        if let Some(speed_tier) = request.speed_tier {
+            args.push("--settings".into());
+            args.push(json!({"fastMode": speed_tier == SpeedTier::Fast}).to_string());
+        }
         args.extend(self.prelude.args.clone());
         match mode {
             ClaudeLaunchMode::Persistent { .. } => {
@@ -328,7 +342,23 @@ mod tests {
     use tempfile::tempdir;
     use vertebrae_harness_core::RequestConfig;
 
-    use super::{ClaudeLaunchMode, ClaudeProviderConfig};
+    use super::{ClaudeLaunchMode, ClaudeProviderConfig, claude_model_supports_fast_mode};
+
+    #[test]
+    fn fast_mode_only_matches_current_supported_opus_models() {
+        for model in [
+            "opus",
+            "claude-opus-5",
+            "claude-opus-5-20260101",
+            "claude-opus-4-8",
+            "claude-opus-4-8-20260101",
+        ] {
+            assert!(claude_model_supports_fast_mode(model), "{model}");
+        }
+        for model in ["sonnet", "claude-opus-4-6", "claude-opus-4-7"] {
+            assert!(!claude_model_supports_fast_mode(model), "{model}");
+        }
+    }
 
     #[test]
     fn appends_developer_instructions_without_replacing_provider_defaults() {

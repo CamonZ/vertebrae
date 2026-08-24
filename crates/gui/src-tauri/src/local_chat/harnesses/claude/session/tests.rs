@@ -9,8 +9,9 @@ use vertebrae_harness_core::{
     ControlSink, DiagnosticEvent, EventCorrelation, EventId, EventSink, HarnessCapabilities,
     HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, ProviderResumeId, RunHandle, RunRequest,
     SessionCloseOutcome, SessionCloseStatus, SessionHandle, SessionId, SessionStarted,
-    SessionUsage, StreamId, TextEvent, TokenUsage, ToolCallEvent, ToolCallId, ToolOutputEvent,
-    ToolStatus, TurnHandle, TurnId, TurnOutcome, TurnUsage, UpdateSemantics, UsageEvent,
+    SessionUsage, SpeedTier, SpeedTierStatus, StreamId, TextEvent, TokenUsage, ToolCallEvent,
+    ToolCallId, ToolOutputEvent, ToolStatus, TurnHandle, TurnId, TurnOutcome, TurnUsage,
+    UpdateSemantics, UsageEvent,
 };
 
 use super::*;
@@ -242,6 +243,7 @@ fn input(session_id: &str, initial_prompt: Option<&str>) -> HarnessCreateSession
         provider_resume_id: Some("resume-request-1".into()),
         model_id: Some("opus".into()),
         reasoning_effort: Some("high".into()),
+        speed_tier: None,
         permission_mode: Some(PermissionMode::Plan),
     }
 }
@@ -540,6 +542,13 @@ async fn harness_events_preserve_init_text_tool_usage_terminal_and_diagnostic_se
             provider: "anthropic".into(),
             model: Some("actual-model".into()),
             provider_resume_id: Some(ProviderResumeId::new("provider-resume")),
+            speed_tier_status: Some(SpeedTierStatus {
+                requested: Some(SpeedTier::Fast),
+                active: Some(SpeedTier::Default),
+                eligible: true,
+                available: false,
+                diagnostic: Some("fast mode unavailable".into()),
+            }),
             tools: vec!["Read".into(), "Bash".into()],
         }),
     ))
@@ -680,7 +689,12 @@ async fn harness_events_preserve_init_text_tool_usage_terminal_and_diagnostic_se
     assert!(matches!(&events[0], LocalChatEvent::Init(init)
         if init.provider_resume_id.as_deref() == Some("provider-resume")
             && init.model == "actual-model"
-            && init.tools == ["Read", "Bash"]));
+            && init.tools == ["Read", "Bash"]
+            && init.speed_tier_status.as_ref().is_some_and(|status|
+                status.requested.as_deref() == Some("fast")
+                    && status.active.as_deref() == Some("default")
+                    && !status.available
+                    && status.diagnostic.as_deref() == Some("fast mode unavailable"))));
     assert!(matches!(&events[1], LocalChatEvent::Text(text)
         if text.text == "hel" && text.is_partial && text.parent_tool_use_id.as_deref() == Some("parent-tool")));
     assert!(matches!(&events[2], LocalChatEvent::Text(text)

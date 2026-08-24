@@ -21,7 +21,7 @@ use vertebrae_harness_core::{
     HarnessCapabilities, HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, HarnessRuntime,
     OutcomeMetrics, ProviderResumeId, ProviderThreadRef, QuestionCapabilities, RunHandle, RunId,
     RunOutcome, RunRequest, SendTurnRequest, SequencedEventSink, SessionCloseOutcome,
-    SessionCloseStatus, SessionHandle, SessionId, SessionStarted, SessionUsage,
+    SessionCloseStatus, SessionHandle, SessionId, SessionStarted, SessionUsage, SpeedTier,
     StartSessionRequest, StreamId, TextEvent, ThreadDeclared, ThreadId, ThreadKind, TokenUsage,
     ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus, TurnHandle, TurnId, TurnInput,
     TurnInputProvenance, TurnOutcome, TurnStarted, TurnUsage, UpdateSemantics, UsageEvent,
@@ -1749,6 +1749,7 @@ async fn setup_session(
     if let Some(effort) = &request_config.reasoning_effort {
         params["effort"] = json!(effort);
     }
+    add_service_tier(&mut params, &request_config);
     if let Some(provider) = &config.model_provider {
         params["modelProvider"] = json!(provider);
     }
@@ -1810,6 +1811,7 @@ async fn setup_session(
             provider: "openai".into(),
             model: Some(model),
             provider_resume_id: Some(ProviderResumeId::new(thread.clone())),
+            speed_tier_status: None,
             tools: Vec::new(),
         }),
     )
@@ -1855,6 +1857,16 @@ fn add_developer_instructions(
     {
         params["developerInstructions"] = json!(instructions);
     }
+}
+
+fn add_service_tier(params: &mut Value, request_config: &vertebrae_harness_core::RequestConfig) {
+    let Some(speed_tier) = request_config.speed_tier else {
+        return;
+    };
+    params["serviceTier"] = json!(match speed_tier {
+        SpeedTier::Default => "default",
+        SpeedTier::Fast => "priority",
+    });
 }
 
 async fn emit_direct(
@@ -2103,10 +2115,10 @@ mod tests {
 
     use super::{
         ControlDisposition, FileChangeKind, RootTurnIdentity, SessionState, ToolStatus,
-        add_developer_instructions, control_request, file_change_event, parse_usage, tool_call,
-        tool_output,
+        add_developer_instructions, add_service_tier, control_request, file_change_event,
+        parse_usage, tool_call, tool_output,
     };
-    use vertebrae_harness_core::{SessionId, ThreadId, ToolCallId, TurnId};
+    use vertebrae_harness_core::{SessionId, SpeedTier, ThreadId, ToolCallId, TurnId};
 
     #[test]
     fn maps_additive_instructions_to_codex_developer_layer() {
@@ -2119,6 +2131,34 @@ mod tests {
             },
         );
         assert_eq!(params["developerInstructions"], "reference contract");
+    }
+
+    #[test]
+    fn maps_speed_tiers_to_codex_service_tiers() {
+        for (speed_tier, service_tier) in [
+            (SpeedTier::Default, "default"),
+            (SpeedTier::Fast, "priority"),
+        ] {
+            let mut params = json!({});
+            add_service_tier(
+                &mut params,
+                &vertebrae_harness_core::RequestConfig {
+                    speed_tier: Some(speed_tier),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(params["serviceTier"], service_tier);
+        }
+    }
+
+    #[test]
+    fn omits_codex_service_tier_when_unset() {
+        let mut params = json!({"serviceName": "vertebrae"});
+        add_service_tier(
+            &mut params,
+            &vertebrae_harness_core::RequestConfig::default(),
+        );
+        assert_eq!(params, json!({"serviceName": "vertebrae"}));
     }
 
     #[test]

@@ -19,6 +19,14 @@ const SUPPORTED_CLAUDE_MODELS: &[ClaudeModelDefinition] = &[
         id: "fable",
         label: "Fable",
     },
+    ClaudeModelDefinition {
+        id: "claude-opus-5",
+        label: "Claude Opus 5",
+    },
+    ClaudeModelDefinition {
+        id: "claude-opus-4-8",
+        label: "Claude Opus 4.8",
+    },
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -32,6 +40,8 @@ struct ClaudeModelDefinition {
 pub struct ClaudeModelOption {
     pub id: String,
     pub label: String,
+    #[serde(default)]
+    pub supported_speed_tier_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -55,9 +65,15 @@ pub fn supported_claude_model_catalog() -> ClaudeModelCatalog {
             .map(|model| ClaudeModelOption {
                 id: model.id.to_string(),
                 label: model.label.to_string(),
+                supported_speed_tier_ids: claude_model_speed_tier_ids(model.id),
             })
             .collect(),
     }
+}
+
+fn claude_model_speed_tier_ids(model_id: &str) -> Option<Vec<String>> {
+    matches!(model_id, "opus" | "claude-opus-5" | "claude-opus-4-8")
+        .then(|| vec!["default".into(), "fast".into()])
 }
 
 fn is_supported_claude_model_id(model_id: &str) -> bool {

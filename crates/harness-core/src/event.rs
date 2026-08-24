@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::{
     ControlRequestEnvelope, ControlResolution, RunOutcome, SessionCloseOutcome, SessionUsage,
-    TurnOutcome, TurnUsage,
+    SpeedTierStatus, TurnOutcome, TurnUsage,
 };
 
 macro_rules! string_id {
@@ -113,6 +113,8 @@ pub struct SessionStarted {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_resume_id: Option<ProviderResumeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed_tier_status: Option<SpeedTierStatus>,
     /// Provider-advertised tools available to the session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<String>,

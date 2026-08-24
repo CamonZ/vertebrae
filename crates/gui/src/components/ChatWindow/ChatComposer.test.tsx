@@ -66,6 +66,8 @@ function defaultProps(overrides: Record<string, unknown> = {}) {
     providerOptions: [{ info: CLAUDE_INFO }],
     supportedModelIds: new Set(["sonnet", "opus"]),
     supportedReasoningEffortIds: new Set<string>(),
+    speedTiers: [],
+    supportedSpeedTierIds: new Set<string>(),
     isBusy: false,
     isActive: false,
     lockedHarness: false,
@@ -84,6 +86,7 @@ function defaultProps(overrides: Record<string, unknown> = {}) {
     onHarnessChange: vi.fn(),
     onModelChange: vi.fn(),
     onReasoningEffortChange: vi.fn(),
+    onSpeedTierChange: vi.fn(),
     onPermissionModeChange: vi.fn(),
     ...overrides,
   };
@@ -400,6 +403,93 @@ describe("ChatComposer", () => {
     // Low is the default so it gets the suffix
     expect(optionTexts).toContain("Low (default)");
     expect(optionTexts).toContain("High");
+  });
+
+  it("renders speed tiers advertised by the selected model", () => {
+    const speedHarness: LocalChatHarnessInfo = {
+      ...CLAUDE_INFO,
+      default_model_id: "opus",
+      models: [
+        {
+          id: "opus",
+          label: "Opus",
+          supported_speed_tier_ids: ["default", "fast"],
+        },
+      ],
+      speed_tiers: [
+        { id: "default", label: "Standard", is_default: true },
+        { id: "fast", label: "Fast", is_default: false },
+      ],
+    };
+    const onSpeedTierChange = vi.fn();
+    render(
+      <ChatComposer
+        {...defaultProps({
+          visibleHarness: speedHarness,
+          session: createSession({ selectedModelId: "opus" }),
+          speedTiers: speedHarness.speed_tiers,
+          supportedSpeedTierIds: new Set(["default", "fast"]),
+          onSpeedTierChange,
+        })}
+      />
+    );
+
+    const picker = screen.getByTestId(
+      "local-chat-speed-tier-picker"
+    ) as HTMLSelectElement;
+    expect(Array.from(picker.options).map((option) => option.value)).toEqual([
+      "default",
+      "fast",
+    ]);
+    expect(
+      Array.from(picker.options).map((option) => option.textContent)
+    ).toEqual(["Standard", "Fast"]);
+    expect(picker).toHaveValue("default");
+    fireEvent.change(picker, { target: { value: "fast" } });
+    expect(onSpeedTierChange).toHaveBeenCalledOnce();
+  });
+
+  it("hides speed tiers when the selected model has no fast capability", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({
+          speedTiers: [
+            { id: "default", label: "Standard", is_default: true },
+          ],
+          supportedSpeedTierIds: new Set(["default"]),
+        })}
+      />
+    );
+    expect(
+      screen.queryByTestId("local-chat-speed-tier-picker")
+    ).not.toBeInTheDocument();
+  });
+
+  it("explains why speed tiers are disabled while resuming", () => {
+    const speedHarness: LocalChatHarnessInfo = {
+      ...CLAUDE_INFO,
+      speed_tiers: [
+        { id: "default", label: "Standard", is_default: true },
+        { id: "fast", label: "Fast", is_default: false },
+      ],
+    };
+    render(
+      <ChatComposer
+        {...defaultProps({
+          visibleHarness: speedHarness,
+          speedTiers: speedHarness.speed_tiers,
+          supportedSpeedTierIds: new Set(["default", "fast"]),
+          hasResume: true,
+          session: createSession({ providerResumeId: "resume-1" }),
+        })}
+      />
+    );
+    const picker = screen.getByTestId("local-chat-speed-tier-picker");
+    expect(picker).toBeDisabled();
+    expect(picker.parentElement).toHaveAttribute(
+      "title",
+      "Speed tier cannot change while resuming"
+    );
   });
 
   it("renders only the selected model's supported effort options", () => {

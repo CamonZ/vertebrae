@@ -1222,6 +1222,34 @@ describe("doStartSession", () => {
     });
   });
 
+  it("passes the selected speed tier to the neutral create command", async () => {
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({
+        harness: "codex",
+        selectedModelId: "gpt-5.5",
+        selectedSpeedTier: "fast",
+      }),
+      SESSION_ID,
+      deps
+    );
+
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harness: "codex",
+        model_id: "gpt-5.5",
+        speed_tier: "fast",
+      })
+    );
+  });
+
   it("passes the selected permission mode when starting", async () => {
     const deps = {
       setBackendSessionId: vi.fn(),

@@ -4,7 +4,7 @@ use vertebrae_harness_core::HarnessCapabilities;
 
 use crate::local_chat::{
     LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
-    LocalChatPermissionModeOption, LocalChatReasoningEffortOption,
+    LocalChatPermissionModeOption, LocalChatReasoningEffortOption, LocalChatSpeedTierOption,
 };
 use crate::types::PermissionMode;
 
@@ -29,6 +29,11 @@ pub(super) fn local_chat_harness_info_from_capabilities(
     capabilities: HarnessCapabilities,
 ) -> LocalChatHarnessInfo {
     let mut reasoning_effort_ids = BTreeSet::new();
+    let supports_fast = capabilities.models.iter().any(|model| {
+        model
+            .supported_speed_tiers
+            .contains(&vertebrae_harness_core::SpeedTier::Fast)
+    });
     let models = capabilities
         .models
         .into_iter()
@@ -39,10 +44,22 @@ pub(super) fn local_chat_harness_info_from_capabilities(
             } else {
                 Some(model.reasoning_efforts.into_iter().collect())
             };
+            let supported_speed_tier_ids = if model.supported_speed_tiers.is_empty() {
+                None
+            } else {
+                Some(
+                    model
+                        .supported_speed_tiers
+                        .iter()
+                        .map(|tier| tier.as_str().to_string())
+                        .collect(),
+                )
+            };
             LocalChatModelOption {
                 id: model.id,
                 label: model.label,
                 supported_reasoning_effort_ids,
+                supported_speed_tier_ids,
             }
         })
         .collect();
@@ -76,6 +93,22 @@ pub(super) fn local_chat_harness_info_from_capabilities(
                 id,
             })
             .collect(),
+        speed_tiers: if supports_fast {
+            vec![
+                LocalChatSpeedTierOption {
+                    id: "default".into(),
+                    label: "Standard".into(),
+                    is_default: true,
+                },
+                LocalChatSpeedTierOption {
+                    id: "fast".into(),
+                    label: "Fast".into(),
+                    is_default: false,
+                },
+            ]
+        } else {
+            Vec::new()
+        },
         permission_modes: Some(permission_modes),
         supports_resume: capabilities.session_resumption,
     }
@@ -129,11 +162,16 @@ mod tests {
                     id: "default".into(),
                     label: "Codex default".into(),
                     reasoning_efforts: BTreeSet::new(),
+                    supported_speed_tiers: BTreeSet::new(),
                 },
                 ModelCapability {
                     id: "server-only-model".into(),
                     label: "Server only model".into(),
                     reasoning_efforts: BTreeSet::from(["ultra".into()]),
+                    supported_speed_tiers: BTreeSet::from([
+                        vertebrae_harness_core::SpeedTier::Default,
+                        vertebrae_harness_core::SpeedTier::Fast,
+                    ]),
                 },
             ],
             default_permission_mode: Some("default".into()),

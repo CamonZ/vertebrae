@@ -5,8 +5,8 @@ use tokio::sync::{Mutex, OnceCell, RwLock};
 use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
-    EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId, StartSessionRequest,
-    StreamId, TurnHandle, TurnId,
+    EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId, SpeedTier,
+    StartSessionRequest, StreamId, TurnHandle, TurnId,
 };
 
 use crate::local_chat::{
@@ -111,6 +111,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
         let model = requested_model_override(input.model_id.as_deref()).map(str::to_owned);
         let reasoning_effort =
             requested_reasoning_effort(input.reasoning_effort.as_deref()).map(str::to_owned);
+        let speed_tier = input.speed_tier.as_deref().and_then(SpeedTier::parse);
         let agent_config = AgentConfig {
             provider: Some(Provider::Openai),
             model: model.clone(),
@@ -126,6 +127,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
                 working_directory: input.working_dir.map(PathBuf::from),
                 model,
                 reasoning_effort,
+                speed_tier,
                 developer_instructions: Some(CHAT_REFERENCE_INSTRUCTIONS.to_string()),
                 ..Default::default()
             },
@@ -262,6 +264,7 @@ fn unavailable_codex_info(reason: String) -> LocalChatHarnessInfo {
         models: Vec::new(),
         default_reasoning_effort: None,
         reasoning_efforts: Vec::new(),
+        speed_tiers: Vec::new(),
         permission_modes: Some(Vec::new()),
         supports_resume: true,
     }

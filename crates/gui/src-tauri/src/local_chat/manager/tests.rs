@@ -71,9 +71,11 @@ impl LocalChatHarness for MockHarness {
                 id: "default-model".to_string(),
                 label: "Default Model".to_string(),
                 supported_reasoning_effort_ids: None,
+                supported_speed_tier_ids: None,
             }],
             default_reasoning_effort: None,
             reasoning_efforts: Vec::new(),
+            speed_tiers: Vec::new(),
             permission_modes: None,
             supports_resume: true,
         }
@@ -143,6 +145,7 @@ fn create_input(
         provider_resume_id: Some("provider-resume-1".to_string()),
         model_id: Some("model-1".to_string()),
         reasoning_effort: Some("high".to_string()),
+        speed_tier: None,
         permission_mode: None,
     }
 }
@@ -252,6 +255,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
                 provider_resume_id: Some("provider-resume-1".to_string()),
                 model_id: Some("model-1".to_string()),
                 reasoning_effort: Some("high".to_string()),
+                speed_tier: None,
                 permission_mode: None,
             }),
             MockCall::Send {
@@ -275,6 +279,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
                 provider_resume_id: Some("provider-resume-1".to_string()),
                 model_id: Some("model-1".to_string()),
                 reasoning_effort: Some("high".to_string()),
+                speed_tier: None,
                 permission_mode: None,
             }),
             MockCall::Send {

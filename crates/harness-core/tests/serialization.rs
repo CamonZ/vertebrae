@@ -131,6 +131,7 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
             provider: "test".into(),
             model: Some("model".into()),
             provider_resume_id: Some(ProviderResumeId::from("resume")),
+            speed_tier_status: None,
             tools: vec!["Read".into(), "Bash".into()],
         }),
         HarnessEventPayloadV1::ThreadDeclared(ThreadDeclared {
@@ -399,6 +400,7 @@ fn capabilities_and_all_control_decisions_are_serializable() {
             id: "m".into(),
             label: "Model".into(),
             reasoning_efforts: BTreeSet::from(["high".into()]),
+            supported_speed_tiers: BTreeSet::new(),
         }],
         default_permission_mode: Some("default".into()),
         permission_modes: vec![PermissionModeCapability {
@@ -446,6 +448,32 @@ fn capabilities_and_all_control_decisions_are_serializable() {
             decision
         );
     }
+}
+
+#[test]
+fn legacy_capabilities_default_missing_speed_tier_declarations() {
+    let legacy = serde_json::json!({
+        "provider": "test",
+        "available": true,
+        "persistent_sessions": true,
+        "one_shot_runs": true,
+        "session_resumption": true,
+        "models": [{
+            "id": "model",
+            "label": "Model",
+            "reasoning_efforts": ["high"]
+        }],
+        "permission_modes": [],
+        "approval_categories": [],
+        "questions": {
+            "multiple_selection": false,
+            "free_form_answers": false,
+            "automatic_resolution": false
+        }
+    });
+
+    let capabilities: HarnessCapabilities = serde_json::from_value(legacy).unwrap();
+    assert!(capabilities.models[0].supported_speed_tiers.is_empty());
 }
 
 #[test]

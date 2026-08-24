@@ -17,7 +17,7 @@ use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRunt
 use vertebrae_harness_core::{
     EventSink, HarnessError, HarnessEventPayloadV1, HarnessEventV1, ProviderResumeId,
     ProviderThreadRef, RequestConfig, SendTurnRequest, SessionCloseStatus, SessionHandle,
-    SessionId, StartSessionRequest, StreamId, TurnId,
+    SessionId, SpeedTier, StartSessionRequest, StreamId, TurnId,
 };
 
 use crate::commands::AppState;
@@ -695,6 +695,7 @@ impl ClaudeSessionRuntime {
                 working_directory: Some(working_dir),
                 model,
                 reasoning_effort: input.reasoning_effort,
+                speed_tier: input.speed_tier.as_deref().and_then(SpeedTier::parse),
                 developer_instructions: Some(CHAT_REFERENCE_INSTRUCTIONS.to_string()),
                 ..RequestConfig::default()
             },
