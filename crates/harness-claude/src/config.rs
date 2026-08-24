@@ -9,8 +9,10 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use vertebrae_harness_core::{HarnessError, ProviderThreadRef, RequestConfig, SessionId};
+use serde_json::{Value, json};
+use vertebrae_harness_core::{
+    HarnessError, ProviderThreadRef, RequestConfig, SessionId, SpeedTier,
+};
 
 pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
     ("sonnet", "Sonnet"),
@@ -18,7 +20,6 @@ pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
     ("haiku", "Haiku"),
     ("fable", "Fable"),
     ("claude-opus-4-6", "Claude Opus 4.6"),
-    ("claude-opus-4-7", "Claude Opus 4.7"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,6 +213,10 @@ impl ClaudeProviderConfig {
         if let Some(path) = &self.prelude.settings_path {
             args.push("--settings".into());
             args.push(path.to_string_lossy().into_owned());
+        }
+        if let Some(speed_tier) = request.speed_tier {
+            args.push("--settings".into());
+            args.push(json!({"fastMode": speed_tier == SpeedTier::Fast}).to_string());
         }
         args.extend(self.prelude.args.clone());
         match mode {

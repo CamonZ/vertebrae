@@ -3,8 +3,8 @@ use std::sync::Arc;
 use vertebrae_harness_claude::{ClaudeDecodeContext, ClaudeStreamDecoder};
 use vertebrae_harness_core::{
     CompactionState, CompletionStatus, ControlDecision, ControlRequest, FileChangeKind,
-    HarnessEventPayloadV1, ProviderThreadRef, RunId, SessionId, StreamId, ThreadKind, ToolStatus,
-    TurnInputProvenance, UpdateSemantics,
+    HarnessEventPayloadV1, ProviderThreadRef, RunId, SessionId, SpeedTier, StreamId, ThreadKind,
+    ToolStatus, TurnInputProvenance, UpdateSemantics,
 };
 
 #[test]
@@ -26,6 +26,60 @@ fn init_preserves_advertised_string_and_object_tool_names() {
         })
         .unwrap();
     assert_eq!(started.tools, ["Read", "Bash"]);
+}
+
+#[test]
+fn init_reports_fast_mode_state_and_requested_tier() {
+    let mut context = ClaudeDecodeContext::one_shot(
+        RunId::from("run-fast-mode"),
+        StreamId::from("stream-fast-mode"),
+    );
+    context.requested_speed_tier = Some(SpeedTier::Fast);
+    let mut decoder = configured_decoder(context);
+    let events = decoder
+        .decode_line(
+            r#"{"type":"system","subtype":"init","session_id":"fast-session","model":"claude-opus-4-6","fast_mode_state":"on"}"#,
+        )
+        .unwrap();
+    let status = events.iter().find_map(|draft| match &draft.payload {
+        HarnessEventPayloadV1::SessionStarted(started) => started.speed_tier_status.as_ref(),
+        _ => None,
+    });
+    assert_eq!(
+        status,
+        Some(&vertebrae_harness_core::SpeedTierStatus {
+            requested: Some(SpeedTier::Fast),
+            active: Some(SpeedTier::Fast),
+            eligible: true,
+            available: true,
+            diagnostic: None,
+        })
+    );
+}
+
+#[test]
+fn fast_mode_cooldown_emits_a_fallback_diagnostic() {
+    let mut context = ClaudeDecodeContext::one_shot(
+        RunId::from("run-fast-cooldown"),
+        StreamId::from("stream-fast-cooldown"),
+    );
+    context.requested_speed_tier = Some(SpeedTier::Fast);
+    let mut decoder = configured_decoder(context);
+    decoder
+        .decode_line(
+            r#"{"type":"system","subtype":"init","session_id":"cooldown-session","model":"claude-opus-4-6","fast_mode_state":"on"}"#,
+        )
+        .unwrap();
+    let events = decoder
+        .decode_line(
+            r#"{"type":"result","subtype":"success","result":"done","fast_mode_state":"cooldown"}"#,
+        )
+        .unwrap();
+    assert!(events.iter().any(|draft| matches!(
+        &draft.payload,
+        HarnessEventPayloadV1::Warning(warning)
+            if warning.code.as_deref() == Some("claude_fast_mode_fallback")
+    )));
 }
 
 #[test]

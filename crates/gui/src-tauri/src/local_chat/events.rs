@@ -6,6 +6,15 @@ use tauri_specta::Event;
 
 use crate::local_chat::harness::LocalChatHarnessKind;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+pub struct LocalChatSpeedTierStatus {
+    pub requested: Option<String>,
+    pub active: Option<String>,
+    pub eligible: bool,
+    pub available: bool,
+    pub diagnostic: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
 pub struct LocalChatSessionInitEvent {
     pub backend_session_id: String,
@@ -13,6 +22,8 @@ pub struct LocalChatSessionInitEvent {
     pub provider_resume_id: Option<String>,
     pub model: String,
     pub tools: Vec<String>,
+    #[serde(default)]
+    pub speed_tier_status: Option<LocalChatSpeedTierStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]

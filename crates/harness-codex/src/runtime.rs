@@ -1811,6 +1811,7 @@ async fn setup_session(
             provider: "openai".into(),
             model: Some(model),
             provider_resume_id: Some(ProviderResumeId::new(thread.clone())),
+            speed_tier_status: None,
             tools: Vec::new(),
         }),
     )

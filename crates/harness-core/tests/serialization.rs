@@ -131,6 +131,7 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
             provider: "test".into(),
             model: Some("model".into()),
             provider_resume_id: Some(ProviderResumeId::from("resume")),
+            speed_tier_status: None,
             tools: vec!["Read".into(), "Bash".into()],
         }),
         HarnessEventPayloadV1::ThreadDeclared(ThreadDeclared {

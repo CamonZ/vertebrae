@@ -111,7 +111,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
         let model = requested_model_override(input.model_id.as_deref()).map(str::to_owned);
         let reasoning_effort =
             requested_reasoning_effort(input.reasoning_effort.as_deref()).map(str::to_owned);
-        let speed_tier = requested_speed_tier(input.speed_tier.as_deref());
+        let speed_tier = input.speed_tier.as_deref().and_then(SpeedTier::parse);
         let agent_config = AgentConfig {
             provider: Some(Provider::Openai),
             model: model.clone(),
@@ -325,14 +325,6 @@ fn core_permission_mode(mode: &crate::types::PermissionMode) -> CorePermissionMo
         crate::types::PermissionMode::Default => CorePermissionMode::Default,
         crate::types::PermissionMode::DontAsk => CorePermissionMode::DontAsk,
         crate::types::PermissionMode::Plan => CorePermissionMode::Plan,
-    }
-}
-
-fn requested_speed_tier(speed_tier: Option<&str>) -> Option<SpeedTier> {
-    match speed_tier {
-        Some("default") => Some(SpeedTier::Default),
-        Some("fast") => Some(SpeedTier::Fast),
-        _ => None,
     }
 }
 

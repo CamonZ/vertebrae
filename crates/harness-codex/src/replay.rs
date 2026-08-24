@@ -176,6 +176,7 @@ impl ReplayState {
                 provider: "openai".into(),
                 model: Some("codex".into()),
                 provider_resume_id: Some(self.provider_resume_id.clone()),
+                speed_tier_status: None,
                 tools: Vec::new(),
             }),
         )];

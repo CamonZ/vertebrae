@@ -15,8 +15,8 @@ use crate::local_chat::{
     LocalChatCompactionEvent, LocalChatEvent, LocalChatEventSink, LocalChatFileChange,
     LocalChatFileChangeEvent, LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionEndEvent,
     LocalChatSessionErrorEvent, LocalChatSessionInitEvent, LocalChatSessionUsageEvent,
-    LocalChatSessionWarningEvent, LocalChatTextEvent, LocalChatToolCallEvent,
-    LocalChatToolResultEvent, LocalChatTurnStartedEvent,
+    LocalChatSessionWarningEvent, LocalChatSpeedTierStatus, LocalChatTextEvent,
+    LocalChatToolCallEvent, LocalChatToolResultEvent, LocalChatTurnStartedEvent,
 };
 
 #[derive(Default)]
@@ -208,6 +208,15 @@ impl EventSink for LocalChatHarnessEventSink {
                     provider_resume_id: started.provider_resume_id.map(|value| value.to_string()),
                     model,
                     tools: started.tools,
+                    speed_tier_status: started.speed_tier_status.map(|status| {
+                        LocalChatSpeedTierStatus {
+                            requested: status.requested.map(|tier| tier.as_str().to_string()),
+                            active: status.active.map(|tier| tier.as_str().to_string()),
+                            eligible: status.eligible,
+                            available: status.available,
+                            diagnostic: status.diagnostic,
+                        }
+                    }),
                 }))?;
             }
             HarnessEventPayloadV1::TurnStarted(_) => {

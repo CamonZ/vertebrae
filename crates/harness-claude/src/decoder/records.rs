@@ -2,9 +2,9 @@ use serde_json::{Map, Value};
 use vertebrae_harness_core::{
     CompactionEvent, CompactionState, ControlDecision, ControlResolution, DiagnosticEvent,
     HarnessEventDraftV1, HarnessEventPayloadV1, PlanEntry, PlanEvent, ProviderResumeId,
-    ResolutionSource, SessionId, SessionStarted, StreamId, TextEvent, ThreadDeclared, ThreadId,
-    ThreadKind, ToolCallId, ToolOutputEvent, ToolStatus, TurnInput, TurnInputProvenance,
-    UpdateSemantics,
+    ResolutionSource, SessionId, SessionStarted, SpeedTier, SpeedTierStatus, StreamId, TextEvent,
+    ThreadDeclared, ThreadId, ThreadKind, ToolCallId, ToolOutputEvent, ToolStatus, TurnInput,
+    TurnInputProvenance, UpdateSemantics,
 };
 
 use super::controls::decode_control_request;
@@ -71,6 +71,9 @@ impl ClaudeStreamDecoder {
                 self.root_declared = true;
                 let root = self.context.root_thread_id.clone();
                 let root_stream = self.context.root_stream_id.clone();
+                let model = string(object, "model").map(str::to_owned);
+                let speed_tier_status = self.speed_tier_status(object, model.as_deref());
+                self.fast_mode_state = string(object, "fast_mode_state").map(str::to_owned);
                 drafts.push(self.draft(
                     root_stream.clone(),
                     &root,
@@ -78,11 +81,24 @@ impl ClaudeStreamDecoder {
                     UpdateSemantics::Snapshot,
                     HarnessEventPayloadV1::SessionStarted(SessionStarted {
                         provider: "anthropic".into(),
-                        model: string(object, "model").map(str::to_owned),
+                        model,
                         provider_resume_id: self.context.provider_resume_id.clone(),
+                        speed_tier_status: speed_tier_status.clone(),
                         tools: claude_init_tools(object),
                     }),
                 ));
+                if let Some(diagnostic) = speed_tier_status.and_then(|status| status.diagnostic) {
+                    drafts.push(self.draft(
+                        root_stream.clone(),
+                        &root,
+                        None,
+                        UpdateSemantics::Snapshot,
+                        HarnessEventPayloadV1::Warning(DiagnosticEvent {
+                            message: diagnostic,
+                            code: Some("claude_fast_mode".into()),
+                        }),
+                    ));
+                }
                 if self.declared_threads.insert(root.clone()) {
                     drafts.push(self.draft(
                         root_stream,
@@ -126,14 +142,17 @@ impl ClaudeStreamDecoder {
                     &mut drafts,
                 )?;
             }
-            "assistant" => self.decode_message(
-                object,
-                true,
-                &thread_id,
-                &stream_id,
-                parent_tool_call,
-                &mut drafts,
-            )?,
+            "assistant" => {
+                self.decode_fast_mode_state(object, &thread_id, &stream_id, &mut drafts);
+                self.decode_message(
+                    object,
+                    true,
+                    &thread_id,
+                    &stream_id,
+                    parent_tool_call,
+                    &mut drafts,
+                )?;
+            }
             "user" => self.decode_message(
                 object,
                 false,
@@ -142,13 +161,16 @@ impl ClaudeStreamDecoder {
                 parent_tool_call,
                 &mut drafts,
             )?,
-            "result" => self.decode_result(
-                object,
-                &thread_id,
-                &stream_id,
-                parent_tool_call,
-                &mut drafts,
-            ),
+            "result" => {
+                self.decode_fast_mode_state(object, &thread_id, &stream_id, &mut drafts);
+                self.decode_result(
+                    object,
+                    &thread_id,
+                    &stream_id,
+                    parent_tool_call,
+                    &mut drafts,
+                );
+            }
             "tool_progress" => self.decode_tool_progress(
                 object,
                 &thread_id,
@@ -288,6 +310,93 @@ impl ClaudeStreamDecoder {
             )),
         }
         Ok(drafts)
+    }
+
+    fn speed_tier_status(
+        &self,
+        object: &Map<String, Value>,
+        model: Option<&str>,
+    ) -> Option<SpeedTierStatus> {
+        let requested = self.context.requested_speed_tier;
+        let state = string(object, "fast_mode_state");
+        if requested.is_none() && state.is_none() {
+            return None;
+        }
+        let model_is_eligible = model.is_some_and(|model| model.contains("opus-4-6"));
+        let eligible = requested != Some(SpeedTier::Fast)
+            || model_is_eligible
+            || matches!(state, Some("on" | "cooldown"));
+        let (active, available, diagnostic) = match state {
+            Some("on") => (Some(SpeedTier::Fast), eligible, None),
+            Some("cooldown") => (
+                Some(SpeedTier::Default),
+                false,
+                Some(
+                    "Claude fast mode fell back to standard mode while its rate limit cools down."
+                        .into(),
+                ),
+            ),
+            Some("off") => {
+                let diagnostic = (requested == Some(SpeedTier::Fast)).then(|| {
+                    if !eligible {
+                        "Claude fast mode is not eligible for the selected model.".into()
+                    } else {
+                        "Claude fast mode is unavailable for this account or organization.".into()
+                    }
+                });
+                (
+                    Some(SpeedTier::Default),
+                    requested != Some(SpeedTier::Fast),
+                    diagnostic,
+                )
+            }
+            Some(_) => (
+                None,
+                false,
+                Some("Claude reported an unknown fast-mode state.".into()),
+            ),
+            None if requested == Some(SpeedTier::Fast) => (
+                None,
+                false,
+                Some("Claude did not report fast-mode availability.".into()),
+            ),
+            None => (Some(SpeedTier::Default), true, None),
+        };
+        Some(SpeedTierStatus {
+            requested,
+            active,
+            eligible,
+            available,
+            diagnostic,
+        })
+    }
+
+    fn decode_fast_mode_state(
+        &mut self,
+        object: &Map<String, Value>,
+        thread_id: &ThreadId,
+        stream_id: &StreamId,
+        drafts: &mut Vec<HarnessEventDraftV1>,
+    ) {
+        let state = string(object, "fast_mode_state").map(str::to_owned);
+        if state == self.fast_mode_state {
+            return;
+        }
+        self.fast_mode_state = state.clone();
+        if state.as_deref() == Some("cooldown")
+            && self.context.requested_speed_tier == Some(SpeedTier::Fast)
+        {
+            drafts.push(self.draft(
+                stream_id.clone(),
+                thread_id,
+                None,
+                UpdateSemantics::Snapshot,
+                HarnessEventPayloadV1::Warning(DiagnosticEvent {
+                    message: "Claude fast mode fell back to standard mode while its rate limit cools down.".into(),
+                    code: Some("claude_fast_mode_fallback".into()),
+                }),
+            ));
+        }
     }
 
     fn decode_compaction_status(

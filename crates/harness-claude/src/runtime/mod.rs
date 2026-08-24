@@ -64,7 +64,7 @@ fn claude_model_speed_tiers(model: &str) -> BTreeSet<SpeedTier> {
     // Fast-capable: the provider may resolve them to a model version for
     // which Fast mode is unavailable. Only resolved model IDs advertised by
     // Claude's Fast-mode contract get the alternate tier.
-    matches!(model, "claude-opus-4-6" | "claude-opus-4-7")
+    matches!(model, "claude-opus-4-6")
         .then(|| BTreeSet::from([SpeedTier::Default, SpeedTier::Fast]))
         .unwrap_or_default()
 }
@@ -176,6 +176,7 @@ impl HarnessRuntime for ClaudeRuntime {
             turn_id: None,
             run_id: None,
             provider_resume_id: request.resume_id.clone(),
+            requested_speed_tier: request.config.speed_tier,
         };
         let cleanup_timeout = self.config.cleanup_timeout;
         let initialization_timeout = self.config.initialization_timeout;
@@ -230,7 +231,8 @@ impl HarnessRuntime for ClaudeRuntime {
         })?;
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
         let (outcome_tx, outcome_rx) = watch::channel(OutcomeState::Pending);
-        let context = ClaudeDecodeContext::one_shot(request.run_id.clone(), request.stream_id);
+        let mut context = ClaudeDecodeContext::one_shot(request.run_id.clone(), request.stream_id);
+        context.requested_speed_tier = request.config.speed_tier;
         let cleanup_timeout = self.config.cleanup_timeout;
         let terminal_exit_timeout = self.config.terminal_exit_timeout;
         let root_locator_resolver = self.config.root_locator_resolver.clone();

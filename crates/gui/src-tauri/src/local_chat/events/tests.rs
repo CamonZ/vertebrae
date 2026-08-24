@@ -9,6 +9,7 @@ fn local_chat_event_names_match_public_contract() {
             provider_resume_id: Some("conversation-1".to_string()),
             model: "sonnet".to_string(),
             tools: vec!["Read".to_string()],
+            speed_tier_status: None,
         }),
         LocalChatEvent::Text(LocalChatTextEvent {
             backend_session_id: "session-1".to_string(),

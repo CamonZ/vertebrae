@@ -5,7 +5,7 @@ use tempfile::TempDir;
 use vertebrae_harness_claude::{
     ClaudeLaunchMode, ClaudePermissionMode, ClaudeProviderConfig, ClaudeProviderPrelude,
 };
-use vertebrae_harness_core::RequestConfig;
+use vertebrae_harness_core::{RequestConfig, SpeedTier};
 
 #[test]
 fn persistent_and_resumed_specs_preserve_exact_provider_configuration() {
@@ -143,6 +143,29 @@ fn one_shot_spec_uses_print_stream_json_and_verbatim_prompt() {
     assert!(spec.args.contains(&"--verbose".into()));
     assert!(spec.args.contains(&"--include-partial-messages".into()));
     assert!(!spec.args.contains(&"--input-format".into()));
+}
+
+#[test]
+fn speed_tier_is_passed_as_an_inline_settings_override() {
+    let temp = TempDir::new().unwrap();
+    let executable = temp.path().join("claude");
+    fs::write(&executable, "fixture").unwrap();
+    let config = ClaudeProviderConfig {
+        executable: Some(executable),
+        ..ClaudeProviderConfig::default()
+    };
+    let request = RequestConfig {
+        speed_tier: Some(SpeedTier::Fast),
+        ..RequestConfig::default()
+    };
+    let spec = config
+        .command_spec(ClaudeLaunchMode::Persistent { resume_id: None }, &request)
+        .unwrap();
+    assert!(
+        spec.args
+            .windows(2)
+            .any(|pair| { pair[0] == "--settings" && pair[1] == r#"{"fastMode":true}"# })
+    );
 }
 
 #[test]

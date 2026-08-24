@@ -232,12 +232,6 @@ mod tests {
                     supported_reasoning_effort_ids: None,
                     supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                 },
-                LocalChatModelOption {
-                    id: "claude-opus-4-7".to_string(),
-                    label: "Claude Opus 4.7".to_string(),
-                    supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                },
             ]
         );
         assert_eq!(
@@ -268,11 +262,6 @@ mod tests {
                     ClaudeModelOption {
                         id: "claude-opus-4-6".to_string(),
                         label: "Claude Opus 4.6".to_string(),
-                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                    },
-                    ClaudeModelOption {
-                        id: "claude-opus-4-7".to_string(),
-                        label: "Claude Opus 4.7".to_string(),
                         supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                     },
                 ],

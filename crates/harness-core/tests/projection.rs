@@ -1511,6 +1511,7 @@ fn remaining_known_payloads_update_their_canonical_state() {
                 provider: "mock".into(),
                 model: Some("model".into()),
                 provider_resume_id: Some(ProviderResumeId::from("resume")),
+                speed_tier_status: None,
                 tools: Vec::new(),
             }),
         ),

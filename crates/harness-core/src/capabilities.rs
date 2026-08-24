@@ -16,6 +16,14 @@ pub enum SpeedTier {
 }
 
 impl SpeedTier {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "default" => Some(Self::Default),
+            "fast" => Some(Self::Fast),
+            _ => None,
+        }
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Default => "default",
@@ -29,6 +37,19 @@ impl SpeedTier {
             Self::Fast => "Fast",
         }
     }
+}
+
+/// Provider-reported speed state for a started session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpeedTierStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested: Option<SpeedTier>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<SpeedTier>,
+    pub eligible: bool,
+    pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
 }
 
 /// A provider model exposed during harness discovery.

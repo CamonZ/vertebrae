@@ -12,18 +12,27 @@ fn supported_claude_model_catalog_uses_expected_aliases_and_default() {
                 ClaudeModelOption {
                     id: "sonnet".to_string(),
                     label: "Sonnet".to_string(),
+                    supported_speed_tier_ids: None,
                 },
                 ClaudeModelOption {
                     id: "opus".to_string(),
                     label: "Opus".to_string(),
+                    supported_speed_tier_ids: None,
                 },
                 ClaudeModelOption {
                     id: "haiku".to_string(),
                     label: "Haiku".to_string(),
+                    supported_speed_tier_ids: None,
                 },
                 ClaudeModelOption {
                     id: "fable".to_string(),
                     label: "Fable".to_string(),
+                    supported_speed_tier_ids: None,
+                },
+                ClaudeModelOption {
+                    id: "claude-opus-4-6".to_string(),
+                    label: "Claude Opus 4.6".to_string(),
+                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                 },
             ],
         }
