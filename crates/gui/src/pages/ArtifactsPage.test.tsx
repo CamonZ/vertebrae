@@ -112,6 +112,15 @@ describe("ArtifactsPage", () => {
       "aria-level",
       "2"
     );
+    expect(screen.getByTestId("artifact-tree-type-a-1")).toHaveTextContent(
+      "Markdown"
+    );
+    expect(screen.getAllByTestId("tree-indent-guides").length).toBeGreaterThan(
+      0
+    );
+    expect(
+      screen.queryByTestId("artifact-tree-type-folder:reports")
+    ).not.toBeInTheDocument();
 
     fireEvent.click(within(folder).getByRole("button", { name: "Collapse" }));
     expect(

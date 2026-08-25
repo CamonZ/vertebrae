@@ -11,6 +11,8 @@ interface TreeNodeProps {
   onSelect?: () => void;
   /** Optional icon rendered between chevron and label. */
   icon?: ReactNode;
+  /** Render subtle vertical guides through the row's indentation slots. */
+  showGuides?: boolean;
   /** Right-aligned slot for status / metadata. */
   right?: ReactNode;
   children: ReactNode;
@@ -41,6 +43,7 @@ export function TreeNode({
   onToggle,
   onSelect,
   icon,
+  showGuides,
   right,
   children,
   className,
@@ -77,6 +80,21 @@ export function TreeNode({
         .join(" ")}
       style={{ paddingLeft: `${8 + depth * 16}px` }}
     >
+      {showGuides && depth > 0 && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 left-0"
+          data-testid="tree-indent-guides"
+        >
+          {Array.from({ length: depth }, (_, guideIndex) => (
+            <span
+              key={guideIndex}
+              className="absolute inset-y-0 w-px bg-[var(--color-line)] opacity-70"
+              style={{ left: `${20 + guideIndex * 16}px` }}
+            />
+          ))}
+        </span>
+      )}
       <button
         type="button"
         onClick={(e) => {

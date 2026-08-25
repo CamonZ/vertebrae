@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import type { Artifact } from "../bindings";
+import { Badge } from "../components/atoms/Badge";
 import { ArtifactInspectorPanel } from "../components/Artifacts/ArtifactInspectorPanel";
 import { TreeNode } from "../components/molecules/TreeNode";
 import { Spinner } from "../components/Spinner";
@@ -29,43 +30,19 @@ function artifactCue(artifact: Artifact) {
     : metadata.format;
 }
 
-function FolderIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-4 w-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      viewBox="0 0 24 24"
-    >
-      <path d="M3.75 6.75h5l1.5 1.5h10v9.75a1.5 1.5 0 0 1-1.5 1.5h-15a1.5 1.5 0 0 1-1.5-1.5V8.25a1.5 1.5 0 0 1 1.5-1.5Z" />
-    </svg>
-  );
-}
-
-function FileIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-4 w-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      viewBox="0 0 24 24"
-    >
-      <path d="M6.75 3.75h7.5l3 3v13.5h-10.5V3.75Z" />
-      <path d="M14.25 3.75v3h3" />
-    </svg>
-  );
-}
-
 function sameIds(left: ReadonlySet<string>, right: ReadonlySet<string>) {
   if (left.size !== right.size) return false;
   for (const id of left) {
     if (!right.has(id)) return false;
   }
   return true;
+}
+
+function artifactTypeLabel(artifact: Artifact) {
+  const cue = artifactCue(artifact);
+  if (cue === "conversation") return "Conversation";
+  if (cue === "raw") return "Raw";
+  return cue.charAt(0).toUpperCase() + cue.slice(1);
 }
 
 interface ArtifactTreeRowsProps {
@@ -93,8 +70,16 @@ function ArtifactTreeRows({
           depth={depth}
           selected={node.id === selectedArtifactId}
           onSelect={() => onSelect(node.artifact)}
-          icon={<FileIcon />}
-          right={artifactCue(node.artifact)}
+          right={
+            <Badge
+              size="sm"
+              className="uppercase tracking-[0.08em]"
+              testId={`artifact-tree-type-${node.id}`}
+            >
+              {artifactTypeLabel(node.artifact)}
+            </Badge>
+          }
+          showGuides
           testId={`artifact-tree-leaf-${node.id}`}
         >
           {node.label}
@@ -110,7 +95,7 @@ function ArtifactTreeRows({
           hasChildren={node.children.length > 0}
           expanded={expanded}
           onToggle={() => onToggle(node.id)}
-          icon={<FolderIcon />}
+          showGuides
           testId={`artifact-tree-folder-${node.id}`}
         >
           {node.label}
