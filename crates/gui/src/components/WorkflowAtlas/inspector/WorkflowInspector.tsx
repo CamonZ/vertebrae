@@ -235,6 +235,7 @@ export function WorkflowInspector({
             <span>Factory name</span>
             <button
               className="wfd-action"
+              data-testid="factory-name-edit"
               onClick={() => {
                 setFactoryError(null);
                 setFactoryNameDraft(wf.factoryName ?? "");
@@ -262,6 +263,7 @@ export function WorkflowInspector({
               <div className="wfd-editor-actions">
                 <button
                   className="wfd-action"
+                  data-testid="factory-name-clear"
                   onClick={() => setFactoryNameDraft("")}
                   type="button"
                 >
@@ -269,6 +271,7 @@ export function WorkflowInspector({
                 </button>
                 <button
                   className="wfd-save"
+                  data-testid="factory-name-save"
                   disabled={factoryBusy}
                   onClick={saveFactoryName}
                   type="button"

@@ -26,13 +26,9 @@ pub struct WorkflowUpdateCommand {
     #[arg(long = "kanban-column")]
     pub kanban_column: Option<String>,
 
-    /// Factory name for the workflow
-    #[arg(long = "factory-name", conflicts_with = "clear_factory_name")]
+    /// Factory name for the workflow; pass an empty string to clear it
+    #[arg(long = "factory-name")]
     pub factory_name: Option<String>,
-
-    /// Clear the workflow factory name
-    #[arg(long = "clear-factory-name", conflicts_with = "factory_name")]
-    pub clear_factory_name: bool,
 
     /// Mark this workflow as the default for new tasks; conflicts with --no-default
     #[arg(long, conflicts_with = "no_default")]
@@ -88,15 +84,17 @@ impl WorkflowUpdateCommand {
         }
 
         if let Some(factory_name) = &self.factory_name {
-            options = options.with_factory_name(factory_name);
-        } else if self.clear_factory_name {
-            options = options.clear_factory_name();
+            if factory_name.is_empty() {
+                options = options.clear_factory_name();
+            } else {
+                options = options.with_factory_name(factory_name);
+            }
         }
 
         // Check if any updates were provided
         if !options.has_updates() {
             return Err(ServiceError::validation_failed(
-                "no updates specified (use --name, --description, --clear-description, --default, --no-default, --kanban-column, --factory-name, or --clear-factory-name options)",
+                "no updates specified (use --name, --description, --clear-description, --default, --no-default, --kanban-column, or --factory-name options)",
             ));
         }
 
@@ -122,7 +120,6 @@ mod tests {
             no_default: false,
             kanban_column: None,
             factory_name: None,
-            clear_factory_name: false,
         };
         let debug = format!("{:?}", cmd);
         assert!(debug.contains("WorkflowUpdateCommand"));

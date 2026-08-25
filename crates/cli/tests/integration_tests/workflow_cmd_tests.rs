@@ -192,7 +192,6 @@ async fn test_workflow_update_name() {
         no_default: false,
         kanban_column: None,
         factory_name: None,
-        clear_factory_name: false,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
 
@@ -219,7 +218,6 @@ async fn test_workflow_update_description() {
         no_default: false,
         kanban_column: None,
         factory_name: None,
-        clear_factory_name: false,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
 
@@ -244,7 +242,6 @@ async fn test_workflow_update_multiple_fields() {
         no_default: false,
         kanban_column: None,
         factory_name: None,
-        clear_factory_name: false,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
 
@@ -273,7 +270,6 @@ async fn test_workflow_update_no_updates_fails() {
         no_default: false,
         kanban_column: None,
         factory_name: None,
-        clear_factory_name: false,
     };
     let result = cmd.execute(services.workflows()).await;
 
@@ -293,7 +289,6 @@ async fn test_workflow_update_nonexistent_workflow() {
         no_default: false,
         kanban_column: None,
         factory_name: None,
-        clear_factory_name: false,
     };
     let result = cmd.execute(services.workflows()).await;
 
@@ -342,7 +337,6 @@ async fn test_workflow_command_dispatch_update() {
         no_default: false,
         kanban_column: None,
         factory_name: None,
-        clear_factory_name: false,
     });
     let output = cmd.execute(&services).await.unwrap();
 
@@ -372,7 +366,6 @@ async fn test_workflow_show_after_update() {
         no_default: false,
         kanban_column: None,
         factory_name: None,
-        clear_factory_name: false,
     };
     update_cmd.execute(services.workflows()).await.unwrap();
 
@@ -531,7 +524,6 @@ async fn test_workflow_update_factory_name_and_clear() {
         no_default: false,
         kanban_column: None,
         factory_name: Some("Updated Factory".to_string()),
-        clear_factory_name: false,
     };
     set_cmd.execute(services.workflows()).await.unwrap();
     let workflow = services.workflows().get_workflow(&wf_id).await.unwrap();
@@ -545,8 +537,7 @@ async fn test_workflow_update_factory_name_and_clear() {
         default: false,
         no_default: false,
         kanban_column: None,
-        factory_name: None,
-        clear_factory_name: true,
+        factory_name: Some(String::new()),
     };
     clear_cmd.execute(services.workflows()).await.unwrap();
     let workflow = services.workflows().get_workflow(&wf_id).await.unwrap();
@@ -627,7 +618,6 @@ async fn test_workflow_update_default_flag() {
         no_default: false,
         kanban_column: None,
         factory_name: None,
-        clear_factory_name: false,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
     assert!(output.contains("Updated workflow"));
@@ -669,7 +659,6 @@ async fn test_workflow_update_no_default_flag() {
         no_default: true,
         kanban_column: None,
         factory_name: None,
-        clear_factory_name: false,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
     assert!(output.contains("Updated workflow"));

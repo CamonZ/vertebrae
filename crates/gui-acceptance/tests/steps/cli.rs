@@ -100,7 +100,7 @@ async fn delete_current_artifact_via_cli(world: &mut GuiWorld) {
 
 /// Build and run `vtb workflow add` from a Gherkin data table.
 ///
-/// Recognised keys: `name`, `kanban_column`, `description`.
+/// Recognised keys: `name`, `kanban_column`, `factory_name`, `description`.
 async fn do_create_workflow(world: &mut GuiWorld, step: &cucumber::gherkin::Step) {
     let table = step
         .table
@@ -117,6 +117,10 @@ async fn do_create_workflow(world: &mut GuiWorld, step: &cucumber::gherkin::Step
             "name" => name = value.to_string(),
             "kanban_column" => {
                 extra.push("--kanban-column".to_string());
+                extra.push(value.to_string());
+            }
+            "factory_name" => {
+                extra.push("--factory-name".to_string());
                 extra.push(value.to_string());
             }
             "description" => {

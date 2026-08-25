@@ -62,7 +62,7 @@ vtb workflow update <id> --name "Dev"              # Rename
 vtb workflow update <id> --kanban-column "Active"  # Set kanban column
 vtb workflow update <id> --kanban-column ""        # Clear kanban column
 vtb workflow update <id> --factory-name "Shared Factory" # Set factory name
-vtb workflow update <id> --clear-factory-name      # Clear factory name
+vtb workflow update <id> --factory-name ""               # Clear factory name
 vtb workflow update <id> --default                 # Mark as default
 vtb workflow update <id> --name "Dev" --json       # Emit update envelope
 vtb workflow delete <workflow-id>                  # Delete workflow
@@ -108,8 +108,7 @@ Supported update options are:
 | `--description <DESCRIPTION>` | `-d` | Set a new workflow description; conflicts with `--clear-description` |
 | `--clear-description` | | Clear the workflow description; conflicts with `--description` |
 | `--kanban-column <KANBAN_COLUMN>` | | Set the board column; pass an empty string `""` to clear it |
-| `--factory-name <FACTORY_NAME>` | | Set the workflow factory name; conflicts with `--clear-factory-name` |
-| `--clear-factory-name` | | Clear the workflow factory name; conflicts with `--factory-name` |
+| `--factory-name <FACTORY_NAME>` | | Set the workflow factory name; pass an empty string `""` to clear it |
 | `--default` | | Mark this workflow as the default for new tasks; conflicts with `--no-default` |
 | `--no-default` | | Unmark this workflow as the default; conflicts with `--default` |
 | `--json` | | Global flag; output a machine-readable update envelope |
