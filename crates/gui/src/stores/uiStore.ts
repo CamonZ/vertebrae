@@ -3,6 +3,9 @@ import { persist } from "zustand/middleware";
 
 type Theme = "light" | "dark" | "system";
 
+/** Visual treatment for the assistant waiting-state indicator. */
+export type ThinkingIndicatorStyle = "classic" | "futuristic";
+
 /**
  * Density preference for the typography scale.
  * - 'auto':        Let useDensity() decide based on scaleFactor + window width.
@@ -15,6 +18,8 @@ export type DensityPreference = "auto" | "comfortable" | "default" | "compact";
 interface UIState {
   /** Current theme preference */
   theme: Theme;
+  /** Current assistant thinking indicator style */
+  thinkingIndicatorStyle: ThinkingIndicatorStyle;
   /** Current density preference */
   density: DensityPreference;
   /** Application name or path used to open local file references. */
@@ -24,6 +29,8 @@ interface UIState {
 interface UIActions {
   /** Set the theme preference */
   setTheme: (theme: Theme) => void;
+  /** Set the assistant thinking indicator style */
+  setThinkingIndicatorStyle: (style: ThinkingIndicatorStyle) => void;
   /** Set the density preference */
   setDensity: (density: DensityPreference) => void;
   /** Set the application used to open local file references. */
@@ -37,6 +44,9 @@ export const useUIStore = create<UIStore>()(
     (set) => ({
       theme: "system",
       setTheme: (theme) => set({ theme }),
+      thinkingIndicatorStyle: "classic",
+      setThinkingIndicatorStyle: (thinkingIndicatorStyle) =>
+        set({ thinkingIndicatorStyle }),
       density: "auto",
       setDensity: (density) => set({ density }),
       externalEditor: "",
@@ -47,6 +57,7 @@ export const useUIStore = create<UIStore>()(
       // Only persist UI preferences, not transient state
       partialize: (state) => ({
         theme: state.theme,
+        thinkingIndicatorStyle: state.thinkingIndicatorStyle,
         density: state.density,
         externalEditor: state.externalEditor,
       }),

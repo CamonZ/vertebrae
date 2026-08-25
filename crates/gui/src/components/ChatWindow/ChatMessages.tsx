@@ -20,6 +20,7 @@ import { chatMessagesToThread } from "./chatMessagesToThread";
 import { PermissionRequestTurn } from "./PermissionRequestTurn";
 import { UserQuestionTurn } from "./UserQuestionTurn";
 import { useChatStore } from "../../stores/chatStore";
+import { useUIStore } from "../../stores/uiStore";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { MarkdownProjectRootProvider } from "../shared/MarkdownContent";
 import {
@@ -255,6 +256,9 @@ export function ChatMessages({
   const markUserQuestionUnavailable = useChatStore(
     (state) => state.markUserQuestionUnavailable
   );
+  const thinkingIndicatorStyle = useUIStore(
+    (state) => state.thinkingIndicatorStyle
+  );
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
   const keepAtBottomRef = useRef(true);
@@ -435,7 +439,10 @@ export function ChatMessages({
             </div>
           )}
           {isWaiting && (
-            <ThinkingIndicator label={activityLabel ?? undefined} />
+            <ThinkingIndicator
+              label={activityLabel ?? undefined}
+              style={thinkingIndicatorStyle}
+            />
           )}
           {!isWaiting && compactionSummary && (
             <div
