@@ -1,9 +1,12 @@
-use std::ffi::OsString;
+use std::env;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::DockerCompose;
-use crate::local_backend::command::{CommandOutput, CommandRequest, ProcessRunner};
+use crate::local_backend::command::{
+    path_for_docker_process, CommandOutput, CommandRequest, ProcessRunner,
+};
 use crate::local_backend::state::{
     ApiToken, DockerTarget, LocalBackendError, ManagedStackPaths, ManagedStackState,
     RuntimeSecrets, SeedAccount,
@@ -353,7 +356,24 @@ fn sanitized_docker_request(
     args: impl IntoIterator<Item = impl Into<OsString>>,
     timeout: Duration,
 ) -> CommandRequest {
+    sanitized_docker_request_with_path(
+        action,
+        docker_cli,
+        args,
+        timeout,
+        env::var_os("PATH").as_deref(),
+    )
+}
+
+fn sanitized_docker_request_with_path(
+    action: &str,
+    docker_cli: &Path,
+    args: impl IntoIterator<Item = impl Into<OsString>>,
+    timeout: Duration,
+    existing_path: Option<&OsStr>,
+) -> CommandRequest {
     CommandRequest::new(action, docker_cli.as_os_str(), args, timeout)
+        .with_env([("PATH", path_for_docker_process(docker_cli, existing_path))])
         .with_env_removed(DOCKER_ENV_REMOVE)
 }
 
@@ -384,9 +404,46 @@ fn redact_seed_error(
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+
     use super::super::test_support::*;
     use super::*;
     use crate::local_backend::state::{ApiToken, SeedAccount, StackKind};
+
+    #[test]
+    fn docker_request_sets_cli_path_and_preserves_existing_path() {
+        let existing_path = env::join_paths([
+            Path::new("/usr/bin"),
+            Path::new("/bin"),
+            Path::new("/custom/bin"),
+        ])
+        .expect("join existing PATH");
+        let request = sanitized_docker_request_with_path(
+            "check Docker",
+            Path::new("/Applications/Docker.app/Contents/Resources/bin/docker"),
+            ["version"],
+            QUICK_COMMAND_TIMEOUT,
+            Some(&existing_path),
+        );
+
+        let entries = env::split_paths(request.env_value("PATH").expect("Docker request PATH"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries.first(),
+            Some(&PathBuf::from(
+                "/Applications/Docker.app/Contents/Resources/bin"
+            ))
+        );
+        assert!(entries.contains(&PathBuf::from("/usr/bin")));
+        assert!(entries.contains(&PathBuf::from("/bin")));
+        assert!(entries.contains(&PathBuf::from("/custom/bin")));
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        assert!(entries.contains(&PathBuf::from("/usr/local/bin")));
+        for name in DOCKER_ENV_REMOVE {
+            assert!(request.removes_env(name), "{name} must be sanitized");
+        }
+    }
+
     #[tokio::test]
     async fn controller_resolves_a_local_context_and_neutralizes_ambient_overrides() {
         let runner = MockRunner::with_outputs([
