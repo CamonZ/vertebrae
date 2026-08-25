@@ -45,8 +45,15 @@ test("light chat panels retain a frosted surface treatment", () => {
   assert.match(lightPanel, /,\s*transparent\)/);
   assert.match(lightPanel, /var\(--bg-3\) 24%/);
   assert.match(lightPanel, /backdrop-filter:\s*blur\(30px\)/);
+});
+
+test("chat and entity side panels share the neutral gray shell border", () => {
   assert.match(
-    lightPanel,
-    /border-color:\s*color-mix\(in oklch, var\(--fg\) 18%, transparent\);/
+    stylesheet,
+    /\.hc-panel,\s*\.detail\.detail-float\s*\{[\s\S]*?border:\s*1px solid color-mix\(in oklch, var\(--fg\) 12%, transparent\);/
+  );
+  assert.match(
+    stylesheet,
+    /\.light \.hc-panel,\s*\.light \.detail\.detail-float\s*\{[\s\S]*?border-color:\s*color-mix\(in oklch, var\(--fg\) 18%, transparent\);/
   );
 });

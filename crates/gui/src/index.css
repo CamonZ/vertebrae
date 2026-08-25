@@ -2434,7 +2434,6 @@ html.light ::selection {
   );
   -webkit-backdrop-filter: blur(30px) brightness(1.5) saturate(1);
   backdrop-filter: blur(30px) brightness(1.5) saturate(1);
-  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
   border-radius: var(--r-lg);
   box-shadow:
     var(--shadow-3),
@@ -3642,7 +3641,6 @@ html.light ::selection {
   );
   -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1);
   backdrop-filter: blur(30px) brightness(1.4) saturate(1);
-  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
   border-radius: var(--r-lg);
   box-shadow:
     var(--shadow-3),
@@ -3676,7 +3674,6 @@ html.light ::selection {
   );
   -webkit-backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
   backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
-  border: 1px solid color-mix(in oklch, var(--fg) 18%, transparent);
   box-shadow:
     var(--shadow-3),
     -18px 0 44px rgba(68, 52, 31, 0.14),
@@ -3691,11 +3688,21 @@ html.light ::selection {
   );
   -webkit-backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
   backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
-  border-color: color-mix(in oklch, var(--fg) 18%, transparent);
   box-shadow:
     var(--shadow-3),
     -18px 0 44px rgba(68, 52, 31, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+/* Chat and entity side panels share the same quiet neutral shell edge. */
+.hc-panel,
+.detail.detail-float {
+  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+}
+
+.light .hc-panel,
+.light .detail.detail-float {
+  border-color: color-mix(in oklch, var(--fg) 18%, transparent);
 }
 
 .light .hc-launch {
