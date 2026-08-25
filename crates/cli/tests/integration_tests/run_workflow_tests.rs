@@ -34,6 +34,7 @@ async fn create_task_with_workflow(
         order: 0,
         is_default: false,
         kanban_column: None,
+        factory_name: None,
     };
     let wf_id = services
         .workflows()

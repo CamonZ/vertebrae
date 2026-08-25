@@ -382,6 +382,8 @@ pub struct WorkflowResponse {
     #[serde(default)]
     pub kanban_column: Option<String>,
     #[serde(default)]
+    pub factory_name: Option<String>,
+    #[serde(default)]
     pub project_id: Option<String>,
     #[serde(default)]
     pub workflow_steps: Vec<WorkflowStepSummary>,
@@ -792,6 +794,8 @@ pub struct PipelineWorkflowResponse {
     pub initial_step_id: Option<String>,
     #[serde(default)]
     pub kanban_column: Option<String>,
+    #[serde(default)]
+    pub factory_name: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
     #[serde(default)]
@@ -1282,6 +1286,18 @@ mod tests {
 
         let workflow: WorkflowResponse = serde_json::from_str(json).unwrap();
         assert_eq!(workflow.kanban_column.as_deref(), Some("In Progress"));
+    }
+
+    #[test]
+    fn test_workflow_response_with_factory_name() {
+        let json = r#"{
+            "id": "wf-factory",
+            "name": "Factory Workflow",
+            "factory_name": "Shared Factory"
+        }"#;
+
+        let workflow: WorkflowResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(workflow.factory_name.as_deref(), Some("Shared Factory"));
     }
 
     #[test]

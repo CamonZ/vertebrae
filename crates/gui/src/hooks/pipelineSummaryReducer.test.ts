@@ -61,6 +61,7 @@ function makeWorkflow(id: string, steps: PipelineStep[]): PipelineWorkflow {
     description: null,
     initial_step_id: steps[0]?.id ?? null,
     kanban_column: null,
+    factory_name: null,
     is_default: false,
     display_order: 0,
     workflow_steps: steps,
@@ -458,6 +459,7 @@ function fakeWorkflow(
     created_at: null,
     updated_at: null,
     ...overrides,
+    factory_name: overrides.factory_name ?? null,
   };
 }
 
@@ -520,14 +522,25 @@ describe("applyWorkflowUpdated", () => {
 
     const next = applyWorkflowUpdated(
       summary,
-      fakeWorkflow("wf-1", 0, { name: "renamed", kanban_column: "Doing" }),
+      fakeWorkflow("wf-1", 0, {
+        name: "renamed",
+        kanban_column: "Doing",
+        factory_name: "Factory Two",
+      }),
     );
 
     expect(next.workflows[0].name).toBe("renamed");
     expect(next.workflows[0].kanban_column).toBe("Doing");
+    expect(next.workflows[0].factory_name).toBe("Factory Two");
     expect(next.workflows[0].workflow_steps).toBe(
       summary.workflows[0].workflow_steps,
     );
+
+    const cleared = applyWorkflowUpdated(
+      next,
+      fakeWorkflow("wf-1", 0, { factory_name: null }),
+    );
+    expect(cleared.workflows[0].factory_name).toBeNull();
   });
 
   it("re-sorts when display_order changes", () => {

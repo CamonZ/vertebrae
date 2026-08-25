@@ -112,6 +112,7 @@ impl SacrumWorkflowService {
             order: response.display_order.unwrap_or(0),
             is_default: response.is_default.unwrap_or(false),
             kanban_column: response.kanban_column.clone(),
+            factory_name: response.factory_name.clone(),
             transitions,
             created_at,
             updated_at,
@@ -194,6 +195,9 @@ impl WorkflowService for SacrumWorkflowService {
 
         if let Some(ref kanban_column) = options.kanban_column {
             variables["kanban_column"] = json!(kanban_column);
+        }
+        if let Some(ref factory_name) = options.factory_name {
+            variables["factory_name"] = json!(factory_name);
         }
 
         #[derive(serde::Deserialize)]
@@ -370,6 +374,12 @@ impl WorkflowService for SacrumWorkflowService {
             match kanban_opt {
                 Some(col) => variables["kanban_column"] = json!(col),
                 None => variables["kanban_column"] = serde_json::Value::Null,
+            }
+        }
+        if let Some(ref factory_opt) = options.factory_name {
+            match factory_opt {
+                Some(factory_name) => variables["factory_name"] = json!(factory_name),
+                None => variables["factory_name"] = serde_json::Value::Null,
             }
         }
 
@@ -643,6 +653,7 @@ mod tests {
             metadata: None,
             initial_step_id: None,
             kanban_column: None,
+            factory_name: None,
             project_id: Some("test-proj".to_string()),
             workflow_steps: vec![],
             transitions: None,
@@ -938,10 +949,14 @@ mod tests {
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        let opts = CreateWorkflowOptions::new("Test Workflow", vec![]);
+        let opts = CreateWorkflowOptions::new("Test Workflow", vec![]).with_factory_name("Factory");
         let id = service.create_workflow(opts).await.unwrap();
 
         assert_eq!(id, "wf-new");
+
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["variables"]["factory_name"], "Factory");
     }
 
     #[tokio::test]
@@ -1248,10 +1263,41 @@ mod tests {
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        let opts = UpdateWorkflowOptions::new().with_name("Updated Name");
+        let opts = UpdateWorkflowOptions::new()
+            .with_name("Updated Name")
+            .with_factory_name("Updated Factory");
         let result = service.update_workflow("wf-1", opts).await;
 
         assert!(result.is_ok());
+
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["variables"]["factory_name"], "Updated Factory");
+    }
+
+    #[tokio::test]
+    async fn test_update_workflow_can_clear_factory_name() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "update_workflow": { "id": "wf-1" }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        service
+            .update_workflow("wf-1", UpdateWorkflowOptions::new().clear_factory_name())
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert!(body["variables"]["factory_name"].is_null());
     }
 
     #[tokio::test]
@@ -1730,6 +1776,18 @@ mod tests {
 
         let workflow = service.response_to_workflow(&response);
         assert_eq!(workflow.kanban_column, Some("In Progress".to_string()));
+    }
+
+    #[test]
+    fn test_response_to_workflow_maps_factory_name() {
+        let client = create_test_client();
+        let service = SacrumWorkflowService::new(client);
+
+        let mut response = make_workflow_response("wf-factory", "Factory Workflow");
+        response.factory_name = Some("Factory".to_string());
+
+        let workflow = service.response_to_workflow(&response);
+        assert_eq!(workflow.factory_name, Some("Factory".to_string()));
     }
 
     #[test]

@@ -68,6 +68,7 @@ impl WorkflowShowCommand {
             description: workflow.description,
             is_default: workflow.is_default,
             kanban_column: workflow.kanban_column,
+            factory_name: workflow.factory_name,
             steps,
             metadata: workflow.metadata,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),

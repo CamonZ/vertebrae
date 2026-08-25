@@ -21,6 +21,7 @@ pub const PIPELINE_SUMMARY: &str = r#"
             metadata
             initial_step_id
             kanban_column
+            factory_name
             project_id
             inserted_at
             updated_at

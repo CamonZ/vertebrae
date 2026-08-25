@@ -401,6 +401,7 @@ mod tests {
                     order: 0,
                     is_default: false,
                     kanban_column: None,
+                    factory_name: None,
                 })
                 .await
                 .unwrap();
@@ -436,6 +437,7 @@ mod tests {
                     order: 0,
                     is_default: false,
                     kanban_column: None,
+                    factory_name: None,
                 })
                 .await
                 .unwrap();
@@ -448,6 +450,7 @@ mod tests {
                     order: 1,
                     is_default: false,
                     kanban_column: None,
+                    factory_name: None,
                 })
                 .await
                 .unwrap();
@@ -495,6 +498,7 @@ mod tests {
                     order: 0,
                     is_default: false,
                     kanban_column: None,
+                    factory_name: None,
                 })
                 .await
                 .unwrap()
@@ -525,6 +529,7 @@ mod tests {
                     order: 0,
                     is_default: false,
                     kanban_column: None,
+                    factory_name: None,
                 })
                 .await
                 .unwrap();
@@ -555,6 +560,7 @@ mod tests {
                     order: 0,
                     is_default: false,
                     kanban_column: None,
+                    factory_name: None,
                 })
                 .await
                 .unwrap();
@@ -566,6 +572,7 @@ mod tests {
                     order: 1,
                     is_default: false,
                     kanban_column: None,
+                    factory_name: None,
                 })
                 .await
                 .unwrap();

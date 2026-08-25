@@ -83,6 +83,7 @@ function makeWorkflow(
     workflow_steps: steps,
     transitions: [],
     ...overrides,
+    factory_name: overrides.factory_name ?? null,
   };
 }
 

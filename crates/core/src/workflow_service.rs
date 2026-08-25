@@ -46,6 +46,8 @@ pub struct CreateWorkflowOptions {
     pub is_default: bool,
     /// Optional kanban column for board placement
     pub kanban_column: Option<String>,
+    /// Optional factory name used to group related workflows
+    pub factory_name: Option<String>,
 }
 
 impl CreateWorkflowOptions {
@@ -58,6 +60,7 @@ impl CreateWorkflowOptions {
             order: 0,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
         }
     }
 
@@ -82,6 +85,12 @@ impl CreateWorkflowOptions {
     /// Set the kanban column
     pub fn with_kanban_column(mut self, kanban_column: impl Into<String>) -> Self {
         self.kanban_column = Some(kanban_column.into());
+        self
+    }
+
+    /// Set the factory name
+    pub fn with_factory_name(mut self, factory_name: impl Into<String>) -> Self {
+        self.factory_name = Some(factory_name.into());
         self
     }
 }
@@ -118,6 +127,8 @@ pub struct UpdateWorkflowOptions {
     pub is_default: Option<bool>,
     /// Kanban column (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
     pub kanban_column: Option<Option<String>>,
+    /// Factory name (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
+    pub factory_name: Option<Option<String>>,
 }
 
 impl UpdateWorkflowOptions {
@@ -168,6 +179,18 @@ impl UpdateWorkflowOptions {
         self
     }
 
+    /// Set the factory name
+    pub fn with_factory_name(mut self, factory_name: impl Into<String>) -> Self {
+        self.factory_name = Some(Some(factory_name.into()));
+        self
+    }
+
+    /// Clear the factory name
+    pub fn clear_factory_name(mut self) -> Self {
+        self.factory_name = Some(None);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.name.is_some()
@@ -175,6 +198,7 @@ impl UpdateWorkflowOptions {
             || self.order.is_some()
             || self.is_default.is_some()
             || self.kanban_column.is_some()
+            || self.factory_name.is_some()
     }
 }
 
@@ -436,6 +460,12 @@ mod tests {
     }
 
     #[test]
+    fn create_workflow_options_with_factory_name() {
+        let opts = CreateWorkflowOptions::new("test", vec![]).with_factory_name("Factory");
+        assert_eq!(opts.factory_name, Some("Factory".to_string()));
+    }
+
+    #[test]
     fn create_workflow_options_with_is_default() {
         let opts = CreateWorkflowOptions::new("test", vec![]).with_is_default(true);
         assert!(opts.is_default);
@@ -472,6 +502,20 @@ mod tests {
     }
 
     #[test]
+    fn update_workflow_options_with_factory_name() {
+        let opts = UpdateWorkflowOptions::new().with_factory_name("Factory");
+        assert_eq!(opts.factory_name, Some(Some("Factory".to_string())));
+        assert!(opts.has_updates());
+    }
+
+    #[test]
+    fn update_workflow_options_clear_factory_name() {
+        let opts = UpdateWorkflowOptions::new().clear_factory_name();
+        assert_eq!(opts.factory_name, Some(None));
+        assert!(opts.has_updates());
+    }
+
+    #[test]
     fn update_workflow_options_with_is_default() {
         let opts = UpdateWorkflowOptions::new().with_is_default(true);
         assert_eq!(opts.is_default, Some(true));
@@ -482,6 +526,7 @@ mod tests {
     fn update_workflow_options_defaults() {
         let opts = UpdateWorkflowOptions::new();
         assert!(opts.kanban_column.is_none());
+        assert!(opts.factory_name.is_none());
         assert!(opts.is_default.is_none());
         assert!(!opts.has_updates());
     }

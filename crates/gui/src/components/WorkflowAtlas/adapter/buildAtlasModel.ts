@@ -248,6 +248,7 @@ export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
       description: wf.description,
       initialStepId: wf.initial_step_id,
       phase: phaseOf(wf),
+      factoryName: wf.factory_name,
       displayOrder: wf.display_order,
       isDefault: wf.is_default,
       stepIds: ordered.map((s) => s.id),

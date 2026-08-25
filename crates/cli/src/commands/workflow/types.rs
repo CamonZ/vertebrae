@@ -59,6 +59,8 @@ pub struct WorkflowDetail {
     pub is_default: bool,
     /// Optional kanban column
     pub kanban_column: Option<String>,
+    /// Optional factory name used to group related workflows
+    pub factory_name: Option<String>,
     /// Ordered list of workflow steps
     pub steps: Vec<StepDisplayInfo>,
     /// Additional metadata as key-value pairs
@@ -90,6 +92,10 @@ impl std::fmt::Display for WorkflowDetail {
         // Kanban column (if present)
         if let Some(ref kanban_column) = self.kanban_column {
             writeln!(f, "Kanban Column: {}", kanban_column)?;
+        }
+
+        if let Some(ref factory_name) = self.factory_name {
+            writeln!(f, "Factory Name: {}", factory_name)?;
         }
 
         writeln!(f)?;
@@ -200,6 +206,7 @@ mod tests {
             description: Some("A detailed workflow".to_string()),
             is_default: false,
             kanban_column: None,
+            factory_name: Some("Shared Factory".to_string()),
             steps: vec![
                 StepDisplayInfo {
                     id: Some("step-id".to_string()),
@@ -224,6 +231,7 @@ mod tests {
         let output = format!("{}", detail);
         assert!(output.contains("Workflow: wf1 - Test Workflow"));
         assert!(output.contains("A detailed workflow"));
+        assert!(output.contains("Factory Name: Shared Factory"));
         assert!(output.contains("1. step1 (model: model1)"));
         assert!(output.contains("2. step2 (model: model2)"));
     }
@@ -239,6 +247,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata,
             created_at: None,
@@ -296,6 +305,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -315,6 +325,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -333,6 +344,7 @@ mod tests {
             description: None,
             is_default: true,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -350,6 +362,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -367,6 +380,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -384,6 +398,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: Some("2024-01-15T10:30:00Z".to_string()),
@@ -403,6 +418,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: Some("2024-01-15T10:30:00Z".to_string()),
@@ -422,6 +438,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -441,6 +458,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -458,6 +476,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![StepDisplayInfo {
                 id: Some("step-id".to_string()),
                 name: "review".to_string(),
@@ -481,6 +500,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![
                 StepDisplayInfo {
                     id: Some("step-id".to_string()),
@@ -525,6 +545,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -547,6 +568,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![],
             metadata,
             created_at: None,
@@ -624,6 +646,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: Some("Shared Factory".to_string()),
             steps: vec![StepDisplayInfo {
                 id: Some("step-123".to_string()),
                 name: "review".to_string(),
@@ -640,6 +663,7 @@ mod tests {
 
         assert_eq!(json["steps"][0]["id"], "step-123");
         assert_eq!(json["steps"][0]["name"], "review");
+        assert_eq!(json["factory_name"], "Shared Factory");
     }
 
     #[test]
@@ -679,6 +703,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![StepDisplayInfo {
                 id: Some("step-id".to_string()),
                 name: "review".to_string(),
@@ -702,6 +727,7 @@ mod tests {
             description: None,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             steps: vec![StepDisplayInfo {
                 id: Some("step-id".to_string()),
                 name: "basic".to_string(),

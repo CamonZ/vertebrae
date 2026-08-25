@@ -711,6 +711,8 @@ pub struct Workflow {
     pub initial_step: Option<String>,
     /// Optional kanban column
     pub kanban_column: Option<String>,
+    /// Optional factory name used to group related workflows
+    pub factory_name: Option<String>,
     /// Whether this is the default workflow for new tasks
     #[serde(default)]
     pub is_default: bool,
@@ -735,6 +737,7 @@ impl From<vertebrae_core::Workflow> for Workflow {
             description: workflow.description,
             initial_step: workflow.initial_step,
             kanban_column: workflow.kanban_column,
+            factory_name: workflow.factory_name,
             is_default: workflow.is_default,
             display_order: workflow.order,
             metadata: workflow.metadata,
@@ -755,6 +758,8 @@ pub struct UpdateWorkflowOptions {
     pub order: Option<i32>,
     pub is_default: Option<bool>,
     pub kanban_column: Option<String>,
+    pub factory_name: Option<String>,
+    pub clear_factory_name: bool,
 }
 
 impl From<UpdateWorkflowOptions> for vertebrae_core::UpdateWorkflowOptions {
@@ -774,6 +779,11 @@ impl From<UpdateWorkflowOptions> for vertebrae_core::UpdateWorkflowOptions {
         }
         if let Some(kanban_column) = opts.kanban_column {
             update = update.with_kanban_column(kanban_column);
+        }
+        if let Some(factory_name) = opts.factory_name {
+            update = update.with_factory_name(factory_name);
+        } else if opts.clear_factory_name {
+            update = update.clear_factory_name();
         }
         update
     }
@@ -1240,6 +1250,7 @@ pub struct PipelineWorkflow {
     pub description: Option<String>,
     pub initial_step_id: Option<String>,
     pub kanban_column: Option<String>,
+    pub factory_name: Option<String>,
     pub is_default: bool,
     pub display_order: i32,
     pub workflow_steps: Vec<PipelineStep>,
@@ -1274,6 +1285,7 @@ impl From<vertebrae_sacrum_client::PipelineWorkflowResponse> for PipelineWorkflo
             description: wf.description,
             initial_step_id: wf.initial_step_id,
             kanban_column: wf.kanban_column,
+            factory_name: wf.factory_name,
             is_default: wf.is_default.unwrap_or(false),
             display_order: wf.display_order.unwrap_or(0),
             workflow_steps,

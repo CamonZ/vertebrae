@@ -65,6 +65,8 @@ export interface AtlasWorkflow {
   /** Phase / value-stream column this workflow belongs to. Never null — a
    *  missing `kanban_column` collapses to the `UNPHASED` bucket label. */
   phase: string;
+  /** Optional factory name used to group related workflows. */
+  factoryName: string | null;
   /** Backend display order (used for column ordering + intra-column stacking). */
   displayOrder: number;
   isDefault: boolean;

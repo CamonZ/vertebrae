@@ -1821,6 +1821,10 @@ pub struct Workflow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kanban_column: Option<String>,
 
+    /// Optional factory name used to group related workflows
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub factory_name: Option<String>,
+
     /// Transitions to other workflows
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<WorkflowTransition>,
@@ -1846,6 +1850,7 @@ impl Workflow {
             order: 0,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
             transitions: Vec::new(),
             created_at: None,
             updated_at: None,

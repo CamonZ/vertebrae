@@ -209,6 +209,7 @@ function pipelineWorkflowFromWorkflow(workflow: Workflow): PipelineWorkflow {
     description: workflow.description ?? null,
     initial_step_id: workflow.initial_step ?? null,
     kanban_column: workflow.kanban_column ?? null,
+    factory_name: workflow.factory_name ?? null,
     is_default: workflow.is_default ?? false,
     display_order: workflow.display_order ?? 0,
     workflow_steps: [],
@@ -266,6 +267,7 @@ export function applyWorkflowUpdated(
     description: workflow.description ?? null,
     initial_step_id: workflow.initial_step ?? null,
     kanban_column: workflow.kanban_column ?? null,
+    factory_name: workflow.factory_name,
     is_default: workflow.is_default ?? existing.is_default,
     display_order: workflow.display_order ?? existing.display_order,
   };

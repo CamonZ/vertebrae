@@ -25,6 +25,7 @@ async fn create_workflow(
         order: 0,
         is_default: false,
         kanban_column: None,
+        factory_name: None,
     };
     services.workflows().create_workflow(options).await.unwrap()
 }
@@ -125,6 +126,7 @@ async fn test_workflow_list_shows_default_marker() {
         order: 0,
         is_default: true,
         kanban_column: None,
+        factory_name: None,
     };
     let wf_id = services.workflows().create_workflow(options).await.unwrap();
 
@@ -189,6 +191,8 @@ async fn test_workflow_update_name() {
         default: false,
         no_default: false,
         kanban_column: None,
+        factory_name: None,
+        clear_factory_name: false,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
 
@@ -214,6 +218,8 @@ async fn test_workflow_update_description() {
         default: false,
         no_default: false,
         kanban_column: None,
+        factory_name: None,
+        clear_factory_name: false,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
 
@@ -237,6 +243,8 @@ async fn test_workflow_update_multiple_fields() {
         default: false,
         no_default: false,
         kanban_column: None,
+        factory_name: None,
+        clear_factory_name: false,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
 
@@ -264,6 +272,8 @@ async fn test_workflow_update_no_updates_fails() {
         default: false,
         no_default: false,
         kanban_column: None,
+        factory_name: None,
+        clear_factory_name: false,
     };
     let result = cmd.execute(services.workflows()).await;
 
@@ -282,6 +292,8 @@ async fn test_workflow_update_nonexistent_workflow() {
         default: false,
         no_default: false,
         kanban_column: None,
+        factory_name: None,
+        clear_factory_name: false,
     };
     let result = cmd.execute(services.workflows()).await;
 
@@ -329,6 +341,8 @@ async fn test_workflow_command_dispatch_update() {
         default: false,
         no_default: false,
         kanban_column: None,
+        factory_name: None,
+        clear_factory_name: false,
     });
     let output = cmd.execute(&services).await.unwrap();
 
@@ -357,6 +371,8 @@ async fn test_workflow_show_after_update() {
         default: false,
         no_default: false,
         kanban_column: None,
+        factory_name: None,
+        clear_factory_name: false,
     };
     update_cmd.execute(services.workflows()).await.unwrap();
 
@@ -433,6 +449,7 @@ async fn test_workflow_add_basic() {
         order: 0,
         default: false,
         kanban_column: None,
+        factory_name: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
     assert!(output.starts_with("Created workflow: "));
@@ -448,12 +465,32 @@ async fn test_workflow_add_with_kanban_column() {
         order: 0,
         default: false,
         kanban_column: Some("In Progress".to_string()),
+        factory_name: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
     let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
 
     let wf = services.workflows().get_workflow(wf_id).await.unwrap();
     assert_eq!(wf.kanban_column, Some("In Progress".to_string()));
+}
+
+#[tokio::test]
+async fn test_workflow_add_with_factory_name() {
+    let services = mock_services();
+    let cmd = WorkflowAddCommand {
+        name: "Factory Workflow".to_string(),
+        description: None,
+        steps: vec![],
+        order: 0,
+        default: false,
+        kanban_column: None,
+        factory_name: Some("Shared Factory".to_string()),
+    };
+    let output = cmd.execute(services.workflows()).await.unwrap();
+    let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
+
+    let workflow = services.workflows().get_workflow(wf_id).await.unwrap();
+    assert_eq!(workflow.factory_name.as_deref(), Some("Shared Factory"));
 }
 
 #[tokio::test]
@@ -466,6 +503,7 @@ async fn test_workflow_add_with_kanban_column_and_options() {
         order: 5,
         default: false,
         kanban_column: Some("Review".to_string()),
+        factory_name: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
     let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
@@ -480,6 +518,42 @@ async fn test_workflow_add_with_kanban_column_and_options() {
 }
 
 #[tokio::test]
+async fn test_workflow_update_factory_name_and_clear() {
+    let services = mock_services();
+    let wf_id = create_workflow(&services, "Factory Workflow", None).await;
+
+    let set_cmd = WorkflowUpdateCommand {
+        id: wf_id.clone(),
+        name: None,
+        description: None,
+        clear_description: false,
+        default: false,
+        no_default: false,
+        kanban_column: None,
+        factory_name: Some("Updated Factory".to_string()),
+        clear_factory_name: false,
+    };
+    set_cmd.execute(services.workflows()).await.unwrap();
+    let workflow = services.workflows().get_workflow(&wf_id).await.unwrap();
+    assert_eq!(workflow.factory_name.as_deref(), Some("Updated Factory"));
+
+    let clear_cmd = WorkflowUpdateCommand {
+        id: wf_id.clone(),
+        name: None,
+        description: None,
+        clear_description: false,
+        default: false,
+        no_default: false,
+        kanban_column: None,
+        factory_name: None,
+        clear_factory_name: true,
+    };
+    clear_cmd.execute(services.workflows()).await.unwrap();
+    let workflow = services.workflows().get_workflow(&wf_id).await.unwrap();
+    assert!(workflow.factory_name.is_none());
+}
+
+#[tokio::test]
 async fn test_workflow_add_without_kanban_column() {
     let services = mock_services();
     let cmd = WorkflowAddCommand {
@@ -489,6 +563,7 @@ async fn test_workflow_add_without_kanban_column() {
         order: 0,
         default: false,
         kanban_column: None,
+        factory_name: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
     let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
@@ -507,6 +582,7 @@ async fn test_workflow_add_with_default_flag() {
         order: 0,
         default: true,
         kanban_column: None,
+        factory_name: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
     let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
@@ -525,6 +601,7 @@ async fn test_workflow_add_without_default_flag() {
         order: 0,
         default: false,
         kanban_column: None,
+        factory_name: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
     let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
@@ -549,6 +626,8 @@ async fn test_workflow_update_default_flag() {
         default: true,
         no_default: false,
         kanban_column: None,
+        factory_name: None,
+        clear_factory_name: false,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
     assert!(output.contains("Updated workflow"));
@@ -572,6 +651,7 @@ async fn test_workflow_update_no_default_flag() {
         order: 0,
         is_default: true,
         kanban_column: None,
+        factory_name: None,
     };
     let wf_id = services.workflows().create_workflow(options).await.unwrap();
 
@@ -588,6 +668,8 @@ async fn test_workflow_update_no_default_flag() {
         default: false,
         no_default: true,
         kanban_column: None,
+        factory_name: None,
+        clear_factory_name: false,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
     assert!(output.contains("Updated workflow"));
@@ -610,6 +692,7 @@ async fn test_workflow_show_displays_default_yes() {
         order: 0,
         is_default: true,
         kanban_column: None,
+        factory_name: None,
     };
     let wf_id = services.workflows().create_workflow(options).await.unwrap();
 
