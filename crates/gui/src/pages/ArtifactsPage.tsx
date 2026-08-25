@@ -1,14 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { Artifact } from "../bindings";
 import { ArtifactInspectorPanel } from "../components/Artifacts/ArtifactInspectorPanel";
+import { TreeNode } from "../components/molecules/TreeNode";
 import { Spinner } from "../components/Spinner";
 import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
+import { useExpandedNodes } from "../hooks/useExpandedNodes";
 import { useProjectArtifacts } from "../hooks/useProjectArtifacts";
 import { useShellHeader } from "../hooks/useShellHeader";
-
-function displayName(artifact: Artifact) {
-  return artifact.logical_name ?? artifact.filename;
-}
+import {
+  buildArtifactTree,
+  collectArtifactFolderIds,
+  flattenVisibleArtifactLeaves,
+  type ArtifactTreeNode,
+} from "../utils/buildArtifactTree";
 
 function artifactCue(artifact: Artifact) {
   const metadata = artifact.metadata;
@@ -18,12 +29,157 @@ function artifactCue(artifact: Artifact) {
     : metadata.format;
 }
 
+function FolderIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      viewBox="0 0 24 24"
+    >
+      <path d="M3.75 6.75h5l1.5 1.5h10v9.75a1.5 1.5 0 0 1-1.5 1.5h-15a1.5 1.5 0 0 1-1.5-1.5V8.25a1.5 1.5 0 0 1 1.5-1.5Z" />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      viewBox="0 0 24 24"
+    >
+      <path d="M6.75 3.75h7.5l3 3v13.5h-10.5V3.75Z" />
+      <path d="M14.25 3.75v3h3" />
+    </svg>
+  );
+}
+
+function sameIds(left: ReadonlySet<string>, right: ReadonlySet<string>) {
+  if (left.size !== right.size) return false;
+  for (const id of left) {
+    if (!right.has(id)) return false;
+  }
+  return true;
+}
+
+interface ArtifactTreeRowsProps {
+  nodes: ArtifactTreeNode[];
+  depth: number;
+  expandedNodeIds: ReadonlySet<string>;
+  selectedArtifactId: string | null;
+  onToggle: (nodeId: string) => void;
+  onSelect: (artifact: Artifact) => void;
+}
+
+function ArtifactTreeRows({
+  nodes,
+  depth,
+  expandedNodeIds,
+  selectedArtifactId,
+  onToggle,
+  onSelect,
+}: ArtifactTreeRowsProps) {
+  return nodes.map((node) => {
+    if (node.kind === "artifact") {
+      return (
+        <TreeNode
+          key={node.id}
+          depth={depth}
+          selected={node.id === selectedArtifactId}
+          onSelect={() => onSelect(node.artifact)}
+          icon={<FileIcon />}
+          right={artifactCue(node.artifact)}
+          testId={`artifact-tree-leaf-${node.id}`}
+        >
+          {node.label}
+        </TreeNode>
+      );
+    }
+
+    const expanded = expandedNodeIds.has(node.id);
+    return (
+      <Fragment key={node.id}>
+        <TreeNode
+          depth={depth}
+          hasChildren={node.children.length > 0}
+          expanded={expanded}
+          onToggle={() => onToggle(node.id)}
+          icon={<FolderIcon />}
+          testId={`artifact-tree-folder-${node.id}`}
+        >
+          {node.label}
+        </TreeNode>
+        {expanded && (
+          <div role="group" aria-label={`Contents of ${node.label}`}>
+            <ArtifactTreeRows
+              nodes={node.children}
+              depth={depth + 1}
+              expandedNodeIds={expandedNodeIds}
+              selectedArtifactId={selectedArtifactId}
+              onToggle={onToggle}
+              onSelect={onSelect}
+            />
+          </div>
+        )}
+      </Fragment>
+    );
+  });
+}
+
 export function ArtifactsPage() {
   const { artifacts, isLoading, error } = useProjectArtifacts();
+  const expandedNodes = useExpandedNodes();
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(
     null
   );
   const lastSelectedArtifactRef = useRef<Artifact | null>(null);
+  const expansionProjectRef = useRef<string | null | undefined>(undefined);
+  const initializedExpansionRef = useRef(false);
+  const knownFolderIdsRef = useRef(new Set<string>());
+  const tree = useMemo(() => buildArtifactTree(artifacts), [artifacts]);
+  const folderIds = useMemo(() => collectArtifactFolderIds(tree), [tree]);
+  const projectId = artifacts[0]?.project_id ?? null;
+  const visibleLeaves = useMemo(
+    () => flattenVisibleArtifactLeaves(tree, expandedNodes.expandedNodeIds),
+    [tree, expandedNodes.expandedNodeIds]
+  );
+
+  useEffect(() => {
+    if (expansionProjectRef.current !== projectId) {
+      expansionProjectRef.current = projectId;
+      initializedExpansionRef.current = false;
+      knownFolderIdsRef.current = new Set();
+    }
+
+    const validFolderIds = new Set(folderIds);
+    const nextExpandedNodeIds = initializedExpansionRef.current
+      ? new Set(
+          [...expandedNodes.expandedNodeIds].filter((id) =>
+            validFolderIds.has(id)
+          )
+        )
+      : new Set(validFolderIds);
+
+    // New prefixes are visible by default, while existing IDs retain an
+    // explicit collapse/expand choice across query and CDC updates.
+    if (initializedExpansionRef.current) {
+      for (const id of validFolderIds) {
+        if (!knownFolderIdsRef.current.has(id)) nextExpandedNodeIds.add(id);
+      }
+    }
+
+    knownFolderIdsRef.current = validFolderIds;
+    initializedExpansionRef.current = true;
+    if (!sameIds(expandedNodes.expandedNodeIds, nextExpandedNodeIds)) {
+      expandedNodes.expandAll([...nextExpandedNodeIds]);
+    }
+  }, [artifacts.length, expandedNodes, folderIds, projectId]);
   const selectedArtifact = useMemo(
     () =>
       artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null,
@@ -53,18 +209,27 @@ export function ArtifactsPage() {
 
   const onListKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (artifacts.length === 0) return;
-      const currentIndex = artifacts.findIndex(
-        (artifact) => artifact.id === selectedArtifactId
+      const currentIndex = visibleLeaves.findIndex(
+        (leaf) => leaf.id === selectedArtifactId
       );
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
       event.preventDefault();
-      const start = currentIndex < 0 ? 0 : currentIndex;
-      const delta = event.key === "ArrowDown" ? 1 : -1;
-      const next = Math.max(0, Math.min(artifacts.length - 1, start + delta));
-      setSelectedArtifactId(artifacts[next].id);
+      if (visibleLeaves.length === 0) return;
+      const next =
+        currentIndex < 0
+          ? event.key === "ArrowDown"
+            ? 0
+            : visibleLeaves.length - 1
+          : Math.max(
+              0,
+              Math.min(
+                visibleLeaves.length - 1,
+                currentIndex + (event.key === "ArrowDown" ? 1 : -1)
+              )
+            );
+      setSelectedArtifactId(visibleLeaves[next].id);
     },
-    [artifacts, selectedArtifactId]
+    [selectedArtifactId, visibleLeaves]
   );
 
   useShellHeader(
@@ -86,7 +251,7 @@ export function ArtifactsPage() {
           </span>
         </div>
         <div
-          role="listbox"
+          role="tree"
           aria-label="Project artifacts"
           tabIndex={0}
           onKeyDown={onListKeyDown}
@@ -108,30 +273,14 @@ export function ArtifactsPage() {
               No project artifacts yet.
             </p>
           ) : (
-            artifacts.map((artifact) => {
-              const selected = artifact.id === selectedArtifactId;
-              return (
-                <button
-                  key={artifact.id}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  onClick={() => selectArtifact(artifact)}
-                  className={`relative mb-1 flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors ${
-                    selected
-                      ? "bg-[var(--color-selection)] text-fg before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:bg-[var(--color-accent)] before:content-['']"
-                      : "hover:bg-bg-1 text-fg"
-                  }`}
-                >
-                  <span className="min-w-0 flex-1 truncate">
-                    {displayName(artifact)}
-                  </span>
-                  <span className="shrink-0 font-mono text-2xs uppercase text-fg-mute">
-                    {artifactCue(artifact)}
-                  </span>
-                </button>
-              );
-            })
+            <ArtifactTreeRows
+              nodes={tree}
+              depth={0}
+              expandedNodeIds={expandedNodes.expandedNodeIds}
+              selectedArtifactId={selectedArtifactId}
+              onToggle={expandedNodes.toggleNode}
+              onSelect={selectArtifact}
+            />
           )}
         </div>
       </main>
