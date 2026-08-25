@@ -703,7 +703,7 @@
   border-radius: var(--r-xs);
   color: var(--accent);
   background: var(--accent-wash);
-  border: 1px solid color-mix(in oklch, var(--accent) 34%, transparent);
+  border: 1px solid var(--panel-border);
 }
 .wfd-status {
   margin-left: auto;
@@ -723,7 +723,7 @@
 }
 .wfd-status.live {
   color: var(--accent);
-  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+  border-color: var(--panel-border);
   background: var(--accent-wash);
 }
 .wfd-status .pulse {
@@ -842,7 +842,7 @@
   display: grid;
   gap: var(--s-2);
   padding: var(--s-2);
-  border: 1px solid color-mix(in oklch, var(--kc, var(--accent)) 24%, var(--line));
+  border: 1px solid var(--panel-border);
   border-radius: var(--r-sm);
   background: color-mix(in oklch, var(--bg) 35%, transparent);
   max-height: 48vh;
@@ -883,7 +883,7 @@
 }
 .wfd-save {
   padding: var(--s-1h) var(--s-2);
-  border: 1px solid color-mix(in oklch, var(--accent) 50%, var(--line));
+  border: 1px solid var(--panel-border);
   border-radius: var(--r-xs);
   background: var(--accent-wash);
   color: var(--accent);
@@ -1080,12 +1080,12 @@
   padding: 1px var(--s-1h);
   border-radius: var(--r-xs);
   background: var(--accent-wash);
-  border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent);
+  border: 1px solid var(--panel-border);
 }
 .wfd-tr.loop .lab {
   color: var(--step-route-fg);
   background: var(--step-route-wash);
-  border-color: color-mix(in oklch, var(--step-route) 26%, transparent);
+  border-color: var(--panel-border);
 }
 .wfd-tr.in .lab {
   color: var(--fg-mute);
@@ -1126,8 +1126,7 @@
   font-weight: 600;
   color: var(--kf, var(--accent));
   background: var(--kw, var(--accent-wash));
-  border: 1px solid
-    color-mix(in oklch, var(--kc, var(--accent)) 38%, transparent);
+  border: 1px solid var(--panel-border);
 }
 .wfd-step-name {
   min-width: 0;
@@ -1210,8 +1209,7 @@
   color: var(--kf, var(--fg));
   padding: 2px var(--s-2);
   background: var(--kw, var(--bg-2));
-  border: 1px solid
-    color-mix(in oklch, var(--kc, var(--line-strong)) 32%, transparent);
+  border: 1px solid var(--panel-border);
   border-radius: var(--r-sm);
 }
 
@@ -1254,7 +1252,7 @@
   color: var(--accent);
   padding: 2px var(--s-2);
   background: var(--accent-wash);
-  border: 1px solid color-mix(in oklch, var(--accent) 26%, transparent);
+  border: 1px solid var(--panel-border);
   border-radius: var(--r-xs);
   cursor: pointer;
   transition: all var(--t-fast) var(--ease);
@@ -1272,5 +1270,5 @@
 .wfd-trans.loop {
   color: var(--step-route-fg);
   background: var(--step-route-wash);
-  border-color: color-mix(in oklch, var(--step-route) 28%, transparent);
+  border-color: var(--panel-border);
 }

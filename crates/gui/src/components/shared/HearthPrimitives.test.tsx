@@ -142,4 +142,11 @@ describe("Hearth primitives", () => {
       screen.getByRole("button", { name: "Copy full task run ID" })
     ).toBeInTheDocument();
   });
+
+  it("leaves the hero border color to panel CSS", () => {
+    render(<HeroStatus status="waiting" step={{ n: 2, kind: "route" }} />);
+
+    const hero = screen.getByLabelText("Hero status: Waiting");
+    expect(hero).not.toHaveAttribute("style");
+  });
 });
