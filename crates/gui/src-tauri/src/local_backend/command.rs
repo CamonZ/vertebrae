@@ -261,6 +261,38 @@ pub(crate) fn discover_docker_cli() -> Result<PathBuf, LocalBackendError> {
     resolve_docker_cli(path.as_deref(), home.as_deref(), &candidates)
 }
 
+pub(crate) fn path_for_docker_process(
+    docker_cli: &Path,
+    existing_path: Option<&OsStr>,
+) -> OsString {
+    let mut path_entries = Vec::new();
+    let mut add_path = |path: PathBuf| {
+        if !path.as_os_str().is_empty() && !path_entries.iter().any(|entry| entry == &path) {
+            path_entries.push(path);
+        }
+    };
+
+    if let Some(docker_bin_dir) = docker_cli
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        add_path(docker_bin_dir.to_path_buf());
+    }
+    for candidate in standard_docker_candidates() {
+        if let Some(directory) = candidate.parent() {
+            add_path(directory.to_path_buf());
+        }
+    }
+    if let Some(existing_path) = existing_path {
+        for path in env::split_paths(existing_path) {
+            add_path(path);
+        }
+    }
+
+    env::join_paths(path_entries)
+        .unwrap_or_else(|_| existing_path.map(OsStr::to_os_string).unwrap_or_default())
+}
+
 fn resolve_docker_cli(
     path: Option<&OsStr>,
     home: Option<&Path>,
@@ -452,6 +484,56 @@ mod tests {
             resolve_docker_cli(None, Some(&home), std::slice::from_ref(&standard)),
             Err(LocalBackendError::DockerCliNotFound { .. })
         ));
+    }
+
+    #[test]
+    fn docker_process_path_prepends_cli_directory_and_preserves_existing_entries() {
+        let existing_path = env::join_paths([
+            Path::new("/usr/bin"),
+            Path::new("/bin"),
+            Path::new("/custom/bin"),
+        ])
+        .expect("join existing PATH");
+        let docker_cli = Path::new("/Applications/Docker.app/Contents/Resources/bin/docker");
+
+        let path = path_for_docker_process(docker_cli, Some(&existing_path));
+
+        let entries = env::split_paths(&path).collect::<Vec<_>>();
+        assert_eq!(
+            entries.first(),
+            Some(&PathBuf::from(
+                "/Applications/Docker.app/Contents/Resources/bin"
+            ))
+        );
+        assert!(entries.contains(&PathBuf::from("/usr/bin")));
+        assert!(entries.contains(&PathBuf::from("/bin")));
+        assert!(entries.contains(&PathBuf::from("/custom/bin")));
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        assert!(entries.contains(&PathBuf::from("/usr/local/bin")));
+    }
+
+    #[test]
+    fn docker_process_path_does_not_duplicate_cli_directory() {
+        let existing_path = env::join_paths([
+            Path::new("/Applications/Docker.app/Contents/Resources/bin"),
+            Path::new("/usr/bin"),
+        ])
+        .expect("join existing PATH");
+        let docker_cli = Path::new("/Applications/Docker.app/Contents/Resources/bin/docker");
+
+        let path = path_for_docker_process(docker_cli, Some(&existing_path));
+
+        let entries = env::split_paths(&path).collect::<Vec<_>>();
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| {
+                    *entry == Path::new("/Applications/Docker.app/Contents/Resources/bin")
+                })
+                .count(),
+            1
+        );
+        assert!(entries.contains(&PathBuf::from("/usr/bin")));
     }
 
     #[cfg(unix)]
