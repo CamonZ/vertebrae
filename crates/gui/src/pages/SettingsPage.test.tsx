@@ -135,7 +135,11 @@ describe("SettingsPage", () => {
       defaultHarness: null,
       storageWarning: null,
     });
-    useUIStore.setState({ theme: "system", externalEditor: "" });
+    useUIStore.setState({
+      theme: "system",
+      thinkingIndicatorStyle: "classic",
+      externalEditor: "",
+    });
     mockGetSupportedLocalChatHarnesses.mockResolvedValue({
       status: "ok",
       data: catalog,
@@ -453,9 +457,7 @@ describe("SettingsPage", () => {
 
     await user.click(screen.getByTestId("settings-nav-updates"));
     await user.click(screen.getByTestId("settings-adopt-local-backend"));
-    await user.click(
-      screen.getByTestId("settings-adopt-local-backend-confirm")
-    );
+    await user.click(screen.getByTestId("settings-adopt-local-backend-confirm"));
     expect(
       await screen.findByTestId("settings-local-backend-adoption-progress")
     ).toBeVisible();
@@ -558,7 +560,9 @@ describe("SettingsPage", () => {
 
     await user.click(screen.getByTestId("settings-nav-updates"));
     await user.click(screen.getByTestId("settings-adopt-local-backend"));
-    await user.click(screen.getByTestId("settings-adopt-local-backend-confirm"));
+    await user.click(
+      screen.getByTestId("settings-adopt-local-backend-confirm")
+    );
 
     expect(
       await screen.findByTestId("settings-backend-current-status")
@@ -795,6 +799,35 @@ describe("SettingsPage", () => {
     expect(screen.getByTestId("codex-default-reasoning-effort")).toBeVisible();
     expect(screen.queryByTestId("settings-theme")).not.toBeInTheDocument();
     expect(screen.queryByText("Saved on this device")).not.toBeInTheDocument();
+  });
+
+  it("exposes and retains the persisted thinking indicator style", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    const selector = await screen.findByTestId("settings-thinking-indicator");
+    expect(selector).toHaveValue("classic");
+
+    await user.selectOptions(selector, "futuristic");
+    expect(useUIStore.getState().thinkingIndicatorStyle).toBe("futuristic");
+    expect(
+      JSON.parse(localStorage.getItem("vertebrae-ui-storage") ?? "{}").state
+        .thinkingIndicatorStyle
+    ).toBe("futuristic");
+
+    unmount();
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+    expect(
+      await screen.findByTestId("settings-thinking-indicator")
+    ).toHaveValue("futuristic");
   });
 
   it("saves model and permission changes", async () => {

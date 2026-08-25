@@ -36,7 +36,7 @@ import {
   refreshLocalBackendUpdateState,
   relaunchGuiApplication,
 } from "../update";
-import { useUIStore } from "../stores/uiStore";
+import { useUIStore, type ThinkingIndicatorStyle } from "../stores/uiStore";
 import {
   hasStaleModelDefault,
   hasStalePermissionDefault,
@@ -1698,6 +1698,12 @@ export function SettingsPage({
   );
   const theme = useUIStore((state) => state.theme);
   const setTheme = useUIStore((state) => state.setTheme);
+  const thinkingIndicatorStyle = useUIStore(
+    (state) => state.thinkingIndicatorStyle
+  );
+  const setThinkingIndicatorStyle = useUIStore(
+    (state) => state.setThinkingIndicatorStyle
+  );
   const externalEditor = useUIStore((state) => state.externalEditor);
   const setExternalEditor = useUIStore((state) => state.setExternalEditor);
   const harnesses = useMemo(() => catalog?.harnesses ?? [], [catalog]);
@@ -2027,6 +2033,34 @@ export function SettingsPage({
             </>
           ) : (
             <>
+              <div className="mt-8 border-t border-[var(--color-line)]">
+                <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+                  Waiting state
+                </p>
+                <SettingRow
+                  label="Thinking indicator"
+                  description="Choose the classic three-dot indicator or a futuristic matrix of blinkenlights."
+                >
+                  <Select
+                    aria-label="Thinking indicator"
+                    data-testid="settings-thinking-indicator"
+                    value={thinkingIndicatorStyle}
+                    onChange={(event) => {
+                      setThinkingIndicatorStyle(
+                        event.target.value as ThinkingIndicatorStyle
+                      );
+                      setSavedFeedback(true);
+                    }}
+                    options={[
+                      { value: "classic", label: "Classic dots" },
+                      {
+                        value: "futuristic",
+                        label: "Futuristic blinkenlights",
+                      },
+                    ]}
+                  />
+                </SettingRow>
+              </div>
               {fileLinkSettings}
               {isLoading ? (
                 <div

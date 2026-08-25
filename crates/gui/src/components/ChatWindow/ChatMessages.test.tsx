@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { ChatEmptyState, ChatMessages } from "./ChatMessages";
 import type { ChatMessage } from "../../stores/chatStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
+import { useUIStore } from "../../stores/uiStore";
 import { CHAT_HELP_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
 
 const { markdownRenderSpy } = vi.hoisted(() => ({
@@ -44,6 +45,7 @@ describe("ChatMessages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useEntityPanelStore.getState().reset();
+    useUIStore.setState({ thinkingIndicatorStyle: "classic" });
   });
 
   // --- Empty state ---
@@ -347,6 +349,22 @@ describe("ChatMessages", () => {
       />
     );
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+  });
+
+  it("renders the configured futuristic indicator only during the waiting turn", () => {
+    useUIStore.setState({ thinkingIndicatorStyle: "futuristic" });
+    const { rerender } = render(
+      <ChatMessages {...defaultProps({ isEmpty: false, isWaiting: true })} />
+    );
+
+    expect(screen.getByTestId("thinking-matrix")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+
+    rerender(
+      <ChatMessages {...defaultProps({ isEmpty: false, isWaiting: false })} />
+    );
+    expect(screen.queryByTestId("thinking-matrix")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("shows a stopping label for a stopping active turn", () => {

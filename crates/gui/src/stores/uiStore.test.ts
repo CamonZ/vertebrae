@@ -6,6 +6,7 @@ describe("uiStore", () => {
     // Reset store state before each test
     useUIStore.setState({
       theme: "system",
+      thinkingIndicatorStyle: "classic",
       density: "auto",
       externalEditor: "",
     });
@@ -15,6 +16,11 @@ describe("uiStore", () => {
     it("has system theme by default", () => {
       const state = useUIStore.getState();
       expect(state.theme).toBe("system");
+    });
+
+    it("uses the classic thinking indicator by default", () => {
+      const state = useUIStore.getState();
+      expect(state.thinkingIndicatorStyle).toBe("classic");
     });
 
     it("has auto density by default", () => {
@@ -50,6 +56,14 @@ describe("uiStore", () => {
     });
   });
 
+  describe("setThinkingIndicatorStyle", () => {
+    it("sets the futuristic style", () => {
+      useUIStore.getState().setThinkingIndicatorStyle("futuristic");
+
+      expect(useUIStore.getState().thinkingIndicatorStyle).toBe("futuristic");
+    });
+  });
+
   describe("setDensity", () => {
     it("sets density to comfortable", () => {
       useUIStore.getState().setDensity("comfortable");
@@ -82,7 +96,9 @@ describe("uiStore", () => {
 
   describe("setExternalEditor", () => {
     it("stores the configured application name or path", () => {
-      useUIStore.getState().setExternalEditor("app:/Applications/Visual Studio Code.app");
+      useUIStore
+        .getState()
+        .setExternalEditor("app:/Applications/Visual Studio Code.app");
 
       expect(useUIStore.getState().externalEditor).toBe(
         "app:/Applications/Visual Studio Code.app"
@@ -91,10 +107,10 @@ describe("uiStore", () => {
   });
 
   describe("persistence", () => {
-    it("partializes theme into persisted state", () => {
+    it("partializes thinking indicator style into persisted state", () => {
       const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
 
-      useUIStore.getState().setTheme("dark");
+      useUIStore.getState().setThinkingIndicatorStyle("futuristic");
 
       const persistCall = setItemSpy.mock.calls.find(
         ([key]) => key === "vertebrae-ui-storage"
@@ -102,7 +118,8 @@ describe("uiStore", () => {
       expect(persistCall).toBeDefined();
       const persisted = JSON.parse(persistCall![1]);
       expect(persisted.state).toEqual({
-        theme: "dark",
+        theme: "system",
+        thinkingIndicatorStyle: "futuristic",
         density: "auto",
         externalEditor: "",
       });
