@@ -562,10 +562,7 @@ export function HeroStatus({
         className
       )}
       data-step-kind={kind}
-      style={{
-        borderLeftColor: `var(${stepStyle.barVar})`,
-        ...containerStyle,
-      }}
+      style={containerStyle}
     >
       <div className="hero-line flex flex-wrap items-center gap-2">
         {chip && (

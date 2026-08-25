@@ -3318,10 +3318,6 @@ html.light ::selection {
   outline: none;
 }
 
-.tasks-v2 .t-row:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
 .tasks-v2 .t-row.sel {
   background: var(--selection);
 }
@@ -3697,12 +3693,14 @@ html.light ::selection {
 /* Chat and entity side panels share the same quiet neutral shell edge. */
 .hc-panel,
 .detail.detail-float {
-  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  --panel-border: color-mix(in oklch, var(--fg) 12%, transparent);
+  border: 1px solid var(--panel-border);
 }
 
 .light .hc-panel,
 .light .detail.detail-float {
-  border-color: color-mix(in oklch, var(--fg) 18%, transparent);
+  --panel-border: color-mix(in oklch, var(--fg) 18%, transparent);
+  border-color: var(--panel-border);
 }
 
 .light .hc-launch {
@@ -3718,7 +3716,7 @@ html.light ::selection {
 
 /* Left-edge drag handle for horizontal resize. Sits inside the panel (the
    surface is overflow-clipped for its rounded corners) and floats above the
-   content. The accent rule only paints on hover / while dragging. */
+   content. Match chat's neutral resize affordance on hover / while dragging. */
 .detail.detail-float .detail-resize-handle {
   position: absolute;
   left: 0;
@@ -3743,7 +3741,7 @@ html.light ::selection {
 
 .detail.detail-float .detail-resize-handle:hover::after,
 .detail.detail-float .detail-resize-handle[data-resizing]::after {
-  background: color-mix(in oklch, var(--accent) 60%, transparent);
+  background: var(--fg-mute);
 }
 
 /* Thin separator between the action icons and the close control in the panel
@@ -3787,7 +3785,7 @@ html.light ::selection {
   right: 0;
   bottom: -1px;
   height: 1px;
-  background: linear-gradient(90deg, var(--accent), transparent 60%);
+  background: linear-gradient(90deg, var(--panel-border), transparent 60%);
   opacity: 0.5;
 }
 
@@ -3817,8 +3815,8 @@ html.light ::selection {
 
 .tasks-v2-detail-shell .t-detail-hero .hero-status {
   background: color-mix(in oklch, var(--bg-2) 72%, var(--bg-1));
-  border-color: var(--line);
-  border-left-color: var(--accent);
+  border-color: var(--panel-border);
+  border-left-color: var(--panel-border);
   border-radius: var(--r-md);
 }
 
