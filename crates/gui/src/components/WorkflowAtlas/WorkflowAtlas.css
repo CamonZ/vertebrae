@@ -881,6 +881,12 @@
   letter-spacing: normal;
   text-transform: none;
 }
+.wfd-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-1h);
+}
 .wfd-save {
   padding: var(--s-1h) var(--s-2);
   border: 1px solid var(--panel-border);

@@ -10,6 +10,7 @@ pub const WORKFLOW_FIELDS: &str = r#"
         metadata
         initial_step_id
         kanban_column
+        factory_name
         project_id
         inserted_at
         updated_at
@@ -87,7 +88,8 @@ pub const CREATE_WORKFLOW: &str = r#"
         $description: String,
         $display_order: Int,
         $is_default: Boolean,
-        $kanban_column: String
+        $kanban_column: String,
+        $factory_name: String
     ) {
         create_workflow(
             project_id: $project_id,
@@ -95,7 +97,8 @@ pub const CREATE_WORKFLOW: &str = r#"
             description: $description,
             display_order: $display_order,
             is_default: $is_default,
-            kanban_column: $kanban_column
+            kanban_column: $kanban_column,
+            factory_name: $factory_name
         ) {
             id
         }
@@ -110,7 +113,8 @@ pub const UPDATE_WORKFLOW: &str = r#"
         $display_order: Int,
         $is_default: Boolean,
         $initial_step_id: Uuid4,
-        $kanban_column: String
+        $kanban_column: String,
+        $factory_name: String
     ) {
         update_workflow(
             id: $id,
@@ -119,7 +123,8 @@ pub const UPDATE_WORKFLOW: &str = r#"
             display_order: $display_order,
             is_default: $is_default,
             initial_step_id: $initial_step_id,
-            kanban_column: $kanban_column
+            kanban_column: $kanban_column,
+            factory_name: $factory_name
         ) {
             id
         }

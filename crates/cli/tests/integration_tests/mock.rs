@@ -677,6 +677,7 @@ impl WorkflowService for MockWorkflowService {
             order: options.order,
             is_default: options.is_default,
             kanban_column: options.kanban_column.clone(),
+            factory_name: options.factory_name.clone(),
             transitions: Vec::new(),
             created_at: Some(Utc::now()),
             updated_at: Some(Utc::now()),
@@ -759,6 +760,9 @@ impl WorkflowService for MockWorkflowService {
         }
         if let Some(kanban_column) = &options.kanban_column {
             wf.kanban_column = kanban_column.clone();
+        }
+        if let Some(factory_name) = &options.factory_name {
+            wf.factory_name = factory_name.clone();
         }
         Ok(())
     }
@@ -1601,6 +1605,7 @@ impl MockSeeder {
                 order: 0,
                 is_default: false,
                 kanban_column: None,
+                factory_name: None,
                 transitions: Vec::new(),
                 created_at: Some(Utc::now()),
                 updated_at: Some(Utc::now()),

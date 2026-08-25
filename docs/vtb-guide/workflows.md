@@ -17,6 +17,9 @@ vtb workflow add "Code Review" \
   --step Approved:haiku \
   --kanban-column "In Review"
 
+# Group related workflows under a factory name
+vtb workflow add "Factory Build" --factory-name "Shared Factory"
+
 # Mark as default workflow for new tasks
 vtb workflow add "Standard" --step Backlog:sonnet --step Done:haiku --default
 
@@ -44,6 +47,7 @@ default. The global `--json` flag returns an operation envelope with
 | `-s, --step <STEPS>` | Inline workflow step in `name:model` format; repeatable |
 | `-o, --order <ORDER>` | Display order for sorting workflows; lower values appear first; defaults to `0` |
 | `--kanban-column <KANBAN_COLUMN>` | Kanban column used for board placement |
+| `--factory-name <FACTORY_NAME>` | Optional factory name used to group related workflows |
 | `--default` | Mark the workflow as the default for new tasks |
 | `--json` | Global flag; output machine-readable JSON |
 
@@ -57,6 +61,8 @@ vtb workflow show <workflow-id> --json             # Emit workflow detail JSON
 vtb workflow update <id> --name "Dev"              # Rename
 vtb workflow update <id> --kanban-column "Active"  # Set kanban column
 vtb workflow update <id> --kanban-column ""        # Clear kanban column
+vtb workflow update <id> --factory-name "Shared Factory" # Set factory name
+vtb workflow update <id> --factory-name ""               # Clear factory name
 vtb workflow update <id> --default                 # Mark as default
 vtb workflow update <id> --name "Dev" --json       # Emit update envelope
 vtb workflow delete <workflow-id>                  # Delete workflow
@@ -80,12 +86,13 @@ the workflow ID to show. It accepts a case-insensitive full UUID or 8-character
 short ID and has no command-specific flags, short flags, aliases, defaults, or
 value enums. Its generated help lists only `<ID>`, the global `--json`, and
 `-h` / `--help`. Human-readable output shows the workflow id, name,
-description, Default value, kanban column, ordered steps with model and prompt
-text, and timestamps.
+description, Default value, kanban column, factory name, ordered steps with
+model and prompt text, and timestamps.
 
 With the global `--json` flag, `workflow show` returns the raw workflow-detail
 object with `id`, `name`, `description`, `is_default`,
-`kanban_column`, `steps`, `metadata`, `created_at`, and `updated_at` fields.
+`kanban_column`, `factory_name`, `steps`, `metadata`, `created_at`, and
+`updated_at` fields.
 Each `steps` entry includes `id`, `name`, `model`, `order`, and `prompt`.
 Malformed IDs fail validation before execution; valid UUIDs or short IDs that
 do not resolve to a workflow return a validation error.
@@ -101,6 +108,7 @@ Supported update options are:
 | `--description <DESCRIPTION>` | `-d` | Set a new workflow description; conflicts with `--clear-description` |
 | `--clear-description` | | Clear the workflow description; conflicts with `--description` |
 | `--kanban-column <KANBAN_COLUMN>` | | Set the board column; pass an empty string `""` to clear it |
+| `--factory-name <FACTORY_NAME>` | | Set the workflow factory name; pass an empty string `""` to clear it |
 | `--default` | | Mark this workflow as the default for new tasks; conflicts with `--no-default` |
 | `--no-default` | | Unmark this workflow as the default; conflicts with `--default` |
 | `--json` | | Global flag; output a machine-readable update envelope |

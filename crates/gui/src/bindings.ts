@@ -2216,6 +2216,7 @@ export type PipelineWorkflow = {
   description: string | null;
   initial_step_id: string | null;
   kanban_column: string | null;
+  factory_name: string | null;
   is_default: boolean;
   display_order: number;
   workflow_steps: PipelineStep[];
@@ -3104,6 +3105,8 @@ export type UpdateWorkflowOptions = {
   order: number | null;
   is_default: boolean | null;
   kanban_column: string | null;
+  factory_name: string | null;
+  clear_factory_name: boolean;
 };
 export type UserQuestion = {
   question: string;
@@ -3136,6 +3139,10 @@ export type Workflow = {
    * Optional kanban column
    */
   kanban_column: string | null;
+  /**
+   * Optional factory name used to group related workflows
+   */
+  factory_name: string | null;
   /**
    * Whether this is the default workflow for new tasks
    */

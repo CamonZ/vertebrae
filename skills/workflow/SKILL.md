@@ -45,6 +45,9 @@ vtb workflow add "Code Review" --step review:sonnet --step approved:haiku
 # Create the workflow first and add steps later
 vtb workflow add "Planning"
 
+# Group related workflows under a factory name
+vtb workflow add "Factory Build" --factory-name "Shared Factory"
+
 # Machine-readable creation result
 vtb workflow add "Automation" --json
 ```
@@ -57,6 +60,7 @@ vtb workflow add "Automation" --json
 | `--step <STEPS>` | `-s` | Step in `name:model` format (repeatable) |
 | `--order <ORDER>` | `-o` | Display order; lower values appear first (default: 0) |
 | `--kanban-column <KANBAN_COLUMN>` | | Kanban column for board placement |
+| `--factory-name <FACTORY_NAME>` | | Optional factory name used to group related workflows |
 | `--default` | | Mark this workflow as the default for new tasks |
 | `--json` | | Global flag; output machine-readable JSON |
 
@@ -114,10 +118,10 @@ vtb --json workflow show <workflow-id>
 
 There are no command aliases, short flags, defaults, or value enums for
 `workflow show`. Human-readable output includes the workflow id, name,
-description, Default value, kanban column, ordered steps with model and prompt
-text, and timestamps. With `--json`, the command returns the raw
-workflow-detail object with `id`, `name`, `description`, `is_default`,
-`kanban_column`, `steps`, `metadata`, `created_at`, and
+description, Default value, kanban column, factory name, ordered steps with
+model and prompt text, and timestamps. With `--json`, the command returns the
+raw workflow-detail object with `id`, `name`, `description`, `is_default`,
+`kanban_column`, `factory_name`, `steps`, `metadata`, `created_at`, and
 `updated_at` fields.
 
 Malformed IDs are rejected before command execution. A valid full UUID or short
@@ -132,6 +136,8 @@ Update workflow properties.
 ```bash
 vtb workflow update <id> --name "Development"
 vtb workflow update <id> --kanban-column ""
+vtb workflow update <id> --factory-name "Shared Factory"
+vtb workflow update <id> --factory-name ""
 vtb workflow update <id> --name "Development" --json
 ```
 
@@ -144,13 +150,14 @@ vtb workflow update <id> --name "Development" --json
 | `--description <DESCRIPTION>` | `-d` | No | New description; conflicts with `--clear-description`. |
 | `--clear-description` | | No | Remove description; conflicts with `--description`. |
 | `--kanban-column <KANBAN_COLUMN>` | | No | Set board column; pass an empty string `""` to clear. |
+| `--factory-name <FACTORY_NAME>` | | No | Set factory name; pass an empty string `""` to clear. |
 | `--default` | | No | Mark this workflow as the default for new tasks; conflicts with `--no-default`. |
 | `--no-default` | | No | Unmark this workflow as the default; conflicts with `--default`. |
 | `--json` | | No | Global flag; returns an operation envelope with `command`, `status`, and `workflow_id`. |
 
 At least one update option is required. Running `vtb workflow update <id>` without
 `--name`, `--description`, `--clear-description`, `--kanban-column`,
-`--default`, or `--no-default` returns a validation error.
+`--factory-name`, `--default`, or `--no-default` returns a validation error.
 
 ---
 

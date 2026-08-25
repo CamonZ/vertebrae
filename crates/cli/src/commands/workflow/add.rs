@@ -27,6 +27,10 @@ pub struct WorkflowAddCommand {
     #[arg(long)]
     pub kanban_column: Option<String>,
 
+    /// Factory name for grouping related workflows
+    #[arg(long)]
+    pub factory_name: Option<String>,
+
     /// Mark this workflow as the default for new tasks
     #[arg(long)]
     pub default: bool,
@@ -97,6 +101,10 @@ impl WorkflowAddCommand {
 
         if let Some(kanban_column) = &self.kanban_column {
             options = options.with_kanban_column(kanban_column);
+        }
+
+        if let Some(factory_name) = &self.factory_name {
+            options = options.with_factory_name(factory_name);
         }
 
         service.create_workflow(options).await

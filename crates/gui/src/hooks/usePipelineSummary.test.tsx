@@ -68,6 +68,7 @@ const summary = (
       description: null,
       initial_step_id: "step-1",
       kanban_column: null,
+      factory_name: null,
       is_default: true,
       display_order: 0,
       workflow_steps: [

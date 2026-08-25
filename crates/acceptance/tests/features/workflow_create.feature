@@ -1,5 +1,5 @@
-Feature: Workflow creation with kanban column and default flag
-  Create workflows with optional kanban_column and default fields.
+Feature: Workflow creation with optional fields
+  Create workflows with optional kanban_column, factory_name, and default fields.
 
   Background:
     Given a configured Sacrum client
@@ -9,6 +9,12 @@ Feature: Workflow creation with kanban column and default flag
       | kanban_column | In Progress |
     Then the command should succeed
     And the workflow kanban_column should be "In Progress"
+
+  Scenario: Create workflow with factory name
+    When I create a workflow "Factory WF" with:
+      | factory_name | Shared Factory |
+    Then the command should succeed
+    And the workflow factory_name should be "Shared Factory"
 
   Scenario: Create workflow without kanban column
     When I create a workflow "Plain WF" with:

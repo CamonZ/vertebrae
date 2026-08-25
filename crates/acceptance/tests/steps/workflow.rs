@@ -189,6 +189,10 @@ pub async fn do_create_workflow(
                 args.push("--kanban-column".to_string());
                 args.push(value);
             }
+            "factory_name" => {
+                args.push("--factory-name".to_string());
+                args.push(value);
+            }
             "default" => {
                 if value == "true" {
                     args.push("--default".to_string());
@@ -339,6 +343,24 @@ async fn when_update_workflow_with_flag(world: &mut SmokeWorld, flag: String) {
         .expect("no workflow ID stored")
         .clone();
     world.run_vtb(&["workflow", "update", &wf_id, &flag]).await;
+}
+
+#[when(expr = "I update the workflow with --factory-name {string}")]
+async fn when_update_workflow_factory_name(world: &mut SmokeWorld, factory_name: String) {
+    let wf_id = world
+        .workflow_id
+        .as_ref()
+        .expect("no workflow ID stored")
+        .clone();
+    world
+        .run_vtb(&[
+            "workflow",
+            "update",
+            &wf_id,
+            "--factory-name",
+            &factory_name,
+        ])
+        .await;
 }
 
 #[then(expr = "the workflow {word} should be empty")]

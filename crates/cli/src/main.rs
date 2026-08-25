@@ -481,6 +481,31 @@ mod tests {
     }
 
     #[test]
+    fn test_args_workflow_update_factory_name() {
+        let set_args = CliArgs::try_parse_from([
+            "vtb",
+            "workflow",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--factory-name",
+            "Shared Factory",
+        ])
+        .unwrap();
+        assert!(set_args.command.is_some());
+
+        let clear_args = CliArgs::try_parse_from([
+            "vtb",
+            "workflow",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--factory-name",
+            "",
+        ])
+        .unwrap();
+        assert!(clear_args.command.is_some());
+    }
+
+    #[test]
     fn test_args_daemon_command_is_not_available() {
         let result = CliArgs::try_parse_from(["vtb", "daemon", "status"]);
         assert!(

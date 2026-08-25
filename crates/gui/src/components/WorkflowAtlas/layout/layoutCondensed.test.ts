@@ -24,6 +24,7 @@ function wf(
     description: null,
     initialStepId: stepIds[0] ?? null,
     phase,
+    factoryName: null,
     displayOrder,
     isDefault: false,
     stepIds,

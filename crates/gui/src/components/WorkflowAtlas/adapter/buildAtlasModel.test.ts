@@ -42,6 +42,7 @@ function makeWorkflow(
     description: null,
     initial_step_id: steps[0]?.id ?? null,
     kanban_column: null,
+    factory_name: null,
     is_default: false,
     display_order: 0,
     workflow_steps: steps,

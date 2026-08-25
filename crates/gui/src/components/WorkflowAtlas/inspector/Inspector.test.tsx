@@ -2,6 +2,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +12,7 @@ import type {
   PipelineWorkflow,
   Step,
 } from "../../../bindings";
+import { commands } from "../../../bindings";
 import { buildAtlasModel } from "../adapter/buildAtlasModel";
 import { StepInspector } from "./StepInspector";
 import { WorkflowInspector } from "./WorkflowInspector";
@@ -18,6 +20,12 @@ import type { AtlasSelection } from "./selection";
 
 /* `useStep` (from the hooks barrel) hits the Tauri bridge — mock it. */
 vi.mock("../../../hooks", () => ({ useStep: vi.fn() }));
+vi.mock("../../../bindings", () => ({
+  commands: {
+    createStep: vi.fn(),
+    updateWorkflow: vi.fn(),
+  },
+}));
 import { useStep } from "../../../hooks";
 
 /* ── fixtures ──────────────────────────────────────────────────── */
@@ -54,6 +62,7 @@ function makeWorkflow(
     description: null,
     initial_step_id: steps[0]?.id ?? null,
     kanban_column: null,
+    factory_name: null,
     is_default: false,
     display_order: 0,
     workflow_steps: steps,
@@ -155,10 +164,69 @@ function mockUseStep(step: Step | null, isLoading = false) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(commands.updateWorkflow).mockResolvedValue({
+    status: "ok",
+    data: null,
+  });
   mockUseStep(stepFixture());
 });
 
 describe("WorkflowInspector", () => {
+  it("shows the workflow factory name", () => {
+    const model = buildAtlasModel({
+      workflows: [
+        makeWorkflow("wf-build", [], { factory_name: "Shared Factory" }),
+      ],
+    });
+
+    render(
+      <WorkflowInspector
+        model={model}
+        workflowId="wf-build"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("factory-name-value")).toHaveTextContent(
+      "Shared Factory"
+    );
+  });
+
+  it("updates the workflow factory name", async () => {
+    const model = buildAtlasModel({
+      workflows: [makeWorkflow("wf-build", [])],
+    });
+
+    render(
+      <WorkflowInspector
+        model={model}
+        workflowId="wf-build"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Factory name" }), {
+      target: { value: "Updated Factory" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save factory name" }));
+
+    await waitFor(() =>
+      expect(commands.updateWorkflow).toHaveBeenCalledWith({
+        workflow_id: "wf-build",
+        name: null,
+        description: null,
+        order: null,
+        is_default: null,
+        kanban_column: null,
+        factory_name: "Updated Factory",
+        clear_factory_name: false,
+      })
+    );
+  });
+
   it("renders the workflow's name, phase, step list, and routes", () => {
     const { container } = render(
       <WorkflowInspector
@@ -301,7 +369,6 @@ describe("WorkflowInspector", () => {
     );
     expect(screen.getByText("default")).toBeInTheDocument();
   });
-
 });
 
 describe("StepInspector", () => {

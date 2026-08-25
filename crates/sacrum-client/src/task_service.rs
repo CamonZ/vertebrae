@@ -1298,6 +1298,7 @@ mod tests {
             metadata: None,
             initial_step_id: None,
             kanban_column: None,
+            factory_name: None,
             project_id: Some("test-project".to_string()),
             workflow_steps: steps,
             transitions: None,

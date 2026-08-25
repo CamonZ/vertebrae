@@ -12,7 +12,7 @@
 
    Ported from docs/design/wf-detail.jsx (WfInspector, workflow branch).
    ────────────────────────────────────────────────────────────────── */
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CloseIcon, IconButton } from "../../panels";
 import { commands, type StepType } from "../../../bindings";
 import { unwrapCommand } from "../../../query";
@@ -63,6 +63,16 @@ export function WorkflowInspector({
   const [newTransition, setNewTransition] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [addingBusy, setAddingBusy] = useState(false);
+  const [editingFactory, setEditingFactory] = useState(false);
+  const [factoryNameDraft, setFactoryNameDraft] = useState("");
+  const [factoryError, setFactoryError] = useState<string | null>(null);
+  const [factoryBusy, setFactoryBusy] = useState(false);
+
+  useEffect(() => {
+    setFactoryNameDraft(wf?.factoryName ?? "");
+    setEditingFactory(false);
+    setFactoryError(null);
+  }, [wf?.id, wf?.factoryName]);
 
   // Resolve the workflow's outgoing / incoming handoffs and same-workflow
   // loop-backs from the model edges. Endpoints are `wf.step` refs.
@@ -150,6 +160,32 @@ export function WorkflowInspector({
       setAddingBusy(false);
     }
   };
+
+  const saveFactoryName = async () => {
+    const factoryName = factoryNameDraft.trim();
+    setFactoryBusy(true);
+    setFactoryError(null);
+    try {
+      await unwrapCommand(
+        commands.updateWorkflow({
+          workflow_id: wf.id,
+          name: null,
+          description: null,
+          order: null,
+          is_default: null,
+          kanban_column: null,
+          factory_name: factoryName || null,
+          clear_factory_name: factoryName.length === 0,
+        })
+      );
+      setEditingFactory(false);
+    } catch (cause) {
+      setFactoryError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setFactoryBusy(false);
+    }
+  };
+
   return (
     <div className="wfd kindspine" data-no-pan>
       <div className="wfd-hd">
@@ -193,6 +229,63 @@ export function WorkflowInspector({
             <div className="wfd-text">{wf.description}</div>
           </section>
         ) : null}
+
+        <section className="wfd-sec">
+          <div className="wfd-lbl wfd-lbl-actions">
+            <span>Factory name</span>
+            <button
+              className="wfd-action"
+              data-testid="factory-name-edit"
+              onClick={() => {
+                setFactoryError(null);
+                setFactoryNameDraft(wf.factoryName ?? "");
+                setEditingFactory((value) => !value);
+              }}
+              type="button"
+            >
+              {editingFactory ? "Cancel" : "Edit"}
+            </button>
+          </div>
+          {editingFactory ? (
+            <div className="wfd-editor" data-testid="factory-name-editor">
+              <label>
+                Factory name
+                <input
+                  aria-label="Factory name"
+                  value={factoryNameDraft}
+                  onChange={(event) => setFactoryNameDraft(event.target.value)}
+                  placeholder="Optional factory name"
+                />
+              </label>
+              {factoryError ? (
+                <div className="wfd-error">{factoryError}</div>
+              ) : null}
+              <div className="wfd-editor-actions">
+                <button
+                  className="wfd-action"
+                  data-testid="factory-name-clear"
+                  onClick={() => setFactoryNameDraft("")}
+                  type="button"
+                >
+                  Clear
+                </button>
+                <button
+                  className="wfd-save"
+                  data-testid="factory-name-save"
+                  disabled={factoryBusy}
+                  onClick={saveFactoryName}
+                  type="button"
+                >
+                  {factoryBusy ? "Saving…" : "Save factory name"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="wfd-text" data-testid="factory-name-value">
+              {wf.factoryName ?? "None"}
+            </div>
+          )}
+        </section>
 
         <section className="wfd-sec">
           <div className="wfd-stats">

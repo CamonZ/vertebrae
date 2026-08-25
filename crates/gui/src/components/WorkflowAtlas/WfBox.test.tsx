@@ -19,6 +19,7 @@ function makeWorkflow(overrides: Partial<AtlasWorkflow> = {}): AtlasWorkflow {
     total: 0,
     running: 0,
     ...overrides,
+    factoryName: overrides.factoryName ?? null,
   };
 }
 

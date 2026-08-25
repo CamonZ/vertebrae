@@ -1063,6 +1063,7 @@ mod workflow_tests {
             order: 0,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
         };
         let wf_id = services.workflows().create_workflow(options).await.unwrap();
         assert!(!wf_id.is_empty());
@@ -1083,6 +1084,7 @@ mod workflow_tests {
             order: 0,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
         };
         let wf_id = services
             .workflows()
@@ -1115,6 +1117,7 @@ mod workflow_tests {
             order: 0,
             is_default: false,
             kanban_column: None,
+            factory_name: None,
         };
         let wf_id = services
             .workflows()

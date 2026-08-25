@@ -133,6 +133,7 @@ const SUMMARY: PipelineSummary = {
       description: null,
       initial_step_id: "s1",
       kanban_column: null,
+      factory_name: null,
       is_default: false,
       display_order: 0,
       workflow_steps: [makeStep("s1", 0), makeStep("s2", 1)],
