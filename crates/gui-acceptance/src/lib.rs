@@ -9,9 +9,9 @@ pub const WEBDRIVER_URL: &str = "http://localhost:4444";
 pub const GUI_BINARY: &str = "/app/target/debug/gui";
 
 /// Shared fixture path used by the mock Claude process for per-scenario local
-/// chat responses. The GUI launches the mock process after the scenario writes
-/// this file, so responses can contain IDs created during the scenario.
-pub const MOCK_CHAT_RESPONSE_FILE: &str = "/tmp/vertebrae-gui-acceptance-chat-response.txt";
+/// chat responses. The mock output directory is inherited by GUI child
+/// processes, so responses can contain IDs created during the scenario.
+pub const MOCK_CHAT_RESPONSE_FILE: &str = "/mocks/gui-acceptance-chat-response.txt";
 
 /// Base URL for the Tauri app inside WebDriver.
 ///

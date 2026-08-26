@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TracesExplorerButton } from "./TracesExplorerButton";
 import type { ExecutionRollups } from "../../utils";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
 
 const navigateMock = vi.fn();
 vi.mock("react-router-dom", () => ({
@@ -26,6 +27,7 @@ vi.mock("../../hooks/useSubtreeExecutions", () => ({
 describe("TracesExplorerButton", () => {
   beforeEach(() => {
     navigateMock.mockReset();
+    useEntityPanelStore.getState().reset();
     rollups = { ...emptyRollups, totalRuns: 10, totalAttempts: 104 };
   });
 
@@ -46,8 +48,10 @@ describe("TracesExplorerButton", () => {
   });
 
   it("navigates to the in-app traces route when docked", () => {
+    useEntityPanelStore.getState().openTask("task-42");
     render(<TracesExplorerButton taskId="task-42" />);
     fireEvent.click(screen.getByTestId("task-detail-traces"));
     expect(navigateMock).toHaveBeenCalledWith("/traces/task-42");
+    expect(useEntityPanelStore.getState().selection).toBeNull();
   });
 });
