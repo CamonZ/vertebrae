@@ -142,11 +142,96 @@ const ALL_IN_FACTORY_FIXTURE: PipelineSummary = {
 
 const OVERVIEW_FIXTURE: PipelineSummary = {
   workflows: [
-    ...FIXTURE.workflows,
+    makeWorkflow("wf-build", FIXTURE.workflows[0].workflow_steps, {
+      name: "Build",
+      description: "Build pipeline",
+      kanban_column: "Dev",
+      factory_name: "Factory A",
+      transitions: [
+        {
+          id: "transition-build-review",
+          from_workflow_id: "wf-build",
+          to_workflow_id: "wf-review",
+          target_step_id: "r1",
+          label: "ready for review",
+        },
+        {
+          id: "transition-build-pack",
+          from_workflow_id: "wf-build",
+          to_workflow_id: "wf-pack",
+          target_step_id: "p1",
+          label: "direct pack",
+        },
+      ],
+    }),
+    makeWorkflow(
+      "wf-unnamed",
+      [makeStep("n1", "wf-unnamed", 0, { name: "Intake" })],
+      { name: "", factory_name: "Factory A", display_order: 1 }
+    ),
+    makeWorkflow(
+      "wf-review",
+      [makeStep("r1", "wf-review", 0, { name: "Approve" })],
+      {
+        name: "Review",
+        kanban_column: "QA",
+        factory_name: "Factory B",
+        display_order: 2,
+        transitions: [
+          {
+            id: "transition-review-pack",
+            from_workflow_id: "wf-review",
+            to_workflow_id: "wf-pack",
+            target_step_id: "p1",
+            label: "approved",
+          },
+          {
+            id: "transition-review-ship",
+            from_workflow_id: "wf-review",
+            to_workflow_id: "wf-ship",
+            target_step_id: "s1",
+            label: "ship from B",
+          },
+        ],
+      }
+    ),
+    makeWorkflow("wf-pack", [makeStep("p1", "wf-pack", 0, { name: "Pack" })], {
+      name: "Pack",
+      kanban_column: "QA",
+      factory_name: "Factory B",
+      display_order: 3,
+      transitions: [
+        {
+          id: "transition-pack-ship",
+          from_workflow_id: "wf-pack",
+          to_workflow_id: "wf-ship",
+          target_step_id: "s1",
+          label: "packed",
+        },
+      ],
+    }),
+    makeWorkflow(
+      "wf-ship",
+      [makeStep("s1", "wf-ship", 0, { name: "Ship", step_type: "finish" })],
+      { name: "Ship", factory_name: "Factory C", display_order: 4 }
+    ),
     makeWorkflow(
       "wf-unclassified",
       [makeStep("u1", "wf-unclassified", 0, { name: "Unclassified" })],
-      { name: "Unclassified", factory_name: null }
+      {
+        name: "Unclassified",
+        factory_name: null,
+        display_order: 5,
+        transitions: [
+          {
+            id: "transition-unclassified-build",
+            from_workflow_id: "wf-unclassified",
+            to_workflow_id: "wf-build",
+            target_step_id: "s1",
+            label: "classified",
+          },
+        ],
+      }
     ),
   ],
 };
@@ -268,7 +353,7 @@ describe("WorkflowAtlas", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows only black-box factories until a factory is selected", async () => {
+  it("shows custom workflow cards and factory routes until a factory is selected", async () => {
     useFactoryFilterStore.getState().reset();
     mockSummary.mockReturnValue({
       summary: OVERVIEW_FIXTURE,
@@ -281,15 +366,29 @@ describe("WorkflowAtlas", () => {
     expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
     expect(screen.getByTestId("factory-node-Factory A")).toBeInTheDocument();
     expect(screen.getByTestId("factory-node-Factory B")).toBeInTheDocument();
+    expect(screen.getByTestId("factory-node-Factory C")).toBeInTheDocument();
     expect(screen.getByTestId("factory-node-No Factory")).toBeInTheDocument();
-    expect(screen.getAllByTestId(/factory-node-/)).toHaveLength(3);
-    expect(document.querySelectorAll(".uv-wf")).toHaveLength(0);
+    expect(screen.getAllByTestId(/factory-node-/)).toHaveLength(4);
+    expect(document.querySelectorAll(".uv-wf")).toHaveLength(6);
+    expect(
+      screen.getByTestId("workflow-node-Unnamed workflow")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("factory-workflow-transition-wf-review-wf-pack")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("factory-transition-Factory A>Factory B")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("factory-transition-Factory B>Factory C")
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("2 routes")).toHaveLength(2);
     expect(document.querySelectorAll(".ag-step")).toHaveLength(0);
     expect(document.querySelector(".uv-legend")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     expect(screen.getByTestId("factory-overview")).toBeInTheDocument();
-    expect(document.querySelectorAll(".uv-wf")).toHaveLength(0);
+    expect(document.querySelectorAll(".uv-wf")).toHaveLength(6);
   });
 
   it("selects No Factory as an exact null workflow scope", async () => {
@@ -321,6 +420,34 @@ describe("WorkflowAtlas", () => {
         "Unclassified"
       )
     );
+  });
+
+  it("zooms from a factory workflow card into that factory's graph", async () => {
+    useFactoryFilterStore.getState().reset();
+    mockSummary.mockReturnValue({
+      summary: OVERVIEW_FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+
+    render(<WorkflowAtlas />);
+
+    fireEvent.click(screen.getByTestId("workflow-node-Unnamed workflow"));
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".uv-wf")).toHaveLength(2);
+      const names = Array.from(document.querySelectorAll(".ag-wf-name")).map(
+        (name) => name.textContent
+      );
+      expect(names).toContain("Build");
+      expect(names).toContain("Unnamed workflow");
+    });
+    expect(
+      Array.from(document.querySelectorAll(".ag-wf-name")).map(
+        (name) => name.textContent
+      )
+    ).not.toContain("Review");
   });
 
   it("renders the graph from a fixture summary", async () => {

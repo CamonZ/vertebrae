@@ -117,22 +117,19 @@
   color: var(--fg-ghost);
   font-size: var(--text-11);
 }
-.factory-overview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
-  justify-content: center;
-  gap: var(--s-4);
-  max-width: 980px;
+.factory-overview-canvas {
+  position: relative;
+  min-width: max-content;
   margin: 0 auto;
 }
-.factory-overview-box {
-  min-height: 150px;
+.factory-overview-factory {
+  position: absolute;
+  z-index: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  justify-content: flex-end;
   gap: var(--s-2);
-  padding: var(--s-4);
+  padding: var(--s-3) var(--s-4);
   border: 1px solid #303030;
   border-radius: var(--r-md);
   background: #050505;
@@ -145,14 +142,13 @@
     transform var(--t-fast) var(--ease),
     box-shadow var(--t-fast) var(--ease);
 }
-.factory-overview-box:hover,
-.factory-overview-box:focus-visible {
+.factory-overview-factory:hover,
+.factory-overview-factory:focus-visible {
   border-color: var(--accent);
   box-shadow: 0 16px 36px rgb(0 0 0 / 36%);
   outline: none;
-  transform: translateY(-2px);
 }
-.factory-overview-box .factory-overview-label {
+.factory-overview-factory .factory-overview-label {
   color: #8f8f8f;
 }
 .factory-overview-name {
@@ -173,6 +169,20 @@
 }
 .factory-overview-active {
   color: var(--accent);
+}
+.factory-overview-edges {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: visible;
+}
+.factory-overview-canvas > .uv-wf {
+  z-index: 2;
+  transition: none;
+}
+.factory-overview-canvas > .al-cond {
+  z-index: 3;
 }
 .factory-overview-empty {
   display: grid;

@@ -135,7 +135,9 @@ function resolveSourceStep(wf: PipelineWorkflow): string | null {
   if (steps.length === 0) return wf.initial_step_id;
 
   const ordered = steps.slice().sort((a, b) => a.step_order - b.step_order);
-  const lastFinish = [...ordered].reverse().find((s) => kindFor(s) === "finish");
+  const lastFinish = [...ordered]
+    .reverse()
+    .find((s) => kindFor(s) === "finish");
   if (lastFinish) return lastFinish.id;
   const lastRoute = [...ordered].reverse().find((s) => kindFor(s) === "route");
   if (lastRoute) return lastRoute.id;
@@ -244,7 +246,9 @@ export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
 
     workflows.push({
       id: wf.id,
-      name: wf.name,
+      // Empty names are valid backend data; keep the topology legible in every
+      // renderer, including the factory overview cards.
+      name: wf.name.trim() || "Unnamed workflow",
       description: wf.description,
       initialStepId: wf.initial_step_id,
       phase: phaseOf(wf),

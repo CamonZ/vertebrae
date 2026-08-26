@@ -554,6 +554,7 @@ export function WorkflowAtlas() {
             <FactoryOverview
               summary={summary}
               query={query}
+              view={view}
               onSelect={setFactoryFilter}
             />
           )}
