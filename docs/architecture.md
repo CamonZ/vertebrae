@@ -181,6 +181,17 @@ may populate a revision-keyed normalized cache that is bounded by entries,
 events, and serialized bytes. Provider paths, JSONL formats, indexing, and
 decoding remain adapter-owned.
 
+The shared paging machinery lives in `harness-core/src/replay/` as focused
+modules: `cursor.rs` (cursor codec), `revision.rs` (transcript revision
+identity), `tail.rs` (bounded JSONL tail reads), `cache.rs` (bounded LRU plus
+single-flight loading), and `mod.rs` (the page contract and the
+`load_transcript_page` driver that adapters delegate to). An adapter supplies
+only discovery, its projection key, a bounded tail decoder, and a full
+normalizer; every branching decision — cold tail, cache hit, deferred
+normalization — lives in the one shared driver. Codex keeps its rollout record
+parsing in `harness-codex/src/rollout.rs`; the GUI keeps replay bookkeeping
+in `gui/src/stores/providerReplay.ts` beside the chat store.
+
 ### Adding a provider
 
 1. Add the variant to `Provider` in `crates/core/src/model_catalog.rs` and its

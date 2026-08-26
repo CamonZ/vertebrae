@@ -34,6 +34,16 @@ import type {
 } from "../bindings";
 import { commands } from "../bindings";
 import { useLocalChatDefaultsStore } from "../utils/localChatDefaults";
+import {
+  applyInitialPage,
+  applyOlderPage,
+  failReplay,
+  initialProviderReplayState,
+  isValidReplayPage,
+  providerReplayErrorMessage,
+  providerReplayGeneration,
+  type ProviderReplayState,
+} from "./providerReplay";
 import { recordLocalChatTrace } from "../utils/localChatDebug";
 
 /**
@@ -384,24 +394,6 @@ export interface TitleCandidateOptions {
 export interface StreamingAssistantMessage {
   text: string;
   timestamp: string;
-}
-
-export interface ProviderReplayState {
-  /** Unique hydration generation; stale requests from a prior reopen are ignored. */
-  generation: number;
-  /** Runtime-only normalized event lines loaded so far, oldest first. */
-  lines: string[];
-  /** Opaque provider transcript revision shared by every loaded page. */
-  cacheKey: string | null;
-  nextCursor: string | null;
-  hasMore: boolean;
-  loading: "initial" | "older" | null;
-  /** Whether at least one valid page (including an empty transcript) loaded. */
-  loaded: boolean;
-  error: string | null;
-  /** Last replay-projected prefix, used to retain later live enrichments. */
-  installedMessages: ChatMessage[];
-  seenCursors: string[];
 }
 
 export interface ChatSession {
@@ -887,13 +879,39 @@ function conversationEventToChatMessage(
   }
 }
 
+/**
+ * Project accumulated replay lines into chat messages.
+ *
+ * Log IDs are derived from each line's own harness event ID (not list
+ * position) so prepending an older page never shifts the identity of
+ * already-projected lines. Re-projecting the full accumulated line list is
+ * intentional: `parseSessionLogs` is stateful across lines (delta merging,
+ * tool-pair and file-edit pairing), so a page boundary is not a projection
+ * boundary.
+ */
 function replayLinesToChatMessages(
   lines: string[],
   session: ChatSession
 ): ChatMessage[] {
-  const logs = lines.map((content, index) => {
+  const logs = lines.map((content) => {
+    let eventId: string | undefined;
+    try {
+      const parsed: unknown = JSON.parse(content);
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "event_id" in parsed &&
+        typeof (parsed as { event_id: unknown }).event_id === "string"
+      ) {
+        eventId = (parsed as { event_id: string }).event_id;
+      }
+    } catch {
+      eventId = undefined;
+    }
     return {
-      id: `local-replay-${session.id}-${index}`,
+      id: eventId
+        ? `local-replay-${session.id}-${eventId}`
+        : `local-replay-${session.id}-${contentDigest(content)}`,
       step_execution_id: session.id,
       content,
       format: "harness",
@@ -906,6 +924,15 @@ function replayLinesToChatMessages(
       .filter((message): message is ChatMessage => message !== null),
     session.providerResumeId
   );
+}
+
+/** Deterministic content digest for lines without a harness event ID. */
+function contentDigest(content: string): string {
+  let hash = 0;
+  for (let index = 0; index < content.length; index += 1) {
+    hash = (Math.imul(31, hash) + content.charCodeAt(index)) | 0;
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function occurrenceKeys(
@@ -1041,46 +1068,6 @@ function unmatchedMessages(
   const baselineKeys = new Set(occurrenceKeys(baseline));
   const currentKeys = occurrenceKeys(current);
   return current.filter((_, index) => !baselineKeys.has(currentKeys[index]));
-}
-
-function providerReplayErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return "Provider transcript history is temporarily unavailable.";
-}
-
-let nextProviderReplayGeneration = 1;
-
-function providerReplayGeneration(): number {
-  const generation = nextProviderReplayGeneration;
-  nextProviderReplayGeneration += 1;
-  return generation;
-}
-
-function isValidReplayPage(
-  page: unknown
-): page is LoadLocalChatSessionReplayOutput {
-  if (typeof page !== "object" || page === null) return false;
-  const candidate = page as Partial<LoadLocalChatSessionReplayOutput>;
-  return (
-    Array.isArray(candidate.events) &&
-    candidate.events.every((line) => typeof line === "string") &&
-    typeof candidate.has_more === "boolean" &&
-    (candidate.cache_key === null || typeof candidate.cache_key === "string") &&
-    (candidate.next_cursor === null ||
-      typeof candidate.next_cursor === "string") &&
-    (candidate.events.length === 0 ||
-      (typeof candidate.cache_key === "string" &&
-        candidate.cache_key.length > 0)) &&
-    (!candidate.has_more ||
-      (typeof candidate.cache_key === "string" &&
-        candidate.cache_key.length > 0 &&
-        typeof candidate.next_cursor === "string" &&
-        candidate.next_cursor.length > 0))
-  );
 }
 
 function localSessionSummaryFor(
@@ -1527,6 +1514,26 @@ export const useChatStore = create<ChatStore>((set, get) => {
     }
   };
 
+  /** Apply a pure replay-state transition to one session inside `set`. */
+  const updateProviderReplay = (
+    sessionId: string,
+    state: ChatStoreState,
+    transition: (replay: ProviderReplayState) => ProviderReplayState
+  ): Partial<ChatStoreState> => {
+    const current = state.sessions[sessionId];
+    const replay = current?.providerReplay;
+    if (!current || !replay) return state;
+    return {
+      sessions: {
+        ...state.sessions,
+        [sessionId]: {
+          ...current,
+          providerReplay: transition(replay),
+        },
+      },
+    };
+  };
+
   const hydrateProviderMessagesInPlace = (
     sessionId: string,
     session: ChatSession
@@ -1546,18 +1553,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           [sessionId]: {
             ...current,
             providerMessagesHydrating: true,
-            providerReplay: {
-              generation,
-              lines: [],
-              cacheKey: null,
-              nextCursor: null,
-              hasMore: false,
-              loading: "initial",
-              loaded: false,
-              error: null,
-              installedMessages: [],
-              seenCursors: [],
-            },
+            providerReplay: initialProviderReplayState(generation),
           },
         },
       };
@@ -1566,38 +1562,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
     void requestProviderReplayPage(session, null).then((result) => {
       set((state) => {
         const current = state.sessions[sessionId];
+        const replay = current?.providerReplay;
         if (
           !current ||
           current.providerResumeId !== session.providerResumeId ||
-          current.providerReplay?.loading !== "initial" ||
-          current.providerReplay.generation !== generation
+          replay?.loading !== "initial" ||
+          replay.generation !== generation
         ) {
           return state;
         }
         if (result.status === "error") {
-          return {
-            sessions: {
-              ...state.sessions,
-              [sessionId]: {
-                ...current,
-                providerMessagesHydrating: false,
-                providerReplay: {
-                  ...(current.providerReplay ?? {
-                    generation,
-                    lines: [],
-                    cacheKey: null,
-                    nextCursor: null,
-                    hasMore: false,
-                    loaded: false,
-                    installedMessages: [],
-                    seenCursors: [],
-                  }),
-                  loading: null,
-                  error: result.error,
-                },
-              },
-            },
-          };
+          return updateProviderReplay(sessionId, state, (r) =>
+            failReplay(r, result.error)
+          );
         }
         const lines = result.page.events.filter(
           (line): line is string => typeof line === "string"
@@ -1618,23 +1595,16 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 current.hasUserMessage ??
                 merged.messages.some((message) => message.kind === "user"),
               providerMessagesHydrating: false,
-              providerReplay: {
-                generation,
-                lines,
-                cacheKey: result.page.cache_key,
-                nextCursor: result.page.next_cursor,
-                hasMore: result.page.has_more,
-                loading: null,
-                loaded: result.page.cache_key !== null,
-                error: null,
-                installedMessages: merged.messages.slice(
-                  0,
-                  merged.installedMessageCount
-                ),
-                seenCursors: result.page.next_cursor
-                  ? [result.page.next_cursor]
-                  : [],
-              },
+              providerReplay: applyInitialPage(
+                replay,
+                {
+                  cacheKey: result.page.cache_key,
+                  events: lines,
+                  nextCursor: result.page.next_cursor,
+                  hasMore: result.page.has_more,
+                },
+                merged
+              ),
             },
           },
         };
@@ -2008,19 +1978,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
         ) {
           return state;
         }
-        return {
-          sessions: {
-            ...state.sessions,
-            [sessionId]: {
-              ...current,
-              providerReplay: {
-                ...current.providerReplay,
-                loading: "older",
-                error: null,
-              },
-            },
-          },
-        };
+        return updateProviderReplay(sessionId, state, (r) => ({
+          ...r,
+          loading: "older",
+          error: null,
+        }));
       });
 
       const result = await requestProviderReplayPage(session, requestedCursor);
@@ -2039,110 +2001,64 @@ export const useChatStore = create<ChatStore>((set, get) => {
           return state;
         }
         if (result.status === "error") {
-          return {
-            sessions: {
-              ...state.sessions,
-              [sessionId]: {
-                ...current,
-                providerReplay: {
-                  ...currentReplay,
-                  loading: null,
-                  error: result.error,
-                },
-              },
-            },
-          };
+          return updateProviderReplay(sessionId, state, (r) =>
+            failReplay(r, result.error)
+          );
         }
-        if (result.page.cache_key !== expectedCacheKey) {
-          return {
-            sessions: {
-              ...state.sessions,
-              [sessionId]: {
-                ...current,
-                providerReplay: {
-                  ...currentReplay,
-                  nextCursor: null,
-                  hasMore: false,
-                  loading: null,
-                  error:
-                    "Provider transcript changed while older history was loading.",
-                },
-              },
-            },
-          };
-        }
-        const nextCursor = result.page.has_more
-          ? result.page.next_cursor
-          : null;
-        if (
-          nextCursor &&
-          (nextCursor === requestedCursor ||
-            currentReplay.seenCursors.includes(nextCursor))
-        ) {
-          return {
-            sessions: {
-              ...state.sessions,
-              [sessionId]: {
-                ...current,
-                providerReplay: {
-                  ...currentReplay,
-                  nextCursor: null,
-                  hasMore: false,
-                  loading: null,
-                  error: "Provider transcript returned a repeated page cursor.",
-                },
-              },
-            },
-          };
-        }
-
-        const pageLines = result.page.events.filter(
-          (line): line is string => typeof line === "string"
+        const previousInstalled = currentReplay.installedMessages;
+        const outcome = applyOlderPage(
+          currentReplay,
+          {
+            cacheKey: result.page.cache_key,
+            events: result.page.events.filter(
+              (line): line is string => typeof line === "string"
+            ),
+            nextCursor: result.page.next_cursor,
+            hasMore: result.page.has_more,
+          },
+          (lines) => {
+            // Re-project the full accumulated history, then reconcile the
+            // replayed prefix against live enrichments recorded since the
+            // last page so user-resolved tools/questions are not clobbered.
+            const projected = replayLinesToChatMessages(lines, current);
+            const currentPrefix = current.messages.slice(
+              0,
+              previousInstalled.length
+            );
+            const reconciled = reconcileReplayMessages(
+              projected,
+              previousInstalled,
+              currentPrefix
+            );
+            const liveMessages = [
+              ...unmatchedMessages(previousInstalled, currentPrefix),
+              ...current.messages.slice(
+                Math.min(previousInstalled.length, current.messages.length)
+              ),
+            ];
+            return [...reconciled, ...liveMessages];
+          }
         );
-        const lines = [...pageLines, ...currentReplay.lines];
-        const projected = replayLinesToChatMessages(lines, current);
-        const installedMessageCount = currentReplay.installedMessages.length;
-        const currentPrefix = current.messages.slice(0, installedMessageCount);
-        const reconciled = reconcileReplayMessages(
-          projected,
-          currentReplay.installedMessages,
-          currentPrefix
-        );
-        const liveMessages = [
-          ...unmatchedMessages(currentReplay.installedMessages, currentPrefix),
-          ...current.messages.slice(
-            Math.min(installedMessageCount, current.messages.length)
-          ),
-        ];
-        const merged = {
-          messages: [...reconciled, ...liveMessages],
-          installedMessageCount: reconciled.length,
-        };
+        if (outcome.status === "rejected") {
+          return updateProviderReplay(sessionId, state, () => outcome.replay);
+        }
         applied = true;
         return {
           sessions: {
             ...state.sessions,
             [sessionId]: {
               ...current,
-              messages: merged.messages,
+              messages: outcome.messages,
               messageCount: Math.max(
-                merged.messages.length,
+                outcome.messages.length,
                 current.messageCount ?? 0
               ),
               providerReplay: {
-                ...currentReplay,
-                lines,
-                nextCursor,
-                hasMore: result.page.has_more,
-                loading: null,
-                error: null,
-                installedMessages: merged.messages.slice(
+                ...outcome.replay,
+                installedMessages: outcome.messages.slice(
                   0,
-                  merged.installedMessageCount
+                  outcome.installedMessageCount
                 ),
-                seenCursors: nextCursor
-                  ? [...currentReplay.seenCursors, nextCursor]
-                  : currentReplay.seenCursors,
               },
             },
           },
