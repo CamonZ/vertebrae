@@ -106,6 +106,7 @@ export function StepInspector({
   const [transitionsTo, setTransitionsTo] = useState("");
   const [modelValue, setModelValue] = useState("");
   const [outputSchema, setOutputSchema] = useState("");
+  const [persistenceOptions, setPersistenceOptions] = useState("");
 
   useEffect(() => {
     if (!cfg || editing) return;
@@ -119,6 +120,11 @@ export function StepInspector({
     setModelValue(cfg.agent_config?.model ?? "");
     setOutputSchema(
       cfg.output_schema ? JSON.stringify(cfg.output_schema, null, 2) : ""
+    );
+    setPersistenceOptions(
+      cfg.persistence_options
+        ? JSON.stringify(cfg.persistence_options, null, 2)
+        : ""
     );
   }, [cfg, editing]);
 
@@ -169,8 +175,9 @@ export function StepInspector({
         list.push({
           key,
           label:
-            model.steps.find((candidate) => candidate.id === `${wf.id}.${targetId}`)
-              ?.name ?? targetId,
+            model.steps.find(
+              (candidate) => candidate.id === `${wf.id}.${targetId}`
+            )?.name ?? targetId,
           loop: false,
           onClick: () =>
             onSelect({ type: "step", workflowId: wf.id, stepId: targetId }),
@@ -216,6 +223,57 @@ export function StepInspector({
       }
     }
 
+    let parsedPersistence: JsonValue | null = null;
+    let clearPersistenceOptions = !persistenceOptions.trim();
+    if (persistenceOptions.trim()) {
+      try {
+        parsedPersistence = JSON.parse(persistenceOptions) as JsonValue;
+      } catch {
+        setError("Persistence options must be valid JSON.");
+        return;
+      }
+      if (
+        parsedPersistence === null ||
+        typeof parsedPersistence !== "object" ||
+        Array.isArray(parsedPersistence)
+      ) {
+        setError(
+          "Persistence options must be an artifact configuration object."
+        );
+        return;
+      }
+      const artifact = (parsedPersistence as Record<string, JsonValue>)
+        .artifact;
+      const logicalName =
+        artifact && typeof artifact === "object" && !Array.isArray(artifact)
+          ? (artifact as Record<string, JsonValue>).logical_name
+          : undefined;
+      if (
+        Object.keys(parsedPersistence as Record<string, JsonValue>).length !==
+          1 ||
+        !artifact ||
+        typeof artifact !== "object" ||
+        Array.isArray(artifact) ||
+        Object.keys(artifact as Record<string, JsonValue>).length !== 1 ||
+        typeof logicalName !== "string" ||
+        !logicalName.trim()
+      ) {
+        setError(
+          'Persistence options must match {"artifact":{"logical_name":"..."}}.'
+        );
+        return;
+      }
+      if (!outputSchema.trim()) {
+        setError("Artifact persistence requires an output schema.");
+        return;
+      }
+      if (type === "finish" || type === "stop") {
+        setError("Finish and stop steps cannot persist artifacts.");
+        return;
+      }
+      clearPersistenceOptions = false;
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -233,6 +291,8 @@ export function StepInspector({
           step_type: type,
           output_schema: parsedSchema,
           clear_output_schema: !outputSchema.trim(),
+          persistence_options: parsedPersistence,
+          clear_persistence_options: clearPersistenceOptions,
           order: step.order,
           transitions_to: nextTransitions,
         })
@@ -324,7 +384,9 @@ export function StepInspector({
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder={
-                isStop ? "Not dispatched for a stop boundary" : "Optional prompt"
+                isStop
+                  ? "Not dispatched for a stop boundary"
+                  : "Optional prompt"
               }
             />
           </label>
@@ -350,7 +412,8 @@ export function StepInspector({
             />
           </label>
           <label>
-            Transitions <span className="wfd-help">stop requires exactly one</span>
+            Transitions{" "}
+            <span className="wfd-help">stop requires exactly one</span>
             <input
               value={transitionsTo}
               onChange={(e) => setTransitionsTo(e.target.value)}
@@ -362,6 +425,14 @@ export function StepInspector({
               value={outputSchema}
               onChange={(e) => setOutputSchema(e.target.value)}
               placeholder="JSON Schema (optional)"
+            />
+          </label>
+          <label>
+            Persistence options
+            <textarea
+              value={persistenceOptions}
+              onChange={(e) => setPersistenceOptions(e.target.value)}
+              placeholder='{"artifact":{"logical_name":"result"}}'
             />
           </label>
           {error ? <div className="wfd-error">{error}</div> : null}
@@ -517,6 +588,19 @@ export function StepInspector({
           ) : (
             <div className="wfd-placeholder">
               {isLoading ? "Loading…" : "No output schema"}
+            </div>
+          )}
+        </section>
+
+        <section className="wfd-sec">
+          <div className="wfd-lbl">Persistence</div>
+          {cfg?.persistence_options ? (
+            <pre className="wfd-prompt">
+              {JSON.stringify(cfg.persistence_options, null, 2)}
+            </pre>
+          ) : (
+            <div className="wfd-placeholder">
+              {isLoading ? "Loading…" : "No persistence configured"}
             </div>
           )}
         </section>

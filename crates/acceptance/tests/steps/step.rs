@@ -130,6 +130,136 @@ async fn when_add_step_with_flag(
     store_step_id_if_created(world, &name);
 }
 
+#[when(expr = "I add a step {string} to the workflow with persistence logical name {string}")]
+async fn when_add_step_with_persistence_name(
+    world: &mut SmokeWorld,
+    name: String,
+    logical_name: String,
+) {
+    let wf_id = workflow_id(world);
+    let schema =
+        r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"#;
+    let persistence = format!(r#"{{"artifact":{{"logical_name":"{}"}}}}"#, logical_name);
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--output-schema",
+            schema,
+            "--persistence-options",
+            &persistence,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
+#[when(expr = "I update the step {string} in the workflow with persistence logical name {string}")]
+async fn when_update_step_with_persistence_name(
+    world: &mut SmokeWorld,
+    name: String,
+    logical_name: String,
+) {
+    let step_id = world
+        .stored_ids
+        .get(&format!("step:{name}"))
+        .cloned()
+        .unwrap_or_else(|| panic!("no stored ID for step '{name}'"));
+    let persistence = format!(r#"{{"artifact":{{"logical_name":"{}"}}}}"#, logical_name);
+    world
+        .run_vtb(&[
+            "step",
+            "update",
+            &step_id,
+            "--persistence-options",
+            &persistence,
+        ])
+        .await;
+}
+
+#[when(expr = "I add a step {string} to the workflow with persistence but no output schema")]
+async fn when_add_step_with_persistence_without_schema(world: &mut SmokeWorld, name: String) {
+    let wf_id = workflow_id(world);
+    let persistence = r#"{"artifact":{"logical_name":"missing-schema"}}"#;
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--persistence-options",
+            persistence,
+        ])
+        .await;
+}
+
+#[when(expr = "I add a step {string} to the workflow with an unknown persistence key")]
+async fn when_add_step_with_unknown_persistence_key(world: &mut SmokeWorld, name: String) {
+    let wf_id = workflow_id(world);
+    let schema =
+        r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"#;
+    let persistence = r#"{"artifact":{"logical_name":"unknown-key"},"unknown":true}"#;
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--output-schema",
+            schema,
+            "--persistence-options",
+            persistence,
+        ])
+        .await;
+}
+
+#[when(expr = "I add a step {string} to the workflow with a blank persistence logical name")]
+async fn when_add_step_with_blank_persistence_name(world: &mut SmokeWorld, name: String) {
+    let wf_id = workflow_id(world);
+    let schema =
+        r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"#;
+    let persistence = r#"{"artifact":{"logical_name":""}}"#;
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--output-schema",
+            schema,
+            "--persistence-options",
+            persistence,
+        ])
+        .await;
+}
+
+#[when(expr = "I add a step {string} to the workflow with an overlong persistence logical name")]
+async fn when_add_step_with_overlong_persistence_name(world: &mut SmokeWorld, name: String) {
+    let wf_id = workflow_id(world);
+    let schema =
+        r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"#;
+    let logical_name = "x".repeat(256);
+    let persistence = format!(r#"{{"artifact":{{"logical_name":"{}"}}}}"#, logical_name);
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--output-schema",
+            schema,
+            "--persistence-options",
+            &persistence,
+        ])
+        .await;
+}
+
 /// Builds `--agent-config '{"model":"<model>"}' ` JSON internally to avoid
 /// Gherkin string-escaping issues with nested double quotes.
 #[when(expr = "I add a step {string} to the workflow with --agent-config model {string}")]
@@ -563,6 +693,24 @@ async fn then_step_show_json_should_have_step_type(world: &mut SmokeWorld, expec
     );
 }
 
+#[then(expr = "the step show JSON should have persistence logical name {string}")]
+async fn then_step_show_json_should_have_persistence_name(
+    world: &mut SmokeWorld,
+    expected: String,
+) {
+    assert_eq!(
+        world.last_exit_code, 0,
+        "step show JSON failed: {}",
+        world.last_stderr
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&world.last_stdout).expect("step show JSON should be valid JSON");
+    assert_eq!(
+        json["persistence_options"]["artifact"]["logical_name"],
+        expected
+    );
+}
+
 #[then(expr = "the step {string} in the workflow should have an output_schema")]
 async fn then_step_should_have_output_schema(world: &mut SmokeWorld, step_name: String) {
     let json = get_step_json(world, &step_name)
@@ -574,6 +722,22 @@ async fn then_step_should_have_output_schema(world: &mut SmokeWorld, step_name: 
         "step '{}' expected output_schema to be present, but it was null\nJSON: {}",
         step_name,
         json
+    );
+}
+
+#[then(expr = "the step {string} in the workflow should have persistence logical name {string}")]
+async fn then_step_should_have_persistence_name(
+    world: &mut SmokeWorld,
+    step_name: String,
+    expected: String,
+) {
+    let json = get_step_json(world, &step_name)
+        .await
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
+    assert_eq!(
+        json["persistence_options"]["artifact"]["logical_name"], expected,
+        "step '{}' persistence logical name mismatch: {}",
+        step_name, json
     );
 }
 

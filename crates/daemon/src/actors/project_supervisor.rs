@@ -1258,6 +1258,7 @@ mod tests {
             "goal": "Deploy to production",
             "context": {"title": "Some task"},
             "unexpected_field": true,
+            "persistence_options": {"artifact": {"logical_name": "result"}},
             "transitions_to": ["next-step"]
         });
 

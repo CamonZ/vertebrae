@@ -163,6 +163,10 @@ pub struct StepAddCommand {
     #[arg(long, value_name = "JSON")]
     pub output_schema: Option<String>,
 
+    /// Orchestrator-owned persistence configuration (raw JSON string)
+    #[arg(long, value_name = "JSON")]
+    pub persistence_options: Option<String>,
+
     /// Step order (0-indexed, defaults to 0)
     #[arg(long, short, default_value = "0")]
     pub order: i32,
@@ -252,6 +256,19 @@ impl StepAddCommand {
             })
             .transpose()?;
 
+        let persistence_options = self
+            .persistence_options
+            .as_deref()
+            .map(|json_str| {
+                serde_json::from_str::<serde_json::Value>(json_str).map_err(|e| {
+                    ServiceError::validation_failed(format!(
+                        "Invalid --persistence-options JSON: {}",
+                        e
+                    ))
+                })
+            })
+            .transpose()?;
+
         let step_type: StepType = self.step_type.clone().into();
         validate_step_constraints(&step_type, self.prompt.as_deref(), &transitions_to)?;
 
@@ -262,6 +279,9 @@ impl StepAddCommand {
 
         if let Some(schema) = output_schema {
             step = step.with_output_schema(schema);
+        }
+        if let Some(options) = persistence_options {
+            step = step.with_persistence_options(options);
         }
         if let Some(goal) = &self.goal {
             step = step.with_goal(goal);
@@ -439,6 +459,12 @@ impl StepShowCommand {
             .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
             .unwrap_or_else(|| "(none)".to_string());
 
+        let persistence_options = s
+            .persistence_options
+            .as_ref()
+            .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
+            .unwrap_or_else(|| "(none)".to_string());
+
         let output = format!(
             r#"Step: {} - {}
 ============================================================
@@ -451,6 +477,7 @@ Agents:        {}
 Skills:        {}
             Model:         {}
 Output Schema: {}
+Persistence:    {}
 Transitions:   {}
 Created:       {}
 Updated:       {}"#,
@@ -464,6 +491,7 @@ Updated:       {}"#,
             skills,
             model,
             output_schema,
+            persistence_options,
             transitions,
             s.created_at
                 .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
@@ -552,6 +580,14 @@ pub struct StepUpdateCommand {
     /// Clear the output schema
     #[arg(long)]
     pub clear_output_schema: bool,
+
+    /// Replace the orchestrator-owned persistence configuration with JSON
+    #[arg(long, value_name = "JSON")]
+    pub persistence_options: Option<String>,
+
+    /// Clear the orchestrator-owned persistence configuration
+    #[arg(long)]
+    pub clear_persistence_options: bool,
 
     /// New order for the step
     #[arg(long, short)]
@@ -646,6 +682,18 @@ impl StepUpdateCommand {
                 ServiceError::validation_failed(format!("Invalid --output-schema JSON: {}", e))
             })?;
             updates = updates.with_output_schema(Some(value));
+        }
+
+        if self.clear_persistence_options {
+            updates = updates.with_persistence_options(None);
+        } else if let Some(json_str) = &self.persistence_options {
+            let value: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+                ServiceError::validation_failed(format!(
+                    "Invalid --persistence-options JSON: {}",
+                    e
+                ))
+            })?;
+            updates = updates.with_persistence_options(Some(value));
         }
 
         if let Some(order) = self.order {
@@ -1524,6 +1572,27 @@ mod tests {
     }
 
     #[test]
+    fn test_step_add_with_persistence_options() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Persisted",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--persistence-options",
+            r#"{"artifact":{"logical_name":"step_result"}}"#,
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => assert_eq!(
+                cmd.persistence_options,
+                Some(r#"{"artifact":{"logical_name":"step_result"}}"#.to_string())
+            ),
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
     fn test_step_add_with_step_type_and_output_schema() {
         let cli = TestCli::try_parse_from([
             "test",
@@ -1618,6 +1687,29 @@ mod tests {
     }
 
     #[test]
+    fn test_step_update_with_persistence_options_and_clear() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--persistence-options",
+            r#"{"artifact":{"logical_name":"step_result"}}"#,
+            "--clear-persistence-options",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                assert_eq!(
+                    cmd.persistence_options,
+                    Some(r#"{"artifact":{"logical_name":"step_result"}}"#.to_string())
+                );
+                assert!(cmd.clear_persistence_options);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
     fn test_step_update_without_step_type_defaults_to_none() {
         let cli =
             TestCli::try_parse_from(["test", "update", "a1b2c3d4-0000-4000-8000-00000000000b"])
@@ -1627,6 +1719,8 @@ mod tests {
                 assert!(cmd.step_type.is_none());
                 assert!(cmd.output_schema.is_none());
                 assert!(!cmd.clear_output_schema);
+                assert!(cmd.persistence_options.is_none());
+                assert!(!cmd.clear_persistence_options);
             }
             _ => panic!("Expected Update command"),
         }

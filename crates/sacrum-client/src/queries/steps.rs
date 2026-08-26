@@ -11,6 +11,7 @@ pub const STEP_FIELDS: &str = r#"
         agent_config
         step_type
         output_schema
+        persistence_options
         step_order
         workflow_id
         project_id
@@ -64,6 +65,7 @@ pub const CREATE_STEP: &str = r#"
         $agent_config: Json,
         $step_type: String,
         $output_schema: Json,
+        $persistence_options: Json,
         $step_order: Int
     ) {
         create_workflow_step(
@@ -76,6 +78,7 @@ pub const CREATE_STEP: &str = r#"
             agent_config: $agent_config,
             step_type: $step_type,
             output_schema: $output_schema,
+            persistence_options: $persistence_options,
             step_order: $step_order
         ) {
             ...StepFields
@@ -94,6 +97,7 @@ pub const UPDATE_STEP: &str = r#"
         $agent_config: Json,
         $step_type: String,
         $output_schema: Json,
+        $persistence_options: Json,
         $clear_output_schema: Boolean,
         $step_order: Int
     ) {
@@ -107,6 +111,7 @@ pub const UPDATE_STEP: &str = r#"
             agent_config: $agent_config,
             step_type: $step_type,
             output_schema: $output_schema,
+            persistence_options: $persistence_options,
             clear_output_schema: $clear_output_schema,
             step_order: $step_order
         ) {
@@ -133,3 +138,17 @@ pub const SYNC_STEP_TRANSITIONS: &str = r#"
         }
     }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_step_operations_read_and_write_persistence_options() {
+        assert!(STEP_FIELDS.contains("persistence_options"));
+        assert!(CREATE_STEP.contains("$persistence_options: Json"));
+        assert!(CREATE_STEP.contains("persistence_options: $persistence_options"));
+        assert!(UPDATE_STEP.contains("$persistence_options: Json"));
+        assert!(UPDATE_STEP.contains("persistence_options: $persistence_options"));
+    }
+}

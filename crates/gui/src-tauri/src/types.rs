@@ -663,6 +663,9 @@ pub struct Step {
     /// JSON Schema describing the expected output of this step
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<serde_json::Value>,
+    /// Orchestrator-owned persistence configuration for this step
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistence_options: Option<serde_json::Value>,
     /// List of step IDs this step can transition to
     #[serde(default)]
     pub transitions_to: Vec<String>,
@@ -689,6 +692,7 @@ impl From<vertebrae_core::Step> for Step {
             agent_config: step.agent_config.into(),
             step_type: step.step_type.into(),
             output_schema: step.output_schema,
+            persistence_options: step.persistence_options,
             transitions_to: step.transitions_to,
             order: step.order,
             created_at: step.created_at.map(|dt| dt.to_rfc3339()),
@@ -1358,11 +1362,13 @@ pub struct CreateStepOptions {
     #[serde(default)]
     pub step_type: StepType,
     pub output_schema: Option<serde_json::Value>,
+    #[serde(default)]
+    pub persistence_options: Option<serde_json::Value>,
 }
 
 /// Options for updating a workflow step.
-/// Only fields that are Some will be updated. `clear_output_schema` explicitly
-/// removes an existing schema when no replacement value is supplied.
+/// Only fields that are Some will be updated. The clear flags explicitly remove
+/// an existing optional value when no replacement value is supplied.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct UpdateStepOptions {
     pub step_id: String,
@@ -1377,6 +1383,10 @@ pub struct UpdateStepOptions {
     pub output_schema: Option<serde_json::Value>,
     #[serde(default)]
     pub clear_output_schema: bool,
+    #[serde(default)]
+    pub persistence_options: Option<serde_json::Value>,
+    #[serde(default)]
+    pub clear_persistence_options: bool,
     pub order: Option<i32>,
     pub transitions_to: Option<Vec<String>>,
 }
@@ -1414,6 +1424,11 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
             update = update.with_output_schema(None);
         } else if let Some(output_schema) = opts.output_schema {
             update = update.with_output_schema(Some(output_schema));
+        }
+        if opts.clear_persistence_options {
+            update = update.with_persistence_options(None);
+        } else if let Some(persistence_options) = opts.persistence_options {
+            update = update.with_persistence_options(Some(persistence_options));
         }
         if let Some(transitions) = opts.transitions_to {
             let transition_ids: Vec<String> =
@@ -2005,6 +2020,8 @@ mod tests {
             step_type: Some(StepType::Finish),
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
             order: None,
             transitions_to: Some(vec![]),
         }
@@ -2031,6 +2048,8 @@ mod tests {
             step_type: Some(StepType::Stop),
             output_schema: None,
             clear_output_schema: true,
+            persistence_options: None,
+            clear_persistence_options: false,
             order: None,
             transitions_to: Some(vec!["next".to_string()]),
         }
@@ -2043,6 +2062,54 @@ mod tests {
             update.agent_config,
             Some(serde_json::json!({"provider": "openai", "model": "gpt-5.5"}))
         );
+    }
+
+    #[test]
+    fn update_step_options_sets_and_clears_persistence_options() {
+        let configured: vertebrae_core::StepUpdate = UpdateStepOptions {
+            step_id: "step".to_string(),
+            name: None,
+            goal: None,
+            prompt: None,
+            agents: None,
+            skills: None,
+            agent_config: None,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
+            persistence_options: Some(serde_json::json!({
+                "artifact": { "logical_name": "result" }
+            })),
+            clear_persistence_options: false,
+            order: None,
+            transitions_to: None,
+        }
+        .into();
+        assert_eq!(
+            configured.persistence_options,
+            Some(Some(serde_json::json!({
+                "artifact": { "logical_name": "result" }
+            })))
+        );
+
+        let cleared: vertebrae_core::StepUpdate = UpdateStepOptions {
+            step_id: "step".to_string(),
+            name: None,
+            goal: None,
+            prompt: None,
+            agents: None,
+            skills: None,
+            agent_config: None,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: true,
+            order: None,
+            transitions_to: None,
+        }
+        .into();
+        assert_eq!(cleared.persistence_options, Some(None));
     }
 
     #[test]

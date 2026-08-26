@@ -45,11 +45,130 @@ mod step_create_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         let result = cmd.execute(services.steps()).await.unwrap();
 
         assert!(result.contains("Created step:"));
+    }
+
+    #[tokio::test]
+    async fn test_create_update_and_clear_persistence_options() {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Default", vec![]))
+            .await
+            .unwrap();
+
+        let persistence = r#"{"artifact":{"logical_name":"step_result"}}"#;
+        let add = StepAddCommand {
+            name: "Persisted".to_string(),
+            workflow: workflow_id,
+            id: Some("persisted-step".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: 0,
+            transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: Some(r#"{"type":"object"}"#.to_string()),
+            persistence_options: Some(persistence.to_string()),
+        };
+        add.execute(services.steps()).await.unwrap();
+        assert_eq!(
+            services
+                .steps()
+                .get_step("persisted-step")
+                .await
+                .unwrap()
+                .unwrap()
+                .persistence_options,
+            Some(serde_json::json!({ "artifact": { "logical_name": "step_result" } }))
+        );
+
+        StepUpdateCommand {
+            id: "persisted-step".to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
+            persistence_options: Some(
+                r#"{"artifact":{"logical_name":"latest_result"}}"#.to_string(),
+            ),
+            clear_persistence_options: false,
+        }
+        .execute(services.steps())
+        .await
+        .unwrap();
+        assert_eq!(
+            services
+                .steps()
+                .get_step("persisted-step")
+                .await
+                .unwrap()
+                .unwrap()
+                .persistence_options,
+            Some(serde_json::json!({ "artifact": { "logical_name": "latest_result" } }))
+        );
+
+        StepUpdateCommand {
+            id: "persisted-step".to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: true,
+        }
+        .execute(services.steps())
+        .await
+        .unwrap();
+        assert!(
+            services
+                .steps()
+                .get_step("persisted-step")
+                .await
+                .unwrap()
+                .unwrap()
+                .persistence_options
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -78,6 +197,7 @@ mod step_create_tests {
             transitions_to: vec![],
             step_type: CliStepType::Finish,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -119,6 +239,7 @@ mod step_create_tests {
             transitions_to: vec!["next-step".to_string()],
             step_type: CliStepType::Finish,
             output_schema: None,
+            persistence_options: None,
         };
 
         let error = cmd.execute(services.steps()).await.unwrap_err();
@@ -155,6 +276,7 @@ mod step_create_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         let result = cmd.execute(services.steps()).await.unwrap();
@@ -202,6 +324,7 @@ mod step_create_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -249,6 +372,7 @@ mod step_create_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -288,6 +412,7 @@ mod step_create_tests {
             transitions_to: vec![],
             step_type: CliStepType::Finish,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -334,6 +459,7 @@ mod step_create_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -386,6 +512,7 @@ mod step_create_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -431,6 +558,7 @@ mod step_create_tests {
             ],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -478,6 +606,7 @@ mod step_create_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -536,6 +665,7 @@ mod step_list_tests {
                     CliStepType::Execute
                 },
                 output_schema: None,
+                persistence_options: None,
             };
             cmd.execute(services.steps()).await.unwrap();
         }
@@ -581,6 +711,7 @@ mod step_list_tests {
             transitions_to: vec![],
             step_type: CliStepType::Evaluate,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -657,6 +788,7 @@ mod step_list_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -708,6 +840,7 @@ mod step_show_tests {
             transitions_to: vec!["approved".to_string(), "rejected".to_string()],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -754,6 +887,7 @@ mod step_show_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -798,6 +932,7 @@ mod step_show_tests {
             transitions_to: vec![],
             step_type: CliStepType::Finish,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -851,6 +986,7 @@ mod step_show_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -891,6 +1027,9 @@ mod step_show_tests {
             transitions_to: vec![],
             step_type: CliStepType::HumanInput,
             output_schema: Some(r#"{"type":"object","required":["decision"]}"#.to_string()),
+            persistence_options: Some(
+                r#"{"artifact":{"logical_name":"human-result"}}"#.to_string(),
+            ),
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -914,6 +1053,10 @@ mod step_show_tests {
         assert_eq!(json["order"], 2);
         assert_eq!(json["step_type"], "human_input");
         assert_eq!(json["output_schema"]["required"][0], "decision");
+        assert_eq!(
+            json["persistence_options"],
+            serde_json::json!({ "artifact": { "logical_name": "human-result" } })
+        );
     }
 }
 
@@ -954,6 +1097,7 @@ mod step_update_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -978,6 +1122,8 @@ mod step_update_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1011,6 +1157,7 @@ mod step_update_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         }
         .execute(services.steps())
         .await
@@ -1036,6 +1183,8 @@ mod step_update_tests {
             step_type: Some(CliStepType::Finish),
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         }
         .execute(services.steps())
         .await
@@ -1073,6 +1222,7 @@ mod step_update_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1097,6 +1247,8 @@ mod step_update_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1133,6 +1285,7 @@ mod step_update_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1157,6 +1310,8 @@ mod step_update_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1193,6 +1348,7 @@ mod step_update_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1217,6 +1373,8 @@ mod step_update_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1261,6 +1419,7 @@ mod step_update_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1285,6 +1444,8 @@ mod step_update_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1321,6 +1482,7 @@ mod step_update_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1345,6 +1507,8 @@ mod step_update_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1394,6 +1558,7 @@ mod step_update_tests {
             transitions_to: vec!["old".to_string()],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1418,6 +1583,8 @@ mod step_update_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1453,6 +1620,7 @@ mod step_update_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1476,6 +1644,8 @@ mod step_update_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1533,6 +1703,7 @@ mod step_dispatcher_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         });
 
         // Call through the dispatcher, not the inner command directly
@@ -1582,6 +1753,7 @@ mod step_delete_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1645,6 +1817,7 @@ mod step_delete_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1687,6 +1860,7 @@ mod step_delete_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1738,6 +1912,7 @@ mod step_prompt_and_agent_config_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -1777,6 +1952,7 @@ mod step_prompt_and_agent_config_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -1815,6 +1991,7 @@ mod step_prompt_and_agent_config_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -1865,6 +2042,7 @@ mod step_prompt_and_agent_config_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         let result = cmd.execute(services.steps()).await;
@@ -1905,6 +2083,7 @@ mod step_prompt_and_agent_config_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -1928,6 +2107,8 @@ mod step_prompt_and_agent_config_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1962,6 +2143,7 @@ mod step_prompt_and_agent_config_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -1986,6 +2168,8 @@ mod step_prompt_and_agent_config_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -2020,6 +2204,7 @@ mod step_prompt_and_agent_config_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -2043,6 +2228,8 @@ mod step_prompt_and_agent_config_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         };
 
         let result = update_cmd.execute(services.steps()).await;
@@ -2083,6 +2270,7 @@ mod step_prompt_and_agent_config_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -2132,6 +2320,7 @@ mod route_step_schema_tests {
             transitions_to: vec![],
             step_type: CliStepType::Route,
             output_schema: Some(schema_json),
+            persistence_options: None,
         }
     }
 
@@ -2156,6 +2345,8 @@ mod route_step_schema_tests {
             step_type: Some(CliStepType::Route),
             output_schema: Some(schema_json),
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         }
     }
 
@@ -2290,6 +2481,7 @@ mod provider_tests {
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
+            persistence_options: None,
         }
     }
 
@@ -2319,6 +2511,8 @@ mod provider_tests {
             step_type: None,
             output_schema: None,
             clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
         }
     }
 

@@ -1668,6 +1668,10 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<serde_json::Value>,
 
+    /// Optional orchestrator-owned persistence configuration for structured output
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistence_options: Option<serde_json::Value>,
+
     /// Step IDs this step can transition to
     #[serde(default)]
     pub transitions_to: Vec<String>,
@@ -1699,6 +1703,7 @@ impl Step {
             agent_config: AgentConfig::default(),
             step_type: StepType::default(),
             output_schema: None,
+            persistence_options: None,
             transitions_to: Vec::new(),
             order: 0,
             created_at: None,
@@ -1757,6 +1762,12 @@ impl Step {
     /// Set the output schema
     pub fn with_output_schema(mut self, schema: serde_json::Value) -> Self {
         self.output_schema = Some(schema);
+        self
+    }
+
+    /// Set the orchestrator-owned persistence configuration
+    pub fn with_persistence_options(mut self, options: serde_json::Value) -> Self {
+        self.persistence_options = Some(options);
         self
     }
 
@@ -2459,6 +2470,8 @@ pub struct StepUpdate {
     pub step_type: Option<StepType>,
     /// New output schema
     pub output_schema: Option<Option<serde_json::Value>>,
+    /// New orchestrator-owned persistence configuration (Some(None) clears it)
+    pub persistence_options: Option<Option<serde_json::Value>>,
     /// New transitions_to list (string IDs)
     pub transitions_to: Option<Vec<String>>,
     /// New order value
@@ -2516,6 +2529,12 @@ impl StepUpdate {
     /// Set the output schema (Some to set, None to clear)
     pub fn with_output_schema(mut self, schema: Option<serde_json::Value>) -> Self {
         self.output_schema = Some(schema);
+        self
+    }
+
+    /// Set or clear the orchestrator-owned persistence configuration
+    pub fn with_persistence_options(mut self, options: Option<serde_json::Value>) -> Self {
+        self.persistence_options = Some(options);
         self
     }
 
@@ -3330,6 +3349,19 @@ mod tests {
     }
 
     #[test]
+    fn step_persistence_options_builder_and_serde_roundtrip() {
+        let options = serde_json::json!({
+            "artifact": {"logical_name": "step_result"}
+        });
+        let step = Step::new("persist", "wf1").with_persistence_options(options.clone());
+
+        assert_eq!(step.persistence_options, Some(options.clone()));
+        let serialized = serde_json::to_string(&step).unwrap();
+        let deserialized: Step = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.persistence_options, Some(options));
+    }
+
+    #[test]
     fn step_new_defaults_step_type_to_execute() {
         let step = Step::new("run", "wf1");
         assert_eq!(step.step_type, StepType::Execute);
@@ -3356,6 +3388,7 @@ mod tests {
         let step: Step = serde_json::from_str(json).unwrap();
         assert_eq!(step.step_type, StepType::Execute);
         assert_eq!(step.output_schema, None);
+        assert_eq!(step.persistence_options, None);
     }
 
     #[test]
@@ -3373,6 +3406,18 @@ mod tests {
     fn step_update_clear_output_schema() {
         let u = StepUpdate::new().with_output_schema(None);
         assert_eq!(u.output_schema, Some(None));
+    }
+
+    #[test]
+    fn step_update_sets_and_clears_persistence_options() {
+        let options = serde_json::json!({
+            "artifact": {"logical_name": "step_result"}
+        });
+        let set = StepUpdate::new().with_persistence_options(Some(options.clone()));
+        assert_eq!(set.persistence_options, Some(Some(options)));
+
+        let clear = StepUpdate::new().with_persistence_options(None);
+        assert_eq!(clear.persistence_options, Some(None));
     }
 
     // ─── Level Enum Tests ───────────────────────────────────────────

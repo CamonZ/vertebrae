@@ -23,6 +23,8 @@ vi.mock("../../../hooks", () => ({ useStep: vi.fn() }));
 vi.mock("../../../bindings", () => ({
   commands: {
     createStep: vi.fn(),
+    updateStep: vi.fn(),
+    deleteStep: vi.fn(),
     updateWorkflow: vi.fn(),
   },
 }));
@@ -165,6 +167,10 @@ function mockUseStep(step: Step | null, isLoading = false) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(commands.updateWorkflow).mockResolvedValue({
+    status: "ok",
+    data: null,
+  });
+  vi.mocked(commands.updateStep).mockResolvedValue({
     status: "ok",
     data: null,
   });
@@ -444,6 +450,46 @@ describe("StepInspector", () => {
     expect(screen.getByText("Output Schema")).toBeInTheDocument();
     expect(screen.getByTestId("schema-tree")).toBeInTheDocument();
     expect(screen.getByTestId("schema-node-verdict")).toBeInTheDocument();
+  });
+
+  it("edits and displays orchestrator persistence options", async () => {
+    mockUseStep(
+      stepFixture({
+        output_schema: {
+          type: "object",
+          properties: { answer: { type: "string" } },
+        },
+        persistence_options: { artifact: { logical_name: "step-result" } },
+      })
+    );
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Persistence")).toBeInTheDocument();
+    expect(screen.getByText(/step-result/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const persistence = screen.getByLabelText("Persistence options");
+    fireEvent.change(persistence, {
+      target: { value: '{"artifact":{"logical_name":"latest-result"}}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+
+    await waitFor(() =>
+      expect(commands.updateStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          persistence_options: { artifact: { logical_name: "latest-result" } },
+          clear_persistence_options: false,
+        })
+      )
+    );
   });
 
   it("walks the topology: clicking the forward transition selects the next step", () => {

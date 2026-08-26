@@ -426,6 +426,8 @@ pub struct WorkflowStepResponse {
     #[serde(default)]
     pub output_schema: Option<serde_json::Value>,
     #[serde(default)]
+    pub persistence_options: Option<serde_json::Value>,
+    #[serde(default)]
     pub step_order: i32,
     pub workflow_id: String,
     #[serde(default)]

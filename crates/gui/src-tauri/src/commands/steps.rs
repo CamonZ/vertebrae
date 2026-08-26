@@ -127,6 +127,10 @@ pub(crate) async fn create_step_inner(
         step = step.with_output_schema(schema);
     }
 
+    if let Some(persistence_options) = options.persistence_options {
+        step = step.with_persistence_options(persistence_options);
+    }
+
     match service.steps().create_step(&step).await {
         Ok(created) => {
             log::info!("create_step succeeded: {:?}", created.id);
@@ -280,12 +284,19 @@ mod tests {
                 transitions_to: vec![],
                 step_type: Default::default(),
                 output_schema: None,
+                persistence_options: Some(serde_json::json!({
+                    "artifact": { "logical_name": "review-result" }
+                })),
             },
         )
         .await
         .unwrap();
         assert_eq!(step.name, "Review");
         assert!(step.id.is_some());
+        assert_eq!(
+            step.persistence_options,
+            Some(serde_json::json!({ "artifact": { "logical_name": "review-result" } }))
+        );
 
         let fetched = get_step(state, step.id.clone().unwrap()).await.unwrap();
         assert!(fetched.is_some());
@@ -310,6 +321,7 @@ mod tests {
                 transitions_to: vec![],
                 step_type: crate::types::StepType::Finish,
                 output_schema: None,
+                persistence_options: None,
             },
         )
         .await
@@ -341,6 +353,7 @@ mod tests {
                 transitions_to: vec!["next-step".to_string()],
                 step_type: crate::types::StepType::Stop,
                 output_schema: Some(serde_json::json!({"type": "object"})),
+                persistence_options: None,
             },
         )
         .await
@@ -385,6 +398,7 @@ mod tests {
                 transitions_to: vec![],
                 step_type: Default::default(),
                 output_schema: None,
+                persistence_options: None,
             },
         )
         .await
@@ -403,6 +417,7 @@ mod tests {
                 transitions_to: vec![],
                 step_type: Default::default(),
                 output_schema: None,
+                persistence_options: None,
             },
         )
         .await
@@ -431,6 +446,50 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(wf_id, "wf-1");
+    }
+
+    #[tokio::test]
+    async fn update_step_inner_sets_and_clears_persistence_options() {
+        let services = mock_services();
+        let step = vertebrae_core::Step::new("Persisted", "wf-1".to_string());
+        let created = services.steps().create_step(&step).await.unwrap();
+        let step_id = created.id.unwrap();
+
+        update_step_inner(
+            &services,
+            &step_id,
+            vertebrae_core::StepUpdate::new().with_persistence_options(Some(
+                serde_json::json!({ "artifact": { "logical_name": "result" } }),
+            )),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            services
+                .steps()
+                .get_step(&step_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .persistence_options,
+            Some(serde_json::json!({ "artifact": { "logical_name": "result" } }))
+        );
+
+        update_step_inner(
+            &services,
+            &step_id,
+            vertebrae_core::StepUpdate::new().with_persistence_options(None),
+        )
+        .await
+        .unwrap();
+        assert!(services
+            .steps()
+            .get_step(&step_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .persistence_options
+            .is_none());
     }
 
     #[tokio::test]

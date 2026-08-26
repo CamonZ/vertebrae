@@ -56,6 +56,43 @@ pub async fn given_workflow_with_schema(world: &mut DaemonWorld) {
     create_workflow_and_step(world, Some(schema.to_string())).await;
 }
 
+#[given(expr = "the step is configured with persistence logical name {string}")]
+pub async fn given_step_persistence_options(world: &mut DaemonWorld, logical_name: String) {
+    let step_id = world.step_id.as_ref().expect("step not created").clone();
+    let persistence = format!(r#"{{"artifact":{{"logical_name":"{}"}}}}"#, logical_name);
+    world
+        .run_vtb(&[
+            "step",
+            "update",
+            &step_id,
+            "--persistence-options",
+            &persistence,
+        ])
+        .await;
+    world.assert_vtb_ok("step update --persistence-options");
+}
+
+#[given(expr = "the task has an existing artifact named {string}")]
+pub async fn given_task_existing_artifact(world: &mut DaemonWorld, logical_name: String) {
+    let task_id = world.task_id.as_ref().expect("task not created").clone();
+    world
+        .run_vtb(&[
+            "artifact",
+            "add",
+            "existing.json",
+            "--body",
+            r#"{"answer":"old"}"#,
+            "--subject-type",
+            "task",
+            "--subject-id",
+            &task_id,
+            "--logical-name",
+            &logical_name,
+        ])
+        .await;
+    world.assert_vtb_ok("artifact add existing task artifact");
+}
+
 #[given("a workflow with one execute step using openai and an output schema")]
 pub async fn given_workflow_with_codex_schema_step(world: &mut DaemonWorld) {
     let schema = serde_json::json!({
