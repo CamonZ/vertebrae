@@ -18,6 +18,7 @@ import { layoutFull } from "./layout/layoutFull";
 import type { AtlasModel, FullLayout } from "./layout/types";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
+import { useFactoryFilterStore } from "../../stores/factoryFilterStore";
 import { GlobalEntityPanelHost } from "../GlobalEntityPanelHost";
 import { WorkflowAtlas, layoutKey } from "./WorkflowAtlas";
 
@@ -44,6 +45,7 @@ const layoutFullMock = vi.mocked(layoutFull);
 beforeEach(() => {
   usePanelLayoutStore.getState().reset();
   useEntityPanelStore.getState().reset();
+  useFactoryFilterStore.getState().setFactoryName("Factory A");
   vi.mocked(invoke).mockResolvedValue(null);
 });
 
@@ -86,7 +88,7 @@ function makeWorkflow(
     workflow_steps: steps,
     transitions: [],
     ...overrides,
-    factory_name: overrides.factory_name ?? null,
+    factory_name: overrides.factory_name ?? "Factory A",
   };
 }
 
@@ -126,6 +128,13 @@ const FIXTURE: PipelineSummary = {
       }
     ),
   ],
+};
+
+const ALL_IN_FACTORY_FIXTURE: PipelineSummary = {
+  workflows: FIXTURE.workflows.map((workflow) => ({
+    ...workflow,
+    factory_name: "Factory A",
+  })),
 };
 
 /** Deterministic grid stub matching the real layoutFull output shape. */
@@ -169,6 +178,7 @@ function stubLayout(model: AtlasModel): FullLayout {
 afterEach(() => {
   vi.clearAllMocks();
   useEntityPanelStore.getState().reset();
+  useFactoryFilterStore.getState().reset();
 });
 
 function renderAtlasWithEntityHost() {
@@ -240,13 +250,35 @@ describe("WorkflowAtlas", () => {
     });
     render(<WorkflowAtlas />);
     expect(
-      await screen.findByText(/no workflows to graph/i)
+      await screen.findByText(/no factories configured/i)
     ).toBeInTheDocument();
+  });
+
+  it("shows only black-box factories until a factory is selected", async () => {
+    useFactoryFilterStore.getState().reset();
+    mockSummary.mockReturnValue({
+      summary: FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+
+    render(<WorkflowAtlas />);
+
+    expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
+    expect(screen.getByTestId("factory-node-Factory A")).toBeInTheDocument();
+    expect(screen.getByTestId("factory-node-Factory B")).toBeInTheDocument();
+    expect(document.querySelectorAll(".uv-wf")).toHaveLength(0);
+    expect(document.querySelectorAll(".ag-step")).toHaveLength(0);
+    expect(document.querySelector(".uv-legend")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
+    expect(screen.getByTestId("factory-overview")).toBeInTheDocument();
+    expect(document.querySelectorAll(".uv-wf")).toHaveLength(0);
   });
 
   it("renders the graph from a fixture summary", async () => {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -285,7 +317,7 @@ describe("WorkflowAtlas", () => {
       isMaximized: false,
     });
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -312,7 +344,7 @@ describe("WorkflowAtlas", () => {
 
   it("does not re-run the ELK layout when only pipeline_counts change", async () => {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -327,7 +359,7 @@ describe("WorkflowAtlas", () => {
     // bump counts only — same structural key → no new layout
     mockSummary.mockReturnValue({
       summary: {
-        workflows: FIXTURE.workflows.map((w) => ({
+        workflows: ALL_IN_FACTORY_FIXTURE.workflows.map((w) => ({
           ...w,
           workflow_steps: w.workflow_steps.map((s) => ({
             ...s,
@@ -351,9 +383,12 @@ describe("WorkflowAtlas", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
+    useFactoryFilterStore.getState().reset();
     render(<WorkflowAtlas />);
     await waitFor(() =>
-      expect(document.querySelectorAll(".uv-wf")).toHaveLength(2)
+      expect(
+        document.querySelectorAll("[data-testid^='factory-node-']")
+      ).toHaveLength(2)
     );
 
     fireEvent.change(screen.getByLabelText("Filter by factory"), {
@@ -389,7 +424,7 @@ describe("WorkflowAtlas — MAP view", () => {
   /** Render the atlas and switch to the Map view (condensed layout is real). */
   async function renderMap() {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -472,7 +507,7 @@ describe("WorkflowAtlas — morph (P6)", () => {
     vi.useFakeTimers();
     try {
       mockSummary.mockReturnValue({
-        summary: FIXTURE,
+        summary: ALL_IN_FACTORY_FIXTURE,
         isLoading: false,
         error: null,
       });
@@ -506,7 +541,7 @@ describe("WorkflowAtlas — morph (P6)", () => {
 
   it("keeps one persistent box element across the toggle", async () => {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -540,7 +575,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
 
   it("applies lit/dim classes on hover (graph view)", async () => {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -573,7 +608,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
 
   it("keeps the workflow traced and emphasises the node when a step is hovered", async () => {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });

@@ -12,6 +12,7 @@ import { BoardPage, topologicalColumnSort } from "./BoardPage";
 import { GlobalEntityPanelHost } from "../components/GlobalEntityPanelHost";
 import { useShellStore } from "../stores/shellStore";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
+import { useFactoryFilterStore } from "../stores/factoryFilterStore";
 import type { Task, Workflow, WorkflowTransition } from "../bindings";
 
 /**
@@ -104,6 +105,7 @@ describe("BoardPage", () => {
     mockTasksError = null;
     mockWorkflowsError = null;
     useEntityPanelStore.getState().reset();
+    useFactoryFilterStore.getState().reset();
   });
 
   describe("loading state", () => {

@@ -12,14 +12,11 @@ import { useWorkflowTransitions } from "../hooks/useWorkflowTransitions";
 import { useShellHeader } from "../hooks/useShellHeader";
 import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
 import { FactoryFilter } from "../components/FactoryFilter";
-import {
-  factoryNames,
-  filterByFactory,
-  type FactoryFilterValue,
-} from "../utils/workflowFactory";
+import { factoryNames, filterByFactory } from "../utils/workflowFactory";
 import { SearchInput } from "../components/molecules/SearchInput";
 import { Select } from "../components/atoms/Select";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
+import { useFactoryFilterStore } from "../stores/factoryFilterStore";
 
 const UNASSIGNED_COLUMN = "Unassigned";
 
@@ -181,7 +178,10 @@ export function BoardPage() {
     state.selection?.type === "task" ? state.selection.taskId : null
   );
   const [levelFilter, setLevelFilter] = useState<TaskLevel | "">("");
-  const [factoryFilter, setFactoryFilter] = useState<FactoryFilterValue>(null);
+  const factoryFilter = useFactoryFilterStore((state) => state.factoryName);
+  const setFactoryFilter = useFactoryFilterStore(
+    (state) => state.setFactoryName
+  );
   const [search, setSearch] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -245,13 +245,20 @@ export function BoardPage() {
   // If a realtime update removes the selected factory from the project, return
   // to the unscoped board instead of leaving a value with no option.
   useEffect(() => {
+    if (workflowsLoading || workflowsError) return;
     if (
       factoryFilter !== null &&
       !factoryNames(workflows).includes(factoryFilter)
     ) {
       setFactoryFilter(null);
     }
-  }, [factoryFilter, workflows]);
+  }, [
+    factoryFilter,
+    setFactoryFilter,
+    workflows,
+    workflowsError,
+    workflowsLoading,
+  ]);
 
   const handleTaskSelect = useCallback(
     (task: Task) => {

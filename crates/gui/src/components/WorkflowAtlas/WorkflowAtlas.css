@@ -88,6 +88,103 @@
   cursor: grabbing;
 }
 
+/* ── Factory overview ── */
+.factory-overview {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: clamp(var(--s-5), 6vh, var(--s-10));
+}
+.factory-overview-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  max-width: 980px;
+  margin: 0 auto var(--s-5);
+}
+.factory-overview-eyebrow,
+.factory-overview-label {
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.factory-overview-eyebrow {
+  color: var(--fg-faint);
+}
+.factory-overview-hint {
+  color: var(--fg-ghost);
+  font-size: var(--text-11);
+}
+.factory-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
+  justify-content: center;
+  gap: var(--s-4);
+  max-width: 980px;
+  margin: 0 auto;
+}
+.factory-overview-box {
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  border: 1px solid #303030;
+  border-radius: var(--r-md);
+  background: #050505;
+  color: #f5f5f5;
+  text-align: left;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 24%);
+  cursor: pointer;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.factory-overview-box:hover,
+.factory-overview-box:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 16px 36px rgb(0 0 0 / 36%);
+  outline: none;
+  transform: translateY(-2px);
+}
+.factory-overview-box .factory-overview-label {
+  color: #8f8f8f;
+}
+.factory-overview-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-family: var(--serif);
+  font-size: var(--text-22);
+  font-weight: 400;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.factory-overview-meta,
+.factory-overview-active {
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: #a8a8a8;
+}
+.factory-overview-active {
+  color: var(--accent);
+}
+.factory-overview-empty {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .uv-loading,
 .uv-empty {
   position: absolute;

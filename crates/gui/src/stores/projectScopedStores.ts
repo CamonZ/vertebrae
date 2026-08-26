@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { useChatStore } from "./chatStore";
 import { useEntityPanelStore } from "./entityPanelStore";
+import { useFactoryFilterStore } from "./factoryFilterStore";
 import { useSessionLogStore } from "./sessionLogStore";
 import { queryClient } from "../query/queryClient";
 
@@ -35,6 +36,7 @@ export function resetProjectScopedStores() {
   useProjectScopeStore.getState().bumpGeneration();
   queryClient.clear();
   useEntityPanelStore.getState().reset();
+  useFactoryFilterStore.getState().reset();
   useSessionLogStore.getState().reset();
   useChatStore.getState().reset();
 }
