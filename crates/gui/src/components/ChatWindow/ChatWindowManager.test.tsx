@@ -449,6 +449,88 @@ describe("ChatWindowManager", () => {
     ).toBeInTheDocument();
   });
 
+  it("projects live thinking and compaction state onto the matching history rows", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const thinking = createSession({
+      id: "thinking-session",
+      label: "Thinking Chat",
+      title: "Thinking Chat",
+      projectPath: "/test/project",
+      hasUserMessage: true,
+      activeTurn: {
+        localId: "local-thinking",
+        turnId: "turn-thinking",
+        phase: "active",
+      },
+    });
+    const compacting = createSession({
+      id: "compacting-session",
+      label: "Compacting Chat",
+      title: "Compacting Chat",
+      harness: "codex",
+      projectPath: "/test/project",
+      hasUserMessage: true,
+      compactionActive: true,
+    });
+    const idle = createSession({
+      id: "idle-session",
+      label: "Idle Chat",
+      title: "Idle Chat",
+      projectPath: "/test/project",
+      hasUserMessage: true,
+    });
+    persistLocalChatSession(thinking);
+    persistLocalChatSession(compacting);
+    persistLocalChatSession(idle);
+    useChatStore.setState({
+      sessions: {
+        [thinking.id]: thinking,
+        [compacting.id]: compacting,
+        [idle.id]: idle,
+      },
+      activeSessionId: thinking.id,
+      paneLayout: {
+        panes: [{ id: "thinking-pane", sessionId: thinking.id }],
+        activePaneId: "thinking-pane",
+      },
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
+    const thinkingRow = miniPanel
+      .getByRole("button", {
+        name: "Load local chat Thinking Chat into active pane",
+      })
+      .closest(".hc-mini-history-row");
+    const compactingRow = miniPanel
+      .getByRole("button", {
+        name: "Load local chat Compacting Chat into active pane",
+      })
+      .closest(".hc-mini-history-row");
+    const idleRow = miniPanel
+      .getByRole("button", {
+        name: "Load local chat Idle Chat into active pane",
+      })
+      .closest(".hc-mini-history-row");
+
+    expect(thinkingRow?.querySelector('[data-activity="thinking"]')).not.toBe(
+      null
+    );
+    expect(
+      compactingRow?.querySelector('[data-activity="compacting"]')
+    ).not.toBe(null);
+    expect(idleRow?.querySelector('[data-harness="claude"]')).not.toBeNull();
+    expect(thinkingRow?.querySelector("[data-harness]")).toBeNull();
+    expect(compactingRow?.querySelector("[data-harness]")).toBeNull();
+  });
+
   it("opens spawned agent rows as provider thread sessions", async () => {
     const user = userEvent.setup();
 
