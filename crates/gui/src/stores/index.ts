@@ -1,7 +1,4 @@
 // Barrel export for all stores
-export { useWorkflowSelectionStore } from "./workflowSelectionStore";
-export type { WorkflowSelectionState } from "./workflowSelectionStore";
-
 export { useUIStore } from "./uiStore";
 export type { UIStore } from "./uiStore";
 

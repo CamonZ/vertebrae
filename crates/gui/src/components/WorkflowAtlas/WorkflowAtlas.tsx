@@ -42,11 +42,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SearchInput } from "../molecules/SearchInput";
 import { SegmentedControl } from "../molecules/SegmentedControl";
-import { FloatingDetailPanel } from "../panels/FloatingDetailPanel";
 import { usePipelineSummary } from "../../hooks/usePipelineSummary";
-import { useWorkflowSelectionStore } from "../../stores";
-import { WorkflowInspector } from "./inspector/WorkflowInspector";
-import { StepInspector } from "./inspector/StepInspector";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import type { AtlasSelection } from "./inspector/selection";
 import { ColumnHeader } from "./ColumnHeader";
 import { EdgeLabel } from "./EdgeLabel";
@@ -58,6 +55,7 @@ import { StepNodeGeo } from "./StepNodeGeo";
 import { WfBox, type WfBoxState } from "./WfBox";
 import { ZoomWidget } from "./ZoomWidget";
 import { buildAtlasModel } from "./adapter/buildAtlasModel";
+import { selectionFromWorkflowTarget } from "./inspector/selection";
 import { usePanZoom } from "./hooks/usePanZoom";
 import { roundedPath } from "./layout/geometry";
 import { layoutCondensed } from "./layout/layoutCondensed";
@@ -111,51 +109,38 @@ export function WorkflowAtlas() {
   // Its owning workflow drives `hover` (so the box stays traced while the cursor
   // sits over a step that paints above it), and this id emphasises that one node.
   const [hoverStep, setHoverStep] = useState<string | null>(null);
-  // Edge-hover: the id of a model edge whose inspector transition row is hovered.
-  // Lights ONLY that one edge (and its two endpoint boxes) — finer than the
-  // workflow hover-trace, which lights a hub's whole connected set.
-  const [hoverEdge, setHoverEdge] = useState<string | null>(null);
+  // Edge-hover is written by the inspector in the global entity host. Keeping
+  // it in the shared UI store lets the inspector move out of this component
+  // without losing the canvas highlight interaction.
+  const hoverEdge = useEntityPanelStore((state) => state.hoveredEdgeId);
   const [morphing, setMorphing] = useState(false);
-  // Inspector selection is UI-only Zustand state. Durable Workflow and Step
-  // records remain in TanStack Query; closing the panel never clears them.
-  const {
-    selectedWorkflowId,
-    selectedStepId,
-    selectWorkflow,
-    selectStep,
-    clearSelection,
-  } = useWorkflowSelectionStore();
-  const sel = useMemo<AtlasSelection | null>(
-    () =>
-      selectedWorkflowId
-        ? selectedStepId
-          ? {
-              type: "step",
-              workflowId: selectedWorkflowId,
-              stepId: selectedStepId,
-            }
-          : { type: "workflow", workflowId: selectedWorkflowId }
-        : null,
-    [selectedStepId, selectedWorkflowId]
-  );
-  const setSel = (selection: AtlasSelection | null) => {
-    if (!selection) {
-      clearSelection();
-    } else if (selection.type === "workflow") {
-      selectWorkflow(selection.workflowId);
-    } else {
-      selectStep(selection.workflowId, selection.stepId);
-    }
-  };
+  const entitySelection = useEntityPanelStore((state) => state.selection);
 
-  const isGraph = view === "graph";
-
-  // Pure topology model — cheap; rebuilt on any summary change. Counts live here
-  // too (for the `live` ember) but do NOT feed the layout key below.
+  // The global entity selection is also the canvas highlight. The global host
+  // renders the inspector; this component only projects the same selection onto
+  // the atlas so the page cannot mount a second detail surface.
   const model = useMemo(
     () => (summary ? buildAtlasModel(summary) : null),
     [summary]
   );
+  const sel = useMemo<AtlasSelection | null>(() => {
+    if (!model || !entitySelection || entitySelection.type === "task") {
+      return null;
+    }
+    return selectionFromWorkflowTarget(model, entitySelection);
+  }, [entitySelection, model]);
+  const setSel = (selection: AtlasSelection | null) => {
+    const store = useEntityPanelStore.getState();
+    if (!selection) {
+      store.close();
+    } else if (selection.type === "workflow") {
+      store.openWorkflow(selection.workflowId);
+    } else {
+      store.openStep(selection.stepId, selection.workflowId);
+    }
+  };
+
+  const isGraph = view === "graph";
 
   const key = useMemo(() => (model ? layoutKey(model) : ""), [model]);
 
@@ -168,12 +153,6 @@ export function WorkflowAtlas() {
     );
     return m;
   }, [model]);
-
-  // Drop any edge-hover when the inspected selection changes or the panel
-  // closes — the hovered transition row unmounts and may not fire mouse-leave.
-  useEffect(() => {
-    setHoverEdge(null);
-  }, [sel]);
 
   // Async ELK graph layout, memoised on the structural key. The effect runs on
   // `key` alone (so counts churn never re-lays out); it reads the latest `model`
@@ -721,40 +700,7 @@ export function WorkflowAtlas() {
 
       <KindLegend />
 
-      {/* Inspector — the canonical detail surface for the topology. Reuses the
-          shared FloatingDetailPanel shell (resize / Escape) with NEW
-          content (WorkflowInspector / StepInspector) computed from the pure
-          model + live useStep. The `.wfd` content carries `data-no-pan` so it
-          sits outside pan capture. Mounted outside the morph layers so it
-          persists across the Map⇄Graph toggle. */}
-      {sel && model && (
-        <FloatingDetailPanel
-          panelId="workflow-atlas-inspector"
-          widthStorageKey="workflow-atlas-inspector-width"
-          className="workflow-atlas"
-          onClose={() => setSel(null)}
-          testId="workflow-atlas-inspector"
-        >
-          {sel.type === "workflow" ? (
-            <WorkflowInspector
-              model={model}
-              workflowId={sel.workflowId}
-              onSelect={setSel}
-              onClose={() => setSel(null)}
-              onHoverEdge={setHoverEdge}
-            />
-          ) : (
-            <StepInspector
-              model={model}
-              workflowId={sel.workflowId}
-              stepId={sel.stepId}
-              onSelect={setSel}
-              onClose={() => setSel(null)}
-              onDeleted={() => setSel(null)}
-            />
-          )}
-        </FloatingDetailPanel>
-      )}
+      {/* The global entity host renders the one workflow/step inspector. */}
     </main>
   );
 }

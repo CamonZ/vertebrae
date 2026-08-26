@@ -197,8 +197,13 @@ fn run_stdin_stream_json() -> ExitCode {
     let session_id = session_id_from_input(&first_message)
         .or_else(|| std::env::var("VTB_CLAUDE_SESSION_ID").ok())
         .unwrap_or_else(|| "mock-gui-session".to_string());
-    let response = std::env::var("MOCK_STDIN_ASSISTANT_MESSAGE")
-        .unwrap_or_else(|_| "local-chat-acceptance reply".to_string());
+    let response = std::env::var("MOCK_STDIN_ASSISTANT_MESSAGE_FILE")
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .map(|message| message.trim_end().to_string())
+        .filter(|message| !message.is_empty())
+        .or_else(|| std::env::var("MOCK_STDIN_ASSISTANT_MESSAGE").ok())
+        .unwrap_or_else(|| "local-chat-acceptance reply".to_string());
     let (first_delta, second_delta) = response
         .split_once(' ')
         .map(|(first, rest)| (format!("{first} "), rest.to_string()))

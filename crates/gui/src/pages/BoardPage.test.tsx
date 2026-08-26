@@ -1,7 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, createMockTask, createMockWorkflow } from "../test/test-utils";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  createMockTask,
+  createMockWorkflow,
+  waitFor,
+} from "../test/test-utils";
 import { BoardPage, topologicalColumnSort } from "./BoardPage";
+import { GlobalEntityPanelHost } from "../components/GlobalEntityPanelHost";
 import { useShellStore } from "../stores/shellStore";
+import { useEntityPanelStore } from "../stores/entityPanelStore";
 import type { Task, Workflow, WorkflowTransition } from "../bindings";
 
 /**
@@ -16,6 +26,15 @@ function BoardPageWithHeader() {
     <>
       <BoardPage />
       <div data-testid="shell-header-actions">{headerActions}</div>
+    </>
+  );
+}
+
+function BoardPageWithEntityHost() {
+  return (
+    <>
+      <BoardPage />
+      <GlobalEntityPanelHost />
     </>
   );
 }
@@ -58,14 +77,19 @@ vi.mock("../hooks/useWorkflowTransitions", () => ({
 
 // Mock TaskDetailPanel to keep tests focused on the board logic
 vi.mock("../components/TaskDetail", () => ({
-  TaskDetailPanel: ({ taskId, onClose }: {
+  TaskDetailPanel: ({
+    taskId,
+    onClose,
+  }: {
     taskId: string | null;
     onClose?: () => void;
   }) =>
     taskId ? (
       <div data-testid="task-detail-panel">
         <span data-testid="detail-task-id">{taskId}</span>
-        <button onClick={onClose} data-testid="close-panel">Close</button>
+        <button onClick={onClose} data-testid="close-panel">
+          Close
+        </button>
       </div>
     ) : null,
 }));
@@ -79,6 +103,7 @@ describe("BoardPage", () => {
     mockWorkflowsLoading = false;
     mockTasksError = null;
     mockWorkflowsError = null;
+    useEntityPanelStore.getState().reset();
   });
 
   describe("loading state", () => {
@@ -119,21 +144,50 @@ describe("BoardPage", () => {
       mockWorkflows = [];
       render(<BoardPage />);
 
-      expect(screen.getByText("No tasks with kanban columns assigned")).toBeInTheDocument();
+      expect(
+        screen.getByText("No tasks with kanban columns assigned")
+      ).toBeInTheDocument();
     });
   });
 
   describe("column rendering from kanban_column values", () => {
     it("creates columns from distinct kanban_column values across workflows", () => {
       mockWorkflows = [
-        createMockWorkflow({ id: "wf-1", name: "Backlog WF", kanban_column: "Backlog" }),
-        createMockWorkflow({ id: "wf-2", name: "Active WF", kanban_column: "Active" }),
-        createMockWorkflow({ id: "wf-3", name: "Done WF", kanban_column: "Done" }),
+        createMockWorkflow({
+          id: "wf-1",
+          name: "Backlog WF",
+          kanban_column: "Backlog",
+        }),
+        createMockWorkflow({
+          id: "wf-2",
+          name: "Active WF",
+          kanban_column: "Active",
+        }),
+        createMockWorkflow({
+          id: "wf-3",
+          name: "Done WF",
+          kanban_column: "Done",
+        }),
       ];
       mockTasks = [
-        createMockTask({ id: "t-1", title: "Task A", workflow_id: "wf-1", workflow_name: "Backlog WF" }),
-        createMockTask({ id: "t-2", title: "Task B", workflow_id: "wf-2", workflow_name: "Active WF" }),
-        createMockTask({ id: "t-3", title: "Task C", workflow_id: "wf-3", workflow_name: "Done WF" }),
+        createMockTask({
+          id: "t-1",
+          title: "Task A",
+          workflow_id: "wf-1",
+          workflow_name: "Backlog WF",
+        }),
+        createMockTask({
+          id: "t-2",
+          title: "Task B",
+          workflow_id: "wf-2",
+          workflow_name: "Active WF",
+        }),
+        createMockTask({
+          id: "t-3",
+          title: "Task C",
+          workflow_id: "wf-3",
+          workflow_name: "Done WF",
+        }),
       ];
       render(<BoardPage />);
 
@@ -148,17 +202,33 @@ describe("BoardPage", () => {
         createMockWorkflow({ id: "wf-2", kanban_column: "In Progress" }),
       ];
       mockTasks = [
-        createMockTask({ id: "t-1", title: "Todo Task 1", workflow_id: "wf-1" }),
-        createMockTask({ id: "t-2", title: "Todo Task 2", workflow_id: "wf-1" }),
-        createMockTask({ id: "t-3", title: "Active Task", workflow_id: "wf-2" }),
+        createMockTask({
+          id: "t-1",
+          title: "Todo Task 1",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "t-2",
+          title: "Todo Task 2",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "t-3",
+          title: "Active Task",
+          workflow_id: "wf-2",
+        }),
       ];
       render(<BoardPage />);
 
       // Check that Todo column has 2 tasks and In Progress has 1
-      const todoRegion = screen.getByRole("region", { name: /Todo column, 2 tasks/i });
+      const todoRegion = screen.getByRole("region", {
+        name: /Todo column, 2 tasks/i,
+      });
       expect(todoRegion).toBeInTheDocument();
 
-      const activeRegion = screen.getByRole("region", { name: /In Progress column, 1 tasks/i });
+      const activeRegion = screen.getByRole("region", {
+        name: /In Progress column, 1 tasks/i,
+      });
       expect(activeRegion).toBeInTheDocument();
     });
 
@@ -168,12 +238,22 @@ describe("BoardPage", () => {
         createMockWorkflow({ id: "wf-2", kanban_column: null }),
       ];
       mockTasks = [
-        createMockTask({ id: "t-1", title: "Active Task", workflow_id: "wf-1" }),
-        createMockTask({ id: "t-2", title: "Unassigned Task", workflow_id: "wf-2" }),
+        createMockTask({
+          id: "t-1",
+          title: "Active Task",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "t-2",
+          title: "Unassigned Task",
+          workflow_id: "wf-2",
+        }),
       ];
       render(<BoardPage />);
 
-      expect(screen.getByRole("region", { name: /Unassigned column, 1 tasks/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("region", { name: /Unassigned column, 1 tasks/i })
+      ).toBeInTheDocument();
       expect(screen.getByText("Unassigned Task")).toBeInTheDocument();
     });
 
@@ -182,12 +262,18 @@ describe("BoardPage", () => {
         createMockWorkflow({ id: "wf-1", kanban_column: "Active" }),
       ];
       mockTasks = [
-        createMockTask({ id: "t-1", title: "Has Workflow", workflow_id: "wf-1" }),
+        createMockTask({
+          id: "t-1",
+          title: "Has Workflow",
+          workflow_id: "wf-1",
+        }),
         createMockTask({ id: "t-2", title: "No Workflow", workflow_id: null }),
       ];
       render(<BoardPage />);
 
-      expect(screen.getByRole("region", { name: /Unassigned column, 1 tasks/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("region", { name: /Unassigned column, 1 tasks/i })
+      ).toBeInTheDocument();
       expect(screen.getByText("No Workflow")).toBeInTheDocument();
     });
 
@@ -218,13 +304,37 @@ describe("BoardPage", () => {
         createMockWorkflow({ id: "wf-backlog", kanban_column: "Backlog" }),
       ];
       mockTransitions = [
-        { id: "t1", from_workflow_id: "wf-backlog", from_workflow_name: "Backlog WF", to_workflow_id: "wf-active", to_workflow_name: "Active WF", label: "start", target_step_id: null },
-        { id: "t2", from_workflow_id: "wf-active", from_workflow_name: "Active WF", to_workflow_id: "wf-done", to_workflow_name: "Done WF", label: "finish", target_step_id: null },
+        {
+          id: "t1",
+          from_workflow_id: "wf-backlog",
+          from_workflow_name: "Backlog WF",
+          to_workflow_id: "wf-active",
+          to_workflow_name: "Active WF",
+          label: "start",
+          target_step_id: null,
+        },
+        {
+          id: "t2",
+          from_workflow_id: "wf-active",
+          from_workflow_name: "Active WF",
+          to_workflow_id: "wf-done",
+          to_workflow_name: "Done WF",
+          label: "finish",
+          target_step_id: null,
+        },
       ];
       mockTasks = [
         createMockTask({ id: "t-1", title: "Task A", workflow_id: "wf-done" }),
-        createMockTask({ id: "t-2", title: "Task B", workflow_id: "wf-active" }),
-        createMockTask({ id: "t-3", title: "Task C", workflow_id: "wf-backlog" }),
+        createMockTask({
+          id: "t-2",
+          title: "Task B",
+          workflow_id: "wf-active",
+        }),
+        createMockTask({
+          id: "t-3",
+          title: "Task C",
+          workflow_id: "wf-backlog",
+        }),
       ];
       render(<BoardPage />);
 
@@ -244,9 +354,24 @@ describe("BoardPage", () => {
         createMockWorkflow({ id: "wf-1", kanban_column: "Active" }),
       ];
       mockTasks = [
-        createMockTask({ id: "t-1", title: "My Epic", level: "epic", workflow_id: "wf-1" }),
-        createMockTask({ id: "t-2", title: "My Ticket", level: "ticket", workflow_id: "wf-1" }),
-        createMockTask({ id: "t-3", title: "My Task", level: "task", workflow_id: "wf-1" }),
+        createMockTask({
+          id: "t-1",
+          title: "My Epic",
+          level: "epic",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "t-2",
+          title: "My Ticket",
+          level: "ticket",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "t-3",
+          title: "My Task",
+          level: "task",
+          workflow_id: "wf-1",
+        }),
       ];
       render(<BoardPage />);
 
@@ -272,9 +397,21 @@ describe("BoardPage", () => {
         createMockWorkflow({ id: "wf-2", kanban_column: "Col B" }),
       ];
       mockTasks = [
-        createMockTask({ id: "t-1", title: "Login feature", workflow_id: "wf-1" }),
-        createMockTask({ id: "t-2", title: "Signup feature", workflow_id: "wf-1" }),
-        createMockTask({ id: "t-3", title: "Dashboard widget", workflow_id: "wf-2" }),
+        createMockTask({
+          id: "t-1",
+          title: "Login feature",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "t-2",
+          title: "Signup feature",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "t-3",
+          title: "Dashboard widget",
+          workflow_id: "wf-2",
+        }),
       ];
       render(<BoardPage />);
 
@@ -291,7 +428,11 @@ describe("BoardPage", () => {
         createMockWorkflow({ id: "wf-1", kanban_column: "Col" }),
       ];
       mockTasks = [
-        createMockTask({ id: "t-1", title: "Login Feature", workflow_id: "wf-1" }),
+        createMockTask({
+          id: "t-1",
+          title: "Login Feature",
+          workflow_id: "wf-1",
+        }),
       ];
       render(<BoardPage />);
 
@@ -432,9 +573,13 @@ describe("BoardPage", () => {
         createMockWorkflow({ id: "wf-1", kanban_column: "Active" }),
       ];
       mockTasks = [
-        createMockTask({ id: "task-abc123", title: "Click Me", workflow_id: "wf-1" }),
+        createMockTask({
+          id: "task-abc123",
+          title: "Click Me",
+          workflow_id: "wf-1",
+        }),
       ];
-      render(<BoardPage />);
+      render(<BoardPageWithEntityHost />);
 
       // Panel not visible initially
       expect(screen.queryByTestId("task-detail-panel")).not.toBeInTheDocument();
@@ -444,17 +589,23 @@ describe("BoardPage", () => {
 
       // Panel appears with correct task ID
       expect(screen.getByTestId("task-detail-panel")).toBeInTheDocument();
-      expect(screen.getByTestId("detail-task-id")).toHaveTextContent("task-abc123");
+      expect(screen.getByTestId("detail-task-id")).toHaveTextContent(
+        "task-abc123"
+      );
     });
 
-    it("closes TaskDetailPanel when close is clicked", () => {
+    it("closes TaskDetailPanel when close is clicked", async () => {
       mockWorkflows = [
         createMockWorkflow({ id: "wf-1", kanban_column: "Active" }),
       ];
       mockTasks = [
-        createMockTask({ id: "task-abc123", title: "Open Me", workflow_id: "wf-1" }),
+        createMockTask({
+          id: "task-abc123",
+          title: "Open Me",
+          workflow_id: "wf-1",
+        }),
       ];
-      render(<BoardPage />);
+      render(<BoardPageWithEntityHost />);
 
       // Open panel
       fireEvent.click(screen.getByText("Open Me"));
@@ -462,9 +613,34 @@ describe("BoardPage", () => {
 
       // Close panel
       fireEvent.click(screen.getByTestId("close-panel"));
-      expect(screen.queryByTestId("task-detail-panel")).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.queryByTestId("task-detail-panel")
+        ).not.toBeInTheDocument()
+      );
     });
 
+    it("replaces the board detail owner when a chat link opens another task", () => {
+      mockWorkflows = [
+        createMockWorkflow({ id: "wf-1", kanban_column: "Active" }),
+      ];
+      mockTasks = [
+        createMockTask({
+          id: "task-abc123",
+          title: "Open Me",
+          workflow_id: "wf-1",
+        }),
+      ];
+      render(<BoardPageWithEntityHost />);
+
+      fireEvent.click(screen.getByText("Open Me"));
+      act(() => useEntityPanelStore.getState().openTask("task-linked"));
+
+      expect(screen.getAllByTestId("task-detail-panel")).toHaveLength(1);
+      expect(screen.getByTestId("detail-task-id")).toHaveTextContent(
+        "task-linked"
+      );
+    });
   });
 
   describe("header", () => {
@@ -517,9 +693,15 @@ describe("BoardPage", () => {
       render(<BoardPage />);
 
       // All three columns appear, even though only Backlog has a task
-      expect(screen.getByRole("region", { name: /Backlog column, 1 tasks/i })).toBeInTheDocument();
-      expect(screen.getByRole("region", { name: /In Progress column, 0 tasks/i })).toBeInTheDocument();
-      expect(screen.getByRole("region", { name: /Done column, 0 tasks/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("region", { name: /Backlog column, 1 tasks/i })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("region", { name: /In Progress column, 0 tasks/i })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("region", { name: /Done column, 0 tasks/i })
+      ).toBeInTheDocument();
     });
 
     it("does not show Unassigned column when no tasks lack a kanban_column", () => {
@@ -533,15 +715,25 @@ describe("BoardPage", () => {
 
       const regions = screen.getAllByRole("region");
       const regionNames = regions.map((r) => r.getAttribute("aria-label"));
-      expect(regionNames.every((name) => !name?.includes("Unassigned"))).toBe(true);
+      expect(regionNames.every((name) => !name?.includes("Unassigned"))).toBe(
+        true
+      );
     });
   });
 
   describe("multiple workflows same kanban_column", () => {
     it("groups tasks from different workflows into the same column if they share kanban_column", () => {
       mockWorkflows = [
-        createMockWorkflow({ id: "wf-1", name: "WF One", kanban_column: "Review" }),
-        createMockWorkflow({ id: "wf-2", name: "WF Two", kanban_column: "Review" }),
+        createMockWorkflow({
+          id: "wf-1",
+          name: "WF One",
+          kanban_column: "Review",
+        }),
+        createMockWorkflow({
+          id: "wf-2",
+          name: "WF Two",
+          kanban_column: "Review",
+        }),
       ];
       mockTasks = [
         createMockTask({ id: "t-1", title: "From WF1", workflow_id: "wf-1" }),
@@ -550,7 +742,9 @@ describe("BoardPage", () => {
       render(<BoardPage />);
 
       // Single Review column with 2 tasks
-      const region = screen.getByRole("region", { name: /Review column, 2 tasks/i });
+      const region = screen.getByRole("region", {
+        name: /Review column, 2 tasks/i,
+      });
       expect(region).toBeInTheDocument();
       expect(screen.getByText("From WF1")).toBeInTheDocument();
       expect(screen.getByText("From WF2")).toBeInTheDocument();
@@ -583,7 +777,11 @@ describe("topologicalColumnSort", () => {
 
   it("sorts by transition order: linear chain", () => {
     const columns = new Set(["Done", "Active", "Backlog"]);
-    const wfMap = new Map([["wf-b", "Backlog"], ["wf-a", "Active"], ["wf-d", "Done"]]);
+    const wfMap = new Map([
+      ["wf-b", "Backlog"],
+      ["wf-a", "Active"],
+      ["wf-d", "Done"],
+    ]);
     const transitions = [
       makeTransition("wf-b", "wf-a"),
       makeTransition("wf-a", "wf-d"),
@@ -595,7 +793,11 @@ describe("topologicalColumnSort", () => {
   it("breaks ties alphabetically among columns with equal in-degree", () => {
     // Backlog → Active, Backlog → Review (Active and Review are tied)
     const columns = new Set(["Review", "Active", "Backlog"]);
-    const wfMap = new Map([["wf-b", "Backlog"], ["wf-a", "Active"], ["wf-r", "Review"]]);
+    const wfMap = new Map([
+      ["wf-b", "Backlog"],
+      ["wf-a", "Active"],
+      ["wf-r", "Review"],
+    ]);
     const transitions = [
       makeTransition("wf-b", "wf-a"),
       makeTransition("wf-b", "wf-r"),
@@ -606,7 +808,11 @@ describe("topologicalColumnSort", () => {
 
   it("ignores self-transitions (same column)", () => {
     const columns = new Set(["Alpha", "Beta"]);
-    const wfMap = new Map([["wf-a1", "Alpha"], ["wf-a2", "Alpha"], ["wf-b", "Beta"]]);
+    const wfMap = new Map([
+      ["wf-a1", "Alpha"],
+      ["wf-a2", "Alpha"],
+      ["wf-b", "Beta"],
+    ]);
     const transitions = [
       makeTransition("wf-a1", "wf-a2"), // same column, should be ignored
       makeTransition("wf-a1", "wf-b"),
@@ -617,7 +823,11 @@ describe("topologicalColumnSort", () => {
 
   it("drops backward edges that would create cycles", () => {
     const columns = new Set(["A", "B", "C"]);
-    const wfMap = new Map([["wf-a", "A"], ["wf-b", "B"], ["wf-c", "C"]]);
+    const wfMap = new Map([
+      ["wf-a", "A"],
+      ["wf-b", "B"],
+      ["wf-c", "C"],
+    ]);
     const transitions = [
       makeTransition("wf-a", "wf-b"),
       makeTransition("wf-b", "wf-c"),
@@ -633,7 +843,10 @@ describe("topologicalColumnSort", () => {
     // Backlog → Active, Backlog → Review, Active → Done, Review → Done
     const columns = new Set(["Done", "Review", "Active", "Backlog"]);
     const wfMap = new Map([
-      ["wf-b", "Backlog"], ["wf-a", "Active"], ["wf-r", "Review"], ["wf-d", "Done"],
+      ["wf-b", "Backlog"],
+      ["wf-a", "Active"],
+      ["wf-r", "Review"],
+      ["wf-d", "Done"],
     ]);
     const transitions = [
       makeTransition("wf-b", "wf-a"),
@@ -650,7 +863,11 @@ describe("topologicalColumnSort", () => {
     // A → C, B → C. A and B are roots, C is terminal.
     // Without terminal-last, alphabetical would interleave.
     const columns = new Set(["C", "B", "A"]);
-    const wfMap = new Map([["wf-a", "A"], ["wf-b", "B"], ["wf-c", "C"]]);
+    const wfMap = new Map([
+      ["wf-a", "A"],
+      ["wf-b", "B"],
+      ["wf-c", "C"],
+    ]);
     const transitions = [
       makeTransition("wf-a", "wf-c"),
       makeTransition("wf-b", "wf-c"),
@@ -663,31 +880,47 @@ describe("topologicalColumnSort", () => {
     // Backlog → Research → In Progress → Review → Done
     // Backlog → In Progress (skip research)
     // Review → In Progress (rework — backward edge)
-    const columns = new Set(["Backlog", "Research", "In Progress", "Review", "Done"]);
+    const columns = new Set([
+      "Backlog",
+      "Research",
+      "In Progress",
+      "Review",
+      "Done",
+    ]);
     const wfMap = new Map([
       ["wf-backlog", "Backlog"],
       ["wf-research", "Research"],
       ["wf-impl", "In Progress"],
       ["wf-review", "Review"],
-      ["wf-pr", "Review"],       // PR_creation shares Review column
+      ["wf-pr", "Review"], // PR_creation shares Review column
       ["wf-done", "Done"],
     ]);
     const transitions = [
-      makeTransition("wf-backlog", "wf-research"),  // Backlog → Research
-      makeTransition("wf-backlog", "wf-impl"),       // Backlog → In Progress
-      makeTransition("wf-research", "wf-impl"),      // Research → In Progress
-      makeTransition("wf-impl", "wf-review"),        // In Progress → Review
-      makeTransition("wf-review", "wf-pr"),           // Review → Review (same col, ignored)
-      makeTransition("wf-review", "wf-impl"),         // Review → In Progress (rework, dropped)
-      makeTransition("wf-pr", "wf-done"),             // Review → Done
+      makeTransition("wf-backlog", "wf-research"), // Backlog → Research
+      makeTransition("wf-backlog", "wf-impl"), // Backlog → In Progress
+      makeTransition("wf-research", "wf-impl"), // Research → In Progress
+      makeTransition("wf-impl", "wf-review"), // In Progress → Review
+      makeTransition("wf-review", "wf-pr"), // Review → Review (same col, ignored)
+      makeTransition("wf-review", "wf-impl"), // Review → In Progress (rework, dropped)
+      makeTransition("wf-pr", "wf-done"), // Review → Done
     ];
     const result = topologicalColumnSort(columns, transitions, wfMap);
-    expect(result).toEqual(["Backlog", "Research", "In Progress", "Review", "Done"]);
+    expect(result).toEqual([
+      "Backlog",
+      "Research",
+      "In Progress",
+      "Review",
+      "Done",
+    ]);
   });
 
   it("terminal columns without transitions sort alphabetically among themselves at the end", () => {
     const columns = new Set(["Active", "Done", "Archived"]);
-    const wfMap = new Map([["wf-a", "Active"], ["wf-d", "Done"], ["wf-ar", "Archived"]]);
+    const wfMap = new Map([
+      ["wf-a", "Active"],
+      ["wf-d", "Done"],
+      ["wf-ar", "Archived"],
+    ]);
     const transitions = [
       makeTransition("wf-a", "wf-d"),
       makeTransition("wf-a", "wf-ar"),

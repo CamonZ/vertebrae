@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -10,6 +11,7 @@ import {
   waitFor,
 } from "../test/test-utils";
 import { TasksPage } from "./TasksPage";
+import { GlobalEntityPanelHost } from "../components/GlobalEntityPanelHost";
 import { useShellStore } from "../stores/shellStore";
 import type { Task, TaskFilterOptions } from "../bindings";
 import { queryClient, queryKeys } from "../query";
@@ -39,6 +41,7 @@ function TasksPageWithHeader() {
   return (
     <>
       <TasksPage />
+      <GlobalEntityPanelHost />
       <div data-testid="shell-header-actions">{headerActions}</div>
     </>
   );
@@ -61,7 +64,7 @@ vi.mock("../hooks/useTasks", () => ({
 
 vi.mock("../components/TaskDetail", () => ({
   TaskDetailPanel: ({ taskId }: { taskId: string | null }) =>
-    taskId ? <div data-testid="task-detail-panel" /> : null,
+    taskId ? <div data-testid="task-detail-panel">{taskId}</div> : null,
 }));
 
 describe("TasksPage", () => {
@@ -147,7 +150,9 @@ describe("TasksPage", () => {
     await user.click(screen.getByRole("button", { name: /blocked1/i }));
 
     expect(screen.getByText("Blocked Task")).toBeInTheDocument();
-    expect(screen.queryByText("Completed Dependency Task")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Completed Dependency Task")
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("Unblocked Task")).not.toBeInTheDocument();
   });
 
@@ -217,6 +222,24 @@ describe("TasksPage", () => {
       "aria-selected",
       "true"
     );
+  });
+
+  it("replaces the page selection in the canonical panel when a chat link opens another task", async () => {
+    const first = createMockTask({
+      id: "11111111-0000-0000-0000-000000000000",
+      title: "First visible task",
+    });
+    const linked = "22222222-0000-0000-0000-000000000000";
+    mockTasks = [first];
+
+    render(<TasksPageWithHeader />);
+    fireEvent.click(screen.getByText("First visible task"));
+    expect(screen.getByTestId("task-detail-panel")).toHaveTextContent(first.id);
+
+    act(() => useEntityPanelStore.getState().openTask(linked));
+
+    expect(screen.getAllByTestId("task-detail-panel")).toHaveLength(1);
+    expect(screen.getByTestId("task-detail-panel")).toHaveTextContent(linked);
   });
 
   it("does not render a 'Selected <id>' chip in the header activity slot", () => {

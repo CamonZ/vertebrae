@@ -14,7 +14,7 @@ import {
   resetProjectScopedStores,
 } from "./projectScopedStores";
 import { useSessionLogStore } from "./sessionLogStore";
-import { useWorkflowSelectionStore } from "./workflowSelectionStore";
+import { useEntityPanelStore } from "./entityPanelStore";
 
 describe("resetProjectScopedStores", () => {
   beforeEach(() => {
@@ -56,10 +56,7 @@ describe("resetProjectScopedStores", () => {
     queryClient.setQueryData(workflowListKey, [workflow]);
     queryClient.setQueryData(workflowDetailKey, { workflow, tasks: [task] });
     queryClient.setQueryData(queryKeys.steps.byId(generation, step.id!), step);
-    useWorkflowSelectionStore.setState({
-      selectedStepId: step.id,
-      selectedWorkflowId: workflowId,
-    });
+    useEntityPanelStore.getState().openStep(step.id!, workflowId);
     queryClient.setQueryData(queryKeys.taskRuns.byTask(generation, task.id), [
       taskRun,
     ]);
@@ -91,10 +88,7 @@ describe("resetProjectScopedStores", () => {
     expect(
       queryClient.getQueryData(queryKeys.steps.byId(generation, step.id!))
     ).toBeUndefined();
-    expect(useWorkflowSelectionStore.getState()).toMatchObject({
-      selectedStepId: null,
-      selectedWorkflowId: null,
-    });
+    expect(useEntityPanelStore.getState().selection).toBeNull();
     expect(
       queryClient.getQueryData(queryKeys.taskRuns.byTask(generation, task.id))
     ).toBeUndefined();

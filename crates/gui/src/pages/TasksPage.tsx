@@ -19,12 +19,10 @@ import { useShellHeader } from "../hooks/useShellHeader";
 import { TaskTreeView, ExpandCollapseAllButton } from "../components/TaskList";
 import { SearchInput } from "../components/molecules/SearchInput";
 import { Select } from "../components/atoms/Select";
-import { TaskDetailPanel } from "../components/TaskDetail";
 import { Badge } from "../components/atoms/Badge";
 import { LiveCount } from "../components/shared/LiveCount";
 import { isActiveRunStatus, isTaskDone } from "../utils/runState";
 import { useSummaryExpanded } from "../hooks/useSummaryExpanded";
-import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
 
 type TaskScope =
@@ -189,9 +187,11 @@ function ScopeChip({
 
 export function TasksPage() {
   const [searchParams] = useSearchParams();
-  const openLinkedTask = useEntityPanelStore((state) => state.openTask);
+  const openTask = useEntityPanelStore((state) => state.openTask);
+  const selectedTaskId = useEntityPanelStore((state) =>
+    state.selection?.type === "task" ? state.selection.taskId : null
+  );
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [scope, setScope] = useState<TaskScope>("all");
   const [hideCompleted, setHideCompleted] = useState(false);
 
@@ -237,8 +237,8 @@ export function TasksPage() {
 
   useEffect(() => {
     const taskId = searchParams.get("taskId")?.trim();
-    if (taskId) openLinkedTask(taskId);
-  }, [openLinkedTask, searchParams]);
+    if (taskId) openTask(taskId);
+  }, [openTask, searchParams]);
 
   const { tasks, isLoading, error } = useTasks(filters);
   const activeRunsByTaskId = useMemo(() => activeRunsFromTasks(tasks), [tasks]);
@@ -261,18 +261,6 @@ export function TasksPage() {
   // done-summary collapse are bypassed so every match stays visible.
   const filtering = scope !== "all" || Boolean(filters.search?.trim());
 
-  // The side panel starts closed: we never auto-select a task on load. This
-  // effect only drops a stale selection when the chosen task leaves the current
-  // scope (or the list empties) so the panel doesn't point at a hidden task.
-  useEffect(() => {
-    if (
-      selectedTaskId &&
-      !scopedTasks.some((task) => task.id === selectedTaskId)
-    ) {
-      setSelectedTaskId(null);
-    }
-  }, [scopedTasks, selectedTaskId]);
-
   const handleSearchChange = useCallback((value: string) => {
     setFilters((prev) => ({ ...prev, search: value || null }));
   }, []);
@@ -288,30 +276,12 @@ export function TasksPage() {
 
   const selectedLevel = filters.levels?.[0] ?? "";
 
-  const handleTaskSelect = useCallback((task: Task) => {
-    setSelectedTaskId(task.id);
-  }, []);
-
-  const handleClosePanel = useCallback(() => {
-    setSelectedTaskId(null);
-  }, []);
-
-  // Defer the detail-float unmount so it can drill back out to the right edge on
-  // close. Closing nulls selectedTaskId (which drops the task data), so we keep
-  // rendering the last task id through the exit window. EXIT_MS must match
-  // `.detail-float.is-closing` (--t-base = 180ms).
-  const lastSelectedTaskIdRef = useRef<string | null>(null);
-  if (selectedTaskId) lastSelectedTaskIdRef.current = selectedTaskId;
-  const {
-    mounted: detailMounted,
-    closing: detailClosing,
-    onAnimationEnd: detailOnAnimationEnd,
-  } = usePanelExitTransition(selectedTaskId != null, 180);
-  const detailTaskId = selectedTaskId ?? lastSelectedTaskIdRef.current;
-
-  const handleRelatedTaskSelect = useCallback((taskId: string) => {
-    setSelectedTaskId(taskId);
-  }, []);
+  const handleTaskSelect = useCallback(
+    (task: Task) => {
+      openTask(task.id);
+    },
+    [openTask]
+  );
 
   const expandableIds = useMemo(
     () => collectExpandableIds(hierarchy),
@@ -476,16 +446,6 @@ export function TasksPage() {
           </div>
         </div>
       </div>
-
-      {detailMounted && (
-        <TaskDetailPanel
-          taskId={detailTaskId}
-          closing={detailClosing}
-          onExitAnimationEnd={detailOnAnimationEnd}
-          onClose={handleClosePanel}
-          onTaskSelect={handleRelatedTaskSelect}
-        />
-      )}
     </div>
   );
 }

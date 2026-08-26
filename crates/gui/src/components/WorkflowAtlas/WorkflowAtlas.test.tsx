@@ -17,6 +17,8 @@ import { buildAtlasModel } from "./adapter/buildAtlasModel";
 import { layoutFull } from "./layout/layoutFull";
 import type { AtlasModel, FullLayout } from "./layout/types";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
+import { GlobalEntityPanelHost } from "../GlobalEntityPanelHost";
 import { WorkflowAtlas, layoutKey } from "./WorkflowAtlas";
 
 /* ── mocks ─────────────────────────────────────────────────────────
@@ -41,6 +43,7 @@ const layoutFullMock = vi.mocked(layoutFull);
 
 beforeEach(() => {
   usePanelLayoutStore.getState().reset();
+  useEntityPanelStore.getState().reset();
   vi.mocked(invoke).mockResolvedValue(null);
 });
 
@@ -159,7 +162,17 @@ function stubLayout(model: AtlasModel): FullLayout {
 
 afterEach(() => {
   vi.clearAllMocks();
+  useEntityPanelStore.getState().reset();
 });
+
+function renderAtlasWithEntityHost() {
+  return render(
+    <>
+      <WorkflowAtlas />
+      <GlobalEntityPanelHost />
+    </>
+  );
+}
 
 /* ── tests ─────────────────────────────────────────────────────── */
 
@@ -209,7 +222,7 @@ describe("WorkflowAtlas", () => {
       error: null,
     });
     layoutFullMock.mockReturnValue(new Promise(() => {}));
-    render(<WorkflowAtlas />);
+    renderAtlasWithEntityHost();
     expect(screen.getByText(/laying out workflow graph/i)).toBeInTheDocument();
   });
 
@@ -272,14 +285,14 @@ describe("WorkflowAtlas", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas />);
+    renderAtlasWithEntityHost();
     await waitFor(() =>
       expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument()
     );
 
     fireEvent.click(screen.getByTestId("workflow-node-Build"));
     expect(await screen.findByText(/Workflow Details/)).toBeInTheDocument();
-    const inspector = screen.getByTestId("workflow-atlas-inspector");
+    const inspector = screen.getByTestId("global-entity-panel");
     expect(inspector).toHaveAttribute("data-chat-adjacent", "true");
     expect(inspector.style.getPropertyValue("--detail-panel-chat-offset")).toBe(
       "calc(432px + var(--s-3))"
@@ -288,6 +301,7 @@ describe("WorkflowAtlas", () => {
     fireEvent.click(screen.getByRole("button", { name: "Step Execute" }));
     expect(await screen.findByText("Step Configuration")).toBeInTheDocument();
     expect(inspector).toHaveAttribute("data-chat-adjacent", "true");
+    expect(screen.getAllByTestId("global-entity-panel")).toHaveLength(1);
   });
 
   it("does not re-run the ELK layout when only pipeline_counts change", async () => {
@@ -577,7 +591,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
       return base;
     });
 
-    render(<WorkflowAtlas />);
+    renderAtlasWithEntityHost();
     await waitFor(() =>
       expect(document.querySelector(".gedge.k-loop")).toBeInTheDocument()
     );
@@ -648,7 +662,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
       return base;
     });
 
-    render(<WorkflowAtlas />);
+    renderAtlasWithEntityHost();
     // scope to the GRAPH cross-edge layer (the map layer also renders a hidden
     // handoff path for the same workflow pair).
     await waitFor(() =>

@@ -2,7 +2,8 @@
    Workflow Atlas — Inspector content (workflow mode).
 
    Rendered as the CONTENT inside a right-docked FloatingDetailPanel shell (the
-   mount lives in WorkflowAtlas.tsx). Content is tailored to the topology surface,
+   mount lives in GlobalEntityPanelHost.tsx). Content is tailored to the topology
+   surface,
    computed live from the pure `AtlasModel`. Transitions are clickable so you can
    walk the topology without leaving the panel.
 

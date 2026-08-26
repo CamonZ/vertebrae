@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
 import { usePipelineSummary } from "../hooks/usePipelineSummary";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
 import type { EntityPanelSelection } from "../stores/entityPanelStore";
@@ -69,9 +70,18 @@ function EmptyAtlasPanel({
 function AtlasEntityPanel({
   selection,
   close,
+  onHoverEdge,
+  closing,
+  onExitAnimationEnd,
 }: {
   selection: Exclude<EntityPanelSelection, { type: "task" }>;
   close: () => void;
+  onHoverEdge: (edgeId: string | null) => void;
+  closing: boolean;
+  onExitAnimationEnd: (event: {
+    target: EventTarget;
+    currentTarget: EventTarget;
+  }) => void;
 }) {
   const { summary, isLoading, error } = usePipelineSummary();
   const model = useMemo(
@@ -82,6 +92,28 @@ function AtlasEntityPanel({
     () => (model ? selectionFromPanelTarget(model, selection) : null),
     [model, selection]
   );
+  const selectionKey = `${selection.type}:${
+    selection.type === "workflow"
+      ? selection.workflowId
+      : `${selection.workflowId ?? ""}:${selection.stepId}`
+  }`;
+  const resolvedSelectionKey = useRef<string | null>(null);
+
+  // Realtime summary updates can remove a selected step or workflow. Close a
+  // selection that was previously valid, but leave a newly linked entity open
+  // while its project summary is still loading or catching up.
+  useEffect(() => {
+    if (atlasSelection) {
+      resolvedSelectionKey.current = selectionKey;
+    } else if (
+      model &&
+      !isLoading &&
+      !error &&
+      resolvedSelectionKey.current === selectionKey
+    ) {
+      close();
+    }
+  }, [atlasSelection, close, error, isLoading, model, selectionKey]);
 
   let content;
   if (isLoading) {
@@ -115,6 +147,7 @@ function AtlasEntityPanel({
         workflowId={atlasSelection.workflowId}
         onSelect={setAtlasSelection}
         onClose={close}
+        onHoverEdge={onHoverEdge}
       />
     );
   } else {
@@ -125,6 +158,7 @@ function AtlasEntityPanel({
         stepId={atlasSelection.stepId}
         onSelect={setAtlasSelection}
         onClose={close}
+        onDeleted={close}
       />
     );
   }
@@ -134,6 +168,8 @@ function AtlasEntityPanel({
       panelId="global-entity-panel"
       widthStorageKey="global-entity-panel-width"
       className="workflow-atlas"
+      closing={closing}
+      onExitAnimationEnd={onExitAnimationEnd}
       onClose={close}
       testId="global-entity-panel"
     >
@@ -146,18 +182,39 @@ export function GlobalEntityPanelHost() {
   const selection = useEntityPanelStore((state) => state.selection);
   const close = useEntityPanelStore((state) => state.close);
   const openTask = useEntityPanelStore((state) => state.openTask);
+  const setHoveredEdge = useEntityPanelStore((state) => state.setHoveredEdge);
+  const lastSelection = useRef<EntityPanelSelection | null>(null);
+  if (selection) lastSelection.current = selection;
 
-  if (!selection) return null;
+  const {
+    mounted: panelMounted,
+    closing: panelClosing,
+    onAnimationEnd: panelOnAnimationEnd,
+  } = usePanelExitTransition(selection != null, 180);
+  const activeSelection = selection ?? lastSelection.current;
 
-  if (selection.type === "task") {
+  if (!panelMounted || !activeSelection) return null;
+
+  if (activeSelection.type === "task") {
     return (
       <TaskDetailPanel
-        taskId={selection.taskId}
+        key={`task:${activeSelection.taskId}`}
+        taskId={activeSelection.taskId}
+        closing={panelClosing}
+        onExitAnimationEnd={panelOnAnimationEnd}
         onClose={close}
         onTaskSelect={openTask}
       />
     );
   }
 
-  return <AtlasEntityPanel selection={selection} close={close} />;
+  return (
+    <AtlasEntityPanel
+      selection={activeSelection}
+      close={close}
+      onHoverEdge={setHoveredEdge}
+      closing={panelClosing}
+      onExitAnimationEnd={panelOnAnimationEnd}
+    />
+  );
 }
