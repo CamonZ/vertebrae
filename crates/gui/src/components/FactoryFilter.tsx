@@ -49,25 +49,27 @@ export function FactoryFilter({
           : value;
 
   return (
-    <Select
-      id={id}
-      options={options}
-      value={selectedValue}
-      onChange={(event) => {
-        const selectedValue = event.target.value;
-        onChange(
-          selectedValue === NO_FACTORY_OPTION_VALUE
-            ? NO_FACTORY_SCOPE
-            : selectedValue === ""
-              ? null
-              : selectedValue ===
-                  `${COLLIDING_FACTORY_OPTION_PREFIX}${NO_FACTORY_OPTION_VALUE}`
-                ? NO_FACTORY_OPTION_VALUE
-                : selectedValue
-        );
-      }}
-      aria-label="Filter by factory"
-      data-testid={`${id}-select`}
-    />
+    <div className="scope-level factory-filter">
+      <Select
+        id={id}
+        options={options}
+        value={selectedValue}
+        onChange={(event) => {
+          const selectedValue = event.target.value;
+          onChange(
+            selectedValue === NO_FACTORY_OPTION_VALUE
+              ? NO_FACTORY_SCOPE
+              : selectedValue === ""
+                ? null
+                : selectedValue ===
+                    `${COLLIDING_FACTORY_OPTION_PREFIX}${NO_FACTORY_OPTION_VALUE}`
+                  ? NO_FACTORY_OPTION_VALUE
+                  : selectedValue
+          );
+        }}
+        aria-label="Filter by factory"
+        data-testid={`${id}-select`}
+      />
+    </div>
   );
 }

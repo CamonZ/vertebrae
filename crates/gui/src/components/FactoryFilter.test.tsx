@@ -59,6 +59,9 @@ describe("FactoryFilter", () => {
     expect(
       screen.getByRole("option", { name: "Factory A" })
     ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Filter by factory").closest(".scope-level")
+    ).toBeInTheDocument();
     const noFactoryOption = screen.getByRole("option", {
       name: "No Factory",
     });

@@ -433,14 +433,12 @@ export function BoardPage() {
               />
             </div>
 
-            <div className="scope-factory">
-              <FactoryFilter
-                id="board-factory-filter"
-                workflows={workflows}
-                value={factoryFilter}
-                onChange={setFactoryFilter}
-              />
-            </div>
+            <FactoryFilter
+              id="board-factory-filter"
+              workflows={workflows}
+              value={factoryFilter}
+              onChange={setFactoryFilter}
+            />
 
             {/* Clear filters */}
             {hasActiveFilters && (
