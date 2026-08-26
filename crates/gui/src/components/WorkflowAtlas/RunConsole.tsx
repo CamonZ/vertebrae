@@ -27,6 +27,7 @@
    ────────────────────────────────────────────────────────────────── */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commands, type PipelineSummary } from "../../bindings";
+import type { FactoryFilterValue } from "../../utils/workflowFactory";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { CloseIcon, IconButton, PlayIcon, StopIcon } from "../panels";
 import { Glyph, IdChip } from "../shared/HearthPrimitives";
@@ -181,16 +182,27 @@ function Row({
 export interface RunConsoleProps {
   /** Pipeline summary, used to project each task onto its workflow's steps. */
   summary: PipelineSummary | null;
+  /** Optional exact factory scope for the task feed. */
+  factoryName?: FactoryFilterValue;
 }
 
 /**
  * Docked Run Console. Self-contained: owns its open/tab/query/selection state
  * and its own task feed. Safe to mount once alongside the Atlas canvas.
  */
-export function RunConsole({ summary }: RunConsoleProps) {
+export function RunConsole({ summary, factoryName = null }: RunConsoleProps) {
   const { tasks } = useRunConsoleTasks();
+  const scopedTasks = useMemo(() => {
+    if (factoryName === null || !summary) return tasks;
+    const workflowIds = new Set(
+      summary.workflows.map((workflow) => workflow.id)
+    );
+    return tasks.filter(
+      (task) => task.workflow_id !== null && workflowIds.has(task.workflow_id)
+    );
+  }, [factoryName, summary, tasks]);
   const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
-    tasks.map((task) => task.id)
+    scopedTasks.map((task) => task.id)
   );
 
   const [open, setOpen] = useState(false);
@@ -260,8 +272,8 @@ export function RunConsole({ summary }: RunConsoleProps) {
   }, [isResizing]);
 
   const { running, ready } = useMemo(
-    () => splitRunConsole(tasks, activeRunsByTaskId),
-    [activeRunsByTaskId, tasks]
+    () => splitRunConsole(scopedTasks, activeRunsByTaskId),
+    [activeRunsByTaskId, scopedTasks]
   );
 
   const q = query.trim().toLowerCase();

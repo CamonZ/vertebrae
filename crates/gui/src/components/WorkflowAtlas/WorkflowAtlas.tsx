@@ -42,6 +42,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SearchInput } from "../molecules/SearchInput";
 import { SegmentedControl } from "../molecules/SegmentedControl";
+import { FactoryFilter } from "../FactoryFilter";
+import {
+  factoryNames,
+  filterByFactory,
+  type FactoryFilterValue,
+} from "../../utils/workflowFactory";
 import { usePipelineSummary } from "../../hooks/usePipelineSummary";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import type { AtlasSelection } from "./inspector/selection";
@@ -103,6 +109,7 @@ export function WorkflowAtlas() {
   const { summary, isLoading, error } = usePipelineSummary();
 
   const [view, setView] = useState<AtlasView>("graph");
+  const [factoryFilter, setFactoryFilter] = useState<FactoryFilterValue>(null);
   const [query, setQuery] = useState("");
   const [hover, setHover] = useState<string | null>(null);
   // Step-node hover: the ref of the step node under the cursor (graph view).
@@ -116,13 +123,49 @@ export function WorkflowAtlas() {
   const [morphing, setMorphing] = useState(false);
   const entitySelection = useEntityPanelStore((state) => state.selection);
 
+  // Keep the topology input scoped before deriving the Atlas model. This makes
+  // the same literal factory comparison govern both Graph and Map layouts.
+  const scopedSummary = useMemo(() => {
+    if (!summary || factoryFilter === null) return summary;
+    return {
+      ...summary,
+      workflows: filterByFactory(summary.workflows, factoryFilter),
+    };
+  }, [summary, factoryFilter]);
+
+  // If a realtime update removes the selected factory from the project, return
+  // to the unscoped topology instead of leaving a value with no option.
+  useEffect(() => {
+    if (
+      factoryFilter !== null &&
+      summary &&
+      !factoryNames(summary.workflows).includes(factoryFilter)
+    ) {
+      setFactoryFilter(null);
+    }
+  }, [factoryFilter, summary]);
+
   // The global entity selection is also the canvas highlight. The global host
   // renders the inspector; this component only projects the same selection onto
   // the atlas so the page cannot mount a second detail surface.
   const model = useMemo(
-    () => (summary ? buildAtlasModel(summary) : null),
-    [summary]
+    () => (scopedSummary ? buildAtlasModel(scopedSummary) : null),
+    [scopedSummary]
   );
+
+  // A selection from another factory should not remain open beside a scoped
+  // canvas. The global host owns the panel, so close through the shared store.
+  useEffect(() => {
+    if (!model || !entitySelection || entitySelection.type === "task") return;
+    const workflowId = entitySelection.workflowId;
+    if (
+      workflowId &&
+      !model.workflows.some((workflow) => workflow.id === workflowId)
+    ) {
+      useEntityPanelStore.getState().close();
+    }
+  }, [entitySelection, model]);
+
   const sel = useMemo<AtlasSelection | null>(() => {
     if (!model || !entitySelection || entitySelection.type === "task") {
       return null;
@@ -449,6 +492,12 @@ export function WorkflowAtlas() {
               hint="/"
             />
           </div>
+          <FactoryFilter
+            id="atlas-factory-filter"
+            workflows={summary?.workflows ?? []}
+            value={factoryFilter}
+            onChange={setFactoryFilter}
+          />
           <SegmentedControl<AtlasView>
             ariaLabel="Workflow view"
             options={[
@@ -695,7 +744,7 @@ export function WorkflowAtlas() {
         {/* Run Console — docked over the canvas, OUTSIDE the morph layers so it
             persists across the Map⇄Graph toggle. Reads the live task list; its
             surfaces carry `data-no-pan` so dragging them never pans the world. */}
-        <RunConsole summary={summary} />
+        <RunConsole summary={scopedSummary} factoryName={factoryFilter} />
       </div>
 
       <KindLegend />

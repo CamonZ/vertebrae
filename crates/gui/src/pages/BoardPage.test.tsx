@@ -390,6 +390,86 @@ describe("BoardPage", () => {
     });
   });
 
+  describe("filtering by factory", () => {
+    it("shows only tasks and columns belonging to the exact factory", () => {
+      mockWorkflows = [
+        createMockWorkflow({
+          id: "wf-a",
+          factory_name: "Factory A",
+          kanban_column: "Factory A column",
+        }),
+        createMockWorkflow({
+          id: "wf-b",
+          factory_name: "Factory B",
+          kanban_column: "Factory B column",
+        }),
+      ];
+      mockTasks = [
+        createMockTask({
+          id: "t-a",
+          title: "Factory A task",
+          workflow_id: "wf-a",
+        }),
+        createMockTask({
+          id: "t-b",
+          title: "Factory B task",
+          workflow_id: "wf-b",
+        }),
+        createMockTask({
+          id: "t-none",
+          title: "Unassigned task",
+          workflow_id: null,
+        }),
+      ];
+      render(<BoardPage />);
+
+      fireEvent.change(screen.getByLabelText("Filter by factory"), {
+        target: { value: "Factory A" },
+      });
+
+      expect(screen.getByText("Factory A task")).toBeInTheDocument();
+      expect(screen.queryByText("Factory B task")).not.toBeInTheDocument();
+      expect(screen.queryByText("Unassigned task")).not.toBeInTheDocument();
+      expect(screen.getByText("Factory A column")).toBeInTheDocument();
+      expect(screen.queryByText("Factory B column")).not.toBeInTheDocument();
+    });
+
+    it("keeps empty columns for the selected factory", () => {
+      mockWorkflows = [
+        createMockWorkflow({
+          id: "wf-a",
+          factory_name: "Factory A",
+          kanban_column: "Factory A column",
+        }),
+        createMockWorkflow({
+          id: "wf-b",
+          factory_name: "Factory B",
+          kanban_column: "Factory B column",
+        }),
+      ];
+      mockTasks = [
+        createMockTask({
+          id: "t-b",
+          title: "Factory B task",
+          workflow_id: "wf-b",
+        }),
+      ];
+      render(<BoardPage />);
+
+      fireEvent.change(screen.getByLabelText("Filter by factory"), {
+        target: { value: "Factory A" },
+      });
+
+      expect(
+        screen.getByRole("region", {
+          name: /Factory A column column, 0 tasks/i,
+        })
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Factory B column")).not.toBeInTheDocument();
+      expect(screen.queryByText("Factory B task")).not.toBeInTheDocument();
+    });
+  });
+
   describe("search filtering", () => {
     it("filters cards by task title across all columns", () => {
       mockWorkflows = [

@@ -102,7 +102,12 @@ const FIXTURE: PipelineSummary = {
         }),
         makeStep("s3", "wf-build", 2, { name: "Ship", step_type: "finish" }),
       ],
-      { name: "Build", description: "Build pipeline", kanban_column: "Dev" }
+      {
+        name: "Build",
+        description: "Build pipeline",
+        kanban_column: "Dev",
+        factory_name: "Factory A",
+      }
     ),
     makeWorkflow(
       "wf-review",
@@ -110,6 +115,7 @@ const FIXTURE: PipelineSummary = {
       {
         name: "Review",
         kanban_column: "QA",
+        factory_name: "Factory B",
         // active runs → running pill
         workflow_steps: [
           makeStep("r1", "wf-review", 0, {
@@ -335,6 +341,47 @@ describe("WorkflowAtlas", () => {
     rerender(<WorkflowAtlas />);
 
     await waitFor(() => expect(layoutFullMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("scopes Graph and Map to the selected exact factory", async () => {
+    mockSummary.mockReturnValue({
+      summary: FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+
+    render(<WorkflowAtlas />);
+    await waitFor(() =>
+      expect(document.querySelectorAll(".uv-wf")).toHaveLength(2)
+    );
+
+    fireEvent.change(screen.getByLabelText("Filter by factory"), {
+      target: { value: "Factory A" },
+    });
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".uv-wf")).toHaveLength(1);
+      expect(document.querySelector(".ag-wf-name")).toHaveTextContent("Build");
+      expect(document.querySelector(".ag-wf-name")).not.toHaveTextContent(
+        "Review"
+      );
+    });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
+    await waitFor(() => {
+      expect(document.querySelector(".al-name")).toHaveTextContent("Build");
+      expect(document.querySelector(".al-name")).not.toHaveTextContent(
+        "Review"
+      );
+      const headers = Array.from(document.querySelectorAll(".al-stagehd"));
+      expect(
+        headers.some((header) => header.textContent?.includes("Dev"))
+      ).toBe(true);
+      expect(headers.some((header) => header.textContent?.includes("QA"))).toBe(
+        false
+      );
+    });
   });
 });
 
