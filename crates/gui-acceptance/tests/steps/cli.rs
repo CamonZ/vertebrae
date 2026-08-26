@@ -32,7 +32,13 @@ fn artifact_fixture(kind: &str) -> (&'static str, &'static str) {
     }
 }
 
-async fn create_artifact(world: &mut GuiWorld, filename: &str, kind: &str, task_id: Option<&str>) {
+async fn create_artifact(
+    world: &mut GuiWorld,
+    filename: &str,
+    kind: &str,
+    task_id: Option<&str>,
+    logical_name: Option<&str>,
+) {
     let (body, metadata) = artifact_fixture(kind);
     let mut args = vec![
         "artifact",
@@ -45,6 +51,9 @@ async fn create_artifact(world: &mut GuiWorld, filename: &str, kind: &str, task_
     ];
     if let Some(task_id) = task_id {
         args.extend(["--subject-type", "task", "--subject-id", task_id]);
+    }
+    if let Some(logical_name) = logical_name {
+        args.extend(["--logical-name", logical_name]);
     }
     world.run_vtb(&args).await;
     assert_eq!(
@@ -63,7 +72,19 @@ async fn create_artifact(world: &mut GuiWorld, filename: &str, kind: &str, task_
 
 #[when(expr = "I create project artifact {string} of kind {string} via the CLI")]
 async fn create_project_artifact_via_cli(world: &mut GuiWorld, filename: String, kind: String) {
-    create_artifact(world, &filename, &kind, None).await;
+    create_artifact(world, &filename, &kind, None, None).await;
+}
+
+#[when(
+    expr = "I create project artifact {string} with logical name {string} of kind {string} via the CLI"
+)]
+async fn create_project_artifact_with_logical_name_via_cli(
+    world: &mut GuiWorld,
+    filename: String,
+    logical_name: String,
+    kind: String,
+) {
+    create_artifact(world, &filename, &kind, None, Some(&logical_name)).await;
 }
 
 #[when(expr = "I create a task artifact {string} of kind {string} via the CLI")]
@@ -73,7 +94,7 @@ async fn create_task_artifact_via_cli(world: &mut GuiWorld, filename: String, ki
         .as_deref()
         .expect("no task ID stored")
         .to_owned();
-    create_artifact(world, &filename, &kind, Some(&task_id)).await;
+    create_artifact(world, &filename, &kind, Some(&task_id), None).await;
 }
 
 #[when("I delete the current artifact via the CLI")]

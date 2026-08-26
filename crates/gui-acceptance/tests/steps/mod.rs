@@ -1,3 +1,4 @@
+pub mod artifact;
 pub mod cli;
 pub mod daemon;
 pub mod debug_console;

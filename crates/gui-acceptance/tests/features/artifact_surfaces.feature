@@ -27,6 +27,20 @@ Feature: Artifact GUI surfaces
     When I delete the current artifact via the CLI
     Then the GUI should not show "artifact-unknown.yaml" within 10 seconds
 
+  Scenario: Project artifact paths render as an expandable tree with type badges
+    Given the GUI is showing project artifacts
+    When I create project artifact "tree-summary.md" with logical name "reports/summary.md" of kind "markdown" via the CLI
+    And I create project artifact "tree-data.json" with logical name "reports/data.json" of kind "json" via the CLI
+    Then the GUI should show "reports" within 10 seconds
+    And the GUI should show "summary.md" within 10 seconds
+    And the GUI should show an element with test id "tree-indent-guides" within 10 seconds
+    And the artifact tree folder "reports" should be expanded within 10 seconds
+    And the artifact tree leaf "summary.md" should show type badge "Markdown" within 10 seconds
+    When I collapse the artifact tree folder "reports"
+    Then the GUI should not show "summary.md" within 5 seconds
+    When I expand the artifact tree folder "reports"
+    Then the GUI should show "summary.md" within 5 seconds
+
   Scenario: A task attachment opens an adjacent read-only preview
     Given the GUI is showing the task list
     When I create a task "Artifact attachment task" via the CLI
