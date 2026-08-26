@@ -9,6 +9,7 @@ import {
   MAX_HISTORY_WIDTH,
 } from "../../hooks/useChatHistoryPanelLayout";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
+import type { LocalChatSessionActivity } from "./LocalChatMiniPanel";
 import type { SpawnOutlineItem } from "./sessionListUtils";
 
 function makeSession(
@@ -54,6 +55,8 @@ interface ControlledPanelProps {
   sessionGroups?: LocalChatSessionGroup[];
   activeSessionId?: string;
   spawnOutlineBySessionId?: Map<string, SpawnOutlineItem[]>;
+  activityBySessionId?: ReadonlyMap<string, LocalChatSessionActivity>;
+  thinkingIndicatorStyle?: "classic" | "futuristic";
   width?: number;
   onQueryChange?: (query: string) => void;
   onSelect?: (sessionId: string) => void;
@@ -68,6 +71,8 @@ function ControlledPanel({
   sessionGroups = [],
   activeSessionId,
   spawnOutlineBySessionId = new Map(),
+  activityBySessionId = new Map(),
+  thinkingIndicatorStyle = "classic",
   width = DEFAULT_HISTORY_WIDTH,
   onQueryChange,
   onSelect = vi.fn(),
@@ -95,6 +100,8 @@ function ControlledPanel({
       projectWarning={null}
       sessionGroups={sessionGroups}
       spawnOutlineBySessionId={spawnOutlineBySessionId}
+      activityBySessionId={activityBySessionId}
+      thinkingIndicatorStyle={thinkingIndicatorStyle}
       onSelect={onSelect}
       onSelectAgent={onSelectAgent}
       onStartProjectChat={onStartProjectChat}
@@ -637,6 +644,79 @@ describe("LocalChatMiniPanel search", () => {
       panelElement().querySelector(".hc-mini-history-open .label")
     ).toHaveTextContent(
       "A session with a title that benefits from the wider history panel"
+    );
+  });
+
+  it("shows independent configured activity indicators and restores harness badges", () => {
+    const thinking = makeSession("thinking", {
+      title: "Thinking session",
+      harness: "claude",
+    });
+    const compacting = makeSession("compacting", {
+      title: "Compacting session",
+      harness: "codex",
+    });
+    const idle = makeSession("idle", {
+      title: "Idle session",
+      harness: "claude",
+    });
+    const sessions = [thinking, compacting, idle];
+    const activityBySessionId = new Map<string, LocalChatSessionActivity>([
+      [thinking.id, "thinking"],
+      [compacting.id, "compacting"],
+    ]);
+    const { rerender } = render(
+      <ControlledPanel
+        sessionGroups={[makeGroup("current", "Current project", sessions)]}
+        activityBySessionId={activityBySessionId}
+        thinkingIndicatorStyle="futuristic"
+      />
+    );
+
+    const panel = within(screen.getByTestId("local-chat-mini-panel"));
+    const thinkingRow = panel.getByRole("button", {
+      name: "Load local chat Thinking session into active pane",
+    });
+    const compactingRow = panel.getByRole("button", {
+      name: "Load local chat Compacting session into active pane",
+    });
+    const idleRow = panel.getByRole("button", {
+      name: "Load local chat Idle session into active pane",
+    });
+
+    expect(
+      within(thinkingRow).getByTestId("thinking-indicator")
+    ).toHaveAttribute("data-style", "futuristic");
+    expect(within(thinkingRow).getByTestId("thinking-matrix")).toHaveAttribute(
+      "data-animation-direction",
+      "outward"
+    );
+    expect(
+      within(compactingRow).getByTestId("thinking-matrix")
+    ).toHaveAttribute("data-animation-direction", "inward");
+    expect(within(idleRow).getByRole("img")).toHaveAccessibleName(
+      "Claude harness"
+    );
+    expect(within(thinkingRow).queryByRole("img")).not.toBeInTheDocument();
+    expect(within(compactingRow).queryByRole("img")).not.toBeInTheDocument();
+
+    rerender(
+      <ControlledPanel
+        sessionGroups={[makeGroup("current", "Current project", sessions)]}
+        thinkingIndicatorStyle="futuristic"
+      />
+    );
+
+    const restoredThinkingRow = within(
+      screen.getByTestId("local-chat-mini-panel")
+    ).getByRole("button", {
+      name: "Load local chat Thinking session into active pane",
+    });
+    expect(
+      within(restoredThinkingRow).queryByTestId("thinking-indicator")
+    ).not.toBeInTheDocument();
+    expect(within(restoredThinkingRow).getByRole("img")).toHaveAccessibleName(
+      "Claude harness"
     );
   });
 });

@@ -28,9 +28,12 @@ const MATRIX_LIGHT_TONES = [
 export function ThinkingIndicator({
   label = "Thinking...",
   style = "classic",
+  compact = false,
 }: {
   label?: string;
   style?: ThinkingIndicatorStyle;
+  /** Render only the visual indicator for compact status surfaces. */
+  compact?: boolean;
 }) {
   // The component is mounted for one waiting turn and unmounted when that
   // turn ends. Keeping the phrase in state prevents re-renders from causing
@@ -52,15 +55,22 @@ export function ThinkingIndicator({
 
   return (
     <div
-      className="flex justify-start"
+      className={compact ? "thinking-indicator--compact" : "flex justify-start"}
       data-testid="thinking-indicator"
       data-style={style}
+      data-compact={compact || undefined}
       role="status"
       aria-live="polite"
       aria-atomic="true"
       aria-label={statusLabel}
     >
-      <div className="flex items-center gap-2 rounded-lg bg-[var(--color-bg-2)] pl-2 pr-4 py-2">
+      <div
+        className={
+          compact
+            ? "flex items-center justify-center"
+            : "flex items-center gap-2 rounded-lg bg-[var(--color-bg-2)] pl-2 pr-4 py-2"
+        }
+      >
         {style === "futuristic" ? (
           <div
             className="thinking-matrix grid shrink-0 grid-cols-8 grid-rows-5 gap-px"
@@ -84,7 +94,7 @@ export function ThinkingIndicator({
 
               return (
                 <span
-                  className={`thinking-matrix__light thinking-matrix__light--${tone} thinking-matrix__light--${isAlmondCell ? "inside" : "outside"} h-[4px] w-[4px] rounded-full motion-reduce:animate-none`}
+                  className={`thinking-matrix__light thinking-matrix__light--${tone} thinking-matrix__light--${isAlmondCell ? "inside" : "outside"} ${compact ? "h-px w-px" : "h-[4px] w-[4px]"} rounded-full motion-reduce:animate-none`}
                   data-column={column}
                   data-radial-band={radialBand}
                   data-row={row}
@@ -98,18 +108,26 @@ export function ThinkingIndicator({
           </div>
         ) : (
           <div
-            className="flex gap-1"
+            className={`flex ${compact ? "gap-0.5" : "gap-1"}`}
             data-testid="thinking-dots"
             aria-hidden="true"
           >
-            <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--color-accent)] motion-reduce:animate-none [animation-delay:-0.3s]" />
-            <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--color-accent)] motion-reduce:animate-none [animation-delay:-0.15s]" />
-            <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--color-accent)] motion-reduce:animate-none" />
+            <span
+              className={`${compact ? "h-1 w-1" : "h-2 w-2"} animate-bounce rounded-full bg-[var(--color-accent)] motion-reduce:animate-none [animation-delay:-0.3s]`}
+            />
+            <span
+              className={`${compact ? "h-1 w-1" : "h-2 w-2"} animate-bounce rounded-full bg-[var(--color-accent)] motion-reduce:animate-none [animation-delay:-0.15s]`}
+            />
+            <span
+              className={`${compact ? "h-1 w-1" : "h-2 w-2"} animate-bounce rounded-full bg-[var(--color-accent)] motion-reduce:animate-none`}
+            />
           </div>
         )}
-        <span className="text-sm text-[var(--color-fg-mute)]">
-          {statusLabel}
-        </span>
+        {!compact && (
+          <span className="text-sm text-[var(--color-fg-mute)]">
+            {statusLabel}
+          </span>
+        )}
       </div>
     </div>
   );

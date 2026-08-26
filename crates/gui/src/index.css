@@ -815,6 +815,15 @@ html.light ::selection {
   --thinking-light-color: var(--color-fg-soft);
 }
 
+.thinking-indicator--compact {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .thinking-matrix__light {
     animation: none;

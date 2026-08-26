@@ -29,6 +29,7 @@ import { ChatPaneList } from "./ChatPaneList";
 import { ChatResizeHandle } from "./ChatResizeHandle";
 import { ChatHistoryResizeHandle } from "./ChatHistoryResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
+import type { LocalChatSessionActivity } from "./LocalChatMiniPanel";
 import { ChatShortcutHints } from "./ChatShortcutHints";
 import {
   buildSpawnOutline,
@@ -36,6 +37,7 @@ import {
   scrollToSpawn,
 } from "./sessionListUtils";
 import type { SpawnOutlineItem } from "./sessionListUtils";
+import { useUIStore } from "../../stores/uiStore";
 
 /** Exit-animation duration (ms). Must match `.hc-panel.is-closing` (--t-base). */
 const EXIT_MS = 180;
@@ -69,6 +71,9 @@ export function ChatWindowManager() {
   const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
   const localSessionSummaries = useChatStore((s) => s.localSessionSummaries);
+  const thinkingIndicatorStyle = useUIStore(
+    (state) => state.thinkingIndicatorStyle
+  );
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
@@ -77,6 +82,28 @@ export function ChatWindowManager() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const sessionList = Object.values(sessions);
+  const sessionActivityToken = sessionList
+    .map(
+      (session) =>
+        `${session.id}:${session.compactionActive ? "compacting" : (session.activeTurn?.phase ?? "idle")}`
+    )
+    .join("\0");
+  const activityBySessionId = useMemo(() => {
+    const activity = new Map<string, LocalChatSessionActivity>();
+    for (const session of sessionList) {
+      if (session.compactionActive) {
+        activity.set(session.id, "compacting");
+      } else if (session.activeTurn?.phase === "stopping") {
+        activity.set(session.id, "stopping");
+      } else if (session.activeTurn) {
+        activity.set(session.id, "thinking");
+      }
+    }
+    return activity;
+    // Streaming text can update `sessions` without changing row activity.
+    // Keep the map stable so the history panel does not re-render per delta.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionActivityToken]);
   const sessionChangeToken = Object.values(localSessionSummaries)
     .map(
       (session) =>
@@ -512,6 +539,8 @@ export function ChatWindowManager() {
               hasLocalChatSessions={hasLocalChatSessions}
               sessionGroups={visibleLocalSessionGroups}
               spawnOutlineBySessionId={spawnOutlineBySessionId}
+              activityBySessionId={activityBySessionId}
+              thinkingIndicatorStyle={thinkingIndicatorStyle}
               projectWarning={projectGroupingWarning}
               onSelect={(sessionId) => {
                 selectHistorySessionForActivePane(sessionId);

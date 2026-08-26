@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { LocalChatHarnessKind } from "../../bindings";
+import type { ThinkingIndicatorStyle } from "../../stores/uiStore";
 import {
   LOCAL_CHAT_SESSION_ROW_LIMIT,
   localChatSessionDisplayTitle,
@@ -14,6 +15,9 @@ import { SearchInput } from "../molecules/SearchInput";
 import { scrollToSpawn, type SpawnOutlineItem } from "./sessionListUtils";
 import { SessionGroupList } from "./SessionGroupList";
 import { SessionDeleteButton } from "./SessionDeleteButton";
+import { ThinkingIndicator } from "./ThinkingIndicator";
+
+export type LocalChatSessionActivity = "thinking" | "compacting" | "stopping";
 
 interface LocalChatMiniPanelProps {
   width: number;
@@ -27,6 +31,10 @@ interface LocalChatMiniPanelProps {
   projectWarning: string | null;
   sessionGroups: LocalChatSessionGroup[];
   spawnOutlineBySessionId: Map<string, SpawnOutlineItem[]>;
+  /** Runtime-only activity keyed by session; absent rows show their harness. */
+  activityBySessionId?: ReadonlyMap<string, LocalChatSessionActivity>;
+  /** Current user-selected waiting indicator style. */
+  thinkingIndicatorStyle?: ThinkingIndicatorStyle;
   onSelect: (sessionId: string) => void | Promise<void>;
   onSelectAgent?: (
     parentSessionId: string,
@@ -53,6 +61,8 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   projectWarning,
   sessionGroups,
   spawnOutlineBySessionId,
+  activityBySessionId,
+  thinkingIndicatorStyle = "classic",
   onSelect,
   onSelectAgent,
   onStartProjectChat,
@@ -387,7 +397,14 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                         aria-label={`Load local chat ${title} into active pane`}
                         aria-current={isActive ? "true" : undefined}
                       >
-                        <HarnessBadge harness={session.harness} />
+                        {activityBySessionId?.has(session.id) ? (
+                          <SessionActivityBadge
+                            activity={activityBySessionId.get(session.id)!}
+                            style={thinkingIndicatorStyle}
+                          />
+                        ) : (
+                          <HarnessBadge harness={session.harness} />
+                        )}
                         <span className="label">{title}</span>
                         {age && <span className="meta">{age}</span>}
                       </button>
@@ -505,6 +522,31 @@ function HarnessBadge({ harness }: { harness: LocalChatHarnessKind }) {
           />
         )}
       </svg>
+    </span>
+  );
+}
+
+function SessionActivityBadge({
+  activity,
+  style,
+}: {
+  activity: LocalChatSessionActivity;
+  style: ThinkingIndicatorStyle;
+}) {
+  const label =
+    activity === "compacting"
+      ? "Compacting conversation…"
+      : activity === "stopping"
+        ? "Stopping..."
+        : "Thinking...";
+
+  return (
+    <span
+      className="hc-mini-history-harness hc-mini-history-activity"
+      data-activity={activity}
+      title={label}
+    >
+      <ThinkingIndicator compact label={label} style={style} />
     </span>
   );
 }

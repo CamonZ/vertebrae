@@ -207,4 +207,37 @@ describe("ThinkingIndicator", () => {
       "motion-reduce:animate-none"
     );
   });
+
+  it("renders a compact classic indicator without a visible status label", () => {
+    render(<ThinkingIndicator compact />);
+
+    const indicator = screen.getByTestId("thinking-indicator");
+    expect(indicator).toHaveAttribute("data-compact", "true");
+    expect(screen.getByRole("status")).toHaveAccessibleName("Thinking...");
+    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("thinking-dots").querySelectorAll(".h-1.w-1")
+    ).toHaveLength(3);
+  });
+
+  it("keeps compaction direction and accessibility in compact futuristic mode", () => {
+    render(
+      <ThinkingIndicator
+        compact
+        label="Compacting conversation…"
+        style="futuristic"
+      />
+    );
+
+    const indicator = screen.getByTestId("thinking-indicator");
+    const matrix = screen.getByTestId("thinking-matrix");
+    expect(indicator).toHaveAttribute("data-compact", "true");
+    expect(matrix).toHaveAttribute("data-animation-direction", "inward");
+    expect(
+      matrix.querySelectorAll(".thinking-matrix__light.h-px.w-px")
+    ).toHaveLength(40);
+    expect(FUTURISTIC_COMPACTING_PHRASES).toContain(
+      screen.getByRole("status").getAttribute("aria-label")
+    );
+  });
 });
