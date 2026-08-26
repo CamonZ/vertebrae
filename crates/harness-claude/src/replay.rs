@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::{self, BufRead, BufReader, Read, Seek, SeekFrom},
+    io::{BufRead, BufReader},
     path::{Component, Path, PathBuf},
     sync::OnceLock,
 };
@@ -8,10 +8,10 @@ use std::{
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use vertebrae_harness_core::{
-    HarnessError, HarnessEventDraftV1, ProviderThreadRef, SessionId, TranscriptReplay,
-    TranscriptReplayAdapter, TranscriptReplayCache, TranscriptReplayPage,
-    TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision,
-    sequence_replay_drafts,
+    HarnessError, HarnessEventDraftV1, ProviderThreadRef, SessionId, TailReadOutcome,
+    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayCache, TranscriptReplayPage,
+    TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision, TranscriptTailLines,
+    load_transcript_page, sequence_replay_drafts, tail_read_budget,
 };
 
 use crate::{ClaudeDecodeContext, ClaudeStreamDecoder};
@@ -51,42 +51,17 @@ impl ClaudeTranscriptReplay {
         };
         let revision = TranscriptRevision::capture(&path)?;
         let projection_key = claude_projection_key(request);
-        if page.cursor.is_none() {
-            let tail = self.read_tail_drafts(
-                &path,
-                request,
-                tail_read_budget(page.limit.unwrap_or_default()),
-            )?;
-            revision.verify(&path)?;
-            let (drafts, older_records_exist, deferred) = match tail {
-                Some((drafts, older_records_exist)) => (drafts, older_records_exist, false),
-                None => (Vec::new(), true, true),
-            };
-            let replay = TranscriptReplay {
-                transcript_path: path,
-                revision,
-                projection_key: projection_key.clone(),
-                events: sequence_replay_drafts(&projection_key, drafts),
-            };
-            return if deferred || (replay.events.is_empty() && older_records_exist) {
-                replay.deferred_tail_page().map(Some)
-            } else {
-                replay.page_tail(page, older_records_exist).map(Some)
-            };
-        }
-        if let Some(cached) = claude_replay_cache().page(&path, &revision, &projection_key, page)? {
-            return Ok(Some(cached));
-        }
         let normalized_path = path.clone();
         let normalized_revision = revision.clone();
-        let replay = claude_replay_cache().get_or_try_insert_with(
-            &path,
-            &revision,
+        load_transcript_page(
+            page,
+            claude_replay_cache(),
+            path,
+            revision,
             &projection_key,
+            || self.read_tail(request, tail_read_budget(page.limit.unwrap_or_default())),
             || self.normalize(normalized_path, normalized_revision, request),
-        )?;
-        claude_replay_cache().retain_window_for_page(&replay, page.cursor.as_deref())?;
-        replay.page(page).map(Some)
+        )
     }
 
     fn normalize(
@@ -181,66 +156,7 @@ impl ClaudeTranscriptReplay {
             }
             let source = offset.saturating_add(1);
             offset = offset.saturating_add(read as u64);
-            let line = std::str::from_utf8(&bytes).map_err(|error| {
-                HarnessError::Operation(format!(
-                    "malformed UTF-8 in Claude transcript {} at byte {}: {error}",
-                    path.display(),
-                    source - 1
-                ))
-            })?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let value: Value = serde_json::from_str(line).map_err(|error| {
-                HarnessError::Operation(format!(
-                    "malformed Claude transcript {} at byte {}: {error}",
-                    path.display(),
-                    source - 1
-                ))
-            })?;
-            let timestamp = record_timestamp(&value);
-            let replay_user_text = (value.get("type").and_then(Value::as_str) == Some("user")
-                && value.get("isMeta").and_then(Value::as_bool) != Some(true)
-                && value.get("isCompactSummary").and_then(Value::as_bool) != Some(true))
-            .then(|| user_text(&value))
-            .flatten();
-            let mut line_drafts = decoder
-                .decode_value_at_sequence(value, timestamp, source)
-                .map_err(|error| HarnessError::Operation(error.to_string()))?;
-            if let Some(text) = replay_user_text {
-                // Claude's live runtime emits the human input before the
-                // provider's echoed `user` record. Preserve that order in
-                // replay while letting the shared decoder handle tools,
-                // tool results, and child-thread lineage.
-                line_drafts.insert(0, decoder.replay_user_input_draft(text, timestamp));
-            }
-            drafts.extend(line_drafts);
-        }
-        drafts.extend(decoder.unresolved_diagnostics());
-        Ok(drafts)
-    }
-
-    fn read_tail_drafts(
-        &self,
-        path: &Path,
-        request: &TranscriptReplayRequest,
-        budget: usize,
-    ) -> Result<Option<(Vec<HarnessEventDraftV1>, bool)>, HarnessError> {
-        let (lines, older_records_exist) = read_tail_lines(path, budget)?;
-        let mut decoder = ClaudeStreamDecoder::new(ClaudeDecodeContext::interactive(
-            SessionId::new(request.provider_resume_id.as_str()),
-            request.stream_id.clone(),
-        ));
-        decoder.context_mut().provider_resume_id = Some(request.provider_resume_id.clone());
-        let locator = ProviderThreadRef::new(path.to_string_lossy());
-        decoder
-            .resolve_root_locator(locator.clone())
-            .map_err(|error| HarnessError::Operation(error.to_string()))?;
-        if older_records_exist {
-            decoder.prepare_bounded_replay_tail(locator);
-        }
-        let mut drafts = Vec::new();
-        for (source, line) in lines {
+            let line = String::from_utf8_lossy(&bytes).into_owned();
             if line.trim().is_empty() {
                 continue;
             }
@@ -251,25 +167,69 @@ impl ClaudeTranscriptReplay {
                     source - 1
                 ))
             })?;
-            if older_records_exist && !claude_tail_record_is_context_free(&value) {
-                return Ok(None);
-            }
-            let timestamp = record_timestamp(&value);
-            let replay_user_text = (value.get("type").and_then(Value::as_str) == Some("user")
-                && value.get("isMeta").and_then(Value::as_bool) != Some(true)
-                && value.get("isCompactSummary").and_then(Value::as_bool) != Some(true))
-            .then(|| user_text(&value))
-            .flatten();
-            let mut line_drafts = decoder
-                .decode_value_at_sequence(value, timestamp, source)
-                .map_err(|error| HarnessError::Operation(error.to_string()))?;
-            if let Some(text) = replay_user_text {
-                line_drafts.insert(0, decoder.replay_user_input_draft(text, timestamp));
-            }
-            drafts.extend(line_drafts);
+            decode_claude_line(&mut decoder, value, source, &mut drafts);
         }
         drafts.extend(decoder.unresolved_diagnostics());
-        Ok(Some((drafts, older_records_exist)))
+        Ok(drafts)
+    }
+
+    /// Decode a bounded tail window for a cold newest page. A record that
+    /// needs context outside the window (subagent lineage, tool pairing)
+    /// defers the whole page to the full-normalization path instead of
+    /// producing a misleading partial projection.
+    fn read_tail(
+        &self,
+        request: &TranscriptReplayRequest,
+        budget: usize,
+    ) -> Result<TailReadOutcome, HarnessError> {
+        let Some(path) = self.discover(request)? else {
+            return Ok(TailReadOutcome {
+                drafts: Vec::new(),
+                older_records_exist: false,
+                bytes_read: 0,
+            });
+        };
+        let tail = TranscriptTailLines::read(&path, budget, "Claude")?;
+        let deferred = || TailReadOutcome {
+            drafts: Vec::new(),
+            older_records_exist: true,
+            bytes_read: tail.bytes_read,
+        };
+        let mut decoder = ClaudeStreamDecoder::new(ClaudeDecodeContext::interactive(
+            SessionId::new(request.provider_resume_id.as_str()),
+            request.stream_id.clone(),
+        ));
+        decoder.context_mut().provider_resume_id = Some(request.provider_resume_id.clone());
+        let locator = ProviderThreadRef::new(path.to_string_lossy());
+        decoder
+            .resolve_root_locator(locator.clone())
+            .map_err(|error| HarnessError::Operation(error.to_string()))?;
+        if tail.older_records_exist {
+            decoder.prepare_bounded_replay_tail(locator);
+        }
+        let mut drafts = Vec::new();
+        for (source, line) in &tail.lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let value: Value = serde_json::from_str(line).map_err(|error| {
+                HarnessError::Operation(format!(
+                    "malformed Claude transcript {} at byte {}: {error}",
+                    path.display(),
+                    source - 1
+                ))
+            })?;
+            if tail.older_records_exist && !claude_tail_record_is_context_free(&value) {
+                return Ok(deferred());
+            }
+            decode_claude_line(&mut decoder, value, *source, &mut drafts);
+        }
+        drafts.extend(decoder.unresolved_diagnostics());
+        Ok(TailReadOutcome {
+            drafts,
+            older_records_exist: tail.older_records_exist,
+            bytes_read: tail.bytes_read,
+        })
     }
 }
 
@@ -290,6 +250,30 @@ impl TranscriptReplayAdapter for ClaudeTranscriptReplay {
     }
 }
 
+/// Decode one Claude record into drafts: the shared decoder owns tools, tool
+/// results, and child-thread lineage; replay re-inserts the human input before
+/// the provider's echoed `user` record to preserve live-runtime order.
+fn decode_claude_line(
+    decoder: &mut ClaudeStreamDecoder,
+    value: Value,
+    source: u64,
+    drafts: &mut Vec<HarnessEventDraftV1>,
+) {
+    let timestamp = record_timestamp(&value);
+    let replay_user_text = (value.get("type").and_then(Value::as_str) == Some("user")
+        && value.get("isMeta").and_then(Value::as_bool) != Some(true)
+        && value.get("isCompactSummary").and_then(Value::as_bool) != Some(true))
+    .then(|| user_text(&value))
+    .flatten();
+    let mut line_drafts = decoder
+        .decode_value_at_sequence(value, timestamp, source)
+        .unwrap_or_default();
+    if let Some(text) = replay_user_text {
+        line_drafts.insert(0, decoder.replay_user_input_draft(text, timestamp));
+    }
+    drafts.extend(line_drafts);
+}
+
 const NORMALIZED_REPLAY_CACHE_CAPACITY: usize = 8;
 
 fn claude_replay_cache() -> &'static TranscriptReplayCache {
@@ -305,72 +289,6 @@ fn claude_projection_key(request: &TranscriptReplayRequest) -> String {
         request.project_path,
         request.created_at
     )
-}
-
-const MIN_TAIL_READ_BYTES: usize = 64 * 1024;
-const MAX_TAIL_READ_BYTES: usize = 1024 * 1024;
-
-fn tail_read_budget(limit: usize) -> usize {
-    limit
-        .max(1)
-        .saturating_mul(2 * 1024)
-        .clamp(MIN_TAIL_READ_BYTES, MAX_TAIL_READ_BYTES)
-}
-
-fn read_captured_tail(reader: impl Read, captured_len: usize) -> io::Result<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(captured_len);
-    reader.take(captured_len as u64).read_to_end(&mut bytes)?;
-    Ok(bytes)
-}
-
-fn read_tail_lines(path: &Path, budget: usize) -> Result<(Vec<(u64, String)>, bool), HarnessError> {
-    let mut file = File::open(path).map_err(|error| {
-        HarnessError::Operation(format!(
-            "failed to open Claude transcript {}: {error}",
-            path.display()
-        ))
-    })?;
-    let len = file
-        .metadata()
-        .map_err(|error| HarnessError::Operation(error.to_string()))?
-        .len();
-    let start = len.saturating_sub(budget as u64);
-    file.seek(SeekFrom::Start(start))
-        .map_err(|error| HarnessError::Operation(error.to_string()))?;
-    let bytes = read_captured_tail(file, (len - start) as usize)
-        .map_err(|error| HarnessError::Operation(error.to_string()))?;
-    let discard = if start > 0 {
-        bytes
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(bytes.len(), |index| index + 1)
-    } else {
-        0
-    };
-    let first_offset = start.saturating_add(discard as u64);
-    let text = std::str::from_utf8(&bytes[discard..]).map_err(|error| {
-        HarnessError::Operation(format!(
-            "malformed UTF-8 in Claude transcript {} tail: {error}",
-            path.display()
-        ))
-    })?;
-    let mut offset = first_offset;
-    let lines: Vec<_> = text
-        .split_inclusive('\n')
-        .map(|line| {
-            let source = offset.saturating_add(1);
-            offset = offset.saturating_add(line.len() as u64);
-            (source, line.to_owned())
-        })
-        .collect();
-    #[cfg(test)]
-    LAST_TAIL_WORK.with(|work| work.set((bytes.len(), lines.len())));
-    Ok((lines, first_offset > 0))
-}
-
-#[cfg(test)]
-thread_local! {
-    static LAST_TAIL_WORK: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
 }
 
 fn record_timestamp(value: &Value) -> DateTime<Utc> {
@@ -498,12 +416,6 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn captured_tail_reader_does_not_follow_appended_bytes() {
-        let bytes = read_captured_tail(std::io::Cursor::new(b"snapshot-appended"), 8).unwrap();
-        assert_eq!(bytes, b"snapshot");
-    }
-
     fn assert_stable_events_equal(actual: &[HarnessEventV1], expected: &[HarnessEventV1]) {
         assert_eq!(actual.len(), expected.len());
         for (actual, expected) in actual.iter().zip(expected) {
@@ -553,13 +465,27 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        let (bytes_read, lines_decoded) = LAST_TAIL_WORK.with(std::cell::Cell::get);
-
         assert_eq!(page.events.len(), 10);
         assert!(page.has_more);
-        assert!(bytes_read <= tail_read_budget(10));
-        assert!(bytes_read < fs::metadata(transcript).unwrap().len() as usize / 10);
-        assert!(lines_decoded < 1_000);
+        let tail = adapter
+            .read_tail(
+                &TranscriptReplayRequest {
+                    provider_resume_id: ProviderResumeId::new("long-claude"),
+                    stream_id: StreamId::new("replay/long-claude"),
+                    project_path: Some(PathBuf::from("/workspace/long-claude")),
+                    created_at: None,
+                },
+                tail_read_budget(10),
+            )
+            .unwrap();
+        assert!(tail.bytes_read <= tail_read_budget(10));
+        assert!(
+            tail.bytes_read < fs::metadata(&transcript).unwrap().len() as usize / 10,
+            "cold tail read {} bytes of a {} byte transcript",
+            tail.bytes_read,
+            fs::metadata(&transcript).unwrap().len()
+        );
+        assert!(tail.drafts.len() < 1_000);
         assert!(matches!(
             &page.events.last().unwrap().payload,
             HarnessEventPayloadV1::Text(text) if text.text == "message-19999"
@@ -672,10 +598,8 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        let (bytes_read, _) = LAST_TAIL_WORK.with(std::cell::Cell::get);
         assert!(head.events.is_empty());
         assert!(head.has_more);
-        assert!(bytes_read <= tail_read_budget(10));
 
         let newest = adapter
             .replay_page(
