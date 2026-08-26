@@ -421,6 +421,89 @@ async fn gui_should_show_element_with_test_id_within(
         .await;
 }
 
+#[then(
+    expr = "the GUI should show exactly {int} elements with test id {string} within {int} seconds"
+)]
+async fn gui_should_show_exactly_elements_with_test_id_within(
+    world: &mut GuiWorld,
+    expected_count: u64,
+    test_id: String,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let locator = Locator::Css(&format!("[data-testid=\"{}\"]", test_id));
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
+
+    loop {
+        if let Ok(elements) = client.find_all(locator).await {
+            if elements.len() as u64 == expected_count {
+                world
+                    .screenshot(&client, &format!("after-assert-count-testid-{test_id}"))
+                    .await;
+                return;
+            }
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            world
+                .screenshot(&client, &format!("fail-assert-count-testid-{test_id}"))
+                .await;
+            let actual_count = client
+                .find_all(locator)
+                .await
+                .map(|elements| elements.len())
+                .unwrap_or(usize::MAX);
+            panic!(
+                "expected exactly {} GUI elements with test id '{}' within {} seconds, found {}",
+                expected_count, test_id, timeout, actual_count
+            );
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+}
+
+#[when("I configure the mock local chat reply with a link to the current task")]
+async fn configure_mock_local_chat_reply_with_task_link(world: &mut GuiWorld) {
+    let task_id = world
+        .task_id
+        .as_deref()
+        .expect("no current task ID stored")
+        .to_string();
+    let response = format!("Open [the linked task](vtb://task/{task_id})");
+    std::fs::write(gui_acceptance::MOCK_CHAT_RESPONSE_FILE, response)
+        .expect("write mock local chat response");
+}
+
+#[when("I configure the mock local chat reply with a link to the current workflow")]
+async fn configure_mock_local_chat_reply_with_workflow_link(world: &mut GuiWorld) {
+    let workflow_id = world
+        .workflow_id
+        .as_deref()
+        .expect("no current workflow ID stored")
+        .to_string();
+    let response = format!("Open [the linked workflow](vtb://workflow/{workflow_id})");
+    std::fs::write(gui_acceptance::MOCK_CHAT_RESPONSE_FILE, response)
+        .expect("write mock local chat response");
+}
+
+#[when("I configure the mock local chat reply with a link to the current step")]
+async fn configure_mock_local_chat_reply_with_step_link(world: &mut GuiWorld) {
+    let step_id = world
+        .step_id
+        .as_deref()
+        .expect("no current step ID stored")
+        .to_string();
+    let response = format!("Open [the linked step](vtb://step/{step_id})");
+    std::fs::write(gui_acceptance::MOCK_CHAT_RESPONSE_FILE, response)
+        .expect("write mock local chat response");
+}
+
 #[then("the artifact preview has no composer")]
 async fn artifact_preview_has_no_composer(world: &mut GuiWorld) {
     let wd = world

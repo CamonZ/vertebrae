@@ -30,7 +30,7 @@ import { commands, type PipelineSummary } from "../../bindings";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { CloseIcon, IconButton, PlayIcon, StopIcon } from "../panels";
 import { Glyph, IdChip } from "../shared/HearthPrimitives";
-import { TaskDetailPanel } from "../TaskDetail";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import { useRunConsoleTasks } from "./hooks/useRunConsoleTasks";
 import { useActiveTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { useTaskLocation } from "../../hooks/useTaskLocation";
@@ -196,7 +196,10 @@ export function RunConsole({ summary }: RunConsoleProps) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<ConsoleTab>("ready");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
+  const openTask = useEntityPanelStore((state) => state.openTask);
+  const selectedTaskId = useEntityPanelStore((state) =>
+    state.selection?.type === "task" ? state.selection.taskId : null
+  );
   const [now, setNow] = useState(() => Date.now());
 
   // Horizontal resize. Left-docked, so a drag on the RIGHT edge widens the panel
@@ -373,11 +376,11 @@ export function RunConsole({ summary }: RunConsoleProps) {
                   row={row}
                   tab={tab}
                   summary={summary}
-                  selected={selected === row.task.id}
+                  selected={selectedTaskId === row.task.id}
                   now={now}
                   onRun={onRun}
                   onStop={onStop}
-                  onSelect={setSelected}
+                  onSelect={openTask}
                 />
               ))
             )}
@@ -437,15 +440,6 @@ export function RunConsole({ summary }: RunConsoleProps) {
           ) : null}
         </button>
       )}
-
-      {selected ? (
-        <TaskDetailPanel
-          key={selected}
-          taskId={selected}
-          onClose={() => setSelected(null)}
-          onTaskSelect={setSelected}
-        />
-      ) : null}
     </>
   );
 }

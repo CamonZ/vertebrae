@@ -10,10 +10,10 @@ import { useTasks } from "../hooks/useTasks";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowTransitions } from "../hooks/useWorkflowTransitions";
 import { useShellHeader } from "../hooks/useShellHeader";
-import { TaskDetailPanel } from "../components/TaskDetail";
 import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
 import { SearchInput } from "../components/molecules/SearchInput";
 import { Select } from "../components/atoms/Select";
+import { useEntityPanelStore } from "../stores/entityPanelStore";
 
 const UNASSIGNED_COLUMN = "Unassigned";
 
@@ -170,7 +170,10 @@ function matchesTaskSearch(task: Task, normalizedSearch: string): boolean {
 }
 
 export function BoardPage() {
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const openTask = useEntityPanelStore((state) => state.openTask);
+  const selectedTaskId = useEntityPanelStore((state) =>
+    state.selection?.type === "task" ? state.selection.taskId : null
+  );
   const [levelFilter, setLevelFilter] = useState<TaskLevel | "">("");
   const [search, setSearch] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -211,13 +214,12 @@ export function BoardPage() {
   } = useWorkflows();
   const { transitions } = useWorkflowTransitions();
 
-  const handleTaskSelect = useCallback((task: Task) => {
-    setSelectedTaskId(task.id);
-  }, []);
-
-  const handleClosePanel = useCallback(() => {
-    setSelectedTaskId(null);
-  }, []);
+  const handleTaskSelect = useCallback(
+    (task: Task) => {
+      openTask(task.id);
+    },
+    [openTask]
+  );
 
   const handleLevelChange = (event: ChangeEvent<HTMLSelectElement>) => {
     setLevelFilter(event.target.value as TaskLevel | "");
@@ -455,13 +457,6 @@ export function BoardPage() {
           )}
         </div>
       </div>
-
-      {/* Task detail side panel */}
-      <TaskDetailPanel
-        taskId={selectedTaskId}
-        onClose={handleClosePanel}
-        onTaskSelect={setSelectedTaskId}
-      />
     </div>
   );
 }

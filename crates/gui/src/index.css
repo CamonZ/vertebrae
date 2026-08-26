@@ -2378,7 +2378,9 @@ html.light ::selection {
   position: fixed;
   right: var(--s-3);
   bottom: 22px;
-  z-index: 40;
+  /* Keep the launcher actionable above entity detail panels. It remains below
+     the open chat surface (z-index: 70), which hides the launcher anyway. */
+  z-index: 60;
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);

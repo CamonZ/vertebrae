@@ -10,6 +10,7 @@ import type {
 } from "../../bindings";
 import { RunConsole } from "./RunConsole";
 import { queryClient } from "../../query";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
 
 /* ── mocks ─────────────────────────────────────────────────────────
    The task feed and the heavyweight TaskDetailPanel are stubbed so the test
@@ -37,12 +38,6 @@ vi.mock("../../hooks/useTaskRuns", () => ({
       )
     ),
   }),
-}));
-
-vi.mock("../TaskDetail", () => ({
-  TaskDetailPanel: ({ taskId }: { taskId: string | null }) => (
-    <div data-testid="task-detail-panel">{taskId}</div>
-  ),
 }));
 
 // Hoisted so the `vi.mock` factory (which is itself hoisted) can reference them.
@@ -160,6 +155,7 @@ function renderConsole() {
 afterEach(() => {
   vi.clearAllMocks();
   mockTasks.mockReturnValue([]);
+  useEntityPanelStore.getState().reset();
 });
 
 /* ── tests ─────────────────────────────────────────────────────── */
@@ -224,15 +220,16 @@ describe("RunConsole", () => {
     expect(runWorkflow).toHaveBeenCalledExactlyOnceWith("ready-aaaa", null);
   });
 
-  it("opens the task detail panel on row click", () => {
+  it("opens the canonical task detail selection on row click", () => {
     mockTasks.mockReturnValue([READY]);
     renderConsole();
     openConsole();
 
     fireEvent.click(screen.getByText("Ready task"));
-    expect(screen.getByTestId("task-detail-panel")).toHaveTextContent(
-      "ready-aaaa"
-    );
+    expect(useEntityPanelStore.getState().selection).toEqual({
+      type: "task",
+      taskId: "ready-aaaa",
+    });
   });
 
   it("collapses on Escape via the shared glass-panel focus stack", () => {

@@ -8,6 +8,11 @@ pub const WEBDRIVER_URL: &str = "http://localhost:4444";
 /// Path to the built Tauri app binary (debug build inside Docker).
 pub const GUI_BINARY: &str = "/app/target/debug/gui";
 
+/// Shared fixture path used by the mock Claude process for per-scenario local
+/// chat responses. The mock output directory is inherited by GUI child
+/// processes, so responses can contain IDs created during the scenario.
+pub const MOCK_CHAT_RESPONSE_FILE: &str = "/mocks/gui-acceptance-chat-response.txt";
+
 /// Base URL for the Tauri app inside WebDriver.
 ///
 /// On Linux (WebKitGTK), Tauri v2 serves assets at `http://tauri.localhost`.
@@ -57,6 +62,10 @@ pub async fn webdriver() -> Arc<Mutex<Client>> {
             app_env.insert(
                 "MOCK_OUTPUT_DIR".to_string(),
                 serde_json::Value::String(mock_output_dir),
+            );
+            app_env.insert(
+                "MOCK_STDIN_ASSISTANT_MESSAGE_FILE".to_string(),
+                serde_json::Value::String(MOCK_CHAT_RESPONSE_FILE.to_string()),
             );
             if let Ok(vtb_gate_path) = std::env::var("VTB_GATE_PATH") {
                 app_env.insert(

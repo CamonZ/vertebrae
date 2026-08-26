@@ -340,6 +340,7 @@ async fn main() {
             // `@multi_project` provisions a second project for switcher tests.
             let multi_project = is_multi_project(feature, scenario);
             Box::pin(async move {
+                let _ = std::fs::remove_file(gui_acceptance::MOCK_CHAT_RESPONSE_FILE);
                 world.feature_slug = slugify(&feature_name);
                 world.scenario_slug = slugify(&scenario_name);
                 steps::setup::before_scenario(world, &scenario_name, first_run, multi_project)
@@ -358,6 +359,7 @@ async fn main() {
                 .map(|w| w.scenario_name.clone())
                 .unwrap_or_default();
             Box::pin(async move {
+                let _ = std::fs::remove_file(gui_acceptance::MOCK_CHAT_RESPONSE_FILE);
                 // Rename the screenshot folder to include the outcome prefix.
                 let safe_name = gui_acceptance::sanitize_name(&scenario_name);
                 if !safe_name.is_empty() {

@@ -184,84 +184,109 @@ fn has_arg_value(args: &[String], flag: &str, value: &str) -> bool {
 }
 
 fn run_stdin_stream_json() -> ExitCode {
-    let mut first_message = String::new();
-    match std::io::stdin().lock().read_line(&mut first_message) {
-        Ok(0) => return ExitCode::from(0),
-        Ok(_) => {}
-        Err(err) => {
-            eprintln!("mock-claude: failed to read stdin stream-json: {err}");
-            return ExitCode::from(1);
-        }
-    }
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let mut initialized = false;
 
-    let session_id = session_id_from_input(&first_message)
-        .or_else(|| std::env::var("VTB_CLAUDE_SESSION_ID").ok())
-        .unwrap_or_else(|| "mock-gui-session".to_string());
-    let response = std::env::var("MOCK_STDIN_ASSISTANT_MESSAGE")
-        .unwrap_or_else(|_| "local-chat-acceptance reply".to_string());
-    let (first_delta, second_delta) = response
-        .split_once(' ')
-        .map(|(first, rest)| (format!("{first} "), rest.to_string()))
-        .unwrap_or_else(|| (response.clone(), String::new()));
-
-    write_json_line(serde_json::json!({
-        "type": "system",
-        "subtype": "init",
-        "session_id": "conv-gui-local",
-        "model": "claude-sonnet-4",
-        "tools": []
-    }));
-    write_json_line(serde_json::json!({
-        "type": "content_block_delta",
-        "delta": {
-            "type": "text_delta",
-            "text": first_delta
+    // Claude's stream-json process is persistent: it reads one user turn,
+    // emits that turn's events, and waits for the next line. Keeping the mock
+    // alive mirrors that lifecycle and prevents a successful turn from being
+    // followed by a misleading "stdout closed" session error.
+    loop {
+        let mut message = String::new();
+        match input.read_line(&mut message) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(err) => {
+                eprintln!("mock-claude: failed to read stdin stream-json: {err}");
+                return ExitCode::from(1);
+            }
         }
-    }));
-    if !second_delta.is_empty() {
-        std::thread::sleep(Duration::from_millis(25));
+        let session_id = session_id_from_input(&message)
+            .or_else(|| std::env::var("VTB_CLAUDE_SESSION_ID").ok())
+            .unwrap_or_else(|| "mock-gui-session".to_string());
+        let response = std::env::var("MOCK_STDIN_ASSISTANT_MESSAGE_FILE")
+            .ok()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .map(|message| message.trim_end().to_string())
+            .filter(|message| !message.is_empty())
+            .or_else(|| {
+                let output_dir = std::env::var_os("MOCK_OUTPUT_DIR")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("/mocks"));
+                std::fs::read_to_string(output_dir.join("gui-acceptance-chat-response.txt")).ok()
+            })
+            .map(|message| message.trim_end().to_string())
+            .filter(|message| !message.is_empty())
+            .or_else(|| std::env::var("MOCK_STDIN_ASSISTANT_MESSAGE").ok())
+            .unwrap_or_else(|| "local-chat-acceptance reply".to_string());
+        let (first_delta, second_delta) = response
+            .split_once(' ')
+            .map(|(first, rest)| (format!("{first} "), rest.to_string()))
+            .unwrap_or_else(|| (response.clone(), String::new()));
+
+        if !initialized {
+            write_json_line(serde_json::json!({
+                "type": "system",
+                "subtype": "init",
+                "session_id": "conv-gui-local",
+                "model": "claude-sonnet-4",
+                "tools": []
+            }));
+            initialized = true;
+        }
         write_json_line(serde_json::json!({
             "type": "content_block_delta",
             "delta": {
                 "type": "text_delta",
-                "text": second_delta
+                "text": first_delta
+            }
+        }));
+        if !second_delta.is_empty() {
+            std::thread::sleep(Duration::from_millis(25));
+            write_json_line(serde_json::json!({
+                "type": "content_block_delta",
+                "delta": {
+                    "type": "text_delta",
+                    "text": second_delta
+                }
+            }));
+        }
+        write_json_line(serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "model": "claude-sonnet-4",
+                "usage": {
+                    "input_tokens": 42,
+                    "output_tokens": 7
+                },
+                "content": [
+                    {
+                        "type": "text",
+                        "text": response
+                    }
+                ]
+            }
+        }));
+        write_json_line(serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "session_id": session_id,
+            "duration_ms": 25,
+            "total_cost_usd": 0.0,
+            "is_error": false,
+            "result": "done",
+            "num_turns": 1,
+            "modelUsage": {
+                "claude-sonnet-4": {
+                    "inputTokens": 42,
+                    "outputTokens": 7,
+                    "contextWindow": 200000
+                }
             }
         }));
     }
-    write_json_line(serde_json::json!({
-        "type": "assistant",
-        "message": {
-            "role": "assistant",
-            "model": "claude-sonnet-4",
-            "usage": {
-                "input_tokens": 42,
-                "output_tokens": 7
-            },
-            "content": [
-                {
-                    "type": "text",
-                    "text": response
-                }
-            ]
-        }
-    }));
-    write_json_line(serde_json::json!({
-        "type": "result",
-        "subtype": "success",
-        "session_id": session_id,
-        "duration_ms": 25,
-        "total_cost_usd": 0.0,
-        "is_error": false,
-        "result": "done",
-        "num_turns": 1,
-        "modelUsage": {
-            "claude-sonnet-4": {
-                "inputTokens": 42,
-                "outputTokens": 7,
-                "contextWindow": 200000
-            }
-        }
-    }));
 
     ExitCode::from(0)
 }

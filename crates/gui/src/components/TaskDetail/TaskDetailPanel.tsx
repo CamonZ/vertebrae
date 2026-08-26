@@ -174,7 +174,15 @@ export function TaskDetailPanel({
     selectedArtifactId != null,
     180
   );
-  useEffect(() => setSelectedArtifactId(null), [taskId]);
+  useEffect(() => {
+    setSelectedArtifactId(null);
+    lastSelectedArtifact.current = null;
+  }, [taskId]);
+  useEffect(() => {
+    if (!closing) return;
+    setSelectedArtifactId(null);
+    lastSelectedArtifact.current = null;
+  }, [closing]);
   useEffect(() => {
     if (selectedArtifactId && !selectedArtifact) setSelectedArtifactId(null);
   }, [selectedArtifact, selectedArtifactId]);
