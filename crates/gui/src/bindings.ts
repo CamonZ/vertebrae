@@ -86,7 +86,8 @@ export const commands = {
     }
   },
   /**
-   * Adopt an existing legacy development backend without initializing a project.
+   * Adopt an existing legacy development backend without selecting or
+   * initializing a project.
    */
   async adoptLocalBackend(
     confirmed: boolean
@@ -95,42 +96,6 @@ export const commands = {
       return {
         status: "ok",
         data: await TAURI_INVOKE("adopt_local_backend", { confirmed }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  async checkLocalBackendUpdate(): Promise<
-    Result<LocalBackendUpdateStatus, CommandError>
-  > {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("check_local_backend_update"),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  async applyApprovedLocalBackendUpdate(
-    approved: boolean,
-    channel: string,
-    version: string,
-    build: string,
-    imageRef: string
-  ): Promise<Result<LocalBackendUpdateResult, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("apply_approved_local_backend_update", {
-          approved,
-          channel,
-          version,
-          build,
-          imageRef,
-        }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;
@@ -1867,31 +1832,50 @@ export type LoadLocalChatSessionReplayInput = {
   provider_resume_id: string | null;
   project_path: string | null;
   created_at: string | null;
+  /**
+   * Opaque cursor returned by the previous (newer) replay page.
+   */
+  cursor: string | null;
+  /**
+   * Requested normalized event count; the harness applies a safe maximum.
+   */
+  limit: number | null;
 };
 export type LoadLocalChatSessionReplayOutput = {
   /**
    * Each entry is one serialized, normalized HarnessEventV1 JSON object.
    */
   events: string[];
+  cache_key: string | null;
+  next_cursor: string | null;
+  has_more: boolean;
 };
-export type LocalBackendProgressEvent = {
-  stage: LocalBackendProgressStage;
-  message: string;
-};
-export type LocalBackendProgressStage =
-  "pulling" | "migrating" | "health" | "seeding";
-export type LocalBackendSetupResult = {
-  status: LocalBackendSetupStatus;
-  backend_url: string | null;
-  adoption_message: string | null;
-};
-export type LocalBackendSetupStatus = "ready" | "adoption_required";
 export type LocalBackendAdoptionResult = {
   status: LocalBackendAdoptionStatus;
   backend_url: string | null;
   adoption_message: string | null;
 };
 export type LocalBackendAdoptionStatus = "ready" | "adoption_required";
+export type LocalBackendProgressEvent = {
+  stage: LocalBackendProgressStage;
+  message: string;
+};
+export type LocalBackendProgressStage =
+  | "pulling"
+  | "migrating"
+  | "health"
+  | "seeding";
+export type LocalBackendSetupResult = {
+  status: LocalBackendSetupStatus;
+  backend_url: string | null;
+  adoption_message: string | null;
+};
+export type LocalBackendSetupStatus = "ready" | "adoption_required";
+export type LocalBackendUpdateDiagnostic = {
+  code: string;
+  retryable: boolean;
+  message: string;
+};
 export type LocalBackendUpdateRelease = {
   channel: string;
   version: string;
@@ -1918,11 +1902,6 @@ export type LocalBackendUpdateStatus = {
   available: boolean;
   adoption_message: string | null;
   diagnostic: LocalBackendUpdateDiagnostic | null;
-};
-export type LocalBackendUpdateDiagnostic = {
-  code: string;
-  retryable: boolean;
-  message: string;
 };
 export type LocalChatCompactionEvent = {
   backend_session_id: string;
@@ -1975,11 +1954,6 @@ export type LocalChatModelOption = {
   supported_reasoning_effort_ids?: string[] | null;
   supported_speed_tier_ids?: string[] | null;
   supports_personality?: boolean | null;
-};
-export type LocalChatSpeedTierOption = {
-  id: string;
-  label: string;
-  is_default?: boolean;
 };
 export type LocalChatPermissionModeOption = {
   id: PermissionMode;
@@ -2057,13 +2031,6 @@ export type LocalChatSessionInitEvent = {
   tools: string[];
   speed_tier_status?: LocalChatSpeedTierStatus | null;
 };
-export type LocalChatSpeedTierStatus = {
-  requested: string | null;
-  active: string | null;
-  eligible: boolean;
-  available: boolean;
-  diagnostic: string | null;
-};
 export type LocalChatSessionUsageEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
@@ -2086,6 +2053,18 @@ export type LocalChatSessionWarningEvent = {
   thread_id?: string | null;
   is_root?: boolean;
   warning: string;
+};
+export type LocalChatSpeedTierOption = {
+  id: string;
+  label: string;
+  is_default?: boolean;
+};
+export type LocalChatSpeedTierStatus = {
+  requested: string | null;
+  active: string | null;
+  eligible: boolean;
+  available: boolean;
+  diagnostic: string | null;
 };
 export type LocalChatTextEvent = {
   backend_session_id: string;
@@ -2237,7 +2216,10 @@ export type ResolvePermissionRequestError = {
   message: string;
 };
 export type ResolvePermissionRequestErrorKind =
-  "unavailable" | "not_found" | "invalid" | "internal";
+  | "unavailable"
+  | "not_found"
+  | "invalid"
+  | "internal";
 export type ResolvePermissionRequestInput = {
   request_id: string;
   behavior: PermissionDecisionBehavior;
@@ -2445,7 +2427,9 @@ export type Step = {
    * Agent configuration for this step
    */
   agent_config?: AgentConfig;
-  /** Step type mirrored from core::StepType. */
+  /**
+   * Step type mirrored from core::StepType.
+   */
   step_type?: StepType;
   /**
    * JSON Schema describing the expected output of this step
@@ -2606,7 +2590,10 @@ export type StepExecutionChangedEvent = {
  * Status of a step execution (mirrors db::ExecutionStatus for frontend)
  */
 export type StepExecutionStatus =
-  "Pending" | "Running" | "Completed" | "Failed";
+  | "Pending"
+  | "Running"
+  | "Completed"
+  | "Failed";
 /**
  * The type of change that occurred on a step transition.
  */
@@ -2755,7 +2742,10 @@ export type Task = {
  * The type of change that occurred on a task.
  */
 export type TaskChangeType =
-  "Created" | "Updated" | "Deleted" | "StatusChanged";
+  | "Created"
+  | "Updated"
+  | "Deleted"
+  | "StatusChanged";
 /**
  * Event payload for task changes.
  * Emitted when a task is created, updated, deleted, or its status changes.
@@ -2856,7 +2846,7 @@ export type TaskRun = {
    */
   status: TaskRunStatus;
   /**
-   * Effective maximum concurrent step attempts for the root TaskRun tree.
+   * Effective maximum concurrent step attempts for the root TaskRun tree
    */
   max_concurrency: number | null;
   /**
@@ -3014,7 +3004,8 @@ export type UpdateComponentState =
   | "failed";
 /**
  * Options for updating a workflow step.
- * Only fields that are Some will be updated.
+ * Only fields that are Some will be updated. `clear_output_schema` explicitly
+ * removes an existing schema when no replacement value is supplied.
  */
 export type UpdateStepOptions = {
   step_id: string;
@@ -3291,7 +3282,8 @@ type __EventObj__<T> = {
 };
 
 export type Result<T, E> =
-  { status: "ok"; data: T } | { status: "error"; error: E };
+  | { status: "ok"; data: T }
+  | { status: "error"; error: E };
 
 function __makeEvents__<T extends Record<string, any>>(
   mappings: Record<keyof T, string>

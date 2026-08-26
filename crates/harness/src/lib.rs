@@ -24,7 +24,7 @@ use vertebrae_harness_codex::{
 };
 use vertebrae_harness_core::{
     HarnessError, HarnessRuntime, ProviderThreadRef, RequestConfig, SessionId, TranscriptReplay,
-    TranscriptReplayRequest,
+    TranscriptReplayPage, TranscriptReplayPageRequest, TranscriptReplayRequest,
 };
 
 /// Construction inputs owned by the surface or deployment environment.
@@ -125,6 +125,24 @@ impl HarnessRuntimeFactory {
             Provider::Openai => {
                 CodexTranscriptReplay::new(self.config.transcript_home_dir.clone()).replay(request)
             }
+        }
+    }
+
+    /// Discover and load one page of a durable provider transcript while
+    /// keeping provider-specific indexing and decoding inside its adapter.
+    pub fn replay_transcript_page(
+        &self,
+        provider: Provider,
+        request: &TranscriptReplayRequest,
+        page: &TranscriptReplayPageRequest,
+    ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        match provider {
+            Provider::Anthropic => {
+                ClaudeTranscriptReplay::new(self.config.transcript_home_dir.clone())
+                    .replay_page(request, page)
+            }
+            Provider::Openai => CodexTranscriptReplay::new(self.config.transcript_home_dir.clone())
+                .replay_page(request, page),
         }
     }
 

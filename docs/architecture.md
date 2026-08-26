@@ -167,6 +167,31 @@ Provider transcript files are discovered and parsed only by their individual
 harness crates; the GUI receives normalized V1 events through
 `HarnessRuntimeFactory`.
 
+Durable replay is paged newest-first at the provider-neutral boundary. Each
+page retains chronological event order and returns an opaque cursor for the
+next older page. The cursor binds its event boundary to a transcript revision
+(path, byte length, and modification time), adapter normalizer version, and
+replay stream, so a changed transcript or projection invalidates an outstanding
+cursor instead of combining events from different revisions.
+Prepending pages reconstructs the same ordered normalized event stream as full
+replay. Cold newest-page requests read a bounded JSONL tail in the provider
+adapter; stable source-position sequences and deterministic replay event IDs
+make that page identical to a later full normalization. Older-page requests
+may populate a revision-keyed normalized cache that is bounded by entries,
+events, and serialized bytes. Provider paths, JSONL formats, indexing, and
+decoding remain adapter-owned.
+
+The shared paging machinery lives in `harness-core/src/replay/` as focused
+modules: `cursor.rs` (cursor codec), `revision.rs` (transcript revision
+identity), `tail.rs` (bounded JSONL tail reads), `cache.rs` (bounded LRU plus
+single-flight loading), and `mod.rs` (the page contract and the
+`load_transcript_page` driver that adapters delegate to). An adapter supplies
+only discovery, its projection key, a bounded tail decoder, and a full
+normalizer; every branching decision — cold tail, cache hit, deferred
+normalization — lives in the one shared driver. Codex keeps its rollout record
+parsing in `harness-codex/src/rollout.rs`; the GUI keeps replay bookkeeping
+in `gui/src/stores/providerReplay.ts` beside the chat store.
+
 ### Adding a provider
 
 1. Add the variant to `Provider` in `crates/core/src/model_catalog.rs` and its

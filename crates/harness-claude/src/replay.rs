@@ -1,14 +1,17 @@
 use std::{
     fs::{self, File},
     io::{BufRead, BufReader},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
-use chrono::{DateTime, Utc};
 use serde_json::Value;
 use vertebrae_harness_core::{
-    EventSequencer, HarnessError, HarnessEventDraftV1, ProviderThreadRef, SessionId,
-    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayRequest,
+    HarnessError, HarnessEventDraftV1, ProviderThreadRef, SessionId, TailReadOutcome,
+    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayCache, TranscriptReplayPage,
+    TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision, TranscriptTailLines,
+    load_transcript_page, record_timestamp, safe_filename, sequence_replay_drafts,
+    tail_read_budget, validated_file,
 };
 
 use crate::{ClaudeDecodeContext, ClaudeStreamDecoder};
@@ -34,12 +37,48 @@ impl ClaudeTranscriptReplay {
         let Some(path) = self.discover(request)? else {
             return Ok(None);
         };
+        let revision = TranscriptRevision::capture(&path)?;
+        Ok(Some(self.normalize(path, revision, request)?))
+    }
+
+    pub fn replay_page(
+        &self,
+        request: &TranscriptReplayRequest,
+        page: &TranscriptReplayPageRequest,
+    ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        let Some(path) = self.discover(request)? else {
+            return Ok(None);
+        };
+        let revision = TranscriptRevision::capture(&path)?;
+        let projection_key = claude_projection_key(request);
+        let normalized_path = path.clone();
+        let normalized_revision = revision.clone();
+        load_transcript_page(
+            page,
+            claude_replay_cache(),
+            path,
+            revision,
+            &projection_key,
+            || self.read_tail(request, tail_read_budget(page.limit.unwrap_or_default())),
+            || self.normalize(normalized_path, normalized_revision, request),
+        )
+    }
+
+    fn normalize(
+        &self,
+        path: PathBuf,
+        revision: TranscriptRevision,
+        request: &TranscriptReplayRequest,
+    ) -> Result<TranscriptReplay, HarnessError> {
         let drafts = self.read_drafts(&path, request)?;
-        let sequencer = EventSequencer::default();
-        Ok(Some(TranscriptReplay {
+        revision.verify(&path)?;
+        let projection_key = claude_projection_key(request);
+        Ok(TranscriptReplay {
             transcript_path: path,
-            events: sequencer.sequence_drafts(drafts),
-        }))
+            revision,
+            projection_key: projection_key.clone(),
+            events: sequence_replay_drafts(&projection_key, drafts),
+        })
     }
 
     pub fn discover(
@@ -100,44 +139,97 @@ impl ClaudeTranscriptReplay {
             .resolve_root_locator(ProviderThreadRef::new(path.to_string_lossy()))
             .map_err(|error| HarnessError::Operation(error.to_string()))?;
 
+        let mut reader = BufReader::new(file);
         let mut drafts = Vec::new();
-        for (line_number, line) in BufReader::new(file).lines().enumerate() {
-            let line = line.map_err(|error| {
+        let mut offset = 0_u64;
+        let mut bytes = Vec::new();
+        loop {
+            bytes.clear();
+            let read = reader.read_until(b'\n', &mut bytes).map_err(|error| {
                 HarnessError::Operation(format!(
-                    "failed to read Claude transcript {} at line {}: {error}",
-                    path.display(),
-                    line_number + 1
+                    "failed to read Claude transcript {} at byte {offset}: {error}",
+                    path.display()
                 ))
             })?;
+            if read == 0 {
+                break;
+            }
+            let source = offset.saturating_add(1);
+            offset = offset.saturating_add(read as u64);
+            let line = String::from_utf8_lossy(&bytes).into_owned();
             if line.trim().is_empty() {
                 continue;
             }
             let value: Value = serde_json::from_str(&line).map_err(|error| {
                 HarnessError::Operation(format!(
-                    "malformed Claude transcript {} at line {}: {error}",
+                    "malformed Claude transcript {} at byte {}: {error}",
                     path.display(),
-                    line_number + 1
+                    source - 1
                 ))
             })?;
-            let timestamp = record_timestamp(&value);
-            let mut line_drafts = decoder
-                .decode_line_at(&line, timestamp)
-                .map_err(|error| HarnessError::Operation(error.to_string()))?;
-            if value.get("type").and_then(Value::as_str) == Some("user")
-                && value.get("isMeta").and_then(Value::as_bool) != Some(true)
-                && value.get("isCompactSummary").and_then(Value::as_bool) != Some(true)
-                && let Some(text) = user_text(&value)
-            {
-                // Claude's live runtime emits the human input before the
-                // provider's echoed `user` record. Preserve that order in
-                // replay while letting the shared decoder handle tools,
-                // tool results, and child-thread lineage.
-                line_drafts.insert(0, decoder.replay_user_input_draft(text, timestamp));
-            }
-            drafts.extend(line_drafts);
+            decode_claude_line(&mut decoder, value, source, &mut drafts);
         }
         drafts.extend(decoder.unresolved_diagnostics());
         Ok(drafts)
+    }
+
+    /// Decode a bounded tail window for a cold newest page. A record that
+    /// needs context outside the window (subagent lineage, tool pairing)
+    /// defers the whole page to the full-normalization path instead of
+    /// producing a misleading partial projection.
+    fn read_tail(
+        &self,
+        request: &TranscriptReplayRequest,
+        budget: usize,
+    ) -> Result<TailReadOutcome, HarnessError> {
+        let Some(path) = self.discover(request)? else {
+            return Ok(TailReadOutcome {
+                drafts: Vec::new(),
+                older_records_exist: false,
+                bytes_read: 0,
+            });
+        };
+        let tail = TranscriptTailLines::read(&path, budget, "Claude")?;
+        let deferred = || TailReadOutcome {
+            drafts: Vec::new(),
+            older_records_exist: true,
+            bytes_read: tail.bytes_read,
+        };
+        let mut decoder = ClaudeStreamDecoder::new(ClaudeDecodeContext::interactive(
+            SessionId::new(request.provider_resume_id.as_str()),
+            request.stream_id.clone(),
+        ));
+        decoder.context_mut().provider_resume_id = Some(request.provider_resume_id.clone());
+        let locator = ProviderThreadRef::new(path.to_string_lossy());
+        decoder
+            .resolve_root_locator(locator.clone())
+            .map_err(|error| HarnessError::Operation(error.to_string()))?;
+        if tail.older_records_exist {
+            decoder.prepare_bounded_replay_tail(locator);
+        }
+        let mut drafts = Vec::new();
+        for (source, line) in &tail.lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let value: Value = serde_json::from_str(line).map_err(|error| {
+                HarnessError::Operation(format!(
+                    "malformed Claude transcript {} at byte {}: {error}",
+                    path.display(),
+                    source - 1
+                ))
+            })?;
+            if tail.older_records_exist && !claude_tail_record_is_context_free(&value) {
+                return Ok(deferred());
+            }
+            decode_claude_line(&mut decoder, value, *source, &mut drafts);
+        }
+        drafts.extend(decoder.unresolved_diagnostics());
+        Ok(TailReadOutcome {
+            drafts,
+            older_records_exist: tail.older_records_exist,
+            bytes_read: tail.bytes_read,
+        })
     }
 }
 
@@ -148,15 +240,55 @@ impl TranscriptReplayAdapter for ClaudeTranscriptReplay {
     ) -> Result<Option<TranscriptReplay>, HarnessError> {
         self.replay(request)
     }
+
+    fn replay_page(
+        &self,
+        request: &TranscriptReplayRequest,
+        page: &TranscriptReplayPageRequest,
+    ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        self.replay_page(request, page)
+    }
 }
 
-fn record_timestamp(value: &Value) -> DateTime<Utc> {
-    value
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.with_timezone(&Utc))
-        .unwrap_or_else(Utc::now)
+/// Decode one Claude record into drafts: the shared decoder owns tools, tool
+/// results, and child-thread lineage; replay re-inserts the human input before
+/// the provider's echoed `user` record to preserve live-runtime order.
+fn decode_claude_line(
+    decoder: &mut ClaudeStreamDecoder,
+    value: Value,
+    source: u64,
+    drafts: &mut Vec<HarnessEventDraftV1>,
+) {
+    let timestamp = record_timestamp(&value);
+    let replay_user_text = (value.get("type").and_then(Value::as_str) == Some("user")
+        && value.get("isMeta").and_then(Value::as_bool) != Some(true)
+        && value.get("isCompactSummary").and_then(Value::as_bool) != Some(true))
+    .then(|| user_text(&value))
+    .flatten();
+    let mut line_drafts = decoder
+        .decode_value_at_sequence(value, timestamp, source)
+        .unwrap_or_default();
+    if let Some(text) = replay_user_text {
+        line_drafts.insert(0, decoder.replay_user_input_draft(text, timestamp));
+    }
+    drafts.extend(line_drafts);
+}
+
+const NORMALIZED_REPLAY_CACHE_CAPACITY: usize = 8;
+
+fn claude_replay_cache() -> &'static TranscriptReplayCache {
+    static CACHE: OnceLock<TranscriptReplayCache> = OnceLock::new();
+    CACHE.get_or_init(|| TranscriptReplayCache::new(NORMALIZED_REPLAY_CACHE_CAPACITY))
+}
+
+fn claude_projection_key(request: &TranscriptReplayRequest) -> String {
+    format!(
+        "claude-v2:resume={:?}:stream={:?}:project={:?}:created={:?}",
+        request.provider_resume_id.as_str(),
+        request.stream_id.as_str(),
+        request.project_path,
+        request.created_at
+    )
 }
 
 fn user_text(value: &Value) -> Option<String> {
@@ -178,6 +310,38 @@ fn user_text(value: &Value) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
+fn claude_tail_record_is_context_free(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if object.contains_key("agent_id")
+        || object.contains_key("agentId")
+        || object.contains_key("parent_tool_use_id")
+    {
+        return false;
+    }
+    let Some(kind) = object.get("type").and_then(Value::as_str) else {
+        return false;
+    };
+    if !matches!(kind, "assistant" | "user") {
+        return false;
+    }
+    let Some(content) = value.pointer("/message/content") else {
+        return false;
+    };
+    if content.is_string() {
+        return kind == "user";
+    }
+    content.as_array().is_some_and(|blocks| {
+        blocks.iter().all(|block| {
+            block
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|block_type| matches!(block_type, "text" | "thinking"))
+        })
+    })
+}
+
 fn claude_project_dir_name(project_path: &Path) -> String {
     project_path
         .to_string_lossy()
@@ -190,24 +354,6 @@ fn claude_project_dir_name(project_path: &Path) -> String {
             }
         })
         .collect()
-}
-
-fn safe_filename(value: &str) -> bool {
-    !value.is_empty()
-        && Path::new(value)
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-}
-
-fn validated_file(root: &Path, candidate: &Path) -> Option<PathBuf> {
-    if !candidate.is_file() {
-        return None;
-    }
-    let canonical_root = fs::canonicalize(root).ok()?;
-    let canonical_candidate = fs::canonicalize(candidate).ok()?;
-    canonical_candidate
-        .starts_with(canonical_root)
-        .then_some(canonical_candidate)
 }
 
 fn find_jsonl_by_stem(root: &Path, stem: &str) -> std::io::Result<Option<PathBuf>> {
@@ -234,13 +380,221 @@ fn find_jsonl_by_stem(root: &Path, stem: &str) -> std::io::Result<Option<PathBuf
 mod tests {
     use std::fs;
 
+    use chrono::DateTime;
     use tempfile::tempdir;
     use vertebrae_harness_core::{
-        CompactionState, HarnessEventPayloadV1, HarnessProjection, ProviderResumeId, StreamId,
-        ToolCallId, ToolStatus, TranscriptReplayRequest, UpdateSemantics,
+        CompactionState, HarnessEventPayloadV1, HarnessEventV1, HarnessProjection,
+        ProviderResumeId, StreamId, ToolCallId, ToolStatus, TranscriptReplayRequest,
+        UpdateSemantics,
     };
 
     use super::*;
+
+    fn assert_stable_events_equal(actual: &[HarnessEventV1], expected: &[HarnessEventV1]) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(actual.event_id, expected.event_id);
+            assert_eq!(actual.stream_id, expected.stream_id);
+            assert_eq!(actual.sequence, expected.sequence);
+            assert_eq!(actual.correlation, expected.correlation);
+            assert_eq!(actual.timestamp, expected.timestamp);
+            assert_eq!(actual.semantics, expected.semantics);
+            assert_eq!(actual.provider_sequence, expected.provider_sequence);
+            assert_eq!(actual.payload, expected.payload);
+        }
+    }
+
+    #[test]
+    fn cold_newest_page_reads_and_decodes_only_a_bounded_tail() {
+        let home = tempdir().unwrap();
+        let project = PathBuf::from("/workspace/long-claude");
+        let directory = home
+            .path()
+            .join(".claude/projects")
+            .join(claude_project_dir_name(&project));
+        fs::create_dir_all(&directory).unwrap();
+        let transcript = directory.join("long-claude.jsonl");
+        let mut body = String::from(
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"long-claude\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n",
+        );
+        for index in 0..20_000 {
+            body.push_str(&format!(
+                "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"message-{index}\"}}]}},\"timestamp\":\"2026-01-01T00:00:00Z\"}}\n"
+            ));
+        }
+        fs::write(&transcript, body).unwrap();
+        let adapter = ClaudeTranscriptReplay::new(Some(home.path().to_path_buf()));
+        let page = adapter
+            .replay_page(
+                &TranscriptReplayRequest {
+                    provider_resume_id: ProviderResumeId::new("long-claude"),
+                    stream_id: StreamId::new("replay/long-claude"),
+                    project_path: Some(project),
+                    created_at: None,
+                },
+                &TranscriptReplayPageRequest {
+                    cursor: None,
+                    limit: Some(10),
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.events.len(), 10);
+        assert!(page.has_more);
+        let tail = adapter
+            .read_tail(
+                &TranscriptReplayRequest {
+                    provider_resume_id: ProviderResumeId::new("long-claude"),
+                    stream_id: StreamId::new("replay/long-claude"),
+                    project_path: Some(PathBuf::from("/workspace/long-claude")),
+                    created_at: None,
+                },
+                tail_read_budget(10),
+            )
+            .unwrap();
+        assert!(tail.bytes_read <= tail_read_budget(10));
+        assert!(
+            tail.bytes_read < fs::metadata(&transcript).unwrap().len() as usize / 10,
+            "cold tail read {} bytes of a {} byte transcript",
+            tail.bytes_read,
+            fs::metadata(&transcript).unwrap().len()
+        );
+        assert!(tail.drafts.len() < 1_000);
+        assert!(matches!(
+            &page.events.last().unwrap().payload,
+            HarnessEventPayloadV1::Text(text) if text.text == "message-19999"
+        ));
+        let older = adapter
+            .replay_page(
+                &TranscriptReplayRequest {
+                    provider_resume_id: ProviderResumeId::new("long-claude"),
+                    stream_id: StreamId::new("replay/long-claude"),
+                    project_path: Some(PathBuf::from("/workspace/long-claude")),
+                    created_at: None,
+                },
+                &TranscriptReplayPageRequest {
+                    cursor: page.next_cursor.clone(),
+                    limit: Some(10),
+                },
+            )
+            .unwrap()
+            .unwrap();
+        let full = adapter
+            .replay(&TranscriptReplayRequest {
+                provider_resume_id: ProviderResumeId::new("long-claude"),
+                stream_id: StreamId::new("replay/long-claude"),
+                project_path: Some(PathBuf::from("/workspace/long-claude")),
+                created_at: None,
+            })
+            .unwrap()
+            .unwrap();
+        let reconstructed = older
+            .events
+            .iter()
+            .chain(&page.events)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_stable_events_equal(
+            &reconstructed,
+            &full.events[full.events.len() - reconstructed.len()..],
+        );
+    }
+
+    #[test]
+    fn projection_identity_includes_every_replay_request_input() {
+        let base = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("resume-a"),
+            stream_id: StreamId::new("stream-a"),
+            project_path: Some(PathBuf::from("/project/a")),
+            created_at: Some("2026-01-01".into()),
+        };
+        let mut variants = Vec::new();
+        variants.push(TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("resume-b"),
+            ..base.clone()
+        });
+        variants.push(TranscriptReplayRequest {
+            stream_id: StreamId::new("stream-b"),
+            ..base.clone()
+        });
+        variants.push(TranscriptReplayRequest {
+            project_path: Some(PathBuf::from("/project/b")),
+            ..base.clone()
+        });
+        variants.push(TranscriptReplayRequest {
+            created_at: Some("2026-01-02".into()),
+            ..base.clone()
+        });
+        for variant in variants {
+            assert_ne!(
+                claude_projection_key(&base),
+                claude_projection_key(&variant)
+            );
+        }
+    }
+
+    #[test]
+    fn bounded_tail_defers_when_subagent_lineage_is_outside_the_window() {
+        let home = tempdir().unwrap();
+        let project = PathBuf::from("/workspace/lineage-tail");
+        let directory = home
+            .path()
+            .join(".claude/projects")
+            .join(claude_project_dir_name(&project));
+        fs::create_dir_all(&directory).unwrap();
+        let transcript = directory.join("lineage-tail.jsonl");
+        let mut body = String::from(concat!(
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"lineage-tail\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"spawn\",\"name\":\"Task\",\"input\":{\"prompt\":\"research\"}}]},\"timestamp\":\"2026-01-01T00:00:01Z\"}\n"
+        ));
+        for index in 0..10_000 {
+            body.push_str(&format!(
+                "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"padding-{index}\"}}]}},\"timestamp\":\"2026-01-01T00:00:02Z\"}}\n"
+            ));
+        }
+        body.push_str("{\"type\":\"assistant\",\"agent_id\":\"child\",\"parent_tool_use_id\":\"spawn\",\"transcript_path\":\"subagents/child.jsonl\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"child newest\"}]},\"timestamp\":\"2026-01-01T00:00:03Z\"}\n");
+        fs::write(&transcript, body).unwrap();
+        let adapter = ClaudeTranscriptReplay::new(Some(home.path().to_path_buf()));
+        let request = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("lineage-tail"),
+            stream_id: StreamId::new("replay/lineage-tail"),
+            project_path: Some(project),
+            created_at: None,
+        };
+
+        let head = adapter
+            .replay_page(
+                &request,
+                &TranscriptReplayPageRequest {
+                    cursor: None,
+                    limit: Some(10),
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert!(head.events.is_empty());
+        assert!(head.has_more);
+
+        let newest = adapter
+            .replay_page(
+                &request,
+                &TranscriptReplayPageRequest {
+                    cursor: head.next_cursor,
+                    limit: Some(10),
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert!(newest.events.iter().any(|event| {
+            matches!(&event.payload, HarnessEventPayloadV1::Text(text) if text.text == "child newest")
+                && event.correlation.thread_id.as_ref().is_some_and(|id| id.as_str() == "child")
+        }));
+        assert!(newest.events.iter().all(|event| !matches!(
+            &event.payload,
+            HarnessEventPayloadV1::Warning(warning)
+                if warning.code.as_deref() == Some("claude_unresolved_agent")
+        )));
+    }
 
     #[test]
     fn discovers_project_transcript_and_replays_human_and_assistant_events() {
@@ -257,20 +611,19 @@ mod tests {
             concat!(
                 "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"session-1\",\"model\":\"sonnet\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n",
                 "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]},\"timestamp\":\"2026-01-01T00:00:01Z\"}\n",
-                "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]},\"timestamp\":\"2026-01-01T00:00:02Z\"}\n"
+                "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]},\"timestamp\":\"invalid\"}\n"
             ),
         )
         .unwrap();
 
-        let replay = ClaudeTranscriptReplay::new(Some(home.path().to_path_buf()))
-            .replay(&TranscriptReplayRequest {
-                provider_resume_id: ProviderResumeId::new("session-1"),
-                stream_id: StreamId::new("replay/session-1"),
-                project_path: Some(project),
-                created_at: None,
-            })
-            .unwrap()
-            .unwrap();
+        let adapter = ClaudeTranscriptReplay::new(Some(home.path().to_path_buf()));
+        let request = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("session-1"),
+            stream_id: StreamId::new("replay/session-1"),
+            project_path: Some(project),
+            created_at: None,
+        };
+        let replay = adapter.replay(&request).unwrap().unwrap();
 
         assert_eq!(
             replay.transcript_path,
@@ -284,6 +637,31 @@ mod tests {
             event.payload,
             HarnessEventPayloadV1::Text(ref text) if text.text == "hi"
         )));
+        assert!(replay.events.iter().any(|event| {
+            matches!(event.payload, HarnessEventPayloadV1::Text(ref text) if text.text == "hi")
+                && event.timestamp == DateTime::UNIX_EPOCH
+        }));
+
+        let mut cursor = None;
+        let mut paged = Vec::new();
+        loop {
+            let page = adapter
+                .replay_page(
+                    &request,
+                    &TranscriptReplayPageRequest {
+                        cursor,
+                        limit: Some(2),
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            paged.splice(0..0, page.events);
+            if !page.has_more {
+                break;
+            }
+            cursor = page.next_cursor;
+        }
+        assert_stable_events_equal(&paged, &replay.events);
     }
 
     #[test]
@@ -356,7 +734,7 @@ mod tests {
 
         let mut projection = HarnessProjection::new(16);
         for event in replay.events.clone() {
-            projection.ingest(event).unwrap();
+            projection.ingest_replay(event).unwrap();
         }
         let tool = &projection
             .stream(&StreamId::new("replay/progress"))

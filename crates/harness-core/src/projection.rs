@@ -367,6 +367,26 @@ impl HarnessProjection {
         Ok(update)
     }
 
+    /// Ingest a durable replay event in adapter-provided chronological order.
+    /// Replay source positions may be sparse; this explicit entry point keeps
+    /// normal live-stream gap detection strict.
+    pub fn ingest_replay(
+        &mut self,
+        event: HarnessEventV1,
+    ) -> Result<ProjectionUpdate, ProjectionError> {
+        let mut update = ProjectionUpdate::default();
+        if self.seen_event_ids.insert(event.event_id.clone()) {
+            self.apply(event, &mut update);
+        } else {
+            update
+                .diagnostics
+                .push(ProjectionDiagnostic::DuplicateEventIgnored {
+                    event_id: event.event_id,
+                });
+        }
+        Ok(update)
+    }
+
     fn validate_event_identity(
         &self,
         event: &HarnessEventV1,

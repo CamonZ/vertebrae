@@ -5,6 +5,7 @@ mod launcher;
 mod models;
 mod protocol;
 mod replay;
+mod rollout;
 mod runtime;
 
 pub use config::*;

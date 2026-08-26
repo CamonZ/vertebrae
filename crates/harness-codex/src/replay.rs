@@ -1,20 +1,17 @@
 use std::{
-    collections::HashSet,
-    fs::{self, File},
-    io::{BufRead, BufReader},
-    path::{Component, Path, PathBuf},
+    fs,
+    path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
-use chrono::{DateTime, NaiveDate, Utc};
-use serde_json::{Map, Value, json};
+use chrono::NaiveDate;
 use vertebrae_harness_core::{
-    AgentMetadata, EventCorrelation, EventSequencer, FileChange, FileChangeEvent, FileChangeKind,
-    HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, PlanEntry, PlanEvent,
-    ProviderResumeId, ProviderThreadRef, SessionId, SessionStarted, StreamId, TextEvent,
-    ThreadDeclared, ThreadId, ThreadKind, ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus,
-    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayRequest, TurnInput,
-    TurnInputProvenance, UpdateSemantics,
+    HarnessError, TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayCache,
+    TranscriptReplayPage, TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision,
+    load_transcript_page, safe_filename, sequence_replay_drafts, tail_read_budget, validated_file,
 };
+
+use crate::rollout::{read_rollout, read_rollout_tail};
 
 /// Reader for Codex rollout JSONL files in `~/.codex/sessions` and
 /// `~/.codex/archived_sessions`.
@@ -35,12 +32,50 @@ impl CodexTranscriptReplay {
         let Some(path) = self.discover(request)? else {
             return Ok(None);
         };
+        let revision = TranscriptRevision::capture(&path)?;
+        Ok(Some(self.normalize(path, revision, request)?))
+    }
+
+    pub fn replay_page(
+        &self,
+        request: &TranscriptReplayRequest,
+        page: &TranscriptReplayPageRequest,
+    ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        let Some(path) = self.discover(request)? else {
+            return Ok(None);
+        };
+        let revision = TranscriptRevision::capture(&path)?;
+        let projection_key = codex_projection_key(request);
+        let tail_path = path.clone();
+        let budget = tail_read_budget(page.limit.unwrap_or_default());
+        let normalized_path = path.clone();
+        let normalized_revision = revision.clone();
+        load_transcript_page(
+            page,
+            codex_replay_cache(),
+            path,
+            revision,
+            &projection_key,
+            move || read_rollout_tail(&tail_path, request, budget),
+            || self.normalize(normalized_path, normalized_revision, request),
+        )
+    }
+
+    fn normalize(
+        &self,
+        path: PathBuf,
+        revision: TranscriptRevision,
+        request: &TranscriptReplayRequest,
+    ) -> Result<TranscriptReplay, HarnessError> {
         let drafts = read_rollout(&path, request)?;
-        let sequencer = EventSequencer::default();
-        Ok(Some(TranscriptReplay {
+        revision.verify(&path)?;
+        let projection_key = codex_projection_key(request);
+        Ok(TranscriptReplay {
             transcript_path: path,
-            events: sequencer.sequence_drafts(drafts),
-        }))
+            revision,
+            projection_key: projection_key.clone(),
+            events: sequence_replay_drafts(&projection_key, drafts),
+        })
     }
 
     pub fn discover(
@@ -109,743 +144,35 @@ impl TranscriptReplayAdapter for CodexTranscriptReplay {
     ) -> Result<Option<TranscriptReplay>, HarnessError> {
         self.replay(request)
     }
-}
 
-#[derive(Debug)]
-struct ReplayState {
-    thread_id: ThreadId,
-    provider_resume_id: ProviderResumeId,
-    stream_id: StreamId,
-    emitted_session_start_ids: HashSet<String>,
-    emitted_thread: bool,
-    custom_tool_names: std::collections::HashMap<String, String>,
-}
-
-impl ReplayState {
-    fn new(request: &TranscriptReplayRequest) -> Self {
-        Self {
-            thread_id: ThreadId::new(request.provider_resume_id.as_str()),
-            provider_resume_id: request.provider_resume_id.clone(),
-            stream_id: request.stream_id.clone(),
-            emitted_session_start_ids: HashSet::new(),
-            emitted_thread: false,
-            custom_tool_names: std::collections::HashMap::new(),
-        }
-    }
-
-    fn correlation(&self) -> EventCorrelation {
-        EventCorrelation {
-            session_id: Some(SessionId::new(self.provider_resume_id.as_str())),
-            thread_id: Some(self.thread_id.clone()),
-            provider_resume_id: Some(self.provider_resume_id.clone()),
-            ..Default::default()
-        }
-    }
-
-    fn draft(
+    fn replay_page(
         &self,
-        timestamp: DateTime<Utc>,
-        provider_sequence: u64,
-        payload: HarnessEventPayloadV1,
-    ) -> HarnessEventDraftV1 {
-        HarnessEventDraftV1 {
-            stream_id: self.stream_id.clone(),
-            correlation: self.correlation(),
-            timestamp,
-            semantics: UpdateSemantics::Snapshot,
-            provider_sequence: Some(provider_sequence),
-            payload,
-        }
-    }
-
-    fn start_events(
-        &mut self,
-        timestamp: DateTime<Utc>,
-        provider_sequence: u64,
-        session_id: Option<String>,
-        path: &Path,
-    ) -> Vec<HarnessEventDraftV1> {
-        let session_id = session_id.unwrap_or_else(|| self.provider_resume_id.to_string());
-        if !self.emitted_session_start_ids.insert(session_id) {
-            return Vec::new();
-        }
-        let mut events = vec![self.draft(
-            timestamp,
-            provider_sequence,
-            HarnessEventPayloadV1::SessionStarted(SessionStarted {
-                provider: "openai".into(),
-                model: Some("codex".into()),
-                provider_resume_id: Some(self.provider_resume_id.clone()),
-                speed_tier_status: None,
-                tools: Vec::new(),
-            }),
-        )];
-        if !self.emitted_thread {
-            self.emitted_thread = true;
-            events.push(self.draft(
-                timestamp,
-                provider_sequence,
-                HarnessEventPayloadV1::ThreadDeclared(ThreadDeclared {
-                    thread_id: self.thread_id.clone(),
-                    parent_thread_id: None,
-                    kind: ThreadKind::Root,
-                    caused_by_tool_call_id: None,
-                    provider_thread_ref: Some(ProviderThreadRef::new(path.to_string_lossy())),
-                    agent_metadata: Some(AgentMetadata {
-                        name: Some("codex".into()),
-                        role: None,
-                        model: Some("codex".into()),
-                    }),
-                }),
-            ));
-        }
-        events
+        request: &TranscriptReplayRequest,
+        page: &TranscriptReplayPageRequest,
+    ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        self.replay_page(request, page)
     }
 }
 
-fn read_rollout(
-    path: &Path,
-    request: &TranscriptReplayRequest,
-) -> Result<Vec<HarnessEventDraftV1>, HarnessError> {
-    let file = File::open(path).map_err(|error| {
-        HarnessError::Operation(format!(
-            "failed to open Codex transcript {}: {error}",
-            path.display()
-        ))
-    })?;
-    let mut state = ReplayState::new(request);
-    let mut drafts = Vec::new();
-    let mut first_timestamp = None;
+const NORMALIZED_REPLAY_CACHE_CAPACITY: usize = 8;
 
-    for (line_number, line) in BufReader::new(file).lines().enumerate() {
-        let line = line.map_err(|error| {
-            HarnessError::Operation(format!(
-                "failed to read Codex transcript {} at line {}: {error}",
-                path.display(),
-                line_number + 1
-            ))
-        })?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let raw: Value = serde_json::from_str(&line).map_err(|error| {
-            HarnessError::Operation(format!(
-                "malformed Codex transcript {} at line {}: {error}",
-                path.display(),
-                line_number + 1
-            ))
-        })?;
-        let timestamp = record_timestamp(&raw);
-        first_timestamp.get_or_insert(timestamp);
-        let provider_sequence = (line_number as u64).saturating_add(1);
-        drafts.extend(parse_rollout_line(
-            &raw,
-            timestamp,
-            provider_sequence,
-            &mut state,
-            path,
-        ));
-    }
-
-    if !state.emitted_session_start_ids.is_empty() {
-        return Ok(drafts);
-    }
-    let timestamp = first_timestamp.unwrap_or_else(Utc::now);
-    let mut prefix = state.start_events(timestamp, 0, None, path);
-    prefix.extend(drafts);
-    Ok(prefix)
+fn codex_replay_cache() -> &'static TranscriptReplayCache {
+    static CACHE: OnceLock<TranscriptReplayCache> = OnceLock::new();
+    CACHE.get_or_init(|| TranscriptReplayCache::new(NORMALIZED_REPLAY_CACHE_CAPACITY))
 }
 
-fn parse_rollout_line(
-    raw: &Value,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &mut ReplayState,
-    path: &Path,
-) -> Vec<HarnessEventDraftV1> {
-    let Some(kind) = raw.get("type").and_then(Value::as_str) else {
-        return Vec::new();
-    };
-    match kind {
-        "session_meta" => {
-            let payload = raw.get("payload").and_then(Value::as_object);
-            let id = payload.and_then(|payload| string(payload, "id"));
-            state.start_events(timestamp, provider_sequence, id, path)
-        }
-        "response_item" => parse_response_item(
-            raw.get("payload").and_then(Value::as_object),
-            timestamp,
-            provider_sequence,
-            state,
-        ),
-        "event_msg" => parse_event_msg(
-            raw.get("payload").and_then(Value::as_object),
-            timestamp,
-            provider_sequence,
-            state,
-        ),
-        "thread.started" => state.start_events(
-            timestamp,
-            provider_sequence,
-            raw.get("thread_id")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            path,
-        ),
-        "item.completed" | "item.started" | "item.updated" => {
-            parse_exec_item(raw, timestamp, provider_sequence, state)
-        }
-        "turn.failed" | "error" => {
-            let message = raw
-                .get("message")
-                .and_then(Value::as_str)
-                .or_else(|| raw.pointer("/error/message").and_then(Value::as_str))
-                .unwrap_or("Codex turn failed");
-            vec![state.draft(
-                timestamp,
-                provider_sequence,
-                HarnessEventPayloadV1::Error(vertebrae_harness_core::DiagnosticEvent {
-                    message: message.to_owned(),
-                    code: Some("codex_replay_error".into()),
-                }),
-            )]
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn parse_response_item(
-    payload: Option<&Map<String, Value>>,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &mut ReplayState,
-) -> Vec<HarnessEventDraftV1> {
-    let Some(payload) = payload else {
-        return Vec::new();
-    };
-    let Some(kind) = string(payload, "type") else {
-        return Vec::new();
-    };
-    match kind.as_str() {
-        "message" => {
-            let text = content_text(payload.get("content"));
-            if text.is_empty() {
-                return Vec::new();
-            }
-            match string(payload, "role").as_deref() {
-                Some("user") => vec![state.draft(
-                    timestamp,
-                    provider_sequence,
-                    HarnessEventPayloadV1::TurnInput(TurnInput {
-                        thread_id: state.thread_id.clone(),
-                        run_id: None,
-                        content: text,
-                        provenance: TurnInputProvenance::Human,
-                    }),
-                )],
-                // Codex seeds every rollout with `developer` messages carrying
-                // the sandbox permissions, app, plugin, and skill instructions.
-                // They are provider-injected context, not model output, and
-                // replaying them renders the system prompt as a first turn.
-                Some("developer" | "system") => Vec::new(),
-                _ => vec![state.draft(
-                    timestamp,
-                    provider_sequence,
-                    HarnessEventPayloadV1::Text(TextEvent { text }),
-                )],
-            }
-        }
-        "reasoning" => content_text(payload.get("summary").or_else(|| payload.get("text")))
-            .is_empty()
-            .then(Vec::new)
-            .unwrap_or_else(|| {
-                vec![state.draft(
-                    timestamp,
-                    provider_sequence,
-                    HarnessEventPayloadV1::Reasoning(vertebrae_harness_core::ReasoningEvent {
-                        text: content_text(payload.get("summary").or_else(|| payload.get("text"))),
-                    }),
-                )]
-            }),
-        "function_call" => tool_call_draft(payload, timestamp, provider_sequence, state),
-        "function_call_output" => tool_output_draft(payload, timestamp, provider_sequence, state),
-        "custom_tool_call" => custom_tool_call_draft(payload, timestamp, provider_sequence, state),
-        "custom_tool_call_output" => Vec::new(),
-        _ => Vec::new(),
-    }
-}
-
-fn parse_event_msg(
-    payload: Option<&Map<String, Value>>,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &mut ReplayState,
-) -> Vec<HarnessEventDraftV1> {
-    let Some(payload) = payload else {
-        return Vec::new();
-    };
-    match string(payload, "type").as_deref() {
-        Some("turn_aborted") => vec![state.draft(
-            timestamp,
-            provider_sequence,
-            HarnessEventPayloadV1::Error(vertebrae_harness_core::DiagnosticEvent {
-                message: format!(
-                    "Codex turn aborted: {}",
-                    string(payload, "reason").unwrap_or_else(|| "unknown reason".into())
-                ),
-                code: Some("codex_turn_aborted".into()),
-            }),
-        )],
-        Some("patch_apply_end") => {
-            patch_apply_end_draft(payload, timestamp, provider_sequence, state)
-        }
-        Some("custom_tool_call") => {
-            custom_tool_call_draft(payload, timestamp, provider_sequence, state)
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn parse_exec_item(
-    raw: &Value,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &mut ReplayState,
-) -> Vec<HarnessEventDraftV1> {
-    let Some(item) = raw.get("item").and_then(Value::as_object) else {
-        return Vec::new();
-    };
-    match string(item, "type").as_deref() {
-        Some("agent_message") => string(item, "text")
-            .filter(|text| !text.is_empty())
-            .map(|text| {
-                vec![state.draft(
-                    timestamp,
-                    provider_sequence,
-                    HarnessEventPayloadV1::Text(TextEvent { text }),
-                )]
-            })
-            .unwrap_or_default(),
-        Some("reasoning") => string(item, "text")
-            .filter(|text| !text.is_empty())
-            .map(|text| {
-                vec![state.draft(
-                    timestamp,
-                    provider_sequence,
-                    HarnessEventPayloadV1::Reasoning(vertebrae_harness_core::ReasoningEvent {
-                        text,
-                    }),
-                )]
-            })
-            .unwrap_or_default(),
-        Some("command_execution") => {
-            let tool_id =
-                string(item, "id").unwrap_or_else(|| format!("codex-line-{provider_sequence}"));
-            let command = string(item, "command").unwrap_or_default();
-            vec![
-                state.draft(
-                    timestamp,
-                    provider_sequence,
-                    HarnessEventPayloadV1::ToolCall(ToolCallEvent {
-                        tool_call_id: ToolCallId::new(tool_id.clone()),
-                        name: "Bash".into(),
-                        input: json!({"command": command}),
-                        status: ToolStatus::Started,
-                    }),
-                ),
-                state.draft(
-                    timestamp,
-                    provider_sequence,
-                    HarnessEventPayloadV1::ToolOutput(ToolOutputEvent {
-                        tool_call_id: ToolCallId::new(tool_id),
-                        output: Value::String(
-                            string(item, "aggregated_output").unwrap_or_default(),
-                        ),
-                        status: if item
-                            .get("exit_code")
-                            .and_then(Value::as_i64)
-                            .is_some_and(|code| code != 0)
-                        {
-                            ToolStatus::Failed
-                        } else {
-                            ToolStatus::Completed
-                        },
-                        content_semantics: UpdateSemantics::Snapshot,
-                    }),
-                ),
-            ]
-        }
-        Some("file_change") | Some("fileChange") => {
-            file_change_item(item, timestamp, provider_sequence, state)
-        }
-        Some("todo_list") => todo_list_draft(item, timestamp, provider_sequence, state),
-        _ => Vec::new(),
-    }
-}
-
-fn tool_call_draft(
-    payload: &Map<String, Value>,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &mut ReplayState,
-) -> Vec<HarnessEventDraftV1> {
-    let Some(tool_id) = string(payload, "call_id").or_else(|| string(payload, "id")) else {
-        return Vec::new();
-    };
-    let name = string(payload, "name").unwrap_or_else(|| "tool".into());
-    let input = parse_json_value(payload.get("arguments")).unwrap_or_else(|| json!({}));
-    let input = if name == "exec_command" {
-        let mut input = input;
-        if let Some(command) = input.get("cmd").cloned()
-            && let Some(object) = input.as_object_mut()
-        {
-            object.insert("command".into(), command);
-        }
-        input
-    } else {
-        input
-    };
-    vec![state.draft(
-        timestamp,
-        provider_sequence,
-        HarnessEventPayloadV1::ToolCall(ToolCallEvent {
-            tool_call_id: ToolCallId::new(tool_id),
-            name: if name == "exec_command" {
-                "Bash".into()
-            } else {
-                name
-            },
-            input,
-            status: ToolStatus::Started,
-        }),
-    )]
-}
-
-fn tool_output_draft(
-    payload: &Map<String, Value>,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &mut ReplayState,
-) -> Vec<HarnessEventDraftV1> {
-    let Some(tool_id) = string(payload, "call_id").or_else(|| string(payload, "id")) else {
-        return Vec::new();
-    };
-    let output = payload.get("output").cloned().unwrap_or(Value::Null);
-    let failed = payload
-        .get("exit_code")
-        .and_then(Value::as_i64)
-        .is_some_and(|code| code != 0);
-    vec![state.draft(
-        timestamp,
-        provider_sequence,
-        HarnessEventPayloadV1::ToolOutput(ToolOutputEvent {
-            tool_call_id: ToolCallId::new(tool_id),
-            output,
-            status: if failed {
-                ToolStatus::Failed
-            } else {
-                ToolStatus::Completed
-            },
-            content_semantics: UpdateSemantics::Snapshot,
-        }),
-    )]
-}
-
-fn custom_tool_call_draft(
-    payload: &Map<String, Value>,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &mut ReplayState,
-) -> Vec<HarnessEventDraftV1> {
-    let Some(tool_id) = string(payload, "call_id").or_else(|| string(payload, "id")) else {
-        return Vec::new();
-    };
-    let name = string(payload, "name").unwrap_or_default();
-    state
-        .custom_tool_names
-        .insert(tool_id.clone(), name.clone());
-    if name != "apply_patch" {
-        return Vec::new();
-    }
-    let changes = apply_patch_changes(payload.get("input").or_else(|| payload.get("arguments")));
-    file_change_draft(
-        changes,
-        Some(ToolCallId::new(tool_id)),
-        ToolStatus::Started,
-        timestamp,
-        provider_sequence,
-        state,
+fn codex_projection_key(request: &TranscriptReplayRequest) -> String {
+    format!(
+        "codex-v2:resume={:?}:stream={:?}:project={:?}:created={:?}",
+        request.provider_resume_id.as_str(),
+        request.stream_id.as_str(),
+        request.project_path,
+        request.created_at
     )
-}
-
-fn patch_apply_end_draft(
-    payload: &Map<String, Value>,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &mut ReplayState,
-) -> Vec<HarnessEventDraftV1> {
-    let changes = payload
-        .get("changes")
-        .and_then(Value::as_object)
-        .map(|changes| {
-            changes
-                .iter()
-                .filter_map(|(path, change)| {
-                    let change = change.as_object()?;
-                    Some(FileChange {
-                        path: path.clone(),
-                        kind: file_change_kind(string(change, "type").as_deref()),
-                        previous_path: None,
-                        patch: string(change, "unified_diff").or_else(|| string(change, "content")),
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    file_change_draft(
-        changes,
-        string(payload, "call_id").map(ToolCallId::new),
-        if payload.get("success").and_then(Value::as_bool) == Some(false) {
-            ToolStatus::Failed
-        } else {
-            ToolStatus::Completed
-        },
-        timestamp,
-        provider_sequence,
-        state,
-    )
-}
-
-fn file_change_item(
-    item: &Map<String, Value>,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &mut ReplayState,
-) -> Vec<HarnessEventDraftV1> {
-    let changes = item
-        .get("changes")
-        .and_then(Value::as_array)
-        .map(|changes| {
-            changes
-                .iter()
-                .filter_map(|change| {
-                    let change = change.as_object()?;
-                    Some(FileChange {
-                        path: string(change, "path").unwrap_or_default(),
-                        kind: file_change_kind(string(change, "kind").as_deref()),
-                        previous_path: None,
-                        patch: string(change, "diff"),
-                    })
-                })
-                .filter(|change| !change.path.is_empty())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    file_change_draft(
-        changes,
-        string(item, "id").map(ToolCallId::new),
-        status(string(item, "status").as_deref()),
-        timestamp,
-        provider_sequence,
-        state,
-    )
-}
-
-fn todo_list_draft(
-    item: &Map<String, Value>,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &mut ReplayState,
-) -> Vec<HarnessEventDraftV1> {
-    let Some(id) = string(item, "id") else {
-        return Vec::new();
-    };
-    let entries = item
-        .get("items")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            let entry = entry.as_object()?;
-            Some(PlanEntry {
-                id: string(entry, "id").unwrap_or_else(|| id.clone()),
-                text: string(entry, "text").unwrap_or_default(),
-                status: Some(
-                    if entry.get("completed").and_then(Value::as_bool) == Some(true) {
-                        "completed".into()
-                    } else {
-                        "pending".into()
-                    },
-                ),
-            })
-        })
-        .filter(|entry| !entry.text.is_empty())
-        .collect::<Vec<_>>();
-    if entries.is_empty() {
-        return Vec::new();
-    }
-    vec![state.draft(
-        timestamp,
-        provider_sequence,
-        HarnessEventPayloadV1::Plan(PlanEvent { entries }),
-    )]
-}
-
-fn file_change_draft(
-    changes: Vec<FileChange>,
-    tool_call_id: Option<ToolCallId>,
-    status: ToolStatus,
-    timestamp: DateTime<Utc>,
-    provider_sequence: u64,
-    state: &ReplayState,
-) -> Vec<HarnessEventDraftV1> {
-    if changes.is_empty() {
-        return Vec::new();
-    }
-    vec![state.draft(
-        timestamp,
-        provider_sequence,
-        HarnessEventPayloadV1::FileChange(FileChangeEvent {
-            tool_call_id,
-            changes,
-            status,
-        }),
-    )]
-}
-
-fn apply_patch_changes(input: Option<&Value>) -> Vec<FileChange> {
-    let text = match input {
-        Some(Value::String(text)) => text.clone(),
-        Some(value) => value.to_string(),
-        None => return Vec::new(),
-    };
-    let mut changes = Vec::new();
-    let mut current: Option<FileChange> = None;
-    let mut patch = Vec::new();
-    let finish = |current: &mut Option<FileChange>,
-                  patch: &mut Vec<String>,
-                  changes: &mut Vec<FileChange>| {
-        if let Some(mut change) = current.take() {
-            let diff = patch
-                .iter()
-                .filter(|line| !line.is_empty())
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("\n");
-            if !diff.is_empty() {
-                change.patch = Some(diff);
-            }
-            changes.push(change);
-            patch.clear();
-        }
-    };
-    for line in text.lines() {
-        let parsed = [
-            ("*** Add File: ", FileChangeKind::Added),
-            ("*** Update File: ", FileChangeKind::Modified),
-            ("*** Delete File: ", FileChangeKind::Deleted),
-        ]
-        .iter()
-        .find_map(|(prefix, kind)| line.strip_prefix(prefix).map(|path| (path, *kind)));
-        if let Some((path, kind)) = parsed {
-            finish(&mut current, &mut patch, &mut changes);
-            current = Some(FileChange {
-                path: path.to_owned(),
-                kind,
-                previous_path: None,
-                patch: None,
-            });
-        } else if current.is_some()
-            && (line.starts_with('+') || line.starts_with('-') || line.starts_with("@@"))
-        {
-            patch.push(line.to_owned());
-        }
-    }
-    finish(&mut current, &mut patch, &mut changes);
-    changes
-}
-
-fn content_text(value: Option<&Value>) -> String {
-    match value {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Array(items)) => items
-            .iter()
-            .filter_map(|item| {
-                let item = item.as_object()?;
-                string(item, "text")
-                    .or_else(|| string(item, "input_text"))
-                    .or_else(|| string(item, "output_text"))
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        Some(value) => string(value.as_object().unwrap_or(&Map::new()), "text").unwrap_or_default(),
-        None => String::new(),
-    }
-}
-
-fn parse_json_value(value: Option<&Value>) -> Option<Value> {
-    match value {
-        Some(Value::String(text)) => serde_json::from_str(text)
-            .ok()
-            .or_else(|| Some(json!({"arguments": text}))),
-        Some(value) => Some(value.clone()),
-        None => None,
-    }
-}
-
-fn string(object: &Map<String, Value>, key: &str) -> Option<String> {
-    object.get(key).and_then(Value::as_str).map(str::to_owned)
-}
-
-fn file_change_kind(kind: Option<&str>) -> FileChangeKind {
-    match kind.unwrap_or_default().to_ascii_lowercase().as_str() {
-        "add" | "added" => FileChangeKind::Added,
-        "delete" | "deleted" | "remove" => FileChangeKind::Deleted,
-        "rename" | "renamed" => FileChangeKind::Renamed,
-        _ => FileChangeKind::Modified,
-    }
-}
-
-fn status(value: Option<&str>) -> ToolStatus {
-    match value.unwrap_or_default().to_ascii_lowercase().as_str() {
-        "failed" | "error" => ToolStatus::Failed,
-        "declined" => ToolStatus::Declined,
-        "cancelled" | "canceled" => ToolStatus::Cancelled,
-        "started" => ToolStatus::Started,
-        "running" => ToolStatus::Running,
-        _ => ToolStatus::Completed,
-    }
-}
-
-fn record_timestamp(value: &Value) -> DateTime<Utc> {
-    value
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.with_timezone(&Utc))
-        .unwrap_or_else(Utc::now)
 }
 
 fn parse_date_prefix(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(value.get(..10)?, "%Y-%m-%d").ok()
-}
-
-fn safe_filename(value: &str) -> bool {
-    !value.is_empty()
-        && Path::new(value)
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-}
-
-fn validated_file(root: &Path, candidate: &Path) -> Option<PathBuf> {
-    if !candidate.is_file() {
-        return None;
-    }
-    let canonical_root = fs::canonicalize(root).ok()?;
-    let canonical_candidate = fs::canonicalize(candidate).ok()?;
-    canonical_candidate
-        .starts_with(canonical_root)
-        .then_some(canonical_candidate)
 }
 
 fn find_jsonl_by_id(root: &Path, id: &str) -> std::io::Result<Option<PathBuf>> {
@@ -878,10 +205,195 @@ fn find_jsonl_by_id(root: &Path, id: &str) -> std::io::Result<Option<PathBuf>> {
 mod tests {
     use std::fs;
 
+    use chrono::DateTime;
     use tempfile::tempdir;
-    use vertebrae_harness_core::{HarnessEventPayloadV1, TranscriptReplayRequest};
+    use vertebrae_harness_core::{
+        HarnessEventPayloadV1, HarnessEventV1, ProviderResumeId, StreamId, TranscriptReplayRequest,
+    };
 
     use super::*;
+
+    fn assert_stable_events_equal(actual: &[HarnessEventV1], expected: &[HarnessEventV1]) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(actual.event_id, expected.event_id);
+            assert_eq!(actual.stream_id, expected.stream_id);
+            assert_eq!(actual.sequence, expected.sequence);
+            assert_eq!(actual.correlation, expected.correlation);
+            assert_eq!(actual.timestamp, expected.timestamp);
+            assert_eq!(actual.semantics, expected.semantics);
+            assert_eq!(actual.provider_sequence, expected.provider_sequence);
+            assert_eq!(actual.payload, expected.payload);
+        }
+    }
+
+    #[test]
+    fn cold_newest_page_reads_and_decodes_only_a_bounded_tail() {
+        let home = tempdir().unwrap();
+        let directory = home.path().join(".codex/sessions/2026/01/01");
+        fs::create_dir_all(&directory).unwrap();
+        let transcript = directory.join("rollout-long-codex.jsonl");
+        let mut body = String::new();
+        for index in 0..20_000 {
+            body.push_str(&format!(
+                "{{\"timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"message-{index}\"}}]}}}}\n"
+            ));
+        }
+        fs::write(&transcript, body).unwrap();
+        let adapter = CodexTranscriptReplay::new(Some(home.path().to_path_buf()));
+        let page = adapter
+            .replay_page(
+                &TranscriptReplayRequest {
+                    provider_resume_id: ProviderResumeId::new("long-codex"),
+                    stream_id: StreamId::new("replay/long-codex"),
+                    project_path: None,
+                    created_at: Some("2026-01-01T00:00:00Z".into()),
+                },
+                &TranscriptReplayPageRequest {
+                    cursor: None,
+                    limit: Some(10),
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.events.len(), 10);
+        assert!(page.has_more);
+        let tail = read_rollout_tail(
+            &transcript,
+            &TranscriptReplayRequest {
+                provider_resume_id: ProviderResumeId::new("long-codex"),
+                stream_id: StreamId::new("replay/long-codex"),
+                project_path: None,
+                created_at: Some("2026-01-01T00:00:00Z".into()),
+            },
+            tail_read_budget(10),
+        )
+        .unwrap();
+        assert!(tail.bytes_read <= tail_read_budget(10));
+        assert!(
+            tail.bytes_read < fs::metadata(&transcript).unwrap().len() as usize / 10,
+            "cold tail read {} bytes of a {} byte transcript",
+            tail.bytes_read,
+            fs::metadata(&transcript).unwrap().len()
+        );
+        assert!(tail.drafts.len() < 1_000);
+        assert!(matches!(
+            &page.events.last().unwrap().payload,
+            HarnessEventPayloadV1::Text(text) if text.text == "message-19999"
+        ));
+        let older = adapter
+            .replay_page(
+                &TranscriptReplayRequest {
+                    provider_resume_id: ProviderResumeId::new("long-codex"),
+                    stream_id: StreamId::new("replay/long-codex"),
+                    project_path: None,
+                    created_at: Some("2026-01-01T00:00:00Z".into()),
+                },
+                &TranscriptReplayPageRequest {
+                    cursor: page.next_cursor.clone(),
+                    limit: Some(10),
+                },
+            )
+            .unwrap()
+            .unwrap();
+        let full = adapter
+            .replay(&TranscriptReplayRequest {
+                provider_resume_id: ProviderResumeId::new("long-codex"),
+                stream_id: StreamId::new("replay/long-codex"),
+                project_path: None,
+                created_at: Some("2026-01-01T00:00:00Z".into()),
+            })
+            .unwrap()
+            .unwrap();
+        let reconstructed = older
+            .events
+            .iter()
+            .chain(&page.events)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_stable_events_equal(
+            &reconstructed,
+            &full.events[full.events.len() - reconstructed.len()..],
+        );
+    }
+
+    #[test]
+    fn projection_identity_includes_every_replay_request_input() {
+        let base = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("resume-a"),
+            stream_id: StreamId::new("stream-a"),
+            project_path: Some(PathBuf::from("/project/a")),
+            created_at: Some("2026-01-01".into()),
+        };
+        let variants = [
+            TranscriptReplayRequest {
+                provider_resume_id: ProviderResumeId::new("resume-b"),
+                ..base.clone()
+            },
+            TranscriptReplayRequest {
+                stream_id: StreamId::new("stream-b"),
+                ..base.clone()
+            },
+            TranscriptReplayRequest {
+                project_path: Some(PathBuf::from("/project/b")),
+                ..base.clone()
+            },
+            TranscriptReplayRequest {
+                created_at: Some("2026-01-02".into()),
+                ..base.clone()
+            },
+        ];
+        for variant in variants {
+            assert_ne!(codex_projection_key(&base), codex_projection_key(&variant));
+        }
+    }
+
+    #[test]
+    fn oversized_newest_record_defers_without_unbounded_cold_normalization() {
+        let home = tempdir().unwrap();
+        let directory = home.path().join(".codex/sessions/2026/01/01");
+        fs::create_dir_all(&directory).unwrap();
+        let transcript = directory.join("rollout-oversized-tail.jsonl");
+        let huge = "x".repeat(tail_read_budget(usize::MAX) + 128 * 1024);
+        fs::write(
+            &transcript,
+            format!(
+                "{{\"timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"oversized-tail\"}}}}\n{{\"timestamp\":\"2026-01-01T00:00:01Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{huge}\"}}]}}}}\n"
+            ),
+        )
+        .unwrap();
+        let page = CodexTranscriptReplay::new(Some(home.path().to_path_buf()))
+            .replay_page(
+                &TranscriptReplayRequest {
+                    provider_resume_id: ProviderResumeId::new("oversized-tail"),
+                    stream_id: StreamId::new("replay/oversized-tail"),
+                    project_path: None,
+                    created_at: Some("2026-01-01T00:00:00Z".into()),
+                },
+                &TranscriptReplayPageRequest {
+                    cursor: None,
+                    limit: Some(10),
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert!(page.events.is_empty());
+        assert!(page.has_more);
+        assert!(page.next_cursor.is_some());
+        let tail = read_rollout_tail(
+            &transcript,
+            &TranscriptReplayRequest {
+                provider_resume_id: ProviderResumeId::new("oversized-tail"),
+                stream_id: StreamId::new("replay/oversized-tail"),
+                project_path: None,
+                created_at: Some("2026-01-01T00:00:00Z".into()),
+            },
+            tail_read_budget(10),
+        )
+        .unwrap();
+        assert_eq!(tail.bytes_read, tail_read_budget(10));
+        assert!(tail.drafts.is_empty());
+    }
 
     #[test]
     fn discovers_date_partitioned_rollout_and_replays_core_events() {
@@ -894,19 +406,18 @@ mod tests {
             concat!(
                 "{\"timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"session-1\"}}\n",
                 "{\"timestamp\":\"2026-01-01T00:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"hello\"}]}}\n",
-                "{\"timestamp\":\"2026-01-01T00:00:02Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}}\n"
+                "{\"timestamp\":\"invalid\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}}\n"
             ),
         )
         .unwrap();
-        let replay = CodexTranscriptReplay::new(Some(home.path().to_path_buf()))
-            .replay(&TranscriptReplayRequest {
-                provider_resume_id: ProviderResumeId::new("session-1"),
-                stream_id: StreamId::new("replay/session-1"),
-                project_path: None,
-                created_at: Some("2026-01-01T00:00:00Z".into()),
-            })
-            .unwrap()
-            .unwrap();
+        let adapter = CodexTranscriptReplay::new(Some(home.path().to_path_buf()));
+        let request = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("session-1"),
+            stream_id: StreamId::new("replay/session-1"),
+            project_path: None,
+            created_at: Some("2026-01-01T00:00:00Z".into()),
+        };
+        let replay = adapter.replay(&request).unwrap().unwrap();
         assert_eq!(
             replay.transcript_path,
             fs::canonicalize(transcript).unwrap()
@@ -919,6 +430,131 @@ mod tests {
             event.payload,
             HarnessEventPayloadV1::Text(ref text) if text.text == "hi"
         )));
+        assert!(replay.events.iter().any(|event| {
+            matches!(event.payload, HarnessEventPayloadV1::Text(ref text) if text.text == "hi")
+                && event.timestamp == DateTime::UNIX_EPOCH
+        }));
+
+        let mut cursor = None;
+        let mut paged = Vec::new();
+        loop {
+            let page = adapter
+                .replay_page(
+                    &request,
+                    &TranscriptReplayPageRequest {
+                        cursor,
+                        limit: Some(2),
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            paged.splice(0..0, page.events);
+            if !page.has_more {
+                break;
+            }
+            cursor = page.next_cursor;
+        }
+        assert_stable_events_equal(&paged, &replay.events);
+    }
+
+    #[test]
+    fn empty_transcript_pages_match_full_replay_with_a_stable_timestamp() {
+        let home = tempdir().unwrap();
+        let directory = home.path().join(".codex/sessions/2026/01/01");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("rollout-empty-session.jsonl"), "").unwrap();
+        let adapter = CodexTranscriptReplay::new(Some(home.path().to_path_buf()));
+        let request = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("empty-session"),
+            stream_id: StreamId::new("replay/empty-session"),
+            project_path: None,
+            created_at: Some("2026-01-01T00:00:00Z".into()),
+        };
+
+        let replay = adapter.replay(&request).unwrap().unwrap();
+        let mut cursor = None;
+        let mut paged = Vec::new();
+        loop {
+            let page = adapter
+                .replay_page(
+                    &request,
+                    &TranscriptReplayPageRequest {
+                        cursor,
+                        limit: Some(1),
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            paged.splice(0..0, page.events);
+            if !page.has_more {
+                break;
+            }
+            cursor = page.next_cursor;
+        }
+
+        assert_eq!(replay.events.len(), 2);
+        assert!(
+            replay
+                .events
+                .iter()
+                .all(|event| event.timestamp == DateTime::UNIX_EPOCH)
+        );
+        assert_stable_events_equal(&paged, &replay.events);
+    }
+
+    #[test]
+    fn id_less_file_change_has_stable_identity_across_full_and_paged_replay() {
+        let home = tempdir().unwrap();
+        let directory = home.path().join(".codex/sessions/2026/01/01");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("rollout-file-change.jsonl"),
+            concat!(
+                "{\"timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"file-change\"}}\n",
+                "{\"timestamp\":\"2026-01-01T00:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"patch_apply_end\",\"changes\":{\"src/lib.rs\":{\"type\":\"update\",\"diff\":\"+changed\"}}}}\n"
+            ),
+        )
+        .unwrap();
+        let adapter = CodexTranscriptReplay::new(Some(home.path().to_path_buf()));
+        let request = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("file-change"),
+            stream_id: StreamId::new("replay/file-change"),
+            project_path: None,
+            created_at: Some("2026-01-01T00:00:00Z".into()),
+        };
+
+        let first_full = adapter.replay(&request).unwrap().unwrap();
+        let second_full = adapter.replay(&request).unwrap().unwrap();
+        let page = adapter
+            .replay_page(
+                &request,
+                &TranscriptReplayPageRequest {
+                    cursor: None,
+                    limit: Some(10),
+                },
+            )
+            .unwrap()
+            .unwrap();
+        let full_change = first_full
+            .events
+            .iter()
+            .find(|event| matches!(event.payload, HarnessEventPayloadV1::FileChange(_)))
+            .unwrap();
+        let second_change = second_full
+            .events
+            .iter()
+            .find(|event| matches!(event.payload, HarnessEventPayloadV1::FileChange(_)))
+            .unwrap();
+        let paged_change = page
+            .events
+            .iter()
+            .find(|event| matches!(event.payload, HarnessEventPayloadV1::FileChange(_)))
+            .unwrap();
+
+        assert_eq!(full_change.event_id, second_change.event_id);
+        assert_eq!(full_change.event_id, paged_change.event_id);
+        assert_eq!(full_change.sequence, paged_change.sequence);
+        assert_eq!(full_change.payload, paged_change.payload);
     }
 
     #[test]

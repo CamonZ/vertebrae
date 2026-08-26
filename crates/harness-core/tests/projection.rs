@@ -73,6 +73,33 @@ fn gaps_are_reported_buffered_and_drained_contiguously() {
 }
 
 #[test]
+fn replay_ordering_is_explicit_and_event_id_prefixes_do_not_bypass_live_gaps() {
+    let replay_named_live = text_event("replay-custom", "live", 9, "late");
+    let mut live = HarnessProjection::new(4);
+    let update = live.ingest(replay_named_live.clone()).unwrap();
+    assert!(matches!(
+        update.diagnostics.as_slice(),
+        [ProjectionDiagnostic::GapDetected {
+            expected: 1,
+            received: 9,
+            ..
+        }]
+    ));
+    assert!(live.stream(&StreamId::from("live")).is_none());
+
+    let mut replay = HarnessProjection::new(4);
+    let update = replay.ingest_replay(replay_named_live).unwrap();
+    assert_eq!(
+        update.applied_event_ids,
+        vec![EventId::from("replay-custom")]
+    );
+    assert_eq!(
+        replay.stream(&StreamId::from("live")).unwrap().turns[&TurnId::from("turn-live")].text,
+        "late"
+    );
+}
+
+#[test]
 fn duplicate_ids_are_idempotent_and_timestamps_do_not_order_events() {
     let mut projection = HarnessProjection::new(2);
     let mut first = text_event("same", "s", 1, "one");

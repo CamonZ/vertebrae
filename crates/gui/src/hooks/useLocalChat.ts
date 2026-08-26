@@ -204,7 +204,7 @@ export async function doRegenerateSessionTitle(
   ) => void
 ): Promise<string | null> {
   if (session.titleStatus === "manual") return null;
-  if (session.providerMessagesHydrating) {
+  if (session.providerReplay?.loading === "initial") {
     return "Chat history is still loading. Try again in a moment.";
   }
 
@@ -941,7 +941,7 @@ export function useLocalChat(sessionId: string | null) {
       !session ||
       !sessionId ||
       isTitleRegenerating ||
-      session.providerMessagesHydrating
+      session.providerReplay?.loading === "initial"
     ) {
       return;
     }

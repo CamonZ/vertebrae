@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useChatSession } from "../../hooks/useChatSession";
+import { useChatStore } from "../../stores/chatStore";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
@@ -50,6 +51,9 @@ export function ChatWindow({
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const chat = useChatSession(sessionId);
+  const loadOlderReplayMessages = useChatStore(
+    (state) => state.loadOlderReplayMessages
+  );
 
   // Focus the composer when this chat window is the foreground pane.
   useEffect(() => {
@@ -104,6 +108,15 @@ export function ChatWindow({
         activityLabel={chat.activityLabel}
         compactionSummary={chat.compactionSummary}
         streamingAssistant={chat.streamingAssistant}
+        isLoadingInitialHistory={
+          chat.session.providerReplay?.loading === "initial"
+        }
+        hasOlderMessages={chat.session.providerReplay?.hasMore === true}
+        isLoadingOlderMessages={
+          chat.session.providerReplay?.loading === "older"
+        }
+        replayError={chat.session.providerReplay?.error ?? null}
+        onLoadOlderMessages={() => loadOlderReplayMessages(sessionId)}
       />
       <ChatComposer
         session={chat.session}
