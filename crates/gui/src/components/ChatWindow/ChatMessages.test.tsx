@@ -7,6 +7,7 @@ import type { ChatMessage } from "../../stores/chatStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import { useUIStore } from "../../stores/uiStore";
 import { CHAT_HELP_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
+import { FUTURISTIC_COMPACTING_PHRASES } from "./thinkingPhrases";
 
 const { markdownRenderSpy } = vi.hoisted(() => ({
   markdownRenderSpy: vi.fn(),
@@ -394,6 +395,27 @@ describe("ChatMessages", () => {
       "Compacting conversation…"
     );
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("uses a stable themed compaction phrase for the futuristic indicator", () => {
+    useUIStore.setState({ thinkingIndicatorStyle: "futuristic" });
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const props = defaultProps({
+      isEmpty: false,
+      isWaiting: true,
+      activityLabel: "Compacting conversation…",
+    });
+    const { rerender } = render(<ChatMessages {...props} />);
+    const status = screen.getByRole("status");
+    const phrase = status.textContent;
+
+    expect(FUTURISTIC_COMPACTING_PHRASES).toContain(phrase);
+    expect(phrase).not.toBe("Compacting conversation…");
+
+    random.mockReturnValue(0.99);
+    rerender(<ChatMessages {...props} />);
+    expect(screen.getByRole("status")).toHaveTextContent(phrase ?? "");
+    random.mockRestore();
   });
 
   it("shows completion metadata without adding a transcript message", () => {
