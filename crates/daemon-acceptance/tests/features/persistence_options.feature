@@ -11,6 +11,7 @@ Feature: Structured output persistence options
     And I orchestrate the task
     And I wait for the execution to reach status "completed"
     Then the task artifact "step_result" has body containing "answer"
+    And the task has exactly 1 artifact named "step_result"
 
   Scenario: Schema-invalid output does not create a task artifact
     Given a configured daemon test environment
