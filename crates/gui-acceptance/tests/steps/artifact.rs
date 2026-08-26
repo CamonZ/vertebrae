@@ -128,16 +128,20 @@ async fn artifact_tree_leaf_should_show_type_badge(
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
     loop {
         if let Ok(row) = client.find(row_locator).await {
-            if let Ok(type_badge) = row
-                .find(Locator::Css("[data-testid^='artifact-tree-type-']"))
+            let row_json = serde_json::to_value(&row).expect("serialize artifact tree row");
+            let actual_badge = client
+                .execute(
+                    "const badge = arguments[0].querySelector('[data-testid^=\"artifact-tree-type-\"]'); return badge?.textContent?.trim() || '';",
+                    vec![row_json],
+                )
                 .await
-            {
-                if type_badge.text().await.ok().as_deref() == Some(badge.as_str()) {
-                    world
-                        .screenshot(&client, &format!("after-assert-artifact-type-{label}"))
-                        .await;
-                    return;
-                }
+                .ok()
+                .and_then(|value| value.as_str().map(ToOwned::to_owned));
+            if actual_badge.as_deref() == Some(badge.as_str()) {
+                world
+                    .screenshot(&client, &format!("after-assert-artifact-type-{label}"))
+                    .await;
+                return;
             }
         }
         if tokio::time::Instant::now() >= deadline {

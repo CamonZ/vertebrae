@@ -179,7 +179,7 @@ async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
 
     let text_xpath = format!("//*[contains(text(), '{}')]", text);
     let clickable_xpath = format!(
-        "//*[contains(text(), '{}')]/ancestor-or-self::*[self::button or @role='button'][1]",
+        "//*[contains(text(), '{}')]/ancestor-or-self::*[self::button or @role='button' or @role='treeitem'][1]",
         text
     );
 
