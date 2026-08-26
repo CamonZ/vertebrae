@@ -436,6 +436,46 @@ describe("BoardPage", () => {
       expect(screen.queryByText("Factory B column")).not.toBeInTheDocument();
     });
 
+    it("filters tasks and columns into the No Factory scope", () => {
+      mockWorkflows = [
+        createMockWorkflow({
+          id: "wf-a",
+          factory_name: "Factory A",
+          kanban_column: "Factory A column",
+        }),
+        createMockWorkflow({
+          id: "wf-none",
+          factory_name: null,
+          kanban_column: "No Factory column",
+        }),
+      ];
+      mockTasks = [
+        createMockTask({
+          id: "t-a",
+          title: "Factory A task",
+          workflow_id: "wf-a",
+        }),
+        createMockTask({
+          id: "t-none",
+          title: "No Factory task",
+          workflow_id: "wf-none",
+        }),
+      ];
+      render(<BoardPage />);
+
+      const noFactoryOption = screen.getByRole("option", {
+        name: "No Factory",
+      });
+      fireEvent.change(screen.getByLabelText("Filter by factory"), {
+        target: { value: noFactoryOption.getAttribute("value") },
+      });
+
+      expect(screen.getByText("No Factory task")).toBeInTheDocument();
+      expect(screen.queryByText("Factory A task")).not.toBeInTheDocument();
+      expect(screen.getByText("No Factory column")).toBeInTheDocument();
+      expect(screen.queryByText("Factory A column")).not.toBeInTheDocument();
+    });
+
     it("keeps empty columns for the selected factory", () => {
       mockWorkflows = [
         createMockWorkflow({

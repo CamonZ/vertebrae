@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "../test/test-utils";
 import { FactoryFilter } from "./FactoryFilter";
-import { factoryNames, filterByFactory } from "../utils/workflowFactory";
+import {
+  factoryNames,
+  filterByFactory,
+  NO_FACTORY_SCOPE,
+} from "../utils/workflowFactory";
 
 describe("FactoryFilter", () => {
   it("returns unique non-empty factory names in stable order", () => {
@@ -26,6 +30,12 @@ describe("FactoryFilter", () => {
     expect(filterByFactory(workflows, "Factory A").map((w) => w.id)).toEqual([
       "wf-1",
     ]);
+    expect(
+      filterByFactory(
+        [...workflows, { id: "wf-none", factory_name: null }],
+        NO_FACTORY_SCOPE
+      ).map((w) => w.id)
+    ).toEqual(["wf-none"]);
   });
 
   it("renders literal factory options and reports the selected value", () => {
@@ -36,6 +46,7 @@ describe("FactoryFilter", () => {
         workflows={[
           { factory_name: "Factory A" },
           { factory_name: "Factory B" },
+          { factory_name: null },
         ]}
         value={null}
         onChange={onChange}
@@ -48,10 +59,19 @@ describe("FactoryFilter", () => {
     expect(
       screen.getByRole("option", { name: "Factory A" })
     ).toBeInTheDocument();
+    const noFactoryOption = screen.getByRole("option", {
+      name: "No Factory",
+    });
+    expect(noFactoryOption).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Filter by factory"), {
       target: { value: "Factory A" },
     });
     expect(onChange).toHaveBeenCalledWith("Factory A");
+
+    fireEvent.change(screen.getByLabelText("Filter by factory"), {
+      target: { value: noFactoryOption.getAttribute("value") },
+    });
+    expect(onChange).toHaveBeenLastCalledWith(NO_FACTORY_SCOPE);
   });
 });

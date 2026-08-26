@@ -1,14 +1,19 @@
 import type { PipelineSummary } from "../../bindings";
-import { factoryNames } from "../../utils/workflowFactory";
+import {
+  factoryNames,
+  NO_FACTORY_SCOPE,
+  type FactoryFilterValue,
+} from "../../utils/workflowFactory";
 
 export interface FactoryOverviewGroup {
   name: string;
+  scope: FactoryFilterValue;
   workflowCount: number;
   workItemCount: number;
   activeCount: number;
 }
 
-/** Aggregate only the named factories; the overview intentionally hides workflow internals. */
+/** Aggregate factories while keeping null factory names in a distinct synthetic group. */
 export function buildFactoryOverviewGroups(
   summary: PipelineSummary
 ): FactoryOverviewGroup[] {
@@ -17,15 +22,30 @@ export function buildFactoryOverviewGroups(
   for (const name of factoryNames(summary.workflows)) {
     grouped.set(name, {
       name,
+      scope: name,
       workflowCount: 0,
       workItemCount: 0,
       activeCount: 0,
     });
   }
 
+  const noFactoryGroup = summary.workflows.some(
+    (workflow) => workflow.factory_name === null
+  )
+    ? {
+        name: "No Factory",
+        scope: NO_FACTORY_SCOPE,
+        workflowCount: 0,
+        workItemCount: 0,
+        activeCount: 0,
+      }
+    : null;
+
   for (const workflow of summary.workflows) {
-    if (!workflow.factory_name) continue;
-    const group = grouped.get(workflow.factory_name);
+    const group =
+      workflow.factory_name === null
+        ? noFactoryGroup
+        : grouped.get(workflow.factory_name);
     if (!group) continue;
     group.workflowCount += 1;
     for (const step of workflow.workflow_steps) {
@@ -37,5 +57,7 @@ export function buildFactoryOverviewGroups(
     }
   }
 
-  return [...grouped.values()];
+  return noFactoryGroup
+    ? [...grouped.values(), noFactoryGroup]
+    : [...grouped.values()];
 }

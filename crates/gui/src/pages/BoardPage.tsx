@@ -12,7 +12,7 @@ import { useWorkflowTransitions } from "../hooks/useWorkflowTransitions";
 import { useShellHeader } from "../hooks/useShellHeader";
 import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
 import { FactoryFilter } from "../components/FactoryFilter";
-import { factoryNames, filterByFactory } from "../utils/workflowFactory";
+import { factoryScopeExists, filterByFactory } from "../utils/workflowFactory";
 import { SearchInput } from "../components/molecules/SearchInput";
 import { Select } from "../components/atoms/Select";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
@@ -221,10 +221,7 @@ export function BoardPage() {
   // A factory is a literal workflow field, so the selected workflow set is
   // the source of truth for both board columns and task membership.
   const scopedWorkflows = useMemo(
-    () =>
-      factoryFilter === null
-        ? workflows
-        : filterByFactory(workflows, factoryFilter),
+    () => filterByFactory(workflows, factoryFilter),
     [workflows, factoryFilter]
   );
   const scopedWorkflowIds = useMemo(
@@ -248,7 +245,7 @@ export function BoardPage() {
     if (workflowsLoading || workflowsError) return;
     if (
       factoryFilter !== null &&
-      !factoryNames(workflows).includes(factoryFilter)
+      !factoryScopeExists(workflows, factoryFilter)
     ) {
       setFactoryFilter(null);
     }

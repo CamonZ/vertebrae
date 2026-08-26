@@ -88,7 +88,10 @@ function makeWorkflow(
     workflow_steps: steps,
     transitions: [],
     ...overrides,
-    factory_name: overrides.factory_name ?? "Factory A",
+    factory_name:
+      overrides.factory_name !== undefined
+        ? overrides.factory_name
+        : "Factory A",
   };
 }
 
@@ -135,6 +138,17 @@ const ALL_IN_FACTORY_FIXTURE: PipelineSummary = {
     ...workflow,
     factory_name: "Factory A",
   })),
+};
+
+const OVERVIEW_FIXTURE: PipelineSummary = {
+  workflows: [
+    ...FIXTURE.workflows,
+    makeWorkflow(
+      "wf-unclassified",
+      [makeStep("u1", "wf-unclassified", 0, { name: "Unclassified" })],
+      { name: "Unclassified", factory_name: null }
+    ),
+  ],
 };
 
 /** Deterministic grid stub matching the real layoutFull output shape. */
@@ -257,7 +271,7 @@ describe("WorkflowAtlas", () => {
   it("shows only black-box factories until a factory is selected", async () => {
     useFactoryFilterStore.getState().reset();
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: OVERVIEW_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -267,6 +281,8 @@ describe("WorkflowAtlas", () => {
     expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
     expect(screen.getByTestId("factory-node-Factory A")).toBeInTheDocument();
     expect(screen.getByTestId("factory-node-Factory B")).toBeInTheDocument();
+    expect(screen.getByTestId("factory-node-No Factory")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/factory-node-/)).toHaveLength(3);
     expect(document.querySelectorAll(".uv-wf")).toHaveLength(0);
     expect(document.querySelectorAll(".ag-step")).toHaveLength(0);
     expect(document.querySelector(".uv-legend")).not.toBeInTheDocument();
@@ -274,6 +290,37 @@ describe("WorkflowAtlas", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     expect(screen.getByTestId("factory-overview")).toBeInTheDocument();
     expect(document.querySelectorAll(".uv-wf")).toHaveLength(0);
+  });
+
+  it("selects No Factory as an exact null workflow scope", async () => {
+    useFactoryFilterStore.getState().reset();
+    mockSummary.mockReturnValue({
+      summary: OVERVIEW_FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+
+    render(<WorkflowAtlas />);
+
+    fireEvent.click(screen.getByTestId("factory-node-No Factory"));
+
+    await waitFor(() => {
+      expect(document.querySelector(".ag-wf-name")).toHaveTextContent(
+        "Unclassified"
+      );
+      expect(document.querySelectorAll(".uv-wf")).toHaveLength(1);
+    });
+    expect(document.querySelector(".ag-wf-name")).not.toHaveTextContent(
+      "Build"
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
+    await waitFor(() =>
+      expect(document.querySelector(".al-name")).toHaveTextContent(
+        "Unclassified"
+      )
+    );
   });
 
   it("renders the graph from a fixture summary", async () => {

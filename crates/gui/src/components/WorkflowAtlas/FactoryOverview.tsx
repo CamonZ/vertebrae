@@ -1,10 +1,11 @@
 import type { PipelineSummary } from "../../bindings";
+import type { FactoryFilterValue } from "../../utils/workflowFactory";
 import { buildFactoryOverviewGroups } from "./factoryOverviewModel";
 
 interface FactoryOverviewProps {
   summary: PipelineSummary;
   query: string;
-  onSelect: (factoryName: string) => void;
+  onSelect: (factoryName: FactoryFilterValue) => void;
 }
 
 /** Black-box factory nodes shown before a factory scope is selected. */
@@ -38,9 +39,11 @@ export function FactoryOverview({
               data-no-pan
               data-testid={`factory-node-${group.name}`}
               aria-label={`Factory ${group.name}`}
-              onClick={() => onSelect(group.name)}
+              onClick={() => onSelect(group.scope)}
             >
-              <span className="factory-overview-label">Factory</span>
+              <span className="factory-overview-label">
+                {group.name === "No Factory" ? "Scope" : "Factory"}
+              </span>
               <strong className="factory-overview-name">{group.name}</strong>
               <span className="factory-overview-meta">
                 {group.workflowCount} workflow

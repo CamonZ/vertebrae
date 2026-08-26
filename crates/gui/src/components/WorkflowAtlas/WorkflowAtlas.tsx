@@ -43,7 +43,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SearchInput } from "../molecules/SearchInput";
 import { SegmentedControl } from "../molecules/SegmentedControl";
 import { FactoryFilter } from "../FactoryFilter";
-import { factoryNames, filterByFactory } from "../../utils/workflowFactory";
+import {
+  factoryScopeExists,
+  filterByFactory,
+} from "../../utils/workflowFactory";
 import { usePipelineSummary } from "../../hooks/usePipelineSummary";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import type { AtlasSelection } from "./inspector/selection";
@@ -142,7 +145,7 @@ export function WorkflowAtlas() {
     if (
       factoryFilter !== null &&
       summary &&
-      !factoryNames(summary.workflows).includes(factoryFilter)
+      !factoryScopeExists(summary.workflows, factoryFilter)
     ) {
       setFactoryFilter(null);
     }

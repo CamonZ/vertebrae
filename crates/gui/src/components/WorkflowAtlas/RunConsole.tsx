@@ -27,7 +27,10 @@
    ────────────────────────────────────────────────────────────────── */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commands, type PipelineSummary } from "../../bindings";
-import type { FactoryFilterValue } from "../../utils/workflowFactory";
+import {
+  filterByFactory,
+  type FactoryFilterValue,
+} from "../../utils/workflowFactory";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { CloseIcon, IconButton, PlayIcon, StopIcon } from "../panels";
 import { Glyph, IdChip } from "../shared/HearthPrimitives";
@@ -195,7 +198,9 @@ export function RunConsole({ summary, factoryName = null }: RunConsoleProps) {
   const scopedTasks = useMemo(() => {
     if (factoryName === null || !summary) return tasks;
     const workflowIds = new Set(
-      summary.workflows.map((workflow) => workflow.id)
+      filterByFactory(summary.workflows, factoryName).map(
+        (workflow) => workflow.id
+      )
     );
     return tasks.filter(
       (task) => task.workflow_id !== null && workflowIds.has(task.workflow_id)
