@@ -748,41 +748,55 @@ html.light ::selection {
   }
 }
 
-/* Futuristic waiting-state matrix: a small, staggered bank of signal lights. */
+/* Futuristic waiting-state matrix: a soft accent-color wave through radial rings. */
 @keyframes thinking-blinkenlights {
   0%,
   100% {
-    opacity: 0.28;
-    transform: scale(0.78);
+    opacity: 0.22;
+    background-color: var(--thinking-light-color);
   }
   42% {
-    opacity: 1;
-    transform: scale(1);
-    box-shadow: 0 0 7px var(--color-accent-glow);
+    opacity: 0.42;
+    background-color: var(--thinking-light-color);
+  }
+  50% {
+    opacity: 0.86;
+    background-color: var(--thinking-light-active-color);
   }
   65% {
-    opacity: 0.55;
-    transform: scale(0.9);
+    opacity: 0.42;
+    background-color: var(--thinking-light-color);
   }
 }
 
 .thinking-matrix__light {
   --thinking-light-color: var(--color-fg-faint);
+  --thinking-light-active-color: var(--color-accent);
   background-color: var(--thinking-light-color);
-  animation: thinking-blinkenlights 1.65s steps(2, end) infinite;
-  will-change: opacity, transform;
+  opacity: 0.22;
+  animation: thinking-blinkenlights 2.4s ease-in-out infinite;
+  animation-fill-mode: both;
+  will-change: opacity;
+}
+
+.thinking-matrix__light--outside {
+  animation: none;
+  opacity: 0;
 }
 
 .thinking-matrix__light--orange {
   --thinking-light-color: var(--color-accent);
+  --thinking-light-active-color: var(--color-warn);
 }
 
 .thinking-matrix__light--purple {
   --thinking-light-color: var(--color-step-execute);
+  --thinking-light-active-color: var(--color-step-execute-fg);
 }
 
 .thinking-matrix__light--red {
   --thinking-light-color: var(--color-err);
+  --thinking-light-active-color: var(--color-warn);
 }
 
 .thinking-matrix__light--gray-dark {
@@ -805,7 +819,6 @@ html.light ::selection {
   .thinking-matrix__light {
     animation: none;
     opacity: 0.8;
-    transform: none;
     will-change: auto;
   }
 }

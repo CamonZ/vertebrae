@@ -1,10 +1,19 @@
 import { useState } from "react";
 import type { ThinkingIndicatorStyle } from "../../stores/uiStore";
-import { selectFuturisticThinkingPhrase } from "./thinkingPhrases";
+import {
+  selectFuturisticCompactingPhrase,
+  selectFuturisticThinkingPhrase,
+} from "./thinkingPhrases";
+import {
+  getThinkingRadialBand,
+  THINKING_ALMOND_MASK,
+  THINKING_MATRIX_COLUMNS,
+  THINKING_MATRIX_LIGHT_COUNT,
+  THINKING_MAX_RADIAL_BAND,
+} from "./thinkingIndicatorGeometry";
 
-const MATRIX_COLUMNS = 4;
-const MATRIX_ROWS = 6;
-const MATRIX_LIGHT_COUNT = MATRIX_COLUMNS * MATRIX_ROWS;
+const COMPACTING_LABEL = "Compacting conversation…";
+const RADIAL_DELAY_SECONDS = 0.12;
 const MATRIX_LIGHT_TONES = [
   "orange",
   "purple",
@@ -27,9 +36,19 @@ export function ThinkingIndicator({
   // turn ends. Keeping the phrase in state prevents re-renders from causing
   // repeated, rapid screen-reader announcements.
   const [futuristicPhrase] = useState(selectFuturisticThinkingPhrase);
+  const [futuristicCompactingPhrase] = useState(
+    selectFuturisticCompactingPhrase
+  );
   const showFuturisticPhrase =
     style === "futuristic" && label === "Thinking...";
-  const statusLabel = showFuturisticPhrase ? futuristicPhrase : label;
+  const showFuturisticCompactingPhrase =
+    style === "futuristic" && label === COMPACTING_LABEL;
+  const isCompacting = showFuturisticCompactingPhrase;
+  const statusLabel = showFuturisticPhrase
+    ? futuristicPhrase
+    : showFuturisticCompactingPhrase
+      ? futuristicCompactingPhrase
+      : label;
 
   return (
     <div
@@ -44,20 +63,34 @@ export function ThinkingIndicator({
       <div className="flex items-center gap-2 rounded-lg bg-[var(--color-bg-2)] pl-2 pr-4 py-2">
         {style === "futuristic" ? (
           <div
-            className="thinking-matrix grid shrink-0 grid-cols-4"
+            className="thinking-matrix grid shrink-0 grid-cols-8 grid-rows-5 gap-px"
             data-testid="thinking-matrix"
+            data-shape="wide-almond"
+            data-animation-direction={isCompacting ? "inward" : "outward"}
             aria-hidden="true"
           >
-            {Array.from({ length: MATRIX_LIGHT_COUNT }, (_, index) => {
+            {Array.from({ length: THINKING_MATRIX_LIGHT_COUNT }, (_, index) => {
+              const row = Math.floor(index / THINKING_MATRIX_COLUMNS);
+              const column = index % THINKING_MATRIX_COLUMNS;
+              const radialBand = getThinkingRadialBand(row, column);
               const tone =
-                MATRIX_LIGHT_TONES[index % MATRIX_LIGHT_TONES.length];
+                radialBand === 0
+                  ? "gray"
+                  : MATRIX_LIGHT_TONES[index % MATRIX_LIGHT_TONES.length];
+              const animationBand = isCompacting
+                ? THINKING_MAX_RADIAL_BAND - radialBand
+                : radialBand;
+              const isAlmondCell = THINKING_ALMOND_MASK[row][column] === "X";
 
               return (
                 <span
-                  className={`thinking-matrix__light thinking-matrix__light--${tone} h-[5px] w-[5px] rounded-[1px] motion-reduce:animate-none`}
+                  className={`thinking-matrix__light thinking-matrix__light--${tone} thinking-matrix__light--${isAlmondCell ? "inside" : "outside"} h-[4px] w-[4px] rounded-full motion-reduce:animate-none`}
+                  data-column={column}
+                  data-radial-band={radialBand}
+                  data-row={row}
                   key={index}
                   style={{
-                    animationDelay: `${-((index % MATRIX_COLUMNS) * 0.14 + Math.floor(index / MATRIX_COLUMNS) * 0.06)}s`,
+                    animationDelay: `${animationBand * RADIAL_DELAY_SECONDS}s`,
                   }}
                 />
               );

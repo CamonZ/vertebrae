@@ -23,16 +23,16 @@ export const FUTURISTIC_THINKING_PHRASES = [
   "Navigating the chrome labyrinth…",
   "Measuring the pulse of the void…",
   "Opening a channel to tomorrow…",
-  "Gathering fragments from the starfield…",
+  "Discovering fragments in the starfield…",
   "Letting the circuits dream aloud…",
   "Reassembling the scattered coordinates…",
   "Cross-referencing the cosmic footnotes…",
   "Charging the idea capacitor…",
   "Watching the horizon for a reply…",
-  "Distilling signal from the shimmer…",
+  "Interpreting signal in the shimmer…",
   "Consulting the midnight mainframe…",
-  "Sending a query past the event horizon…",
-  "Folding time around the answer…",
+  "Projecting a query past the event horizon…",
+  "Bending time around the answer…",
   "Looking beneath the rendered surface…",
   "Following the blue thread through the grid…",
   "Sampling the atmosphere of possibility…",
@@ -60,17 +60,150 @@ export const FUTURISTIC_THINKING_PHRASES = [
   "Summoning the quiet machinery…",
   "Charting a course through electric fog…",
   "Waiting for the right constellation…",
+  "Imagining a shape for the unknown…",
+  "Exploring the perimeter of possibility…",
+  "Interrogating the signal matrix…",
+  "Observing the pulse beneath the noise…",
+  "Unfolding a map of tomorrow…",
+  "Probing the lattice for hidden doors…",
+  "Sketching a route through the starfield…",
+  "Interpreting the machine's half-dream…",
+  "Chasing a glint through the data stream…",
+  "Surveying the electric horizon…",
+  "Invoking the library of lost futures…",
+  "Illuminating the edges of the question…",
+  "Deciphering a whisper from the deep net…",
+  "Consulting the moonlit index…",
+  "Crossing the threshold of possibility…",
+  "Imagining the answer in negative space…",
+  "Observing constellations in the code…",
+  "Testing the gravity of an idea…",
+  "Following a photon through the labyrinth…",
+  "Listening beneath the carrier wave…",
+  "Projecting possible worlds onto the grid…",
+  "Examining the echo behind the question…",
+  "Charting currents in the noosphere…",
+  "Seeking a signal in the afterglow…",
+  "Summoning patterns from the static…",
+  "Weighing the omens against the evidence…",
+  "Tracing a new orbit through the unknown…",
+  "Reading the silence between signals…",
+  "Interpreting the geometry of chance…",
+  "Navigating by a distant pulse…",
+  "Imagining a bridge across the void…",
+  "Scanning the dreamspace for landmarks…",
+  "Uncovering the question beneath the question…",
+  "Listening to the archive of rain…",
+  "Watching the signal bend around the dark…",
+  "Decoding a path through crystal logic…",
+  "Exploring the underside of the answer…",
+  "Consulting a constellation of possibilities…",
+  "Refracting the idea through moonlit glass…",
+  "Divining a route through electric fog…",
 ] as const;
 
 export type FuturisticThinkingPhrase =
   (typeof FUTURISTIC_THINKING_PHRASES)[number];
 
+/** Verbs reserved for compaction so thinking phrases stay exploratory. */
+export const FUTURISTIC_COMPACTING_ACTIONS = [
+  "Archiving",
+  "Binding",
+  "Collapsing",
+  "Compiling",
+  "Compressing",
+  "Consolidating",
+  "Condensing",
+  "Crystallizing",
+  "Distilling",
+  "Encoding",
+  "Folding",
+  "Packing",
+  "Reducing",
+  "Reforging",
+  "Reindexing",
+  "Reweaving",
+  "Sealing",
+  "Shrinking",
+  "Transmuting",
+] as const;
+
+/** Curated compaction-specific phrases shown while the futuristic indicator compacts chat. */
+export const FUTURISTIC_COMPACTING_PHRASES = [
+  "Compressing the astral archive…",
+  "Folding the neon grimoire…",
+  "Condensing the memory constellation…",
+  "Sealing old runes in the cipher vault…",
+  "Reweaving the thread of remembered stars…",
+  "Distilling signal from the memory fog…",
+  "Collapsing the quantum codex…",
+  "Reindexing the Oracle's hidden lattice…",
+  "Packing echoes into portable stardust…",
+  "Shrinking the noosphere to a bright seed…",
+  "Transmuting history into electric shorthand…",
+  "Consolidating the chrome labyrinth…",
+  "Binding yesterday into the backup moon…",
+  "Reforging the conversation's memory core…",
+  "Archiving old context beneath the event horizon…",
+  "Crystallizing the conversation into a memory shard…",
+  "Compiling remembered stars into a cipher seed…",
+  "Encoding loose thoughts as neon shorthand…",
+  "Folding stray context into the archive vault…",
+  "Compressing the signal cache…",
+  "Condensing old echoes into a single rune…",
+  "Sealing the memory horizon…",
+  "Packing conversation fragments into orbit…",
+  "Distilling the archive's excess starlight…",
+  "Reindexing the celestial footnotes…",
+  "Consolidating the scattered memory threads…",
+  "Collapsing redundant echoes in the noosphere…",
+  "Reweaving old replies into a compact lattice…",
+  "Shrinking the chrome dream to a data seed…",
+  "Transmuting surplus context into signal dust…",
+  "Binding archive fragments with electric sigils…",
+  "Reforging the past into a portable codex…",
+  "Folding the memory channel inward…",
+  "Compressing the quantum ledger…",
+  "Sealing expired omens in the star vault…",
+  "Archiving the conversation's outer rings…",
+  "Packing old messages into a moon cache…",
+  "Condensing the neon archive to its core…",
+  "Distilling remembered whispers into crystal logic…",
+  "Reindexing the labyrinth's memory gates…",
+  "Consolidating context beneath a single constellation…",
+  "Collapsing the archive into a bright ember…",
+  "Encoding the old signal in machine dream…",
+  "Crystallizing surplus thoughts into dark matter…",
+  "Compressing the noosphere's loose threads…",
+  "Folding the celestial ledger into shorthand…",
+  "Sealing the conversation's forgotten runes…",
+  "Packing the memory core with portable stardust…",
+  "Reducing the archive to its essential signal…",
+  "Reweaving context into a smaller grimoire…",
+] as const;
+
+export type FuturisticCompactingPhrase =
+  (typeof FUTURISTIC_COMPACTING_PHRASES)[number];
+
+function selectPhrase<T extends readonly string[]>(
+  phrases: T,
+  random: () => number
+): T[number] {
+  const index = Math.min(
+    phrases.length - 1,
+    Math.floor(random() * phrases.length)
+  );
+  return phrases[index];
+}
+
 export function selectFuturisticThinkingPhrase(
   random = Math.random
 ): FuturisticThinkingPhrase {
-  const index = Math.min(
-    FUTURISTIC_THINKING_PHRASES.length - 1,
-    Math.floor(random() * FUTURISTIC_THINKING_PHRASES.length)
-  );
-  return FUTURISTIC_THINKING_PHRASES[index];
+  return selectPhrase(FUTURISTIC_THINKING_PHRASES, random);
+}
+
+export function selectFuturisticCompactingPhrase(
+  random = Math.random
+): FuturisticCompactingPhrase {
+  return selectPhrase(FUTURISTIC_COMPACTING_PHRASES, random);
 }
