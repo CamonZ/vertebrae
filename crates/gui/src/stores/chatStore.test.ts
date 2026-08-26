@@ -7,6 +7,7 @@ import {
   persistLocalChatSession,
 } from "../utils/localChatPersistence";
 import { commands } from "../bindings";
+import { doRegenerateSessionTitle } from "../hooks/useLocalChat";
 
 describe("chatStore", () => {
   beforeEach(() => {
@@ -397,6 +398,51 @@ describe("chatStore", () => {
           loading: null,
           error: "transcript changed",
         }
+      );
+    });
+
+    it("clears the initial hydration state when the first replay page fails", async () => {
+      const id = useChatStore
+        .getState()
+        .openSession("Failed Initial Replay", "/repo/root");
+      useChatStore.getState().setProviderResumeId(id, "conv-initial-fail");
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        panelOpen: false,
+      });
+      const replay = vi
+        .spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValue({
+          status: "error",
+          error: { message: "transcript unavailable" },
+        });
+
+      const reopened = useChatStore
+        .getState()
+        .openSession("Replacement Label", "/repo/root");
+      expect(reopened).toBe(id);
+
+      await vi.waitFor(() =>
+        expect(useChatStore.getState().sessions[id].providerReplay)
+          .toMatchObject({
+            loading: null,
+            loaded: false,
+            error: "transcript unavailable",
+          })
+      );
+      expect(replay).toHaveBeenCalledTimes(1);
+      // Title regeneration derives from the replay state machine and must not
+      // stay blocked by a stale hydration flag.
+      const session = useChatStore.getState().sessions[id];
+      expect(session.providerReplay?.loading).not.toBe("initial");
+      const titleError = await doRegenerateSessionTitle(
+        session,
+        id,
+        useChatStore.getState().setSessionTitleCandidate
+      );
+      expect(titleError).not.toBe(
+        "Chat history is still loading. Try again in a moment."
       );
     });
 

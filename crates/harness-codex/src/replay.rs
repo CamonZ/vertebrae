@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::OnceLock,
 };
 
@@ -8,7 +8,7 @@ use chrono::NaiveDate;
 use vertebrae_harness_core::{
     HarnessError, TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayCache,
     TranscriptReplayPage, TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision,
-    load_transcript_page, sequence_replay_drafts, tail_read_budget,
+    load_transcript_page, safe_filename, sequence_replay_drafts, tail_read_budget, validated_file,
 };
 
 use crate::rollout::{read_rollout, read_rollout_tail};
@@ -175,24 +175,6 @@ fn parse_date_prefix(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(value.get(..10)?, "%Y-%m-%d").ok()
 }
 
-fn safe_filename(value: &str) -> bool {
-    !value.is_empty()
-        && Path::new(value)
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-}
-
-fn validated_file(root: &Path, candidate: &Path) -> Option<PathBuf> {
-    if !candidate.is_file() {
-        return None;
-    }
-    let canonical_root = fs::canonicalize(root).ok()?;
-    let canonical_candidate = fs::canonicalize(candidate).ok()?;
-    canonical_candidate
-        .starts_with(canonical_root)
-        .then_some(canonical_candidate)
-}
-
 fn find_jsonl_by_id(root: &Path, id: &str) -> std::io::Result<Option<PathBuf>> {
     if !root.is_dir() {
         return Ok(None);
@@ -223,7 +205,7 @@ fn find_jsonl_by_id(root: &Path, id: &str) -> std::io::Result<Option<PathBuf>> {
 mod tests {
     use std::fs;
 
-    use chrono::{DateTime, Utc};
+    use chrono::DateTime;
     use tempfile::tempdir;
     use vertebrae_harness_core::{
         HarnessEventPayloadV1, HarnessEventV1, ProviderResumeId, StreamId, TranscriptReplayRequest,

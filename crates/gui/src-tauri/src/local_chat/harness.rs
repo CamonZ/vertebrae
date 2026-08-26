@@ -25,6 +25,8 @@ pub struct LocalChatModelOption {
     #[serde(default)]
     #[specta(optional)]
     pub supported_speed_tier_ids: Option<Vec<String>>,
+    #[serde(default)]
+    #[specta(optional)]
     pub supports_personality: Option<bool>,
 }
 

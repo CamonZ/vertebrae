@@ -44,6 +44,11 @@ import {
   providerReplayGeneration,
   type ProviderReplayState,
 } from "./providerReplay";
+import {
+  mergeReplayMessages,
+  reconcileReplayMessages,
+  unmatchedMessages,
+} from "./providerReplayMerge";
 import { recordLocalChatTrace } from "../utils/localChatDebug";
 
 /**
@@ -455,8 +460,6 @@ export interface ChatSession {
   providerReplay?: ProviderReplayState;
   /** Runtime-only user messages queued while a local turn is still active */
   queuedMessages?: string[];
-  /** Runtime-only guard while a persisted provider transcript is replayed. */
-  providerMessagesHydrating?: boolean;
   /** Durable local metadata for session-history ordering */
   createdAt?: string;
   /** Durable local metadata for session-history ordering */
@@ -933,141 +936,6 @@ function contentDigest(content: string): string {
     hash = (Math.imul(31, hash) + content.charCodeAt(index)) | 0;
   }
   return (hash >>> 0).toString(36);
-}
-
-function occurrenceKeys(
-  messages: readonly ChatMessage[],
-  direction: "forward" | "reverse" = "forward"
-): string[] {
-  const counts = new Map<string, number>();
-  const keys = new Array<string>(messages.length);
-  const indexes =
-    direction === "forward"
-      ? messages.map((_, index) => index)
-      : messages.map((_, index) => messages.length - index - 1);
-  for (const index of indexes) {
-    const base = chatMessageKey(messages[index]);
-    const occurrence = (counts.get(base) ?? 0) + 1;
-    counts.set(base, occurrence);
-    keys[index] = `${base}\u0000${occurrence}`;
-  }
-  return keys;
-}
-
-function mergeHydratedMatch(
-  replayed: ChatMessage,
-  current: ChatMessage
-): ChatMessage {
-  if (replayed.kind !== "file_edit" || current.kind !== "file_edit") {
-    return current;
-  }
-  return {
-    ...current,
-    status: replayed.status,
-    changes: replayed.changes.length > 0 ? replayed.changes : current.changes,
-  };
-}
-
-function chatMessageKey(message: ChatMessage): string {
-  switch (message.kind) {
-    case "user":
-      return `${message.kind}:${message.text}`;
-    case "assistant":
-      return `${message.kind}:${message.text}:${message.parentToolUseId ?? ""}`;
-    case "tool_call":
-    case "tool_result":
-      return `${message.kind}:${message.toolId}`;
-    case "file_edit":
-      return `${message.kind}:${message.toolId}`;
-    case "permission_request":
-      return `${message.kind}:${message.requestId ?? ""}:${message.toolName}:${message.message}`;
-    case "user_question":
-      return `${message.kind}:${message.requestId}:${message.toolUseId}`;
-    case "session_start":
-      return `${message.kind}:${message.model}`;
-    case "session_end":
-      return `${message.kind}:${message.durationMs}:${message.numTurns}`;
-    case "warning":
-    case "error":
-    case "task_notification":
-      return `${message.kind}:${message.message}`;
-  }
-}
-
-function mergeHydratedMessages(
-  hydrated: ChatMessage[],
-  current: ChatMessage[]
-): ChatMessage[] {
-  if (current.length === 0) return hydrated;
-  const currentKeys = occurrenceKeys(current, "reverse");
-  const hydratedKeys = occurrenceKeys(hydrated, "reverse");
-  const currentByOccurrence = new Map(
-    currentKeys.map((key, index) => [key, current[index]])
-  );
-  const consumed = new Set<string>();
-  const merged = hydrated.map((replayed, index) => {
-    const key = hydratedKeys[index];
-    const live = currentByOccurrence.get(key);
-    if (!live) return replayed;
-    consumed.add(key);
-    return mergeHydratedMatch(replayed, live);
-  });
-  currentKeys.forEach((key, index) => {
-    if (!consumed.has(key)) merged.push(current[index]);
-  });
-  return merged;
-}
-
-function mergeReplayMessages(
-  replayed: ChatMessage[],
-  current: ChatMessage[]
-): { messages: ChatMessage[]; installedMessageCount: number } {
-  if (current.length === 0) {
-    return { messages: replayed, installedMessageCount: replayed.length };
-  }
-  return {
-    messages: mergeHydratedMessages(replayed, current),
-    installedMessageCount: replayed.length,
-  };
-}
-
-function reconcileReplayMessages(
-  replayed: ChatMessage[],
-  previousInstalled: ChatMessage[],
-  currentPrefix: ChatMessage[]
-): ChatMessage[] {
-  const previousKeys = occurrenceKeys(previousInstalled, "reverse");
-  const currentKeys = occurrenceKeys(currentPrefix, "reverse");
-  const replayedKeys = occurrenceKeys(replayed, "reverse");
-  const previousByKey = new Map(
-    previousKeys.map((key, index) => [key, previousInstalled[index]])
-  );
-  const currentByKey = new Map(
-    currentKeys.map((key, index) => [key, currentPrefix[index]])
-  );
-  const removedKeys = new Set(
-    [...previousByKey.keys()].filter((key) => !currentByKey.has(key))
-  );
-  const liveOverrides = new Map(
-    [...currentByKey.entries()].filter(([key, current]) => {
-      const previous = previousByKey.get(key);
-      return previous && JSON.stringify(previous) !== JSON.stringify(current);
-    })
-  );
-  return replayed.flatMap((message, index) => {
-    const key = replayedKeys[index];
-    if (removedKeys.has(key)) return [];
-    return [liveOverrides.get(key) ?? message];
-  });
-}
-
-function unmatchedMessages(
-  baseline: readonly ChatMessage[],
-  current: readonly ChatMessage[]
-): ChatMessage[] {
-  const baselineKeys = new Set(occurrenceKeys(baseline));
-  const currentKeys = occurrenceKeys(current);
-  return current.filter((_, index) => !baselineKeys.has(currentKeys[index]));
 }
 
 function localSessionSummaryFor(
@@ -1552,7 +1420,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ...state.sessions,
           [sessionId]: {
             ...current,
-            providerMessagesHydrating: true,
             providerReplay: initialProviderReplayState(generation),
           },
         },
@@ -1594,7 +1461,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
               hasUserMessage:
                 current.hasUserMessage ??
                 merged.messages.some((message) => message.kind === "user"),
-              providerMessagesHydrating: false,
               providerReplay: applyInitialPage(
                 replay,
                 {
@@ -1668,7 +1534,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const hydrated: ChatSession = hydrateLocalSession({
           ...persisted,
           projectPath: persisted.projectPath ?? projectPath,
-          providerMessagesHydrating: !!persisted.providerResumeId,
         });
         if (hydrated.permissionMode !== persisted.permissionMode) {
           persistLocalChatSession(hydrated);
@@ -1899,18 +1764,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     selectPersistedSession: async (sessionId, preferredPaneId) => {
       const existing = get().sessions[sessionId];
       if (existing) {
-        const hydrationSession = existing.providerResumeId
-          ? { ...existing, providerMessagesHydrating: true }
-          : existing;
-        if (hydrationSession !== existing) {
-          set((state) => ({
-            sessions: {
-              ...state.sessions,
-              [sessionId]: hydrationSession,
-            },
-          }));
-        }
-        void hydrateProviderMessagesInPlace(sessionId, hydrationSession);
+        void hydrateProviderMessagesInPlace(sessionId, existing);
         set((state) => {
           const current = state.sessions[sessionId];
           if (!current) return state;
@@ -1929,7 +1783,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }
       const hydrated = hydrateLocalSession({
         ...persisted,
-        providerMessagesHydrating: !!persisted.providerResumeId,
       });
       if (hydrated.permissionMode !== persisted.permissionMode) {
         persistLocalChatSession(hydrated);
@@ -2950,7 +2803,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
               streamingAssistant: null,
               providerReplay: undefined,
               queuedMessages: undefined,
-              providerMessagesHydrating: false,
               updatedAt: timestamp,
               messageCount: 0,
             },

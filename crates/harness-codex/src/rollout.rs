@@ -19,6 +19,7 @@ use vertebrae_harness_core::{
     ProviderThreadRef, SessionId, SessionStarted, StreamId, TailReadOutcome, TextEvent,
     ThreadDeclared, ThreadId, ThreadKind, ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus,
     TranscriptReplayRequest, TranscriptTailLines, TurnInput, TurnInputProvenance, UpdateSemantics,
+    record_timestamp,
 };
 
 #[derive(Debug)]
@@ -111,15 +112,6 @@ impl ReplayState {
         }
         events
     }
-}
-
-pub(crate) fn record_timestamp(value: &Value) -> DateTime<Utc> {
-    value
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.with_timezone(&Utc))
-        .unwrap_or(DateTime::UNIX_EPOCH)
 }
 
 pub(crate) fn read_rollout(

@@ -5,11 +5,13 @@
 //! JSONL line or know where that provider stores it. Paging, cursors, revision
 //! consistency, caching, and bounded cold reads are shared here.
 
+mod adapter;
 mod cache;
 mod cursor;
 mod revision;
 mod tail;
 
+pub use adapter::{record_timestamp, safe_filename, validated_file};
 pub use cache::TranscriptReplayCache;
 pub use revision::TranscriptRevision;
 pub use tail::{TranscriptTailLines, tail_read_budget};

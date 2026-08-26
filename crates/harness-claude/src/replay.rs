@@ -1,17 +1,17 @@
 use std::{
     fs::{self, File},
     io::{BufRead, BufReader},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::OnceLock,
 };
 
-use chrono::{DateTime, Utc};
 use serde_json::Value;
 use vertebrae_harness_core::{
     HarnessError, HarnessEventDraftV1, ProviderThreadRef, SessionId, TailReadOutcome,
     TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayCache, TranscriptReplayPage,
     TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision, TranscriptTailLines,
-    load_transcript_page, sequence_replay_drafts, tail_read_budget,
+    load_transcript_page, record_timestamp, safe_filename, sequence_replay_drafts,
+    tail_read_budget, validated_file,
 };
 
 use crate::{ClaudeDecodeContext, ClaudeStreamDecoder};
@@ -291,15 +291,6 @@ fn claude_projection_key(request: &TranscriptReplayRequest) -> String {
     )
 }
 
-fn record_timestamp(value: &Value) -> DateTime<Utc> {
-    value
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.with_timezone(&Utc))
-        .unwrap_or(DateTime::UNIX_EPOCH)
-}
-
 fn user_text(value: &Value) -> Option<String> {
     let content = value.pointer("/message/content")?;
     if let Some(text) = content.as_str() {
@@ -365,24 +356,6 @@ fn claude_project_dir_name(project_path: &Path) -> String {
         .collect()
 }
 
-fn safe_filename(value: &str) -> bool {
-    !value.is_empty()
-        && Path::new(value)
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-}
-
-fn validated_file(root: &Path, candidate: &Path) -> Option<PathBuf> {
-    if !candidate.is_file() {
-        return None;
-    }
-    let canonical_root = fs::canonicalize(root).ok()?;
-    let canonical_candidate = fs::canonicalize(candidate).ok()?;
-    canonical_candidate
-        .starts_with(canonical_root)
-        .then_some(canonical_candidate)
-}
-
 fn find_jsonl_by_stem(root: &Path, stem: &str) -> std::io::Result<Option<PathBuf>> {
     if !root.is_dir() {
         return Ok(None);
@@ -407,6 +380,7 @@ fn find_jsonl_by_stem(root: &Path, stem: &str) -> std::io::Result<Option<PathBuf
 mod tests {
     use std::fs;
 
+    use chrono::DateTime;
     use tempfile::tempdir;
     use vertebrae_harness_core::{
         CompactionState, HarnessEventPayloadV1, HarnessEventV1, HarnessProjection,
