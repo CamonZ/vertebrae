@@ -202,7 +202,7 @@
 @keyframes ev-spin { to { transform: rotate(360deg); } }
 .evtool-prompt { color: var(--fg-faint); flex-shrink: 0; }
 .evtool-name { color: var(--fg); font-weight: 500; flex-shrink: 0; }
-.evtool.shell .evtool-name { min-width: 0; flex: 1 1 auto; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.evtool.shell .evtool-name { min-width: 0; flex: 1 1 auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .evtool-args { color: var(--fg-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .evtool-args .flag { color: var(--fg-faint); }
 .evtool-args em { font-style: normal; color: var(--accent); }
