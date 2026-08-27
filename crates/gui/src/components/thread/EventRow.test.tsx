@@ -124,4 +124,24 @@ describe("ToolRow", () => {
       screen.getByText((text) => text.includes('"tail": "PRESERVED-JSON-TAIL"'))
     ).toBeInTheDocument();
   });
+
+  it("wraps complete shell commands, including unbroken tokens, in a narrow header", () => {
+    const command = `${"x".repeat(140)} --final-argument`;
+    const { container } = render(
+      <div style={{ width: "180px" }}>
+        <ToolRow kind="shell" cmd={command} status="pending" />
+      </div>
+    );
+
+    const shell = container.querySelector(".evtool");
+    const header = container.querySelector(".evtool-hd");
+    const commandNode = container.querySelector(".evtool-name");
+
+    expect(shell).toHaveClass("shell", "pending");
+    expect(header).toHaveClass("evtool-hd");
+    expect(commandNode).toHaveClass("evtool-name");
+    expect(commandNode).toHaveTextContent(command);
+    expect(commandNode).not.toHaveTextContent("…");
+    expect(container.querySelector(".evtool-prompt")).toHaveTextContent("$");
+  });
 });
