@@ -1754,6 +1754,7 @@ export type CreateStepOptions = {
   transitions_to: string[];
   step_type?: StepType;
   output_schema: JsonValue | null;
+  persistence_options?: JsonValue | null;
 };
 /**
  * Execution status - mirrors db::ExecutionStatus
@@ -2436,6 +2437,10 @@ export type Step = {
    */
   output_schema?: JsonValue | null;
   /**
+   * Orchestrator-owned persistence configuration for this step
+   */
+  persistence_options?: JsonValue | null;
+  /**
    * List of step IDs this step can transition to
    */
   transitions_to?: string[];
@@ -3004,8 +3009,8 @@ export type UpdateComponentState =
   | "failed";
 /**
  * Options for updating a workflow step.
- * Only fields that are Some will be updated. `clear_output_schema` explicitly
- * removes an existing schema when no replacement value is supplied.
+ * Only fields that are Some will be updated. The clear flags explicitly remove
+ * an existing optional value when no replacement value is supplied.
  */
 export type UpdateStepOptions = {
   step_id: string;
@@ -3018,6 +3023,8 @@ export type UpdateStepOptions = {
   step_type: StepType | null;
   output_schema: JsonValue | null;
   clear_output_schema?: boolean;
+  persistence_options?: JsonValue | null;
+  clear_persistence_options?: boolean;
   order: number | null;
   transitions_to: string[] | null;
 };

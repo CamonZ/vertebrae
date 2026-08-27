@@ -1,5 +1,7 @@
 use cucumber::then;
-use vertebrae_sacrum_client::StepExecutionResponse;
+use vertebrae_core::artifact_service::ArtifactService;
+use vertebrae_core::models::ListArtifactInput;
+use vertebrae_sacrum_client::{SacrumArtifactService, StepExecutionResponse};
 
 use crate::DaemonWorld;
 
@@ -8,6 +10,19 @@ fn last_execution(world: &DaemonWorld) -> &StepExecutionResponse {
         .last_execution
         .as_ref()
         .expect("no execution polled yet — call `wait for the execution to reach status` first")
+}
+
+async fn task_artifacts(world: &DaemonWorld) -> Vec<vertebrae_core::Artifact> {
+    let task_id = world.task_id.as_ref().expect("task not created");
+    let client = world
+        .graphql_client
+        .as_ref()
+        .expect("graphql_client not configured")
+        .clone();
+    SacrumArtifactService::new((*client).clone())
+        .list_task_artifacts(task_id, ListArtifactInput::new())
+        .await
+        .expect("list task artifacts failed")
 }
 
 #[then(expr = "the execution status is {string}")]
@@ -85,6 +100,50 @@ pub async fn no_recorded_metrics(world: &mut DaemonWorld) {
         "unexpected duration_ms: {:?}",
         exec.duration_ms
     );
+}
+
+#[then(expr = "the task artifact {string} has body containing {string}")]
+pub async fn task_artifact_body_contains(
+    world: &mut DaemonWorld,
+    logical_name: String,
+    expected: String,
+) {
+    let artifacts = task_artifacts(world).await;
+    let artifact = artifacts
+        .iter()
+        .find(|artifact| artifact.logical_name.as_deref() == Some(logical_name.as_str()))
+        .unwrap_or_else(|| panic!("artifact {logical_name:?} not found: {artifacts:?}"));
+    assert_eq!(artifact.filename, format!("{logical_name}.json"));
+    assert!(
+        artifact.body.contains(&expected),
+        "artifact {logical_name:?} body did not contain {expected:?}: {}",
+        artifact.body
+    );
+}
+
+#[then(expr = "the task has no artifact named {string}")]
+pub async fn task_has_no_artifact(world: &mut DaemonWorld, logical_name: String) {
+    let artifacts = task_artifacts(world).await;
+    assert!(
+        artifacts
+            .iter()
+            .all(|artifact| artifact.logical_name.as_deref() != Some(logical_name.as_str())),
+        "unexpected artifact {logical_name:?}: {artifacts:?}"
+    );
+}
+
+#[then(expr = "the task has exactly {int} artifact named {string}")]
+pub async fn task_has_exactly_artifacts(
+    world: &mut DaemonWorld,
+    expected: usize,
+    logical_name: String,
+) {
+    let artifacts = task_artifacts(world).await;
+    let matching: Vec<_> = artifacts
+        .iter()
+        .filter(|artifact| artifact.logical_name.as_deref() == Some(logical_name.as_str()))
+        .collect();
+    assert_eq!(matching.len(), expected, "matching artifacts: {matching:?}");
 }
 
 #[then(expr = "the mock argv contains {string} followed by {string}")]

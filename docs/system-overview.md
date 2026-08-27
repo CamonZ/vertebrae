@@ -150,6 +150,7 @@ A single stage within a workflow. Each step defines what an AI agent should do.
 | `prompt` | Template sent to the executing agent |
 | `eval_prompt` | Template for evaluating output and choosing next transition |
 | `output_schema` | JSON Schema for structured output (passed as `--json-schema` to Claude) |
+| `persistence_options` | Optional Sacrum-owned artifact configuration, currently `{"artifact":{"logical_name":"..."}}`; requires `output_schema` |
 | `agents` | Agent file paths to run |
 | `skills` | Skill names to enable as tools |
 | `agent_config` | LLM configuration (see below) |
@@ -169,6 +170,12 @@ daemon. The finish type is preserved across the Sacrum wire model,
 core/CLI/Tauri models, GUI workflow/task surfaces, and trace events.
 
 **Output schema precedence:** When a step has `output_schema`, it overrides `agent_config.json_schema`. This gives step-level structured output contracts priority over the default agent config.
+
+**Artifact persistence:** Sacrum's orchestrator persists validated output for
+`execute`, `evaluate`, `route`, `human_input`, and `wait_children` steps when
+`persistence_options` requests an artifact. Writes upsert the task artifact by
+logical name. `finish` and `stop` persistence is rejected by Sacrum; the
+daemon remains storage-agnostic and only reports step output.
 
 ### AgentConfig
 

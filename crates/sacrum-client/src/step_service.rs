@@ -71,6 +71,7 @@ impl SacrumStepService {
             agent_config,
             step_type,
             output_schema: response.output_schema.clone(),
+            persistence_options: response.persistence_options.clone(),
             transitions_to,
             order: response.step_order,
             created_at,
@@ -116,6 +117,12 @@ impl StepService for SacrumStepService {
                 ServiceError::validation_failed(format!("Invalid output schema: {}", e))
             })?;
             variables["output_schema"] = json!(schema_str);
+        }
+        if let Some(options) = &step.persistence_options {
+            let options_str = serde_json::to_string(options).map_err(|e| {
+                ServiceError::validation_failed(format!("Invalid persistence options: {}", e))
+            })?;
+            variables["persistence_options"] = json!(options_str);
         }
 
         let response: WorkflowStepResponse = self
@@ -291,6 +298,18 @@ impl StepService for SacrumStepService {
             }
             None => {}
         }
+        match &updates.persistence_options {
+            Some(Some(options)) => {
+                let options_str = serde_json::to_string(options).map_err(|e| {
+                    ServiceError::validation_failed(format!("Invalid persistence options: {}", e))
+                })?;
+                variables["persistence_options"] = json!(options_str);
+            }
+            Some(None) => {
+                variables["persistence_options"] = serde_json::Value::Null;
+            }
+            None => {}
+        }
 
         let response: WorkflowStepResponse = self
             .client
@@ -403,6 +422,9 @@ mod tests {
             agent_config: None,
             step_type: Some("evaluate".to_string()),
             output_schema: Some(json!({"type": "object"})),
+            persistence_options: Some(json!({
+                "artifact": {"logical_name": "step_result"}
+            })),
             step_order: 0,
             workflow_id: "wf-1".to_string(),
             transitions: Some(vec![StepTransitionResponse {
@@ -424,6 +446,10 @@ mod tests {
         assert_eq!(step.skills, vec!["code-review"]);
         assert_eq!(step.step_type, StepType::Evaluate);
         assert_eq!(step.output_schema, Some(json!({"type": "object"})));
+        assert_eq!(
+            step.persistence_options,
+            Some(json!({"artifact": {"logical_name": "step_result"}}))
+        );
         assert_eq!(step.order, 0);
         assert_eq!(step.workflow_id, "wf-1");
         assert_eq!(step.transitions_to, vec!["step-2"]);
@@ -442,6 +468,7 @@ mod tests {
             agent_config: None,
             step_type: None,
             output_schema: None,
+            persistence_options: None,
             step_order: 5,
             workflow_id: "wf-1".to_string(),
             transitions: None,
@@ -459,6 +486,7 @@ mod tests {
         assert!(step.skills.is_empty());
         assert_eq!(step.step_type, StepType::Execute);
         assert!(step.output_schema.is_none());
+        assert!(step.persistence_options.is_none());
         assert_eq!(step.order, 5);
         assert!(step.transitions_to.is_empty());
     }
@@ -475,6 +503,7 @@ mod tests {
             agent_config: Some(json!({"model": "claude-opus"})),
             step_type: Some("route".to_string()),
             output_schema: None,
+            persistence_options: None,
             step_order: 0,
             workflow_id: "wf-1".to_string(),
             transitions: None,
@@ -499,6 +528,7 @@ mod tests {
             agent_config: None,
             step_type: Some("future_type".to_string()),
             output_schema: None,
+            persistence_options: None,
             step_order: 0,
             workflow_id: "wf-1".to_string(),
             transitions: None,
@@ -535,6 +565,7 @@ mod tests {
                 agent_config: None,
                 step_type: Some(input.to_string()),
                 output_schema: None,
+                persistence_options: None,
                 step_order: 0,
                 workflow_id: "wf-1".to_string(),
                 transitions: None,
@@ -626,6 +657,37 @@ mod tests {
         assert_eq!(result.id, Some("step-new".to_string()));
         assert_eq!(result.name, "Review");
         assert_eq!(result.workflow_id, "wf-1");
+    }
+
+    #[tokio::test]
+    async fn test_create_step_serializes_persistence_options_and_maps_response() {
+        let server = MockServer::start().await;
+
+        let mut response = make_step_response("step-new", "Review", "wf-1", 0);
+        response["persistence_options"] = json!({
+            "artifact": {"logical_name": "step_result"}
+        });
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(graphql_response("create_workflow_step", response)),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let options = json!({"artifact": {"logical_name": "step_result"}});
+        let step = Step::new("Review", "wf-1").with_persistence_options(options.clone());
+        let result = service.create_step(&step).await.unwrap();
+
+        assert_eq!(result.persistence_options, Some(options));
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(
+            body["variables"]["persistence_options"],
+            r#"{"artifact":{"logical_name":"step_result"}}"#
+        );
     }
 
     #[tokio::test]
@@ -876,6 +938,44 @@ mod tests {
         let result = service.update_step("step-1", &updates).await;
 
         assert_eq!(result.unwrap(), "wf-1");
+    }
+
+    #[tokio::test]
+    async fn test_update_step_serializes_and_clears_persistence_options() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(
+                "update_workflow_step",
+                make_step_response("step-1", "Updated", "wf-1", 0),
+            )))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let options = json!({"artifact": {"logical_name": "step_result"}});
+        service
+            .update_step(
+                "step-1",
+                &StepUpdate::new().with_persistence_options(Some(options)),
+            )
+            .await
+            .unwrap();
+        service
+            .update_step("step-1", &StepUpdate::new().with_persistence_options(None))
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let set_body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(
+            set_body["variables"]["persistence_options"],
+            r#"{"artifact":{"logical_name":"step_result"}}"#
+        );
+        let clear_body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert!(clear_body["variables"]["persistence_options"].is_null());
     }
 
     #[tokio::test]

@@ -179,3 +179,35 @@ Feature: Step fields: prompt and agent-config
     And I show the step "Visible"
     Then the output should contain "Step Type:     route"
     And the output should contain "Output Schema:"
+
+  Scenario: Structured-output persistence options round-trip and display
+    When I add a step "Persisted" to the workflow with persistence logical name "step_result"
+    Then the command should succeed
+    And the step "Persisted" in the workflow should have persistence logical name "step_result"
+    When I update the step "Persisted" in the workflow with persistence logical name "latest_result"
+    Then the command should succeed
+    And the step "Persisted" in the workflow should have persistence logical name "latest_result"
+    When I show the step "Persisted"
+    Then the output should contain "Persistence:"
+    When I show the step "Persisted" as JSON
+    Then the step show JSON should have persistence logical name "latest_result"
+
+  Scenario: Invalid persistence JSON is rejected before mutation
+    When I add a step "BadPersistenceJson" to the workflow with flag "--persistence-options" and value "{bad json}"
+    Then the command should fail with "--persistence-options JSON"
+
+  Scenario: Persistence requires an output schema
+    When I add a step "MissingSchemaPersistence" to the workflow with persistence but no output schema
+    Then the command should fail with "output_schema"
+
+  Scenario: Unknown persistence keys are rejected by Sacrum
+    When I add a step "UnknownPersistenceKey" to the workflow with an unknown persistence key
+    Then the command should fail with "persistence"
+
+  Scenario: Blank persistence logical names are rejected by Sacrum
+    When I add a step "BlankPersistenceName" to the workflow with a blank persistence logical name
+    Then the command should fail with "logical_name"
+
+  Scenario: Overlong persistence logical names are rejected by Sacrum
+    When I add a step "LongPersistenceName" to the workflow with an overlong persistence logical name
+    Then the command should fail with "logical_name"

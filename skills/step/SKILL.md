@@ -66,6 +66,12 @@ vtb step add "Evaluate" -w <workflow-id> \
   --step-type evaluate \
   --output-schema '{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}'
 
+# Persist validated structured output as a task artifact (Sacrum-owned)
+vtb step add "Evaluate" -w <workflow-id> \
+  --step-type evaluate \
+  --output-schema '{"type":"object","required":["passed"]}' \
+  --persistence-options '{"artifact":{"logical_name":"step_result"}}'
+
 # Machine-readable creation result
 vtb --json step add "Review" -w <workflow-id>
 ```
@@ -88,6 +94,7 @@ vtb --json step add "Review" -w <workflow-id>
 | `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh` |
 | `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, or `human_input` (default: `execute`) |
 | `--output-schema` | | JSON Schema describing expected structured output |
+| `--persistence-options` | | Sacrum-owned JSON configuration for persisting structured output as a task artifact |
 | `--order` | `-o` | Step order (default: 0) |
 | `--transition-to` | `-t` | Steps this can transition to (repeatable) |
 
@@ -98,6 +105,10 @@ creation envelope with `command`, `status`, `step_id`, and `workflow_id`.
 `--reasoning-effort` is only valid with the OpenAI/Codex provider. Supported
 values are `low`, `medium`, `high`, and `xhigh`; Claude/Anthropic steps reject
 the field.
+
+`--persistence-options` accepts Sacrum's persistence configuration, currently
+`{"artifact":{"logical_name":"<name>"}}`. It requires an output schema;
+Sacrum validates the logical name and owns the resulting task artifact.
 
 ---
 
@@ -168,12 +179,12 @@ There are no command aliases, defaults, or value enums for `step show`.
 
 Human-readable output is a flat detail view with the step ID and name, workflow
 ID, order, step type, goal, agents, skills, model, output schema, transitions,
-and created/updated timestamps. Missing optional fields are
+and persistence configuration, and created/updated timestamps. Missing optional fields are
 shown as `(none)`, and missing timestamps are shown as `-`.
 
 `--json` returns the raw `Step` object with fields such as `id`, `name`,
 `workflow_id`, `order`, `goal`, `prompt`, `agents`, `skills`, `step_type`,
-`agent_config`, `output_schema`, `transitions_to`, and timestamps.
+`agent_config`, `output_schema`, `persistence_options`, `transitions_to`, and timestamps.
 It does not wrap the result in an `output` field.
 
 If a full UUID reaches `step show` but no matching step exists, the command
@@ -219,6 +230,11 @@ vtb step update <step-id> --clear-skills
 # Clear output schema
 vtb step update <step-id> --clear-output-schema
 
+# Configure or clear structured-output artifact persistence
+vtb step update <step-id> \
+  --persistence-options '{"artifact":{"logical_name":"step_result"}}'
+vtb step update <step-id> --clear-persistence-options
+
 # Clear all transitions
 vtb step update <step-id> --clear-transitions
 
@@ -252,6 +268,8 @@ vtb --json step update <step-id> --goal "New goal"
 | `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, or `human_input` |
 | `--output-schema` | | New output schema as a JSON string |
 | `--clear-output-schema` | | Clear the output schema |
+| `--persistence-options` | | Replace Sacrum's persistence configuration with JSON |
+| `--clear-persistence-options` | | Clear the persistence configuration (send `null`) |
 | `--order` | `-o` | New 0-indexed step order |
 | `--transition-to` | `-t` | Replace transitions list; repeatable |
 | `--clear-transitions` | | Clear all transitions |
@@ -265,7 +283,10 @@ can replace the full config, and the shortcut flags (`--provider`, `--model`,
 `--codex-model-provider`, and `--reasoning-effort`) overlay individual fields.
 
 `--json` returns an operation envelope with `command`, `status`, and `step_id`.
-Invalid `--agent-config` or `--output-schema` JSON fails before persistence.
+Invalid `--agent-config`, `--output-schema`, or `--persistence-options` JSON
+fails before persistence. Use `--clear-persistence-options` to remove the
+nullable field; setting `{}` is accepted by Sacrum as an empty configuration,
+but it does not create an artifact and is not equivalent to clearing the field.
 Provider/model mismatches, Codex upstream provider usage when the resulting
 provider is Anthropic, and Anthropic reasoning effort are rejected by the CLI
 before the step is updated.
@@ -313,6 +334,21 @@ resolved, the shared ID resolver reports `step with prefix '<id>' not found`.
 ---
 
 ## Step Concepts
+
+### Persistence Options
+
+Sacrum's orchestrator can persist validated structured output as a JSON artifact
+attached to the current task:
+
+```json
+{"artifact":{"logical_name":"step_result"}}
+```
+
+The logical name must be nonblank and at most 255 characters. Artifact
+persistence requires `--output-schema`; repeated writes upsert the task artifact
+by logical name. The daemon only produces and validates output; it does not
+interpret this setting or create artifacts. `finish` and `stop` persistence is
+rejected by Sacrum.
 
 ### Order
 Steps are ordered by their `order` field. Lower values execute first.

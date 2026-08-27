@@ -645,6 +645,25 @@ describe("server cache helpers", () => {
     ).toEqual([]);
   });
 
+  it("preserves persistence options in realtime step projections", () => {
+    const generation = 32;
+    const step = createMockStep({
+      id: "step-persist",
+      persistence_options: { artifact: { logical_name: "result" } },
+    });
+    queryClient.setQueryData(queryKeys.steps.byId(generation, step.id!), {
+      ...step,
+      persistence_options: null,
+    });
+
+    upsertStepInQueryCache(step, generation);
+
+    expect(
+      queryClient.getQueryData<Step>(queryKeys.steps.byId(generation, step.id!))
+        ?.persistence_options
+    ).toEqual({ artifact: { logical_name: "result" } });
+  });
+
   it("reconciles filtered task lists after a canonical location update", () => {
     const generation = 6;
     const filter: TaskFilterOptions = {

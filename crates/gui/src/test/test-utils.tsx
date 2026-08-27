@@ -77,6 +77,8 @@ export function createMockStep(overrides?: Partial<Step>): Step {
     order: 0,
     created_at: null,
     updated_at: null,
+    output_schema: null,
+    persistence_options: null,
     ...overrides,
   };
 }

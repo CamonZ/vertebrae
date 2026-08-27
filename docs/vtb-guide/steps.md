@@ -35,6 +35,12 @@ vtb step add "Evaluate" -w <workflow-id> \
   --step-type evaluate \
   --output-schema '{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}'
 
+# Persist validated structured output as a task artifact (Sacrum-owned)
+vtb step add "Evaluate" -w <workflow-id> \
+  --step-type evaluate \
+  --output-schema '{"type":"object","required":["passed"]}' \
+  --persistence-options '{"artifact":{"logical_name":"step_result"}}'
+
 # Add a human-input gate
 vtb step add "Needs Input" -w <workflow-id> --step-type human_input
 
@@ -57,6 +63,8 @@ vtb step update <step-id> --step-type evaluate
 vtb step update <step-id> --step-type stop --transition-to <next-step-id>
 vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
+vtb step update <step-id> --persistence-options '{"artifact":{"logical_name":"step_result"}}'
+vtb step update <step-id> --clear-persistence-options
 vtb step update <step-id> --clear-agents --clear-skills
 vtb --json step update <step-id> --step-type finish
 vtb step delete <step-id>
@@ -127,6 +135,8 @@ vtb --json step show <step-id>
 The JSON object includes fields such as `id`, `name`, `workflow_id`, `order`,
 `goal`, `prompt`, `agents`, `skills`, `step_type`, `agent_config`,
 `output_schema`, `transitions_to`, `created_at`, and `updated_at`.
+When configured, `persistence_options` is also included; it is `null`/absent
+for steps without persistence configuration.
 
 `vtb step update` takes exactly one required `<id>` argument: the step ID to
 update. It accepts a full UUID or an 8-character hex short ID and resolves IDs
@@ -151,6 +161,8 @@ request with no property changes before reporting success.
 | `--step-type <STEP_TYPE>` | | Set the step type; values are `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, and `finish` |
 | `--output-schema <JSON>` | | Replace the step output schema from a JSON string |
 | `--clear-output-schema` | | Remove the output schema |
+| `--persistence-options <JSON>` | | Replace Sacrum's persistence configuration |
+| `--clear-persistence-options` | | Remove the persistence configuration |
 | `--order <ORDER>` | `-o` | Replace the 0-indexed step order |
 | `--transition-to <STEP_ID>` | `-t` | Replace the full transitions list; repeat for multiple target steps |
 | `--clear-transitions` | | Replace the transitions list with an empty list |
@@ -162,7 +174,10 @@ the supplied JSON; the shortcut flags (`--provider`, `--model`,
 `--codex-model-provider`, and `--reasoning-effort`) then overlay individual
 fields before the config is validated and persisted.
 
-Invalid JSON in `--agent-config` or `--output-schema` fails before persistence.
+Invalid JSON in `--agent-config`, `--output-schema`, or `--persistence-options`
+fails before persistence. Sacrum validates persistence configuration and
+surfaces errors for blank/overlong logical names, unknown keys, missing
+`output_schema`, and terminal `finish`/`stop` steps.
 Provider/model mismatches, Codex upstream provider usage when the resulting
 provider is Anthropic, and Anthropic reasoning effort are rejected by the CLI
 before the step is updated.
@@ -302,6 +317,23 @@ vtb step update <step-id> --output-schema '{"type":"object"}'
 # Clear output schema
 vtb step update <step-id> --clear-output-schema
 ```
+
+### Persistence Options
+
+Steps may ask Sacrum's orchestrator to persist validated structured output as a
+named JSON artifact attached to the current task:
+
+```json
+{"artifact":{"logical_name":"step_result"}}
+```
+
+The `logical_name` must be nonblank and at most 255 characters. Artifact
+persistence requires an `output_schema`; Sacrum rejects unknown keys and
+rejects persistence on `finish` and `stop` steps. `execute`, `evaluate`,
+`route`, `human_input`, and `wait_children` outputs/snapshots are persisted by
+Sacrum, with repeated writes upserting the task's
+`<logical_name>.json` artifact. The daemon only executes and validates output;
+it does not interpret this setting or create artifacts.
 
 ### Provider Selection (Anthropic / OpenAI)
 

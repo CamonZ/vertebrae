@@ -114,6 +114,7 @@ Key types: `Task`, `Workflow`, `Step`, `Artifact`, `Section`, `CodeRef`, `StepEx
 Steps carry:
 - `step_type: StepType` — `Execute` (default), `Evaluate`, or `Route`
 - `output_schema: Option<Value>` — JSON Schema for structured output enforcement
+- `persistence_options: Option<Value>` — Sacrum-owned artifact persistence configuration
 - `agent_config: AgentConfig` — LLM configuration (model, budget, tools, permissions, json_schema)
 
 DTOs: `CreateTaskOptions`, `UpdateTaskOptions`, `CreateWorkflowOptions`, `CreateArtifactInput`, `UpdateArtifactInput`, `ListArtifactInput`, `StepUpdate`, etc.
