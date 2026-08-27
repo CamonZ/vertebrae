@@ -101,6 +101,7 @@ export function ToolRow(props: ToolRowProps): ReactNode {
     : () => setLocalCollapsed((c) => !c);
   const cls =
     "evtool" +
+    (isShell ? " shell" : "") +
     (status === "err" ? " err" : pending ? " pending" : "") +
     (hasBody ? " has-body" : "") +
     (hasBody && collapsed ? " collapsed" : "");
