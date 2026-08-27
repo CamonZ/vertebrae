@@ -3,6 +3,7 @@ import {
   chatMessagesToThread,
   LOCAL_CHAT_THREAD_ID,
 } from "./chatMessagesToThread";
+import { conversationEventsToThread } from "../thread/normalize";
 import type { ChatMessage } from "../../stores/chatStore";
 import type {
   AgentMessage,
@@ -434,6 +435,71 @@ describe("chatMessagesToThread", () => {
     expect(tool.kind).toBe("shell");
     expect(tool.cmd).toBe("ls -la");
     expect(tool.name).toBeUndefined();
+  });
+
+  it("preserves the complete Bash command for pending and completed calls", () => {
+    const command = `bash -lc '${"echo long-command ".repeat(12)}--final-argument'`;
+    const pending = build([
+      {
+        kind: "tool_call",
+        toolName: "Bash",
+        toolId: "pending-bash",
+        input: JSON.stringify({ command }),
+        timestamp: TS,
+      },
+    ]);
+    const completed = build([
+      {
+        kind: "tool_call",
+        toolName: "Bash",
+        toolId: "completed-bash",
+        input: JSON.stringify({ command }),
+        timestamp: TS,
+      },
+      {
+        kind: "tool_result",
+        toolId: "completed-bash",
+        result: "command output",
+        isError: false,
+        timestamp: TS,
+      },
+    ]);
+
+    const pendingTool = firstTool(pending.turns[0].messages);
+    const completedTool = firstTool(completed.turns[0].messages);
+    expect(pendingTool.cmd).toBe(command);
+    expect(pendingTool.status).toBe("pending");
+    expect(completedTool.cmd).toBe(command);
+    expect(completedTool.status).toBe("done");
+    expect(completedTool.body).toBe("command output");
+  });
+
+  it("keeps the same complete Bash command for replayed normalized events", () => {
+    const command = `${"/usr/bin/tool --input ".repeat(10)}replayed-final-argument`;
+    const replayed = conversationEventsToThread([
+      {
+        kind: "tool_call",
+        toolId: "replayed-bash",
+        toolName: "Bash",
+        displayName: "Bash",
+        icon: "terminal",
+        summary: command.slice(0, 80) + "…",
+        input: { command },
+        timestamp: TS,
+      },
+      {
+        kind: "tool_result",
+        toolUseId: "replayed-bash",
+        result: "replayed output",
+        isError: false,
+        timestamp: TS,
+      },
+    ]);
+
+    const tool = firstTool(replayed.turns[0].messages);
+    expect(tool.cmd).toBe(command);
+    expect(tool.status).toBe("done");
+    expect(tool.body).toBe("replayed output");
   });
 
   it("falls back to raw input when a Bash input is not parseable JSON", () => {
