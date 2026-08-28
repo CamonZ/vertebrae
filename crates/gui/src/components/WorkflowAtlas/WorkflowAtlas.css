@@ -99,7 +99,7 @@
   z-index: 4;
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: var(--s-4);
   padding: clamp(var(--s-5), 6vh, var(--s-10));
   max-width: 980px;
@@ -115,10 +115,6 @@
 }
 .factory-overview-eyebrow {
   color: var(--fg-faint);
-}
-.factory-overview-hint {
-  color: var(--fg-ghost);
-  font-size: var(--text-11);
 }
 .factory-overview-stage {
   position: absolute;

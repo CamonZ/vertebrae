@@ -226,9 +226,6 @@ export function FactoryOverview({
     <div className="factory-overview" data-testid="factory-overview">
       <div className="factory-overview-heading">
         <span className="factory-overview-eyebrow">Factory scope</span>
-        <span className="factory-overview-hint">
-          Zoom in to inspect the workflows in place
-        </span>
       </div>
       {groups.length > 0 && layout ? (
         <div

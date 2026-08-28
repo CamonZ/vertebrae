@@ -499,7 +499,9 @@ export function WorkflowAtlas() {
     <main className="uv-main">
       <header className="uv-head">
         <div className="uv-name">
-          <div className="crumb">design · workflow topology · elk</div>
+          {!showFactoryOverview && (
+            <div className="crumb">design · workflow topology · elk</div>
+          )}
           <h1>
             Workflow <em>{isGraph ? "Graph" : "Atlas"}</em>
           </h1>

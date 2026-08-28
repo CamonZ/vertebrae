@@ -375,6 +375,12 @@ describe("WorkflowAtlas", () => {
     render(<WorkflowAtlas />);
 
     expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
+    expect(
+      screen.queryByText("design · workflow topology · elk")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Zoom in to inspect the workflows in place")
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("factory-node-Factory A")).toBeInTheDocument();
     expect(screen.getByTestId("factory-node-Factory B")).toBeInTheDocument();
     expect(screen.getByTestId("factory-node-Factory C")).toBeInTheDocument();
@@ -563,6 +569,9 @@ describe("WorkflowAtlas", () => {
     await waitFor(() =>
       expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
     );
+    expect(
+      screen.getByText("design · workflow topology · elk")
+    ).toBeInTheDocument();
     const graphNames = Array.from(document.querySelectorAll(".ag-wf-name")).map(
       (n) => n.textContent
     );
