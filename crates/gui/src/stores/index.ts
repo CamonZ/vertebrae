@@ -23,6 +23,8 @@ export { resetProjectScopedStores } from "./projectScopedStores";
 
 export { useShellStore } from "./shellStore";
 
+export { useFactoryFilterStore } from "./factoryFilterStore";
+
 export {
   GUI_UPDATE_CHANNEL,
   initialGuiUpdateState,

@@ -11,9 +11,12 @@ import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowTransitions } from "../hooks/useWorkflowTransitions";
 import { useShellHeader } from "../hooks/useShellHeader";
 import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
+import { FactoryFilter } from "../components/FactoryFilter";
+import { factoryScopeExists, filterByFactory } from "../utils/workflowFactory";
 import { SearchInput } from "../components/molecules/SearchInput";
 import { Select } from "../components/atoms/Select";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
+import { useFactoryFilterStore } from "../stores/factoryFilterStore";
 
 const UNASSIGNED_COLUMN = "Unassigned";
 
@@ -175,6 +178,10 @@ export function BoardPage() {
     state.selection?.type === "task" ? state.selection.taskId : null
   );
   const [levelFilter, setLevelFilter] = useState<TaskLevel | "">("");
+  const factoryFilter = useFactoryFilterStore((state) => state.factoryName);
+  const setFactoryFilter = useFactoryFilterStore(
+    (state) => state.setFactoryName
+  );
   const [search, setSearch] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -190,10 +197,7 @@ export function BoardPage() {
       if (event.key === "/" && !typing) {
         event.preventDefault();
         searchInputRef.current?.focus();
-      } else if (
-        event.key === "Escape" &&
-        target === searchInputRef.current
-      ) {
+      } else if (event.key === "Escape" && target === searchInputRef.current) {
         searchInputRef.current?.blur();
         setSearch("");
       }
@@ -214,6 +218,45 @@ export function BoardPage() {
   } = useWorkflows();
   const { transitions } = useWorkflowTransitions();
 
+  // A factory is a literal workflow field, so the selected workflow set is
+  // the source of truth for both board columns and task membership.
+  const scopedWorkflows = useMemo(
+    () => filterByFactory(workflows, factoryFilter),
+    [workflows, factoryFilter]
+  );
+  const scopedWorkflowIds = useMemo(
+    () =>
+      new Set(scopedWorkflows.map((workflow) => workflow.id).filter(Boolean)),
+    [scopedWorkflows]
+  );
+  const scopedTransitions = useMemo(
+    () =>
+      transitions.filter(
+        (transition) =>
+          scopedWorkflowIds.has(transition.from_workflow_id) &&
+          scopedWorkflowIds.has(transition.to_workflow_id)
+      ),
+    [transitions, scopedWorkflowIds]
+  );
+
+  // If a realtime update removes the selected factory from the project, return
+  // to the unscoped board instead of leaving a value with no option.
+  useEffect(() => {
+    if (workflowsLoading || workflowsError) return;
+    if (
+      factoryFilter !== null &&
+      !factoryScopeExists(workflows, factoryFilter)
+    ) {
+      setFactoryFilter(null);
+    }
+  }, [
+    factoryFilter,
+    setFactoryFilter,
+    workflows,
+    workflowsError,
+    workflowsLoading,
+  ]);
+
   const handleTaskSelect = useCallback(
     (task: Task) => {
       openTask(task.id);
@@ -231,6 +274,7 @@ export function BoardPage() {
 
   const handleClearFilters = () => {
     setLevelFilter("");
+    setFactoryFilter(null);
     setSearch("");
   };
 
@@ -238,25 +282,36 @@ export function BoardPage() {
   const { workflowColumnMap, allKanbanColumns } = useMemo(() => {
     const map = new Map<string, string>();
     const columnSet = new Set<string>();
-    for (const wf of workflows) {
+    for (const wf of scopedWorkflows) {
       if (wf.id && wf.kanban_column) {
         map.set(wf.id, wf.kanban_column);
         columnSet.add(wf.kanban_column);
       }
     }
     return { workflowColumnMap: map, allKanbanColumns: columnSet };
-  }, [workflows]);
+  }, [scopedWorkflows]);
 
   // Topologically sort columns using workflow transitions
   const sortedColumns = useMemo(
     () =>
-      topologicalColumnSort(allKanbanColumns, transitions, workflowColumnMap),
-    [allKanbanColumns, transitions, workflowColumnMap]
+      topologicalColumnSort(
+        allKanbanColumns,
+        scopedTransitions,
+        workflowColumnMap
+      ),
+    [allKanbanColumns, scopedTransitions, workflowColumnMap]
   );
 
   // Filter tasks by level and search, then group by kanban_column
   const { columns, columnOrder, totalFiltered } = useMemo(() => {
     let filtered = tasks;
+
+    if (factoryFilter !== null) {
+      filtered = filtered.filter(
+        (task) =>
+          task.workflow_id !== null && scopedWorkflowIds.has(task.workflow_id)
+      );
+    }
 
     if (levelFilter) {
       filtered = filtered.filter((t) => t.level === levelFilter);
@@ -307,6 +362,8 @@ export function BoardPage() {
     };
   }, [
     tasks,
+    factoryFilter,
+    scopedWorkflowIds,
     levelFilter,
     search,
     workflowColumnMap,
@@ -316,7 +373,8 @@ export function BoardPage() {
 
   const isLoading = tasksLoading || workflowsLoading;
   const error = tasksError || workflowsError;
-  const hasActiveFilters = levelFilter !== "" || search !== "";
+  const hasActiveFilters =
+    levelFilter !== "" || factoryFilter !== null || search !== "";
 
   const headerActions = useMemo(
     () =>
@@ -374,6 +432,13 @@ export function BoardPage() {
                 aria-label="Filter by level"
               />
             </div>
+
+            <FactoryFilter
+              id="board-factory-filter"
+              workflows={workflows}
+              value={factoryFilter}
+              onChange={setFactoryFilter}
+            />
 
             {/* Clear filters */}
             {hasActiveFilters && (

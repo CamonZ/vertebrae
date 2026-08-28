@@ -25,6 +25,8 @@ export interface PanZoomContent {
 }
 
 export interface UsePanZoomOptions {
+  /** Whether this camera should capture pointer and resize events (default true). */
+  enabled?: boolean;
   /** Minimum scale (default 0.15). */
   min?: number;
   /** Maximum scale (default 2.4). */
@@ -40,6 +42,8 @@ export interface UsePanZoomResult {
   transform: string;
   /** Current scale factor. */
   scale: number;
+  /** Whether the user has taken control of the camera since the last fit. */
+  userControlled: boolean;
   /** Re-fit content to the container and re-enable auto-fit on resize. */
   fit: () => void;
   /** Zoom in around the container center. */
@@ -70,11 +74,15 @@ export function fitTransform(
   content: PanZoomContent,
   min: number,
   max: number,
-  pad: number,
+  pad: number
 ): PanZoomTransform | null {
   if (cw < 2 || ch < 2) return null;
   if (content.w <= 0 || content.h <= 0) return null;
-  const s = clamp(Math.min((cw - pad) / content.w, (ch - pad) / content.h), min, max);
+  const s = clamp(
+    Math.min((cw - pad) / content.w, (ch - pad) / content.h),
+    min,
+    max
+  );
   return { s, x: (cw - content.w * s) / 2, y: (ch - content.h * s) / 2 };
 }
 
@@ -88,7 +96,7 @@ export function zoomAt(
   px: number,
   py: number,
   min: number,
-  max: number,
+  max: number
 ): PanZoomTransform {
   const ns = clamp(prev.s * factor, min, max);
   const k = ns / prev.s;
@@ -98,13 +106,18 @@ export function zoomAt(
 export function usePanZoom(
   ref: React.RefObject<HTMLElement | null>,
   content: PanZoomContent,
-  opts: UsePanZoomOptions = {},
+  opts: UsePanZoomOptions = {}
 ): UsePanZoomResult {
+  const enabled = opts.enabled ?? true;
   const min = opts.min ?? 0.15;
   const max = opts.max ?? 2.4;
   const pad = opts.pad ?? 96;
 
-  const [t, setT] = useState<PanZoomTransform>({ s: opts.scale ?? 1, x: 0, y: 0 });
+  const [t, setT] = useState<PanZoomTransform>({
+    s: opts.scale ?? 1,
+    x: 0,
+    y: 0,
+  });
   const tref = useRef(t);
   tref.current = t;
   const contentRef = useRef(content);
@@ -115,21 +128,30 @@ export function usePanZoom(
   // Listeners: pointer drag + non-passive wheel.
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || !enabled) return;
     let drag: { x: number; y: number; ox: number; oy: number } | null = null;
 
     const down = (e: PointerEvent) => {
       if (e.button !== 0) return;
       const target = e.target as Element | null;
       if (target?.closest?.("[data-no-pan]")) return;
-      drag = { x: e.clientX, y: e.clientY, ox: tref.current.x, oy: tref.current.y };
+      drag = {
+        x: e.clientX,
+        y: e.clientY,
+        ox: tref.current.x,
+        oy: tref.current.y,
+      };
       el.classList.add("is-grabbing");
     };
     const move = (e: PointerEvent) => {
       if (!drag) return;
       moved.current = true;
       const { ox, oy, x: sx, y: sy } = drag;
-      setT((p) => ({ ...p, x: ox + (e.clientX - sx), y: oy + (e.clientY - sy) }));
+      setT((p) => ({
+        ...p,
+        x: ox + (e.clientX - sx),
+        y: oy + (e.clientY - sy),
+      }));
     };
     const up = () => {
       drag = null;
@@ -159,12 +181,13 @@ export function usePanZoom(
       window.removeEventListener("pointerup", up);
       el.removeEventListener("wheel", wheel);
     };
-  }, [ref, min, max]);
+  }, [ref, min, max, enabled]);
 
   const api = useMemo(() => {
     const zoomCenter = (factor: number) => {
       const el = ref.current;
       if (!el) return;
+      moved.current = true;
       const px = el.clientWidth / 2;
       const py = el.clientHeight / 2;
       setT((p) => zoomAt(p, factor, px, py, min, max));
@@ -173,7 +196,14 @@ export function usePanZoom(
       const el = ref.current;
       const c = contentRef.current;
       if (!el) return;
-      const next = fitTransform(el.clientWidth, el.clientHeight, c, min, max, pad);
+      const next = fitTransform(
+        el.clientWidth,
+        el.clientHeight,
+        c,
+        min,
+        max,
+        pad
+      );
       if (next) setT(next);
     };
     return {
@@ -184,7 +214,10 @@ export function usePanZoom(
       },
       zoomIn: () => zoomCenter(ZOOM_STEP),
       zoomOut: () => zoomCenter(1 / ZOOM_STEP),
-      reset: () => setT({ s: 1, x: 0, y: 0 }),
+      reset: () => {
+        moved.current = true;
+        setT({ s: 1, x: 0, y: 0 });
+      },
     };
   }, [ref, min, max, pad]);
 
@@ -193,17 +226,18 @@ export function usePanZoom(
   // not-yet-laid-out (zero/low-height) canvas and clamped to the min scale.
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
+    if (!el || !enabled || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
       if (!moved.current) api._autofit();
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [ref, api]);
+  }, [ref, api, enabled]);
 
   return {
     transform: `translate(${t.x}px,${t.y}px) scale(${t.s})`,
     scale: t.s,
+    userControlled: moved.current,
     fit: api.fit,
     zoomIn: api.zoomIn,
     zoomOut: api.zoomOut,

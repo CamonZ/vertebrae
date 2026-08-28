@@ -7,6 +7,7 @@ Feature: Real-time step detail panel updates
       | name | Step Panel Workflow |
     And I create a step "Original Step Name" in the workflow "Step Panel Workflow" via the CLI
     And the GUI is on the pipeline view
+    And I select factory "No Factory"
     Then the GUI should show "Original Step Name" within 5 seconds
     When I click on the element containing text "Original Step Name"
     Then the GUI should show "Step Configuration" within 5 seconds
@@ -18,6 +19,7 @@ Feature: Real-time step detail panel updates
       | name | Human Input Step Panel Workflow |
     And I create a step "Approval Gate" with type "human_input" in the workflow "Human Input Step Panel Workflow" via the CLI
     And the GUI is on the pipeline view
+    And I select factory "No Factory"
     Then the GUI should show "Approval Gate" within 10 seconds
     When I click on the element with test id "step-node-Approval Gate"
     Then the GUI should show "Step Configuration" within 5 seconds

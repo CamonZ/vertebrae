@@ -18,6 +18,7 @@ import { layoutFull } from "./layout/layoutFull";
 import type { AtlasModel, FullLayout } from "./layout/types";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
+import { useFactoryFilterStore } from "../../stores/factoryFilterStore";
 import { GlobalEntityPanelHost } from "../GlobalEntityPanelHost";
 import { WorkflowAtlas, layoutKey } from "./WorkflowAtlas";
 
@@ -44,6 +45,7 @@ const layoutFullMock = vi.mocked(layoutFull);
 beforeEach(() => {
   usePanelLayoutStore.getState().reset();
   useEntityPanelStore.getState().reset();
+  useFactoryFilterStore.getState().setFactoryName("Factory A");
   vi.mocked(invoke).mockResolvedValue(null);
 });
 
@@ -86,7 +88,10 @@ function makeWorkflow(
     workflow_steps: steps,
     transitions: [],
     ...overrides,
-    factory_name: overrides.factory_name ?? null,
+    factory_name:
+      overrides.factory_name !== undefined
+        ? overrides.factory_name
+        : "Factory A",
   };
 }
 
@@ -102,7 +107,12 @@ const FIXTURE: PipelineSummary = {
         }),
         makeStep("s3", "wf-build", 2, { name: "Ship", step_type: "finish" }),
       ],
-      { name: "Build", description: "Build pipeline", kanban_column: "Dev" }
+      {
+        name: "Build",
+        description: "Build pipeline",
+        kanban_column: "Dev",
+        factory_name: "Factory A",
+      }
     ),
     makeWorkflow(
       "wf-review",
@@ -110,12 +120,116 @@ const FIXTURE: PipelineSummary = {
       {
         name: "Review",
         kanban_column: "QA",
+        factory_name: "Factory B",
         // active runs → running pill
         workflow_steps: [
           makeStep("r1", "wf-review", 0, {
             name: "Approve",
             pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 2 },
           }),
+        ],
+      }
+    ),
+  ],
+};
+
+const ALL_IN_FACTORY_FIXTURE: PipelineSummary = {
+  workflows: FIXTURE.workflows.map((workflow) => ({
+    ...workflow,
+    factory_name: "Factory A",
+  })),
+};
+
+const OVERVIEW_FIXTURE: PipelineSummary = {
+  workflows: [
+    makeWorkflow("wf-build", FIXTURE.workflows[0].workflow_steps, {
+      name: "Build",
+      description: "Build pipeline",
+      kanban_column: "Dev",
+      factory_name: "Factory A",
+      transitions: [
+        {
+          id: "transition-build-review",
+          from_workflow_id: "wf-build",
+          to_workflow_id: "wf-review",
+          target_step_id: "r1",
+          label: "ready for review",
+        },
+        {
+          id: "transition-build-pack",
+          from_workflow_id: "wf-build",
+          to_workflow_id: "wf-pack",
+          target_step_id: "p1",
+          label: "direct pack",
+        },
+      ],
+    }),
+    makeWorkflow(
+      "wf-unnamed",
+      [makeStep("n1", "wf-unnamed", 0, { name: "Intake" })],
+      { name: "", factory_name: "Factory A", display_order: 1 }
+    ),
+    makeWorkflow(
+      "wf-review",
+      [makeStep("r1", "wf-review", 0, { name: "Approve" })],
+      {
+        name: "Review",
+        kanban_column: "QA",
+        factory_name: "Factory B",
+        display_order: 2,
+        transitions: [
+          {
+            id: "transition-review-pack",
+            from_workflow_id: "wf-review",
+            to_workflow_id: "wf-pack",
+            target_step_id: "p1",
+            label: "approved",
+          },
+          {
+            id: "transition-review-ship",
+            from_workflow_id: "wf-review",
+            to_workflow_id: "wf-ship",
+            target_step_id: "s1",
+            label: "ship from B",
+          },
+        ],
+      }
+    ),
+    makeWorkflow("wf-pack", [makeStep("p1", "wf-pack", 0, { name: "Pack" })], {
+      name: "Pack",
+      kanban_column: "QA",
+      factory_name: "Factory B",
+      display_order: 3,
+      transitions: [
+        {
+          id: "transition-pack-ship",
+          from_workflow_id: "wf-pack",
+          to_workflow_id: "wf-ship",
+          target_step_id: "s1",
+          label: "packed",
+        },
+      ],
+    }),
+    makeWorkflow(
+      "wf-ship",
+      [makeStep("s1", "wf-ship", 0, { name: "Ship", step_type: "finish" })],
+      { name: "Ship", factory_name: "Factory C", display_order: 4 }
+    ),
+    makeWorkflow(
+      "wf-unclassified",
+      [makeStep("u1", "wf-unclassified", 0, { name: "Unclassified" })],
+      {
+        name: "Unclassified",
+        factory_name: null,
+        display_order: 5,
+        transitions: [
+          {
+            id: "transition-unclassified-build",
+            from_workflow_id: "wf-unclassified",
+            to_workflow_id: "wf-build",
+            target_step_id: "s1",
+            label: "classified",
+          },
         ],
       }
     ),
@@ -151,11 +265,21 @@ function stubLayout(model: AtlasModel): FullLayout {
       intra: [] as FullLayout["cross"],
     };
   });
+  const cross = model.edges
+    .filter((edge) => edge.kind === "cross")
+    .map((edge, index) => ({
+      ...edge,
+      points: [
+        { x: 620, y: 80 + index * 18 },
+        { x: 680, y: 80 + index * 18 },
+      ],
+      labelPos: null,
+    }));
   return {
     width: 700,
     height: 20 + model.workflows.length * 240,
     workflows,
-    cross: [],
+    cross,
     hubIds: [],
   };
 }
@@ -163,6 +287,7 @@ function stubLayout(model: AtlasModel): FullLayout {
 afterEach(() => {
   vi.clearAllMocks();
   useEntityPanelStore.getState().reset();
+  useFactoryFilterStore.getState().reset();
 });
 
 function renderAtlasWithEntityHost() {
@@ -234,13 +359,204 @@ describe("WorkflowAtlas", () => {
     });
     render(<WorkflowAtlas />);
     expect(
-      await screen.findByText(/no workflows to graph/i)
+      await screen.findByText(/no factories configured/i)
     ).toBeInTheDocument();
+  });
+
+  it("shows opaque factory nodes and collapsed routes until a factory is selected", async () => {
+    useFactoryFilterStore.getState().reset();
+    mockSummary.mockReturnValue({
+      summary: OVERVIEW_FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+
+    render(<WorkflowAtlas />);
+
+    expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
+    expect(
+      screen.queryByText("design · workflow topology · elk")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Zoom in to inspect the workflows in place")
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("factory-node-Factory A")).toBeInTheDocument();
+    expect(screen.getByTestId("factory-node-Factory B")).toBeInTheDocument();
+    expect(screen.getByTestId("factory-node-Factory C")).toBeInTheDocument();
+    expect(screen.getByTestId("factory-node-No Factory")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/factory-node-/)).toHaveLength(4);
+    expect(
+      document.querySelectorAll(".factory-overview-factories .uv-wf")
+    ).toHaveLength(4);
+    expect(
+      screen.getByTestId("workflow-node-Unnamed workflow")
+    ).toBeInTheDocument();
+    expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
+      "is-collapsed"
+    );
+    expect(
+      document.querySelector(".factory-overview-map-columns")
+    ).not.toBeInTheDocument();
+    const workflowEdges = Array.from(
+      document.querySelectorAll(".factory-overview-workflow-edges")
+    );
+    expect(workflowEdges.length).toBeGreaterThan(0);
+    expect(
+      workflowEdges.every((edge) => edge.classList.contains("is-hidden"))
+    ).toBe(true);
+    expect(document.querySelector(".factory-overview-regions")).toHaveClass(
+      "is-hidden"
+    );
+    expect(
+      screen.getByTestId("factory-transition-Factory A>Factory B")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("factory-transition-Factory B>Factory C")
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("2 routes")).toHaveLength(2);
+    expect(
+      document.querySelectorAll(".factory-overview-factories .ag-step")
+    ).toHaveLength(0);
+    expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
+      "is-collapsed"
+    );
+    expect(document.querySelector(".uv-legend")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
+    expect(screen.getByTestId("factory-overview")).toBeInTheDocument();
+    expect(
+      document.querySelectorAll(".factory-overview-factories .uv-wf")
+    ).toHaveLength(4);
+    expect(
+      document.querySelector(".factory-overview-map-columns")
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Graph" }));
+    expect(
+      document.querySelector(".factory-overview-map-columns")
+    ).not.toBeInTheDocument();
+  });
+
+  it("pans the factory surface and reveals workflow contents after zooming in", async () => {
+    useFactoryFilterStore.getState().reset();
+    mockSummary.mockReturnValue({
+      summary: OVERVIEW_FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+
+    render(<WorkflowAtlas />);
+
+    const stage = await screen.findByTestId("factory-overview-stage");
+    expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument();
+    expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
+      "is-collapsed"
+    );
+
+    fireEvent.pointerDown(stage, {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(window, { clientX: 140, clientY: 130 });
+    fireEvent.pointerUp(window);
+    expect(stage).not.toHaveClass("is-grabbing");
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("factory-region-Factory A")
+      ).toBeInTheDocument();
+      expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
+        "is-expanded"
+      );
+      expect(
+        document.querySelector(".factory-overview-workflow-edges")
+      ).toHaveClass("is-visible");
+    });
+    expect(screen.getByText("Plan")).toBeInTheDocument();
+    expect(
+      document.querySelectorAll(".factory-overview-factories .uv-wf")
+    ).toHaveLength(4);
+    expect(
+      document.querySelectorAll(
+        ".factory-overview-factories .factory-node .uv-wf"
+      )
+    ).toHaveLength(0);
+    expect(
+      document.querySelectorAll(".factory-overview-workflow-edges .gedge")
+        .length
+    ).toBeGreaterThan(0);
+  });
+
+  it("selects No Factory as an exact null workflow scope", async () => {
+    useFactoryFilterStore.getState().reset();
+    mockSummary.mockReturnValue({
+      summary: OVERVIEW_FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+
+    render(<WorkflowAtlas />);
+
+    fireEvent.click(screen.getByTestId("factory-node-No Factory"));
+
+    await waitFor(() => {
+      expect(document.querySelector(".ag-wf-name")).toHaveTextContent(
+        "Unclassified"
+      );
+      expect(document.querySelectorAll(".uv-wf")).toHaveLength(1);
+    });
+    expect(document.querySelector(".ag-wf-name")).not.toHaveTextContent(
+      "Build"
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
+    await waitFor(() =>
+      expect(document.querySelector(".al-name")).toHaveTextContent(
+        "Unclassified"
+      )
+    );
+  });
+
+  it("zooms from an opaque factory node into that factory's graph", async () => {
+    useFactoryFilterStore.getState().reset();
+    mockSummary.mockReturnValue({
+      summary: OVERVIEW_FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+
+    render(<WorkflowAtlas />);
+
+    fireEvent.click(screen.getByTestId("factory-node-Factory A"));
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".uv-wf")).toHaveLength(2);
+      const names = Array.from(document.querySelectorAll(".ag-wf-name")).map(
+        (name) => name.textContent
+      );
+      expect(names).toContain("Build");
+      expect(names).toContain("Unnamed workflow");
+    });
+    expect(
+      Array.from(document.querySelectorAll(".ag-wf-name")).map(
+        (name) => name.textContent
+      )
+    ).not.toContain("Review");
   });
 
   it("renders the graph from a fixture summary", async () => {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -253,6 +569,9 @@ describe("WorkflowAtlas", () => {
     await waitFor(() =>
       expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
     );
+    expect(
+      screen.getByText("design · workflow topology · elk")
+    ).toBeInTheDocument();
     const graphNames = Array.from(document.querySelectorAll(".ag-wf-name")).map(
       (n) => n.textContent
     );
@@ -279,7 +598,7 @@ describe("WorkflowAtlas", () => {
       isMaximized: false,
     });
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -306,7 +625,7 @@ describe("WorkflowAtlas", () => {
 
   it("does not re-run the ELK layout when only pipeline_counts change", async () => {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -321,7 +640,7 @@ describe("WorkflowAtlas", () => {
     // bump counts only — same structural key → no new layout
     mockSummary.mockReturnValue({
       summary: {
-        workflows: FIXTURE.workflows.map((w) => ({
+        workflows: ALL_IN_FACTORY_FIXTURE.workflows.map((w) => ({
           ...w,
           workflow_steps: w.workflow_steps.map((s) => ({
             ...s,
@@ -336,13 +655,57 @@ describe("WorkflowAtlas", () => {
 
     await waitFor(() => expect(layoutFullMock).toHaveBeenCalledTimes(1));
   });
+
+  it("scopes Graph and Map to the selected exact factory", async () => {
+    mockSummary.mockReturnValue({
+      summary: FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+
+    useFactoryFilterStore.getState().reset();
+    render(<WorkflowAtlas />);
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll("[data-testid^='factory-node-']")
+      ).toHaveLength(2)
+    );
+
+    fireEvent.change(screen.getByLabelText("Filter by factory"), {
+      target: { value: "Factory A" },
+    });
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".uv-wf")).toHaveLength(1);
+      expect(document.querySelector(".ag-wf-name")).toHaveTextContent("Build");
+      expect(document.querySelector(".ag-wf-name")).not.toHaveTextContent(
+        "Review"
+      );
+    });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
+    await waitFor(() => {
+      expect(document.querySelector(".al-name")).toHaveTextContent("Build");
+      expect(document.querySelector(".al-name")).not.toHaveTextContent(
+        "Review"
+      );
+      const headers = Array.from(document.querySelectorAll(".al-stagehd"));
+      expect(
+        headers.some((header) => header.textContent?.includes("Dev"))
+      ).toBe(true);
+      expect(headers.some((header) => header.textContent?.includes("QA"))).toBe(
+        false
+      );
+    });
+  });
 });
 
 describe("WorkflowAtlas — MAP view", () => {
   /** Render the atlas and switch to the Map view (condensed layout is real). */
   async function renderMap() {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -425,7 +788,7 @@ describe("WorkflowAtlas — morph (P6)", () => {
     vi.useFakeTimers();
     try {
       mockSummary.mockReturnValue({
-        summary: FIXTURE,
+        summary: ALL_IN_FACTORY_FIXTURE,
         isLoading: false,
         error: null,
       });
@@ -459,7 +822,7 @@ describe("WorkflowAtlas — morph (P6)", () => {
 
   it("keeps one persistent box element across the toggle", async () => {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -493,7 +856,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
 
   it("applies lit/dim classes on hover (graph view)", async () => {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
@@ -526,7 +889,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
 
   it("keeps the workflow traced and emphasises the node when a step is hovered", async () => {
     mockSummary.mockReturnValue({
-      summary: FIXTURE,
+      summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });

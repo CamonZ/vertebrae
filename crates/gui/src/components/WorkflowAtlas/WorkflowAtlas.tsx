@@ -42,6 +42,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SearchInput } from "../molecules/SearchInput";
 import { SegmentedControl } from "../molecules/SegmentedControl";
+import { FactoryFilter } from "../FactoryFilter";
+import {
+  factoryScopeExists,
+  filterByFactory,
+} from "../../utils/workflowFactory";
 import { usePipelineSummary } from "../../hooks/usePipelineSummary";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import type { AtlasSelection } from "./inspector/selection";
@@ -50,6 +55,7 @@ import { EdgeLabel } from "./EdgeLabel";
 import { GraphEdge } from "./GraphEdge";
 import { GraphMarkers } from "./GraphMarkers";
 import { KindLegend } from "./KindLegend";
+import { FactoryOverview } from "./FactoryOverview";
 import { RunConsole } from "./RunConsole";
 import { StepNodeGeo } from "./StepNodeGeo";
 import { WfBox, type WfBoxState } from "./WfBox";
@@ -57,6 +63,7 @@ import { ZoomWidget } from "./ZoomWidget";
 import { buildAtlasModel } from "./adapter/buildAtlasModel";
 import { selectionFromWorkflowTarget } from "./inspector/selection";
 import { usePanZoom } from "./hooks/usePanZoom";
+import { useFactoryFilterStore } from "../../stores/factoryFilterStore";
 import { roundedPath } from "./layout/geometry";
 import { layoutCondensed } from "./layout/layoutCondensed";
 import { layoutFull } from "./layout/layoutFull";
@@ -103,6 +110,10 @@ export function WorkflowAtlas() {
   const { summary, isLoading, error } = usePipelineSummary();
 
   const [view, setView] = useState<AtlasView>("graph");
+  const factoryFilter = useFactoryFilterStore((state) => state.factoryName);
+  const setFactoryFilter = useFactoryFilterStore(
+    (state) => state.setFactoryName
+  );
   const [query, setQuery] = useState("");
   const [hover, setHover] = useState<string | null>(null);
   // Step-node hover: the ref of the step node under the cursor (graph view).
@@ -116,13 +127,58 @@ export function WorkflowAtlas() {
   const [morphing, setMorphing] = useState(false);
   const entitySelection = useEntityPanelStore((state) => state.selection);
 
+  const showFactoryOverview = summary !== null && factoryFilter === null;
+
+  // Keep the topology input scoped before deriving the Atlas model. This makes
+  // the same literal factory comparison govern both Graph and Map layouts.
+  const scopedSummary = useMemo(() => {
+    if (!summary || factoryFilter === null) return summary;
+    return {
+      ...summary,
+      workflows: filterByFactory(summary.workflows, factoryFilter),
+    };
+  }, [summary, factoryFilter]);
+
+  // If a realtime update removes the selected factory from the project, return
+  // to the unscoped topology instead of leaving a value with no option.
+  useEffect(() => {
+    if (
+      factoryFilter !== null &&
+      summary &&
+      !factoryScopeExists(summary.workflows, factoryFilter)
+    ) {
+      setFactoryFilter(null);
+    }
+  }, [factoryFilter, setFactoryFilter, summary]);
+
   // The global entity selection is also the canvas highlight. The global host
   // renders the inspector; this component only projects the same selection onto
   // the atlas so the page cannot mount a second detail surface.
   const model = useMemo(
-    () => (summary ? buildAtlasModel(summary) : null),
-    [summary]
+    () =>
+      !showFactoryOverview && scopedSummary
+        ? buildAtlasModel(scopedSummary)
+        : null,
+    [scopedSummary, showFactoryOverview]
   );
+
+  // A selection from another factory should not remain open beside a scoped
+  // canvas. The global host owns the panel, so close through the shared store.
+  useEffect(() => {
+    if (showFactoryOverview && entitySelection?.type !== "task") {
+      if (entitySelection) useEntityPanelStore.getState().close();
+      return;
+    }
+    if (!model || !entitySelection || entitySelection.type === "task") return;
+    const workflowId = entitySelection.workflowId;
+    if (
+      workflowId &&
+      !model.workflows.some((workflow) => workflow.id === workflowId)
+    ) {
+      useEntityPanelStore.getState().close();
+    }
+  }, [entitySelection, model, showFactoryOverview]);
+
   const sel = useMemo<AtlasSelection | null>(() => {
     if (!model || !entitySelection || entitySelection.type === "task") {
       return null;
@@ -203,7 +259,11 @@ export function WorkflowAtlas() {
     if (isGraph) return { w: full?.width ?? 0, h: full?.height ?? 0 };
     return { w: cond?.width ?? 0, h: cond?.height ?? 0 };
   }, [isGraph, full, cond]);
-  const pz = usePanZoom(canvasRef, dims, { min: 0.12, max: 2.4 });
+  const pz = usePanZoom(canvasRef, dims, {
+    min: 0.12,
+    max: 2.4,
+    enabled: !showFactoryOverview,
+  });
   const pzRef = useRef(pz);
   pzRef.current = pz;
 
@@ -423,8 +483,13 @@ export function WorkflowAtlas() {
     return crossIsBack(fromWorkflow, toWorkflow);
   };
 
-  const ready = isGraph ? !!full && !!model : !!cond && !!model;
-  const empty = !!summary && model !== null && model.workflows.length === 0;
+  const ready =
+    showFactoryOverview || (isGraph ? !!full && !!model : !!cond && !!model);
+  const empty =
+    !showFactoryOverview &&
+    !!summary &&
+    model !== null &&
+    model.workflows.length === 0;
 
   // z-sort: lit edges paint LAST so they read over the dimmed field. Stable sort
   // keeps resting order otherwise.
@@ -434,7 +499,9 @@ export function WorkflowAtlas() {
     <main className="uv-main">
       <header className="uv-head">
         <div className="uv-name">
-          <div className="crumb">design · workflow topology · elk</div>
+          {!showFactoryOverview && (
+            <div className="crumb">design · workflow topology · elk</div>
+          )}
           <h1>
             Workflow <em>{isGraph ? "Graph" : "Atlas"}</em>
           </h1>
@@ -445,10 +512,18 @@ export function WorkflowAtlas() {
             <SearchInput
               value={query}
               onChange={setQuery}
-              placeholder="Find a workflow…"
+              placeholder={
+                showFactoryOverview ? "Find a factory…" : "Find a workflow…"
+              }
               hint="/"
             />
           </div>
+          <FactoryFilter
+            id="atlas-factory-filter"
+            workflows={summary?.workflows ?? []}
+            value={factoryFilter}
+            onChange={setFactoryFilter}
+          />
           <SegmentedControl<AtlasView>
             ariaLabel="Workflow view"
             options={[
@@ -477,7 +552,20 @@ export function WorkflowAtlas() {
           <div className="uv-empty">no workflows to graph</div>
         )}
 
-        {ready && (
+        {showFactoryOverview &&
+          !isLoading &&
+          !error &&
+          !layoutError &&
+          summary && (
+            <FactoryOverview
+              summary={summary}
+              query={query}
+              view={view}
+              onSelect={setFactoryFilter}
+            />
+          )}
+
+        {!showFactoryOverview && ready && (
           <div
             className={"uv-scaler" + (morphing ? " morphing" : "")}
             style={{ transform: pz.transform }}
@@ -684,7 +772,7 @@ export function WorkflowAtlas() {
           </div>
         )}
 
-        {ready && (
+        {!showFactoryOverview && ready && (
           <ZoomWidget
             onZoomIn={pz.zoomIn}
             onZoomOut={pz.zoomOut}
@@ -695,10 +783,10 @@ export function WorkflowAtlas() {
         {/* Run Console — docked over the canvas, OUTSIDE the morph layers so it
             persists across the Map⇄Graph toggle. Reads the live task list; its
             surfaces carry `data-no-pan` so dragging them never pans the world. */}
-        <RunConsole summary={summary} />
+        <RunConsole summary={scopedSummary} factoryName={factoryFilter} />
       </div>
 
-      <KindLegend />
+      {!showFactoryOverview && <KindLegend />}
 
       {/* The global entity host renders the one workflow/step inspector. */}
     </main>

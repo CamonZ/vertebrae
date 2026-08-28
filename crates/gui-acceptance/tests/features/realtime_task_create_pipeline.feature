@@ -7,6 +7,7 @@ Feature: Real-time task creation on pipeline view
       | name | Pipeline Task Workflow |
     And I create a step "To Do" in the workflow "Pipeline Task Workflow" via the CLI
     And the GUI is on the pipeline view
+    And I select factory "No Factory"
     When I create a task with:
       | title    | Pipeline Create Test Task |
       | workflow | Pipeline Task Workflow    |
