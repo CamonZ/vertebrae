@@ -401,6 +401,141 @@ describe("chatStore", () => {
       );
     });
 
+    it("does not move a live question after its replayed response", async () => {
+      const id = useChatStore
+        .getState()
+        .openSession("Live Replay Order", "/repo/root");
+      useChatStore.getState().setProviderResumeId(id, "conv-live-order");
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "question",
+        timestamp: "2026-01-01T00:00:01Z",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "response",
+        timestamp: "2026-01-01T00:00:02Z",
+      });
+      const replay = vi
+        .spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValue({
+          status: "ok",
+          data: {
+            events: [
+              JSON.stringify({
+                version: 1,
+                event_id: "live-order-response",
+                stream_id: "local-replay/session",
+                sequence: 2,
+                correlation: { session_id: "conv-live-order" },
+                timestamp: "2026-01-01T00:00:02Z",
+                semantics: "snapshot",
+                type: "text",
+                data: { text: "response" },
+              }),
+            ],
+            cache_key: "revision-live-order",
+            next_cursor: null,
+            has_more: false,
+          },
+        });
+
+      await expect(
+        useChatStore.getState().selectPersistedSession(id)
+      ).resolves.toBe(true);
+
+      await vi.waitFor(() =>
+        expect(useChatStore.getState().sessions[id].messages).toEqual([
+          {
+            kind: "user",
+            text: "question",
+            timestamp: "2026-01-01T00:00:01Z",
+          },
+          {
+            kind: "assistant",
+            text: "response",
+            timestamp: "2026-01-01T00:00:02Z",
+          },
+        ])
+      );
+      expect(replay).toHaveBeenCalledTimes(1);
+      expect(
+        useChatStore.getState().sessions[id].providerReplay?.installedMessages
+      ).toHaveLength(2);
+    });
+
+    it("automatically follows an empty deferred newest page", async () => {
+      const id = useChatStore
+        .getState()
+        .openSession("Deferred Replay", "/repo/root");
+      useChatStore.getState().setProviderResumeId(id, "conv-deferred");
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        panelOpen: false,
+      });
+      const replay = vi
+        .spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValueOnce({
+          status: "ok",
+          data: {
+            events: [],
+            cache_key: "revision-deferred",
+            next_cursor: "revision-deferred:end",
+            has_more: true,
+          },
+        })
+        .mockResolvedValueOnce({
+          status: "ok",
+          data: {
+            events: [
+              JSON.stringify({
+                version: 1,
+                event_id: "deferred-event",
+                stream_id: "local-replay/session",
+                sequence: 1,
+                correlation: { session_id: "conv-deferred" },
+                timestamp: "2026-01-01T00:00:01Z",
+                semantics: "snapshot",
+                type: "text",
+                data: { text: "newest response" },
+              }),
+            ],
+            cache_key: "revision-deferred",
+            next_cursor: null,
+            has_more: false,
+          },
+        });
+
+      useChatStore.getState().openSession("Replacement Label", "/repo/root");
+
+      await vi.waitFor(() =>
+        expect(useChatStore.getState().sessions[id].messages).toEqual([
+          {
+            kind: "assistant",
+            text: "newest response",
+            timestamp: "2026-01-01T00:00:01Z",
+          },
+        ])
+      );
+      expect(replay).toHaveBeenCalledTimes(2);
+      expect(replay).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          cursor: "revision-deferred:end",
+        })
+      );
+      expect(useChatStore.getState().sessions[id].providerReplay).toMatchObject(
+        {
+          loaded: true,
+          hasMore: false,
+          nextCursor: null,
+          loading: null,
+          error: null,
+        }
+      );
+    });
+
     it("clears the initial hydration state when the first replay page fails", async () => {
       const id = useChatStore
         .getState()
