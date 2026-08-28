@@ -353,7 +353,7 @@ describe("WorkflowAtlas", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows custom workflow cards and factory routes until a factory is selected", async () => {
+  it("shows opaque factory nodes and collapsed routes until a factory is selected", async () => {
     useFactoryFilterStore.getState().reset();
     mockSummary.mockReturnValue({
       summary: OVERVIEW_FIXTURE,
@@ -369,13 +369,10 @@ describe("WorkflowAtlas", () => {
     expect(screen.getByTestId("factory-node-Factory C")).toBeInTheDocument();
     expect(screen.getByTestId("factory-node-No Factory")).toBeInTheDocument();
     expect(screen.getAllByTestId(/factory-node-/)).toHaveLength(4);
-    expect(document.querySelectorAll(".uv-wf")).toHaveLength(6);
+    expect(document.querySelectorAll(".uv-wf")).toHaveLength(4);
     expect(
-      screen.getByTestId("workflow-node-Unnamed workflow")
-    ).toBeInTheDocument();
-    expect(
-      screen.getByTestId("factory-workflow-transition-wf-review-wf-pack")
-    ).toBeInTheDocument();
+      screen.queryByTestId("workflow-node-Unnamed workflow")
+    ).not.toBeInTheDocument();
     expect(
       screen.getByTestId("factory-transition-Factory A>Factory B")
     ).toBeInTheDocument();
@@ -388,7 +385,7 @@ describe("WorkflowAtlas", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     expect(screen.getByTestId("factory-overview")).toBeInTheDocument();
-    expect(document.querySelectorAll(".uv-wf")).toHaveLength(6);
+    expect(document.querySelectorAll(".uv-wf")).toHaveLength(4);
   });
 
   it("selects No Factory as an exact null workflow scope", async () => {
@@ -422,7 +419,7 @@ describe("WorkflowAtlas", () => {
     );
   });
 
-  it("zooms from a factory workflow card into that factory's graph", async () => {
+  it("zooms from an opaque factory node into that factory's graph", async () => {
     useFactoryFilterStore.getState().reset();
     mockSummary.mockReturnValue({
       summary: OVERVIEW_FIXTURE,
@@ -433,7 +430,7 @@ describe("WorkflowAtlas", () => {
 
     render(<WorkflowAtlas />);
 
-    fireEvent.click(screen.getByTestId("workflow-node-Unnamed workflow"));
+    fireEvent.click(screen.getByTestId("factory-node-Factory A"));
 
     await waitFor(() => {
       expect(document.querySelectorAll(".uv-wf")).toHaveLength(2);

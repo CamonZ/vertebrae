@@ -1,5 +1,5 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { WfBox } from "./WfBox";
 import type { AtlasWorkflow, Kind, Rect } from "./layout/types";
 
@@ -48,6 +48,37 @@ describe("WfBox default badge", () => {
       />
     );
     expect(queryByText("default")).not.toBeInTheDocument();
+  });
+});
+
+describe("WfBox factory variant", () => {
+  it("uses the workflow node shell while keeping factory contents opaque", () => {
+    const onSelect = vi.fn();
+    const { container, getByTestId } = render(
+      <WfBox
+        variant="factory"
+        factory={{
+          id: "Factory A",
+          name: "Factory A",
+          workflowCount: 2,
+          workItemCount: 4,
+          activeCount: 1,
+        }}
+        rect={RECT}
+        onSelect={onSelect}
+      />
+    );
+
+    expect(container.querySelector(".uv-wf.factory-node")).toBeInTheDocument();
+    expect(container.querySelector(".uv-factory-face")).toBeInTheDocument();
+    expect(container.querySelector(".uv-face-graph")).not.toBeInTheDocument();
+    expect(container.querySelector(".uv-face-map")).not.toBeInTheDocument();
+    expect(getByTestId("factory-node-Factory A")).toHaveTextContent(
+      "2 workflows"
+    );
+
+    fireEvent.click(getByTestId("factory-node-Factory A"));
+    expect(onSelect).toHaveBeenCalledWith("Factory A");
   });
 });
 
