@@ -388,6 +388,43 @@ describe("WorkflowAtlas", () => {
     expect(document.querySelectorAll(".uv-wf")).toHaveLength(4);
   });
 
+  it("pans the factory surface and reveals workflow contents after zooming in", async () => {
+    useFactoryFilterStore.getState().reset();
+    mockSummary.mockReturnValue({
+      summary: OVERVIEW_FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+
+    render(<WorkflowAtlas />);
+
+    const stage = await screen.findByTestId("factory-overview-stage");
+    expect(screen.queryByTestId("workflow-node-Build")).not.toBeInTheDocument();
+
+    fireEvent.pointerDown(stage, {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(window, { clientX: 140, clientY: 130 });
+    fireEvent.pointerUp(window);
+    expect(stage).not.toHaveClass("is-grabbing");
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("factory-workflow-transition-wf-review-wf-pack")
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("factory-node-Factory A")).toHaveClass(
+      "factory-node"
+    );
+  });
+
   it("selects No Factory as an exact null workflow scope", async () => {
     useFactoryFilterStore.getState().reset();
     mockSummary.mockReturnValue({

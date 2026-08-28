@@ -259,7 +259,11 @@ export function WorkflowAtlas() {
     if (isGraph) return { w: full?.width ?? 0, h: full?.height ?? 0 };
     return { w: cond?.width ?? 0, h: cond?.height ?? 0 };
   }, [isGraph, full, cond]);
-  const pz = usePanZoom(canvasRef, dims, { min: 0.12, max: 2.4 });
+  const pz = usePanZoom(canvasRef, dims, {
+    min: 0.12,
+    max: 2.4,
+    enabled: !showFactoryOverview,
+  });
   const pzRef = useRef(pz);
   pzRef.current = pz;
 
@@ -554,6 +558,7 @@ export function WorkflowAtlas() {
             <FactoryOverview
               summary={summary}
               query={query}
+              view={view}
               onSelect={setFactoryFilter}
             />
           )}

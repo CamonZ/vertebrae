@@ -5,15 +5,22 @@ import {
   type FactoryFilterValue,
 } from "../../utils/workflowFactory";
 import { rayBox } from "./layout/geometry";
-import type { AtlasModel, Point, Rect } from "./layout/types";
+import type { AtlasModel, AtlasWorkflow, Point, Rect } from "./layout/types";
 
-const FACTORY_W = 280;
-const FACTORY_H = 150;
+const COLLAPSED_FACTORY_W = 280;
+const COLLAPSED_FACTORY_H = 150;
+const CARD_W = 264;
+const CARD_H = 140;
+const CARD_GAP = 18;
+const FACTORY_PAD_X = 22;
+const FACTORY_PAD_TOP = 54;
+const FACTORY_PAD_BOTTOM = 22;
 const FACTORY_GAP_X = 60;
 const FACTORY_GAP_Y = 48;
 const OVERVIEW_PAD_X = 32;
 const OVERVIEW_PAD_Y = 24;
 const MAX_FACTORY_COLUMNS = 2;
+const MAX_WORKFLOW_COLUMNS = 2;
 
 /** Stable key used to group the explicit `null` factory value. */
 export const NO_FACTORY_KEY = "__no_factory__";
@@ -21,13 +28,31 @@ export const NO_FACTORY_KEY = "__no_factory__";
 export interface FactoryOverviewGroup {
   name: string;
   scope: FactoryFilterValue;
+  /** Model workflow ids belonging to this exact factory scope. */
+  workflowIds: string[];
   workflowCount: number;
   workItemCount: number;
   activeCount: number;
 }
 
+export interface FactoryOverviewWorkflow {
+  workflow: AtlasWorkflow;
+  /** Position relative to the containing factory node. */
+  rect: Rect;
+  shape: AtlasModel["steps"][number]["kind"][];
+}
+
 export interface FactoryOverviewNode extends FactoryOverviewGroup {
   rect: Rect;
+  workflows: FactoryOverviewWorkflow[];
+}
+
+/** One visible workflow-to-workflow route inside an expanded factory. */
+export interface FactoryOverviewWorkflowRoute {
+  id: string;
+  from: string;
+  to: string;
+  points: Point[];
 }
 
 /** One visible route between factories, regardless of how many workflows cause it. */
@@ -43,6 +68,7 @@ export interface FactoryOverviewLayout {
   width: number;
   height: number;
   factories: FactoryOverviewNode[];
+  workflowRoutes: FactoryOverviewWorkflowRoute[];
   factoryRoutes: FactoryOverviewFactoryRoute[];
 }
 
@@ -69,6 +95,7 @@ export function buildFactoryOverviewGroups(
     grouped.set(name, {
       name,
       scope: name,
+      workflowIds: [],
       workflowCount: 0,
       workItemCount: 0,
       activeCount: 0,
@@ -81,6 +108,7 @@ export function buildFactoryOverviewGroups(
     ? {
         name: "No Factory",
         scope: NO_FACTORY_SCOPE,
+        workflowIds: [],
         workflowCount: 0,
         workItemCount: 0,
         activeCount: 0,
@@ -93,6 +121,7 @@ export function buildFactoryOverviewGroups(
         ? noFactoryGroup
         : grouped.get(workflow.factory_name);
     if (!group) continue;
+    group.workflowIds.push(workflow.id);
     group.workflowCount += 1;
     for (const step of workflow.workflow_steps) {
       group.workItemCount +=
@@ -115,7 +144,8 @@ export function buildFactoryOverviewGroups(
  */
 export function layoutFactoryOverview(
   model: AtlasModel,
-  groups: FactoryOverviewGroup[]
+  groups: FactoryOverviewGroup[],
+  expanded = false
 ): FactoryOverviewLayout {
   const factoryColumns = Math.min(
     MAX_FACTORY_COLUMNS,
@@ -126,7 +156,27 @@ export function layoutFactoryOverview(
     groupRows.push(groups.slice(i, i + factoryColumns));
   }
 
-  const rowHeights = groupRows.map(() => FACTORY_H);
+  const factoryWidth = expanded
+    ? FACTORY_PAD_X * 2 +
+      MAX_WORKFLOW_COLUMNS * CARD_W +
+      (MAX_WORKFLOW_COLUMNS - 1) * CARD_GAP
+    : COLLAPSED_FACTORY_W;
+  const factoryHeight = (group: FactoryOverviewGroup): number => {
+    if (!expanded) return COLLAPSED_FACTORY_H;
+    const rows = Math.max(
+      1,
+      Math.ceil(group.workflowIds.length / MAX_WORKFLOW_COLUMNS)
+    );
+    return (
+      FACTORY_PAD_TOP +
+      rows * CARD_H +
+      (rows - 1) * CARD_GAP +
+      FACTORY_PAD_BOTTOM
+    );
+  };
+  const rowHeights = groupRows.map((row) =>
+    Math.max(...row.map((group) => factoryHeight(group)))
+  );
   const yByRow: number[] = [];
   rowHeights.reduce((y, height, index) => {
     yByRow[index] = y;
@@ -135,21 +185,68 @@ export function layoutFactoryOverview(
 
   const factories: FactoryOverviewNode[] = [];
   const factoryRects = new Map<string, Rect>();
+  const modelWorkflows = new Map(model.workflows.map((w) => [w.id, w]));
+  const modelSteps = new Map<string, AtlasModel["steps"]>();
+  for (const step of model.steps) {
+    const list = modelSteps.get(step.workflowId);
+    if (list) list.push(step);
+    else modelSteps.set(step.workflowId, [step]);
+  }
+
   groups.forEach((group, index) => {
     const row = Math.floor(index / factoryColumns);
     const col = index % factoryColumns;
     const rect: Rect = {
-      x: OVERVIEW_PAD_X + col * (FACTORY_W + FACTORY_GAP_X),
+      x: OVERVIEW_PAD_X + col * (factoryWidth + FACTORY_GAP_X),
       y: yByRow[row],
-      w: FACTORY_W,
-      h: FACTORY_H,
+      w: factoryWidth,
+      h: factoryHeight(group),
     };
     const key = typeof group.scope === "string" ? group.scope : NO_FACTORY_KEY;
     factoryRects.set(key, rect);
-    factories.push({ ...group, rect });
+    const workflows = expanded
+      ? group.workflowIds
+          .map((id, workflowIndex) => {
+            const workflow = modelWorkflows.get(id);
+            if (!workflow) return null;
+            const cardCol = workflowIndex % MAX_WORKFLOW_COLUMNS;
+            const cardRow = Math.floor(workflowIndex / MAX_WORKFLOW_COLUMNS);
+            return {
+              workflow,
+              rect: {
+                x: FACTORY_PAD_X + cardCol * (CARD_W + CARD_GAP),
+                y: FACTORY_PAD_TOP + cardRow * (CARD_H + CARD_GAP),
+                w: CARD_W,
+                h: CARD_H,
+              },
+              shape: workflow.stepIds
+                .map((stepId) =>
+                  modelSteps
+                    .get(workflow.id)
+                    ?.find((step) => step.stepId === stepId)
+                )
+                .filter((step): step is NonNullable<typeof step> => !!step)
+                .map((step) => step.kind),
+            } satisfies FactoryOverviewWorkflow;
+          })
+          .filter((workflow): workflow is FactoryOverviewWorkflow => !!workflow)
+      : [];
+    factories.push({ ...group, rect, workflows });
   });
 
-  const modelWorkflows = new Map(model.workflows.map((w) => [w.id, w]));
+  const workflowRects = new Map<string, Rect>();
+  for (const factory of factories) {
+    for (const workflow of factory.workflows) {
+      workflowRects.set(workflow.workflow.id, {
+        x: workflow.rect.x,
+        y: workflow.rect.y,
+        w: workflow.rect.w,
+        h: workflow.rect.h,
+      });
+    }
+  }
+
+  const workflowRoutes = new Map<string, FactoryOverviewWorkflowRoute>();
   const factoryRoutes = new Map<
     string,
     { from: string; to: string; count: number }
@@ -161,7 +258,21 @@ export function layoutFactoryOverview(
     if (!from || !to) continue;
     const fromKey = factoryKey(from.factoryName);
     const toKey = factoryKey(to.factoryName);
-    if (fromKey === toKey) continue;
+    if (fromKey === toKey) {
+      if (!expanded || edge.fromWorkflow === edge.toWorkflow) continue;
+      const routeKey = `${edge.fromWorkflow}>${edge.toWorkflow}`;
+      if (workflowRoutes.has(routeKey)) continue;
+      const fromRect = workflowRects.get(edge.fromWorkflow);
+      const toRect = workflowRects.get(edge.toWorkflow);
+      if (!fromRect || !toRect) continue;
+      workflowRoutes.set(routeKey, {
+        id: `factory-workflow-transition-${edge.fromWorkflow}-${edge.toWorkflow}`,
+        from: edge.fromWorkflow,
+        to: edge.toWorkflow,
+        points: routePoints(fromRect, toRect),
+      });
+      continue;
+    }
     const routeKey = `${fromKey}>${toKey}`;
     const route = factoryRoutes.get(routeKey);
     if (route) route.count += 1;
@@ -189,10 +300,11 @@ export function layoutFactoryOverview(
   return {
     width:
       OVERVIEW_PAD_X * 2 +
-      factoryColumns * FACTORY_W +
+      factoryColumns * factoryWidth +
       (factoryColumns - 1) * FACTORY_GAP_X,
     height,
     factories,
+    workflowRoutes: [...workflowRoutes.values()],
     factoryRoutes: factoryRoutesWithPoints,
   };
 }
