@@ -7,6 +7,7 @@ Feature: Real-time task deletion on pipeline view
       | name | Pipeline Delete Workflow |
     And I create a step "To Do" in the workflow "Pipeline Delete Workflow" via the CLI
     And the GUI is on the pipeline view
+    And I select factory "No Factory"
     When I create a task with:
       | title    | Pipeline Task To Delete  |
       | workflow | Pipeline Delete Workflow |

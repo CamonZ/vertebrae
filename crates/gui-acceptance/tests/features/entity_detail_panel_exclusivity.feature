@@ -46,6 +46,7 @@ Feature: Exclusive entity detail panels
     And I configure the mock local chat reply with a link to the current workflow
     And I create a workflow "Existing workflow panel" via the CLI
     And the GUI is on the pipeline view
+    And I select factory "No Factory"
     When I click on the element containing text "Existing workflow panel"
     Then the GUI should show "Workflow Details" within 10 seconds
     When I click on the element with test id "local-chat-launcher"
@@ -63,6 +64,7 @@ Feature: Exclusive entity detail panels
     And I create a workflow "Existing step panel workflow" via the CLI
     And I create a step "Existing step panel" in the workflow "Existing step panel workflow" via the CLI
     And the GUI is on the pipeline view
+    And I select factory "No Factory"
     When I click on the element with test id "step-node-Existing step panel"
     Then the GUI should show "Existing step panel" within 10 seconds
     When I click on the element with test id "local-chat-launcher"

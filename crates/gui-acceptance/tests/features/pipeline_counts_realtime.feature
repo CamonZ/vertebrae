@@ -7,6 +7,7 @@ Feature: Real-time pipeline aggregate counts
       | name | Pipeline Active Workflow |
     And I create a step "Run Count" in the workflow "Pipeline Active Workflow" via the CLI
     And the GUI is on the pipeline view
+    And I select factory "No Factory"
     When I create a task with:
       | title    | Pipeline Active Task     |
       | workflow | Pipeline Active Workflow |

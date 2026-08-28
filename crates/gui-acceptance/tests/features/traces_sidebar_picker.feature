@@ -9,6 +9,7 @@ Feature: Traces sidebar entry and task picker
       | name | Sidebar Picker Workflow |
     And I create a step "Sidebar Picker Step" in the workflow "Sidebar Picker Workflow" via the CLI
     And the GUI is on the pipeline view
+    And I select factory "No Factory"
     When I create a task with:
       | title    | Sidebar Picker Root Task |
       | workflow | Sidebar Picker Workflow  |

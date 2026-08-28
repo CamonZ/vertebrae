@@ -12,6 +12,7 @@ Feature: Traces page renders session log content end-to-end
     And I create a step "Traces Content Step" in the workflow "Traces Content Workflow" via the CLI
     And the step prompt is set to a mock that emits an assistant message "hello-from-mock-claude"
     And the GUI is on the pipeline view
+    And I select factory "No Factory"
     When I create a task with:
       | title    | Traces Content Root Task |
       | workflow | Traces Content Workflow  |

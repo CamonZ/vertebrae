@@ -7,6 +7,7 @@ Feature: Real-time task update on pipeline view
       | name | Pipeline Update Workflow |
     And I create a step "To Do" in the workflow "Pipeline Update Workflow" via the CLI
     And the GUI is on the pipeline view
+    And I select factory "No Factory"
     When I create a task with:
       | title    | Pipeline Original Title  |
       | workflow | Pipeline Update Workflow |

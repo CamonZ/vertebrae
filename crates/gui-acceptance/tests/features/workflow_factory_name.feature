@@ -6,6 +6,7 @@ Feature: Workflow factory name in the GUI
       | name         | Factory GUI Workflow |
       | factory_name | Shared Factory       |
     And the GUI is on the pipeline view
+    And I select factory "Shared Factory"
     Then the GUI should show "Factory GUI Workflow" within 5 seconds
     When I click on the element containing text "Factory GUI Workflow"
     Then the GUI should show "Workflow Details" within 5 seconds
@@ -13,4 +14,6 @@ Feature: Workflow factory name in the GUI
     When I click on the element with test id "factory-name-edit"
     And I click on the element with test id "factory-name-clear"
     And I click on the element with test id "factory-name-save"
+    And I select factory "No Factory"
+    And I click on the element containing text "Factory GUI Workflow"
     Then the GUI element with test id "factory-name-value" should have text "None" within 10 seconds

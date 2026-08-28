@@ -42,6 +42,46 @@ async fn gui_on_pipeline_view(world: &mut GuiWorld) {
     navigate_to(world, "/design", "nav-pipeline").await;
 }
 
+#[given(expr = "I select factory {string}")]
+#[when(expr = "I select factory {string}")]
+async fn select_factory(world: &mut GuiWorld, factory: String) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let select = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(10))
+        .for_element(Locator::Css("[data-testid='atlas-factory-filter-select']"))
+        .await
+        .unwrap_or_else(|_| panic!("factory filter not found while selecting '{factory}'"));
+
+    let value = if factory == "No Factory" {
+        "__no_factory__"
+    } else {
+        factory.as_str()
+    };
+    client
+        .wait()
+        .at_most(std::time::Duration::from_secs(10))
+        .for_element(Locator::Css(&format!(
+            "[data-testid='atlas-factory-filter-select'] option[value=\"{value}\"]"
+        )))
+        .await
+        .unwrap_or_else(|_| panic!("factory option '{factory}' not found within 10 seconds"));
+    select
+        .select_by_value(value)
+        .await
+        .unwrap_or_else(|_| panic!("failed to select factory scope '{factory}'"));
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    world
+        .screenshot(&client, &format!("after-select-factory-{factory}"))
+        .await;
+}
+
 #[then(expr = "the GUI shows {string}")]
 async fn gui_shows_text(world: &mut GuiWorld, expected_text: String) {
     let wd = world
