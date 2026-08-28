@@ -167,6 +167,9 @@
 .factory-overview-workflows.is-collapsed .uv-steplayer .ag-step {
   pointer-events: none;
 }
+.factory-overview-workflow-edges {
+  transition: opacity 0.32s var(--ease);
+}
 .factory-overview-regions,
 .factory-overview-factories,
 .factory-overview-route-labels {
@@ -181,6 +184,7 @@
 .factory-overview-regions.is-hidden,
 .factory-overview-factories.is-hidden,
 .factory-overview-route-labels.is-hidden,
+.factory-overview-workflow-edges.is-hidden,
 .factory-overview-factory-edges.is-hidden {
   opacity: 0;
   pointer-events: none;
@@ -188,6 +192,7 @@
 .factory-overview-regions.is-visible,
 .factory-overview-factories.is-visible,
 .factory-overview-route-labels.is-visible,
+.factory-overview-workflow-edges.is-visible,
 .factory-overview-factory-edges.is-visible {
   opacity: 1;
 }

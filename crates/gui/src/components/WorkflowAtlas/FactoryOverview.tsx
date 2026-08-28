@@ -278,7 +278,10 @@ export function FactoryOverview({
 
                 {workflowView === "map" && (
                   <svg
-                    className="factory-overview-workflow-edges al-edges"
+                    className={
+                      "factory-overview-workflow-edges al-edges" +
+                      (expanded ? " is-visible" : " is-hidden")
+                    }
                     width={activeWidth}
                     height={activeHeight}
                     viewBox={`0 0 ${activeWidth} ${activeHeight}`}
@@ -297,7 +300,10 @@ export function FactoryOverview({
 
                 {workflowView === "graph" && full && (
                   <svg
-                    className="factory-overview-workflow-edges ag-edges"
+                    className={
+                      "factory-overview-workflow-edges ag-edges" +
+                      (expanded ? " is-visible" : " is-hidden")
+                    }
                     width={activeWidth}
                     height={activeHeight}
                     viewBox={`0 0 ${activeWidth} ${activeHeight}`}

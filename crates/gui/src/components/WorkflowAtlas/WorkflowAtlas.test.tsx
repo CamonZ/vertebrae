@@ -389,6 +389,13 @@ describe("WorkflowAtlas", () => {
     expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
       "is-collapsed"
     );
+    const workflowEdges = Array.from(
+      document.querySelectorAll(".factory-overview-workflow-edges")
+    );
+    expect(workflowEdges.length).toBeGreaterThan(0);
+    expect(
+      workflowEdges.every((edge) => edge.classList.contains("is-hidden"))
+    ).toBe(true);
     expect(document.querySelector(".factory-overview-regions")).toHaveClass(
       "is-hidden"
     );
@@ -452,6 +459,9 @@ describe("WorkflowAtlas", () => {
       expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
         "is-expanded"
       );
+      expect(
+        document.querySelector(".factory-overview-workflow-edges")
+      ).toHaveClass("is-visible");
     });
     expect(screen.getByText("Plan")).toBeInTheDocument();
     expect(
