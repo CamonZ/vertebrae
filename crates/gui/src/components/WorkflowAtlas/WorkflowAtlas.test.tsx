@@ -389,6 +389,9 @@ describe("WorkflowAtlas", () => {
     expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
       "is-collapsed"
     );
+    expect(
+      document.querySelector(".factory-overview-map-columns")
+    ).not.toBeInTheDocument();
     const workflowEdges = Array.from(
       document.querySelectorAll(".factory-overview-workflow-edges")
     );
@@ -419,6 +422,14 @@ describe("WorkflowAtlas", () => {
     expect(
       document.querySelectorAll(".factory-overview-factories .uv-wf")
     ).toHaveLength(4);
+    expect(
+      document.querySelector(".factory-overview-map-columns")
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Graph" }));
+    expect(
+      document.querySelector(".factory-overview-map-columns")
+    ).not.toBeInTheDocument();
   });
 
   it("pans the factory surface and reveals workflow contents after zooming in", async () => {

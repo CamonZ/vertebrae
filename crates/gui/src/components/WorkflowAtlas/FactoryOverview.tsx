@@ -257,7 +257,7 @@ export function FactoryOverview({
                   height: activeHeight,
                 }}
               >
-                {workflowView === "map" && (
+                {view === "map" && (
                   <div className="uv-layer factory-overview-map-columns">
                     {cond.columns.map((column) => {
                       const first = cond.nodes.find(
