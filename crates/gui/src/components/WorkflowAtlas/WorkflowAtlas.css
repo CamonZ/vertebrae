@@ -137,7 +137,88 @@
   min-width: max-content;
   margin: 0;
 }
-.factory-overview-canvas > .uv-wf.factory-node {
+.factory-overview-world {
+  position: absolute;
+}
+.factory-overview-workflows {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  transition: opacity 0.32s var(--ease);
+}
+.factory-overview-workflows.is-expanded {
+  opacity: 1;
+  pointer-events: auto;
+}
+.factory-overview-workflows.is-collapsed {
+  opacity: 0;
+}
+.factory-overview-workflows .uv-wf {
+  pointer-events: auto;
+}
+.factory-overview-workflows .uv-steplayer {
+  pointer-events: none;
+}
+.factory-overview-workflows .uv-steplayer .ag-step {
+  pointer-events: auto;
+}
+.factory-overview-workflows.is-collapsed .uv-wf,
+.factory-overview-workflows.is-collapsed .uv-steplayer .ag-step {
+  pointer-events: none;
+}
+.factory-overview-regions,
+.factory-overview-factories,
+.factory-overview-route-labels {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.32s var(--ease);
+}
+.factory-overview-regions {
+  z-index: 4;
+  pointer-events: none;
+}
+.factory-overview-regions.is-hidden,
+.factory-overview-factories.is-hidden,
+.factory-overview-route-labels.is-hidden,
+.factory-overview-factory-edges.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.factory-overview-regions.is-visible,
+.factory-overview-factories.is-visible,
+.factory-overview-route-labels.is-visible,
+.factory-overview-factory-edges.is-visible {
+  opacity: 1;
+}
+.factory-overview-region {
+  position: absolute;
+  border: 1px dashed color-mix(in oklch, var(--fg-faint) 70%, transparent);
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--line) 40%, transparent);
+}
+.factory-overview-region-name,
+.factory-overview-region-meta {
+  position: absolute;
+  top: 14px;
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.factory-overview-region-name {
+  left: 18px;
+  color: var(--fg);
+}
+.factory-overview-region-meta {
+  right: 18px;
+  color: var(--fg-faint);
+}
+.factory-overview-factories {
+  z-index: 6;
+  pointer-events: none;
+}
+.factory-overview-factories .uv-wf.factory-node {
   position: absolute;
   z-index: 2;
   display: flex;
@@ -150,6 +231,7 @@
   background: #050505;
   color: #f5f5f5;
   text-align: left;
+  pointer-events: auto;
   box-shadow: 0 12px 30px rgb(0 0 0 / 24%);
   cursor: pointer;
   transition:
@@ -157,14 +239,26 @@
     transform var(--t-fast) var(--ease),
     box-shadow var(--t-fast) var(--ease);
 }
-.factory-overview-canvas > .uv-wf.factory-node:hover,
-.factory-overview-canvas > .uv-wf.factory-node:focus-visible {
+.factory-overview-factories .uv-wf.factory-node:hover,
+.factory-overview-factories .uv-wf.factory-node:focus-visible {
   border-color: var(--accent);
   box-shadow: 0 16px 36px rgb(0 0 0 / 36%);
   outline: none;
 }
-.factory-overview-canvas > .uv-wf.factory-node .factory-overview-label {
+.factory-overview-factories .uv-wf.factory-node .factory-overview-label {
   color: #8f8f8f;
+}
+.factory-overview-factory-edges {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  overflow: visible;
+  transition: opacity 0.32s var(--ease);
+}
+.factory-overview-route-labels {
+  z-index: 7;
+  pointer-events: none;
 }
 .uv-factory-face {
   position: absolute;
@@ -176,38 +270,6 @@
   justify-content: flex-end;
   gap: var(--s-2);
   padding: var(--s-4);
-}
-.uv-factory-face.expanded {
-  inset: 0 0 auto;
-  height: 54px;
-  justify-content: flex-start;
-  gap: var(--s-1);
-  padding: var(--s-2) var(--s-4);
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in oklch, var(--bg-1) 88%, transparent);
-}
-.uv-factory-face.expanded .factory-overview-label,
-.uv-factory-face.expanded .factory-overview-active {
-  display: none;
-}
-.uv-factory-face.expanded .factory-overview-name {
-  font-size: var(--text-15);
-}
-.factory-overview-content {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-}
-.factory-overview-content > .uv-wf {
-  z-index: 2;
-  transition: none;
-}
-.factory-overview-inner-edges {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  overflow: visible;
 }
 .factory-overview-name {
   max-width: 100%;
@@ -227,16 +289,6 @@
 }
 .factory-overview-active {
   color: var(--accent);
-}
-.factory-overview-edges {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  overflow: visible;
-}
-.factory-overview-canvas > .al-cond {
-  z-index: 3;
 }
 .factory-overview-empty {
   display: grid;

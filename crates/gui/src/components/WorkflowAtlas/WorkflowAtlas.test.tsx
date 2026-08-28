@@ -265,11 +265,21 @@ function stubLayout(model: AtlasModel): FullLayout {
       intra: [] as FullLayout["cross"],
     };
   });
+  const cross = model.edges
+    .filter((edge) => edge.kind === "cross")
+    .map((edge, index) => ({
+      ...edge,
+      points: [
+        { x: 620, y: 80 + index * 18 },
+        { x: 680, y: 80 + index * 18 },
+      ],
+      labelPos: null,
+    }));
   return {
     width: 700,
     height: 20 + model.workflows.length * 240,
     workflows,
-    cross: [],
+    cross,
     hubIds: [],
   };
 }
@@ -360,6 +370,7 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
     render(<WorkflowAtlas />);
 
@@ -369,10 +380,18 @@ describe("WorkflowAtlas", () => {
     expect(screen.getByTestId("factory-node-Factory C")).toBeInTheDocument();
     expect(screen.getByTestId("factory-node-No Factory")).toBeInTheDocument();
     expect(screen.getAllByTestId(/factory-node-/)).toHaveLength(4);
-    expect(document.querySelectorAll(".uv-wf")).toHaveLength(4);
     expect(
-      screen.queryByTestId("workflow-node-Unnamed workflow")
-    ).not.toBeInTheDocument();
+      document.querySelectorAll(".factory-overview-factories .uv-wf")
+    ).toHaveLength(4);
+    expect(
+      screen.getByTestId("workflow-node-Unnamed workflow")
+    ).toBeInTheDocument();
+    expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
+      "is-collapsed"
+    );
+    expect(document.querySelector(".factory-overview-regions")).toHaveClass(
+      "is-hidden"
+    );
     expect(
       screen.getByTestId("factory-transition-Factory A>Factory B")
     ).toBeInTheDocument();
@@ -380,12 +399,19 @@ describe("WorkflowAtlas", () => {
       screen.getByTestId("factory-transition-Factory B>Factory C")
     ).toBeInTheDocument();
     expect(screen.getAllByText("2 routes")).toHaveLength(2);
-    expect(document.querySelectorAll(".ag-step")).toHaveLength(0);
+    expect(
+      document.querySelectorAll(".factory-overview-factories .ag-step")
+    ).toHaveLength(0);
+    expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
+      "is-collapsed"
+    );
     expect(document.querySelector(".uv-legend")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     expect(screen.getByTestId("factory-overview")).toBeInTheDocument();
-    expect(document.querySelectorAll(".uv-wf")).toHaveLength(4);
+    expect(
+      document.querySelectorAll(".factory-overview-factories .uv-wf")
+    ).toHaveLength(4);
   });
 
   it("pans the factory surface and reveals workflow contents after zooming in", async () => {
@@ -395,11 +421,15 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
     render(<WorkflowAtlas />);
 
     const stage = await screen.findByTestId("factory-overview-stage");
-    expect(screen.queryByTestId("workflow-node-Build")).not.toBeInTheDocument();
+    expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument();
+    expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
+      "is-collapsed"
+    );
 
     fireEvent.pointerDown(stage, {
       button: 0,
@@ -417,12 +447,25 @@ describe("WorkflowAtlas", () => {
     await waitFor(() => {
       expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument();
       expect(
-        screen.getByTestId("factory-workflow-transition-wf-review-wf-pack")
+        screen.getByTestId("factory-region-Factory A")
       ).toBeInTheDocument();
+      expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
+        "is-expanded"
+      );
     });
-    expect(screen.getByTestId("factory-node-Factory A")).toHaveClass(
-      "factory-node"
-    );
+    expect(screen.getByText("Plan")).toBeInTheDocument();
+    expect(
+      document.querySelectorAll(".factory-overview-factories .uv-wf")
+    ).toHaveLength(4);
+    expect(
+      document.querySelectorAll(
+        ".factory-overview-factories .factory-node .uv-wf"
+      )
+    ).toHaveLength(0);
+    expect(
+      document.querySelectorAll(".factory-overview-workflow-edges .gedge")
+        .length
+    ).toBeGreaterThan(0);
   });
 
   it("selects No Factory as an exact null workflow scope", async () => {

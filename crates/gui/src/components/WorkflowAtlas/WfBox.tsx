@@ -20,7 +20,7 @@
  *
  * Ported from docs/design/workflow-views.jsx (WfBox).
  */
-import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 import { StepStrip } from "./StepStrip";
 import { TaskCount } from "./TaskCount";
 import { shortId } from "./layout/geometry";
@@ -52,10 +52,6 @@ export interface WfBoxWorkflowProps extends WfBoxCommonProps {
 export interface WfBoxFactoryProps extends WfBoxCommonProps {
   /** Opaque factory node shown at the unscoped overview level. */
   variant: "factory";
-  /** Whether the factory should reveal its workflow contents. */
-  expanded?: boolean;
-  /** Workflow nodes and route layer shown inside an expanded factory. */
-  children?: ReactNode;
   factory: {
     id: string;
     name: string;
@@ -76,7 +72,6 @@ export function WfBox({
 }: WfBoxProps) {
   if (node.variant === "factory") {
     const factory = node.factory;
-    const expanded = node.expanded ?? false;
     const select = () => onSelect?.(factory.id);
     const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
       if (event.key !== "Enter" && event.key !== " ") return;
@@ -96,7 +91,7 @@ export function WfBox({
         onKeyDown={onSelect ? handleKeyDown : undefined}
         onClick={onSelect ? select : undefined}
       >
-        <div className={"uv-factory-face" + (expanded ? " expanded" : "")}>
+        <div className="uv-factory-face">
           <span className="factory-overview-label">
             {factory.name === "No Factory" ? "Scope" : "Factory"}
           </span>
@@ -114,9 +109,6 @@ export function WfBox({
             </span>
           )}
         </div>
-        {expanded ? (
-          <div className="factory-overview-content">{node.children}</div>
-        ) : null}
       </div>
     );
   }
