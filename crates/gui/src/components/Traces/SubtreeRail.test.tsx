@@ -239,8 +239,7 @@ describe("SubtreeRail", () => {
         tasks={tasks}
         subtreeTaskIds={subtreeTaskIds}
         executions={executions}
-        logsByExecutionId={{}}
-        fallbackCostByExecutionId={{}}
+        logBucketsByExecutionId={{}}
       />
     );
 

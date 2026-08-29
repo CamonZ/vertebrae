@@ -105,6 +105,10 @@ describe("useSubtreeSessionLogs", () => {
       expect(result.current.isLoading).toBe(false);
     });
     expect(result.current.logsByExecutionId.e1).toEqual(fetched);
+    expect(result.current.logBucketsByExecutionId.e1).toEqual({
+      logs: fetched,
+      fallbackCost: 0,
+    });
 
     const liveSuperset = [log("e1-fetched-1"), log("e1-live-2")];
     act(() => {

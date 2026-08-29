@@ -110,43 +110,35 @@ Live chat and trace replay share one normalized stream:
 
 Live session-log notifications are a UI delivery contract, not the durable
 record. The websocket continues to deliver individual `SessionLog` records;
-the frontend may queue them and apply them in ordered bulk updates. Created
-records append, updated records upsert by `id` or `logical_key`, and the
-record's existing ID, execution ID, content, format, and timestamps are not
-rewritten. Reconnects may replay records, so idempotent reconciliation is
-required. A complete historical result still comes from
+the frontend queues them in the session-log store and applies them in ordered,
+bounded batches. Created records append, updated records upsert by `id` or
+`logical_key`, and the record's existing ID, execution ID, content, format,
+and timestamps are not rewritten. Reconnects may replay records, so idempotent
+reconciliation is required. A complete historical result still comes from
 `getExecutionLogs`/`getTaskRunTrace`; live state is merged with that durable
-baseline and a gap or overflow is reconciled by refetching rather than
-silently dropping records.
+baseline.
 
-The initial frontend budget is:
+The frontend delivery policy is:
 
 | Measure | Budget / policy |
 | --- | --- |
-| Ordinary flush cadence | Next animation frame, with a 50 ms maximum timer interval |
-| Terminal or error flush | Next frame, at most 16 ms of intentional pacing |
+| Store flush cadence | One scheduled animation frame, with a 50 ms timer fallback when frames are unavailable or delayed |
 | Records per store application | 256 maximum |
-| Pending records | 4,096 maximum; overflow forces reconciliation before accepting more |
-| Hot-state retention | 10,000 records is a soft observation budget; this contract does not evict durable or live records |
-| Received-to-visible latency | Initial p95 target: 100 ms |
+| Pending records | Records are retained and drained in successive bounded batches; there is no synchronous drain-all or automatic overflow refetch |
+| Recovery | The durable baseline is refreshed only by the owning trace hook's explicit refetch path; project reset cancels and drops pending work, while reconnect does not synchronously drain it |
 
-The `sessionLogPerformance` monitor in `src/utils/sessionLogPerformance.ts`
-is disabled by default. An opt-in stress or diagnostic run can enable it and
-collect project- and execution-scoped received, queued, flushed, visible,
-store-commit, rollup, render, parse-time, queue-depth, batch-size, retention,
-overflow, memory, and event-to-visible-latency metrics. Correlation identities
-use the stable logical key when present, otherwise the SessionLog ID; the live
-log ID is the frontend boundary for tracing a record back to its durable row
-and the serialized harness `event_id` remains in `content` for deeper
-investigations. The monitor keeps only bounded latency samples and performs no
-filesystem or webview work.
+The session-log store owns the pending buffer and scheduling. A burst may
+therefore take several frames to catch up, but each store application remains
+bounded and unrelated execution buckets keep their existing references. There
+is no production performance monitor or per-event correlation allocation in
+this path.
 
 ### WebSocket diagnostics
 
 Normal GUI operation does not create per-event WebSocket trace files, and the
 webview receives only warnings and errors from the WebSocket module. Routine
-dispatch and emission records remain available to native stdout at their
-normal log level without being copied into the webview debug store.
+dispatch and emission records are native `debug` logs; they are not forwarded
+to the webview unless diagnostics are enabled.
 
 For event-order investigations, set `VERTEBRAE_WEBSOCKET_DIAGNOSTICS=1` before
 starting the GUI. This enables WebSocket debug records at the webview boundary

@@ -1,14 +1,9 @@
 import { useMemo, useState, type ReactNode } from "react";
-import type {
-  ExecutionStatus,
-  SessionLog,
-  StepExecution,
-  Task,
-} from "../../bindings";
+import type { ExecutionStatus, StepExecution, Task } from "../../bindings";
 import { useScopedSessionLogs } from "../../hooks/useScopedSessionLogs";
+import type { ExecutionLogBucket } from "../../stores/sessionLogStore";
 import {
   computeExecutionRollups,
-  costFromSessionLogs,
   formatCost,
   parseCost,
   type ExecutionRollups,
@@ -19,21 +14,16 @@ interface SubtreeRailProps {
   tasks: readonly Task[];
   subtreeTaskIds: readonly string[];
   executions: readonly StepExecution[];
-  /**
-   * Per-execution session logs. When an execution lacks a populated
-   * `cost` field, the per-task and per-execution rollups fall back to
-   * summing `cost_usd` from `session_end` log entries. Defaults to the
-   * global live `sessionLogStore` map when omitted.
-   */
-  logsByExecutionId?: Readonly<Record<string, SessionLog[]>>;
-  fallbackCostByExecutionId?: Readonly<Record<string, number>>;
+  /** Per-execution logs and their incrementally maintained fallback cost. */
+  logBucketsByExecutionId?: Readonly<Record<string, ExecutionLogBucket>>;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   onSwitchTask?: () => void;
 }
 
-const EMPTY_LOGS_BY_EXECUTION_ID: Readonly<Record<string, SessionLog[]>> = {};
-const EMPTY_COSTS_BY_EXECUTION_ID: Readonly<Record<string, number>> = {};
+const EMPTY_BUCKETS_BY_EXECUTION_ID: Readonly<
+  Record<string, ExecutionLogBucket>
+> = {};
 
 interface GroupRow {
   task: Task;
@@ -125,16 +115,14 @@ function StatusPip({ status }: { status: ExecutionStatus }): ReactNode {
 
 function ExecutionRow({
   execution,
-  logs,
-  fallbackCost,
+  bucket,
 }: {
   execution: StepExecution;
-  logs: SessionLog[] | undefined;
-  fallbackCost: number | undefined;
+  bucket: ExecutionLogBucket | undefined;
 }): ReactNode {
   let displayCost: number | null = parseCost(execution.cost);
   if (displayCost === null) {
-    const fromLogs = fallbackCost ?? costFromSessionLogs(logs);
+    const fromLogs = bucket?.fallbackCost ?? 0;
     if (fromLogs > 0) displayCost = fromLogs;
   }
   return (
@@ -160,15 +148,13 @@ function ExecutionRow({
 interface GroupSectionProps {
   row: GroupRow;
   initiallyExpanded: boolean;
-  logsByExecutionId: Readonly<Record<string, SessionLog[]>>;
-  fallbackCostByExecutionId: Readonly<Record<string, number>>;
+  logBucketsByExecutionId: Readonly<Record<string, ExecutionLogBucket>>;
 }
 
 function GroupSection({
   row,
   initiallyExpanded,
-  logsByExecutionId,
-  fallbackCostByExecutionId,
+  logBucketsByExecutionId,
 }: GroupSectionProps): ReactNode {
   const [expanded, setExpanded] = useState(initiallyExpanded);
   const { task, depth, executions, rollups } = row;
@@ -266,10 +252,7 @@ function GroupSection({
               <ExecutionRow
                 key={exec.id ?? `${task.id}-${idx}`}
                 execution={exec}
-                logs={exec.id ? logsByExecutionId[exec.id] : undefined}
-                fallbackCost={
-                  exec.id ? fallbackCostByExecutionId[exec.id] : undefined
-                }
+                bucket={exec.id ? logBucketsByExecutionId[exec.id] : undefined}
               />
             ))
           )}
@@ -284,15 +267,13 @@ function SubtreeRailContent({
   tasks,
   subtreeTaskIds,
   executions,
-  logsByExecutionId: providedLogs,
-  fallbackCostByExecutionId: providedFallbackCosts,
+  logBucketsByExecutionId: providedBuckets,
   collapsed,
   onToggleCollapsed,
   onSwitchTask,
 }: SubtreeRailProps): ReactNode {
-  const logsByExecutionId = providedLogs ?? EMPTY_LOGS_BY_EXECUTION_ID;
-  const fallbackCostByExecutionId =
-    providedFallbackCosts ?? EMPTY_COSTS_BY_EXECUTION_ID;
+  const logBucketsByExecutionId =
+    providedBuckets ?? EMPTY_BUCKETS_BY_EXECUTION_ID;
   const rows = useMemo<GroupRow[]>(() => {
     const taskById = new Map<string, Task>();
     for (const t of tasks) taskById.set(t.id, t);
@@ -320,11 +301,7 @@ function SubtreeRailContent({
         task,
         depth: depths.get(id) ?? 0,
         executions: taskExecs,
-        rollups: computeExecutionRollups(
-          taskExecs,
-          logsByExecutionId,
-          fallbackCostByExecutionId
-        ),
+        rollups: computeExecutionRollups(taskExecs, logBucketsByExecutionId),
       });
     }
 
@@ -334,14 +311,7 @@ function SubtreeRailContent({
     });
 
     return built;
-  }, [
-    rootTaskId,
-    tasks,
-    subtreeTaskIds,
-    executions,
-    fallbackCostByExecutionId,
-    logsByExecutionId,
-  ]);
+  }, [rootTaskId, tasks, subtreeTaskIds, executions, logBucketsByExecutionId]);
 
   if (collapsed) {
     return (
@@ -415,8 +385,7 @@ function SubtreeRailContent({
               key={row.task.id}
               row={row}
               initiallyExpanded={row.depth === 0}
-              logsByExecutionId={logsByExecutionId}
-              fallbackCostByExecutionId={fallbackCostByExecutionId}
+              logBucketsByExecutionId={logBucketsByExecutionId}
             />
           ))
         )}
@@ -431,38 +400,14 @@ function LiveSubtreeRail(props: SubtreeRailProps): ReactNode {
     [props.executions]
   );
   const liveBuckets = useScopedSessionLogs(executionIds);
-  const logsByExecutionId = useMemo(
-    () =>
-      Object.fromEntries(
-        Object.entries(liveBuckets).map(([id, bucket]) => [id, bucket.logs])
-      ),
-    [liveBuckets]
-  );
-  const fallbackCostByExecutionId = useMemo(
-    () =>
-      Object.fromEntries(
-        Object.entries(liveBuckets).map(([id, bucket]) => [
-          id,
-          bucket.fallbackCost,
-        ])
-      ),
-    [liveBuckets]
-  );
 
   return (
-    <SubtreeRailContent
-      {...props}
-      logsByExecutionId={logsByExecutionId}
-      fallbackCostByExecutionId={fallbackCostByExecutionId}
-    />
+    <SubtreeRailContent {...props} logBucketsByExecutionId={liveBuckets} />
   );
 }
 
 export function SubtreeRail(props: SubtreeRailProps): ReactNode {
-  if (
-    props.logsByExecutionId !== undefined ||
-    props.fallbackCostByExecutionId !== undefined
-  ) {
+  if (props.logBucketsByExecutionId !== undefined) {
     return <SubtreeRailContent {...props} />;
   }
   return <LiveSubtreeRail {...props} />;

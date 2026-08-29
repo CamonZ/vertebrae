@@ -9,7 +9,10 @@ import {
   isCurrentProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
-import { useSessionLogStore } from "../stores/sessionLogStore";
+import {
+  useSessionLogStore,
+  type ExecutionLogBucket,
+} from "../stores/sessionLogStore";
 import { useSubtreeSessionLogs } from "./useSubtreeSessionLogs";
 import {
   errorMessage,
@@ -116,8 +119,8 @@ export interface UseRunTraceResult {
   stepExecutions: StepExecution[];
   /** Session logs keyed by `step_execution_id` for the run's executions. */
   logsByExecutionId: Record<string, SessionLog[]>;
-  /** Incremental session-end cost totals keyed by `step_execution_id`. */
-  fallbackCostByExecutionId: Record<string, number>;
+  /** Session-log buckets keyed by `step_execution_id`. */
+  logBucketsByExecutionId: Record<string, ExecutionLogBucket>;
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
@@ -177,13 +180,13 @@ export function useRunTrace(
   });
 
   const stepExecutions = query.data?.step_executions ?? [];
-  const { logsByExecutionId, fallbackCostByExecutionId } =
+  const { logsByExecutionId, logBucketsByExecutionId } =
     useSubtreeSessionLogs(stepExecutions);
 
   return {
     stepExecutions,
     logsByExecutionId,
-    fallbackCostByExecutionId,
+    logBucketsByExecutionId,
     isLoading: query.isLoading,
     error: query.error ? errorMessage(query.error) : null,
     refetch: () => {

@@ -68,32 +68,10 @@ export function useSubtreeExecutions(
     [executions]
   );
   const liveBuckets = useScopedSessionLogs(executionIds);
-  const logsByExecutionId = useMemo(
-    () =>
-      Object.fromEntries(
-        Object.entries(liveBuckets).map(([id, bucket]) => [id, bucket.logs])
-      ),
-    [liveBuckets]
-  );
-  const fallbackCostByExecutionId = useMemo(
-    () =>
-      Object.fromEntries(
-        Object.entries(liveBuckets).map(([id, bucket]) => [
-          id,
-          bucket.fallbackCost,
-        ])
-      ),
-    [liveBuckets]
-  );
 
   const rollups = useMemo(
-    () =>
-      computeExecutionRollups(
-        executions,
-        logsByExecutionId,
-        fallbackCostByExecutionId
-      ),
-    [executions, fallbackCostByExecutionId, logsByExecutionId]
+    () => computeExecutionRollups(executions, liveBuckets),
+    [executions, liveBuckets]
   );
 
   return {

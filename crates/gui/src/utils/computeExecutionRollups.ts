@@ -1,4 +1,5 @@
 import type { SessionLog, StepExecution } from "../bindings";
+import type { ExecutionLogBucket } from "../stores/sessionLogStore";
 import { parseSessionLogs } from "../types/conversation";
 
 /** Aggregate metrics computed across an execution set. */
@@ -104,31 +105,7 @@ function cacheReadByLatestPerRun(executions: readonly StepExecution[]): number {
   return sum;
 }
 
-export interface SessionLogCostDerivationStats {
-  fullTranscriptParses: number;
-  incrementalRecordParses: number;
-  recordsParsed: number;
-}
-
 const sessionLogCostCache = new WeakMap<readonly SessionLog[], number>();
-let sessionLogCostStats: SessionLogCostDerivationStats = {
-  fullTranscriptParses: 0,
-  incrementalRecordParses: 0,
-  recordsParsed: 0,
-};
-
-/** Reset cost-derivation counters used by performance diagnostics and tests. */
-export function resetSessionLogCostDerivationStats(): void {
-  sessionLogCostStats = {
-    fullTranscriptParses: 0,
-    incrementalRecordParses: 0,
-    recordsParsed: 0,
-  };
-}
-
-export function getSessionLogCostDerivationStats(): SessionLogCostDerivationStats {
-  return { ...sessionLogCostStats };
-}
 
 function sumSessionEndCosts(logs: readonly SessionLog[]): number {
   let sum = 0;
@@ -155,8 +132,6 @@ export function costFromSessionLog(log: SessionLog): number {
   }
   if (type !== "turn_finished" && type !== "run_finished") return 0;
 
-  sessionLogCostStats.incrementalRecordParses += 1;
-  sessionLogCostStats.recordsParsed += 1;
   return sumSessionEndCosts([log]);
 }
 
@@ -168,8 +143,6 @@ export function costFromSessionLogs(logs: SessionLog[] | undefined): number {
   if (!logs || logs.length === 0) return 0;
   const cached = sessionLogCostCache.get(logs);
   if (cached !== undefined) return cached;
-  sessionLogCostStats.fullTranscriptParses += 1;
-  sessionLogCostStats.recordsParsed += logs.length;
   const sum = sumSessionEndCosts(logs);
   sessionLogCostCache.set(logs, sum);
   return sum;
@@ -180,16 +153,13 @@ export function costFromSessionLogs(logs: SessionLog[] | undefined): number {
  *
  * Cost source preference:
  *   1. `StepExecution.cost` when present (canonical).
- *   2. Otherwise, when `logsByExecutionId` is provided, fall back to summing
- *      `cost_usd` from normalized harness `session_end` log entries for that
- *      execution.
- *   3. When `fallbackCostByExecutionId` is provided, use its incrementally
- *      maintained value before parsing the log array.
+ *   2. Otherwise, when a log bucket is provided, use its incrementally
+ *      maintained fallback cost. Store and fetch paths populate that value
+ *      before rollups run.
  */
 export function computeExecutionRollups(
   executions: readonly StepExecution[],
-  logsByExecutionId?: Readonly<Record<string, SessionLog[]>>,
-  fallbackCostByExecutionId?: Readonly<Record<string, number>>
+  logBucketsByExecutionId?: Readonly<Record<string, ExecutionLogBucket>>
 ): ExecutionRollups {
   let totalCost = 0;
   let rawInputTokens = 0;
@@ -204,13 +174,11 @@ export function computeExecutionRollups(
     if (execCost !== null) {
       totalCost += execCost;
     } else if (
-      fallbackCostByExecutionId &&
+      logBucketsByExecutionId &&
       exec.id &&
-      fallbackCostByExecutionId[exec.id] !== undefined
+      logBucketsByExecutionId[exec.id] !== undefined
     ) {
-      totalCost += fallbackCostByExecutionId[exec.id];
-    } else if (logsByExecutionId && exec.id) {
-      totalCost += costFromSessionLogs(logsByExecutionId[exec.id]);
+      totalCost += logBucketsByExecutionId[exec.id].fallbackCost;
     }
     if (typeof exec.input_tokens === "number")
       rawInputTokens += exec.input_tokens;

@@ -5,14 +5,9 @@ export {
   computeExecutionRollups,
   costFromSessionLog,
   costFromSessionLogs,
-  getSessionLogCostDerivationStats,
   parseCost,
-  resetSessionLogCostDerivationStats,
 } from "./computeExecutionRollups";
-export type {
-  ExecutionRollups,
-  SessionLogCostDerivationStats,
-} from "./computeExecutionRollups";
+export type { ExecutionRollups } from "./computeExecutionRollups";
 export { formatCost } from "./formatCost";
 export {
   resolveContextWindow,

@@ -1,10 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useSessionLogStore } from "./sessionLogStore";
 import type { SessionLog } from "../bindings";
-import {
-  getSessionLogCostDerivationStats,
-  resetSessionLogCostDerivationStats,
-} from "../utils/computeExecutionRollups";
 
 function createMockSessionLog(overrides?: Partial<SessionLog>): SessionLog {
   return {
@@ -49,7 +45,12 @@ function logsFor(executionId: string): SessionLog[] {
 describe("sessionLogStore", () => {
   beforeEach(() => {
     useSessionLogStore.getState().reset();
-    resetSessionLogCostDerivationStats();
+  });
+
+  afterEach(() => {
+    useSessionLogStore.getState().reset();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   describe("initial state", () => {
@@ -115,6 +116,46 @@ describe("sessionLogStore", () => {
   });
 
   describe("appendLog", () => {
+    it("applies queued records in batches of at most 256", () => {
+      const notificationSizes: number[] = [];
+      const unsubscribe = useSessionLogStore.subscribe((state) => {
+        notificationSizes.push(
+          state.logsByExecutionId["exec-1"]?.logs.length ?? 0
+        );
+      });
+
+      for (let index = 0; index < 600; index += 1) {
+        useSessionLogStore
+          .getState()
+          .appendLog("exec-1", createMockSessionLog({ id: `log-${index}` }));
+      }
+
+      expect(logsFor("exec-1")).toHaveLength(0);
+      useSessionLogStore.getState().flushPending();
+      expect(logsFor("exec-1")).toHaveLength(256);
+      useSessionLogStore.getState().flushPending();
+      expect(logsFor("exec-1")).toHaveLength(512);
+      useSessionLogStore.getState().flushPending();
+      expect(logsFor("exec-1")).toHaveLength(600);
+
+      unsubscribe();
+      expect(notificationSizes).toEqual([256, 512, 600]);
+    });
+
+    it("uses the timer fallback when animation frames are unavailable", () => {
+      vi.useFakeTimers();
+      vi.stubGlobal("requestAnimationFrame", undefined);
+
+      useSessionLogStore
+        .getState()
+        .appendLog("exec-timer", createMockSessionLog({ id: "timer-log" }));
+
+      vi.advanceTimersByTime(49);
+      expect(logsFor("exec-timer")).toHaveLength(0);
+      vi.advanceTimersByTime(1);
+      expect(logsFor("exec-timer")).toHaveLength(1);
+    });
+
     it("appends to existing bucket", () => {
       useSessionLogStore
         .getState()
@@ -379,11 +420,9 @@ describe("sessionLogStore", () => {
   });
 
   describe("incremental fallback costs", () => {
-    it("parses only appended or corrected records after the baseline", () => {
+    it("maintains fallback cost for appended and corrected records", () => {
       const baseline = createSessionEndLog("log-1", 0.1, "terminal");
       useSessionLogStore.getState().setLogs("exec-1", [baseline]);
-      resetSessionLogCostDerivationStats();
-
       useSessionLogStore.getState().applyLogBatch([
         {
           executionId: "exec-1",
@@ -402,10 +441,6 @@ describe("sessionLogStore", () => {
         },
       ]);
 
-      const stats = getSessionLogCostDerivationStats();
-      expect(stats.fullTranscriptParses).toBe(0);
-      expect(stats.incrementalRecordParses).toBe(3);
-      expect(stats.recordsParsed).toBe(3);
       expect(
         useSessionLogStore.getState().logsByExecutionId["exec-1"].fallbackCost
       ).toBeCloseTo(0.5, 10);
@@ -462,5 +497,16 @@ describe("sessionLogStore", () => {
       expect(logsFor("exec-1")[0].id).toBe("log-1");
       expect(state.logsByExecutionId["exec-nonexistent"]).toBeUndefined();
     });
+  });
+
+  it("drops pending records when the project-scoped store is reset", () => {
+    useSessionLogStore
+      .getState()
+      .appendLog("stale-execution", createMockSessionLog({ id: "stale-log" }));
+
+    useSessionLogStore.getState().reset();
+    useSessionLogStore.getState().flushPending();
+
+    expect(useSessionLogStore.getState().logsByExecutionId).toEqual({});
   });
 });
