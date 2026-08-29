@@ -1,8 +1,13 @@
 import { create } from "zustand";
 import type { SessionLog } from "../bindings";
+import {
+  costFromSessionLog,
+  costFromSessionLogs,
+} from "../utils/computeExecutionRollups";
 
 interface SessionLogState {
   logsByExecutionId: Record<string, SessionLog[]>;
+  fallbackCostByExecutionId: Record<string, number>;
 }
 
 interface SessionLogActions {
@@ -36,8 +41,23 @@ export function selectSessionLogsForExecutionIds(
   return scoped;
 }
 
+/** Select incrementally maintained fallback costs for the same execution scope. */
+export function selectSessionLogCostsForExecutionIds(
+  fallbackCostByExecutionId: Readonly<Record<string, number>>,
+  executionIds: readonly (string | null | undefined)[]
+): Record<string, number> {
+  const scoped: Record<string, number> = {};
+  for (const executionId of executionIds) {
+    if (executionId && fallbackCostByExecutionId[executionId] !== undefined) {
+      scoped[executionId] = fallbackCostByExecutionId[executionId];
+    }
+  }
+  return scoped;
+}
+
 const initialState: SessionLogState = {
   logsByExecutionId: {},
+  fallbackCostByExecutionId: {},
 };
 
 export const useSessionLogStore = create<SessionLogStore>((set) => ({
@@ -46,21 +66,33 @@ export const useSessionLogStore = create<SessionLogStore>((set) => ({
   setLogs: (executionId, logs) =>
     set((state) => ({
       logsByExecutionId: { ...state.logsByExecutionId, [executionId]: logs },
+      fallbackCostByExecutionId: {
+        ...state.fallbackCostByExecutionId,
+        [executionId]: costFromSessionLogs(logs),
+      },
     })),
 
   appendLog: (executionId, log) =>
-    set((state) => applyLogBatch(state, [{ executionId, log, operation: "append" }])),
+    set((state) =>
+      applyLogBatch(state, [{ executionId, log, operation: "append" }])
+    ),
 
   upsertLog: (executionId, log) =>
-    set((state) => applyLogBatch(state, [{ executionId, log, operation: "upsert" }])),
+    set((state) =>
+      applyLogBatch(state, [{ executionId, log, operation: "upsert" }])
+    ),
 
   applyLogBatch: (entries) => set((state) => applyLogBatch(state, entries)),
 
   clearLogs: (executionId) =>
     set((state) => {
-      const next = { ...state.logsByExecutionId };
-      delete next[executionId];
-      return { logsByExecutionId: next };
+      const logsByExecutionId = { ...state.logsByExecutionId };
+      const fallbackCostByExecutionId = {
+        ...state.fallbackCostByExecutionId,
+      };
+      delete logsByExecutionId[executionId];
+      delete fallbackCostByExecutionId[executionId];
+      return { logsByExecutionId, fallbackCostByExecutionId };
     }),
 
   reset: () => set(initialState),
@@ -70,13 +102,18 @@ interface MutableExecutionLogs {
   logs: SessionLog[];
   ids: Map<string, number>;
   logicalKeys: Map<string, number>;
+  fallbackCost: number;
 }
 
-function mutableExecutionLogs(logs: readonly SessionLog[]): MutableExecutionLogs {
+function mutableExecutionLogs(
+  logs: readonly SessionLog[],
+  fallbackCost: number
+): MutableExecutionLogs {
   const mutable: MutableExecutionLogs = {
     logs: [...logs],
     ids: new Map(),
     logicalKeys: new Map(),
+    fallbackCost,
   };
   logs.forEach((log, index) => {
     if (log.id) mutable.ids.set(log.id, index);
@@ -85,7 +122,11 @@ function mutableExecutionLogs(logs: readonly SessionLog[]): MutableExecutionLogs
   return mutable;
 }
 
-function removeIndex(map: Map<string, number>, key: string | null | undefined, index: number) {
+function removeIndex(
+  map: Map<string, number>,
+  key: string | null | undefined,
+  index: number
+) {
   if (key && map.get(key) === index) map.delete(key);
 }
 
@@ -109,6 +150,8 @@ function replaceExecutionLog(
   const previous = mutable.logs[index];
   removeIndex(mutable.ids, previous.id, index);
   removeIndex(mutable.logicalKeys, previous.logical_key, index);
+  mutable.fallbackCost -= costFromSessionLog(previous);
+  mutable.fallbackCost += costFromSessionLog(log);
   mutable.logs[index] = log;
   if (log.id) mutable.ids.set(log.id, index);
   if (log.logical_key) mutable.logicalKeys.set(log.logical_key, index);
@@ -117,6 +160,7 @@ function replaceExecutionLog(
 function appendExecutionLog(mutable: MutableExecutionLogs, log: SessionLog) {
   const index = mutable.logs.length;
   mutable.logs.push(log);
+  mutable.fallbackCost += costFromSessionLog(log);
   if (log.id) mutable.ids.set(log.id, index);
   if (log.logical_key) mutable.logicalKeys.set(log.logical_key, index);
 }
@@ -134,8 +178,11 @@ function applyLogBatch(
   for (const entry of entries) {
     let mutable = mutableByExecutionId.get(entry.executionId);
     if (!mutable) {
+      const existingLogs = state.logsByExecutionId[entry.executionId] ?? [];
       mutable = mutableExecutionLogs(
-        state.logsByExecutionId[entry.executionId] ?? []
+        existingLogs,
+        state.fallbackCostByExecutionId[entry.executionId] ??
+          costFromSessionLogs(existingLogs)
       );
       mutableByExecutionId.set(entry.executionId, mutable);
     }
@@ -157,8 +204,13 @@ function applyLogBatch(
 
   if (!changed) return state;
   const logsByExecutionId = { ...state.logsByExecutionId };
+  const fallbackCostByExecutionId = {
+    ...state.fallbackCostByExecutionId,
+  };
   for (const executionId of changedExecutionIds) {
-    logsByExecutionId[executionId] = mutableByExecutionId.get(executionId)!.logs;
+    const mutable = mutableByExecutionId.get(executionId)!;
+    logsByExecutionId[executionId] = mutable.logs;
+    fallbackCostByExecutionId[executionId] = mutable.fallbackCost;
   }
-  return { logsByExecutionId };
+  return { logsByExecutionId, fallbackCostByExecutionId };
 }

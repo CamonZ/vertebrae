@@ -7,6 +7,7 @@ import type {
   Task,
 } from "../../bindings";
 import {
+  selectSessionLogCostsForExecutionIds,
   selectSessionLogsForExecutionIds,
   useSessionLogStore,
 } from "../../stores/sessionLogStore";
@@ -30,6 +31,7 @@ interface SubtreeRailProps {
    * global live `sessionLogStore` map when omitted.
    */
   logsByExecutionId?: Readonly<Record<string, SessionLog[]>>;
+  fallbackCostByExecutionId?: Readonly<Record<string, number>>;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   onSwitchTask?: () => void;
@@ -126,13 +128,15 @@ function StatusPip({ status }: { status: ExecutionStatus }): ReactNode {
 function ExecutionRow({
   execution,
   logs,
+  fallbackCost,
 }: {
   execution: StepExecution;
   logs: SessionLog[] | undefined;
+  fallbackCost: number | undefined;
 }): ReactNode {
   let displayCost: number | null = parseCost(execution.cost);
   if (displayCost === null) {
-    const fromLogs = costFromSessionLogs(logs);
+    const fromLogs = fallbackCost ?? costFromSessionLogs(logs);
     if (fromLogs > 0) displayCost = fromLogs;
   }
   return (
@@ -159,12 +163,14 @@ interface GroupSectionProps {
   row: GroupRow;
   initiallyExpanded: boolean;
   logsByExecutionId: Readonly<Record<string, SessionLog[]>>;
+  fallbackCostByExecutionId: Readonly<Record<string, number>>;
 }
 
 function GroupSection({
   row,
   initiallyExpanded,
   logsByExecutionId,
+  fallbackCostByExecutionId,
 }: GroupSectionProps): ReactNode {
   const [expanded, setExpanded] = useState(initiallyExpanded);
   const { task, depth, executions, rollups } = row;
@@ -263,6 +269,9 @@ function GroupSection({
                 key={exec.id ?? `${task.id}-${idx}`}
                 execution={exec}
                 logs={exec.id ? logsByExecutionId[exec.id] : undefined}
+                fallbackCost={
+                  exec.id ? fallbackCostByExecutionId[exec.id] : undefined
+                }
               />
             ))
           )}
@@ -278,6 +287,7 @@ export function SubtreeRail({
   subtreeTaskIds,
   executions,
   logsByExecutionId: providedLogs,
+  fallbackCostByExecutionId: providedFallbackCosts,
   collapsed,
   onToggleCollapsed,
   onSwitchTask,
@@ -294,7 +304,16 @@ export function SubtreeRail({
       )
     )
   );
+  const liveCosts = useSessionLogStore(
+    useShallow((state) =>
+      selectSessionLogCostsForExecutionIds(
+        state.fallbackCostByExecutionId,
+        providedLogs === undefined ? executionIds : []
+      )
+    )
+  );
   const logsByExecutionId = providedLogs ?? liveLogs;
+  const fallbackCostByExecutionId = providedFallbackCosts ?? liveCosts;
   const rows = useMemo<GroupRow[]>(() => {
     const taskById = new Map<string, Task>();
     for (const t of tasks) taskById.set(t.id, t);
@@ -322,7 +341,11 @@ export function SubtreeRail({
         task,
         depth: depths.get(id) ?? 0,
         executions: taskExecs,
-        rollups: computeExecutionRollups(taskExecs, logsByExecutionId),
+        rollups: computeExecutionRollups(
+          taskExecs,
+          logsByExecutionId,
+          fallbackCostByExecutionId
+        ),
       });
     }
 
@@ -332,7 +355,14 @@ export function SubtreeRail({
     });
 
     return built;
-  }, [rootTaskId, tasks, subtreeTaskIds, executions, logsByExecutionId]);
+  }, [
+    rootTaskId,
+    tasks,
+    subtreeTaskIds,
+    executions,
+    fallbackCostByExecutionId,
+    logsByExecutionId,
+  ]);
 
   if (collapsed) {
     return (
@@ -407,6 +437,7 @@ export function SubtreeRail({
               row={row}
               initiallyExpanded={row.depth === 0}
               logsByExecutionId={logsByExecutionId}
+              fallbackCostByExecutionId={fallbackCostByExecutionId}
             />
           ))
         )}

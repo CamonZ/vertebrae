@@ -4,6 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import type { StepExecution } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import {
+  selectSessionLogCostsForExecutionIds,
   selectSessionLogsForExecutionIds,
   useSessionLogStore,
 } from "../stores/sessionLogStore";
@@ -76,10 +77,23 @@ export function useSubtreeExecutions(
       selectSessionLogsForExecutionIds(state.logsByExecutionId, executionIds)
     )
   );
+  const fallbackCostByExecutionId = useSessionLogStore(
+    useShallow((state) =>
+      selectSessionLogCostsForExecutionIds(
+        state.fallbackCostByExecutionId,
+        executionIds
+      )
+    )
+  );
 
   const rollups = useMemo(
-    () => computeExecutionRollups(executions, logsByExecutionId),
-    [executions, logsByExecutionId]
+    () =>
+      computeExecutionRollups(
+        executions,
+        logsByExecutionId,
+        fallbackCostByExecutionId
+      ),
+    [executions, fallbackCostByExecutionId, logsByExecutionId]
   );
 
   return {

@@ -15,6 +15,7 @@ export type { DebugStore } from "./debugStore";
 
 export { useSessionLogStore } from "./sessionLogStore";
 export {
+  selectSessionLogCostsForExecutionIds,
   selectSessionLogsForExecutionIds,
 } from "./sessionLogStore";
 export type { SessionLogBatchEntry, SessionLogStore } from "./sessionLogStore";

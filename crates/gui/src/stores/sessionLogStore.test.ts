@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useSessionLogStore } from "./sessionLogStore";
 import type { SessionLog } from "../bindings";
+import {
+  getSessionLogCostDerivationStats,
+  resetSessionLogCostDerivationStats,
+} from "../utils/computeExecutionRollups";
 
 function createMockSessionLog(overrides?: Partial<SessionLog>): SessionLog {
   return {
@@ -12,9 +16,37 @@ function createMockSessionLog(overrides?: Partial<SessionLog>): SessionLog {
   };
 }
 
+function createSessionEndLog(
+  id: string,
+  costUsd: number,
+  logical_key?: string
+): SessionLog {
+  return createMockSessionLog({
+    id,
+    logical_key,
+    format: "harness",
+    content: JSON.stringify({
+      version: 1,
+      event_id: `event-${id}`,
+      stream_id: "stream-1",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      semantics: "snapshot",
+      type: "run_finished",
+      data: {
+        status: "completed",
+        metrics: { total_cost_usd: costUsd },
+      },
+    }),
+  });
+}
+
 describe("sessionLogStore", () => {
   beforeEach(() => {
-    useSessionLogStore.setState({ logsByExecutionId: {} });
+    useSessionLogStore.setState({
+      logsByExecutionId: {},
+      fallbackCostByExecutionId: {},
+    });
+    resetSessionLogCostDerivationStats();
   });
 
   describe("initial state", () => {
@@ -43,11 +75,15 @@ describe("sessionLogStore", () => {
     it("replaces existing logs for the same execution ID", () => {
       useSessionLogStore
         .getState()
-        .setLogs("exec-1", [createMockSessionLog({ id: "log-1", content: "old" })]);
+        .setLogs("exec-1", [
+          createMockSessionLog({ id: "log-1", content: "old" }),
+        ]);
 
       useSessionLogStore
         .getState()
-        .setLogs("exec-1", [createMockSessionLog({ id: "log-2", content: "new" })]);
+        .setLogs("exec-1", [
+          createMockSessionLog({ id: "log-2", content: "new" }),
+        ]);
 
       const state = useSessionLogStore.getState();
       expect(state.logsByExecutionId["exec-1"]).toHaveLength(1);
@@ -58,11 +94,15 @@ describe("sessionLogStore", () => {
     it("does not affect other execution IDs", () => {
       useSessionLogStore
         .getState()
-        .setLogs("exec-1", [createMockSessionLog({ id: "log-1", content: "exec-1 log" })]);
+        .setLogs("exec-1", [
+          createMockSessionLog({ id: "log-1", content: "exec-1 log" }),
+        ]);
 
       useSessionLogStore
         .getState()
-        .setLogs("exec-2", [createMockSessionLog({ id: "log-2", content: "exec-2 log" })]);
+        .setLogs("exec-2", [
+          createMockSessionLog({ id: "log-2", content: "exec-2 log" }),
+        ]);
 
       const state = useSessionLogStore.getState();
       expect(state.logsByExecutionId["exec-1"]).toHaveLength(1);
@@ -78,11 +118,16 @@ describe("sessionLogStore", () => {
     it("appends to existing bucket", () => {
       useSessionLogStore
         .getState()
-        .setLogs("exec-1", [createMockSessionLog({ id: "log-1", content: "first" })]);
+        .setLogs("exec-1", [
+          createMockSessionLog({ id: "log-1", content: "first" }),
+        ]);
 
       useSessionLogStore
         .getState()
-        .appendLog("exec-1", createMockSessionLog({ id: "log-2", content: "second" }));
+        .appendLog(
+          "exec-1",
+          createMockSessionLog({ id: "log-2", content: "second" })
+        );
 
       const state = useSessionLogStore.getState();
       expect(state.logsByExecutionId["exec-1"]).toHaveLength(2);
@@ -95,7 +140,10 @@ describe("sessionLogStore", () => {
     it("creates new bucket when execution ID does not exist", () => {
       useSessionLogStore
         .getState()
-        .appendLog("exec-new", createMockSessionLog({ id: "log-1", content: "brand new" }));
+        .appendLog(
+          "exec-new",
+          createMockSessionLog({ id: "log-1", content: "brand new" })
+        );
 
       const state = useSessionLogStore.getState();
       expect(state.logsByExecutionId["exec-new"]).toHaveLength(1);
@@ -106,11 +154,16 @@ describe("sessionLogStore", () => {
     it("does not append a log whose id is already in the execution bucket", () => {
       useSessionLogStore
         .getState()
-        .setLogs("exec-1", [createMockSessionLog({ id: "log-1", content: "first copy" })]);
+        .setLogs("exec-1", [
+          createMockSessionLog({ id: "log-1", content: "first copy" }),
+        ]);
 
       useSessionLogStore
         .getState()
-        .appendLog("exec-1", createMockSessionLog({ id: "log-1", content: "replayed copy" }));
+        .appendLog(
+          "exec-1",
+          createMockSessionLog({ id: "log-1", content: "replayed copy" })
+        );
 
       const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
       expect(logs).toHaveLength(1);
@@ -121,14 +174,21 @@ describe("sessionLogStore", () => {
     it("does not affect other execution IDs", () => {
       useSessionLogStore
         .getState()
-        .setLogs("exec-1", [createMockSessionLog({ id: "log-1", content: "exec-1 log" })]);
+        .setLogs("exec-1", [
+          createMockSessionLog({ id: "log-1", content: "exec-1 log" }),
+        ]);
       useSessionLogStore
         .getState()
-        .setLogs("exec-2", [createMockSessionLog({ id: "log-2", content: "exec-2 log" })]);
+        .setLogs("exec-2", [
+          createMockSessionLog({ id: "log-2", content: "exec-2 log" }),
+        ]);
 
       useSessionLogStore
         .getState()
-        .appendLog("exec-1", createMockSessionLog({ id: "log-3", content: "appended" }));
+        .appendLog(
+          "exec-1",
+          createMockSessionLog({ id: "log-3", content: "appended" })
+        );
 
       const state = useSessionLogStore.getState();
       expect(state.logsByExecutionId["exec-1"]).toHaveLength(2);
@@ -140,14 +200,19 @@ describe("sessionLogStore", () => {
 
   describe("upsertLog", () => {
     it("replaces an existing log by id without growing or reordering", () => {
-      useSessionLogStore.getState().setLogs("exec-1", [
-        createMockSessionLog({ id: "log-1", content: "first" }),
-        createMockSessionLog({ id: "log-2", content: "second" }),
-      ]);
+      useSessionLogStore
+        .getState()
+        .setLogs("exec-1", [
+          createMockSessionLog({ id: "log-1", content: "first" }),
+          createMockSessionLog({ id: "log-2", content: "second" }),
+        ]);
 
       useSessionLogStore
         .getState()
-        .upsertLog("exec-1", createMockSessionLog({ id: "log-1", content: "updated" }));
+        .upsertLog(
+          "exec-1",
+          createMockSessionLog({ id: "log-1", content: "updated" })
+        );
 
       const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
       expect(logs).toHaveLength(2);
@@ -186,7 +251,10 @@ describe("sessionLogStore", () => {
     it("inserts when the log is absent", () => {
       useSessionLogStore
         .getState()
-        .upsertLog("exec-new", createMockSessionLog({ id: "log-1", content: "first update" }));
+        .upsertLog(
+          "exec-new",
+          createMockSessionLog({ id: "log-1", content: "first update" })
+        );
 
       const logs = useSessionLogStore.getState().logsByExecutionId["exec-new"];
       expect(logs).toHaveLength(1);
@@ -259,7 +327,10 @@ describe("sessionLogStore", () => {
         {
           executionId: "exec-1",
           operation: "append",
-          log: createMockSessionLog({ id: "after-reconnect", content: "new row" }),
+          log: createMockSessionLog({
+            id: "after-reconnect",
+            content: "new row",
+          }),
         },
       ]);
 
@@ -272,10 +343,14 @@ describe("sessionLogStore", () => {
     });
 
     it("preserves untouched execution bucket references for duplicate-only entries", () => {
-      const unchanged = [createMockSessionLog({ id: "log-2", content: "untouched" })];
-      useSessionLogStore.getState().setLogs("exec-1", [
-        createMockSessionLog({ id: "log-1", content: "existing" }),
-      ]);
+      const unchanged = [
+        createMockSessionLog({ id: "log-2", content: "untouched" }),
+      ];
+      useSessionLogStore
+        .getState()
+        .setLogs("exec-1", [
+          createMockSessionLog({ id: "log-1", content: "existing" }),
+        ]);
       useSessionLogStore.getState().setLogs("exec-2", unchanged);
       const before = useSessionLogStore.getState().logsByExecutionId;
 
@@ -299,6 +374,45 @@ describe("sessionLogStore", () => {
     });
   });
 
+  describe("incremental fallback costs", () => {
+    it("parses only appended or corrected records after the baseline", () => {
+      const baseline = createSessionEndLog("log-1", 0.1, "terminal");
+      useSessionLogStore.getState().setLogs("exec-1", [baseline]);
+      resetSessionLogCostDerivationStats();
+
+      useSessionLogStore.getState().applyLogBatch([
+        {
+          executionId: "exec-1",
+          operation: "append",
+          log: createSessionEndLog("log-2", 0.2),
+        },
+        {
+          executionId: "exec-1",
+          operation: "append",
+          log: createSessionEndLog("log-1", 0.9),
+        },
+        {
+          executionId: "exec-1",
+          operation: "upsert",
+          log: createSessionEndLog("log-corrected", 0.3, "terminal"),
+        },
+      ]);
+
+      const stats = getSessionLogCostDerivationStats();
+      expect(stats.fullTranscriptParses).toBe(0);
+      expect(stats.incrementalRecordParses).toBe(3);
+      expect(stats.recordsParsed).toBe(3);
+      expect(
+        useSessionLogStore.getState().fallbackCostByExecutionId["exec-1"]
+      ).toBeCloseTo(0.5, 10);
+      expect(
+        useSessionLogStore
+          .getState()
+          .logsByExecutionId["exec-1"].map(({ id }) => id)
+      ).toEqual(["log-corrected", "log-2"]);
+    });
+  });
+
   describe("clearLogs", () => {
     it("removes logs for the given execution ID", () => {
       useSessionLogStore
@@ -315,10 +429,14 @@ describe("sessionLogStore", () => {
     it("does not affect other execution IDs", () => {
       useSessionLogStore
         .getState()
-        .setLogs("exec-1", [createMockSessionLog({ id: "log-1", content: "exec-1 log" })]);
+        .setLogs("exec-1", [
+          createMockSessionLog({ id: "log-1", content: "exec-1 log" }),
+        ]);
       useSessionLogStore
         .getState()
-        .setLogs("exec-2", [createMockSessionLog({ id: "log-2", content: "exec-2 log" })]);
+        .setLogs("exec-2", [
+          createMockSessionLog({ id: "log-2", content: "exec-2 log" }),
+        ]);
 
       useSessionLogStore.getState().clearLogs("exec-1");
 

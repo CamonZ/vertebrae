@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { commands, type SessionLog, type StepExecution } from "../bindings";
 import {
+  selectSessionLogCostsForExecutionIds,
   selectSessionLogsForExecutionIds,
   useSessionLogStore,
 } from "../stores";
+import { costFromSessionLogs } from "../utils/computeExecutionRollups";
 import {
   getProjectScopeGeneration,
   isCurrentProjectScopeGeneration,
@@ -13,6 +15,8 @@ import {
 export interface UseSubtreeSessionLogsResult {
   /** Map: execution_id -> SessionLog[] */
   logsByExecutionId: Record<string, SessionLog[]>;
+  /** Incrementally maintained fallback cost for each live or fetched execution. */
+  fallbackCostByExecutionId: Record<string, number>;
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
@@ -85,6 +89,11 @@ export function useSubtreeSessionLogs(
       selectSessionLogsForExecutionIds(state.logsByExecutionId, ids)
     )
   );
+  const liveCosts = useSessionLogStore(
+    useShallow((state) =>
+      selectSessionLogCostsForExecutionIds(state.fallbackCostByExecutionId, ids)
+    )
+  );
 
   const merged = useMemo(() => {
     if (ids.length === 0) return {} as Record<string, SessionLog[]>;
@@ -105,5 +114,29 @@ export function useSubtreeSessionLogs(
     return out;
   }, [ids, logsByExecutionId, liveLogs]);
 
-  return { logsByExecutionId: merged, isLoading, error, refetch: fetchAll };
+  const fallbackCostByExecutionId = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const id of ids) {
+      const fetched = logsByExecutionId[id];
+      const live = liveLogs[id];
+      const liveWins =
+        live && live.length > 0 && live.length >= (fetched?.length ?? 0);
+      if (liveWins) {
+        out[id] = liveCosts[id] ?? costFromSessionLogs(live);
+      } else if (fetched !== undefined) {
+        out[id] = costFromSessionLogs(fetched);
+      } else if (live !== undefined) {
+        out[id] = liveCosts[id] ?? costFromSessionLogs(live);
+      }
+    }
+    return out;
+  }, [ids, logsByExecutionId, liveCosts, liveLogs]);
+
+  return {
+    logsByExecutionId: merged,
+    fallbackCostByExecutionId,
+    isLoading,
+    error,
+    refetch: fetchAll,
+  };
 }

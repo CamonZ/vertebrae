@@ -116,6 +116,8 @@ export interface UseRunTraceResult {
   stepExecutions: StepExecution[];
   /** Session logs keyed by `step_execution_id` for the run's executions. */
   logsByExecutionId: Record<string, SessionLog[]>;
+  /** Incremental session-end cost totals keyed by `step_execution_id`. */
+  fallbackCostByExecutionId: Record<string, number>;
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
@@ -172,11 +174,13 @@ export function useRunTrace(
   });
 
   const stepExecutions = query.data?.step_executions ?? [];
-  const { logsByExecutionId } = useSubtreeSessionLogs(stepExecutions);
+  const { logsByExecutionId, fallbackCostByExecutionId } =
+    useSubtreeSessionLogs(stepExecutions);
 
   return {
     stepExecutions,
     logsByExecutionId,
+    fallbackCostByExecutionId,
     isLoading: query.isLoading,
     error: query.error ? errorMessage(query.error) : null,
     refetch: () => {

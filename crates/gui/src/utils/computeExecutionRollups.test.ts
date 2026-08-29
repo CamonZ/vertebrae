@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeExecutionRollups } from "./computeExecutionRollups";
+import {
+  computeExecutionRollups,
+  costFromSessionLogs,
+  getSessionLogCostDerivationStats,
+  resetSessionLogCostDerivationStats,
+} from "./computeExecutionRollups";
 import type { SessionLog, StepExecution } from "../bindings";
 
 function sessionEndLog(execId: string, costUsd: number, idx = 0): SessionLog {
@@ -235,6 +240,20 @@ describe("computeExecutionRollups", () => {
     expect(rollups.totalRuns).toBe(1);
     expect(rollups.totalAttempts).toBe(2);
     expect(rollups.totalCost).toBeCloseTo(0.0742 + 0.1166, 10);
+  });
+
+  it("memoizes fallback cost for an unchanged transcript array", () => {
+    const logs = [sessionEndLog("exec-1", 0.0742)];
+    resetSessionLogCostDerivationStats();
+
+    expect(costFromSessionLogs(logs)).toBeCloseTo(0.0742, 10);
+    expect(costFromSessionLogs(logs)).toBeCloseTo(0.0742, 10);
+
+    expect(getSessionLogCostDerivationStats()).toEqual({
+      fullTranscriptParses: 1,
+      incrementalRecordParses: 0,
+      recordsParsed: 1,
+    });
   });
 
   it("sums multiple session_end events within a single execution", () => {

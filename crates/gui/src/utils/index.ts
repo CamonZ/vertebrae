@@ -3,10 +3,16 @@ export { buildTreeFromTasks } from "./buildTreeFromTasks";
 export { getDescendantTaskIds } from "./getDescendantTaskIds";
 export {
   computeExecutionRollups,
+  costFromSessionLog,
   costFromSessionLogs,
+  getSessionLogCostDerivationStats,
   parseCost,
+  resetSessionLogCostDerivationStats,
 } from "./computeExecutionRollups";
-export type { ExecutionRollups } from "./computeExecutionRollups";
+export type {
+  ExecutionRollups,
+  SessionLogCostDerivationStats,
+} from "./computeExecutionRollups";
 export {
   configureSessionLogPerformance,
   createSessionLogPerformanceMonitor,

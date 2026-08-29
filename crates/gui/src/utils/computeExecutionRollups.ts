@@ -104,18 +104,61 @@ function cacheReadByLatestPerRun(executions: readonly StepExecution[]): number {
   return sum;
 }
 
+export interface SessionLogCostDerivationStats {
+  fullTranscriptParses: number;
+  incrementalRecordParses: number;
+  recordsParsed: number;
+}
+
+const sessionLogCostCache = new WeakMap<readonly SessionLog[], number>();
+let sessionLogCostStats: SessionLogCostDerivationStats = {
+  fullTranscriptParses: 0,
+  incrementalRecordParses: 0,
+  recordsParsed: 0,
+};
+
+/** Reset cost-derivation counters used by performance diagnostics and tests. */
+export function resetSessionLogCostDerivationStats(): void {
+  sessionLogCostStats = {
+    fullTranscriptParses: 0,
+    incrementalRecordParses: 0,
+    recordsParsed: 0,
+  };
+}
+
+export function getSessionLogCostDerivationStats(): SessionLogCostDerivationStats {
+  return { ...sessionLogCostStats };
+}
+
+function sumSessionEndCosts(logs: readonly SessionLog[]): number {
+  let sum = 0;
+  for (const event of parseSessionLogs([...logs])) {
+    if (event.kind === "session_end" && typeof event.costUsd === "number") {
+      sum += event.costUsd;
+    }
+  }
+  return sum;
+}
+
+/** Parse one changed record for incremental live cost reconciliation. */
+export function costFromSessionLog(log: SessionLog): number {
+  sessionLogCostStats.incrementalRecordParses += 1;
+  sessionLogCostStats.recordsParsed += 1;
+  return sumSessionEndCosts([log]);
+}
+
 /**
  * Sum `costUsd` across all normalized harness `session_end` events in the
  * given session logs. Returns 0 when no parseable session_end entries exist.
  */
 export function costFromSessionLogs(logs: SessionLog[] | undefined): number {
   if (!logs || logs.length === 0) return 0;
-  let sum = 0;
-  for (const event of parseSessionLogs(logs)) {
-    if (event.kind === "session_end" && typeof event.costUsd === "number") {
-      sum += event.costUsd;
-    }
-  }
+  const cached = sessionLogCostCache.get(logs);
+  if (cached !== undefined) return cached;
+  sessionLogCostStats.fullTranscriptParses += 1;
+  sessionLogCostStats.recordsParsed += logs.length;
+  const sum = sumSessionEndCosts(logs);
+  sessionLogCostCache.set(logs, sum);
   return sum;
 }
 
@@ -127,10 +170,13 @@ export function costFromSessionLogs(logs: SessionLog[] | undefined): number {
  *   2. Otherwise, when `logsByExecutionId` is provided, fall back to summing
  *      `cost_usd` from normalized harness `session_end` log entries for that
  *      execution.
+ *   3. When `fallbackCostByExecutionId` is provided, use its incrementally
+ *      maintained value before parsing the log array.
  */
 export function computeExecutionRollups(
   executions: readonly StepExecution[],
-  logsByExecutionId?: Readonly<Record<string, SessionLog[]>>
+  logsByExecutionId?: Readonly<Record<string, SessionLog[]>>,
+  fallbackCostByExecutionId?: Readonly<Record<string, number>>
 ): ExecutionRollups {
   let totalCost = 0;
   let rawInputTokens = 0;
@@ -144,6 +190,12 @@ export function computeExecutionRollups(
     const execCost = parseCost(exec.cost);
     if (execCost !== null) {
       totalCost += execCost;
+    } else if (
+      fallbackCostByExecutionId &&
+      exec.id &&
+      fallbackCostByExecutionId[exec.id] !== undefined
+    ) {
+      totalCost += fallbackCostByExecutionId[exec.id];
     } else if (logsByExecutionId && exec.id) {
       totalCost += costFromSessionLogs(logsByExecutionId[exec.id]);
     }
