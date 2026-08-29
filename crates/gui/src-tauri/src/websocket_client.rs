@@ -5,7 +5,11 @@
 
 use futures::{stream::SplitSink, stream::SplitStream, SinkExt, StreamExt};
 use serde::Deserialize;
-use std::sync::Arc;
+use std::fmt;
+use std::io::{LineWriter, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 use tauri::{async_runtime::JoinHandle as ActorJoinHandle, Emitter, Runtime};
 use tokio::net::TcpStream;
@@ -96,6 +100,103 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Maximum reconnection delay (30 seconds)
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
+
+const WEBSOCKET_DIAGNOSTICS_ENV: &str = "VERTEBRAE_WEBSOCKET_DIAGNOSTICS";
+const WEBSOCKET_TRACE_PATH_ENV: &str = "VERTEBRAE_WEBSOCKET_TRACE_PATH";
+const DEFAULT_WEBSOCKET_TRACE_PATH: &str = "/app/test-output/websocket-events.log";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WebSocketTraceConfig {
+    enabled: bool,
+    path: PathBuf,
+}
+
+impl WebSocketTraceConfig {
+    fn from_environment() -> Self {
+        Self {
+            enabled: Self::enabled_for_value(std::env::var(WEBSOCKET_DIAGNOSTICS_ENV).ok()),
+            path: std::env::var_os(WEBSOCKET_TRACE_PATH_ENV)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(DEFAULT_WEBSOCKET_TRACE_PATH)),
+        }
+    }
+
+    fn enabled_for_value(value: Option<String>) -> bool {
+        value.is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+    }
+}
+
+struct WebSocketTraceSink {
+    writer: StdMutex<LineWriter<std::fs::File>>,
+    next_sequence: AtomicU64,
+}
+
+impl WebSocketTraceSink {
+    fn from_config(config: &WebSocketTraceConfig) -> Option<Self> {
+        if !config.enabled {
+            return None;
+        }
+
+        if let Some(parent) = config.path.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                log::warn!(
+                    "[WebSocket] Could not initialize diagnostic trace directory '{}': {}",
+                    parent.display(),
+                    error
+                );
+                return None;
+            }
+        }
+
+        let file = match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&config.path)
+        {
+            Ok(file) => file,
+            Err(error) => {
+                log::warn!(
+                    "[WebSocket] Could not initialize diagnostic trace file '{}': {}",
+                    config.path.display(),
+                    error
+                );
+                return None;
+            }
+        };
+
+        Some(Self {
+            writer: StdMutex::new(LineWriter::new(file)),
+            next_sequence: AtomicU64::new(1),
+        })
+    }
+
+    fn write(&self, entry: fmt::Arguments<'_>) {
+        let sequence = self.next_sequence.fetch_add(1, Ordering::Relaxed);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
+        let Ok(mut writer) = self.writer.lock() else {
+            log::warn!("[WebSocket] Diagnostic trace lock was poisoned");
+            return;
+        };
+        if let Err(error) = writeln!(writer, "[{timestamp} #{sequence}] {entry}") {
+            log::warn!("[WebSocket] Failed to write diagnostic trace: {}", error);
+        }
+    }
+}
+
+static WEBSOCKET_TRACE_SINK: OnceLock<Option<WebSocketTraceSink>> = OnceLock::new();
+
+pub(crate) fn websocket_diagnostics_enabled() -> bool {
+    WebSocketTraceConfig::from_environment().enabled
+}
 
 /// WebSocket connection state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,21 +401,17 @@ pub struct SacrumSocket {
 }
 
 impl SacrumSocket {
-    /// Append a line to the WebSocket event trace log for debugging acceptance tests.
-    /// Errors are silently ignored to avoid disrupting event processing.
-    fn trace_event(entry: &str) {
-        use std::io::Write;
-        let _ = std::fs::create_dir_all("/app/test-output");
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("/app/test-output/websocket-events.log")
-        {
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
-            let _ = writeln!(f, "[{ts}] {entry}");
+    /// Append a line to the opt-in WebSocket event trace.
+    ///
+    /// The sink is initialized at most once and remains completely disabled in
+    /// normal production operation. Diagnostic mode is intentionally more
+    /// expensive because it serializes each event to a line-oriented file.
+    fn trace_event(entry: fmt::Arguments<'_>) {
+        let sink = WEBSOCKET_TRACE_SINK.get_or_init(|| {
+            WebSocketTraceSink::from_config(&WebSocketTraceConfig::from_environment())
+        });
+        if let Some(sink) = sink.as_ref() {
+            sink.write(entry);
         }
     }
 
@@ -840,7 +937,7 @@ impl SacrumSocket {
                     topic,
                     current_topic
                 );
-                Self::trace_event(&format!(
+                Self::trace_event(format_args!(
                     "DROP event='{}' topic='{}' current='{}'",
                     event,
                     topic,
@@ -850,13 +947,13 @@ impl SacrumSocket {
             }
 
             if event != "phx_reply" {
-                log::info!(
+                log::debug!(
                     "[WebSocket] Dispatching event '{}' on topic '{}'",
                     event,
                     topic
                 );
             }
-            Self::trace_event(&format!("RECV event='{}' topic='{}'", event, topic));
+            Self::trace_event(format_args!("RECV event='{}' topic='{}'", event, topic));
 
             match event {
                 "artifact_created" | "artifact_updated" | "artifact_deleted" => {
@@ -1033,7 +1130,7 @@ impl SacrumSocket {
             _ => TaskChangeType::StatusChanged,
         };
 
-        Self::trace_event(&format!(
+        Self::trace_event(format_args!(
             "TASK event='{}' task_id='{}' payload_keys={:?}",
             event,
             task_id,
@@ -1047,14 +1144,14 @@ impl SacrumSocket {
             let result = serde_json::from_value::<types::Task>(payload.clone());
             match result {
                 Ok(t) => {
-                    Self::trace_event(&format!(
+                    Self::trace_event(format_args!(
                         "TASK deserialized ok task_id='{}' title='{}'",
                         task_id, t.title
                     ));
                     Some(t)
                 }
                 Err(e) => {
-                    Self::trace_event(&format!(
+                    Self::trace_event(format_args!(
                         "TASK deser FAILED task_id='{}' error='{}'",
                         task_id, e
                     ));
@@ -1105,13 +1202,13 @@ impl SacrumSocket {
             previous,
         };
 
-        Self::trace_event(&format!(
+        Self::trace_event(format_args!(
             "TASK emitted change_type='{:?}' task_id='{}' has_task={}",
             event.change_type,
             event.task_id,
             event.task.is_some()
         ));
-        log::info!(
+        log::debug!(
             "[WebSocket] Emitting task {:?} event for task_id={}",
             event.change_type,
             event.task_id
@@ -1145,7 +1242,7 @@ impl SacrumSocket {
             _ => WorkflowChangeType::Updated,
         };
 
-        Self::trace_event(&format!(
+        Self::trace_event(format_args!(
             "WORKFLOW event='{}' workflow_id='{}' payload_keys={:?}",
             event,
             workflow_id,
@@ -1159,14 +1256,14 @@ impl SacrumSocket {
             let result = serde_json::from_value::<types::Workflow>(payload.clone());
             match result {
                 Ok(w) => {
-                    Self::trace_event(&format!(
+                    Self::trace_event(format_args!(
                         "WORKFLOW deserialized ok workflow_id='{}' name='{}'",
                         workflow_id, w.name
                     ));
                     Some(w)
                 }
                 Err(e) => {
-                    Self::trace_event(&format!(
+                    Self::trace_event(format_args!(
                         "WORKFLOW deser FAILED workflow_id='{}' error='{}'",
                         workflow_id, e
                     ));
@@ -1187,13 +1284,13 @@ impl SacrumSocket {
             workflow,
         };
 
-        Self::trace_event(&format!(
+        Self::trace_event(format_args!(
             "WORKFLOW emitted change_type='{:?}' workflow_id='{}' has_workflow={}",
             event.change_type,
             event.workflow_id,
             event.workflow.is_some()
         ));
-        log::info!(
+        log::debug!(
             "[WebSocket] Emitting workflow {:?} event for workflow_id={}",
             event.change_type,
             event.workflow_id
@@ -1231,7 +1328,7 @@ impl SacrumSocket {
             _ => StepChangeType::Updated,
         };
 
-        Self::trace_event(&format!(
+        Self::trace_event(format_args!(
             "STEP event='{}' step_id='{}' workflow_id='{}' payload_keys={:?}",
             event,
             step_id,
@@ -1246,14 +1343,14 @@ impl SacrumSocket {
             let result = serde_json::from_value::<types::Step>(payload.clone());
             match result {
                 Ok(s) => {
-                    Self::trace_event(&format!(
+                    Self::trace_event(format_args!(
                         "STEP deserialized ok step_id='{}' name='{}'",
                         step_id, s.name
                     ));
                     Some(s)
                 }
                 Err(e) => {
-                    Self::trace_event(&format!(
+                    Self::trace_event(format_args!(
                         "STEP deser FAILED step_id='{}' error='{}'",
                         step_id, e
                     ));
@@ -1272,13 +1369,13 @@ impl SacrumSocket {
             step,
         };
 
-        Self::trace_event(&format!(
+        Self::trace_event(format_args!(
             "STEP emitted change_type='{:?}' step_id='{}' has_step={}",
             event.change_type,
             event.step_id,
             event.step.is_some()
         ));
-        log::info!(
+        log::debug!(
             "[WebSocket] Emitting step {:?} event for step_id={}",
             event.change_type,
             event.step_id
@@ -2015,6 +2112,59 @@ mod tests {
         assert_eq!(socket.base_url, "http://localhost:4000");
         assert_eq!(socket.api_token, "sac_test_token");
         assert_eq!(socket.project_slug, "my-project");
+    }
+
+    #[test]
+    fn websocket_diagnostics_are_explicitly_opt_in() {
+        assert!(!WebSocketTraceConfig::enabled_for_value(None));
+        assert!(!WebSocketTraceConfig::enabled_for_value(Some(
+            "false".into()
+        )));
+        assert!(!WebSocketTraceConfig::enabled_for_value(Some("0".into())));
+        assert!(WebSocketTraceConfig::enabled_for_value(Some("1".into())));
+        assert!(WebSocketTraceConfig::enabled_for_value(Some(
+            " TRUE ".into()
+        )));
+    }
+
+    #[test]
+    fn production_trace_burst_does_not_initialize_a_file_sink() {
+        let config = WebSocketTraceConfig {
+            enabled: false,
+            path: tempfile::tempdir()
+                .expect("create temporary trace directory")
+                .path()
+                .join("should-not-exist/websocket-events.log"),
+        };
+
+        for _ in 0..1_000 {
+            assert!(WebSocketTraceSink::from_config(&config).is_none());
+        }
+        assert!(!config.path.exists());
+    }
+
+    #[test]
+    fn diagnostic_trace_sink_is_initialized_once_and_preserves_order_metadata() {
+        let directory = tempfile::tempdir().expect("create temporary trace directory");
+        let path = directory.path().join("websocket-events.log");
+        let config = WebSocketTraceConfig {
+            enabled: true,
+            path: path.clone(),
+        };
+        let sink = WebSocketTraceSink::from_config(&config).expect("diagnostic sink");
+
+        sink.write(format_args!("RECV event='session_log_created'"));
+        sink.write(format_args!("EMIT event='session_log_created'"));
+        drop(sink);
+
+        let trace = std::fs::read_to_string(path).expect("read diagnostic trace");
+        let first = trace
+            .find("#1] RECV event='session_log_created'")
+            .expect("first trace sequence");
+        let second = trace
+            .find("#2] EMIT event='session_log_created'")
+            .expect("second trace sequence");
+        assert!(first < second, "trace sequence must preserve event order");
     }
 
     #[test]

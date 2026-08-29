@@ -199,6 +199,12 @@ fn create_builder() -> Builder {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = create_builder();
+    let websocket_diagnostics = websocket_client::websocket_diagnostics_enabled();
+    let log_level = if websocket_diagnostics {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
 
     let tauri_app_builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -207,12 +213,20 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::default()
-                .level(log::LevelFilter::Info)
+                .level(log_level)
                 .targets([
                     Target::new(TargetKind::Stdout),
-                    Target::new(TargetKind::Webview).format(|out, message, record| {
-                        out.finish(format_args!("[{}] {}", record.target(), message));
-                    }),
+                    Target::new(TargetKind::Webview)
+                        .filter(move |metadata| {
+                            should_forward_webview_log(
+                                metadata.target(),
+                                metadata.level(),
+                                websocket_diagnostics,
+                            )
+                        })
+                        .format(|out, message, record| {
+                            out.finish(format_args!("[{}] {}", record.target(), message));
+                        }),
                 ])
                 .build(),
         );
@@ -353,6 +367,22 @@ pub fn run() {
         })
 }
 
+fn should_forward_webview_log(
+    target: &str,
+    level: log::Level,
+    websocket_diagnostics: bool,
+) -> bool {
+    if matches!(level, log::Level::Warn | log::Level::Error) {
+        return true;
+    }
+
+    if target.contains("websocket_client") {
+        return websocket_diagnostics;
+    }
+
+    matches!(level, log::Level::Info)
+}
+
 fn provision_managed_skills() -> Result<(PathBuf, usize), String> {
     let root =
         vertebrae_installer::provision_installed_skills_dir().map_err(|error| error.to_string())?;
@@ -442,5 +472,39 @@ mod tests {
             dir.path().join("vtb-artifact/SKILL.md").is_file(),
             "GUI managed skill bundle should include vtb-artifact"
         );
+    }
+
+    #[test]
+    fn webview_log_filter_bounds_websocket_noise_without_hiding_errors() {
+        assert!(!should_forward_webview_log(
+            "gui_lib::websocket_client",
+            log::Level::Info,
+            false
+        ));
+        assert!(!should_forward_webview_log(
+            "gui_lib::websocket_client",
+            log::Level::Debug,
+            false
+        ));
+        assert!(should_forward_webview_log(
+            "gui_lib::websocket_client",
+            log::Level::Debug,
+            true
+        ));
+        assert!(should_forward_webview_log(
+            "gui_lib::websocket_client",
+            log::Level::Warn,
+            false
+        ));
+        assert!(should_forward_webview_log(
+            "gui_lib::websocket_client",
+            log::Level::Error,
+            false
+        ));
+        assert!(should_forward_webview_log(
+            "gui_lib::commands",
+            log::Level::Info,
+            false
+        ));
     }
 }
