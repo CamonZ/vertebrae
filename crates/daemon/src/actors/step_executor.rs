@@ -164,7 +164,7 @@ struct HarnessUsageMetrics {
 }
 
 struct DaemonHarnessEventSink {
-    persistence: Arc<dyn EventSink>,
+    persistence: Arc<SessionLogEventSink>,
     root_stream_id: StreamId,
     usage: Arc<std::sync::Mutex<HarnessUsageMetrics>>,
     cancel_rx: tokio::sync::watch::Receiver<bool>,
@@ -215,16 +215,11 @@ impl EventSink for DaemonHarnessEventSink {
         };
         let mut cancel_rx = self.cancel_rx.clone();
         if *cancel_rx.borrow() {
-            if matches!(
-                &event.payload,
-                HarnessEventPayloadV1::RunFinished(_)
-                    | HarnessEventPayloadV1::TurnFinished(_)
-                    | HarnessEventPayloadV1::SessionClosed(_)
-            ) {
-                return tokio::time::timeout(
-                    CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT,
-                    self.persistence.emit(event),
-                )
+            if event.payload.is_lifecycle_terminal() {
+                return tokio::time::timeout(CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT, async {
+                    self.persistence.enqueue(event).await?;
+                    self.persistence.flush().await
+                })
                 .await
                 .map_err(|_| {
                     HarnessError::EventSink(
@@ -237,7 +232,7 @@ impl EventSink for DaemonHarnessEventSink {
             ));
         }
         tokio::select! {
-            result = self.persistence.emit(event) => result?,
+            result = self.persistence.enqueue(event) => result?,
             _ = cancel_rx.changed() => {
                 return Err(HarnessError::EventSink(
                     "daemon cancelled while persisting a harness event".into(),
@@ -262,6 +257,28 @@ impl EventSink for DaemonHarnessEventSink {
             }
         }
         Ok(())
+    }
+
+    async fn flush(&self) -> Result<(), HarnessError> {
+        let mut cancel_rx = self.cancel_rx.clone();
+        if *cancel_rx.borrow() {
+            return tokio::time::timeout(
+                CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT,
+                self.persistence.flush(),
+            )
+            .await
+            .map_err(|_| {
+                HarnessError::EventSink(
+                    "daemon cancelled while draining terminal harness events".into(),
+                )
+            })?;
+        }
+        tokio::select! {
+            result = self.persistence.flush() => result,
+            _ = cancel_rx.changed() => Err(HarnessError::EventSink(
+                "daemon cancelled while draining harness events".into(),
+            )),
+        }
     }
 }
 

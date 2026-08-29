@@ -1,15 +1,20 @@
 //! Persistence adapter for provider-neutral harness events.
 
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use tokio::sync::{Notify, oneshot};
 use vertebrae_core::{ExecutionService, SessionLog};
 use vertebrae_harness_core::{EventSink, HarnessError, HarnessEventV1};
 
+const OUTPUT_QUEUE_CAPACITY: usize = 256;
+const TERMINAL_QUEUE_RESERVE: usize = 8;
+const INITIAL_PERSIST_RETRY_DELAY: Duration = Duration::from_millis(10);
+const MAX_PERSIST_RETRY_DELAY: Duration = Duration::from_secs(1);
+
 /// Persists already-sequenced harness events as daemon-owned session logs.
 pub struct SessionLogEventSink {
-    step_execution_id: String,
-    execution_service: Arc<dyn ExecutionService>,
+    queue: Arc<OutputQueue>,
 }
 
 impl SessionLogEventSink {
@@ -17,36 +22,240 @@ impl SessionLogEventSink {
         step_execution_id: impl Into<String>,
         execution_service: Arc<dyn ExecutionService>,
     ) -> Self {
-        Self {
-            step_execution_id: step_execution_id.into(),
-            execution_service,
-        }
+        let step_execution_id = step_execution_id.into();
+        let queue = Arc::new(OutputQueue::default());
+        let worker_queue = Arc::clone(&queue);
+        let worker_service = Arc::clone(&execution_service);
+        let worker_step_execution_id = step_execution_id.clone();
+        tokio::spawn(async move {
+            run_output_worker(worker_queue, worker_service, worker_step_execution_id).await;
+        });
+        Self { queue }
+    }
+
+    /// Enqueues a materialized record without waiting for serialization or
+    /// backend persistence. The queue is bounded, never drops records, and
+    /// reserves capacity for terminal lifecycle records.
+    pub async fn enqueue(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
+        self.queue.push_event(event, false).await
+    }
+
+    /// Waits until every queued record before this call has been persisted.
+    pub async fn flush(&self) -> Result<(), HarnessError> {
+        self.queue.flush().await
+    }
+}
+
+impl Drop for SessionLogEventSink {
+    fn drop(&mut self) {
+        self.queue.shutdown();
     }
 }
 
 #[async_trait]
 impl EventSink for SessionLogEventSink {
     async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
-        let content = serde_json::to_string(&event).map_err(|error| {
-            HarnessError::EventSink(format!(
-                "failed to serialize harness event {} for step execution {}: {error}",
-                event.event_id, self.step_execution_id
-            ))
-        })?;
-        let logical_key = format!("harness:{}", event.event_id);
-        let log = SessionLog::new(&self.step_execution_id, content)
-            .with_format("harness")
-            .with_logical_key(logical_key);
-
-        self.execution_service.add_log(log).await.map_err(|error| {
-            HarnessError::EventSink(format!(
-                "failed to persist harness event {} for step execution {}: {error}",
-                event.event_id, self.step_execution_id
-            ))
-        })?;
-
-        Ok(())
+        self.queue.push_event(event, true).await
     }
+
+    async fn flush(&self) -> Result<(), HarnessError> {
+        Self::flush(self).await
+    }
+}
+
+#[derive(Default)]
+struct OutputQueue {
+    state: std::sync::Mutex<OutputQueueState>,
+    item_available: Notify,
+    space_available: Notify,
+}
+
+#[derive(Default)]
+struct OutputQueueState {
+    items: VecDeque<QueueItem>,
+    shutdown: bool,
+}
+
+enum QueueItem {
+    Event {
+        event: Box<HarnessEventV1>,
+        ack: Option<oneshot::Sender<Result<(), HarnessError>>>,
+    },
+    Flush {
+        ack: oneshot::Sender<Result<(), HarnessError>>,
+    },
+}
+
+impl OutputQueue {
+    async fn push_event(&self, event: HarnessEventV1, wait: bool) -> Result<(), HarnessError> {
+        let terminal = event.payload.is_lifecycle_terminal();
+        let (ack, receiver) = if wait {
+            let (sender, receiver) = oneshot::channel();
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
+        };
+        self.enqueue(
+            QueueItem::Event {
+                event: Box::new(event),
+                ack,
+            },
+            if terminal {
+                OUTPUT_QUEUE_CAPACITY + TERMINAL_QUEUE_RESERVE
+            } else {
+                OUTPUT_QUEUE_CAPACITY
+            },
+        )
+        .await?;
+        if let Some(receiver) = receiver {
+            receiver
+                .await
+                .map_err(|_| HarnessError::EventSink("persistence worker stopped".into()))?
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn flush(&self) -> Result<(), HarnessError> {
+        let (sender, receiver) = oneshot::channel();
+        self.enqueue(
+            QueueItem::Flush { ack: sender },
+            OUTPUT_QUEUE_CAPACITY + TERMINAL_QUEUE_RESERVE,
+        )
+        .await?;
+        receiver
+            .await
+            .map_err(|_| HarnessError::EventSink("persistence worker stopped".into()))?
+    }
+
+    fn shutdown(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.shutdown = true;
+        self.item_available.notify_waiters();
+        self.space_available.notify_waiters();
+    }
+
+    async fn enqueue(&self, item: QueueItem, limit: usize) -> Result<(), HarnessError> {
+        let mut item = Some(item);
+        loop {
+            let notified = self.space_available.notified();
+            let queued = {
+                let mut state = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if state.shutdown {
+                    return Err(HarnessError::EventSink(
+                        "persistence worker is shutting down".into(),
+                    ));
+                }
+                if state.items.len() < limit {
+                    state
+                        .items
+                        .push_back(item.take().expect("queue item is enqueued once"));
+                    true
+                } else {
+                    false
+                }
+            };
+            if queued {
+                self.item_available.notify_one();
+                return Ok(());
+            }
+            notified.await;
+        }
+    }
+
+    async fn next(&self) -> Option<QueueItem> {
+        loop {
+            let notified = self.item_available.notified();
+            let item = {
+                let mut state = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(item) = state.items.pop_front() {
+                    Some(item)
+                } else if state.shutdown {
+                    return None;
+                } else {
+                    None
+                }
+            };
+            if let Some(item) = item {
+                self.space_available.notify_waiters();
+                return Some(item);
+            }
+            notified.await;
+        }
+    }
+}
+
+async fn run_output_worker(
+    queue: Arc<OutputQueue>,
+    execution_service: Arc<dyn ExecutionService>,
+    step_execution_id: String,
+) {
+    while let Some(item) = queue.next().await {
+        match item {
+            QueueItem::Event { event, ack } => {
+                persist_with_retry(&step_execution_id, &execution_service, &event).await;
+                if let Some(ack) = ack {
+                    let _ = ack.send(Ok(()));
+                }
+            }
+            QueueItem::Flush { ack } => {
+                let _ = ack.send(Ok(()));
+            }
+        }
+    }
+}
+
+async fn persist_with_retry(
+    step_execution_id: &str,
+    execution_service: &Arc<dyn ExecutionService>,
+    event: &HarnessEventV1,
+) {
+    let mut delay = INITIAL_PERSIST_RETRY_DELAY;
+    loop {
+        if persist_event(step_execution_id, execution_service, event)
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        tokio::time::sleep(delay).await;
+        delay = delay.saturating_mul(2).min(MAX_PERSIST_RETRY_DELAY);
+    }
+}
+
+async fn persist_event(
+    step_execution_id: &str,
+    execution_service: &Arc<dyn ExecutionService>,
+    event: &HarnessEventV1,
+) -> Result<(), HarnessError> {
+    let content = serde_json::to_string(event).map_err(|error| {
+        HarnessError::EventSink(format!(
+            "failed to serialize harness event {} for step execution {}: {error}",
+            event.event_id, step_execution_id
+        ))
+    })?;
+    let logical_key = format!("harness:{}", event.event_id);
+    let log = SessionLog::new(step_execution_id, content)
+        .with_format("harness")
+        .with_logical_key(logical_key);
+
+    execution_service.add_log(log).await.map_err(|error| {
+        HarnessError::EventSink(format!(
+            "failed to persist harness event {} for step execution {}: {error}",
+            event.event_id, step_execution_id
+        ))
+    })?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -62,11 +271,12 @@ mod tests {
         TaskRun, TaskRunTrace, UpdateExecutionStatusParams,
     };
     use vertebrae_harness_core::{
-        EventSequencer, EventSink, HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1,
-        HarnessEventV1, SequencedEventSink, ThreadKind, TurnInputProvenance,
+        CompletionStatus, EventSequencer, EventSink, HarnessEventDraftV1, HarnessEventPayloadV1,
+        HarnessEventV1, OutcomeMetrics, RunOutcome, SequencedEventSink, ThreadKind,
+        TurnInputProvenance,
     };
 
-    use super::SessionLogEventSink;
+    use super::{OUTPUT_QUEUE_CAPACITY, SessionLogEventSink};
 
     const EXACT_EVENT_JSON: &str = r#"{"version":1,"event_id":"event-1","stream_id":"stream-1","sequence":7,"correlation":{"session_id":"session-1","thread_id":"thread-1","turn_id":"turn-1","run_id":"run-1","item_id":"item-1","tool_call_id":"tool-1","parent_tool_call_id":"parent-tool","provider_resume_id":"resume-1"},"timestamp":"2026-07-17T10:11:12.123456Z","semantics":"snapshot","provider_sequence":41,"type":"text","data":{"text":"exact text"}}"#;
 
@@ -397,7 +607,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn persistence_failure_closes_only_the_failed_sequenced_stream() {
+    async fn transient_persist_failure_is_retried_without_closing_the_stream() {
         let service = Arc::new(CapturingExecutionService::rejecting());
         let durable_sink: Arc<dyn EventSink> = Arc::new(SessionLogEventSink::new(
             "step-execution-failure",
@@ -416,32 +626,94 @@ mod tests {
             }
         };
 
-        let first_error = sink.emit(draft("failed-stream")).await.unwrap_err();
-        assert!(matches!(first_error, HarnessError::EventSink(_)));
-        assert!(
-            first_error
-                .to_string()
-                .contains("simulated transport failure")
-        );
-        assert!(first_error.to_string().contains("step-execution-failure"));
-        assert!(service.logs().is_empty());
-
-        let closed_error = sink.emit(draft("failed-stream")).await.unwrap_err();
-        assert!(matches!(closed_error, HarnessError::EventSink(_)));
-        assert!(
-            closed_error
-                .to_string()
-                .contains("closed after a prior dispatch failure")
-        );
-        assert!(service.logs().is_empty());
-
-        let persisted = sink.emit(draft("usable-stream")).await.unwrap();
-        assert_eq!(persisted.sequence, 1);
-        let logs = service.logs();
-        assert_eq!(logs.len(), 1);
+        let first = sink.emit(draft("usable-stream")).await.unwrap();
+        assert_eq!(first.sequence, 1);
+        let second = sink.emit(draft("usable-stream")).await.unwrap();
+        assert_eq!(second.sequence, 2);
+        assert_eq!(service.logs().len(), 2);
         assert_eq!(
-            event_from_json(&logs[0].content).stream_id.as_str(),
+            event_from_json(&service.logs()[0].content)
+                .stream_id
+                .as_str(),
             "usable-stream"
         );
+    }
+
+    #[tokio::test]
+    async fn retrying_a_failed_event_reuses_its_idempotency_key() {
+        let service = Arc::new(CapturingExecutionService::rejecting());
+        let sink = SessionLogEventSink::new("step-execution-retry", service.clone());
+        let event = event_from_json(EXACT_EVENT_JSON);
+
+        sink.emit(event).await.unwrap();
+
+        let logs = service.logs();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].format.as_deref(), Some("harness"));
+        assert_eq!(logs[0].logical_key.as_deref(), Some("harness:event-1"));
+    }
+
+    #[tokio::test]
+    async fn dropping_the_sink_still_drains_queued_records() {
+        let service = Arc::new(CapturingExecutionService::blocking());
+        let sink = SessionLogEventSink::new("step-execution-drop", service.clone());
+        let event = event_from_json(EXACT_EVENT_JSON);
+
+        sink.enqueue(event).await.unwrap();
+        service.add_started.notified().await;
+        drop(sink);
+
+        service.block_add.store(false, Ordering::SeqCst);
+        service.release_add.notify_one();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if !service.logs().is_empty() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("worker should persist queued records after the sink is dropped");
+        assert_eq!(service.logs().len(), 1);
+        assert_eq!(
+            service.logs()[0].logical_key.as_deref(),
+            Some("harness:event-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_records_use_reserved_capacity_when_queue_is_saturated() {
+        let service = Arc::new(CapturingExecutionService::blocking());
+        let sink = SessionLogEventSink::new("step-execution-saturated", service.clone());
+        let event = event_from_json(EXACT_EVENT_JSON);
+
+        sink.enqueue(event.clone()).await.unwrap();
+        service.add_started.notified().await;
+        for _ in 0..OUTPUT_QUEUE_CAPACITY {
+            sink.enqueue(event.clone()).await.unwrap();
+        }
+        let mut terminal = event.clone();
+        terminal.event_id = "terminal-event".into();
+        terminal.payload = HarnessEventPayloadV1::RunFinished(RunOutcome {
+            status: CompletionStatus::Completed,
+            result_text: Some("complete".into()),
+            structured_output: None,
+            usage: None,
+            metrics: OutcomeMetrics::default(),
+            error: None,
+        });
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            sink.enqueue(terminal),
+        )
+        .await
+        .expect("terminal event should fit in reserved queue capacity")
+        .unwrap();
+
+        service.block_add.store(false, Ordering::SeqCst);
+        service.release_add.notify_one();
+        sink.flush().await.unwrap();
+        assert_eq!(service.logs().len(), OUTPUT_QUEUE_CAPACITY + 2);
     }
 }

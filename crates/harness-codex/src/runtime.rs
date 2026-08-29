@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::{
     net::TcpStream,
     process::Child,
-    sync::{Mutex as AsyncMutex, broadcast, oneshot, watch},
+    sync::{Mutex as AsyncMutex, mpsc, oneshot, watch},
     task::JoinHandle,
 };
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
@@ -19,8 +19,8 @@ use vertebrae_harness_core::{
     ControlRequestEnvelope, ControlResolution, ControlSink, DiagnosticEvent, EventCorrelation,
     EventSequencer, EventSink, FileChange, FileChangeEvent, FileChangeKind, GrantScope,
     HarnessCapabilities, HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, HarnessRuntime,
-    OutcomeMetrics, ProviderResumeId, ProviderThreadRef, QuestionCapabilities, RunHandle, RunId,
-    RunOutcome, RunRequest, SendTurnRequest, SequencedEventSink, SessionCloseOutcome,
+    ItemId, OutcomeMetrics, ProviderResumeId, ProviderThreadRef, QuestionCapabilities, RunHandle,
+    RunId, RunOutcome, RunRequest, SendTurnRequest, SequencedEventSink, SessionCloseOutcome,
     SessionCloseStatus, SessionHandle, SessionId, SessionStarted, SessionUsage, SpeedTier,
     StartSessionRequest, StreamId, TextEvent, ThreadDeclared, ThreadId, ThreadKind, TokenUsage,
     ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus, TurnHandle, TurnId, TurnInput,
@@ -231,7 +231,7 @@ struct CodexConnection {
     writer: Arc<AsyncMutex<futures::stream::SplitSink<WsStream, Message>>>,
     pending: Arc<AsyncMutex<HashMap<String, PendingResponse>>>,
     next_id: AsyncMutex<u64>,
-    notifications: broadcast::Sender<NotificationMessage>,
+    notifications: AsyncMutex<mpsc::Receiver<NotificationMessage>>,
     closed: watch::Sender<Option<String>>,
     reader: AsyncMutex<Option<JoinHandle<()>>>,
     root_turn_identity: Arc<RootTurnIdentity>,
@@ -246,21 +246,20 @@ impl CodexConnection {
             HarnessError::Unavailable(format!("failed to connect to Codex App Server: {error}"))
         })?;
         let (writer, mut reader) = stream.split();
-        let (notifications, _) = broadcast::channel(512);
+        let (notification_tx, notification_rx) = mpsc::channel(512);
         let (closed, _) = watch::channel(None);
         let root_turn_identity = Arc::new(RootTurnIdentity::default());
         let connection = Arc::new(Self {
             writer: Arc::new(AsyncMutex::new(writer)),
             pending: Arc::new(AsyncMutex::new(HashMap::new())),
             next_id: AsyncMutex::new(1),
-            notifications,
+            notifications: AsyncMutex::new(notification_rx),
             closed,
             reader: AsyncMutex::new(None),
             root_turn_identity: Arc::clone(&root_turn_identity),
         });
         let pending = Arc::clone(&connection.pending);
         let writer = Arc::clone(&connection.writer);
-        let notification_tx = connection.notifications.clone();
         let connection_closed = connection.closed.clone();
         let reader_task = tokio::spawn(async move {
             let failure = loop {
@@ -331,11 +330,16 @@ impl CodexConnection {
                         continue;
                     }
                 }
-                if let Some(method) = message.method {
-                    let _ = notification_tx.send(NotificationMessage {
-                        method,
-                        params: message.params.unwrap_or(Value::Null),
-                    });
+                if let Some(method) = message.method
+                    && notification_tx
+                        .send(NotificationMessage {
+                            method,
+                            params: message.params.unwrap_or(Value::Null),
+                        })
+                        .await
+                        .is_err()
+                {
+                    break "Codex notification queue closed".to_string();
                 }
             };
             let pending = std::mem::take(&mut *pending.lock().await);
@@ -780,7 +784,7 @@ impl SessionState {
         let is_child = thread_id
             .as_deref()
             .is_some_and(|id| id != self.root_thread_id.as_str());
-        let (stream, correlation) = if is_child {
+        let (stream, mut correlation) = if is_child {
             let Some((_, stream, correlation)) = self.declare_child(&params).await? else {
                 return Ok(None);
             };
@@ -803,6 +807,8 @@ impl SessionState {
         };
         match notification {
             CodexNotification::AgentMessageDelta(params) => {
+                correlation.item_id =
+                    optional_string(&params, &["/itemId", "/item_id", "/item/id"]).map(ItemId::new);
                 let text = required_string(&params, &["/delta"], "agent message delta")
                     .map_err(HarnessError::Operation)?;
                 if !is_child {
@@ -822,7 +828,11 @@ impl SessionState {
                         "Codex item/started is missing item".into(),
                     ));
                 };
+                let item_id =
+                    optional_string(item, &["/id", "/itemId", "/item_id"]).map(ItemId::new);
+                correlation.item_id = item_id;
                 if let Some(file_change) = file_change_event(item) {
+                    correlation.tool_call_id = file_change.tool_call_id.clone();
                     self.emit(
                         stream,
                         correlation,
@@ -831,6 +841,7 @@ impl SessionState {
                     )
                     .await?;
                 } else if let Some((tool_id, name, input, is_spawn)) = tool_call(item) {
+                    correlation.tool_call_id = Some(ToolCallId::new(tool_id.clone()));
                     if is_spawn {
                         let parent_thread = thread_id
                             .as_deref()
@@ -858,7 +869,11 @@ impl SessionState {
                         "Codex item/completed is missing item".into(),
                     ));
                 };
+                let item_id =
+                    optional_string(item, &["/id", "/itemId", "/item_id"]).map(ItemId::new);
+                correlation.item_id = item_id;
                 if let Some(file_change) = file_change_event(item) {
+                    correlation.tool_call_id = file_change.tool_call_id.clone();
                     self.emit(
                         stream,
                         correlation,
@@ -884,6 +899,7 @@ impl SessionState {
                         }
                         _ => {
                             if let Some((tool_id, output, failed)) = tool_output(item) {
+                                correlation.tool_call_id = Some(ToolCallId::new(tool_id.clone()));
                                 self.emit(
                                     stream,
                                     correlation,
@@ -1009,7 +1025,12 @@ impl SessionState {
             Some(&format!("content_len={content_len}")),
             Some(&content),
         );
-        let mut notifications = self.connection.notifications.subscribe();
+        // There is one lossless receiver for the connection. Holding the
+        // receiver for the duration of a root turn also makes the single
+        // root-turn gate explicit: every notification is consumed exactly
+        // once, while the websocket reader applies backpressure to the
+        // provider instead of dropping messages from a broadcast ring.
+        let mut notifications = self.connection.notifications.lock().await;
         let mut connection_closed = self.connection.closed.subscribe();
         let correlation = self.root_correlation(Some(turn_id.clone()), run_id.clone());
         self.emit(
@@ -1174,7 +1195,7 @@ impl SessionState {
         &self,
         provider_turn: &str,
         normalized_turn: &TurnId,
-        notifications: &mut broadcast::Receiver<NotificationMessage>,
+        notifications: &mut mpsc::Receiver<NotificationMessage>,
         connection_closed: &mut watch::Receiver<Option<String>>,
         accumulator: &mut TurnAccumulator,
     ) -> Result<Option<TurnOutcome>, HarnessError> {
@@ -1183,7 +1204,7 @@ impl SessionState {
             // connection close observed in the same poll.
             biased;
             notification = notifications.recv() => match notification {
-                Ok(notification) => {
+                Some(notification) => {
                     let notification = decode_notification(notification.method, notification.params)
                         .map_err(HarnessError::Operation)?;
                     self.process_notification(
@@ -1193,10 +1214,7 @@ impl SessionState {
                         accumulator,
                     ).await
                 }
-                Err(broadcast::error::RecvError::Lagged(count)) => Err(HarnessError::Operation(format!(
-                    "Codex notification buffer lost {count} messages"
-                ))),
-                Err(broadcast::error::RecvError::Closed) => Err(HarnessError::Operation(
+                None => Err(HarnessError::Operation(
                     "Codex notification stream closed".into(),
                 )),
             },
@@ -1215,7 +1233,7 @@ impl SessionState {
         &self,
         provider_turn: &str,
         normalized_turn: &TurnId,
-        notifications: &mut broadcast::Receiver<NotificationMessage>,
+        notifications: &mut mpsc::Receiver<NotificationMessage>,
         connection_closed: &mut watch::Receiver<Option<String>>,
         accumulator: &mut TurnAccumulator,
     ) -> Result<TurnOutcome, HarnessError> {

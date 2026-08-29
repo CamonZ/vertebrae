@@ -205,6 +205,18 @@ pub trait EventSink: Send + Sync {
     /// must not accept an event and then report failure, because adapters use
     /// this result to preserve exactly-once lifecycle delivery.
     async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError>;
+
+    /// Waits until all events accepted by the sink before this call have
+    /// reached their durable/live delivery boundary.
+    ///
+    /// Most live sinks do not have an additional asynchronous boundary, so
+    /// the default is intentionally a no-op. Durable sinks may override this
+    /// to drain an output queue. Keeping this operation on the neutral sink
+    /// contract lets adapters acknowledge terminal lifecycle events without
+    /// teaching them about persistence or provider-specific queues.
+    async fn flush(&self) -> Result<(), HarnessError> {
+        Ok(())
+    }
 }
 
 #[async_trait]

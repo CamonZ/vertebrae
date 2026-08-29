@@ -16,7 +16,7 @@ use vertebrae_harness_codex::{
 };
 use vertebrae_harness_core::{
     CompletionStatus, ControlResolution, ControlSink, EventSink, HarnessError,
-    HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, RunRequest, SendTurnRequest, SessionId,
+    HarnessEventPayloadV1, HarnessRuntime, RunRequest, SendTurnRequest, SessionId,
     StartSessionRequest, StreamId, TurnId, TurnInputProvenance,
 };
 
@@ -40,20 +40,6 @@ impl CodexAppServerLauncher for TestLauncher {
 #[derive(Default)]
 struct CapturingSink {
     events: Mutex<Vec<vertebrae_harness_core::HarnessEventV1>>,
-}
-
-struct SlowCapturingSink {
-    events: Mutex<Vec<HarnessEventV1>>,
-    delay: Duration,
-}
-
-#[async_trait]
-impl EventSink for SlowCapturingSink {
-    async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
-        tokio::time::sleep(self.delay).await;
-        self.events.lock().unwrap().push(event);
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -178,7 +164,6 @@ enum LifecycleScenario {
     InterruptCompleted,
     InterruptFallback,
     InterruptNoAck,
-    NotificationLag,
     ControlledSuccess,
     StructuredValid,
     StructuredScalar,
@@ -293,17 +278,6 @@ async fn lifecycle_server(
                                     ))
                                     .await
                                     .unwrap();
-                            }
-                            LifecycleScenario::NotificationLag => {
-                                for index in 0..700 {
-                                    socket
-                                        .send(Message::Text(
-                                            json!({"method": "item/agentMessage/delta", "params": {"threadId": "root-thread", "turnId": "provider-turn", "delta": index.to_string()}})
-                                                .to_string(),
-                                        ))
-                                        .await
-                                        .unwrap();
-                                }
                             }
                             LifecycleScenario::StructuredValid => {
                                 socket
@@ -811,36 +785,6 @@ async fn in_flight_interrupt_uses_bounded_interrupted_fallback() {
         session.close().await.unwrap();
         let _ = server.await;
     }
-}
-
-#[tokio::test]
-async fn notification_lag_emits_one_matching_failed_terminal() {
-    let (url, server, _, _) = lifecycle_server(LifecycleScenario::NotificationLag).await;
-    let runtime = runtime_with_timeouts(url);
-    let events = Arc::new(SlowCapturingSink {
-        events: Mutex::new(Vec::new()),
-        delay: Duration::from_millis(2),
-    });
-    let session = start_test_session(&runtime, events.clone()).await;
-    let turn = session
-        .send(SendTurnRequest {
-            turn_id: TurnId::from("lagged"),
-            content: "hello".into(),
-            output_schema: None,
-        })
-        .await
-        .unwrap();
-
-    let outcome = tokio::time::timeout(Duration::from_secs(2), turn.await_outcome())
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(outcome.status, CompletionStatus::Failed);
-    assert!(outcome.error.as_deref().unwrap().contains("buffer lost"));
-    assert_balanced_turn(&events.events.lock().unwrap(), "lagged", &outcome);
-
-    session.close().await.unwrap();
-    let _ = server.await;
 }
 
 #[tokio::test]
