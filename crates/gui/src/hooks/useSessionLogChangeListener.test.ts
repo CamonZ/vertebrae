@@ -94,6 +94,39 @@ describe("useSessionLogChangeListener", () => {
     expect(logs[0].step_execution_id).toBe("exec-001");
   });
 
+  it("flushes pending records when the listener unmounts", async () => {
+    const { unmount } = renderHook(() => useSessionLogChangeListener());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const sessionLog = {
+      id: "log-unmount",
+      step_execution_id: "exec-unmount",
+      content: "Pending before cleanup",
+      created_at: "2026-03-17T10:00:00Z",
+    };
+
+    act(() => {
+      emitEvent("sessionLogCreated", {
+        log_id: sessionLog.id,
+        step_execution_id: sessionLog.step_execution_id,
+        session_log: sessionLog,
+      });
+    });
+
+    expect(
+      useSessionLogStore.getState().logsByExecutionId["exec-unmount"]
+    ).toBeUndefined();
+
+    act(() => unmount());
+
+    expect(
+      useSessionLogStore.getState().logsByExecutionId["exec-unmount"]
+    ).toEqual([sessionLog]);
+  });
+
   it("does not call appendLog when a created event has null session_log", async () => {
     renderHook(() => useSessionLogChangeListener());
 
@@ -222,7 +255,9 @@ describe("useSessionLogChangeListener", () => {
       created_at: "2026-03-17T10:02:00Z",
     };
 
-    useSessionLogStore.getState().setLogs("exec-001", [originalLog, durableLog]);
+    useSessionLogStore
+      .getState()
+      .setLogs("exec-001", [originalLog, durableLog]);
 
     act(() => {
       emitEvent("sessionLogUpdated", {

@@ -68,11 +68,7 @@ export function useSessionLogChangeListener(
           typeof performance !== "undefined"
             ? Math.max(0, performance.now() - startedAt)
             : 0;
-        monitor.recordFlush(
-          { projectScope },
-          queuedEvents.length,
-          durationMs
-        );
+        monitor.recordFlush({ projectScope }, queuedEvents.length, durationMs);
         for (const queuedEvent of queuedEvents) {
           if (queuedEvent.correlation) {
             monitor.recordVisible(queuedEvent.correlation);
@@ -141,13 +137,16 @@ export function useSessionLogChangeListener(
     );
 
     return () => {
-      disposed = true;
-      queue.dispose({
-        flush: projectScopeGeneration === getProjectScopeGeneration(),
-      });
-      void unlistenCreatedPromise.then((unlisten) => unlisten());
-      void unlistenUpdatedPromise.then((unlisten) => unlisten());
-      void unlistenWebsocketPromise.then((unlisten) => unlisten());
+      try {
+        queue.dispose({
+          flush: projectScopeGeneration === getProjectScopeGeneration(),
+        });
+      } finally {
+        disposed = true;
+        void unlistenCreatedPromise.then((unlisten) => unlisten());
+        void unlistenUpdatedPromise.then((unlisten) => unlisten());
+        void unlistenWebsocketPromise.then((unlisten) => unlisten());
+      }
     };
   }, [enabled, projectScopeGeneration]);
 }
