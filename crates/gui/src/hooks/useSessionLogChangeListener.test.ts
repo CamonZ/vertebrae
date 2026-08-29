@@ -104,7 +104,7 @@ describe("useSessionLogChangeListener", () => {
     expect(logs[0].step_execution_id).toBe("exec-001");
   });
 
-  it("flushes pending records when the listener unmounts", async () => {
+  it("does not synchronously flush pending records when the listener unmounts", async () => {
     const { unmount } = renderHook(() => useSessionLogChangeListener());
 
     await act(async () => {
@@ -130,7 +130,7 @@ describe("useSessionLogChangeListener", () => {
 
     act(() => unmount());
 
-    expect(logsFor("exec-unmount")).toEqual([sessionLog]);
+    expect(logsFor("exec-unmount")).toEqual([]);
   });
 
   it("does not call appendLog when a created event has null session_log", async () => {

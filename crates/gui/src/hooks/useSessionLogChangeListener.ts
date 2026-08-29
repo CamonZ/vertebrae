@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
 import {
   events,
   type SessionLogCreatedEvent,
@@ -61,29 +60,10 @@ export function useSessionLogChangeListener(
     const unlistenUpdatedPromise = events.sessionLogUpdatedEvent.listen(
       (event) => enqueue("upsert", event)
     );
-    const unlistenWebsocketPromise = listen<string>(
-      "websocket-state-changed",
-      (event) => {
-        if (
-          isCurrentScope() &&
-          (event.payload === "reconnecting" || event.payload === "disconnected")
-        ) {
-          useSessionLogStore.getState().flushPending();
-        }
-      }
-    );
-
     return () => {
-      try {
-        disposed = true;
-        if (projectScopeGeneration === getProjectScopeGeneration()) {
-          useSessionLogStore.getState().flushPending();
-        }
-      } finally {
-        void unlistenCreatedPromise.then((unlisten) => unlisten());
-        void unlistenUpdatedPromise.then((unlisten) => unlisten());
-        void unlistenWebsocketPromise.then((unlisten) => unlisten());
-      }
+      disposed = true;
+      void unlistenCreatedPromise.then((unlisten) => unlisten());
+      void unlistenUpdatedPromise.then((unlisten) => unlisten());
     };
   }, [enabled, projectScopeGeneration]);
 }

@@ -11,6 +11,7 @@ pub mod project_config;
 pub mod types;
 pub mod update;
 pub mod websocket_client;
+pub(crate) mod websocket_trace;
 
 #[cfg(test)]
 pub mod mock;

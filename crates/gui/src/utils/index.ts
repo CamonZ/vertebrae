@@ -13,33 +13,6 @@ export type {
   ExecutionRollups,
   SessionLogCostDerivationStats,
 } from "./computeExecutionRollups";
-export {
-  configureSessionLogPerformance,
-  createSessionLogPerformanceMonitor,
-  makeSessionLogPerformanceCorrelation,
-  SESSION_LOG_FLUSH_POLICY,
-  sessionLogPerformance,
-} from "./sessionLogPerformance";
-export type {
-  SessionLogFlushPolicy,
-  SessionLogPerformanceCorrelation,
-  SessionLogPerformanceCorrelationInput,
-  SessionLogPerformanceMetrics,
-  SessionLogPerformanceMonitor,
-  SessionLogPerformanceScope,
-  SessionLogPerformanceSnapshot,
-} from "./sessionLogPerformance";
-export {
-  createSessionLogEventQueue,
-  flushSessionLogEventQueues,
-  isUrgentSessionLog,
-  SessionLogEventQueue,
-} from "./sessionLogEventQueue";
-export type {
-  QueuedSessionLogEvent,
-  SessionLogChangeOperation,
-  SessionLogEventQueueOptions,
-} from "./sessionLogEventQueue";
 export { formatCost } from "./formatCost";
 export {
   resolveContextWindow,
