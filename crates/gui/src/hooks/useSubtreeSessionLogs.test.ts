@@ -116,6 +116,32 @@ describe("useSubtreeSessionLogs", () => {
     expect(result.current.logsByExecutionId.e1).toHaveLength(2);
   });
 
+  it("does not rerender for live logs outside the requested executions", async () => {
+    mockGetExecutionLogs.mockResolvedValue({
+      status: "ok",
+      data: [log("e1-fetched-1")],
+    });
+    let renderCount = 0;
+    const { result } = renderHook(() => {
+      renderCount += 1;
+      return useSubtreeSessionLogs([exec("e1")]);
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const settledRenderCount = renderCount;
+
+    act(() => {
+      useSessionLogStore.getState().appendLog("unrelated", log("other-live"));
+    });
+
+    expect(renderCount).toBe(settledRenderCount);
+
+    act(() => {
+      useSessionLogStore.getState().appendLog("e1", log("e1-live-2"));
+    });
+    await waitFor(() => expect(renderCount).toBeGreaterThan(settledRenderCount));
+    expect(result.current.logsByExecutionId.e1).toEqual([log("e1-live-2")]);
+  });
+
   it("falls back to fetched baseline when live store is empty for that execution", async () => {
     const fetched = [log("e1-fetched-1")];
     mockGetExecutionLogs.mockResolvedValue({ status: "ok", data: fetched });
@@ -129,6 +155,23 @@ describe("useSubtreeSessionLogs", () => {
       useSessionLogStore.setState({ logsByExecutionId: { e1: [] } });
     });
     // Empty live bucket must NOT clobber the fetched baseline.
+    expect(result.current.logsByExecutionId.e1).toEqual(fetched);
+  });
+
+  it("keeps the complete fetched trace when the live bucket is only a retained subset", async () => {
+    const fetched = [log("e1-fetched-1"), log("e1-fetched-2")];
+    mockGetExecutionLogs.mockResolvedValue({ status: "ok", data: fetched });
+    const { result } = renderHook(() => useSubtreeSessionLogs([exec("e1")]));
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    act(() => {
+      useSessionLogStore.setState({
+        logsByExecutionId: { e1: [log("e1-fetched-2")] },
+      });
+    });
+
     expect(result.current.logsByExecutionId.e1).toEqual(fetched);
   });
 

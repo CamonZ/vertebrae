@@ -1,8 +1,12 @@
 import { useCallback, useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
+import { useShallow } from "zustand/react/shallow";
 import type { StepExecution } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
-import { useSessionLogStore } from "../stores/sessionLogStore";
+import {
+  selectSessionLogsForExecutionIds,
+  useSessionLogStore,
+} from "../stores/sessionLogStore";
 import { useTasks } from "./useTasks";
 import {
   computeExecutionRollups,
@@ -63,8 +67,14 @@ export function useSubtreeExecutions(
     executionQueries.refetch();
   }, [executionQueries]);
 
+  const executionIds = useMemo(
+    () => executions.map((execution) => execution.id),
+    [executions]
+  );
   const logsByExecutionId = useSessionLogStore(
-    (state) => state.logsByExecutionId
+    useShallow((state) =>
+      selectSessionLogsForExecutionIds(state.logsByExecutionId, executionIds)
+    )
   );
 
   const rollups = useMemo(

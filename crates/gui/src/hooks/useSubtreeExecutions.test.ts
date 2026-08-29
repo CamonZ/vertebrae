@@ -15,6 +15,7 @@ vi.mock("../bindings", () => ({
 import { useSubtreeExecutions } from "./useSubtreeExecutions";
 import { createMockTask } from "../test/test-utils";
 import type { StepExecution, Task } from "../bindings";
+import { useSessionLogStore } from "../stores/sessionLogStore";
 import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
@@ -187,6 +188,47 @@ describe("useSubtreeExecutions", () => {
     expect(result.current.rollups.totalCost).toBeCloseTo(1.4, 10);
     expect(result.current.rollups.totalTokens).toBe(4 * 10 + 300);
     expect(result.current.rollups.totalWallTimeMs).toBe(400 + 5000);
+  });
+
+  it("does not rerender for a log from an execution outside the subtree", async () => {
+    seedTree();
+    mockGetTaskExecutions.mockImplementation((taskId: string) =>
+      Promise.resolve({
+        status: "ok",
+        data: [exec({ id: `${taskId}-e1`, task_id: taskId })],
+      })
+    );
+
+    let renderCount = 0;
+    const { result } = renderHook(() => {
+      renderCount += 1;
+      return useSubtreeExecutions("epic");
+    }, {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const settledRenderCount = renderCount;
+
+    act(() => {
+      useSessionLogStore.getState().appendLog("unrelated-execution", {
+        id: "unrelated-log",
+        step_execution_id: "unrelated-execution",
+        content: "{}",
+        created_at: "2026-01-01T00:00:00.000Z",
+      });
+    });
+
+    expect(renderCount).toBe(settledRenderCount);
+
+    act(() => {
+      useSessionLogStore.getState().appendLog("epic-e1", {
+        id: "selected-log",
+        step_execution_id: "epic-e1",
+        content: "{}",
+        created_at: "2026-01-01T00:00:00.000Z",
+      });
+    });
+    await waitFor(() => expect(renderCount).toBeGreaterThan(settledRenderCount));
   });
 
   it("ignores executions for tasks outside the subtree", async () => {

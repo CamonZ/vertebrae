@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { commands, type SessionLog, type StepExecution } from "../bindings";
-import { useSessionLogStore } from "../stores";
+import {
+  selectSessionLogsForExecutionIds,
+  useSessionLogStore,
+} from "../stores";
 import {
   getProjectScopeGeneration,
   isCurrentProjectScopeGeneration,
@@ -76,7 +80,11 @@ export function useSubtreeSessionLogs(
     fetchAll();
   }, [fetchAll]);
 
-  const liveLogs = useSessionLogStore((s) => s.logsByExecutionId);
+  const liveLogs = useSessionLogStore(
+    useShallow((state) =>
+      selectSessionLogsForExecutionIds(state.logsByExecutionId, ids)
+    )
+  );
 
   const merged = useMemo(() => {
     if (ids.length === 0) return {} as Record<string, SessionLog[]>;

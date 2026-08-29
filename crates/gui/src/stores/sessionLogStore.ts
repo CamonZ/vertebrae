@@ -22,6 +22,20 @@ export interface SessionLogBatchEntry {
   operation: "append" | "upsert";
 }
 
+/** Select only the live log buckets needed by a consumer. */
+export function selectSessionLogsForExecutionIds(
+  logsByExecutionId: Readonly<Record<string, SessionLog[]>>,
+  executionIds: readonly (string | null | undefined)[]
+): Record<string, SessionLog[]> {
+  const scoped: Record<string, SessionLog[]> = {};
+  for (const executionId of executionIds) {
+    if (executionId && logsByExecutionId[executionId] !== undefined) {
+      scoped[executionId] = logsByExecutionId[executionId];
+    }
+  }
+  return scoped;
+}
+
 const initialState: SessionLogState = {
   logsByExecutionId: {},
 };

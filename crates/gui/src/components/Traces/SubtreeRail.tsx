@@ -1,11 +1,15 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type {
   ExecutionStatus,
   SessionLog,
   StepExecution,
   Task,
 } from "../../bindings";
-import { useSessionLogStore } from "../../stores/sessionLogStore";
+import {
+  selectSessionLogsForExecutionIds,
+  useSessionLogStore,
+} from "../../stores/sessionLogStore";
 import {
   computeExecutionRollups,
   costFromSessionLogs,
@@ -278,7 +282,18 @@ export function SubtreeRail({
   onToggleCollapsed,
   onSwitchTask,
 }: SubtreeRailProps): ReactNode {
-  const liveLogs = useSessionLogStore((state) => state.logsByExecutionId);
+  const executionIds = useMemo(
+    () => executions.map((execution) => execution.id),
+    [executions]
+  );
+  const liveLogs = useSessionLogStore(
+    useShallow((state) =>
+      selectSessionLogsForExecutionIds(
+        state.logsByExecutionId,
+        providedLogs === undefined ? executionIds : []
+      )
+    )
+  );
   const logsByExecutionId = providedLogs ?? liveLogs;
   const rows = useMemo<GroupRow[]>(() => {
     const taskById = new Map<string, Task>();
