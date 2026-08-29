@@ -132,6 +132,7 @@ impl SequencedEventSink {
                 draft.stream_id
             )));
         }
+        let terminal = draft.payload.is_lifecycle_terminal();
         let event = self.sequencer.sequence_draft(draft);
         // Delivery errors are not transactional: the sink may have accepted
         // the event before reporting failure. The guard also handles task
@@ -144,6 +145,15 @@ impl SequencedEventSink {
             Ok(()) => failure_guard.complete(),
             Err(error) => return Err(error),
         }
+        if terminal {
+            self.sink.flush().await?;
+        }
         Ok(event)
+    }
+
+    /// Drain the downstream sink after all sequencing currently in flight.
+    pub async fn flush(&self) -> Result<(), HarnessError> {
+        let _guard = self.sequencer.dispatch_lock.lock().await;
+        self.sink.flush().await
     }
 }

@@ -373,6 +373,13 @@ impl HarnessEventPayloadV1 {
         }
     }
 
+    pub fn is_lifecycle_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::TurnFinished(_) | Self::RunFinished(_) | Self::SessionClosed(_)
+        )
+    }
+
     fn to_data(&self) -> Result<Value, serde_json::Error> {
         match self {
             Self::SessionStarted(value) => serde_json::to_value(value),
