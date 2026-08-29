@@ -7,6 +7,22 @@ export {
   parseCost,
 } from "./computeExecutionRollups";
 export type { ExecutionRollups } from "./computeExecutionRollups";
+export {
+  configureSessionLogPerformance,
+  createSessionLogPerformanceMonitor,
+  makeSessionLogPerformanceCorrelation,
+  SESSION_LOG_FLUSH_POLICY,
+  sessionLogPerformance,
+} from "./sessionLogPerformance";
+export type {
+  SessionLogFlushPolicy,
+  SessionLogPerformanceCorrelation,
+  SessionLogPerformanceCorrelationInput,
+  SessionLogPerformanceMetrics,
+  SessionLogPerformanceMonitor,
+  SessionLogPerformanceScope,
+  SessionLogPerformanceSnapshot,
+} from "./sessionLogPerformance";
 export { formatCost } from "./formatCost";
 export {
   resolveContextWindow,

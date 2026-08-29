@@ -106,6 +106,41 @@ Live chat and trace replay share one normalized stream:
   discovered/parsed by the provider harness crate; the frontend receives only
   serialized `HarnessEventV1` records.
 
+### Realtime session-log pacing contract
+
+Live session-log notifications are a UI delivery contract, not the durable
+record. The websocket continues to deliver individual `SessionLog` records;
+the frontend may queue them and apply them in ordered bulk updates. Created
+records append, updated records upsert by `id` or `logical_key`, and the
+record's existing ID, execution ID, content, format, and timestamps are not
+rewritten. Reconnects may replay records, so idempotent reconciliation is
+required. A complete historical result still comes from
+`getExecutionLogs`/`getTaskRunTrace`; live state is merged with that durable
+baseline and a gap or overflow is reconciled by refetching rather than
+silently dropping records.
+
+The initial frontend budget is:
+
+| Measure | Budget / policy |
+| --- | --- |
+| Ordinary flush cadence | Next animation frame, with a 50 ms maximum timer interval |
+| Terminal or error flush | Next frame, at most 16 ms of intentional pacing |
+| Records per store application | 256 maximum |
+| Pending records | 4,096 maximum; overflow forces reconciliation before accepting more |
+| Hot-state retention | 10,000 records is a soft observation budget; this contract does not evict durable or live records |
+| Received-to-visible latency | Initial p95 target: 100 ms |
+
+The `sessionLogPerformance` monitor in `src/utils/sessionLogPerformance.ts`
+is disabled by default. An opt-in stress or diagnostic run can enable it and
+collect project- and execution-scoped received, queued, flushed, visible,
+store-commit, rollup, render, parse-time, queue-depth, batch-size, retention,
+overflow, memory, and event-to-visible-latency metrics. Correlation identities
+use the stable logical key when present, otherwise the SessionLog ID; the live
+log ID is the frontend boundary for tracing a record back to its durable row
+and the serialized harness `event_id` remains in `content` for deeper
+investigations. The monitor keeps only bounded latency samples and performs no
+filesystem or webview work.
+
 ### Claude compaction lifecycle
 
 Claude context compaction is exposed as lifecycle state, not as transcript
