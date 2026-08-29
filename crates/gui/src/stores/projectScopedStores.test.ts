@@ -60,9 +60,9 @@ describe("resetProjectScopedStores", () => {
     queryClient.setQueryData(queryKeys.taskRuns.byTask(generation, task.id), [
       taskRun,
     ]);
-    useSessionLogStore.setState({
-      logsByExecutionId: { [execution.id ?? "execution-1"]: [sessionLog] },
-    });
+    useSessionLogStore
+      .getState()
+      .setLogs(execution.id ?? "execution-1", [sessionLog]);
     useChatStore.setState({
       sessions: {
         "chat-1": {

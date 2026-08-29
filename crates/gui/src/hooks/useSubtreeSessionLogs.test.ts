@@ -38,7 +38,7 @@ describe("useSubtreeSessionLogs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     act(() => {
-      useSessionLogStore.setState({ logsByExecutionId: {} });
+      useSessionLogStore.getState().reset();
     });
   });
 
@@ -109,7 +109,9 @@ describe("useSubtreeSessionLogs", () => {
     const liveSuperset = [log("e1-fetched-1"), log("e1-live-2")];
     act(() => {
       useSessionLogStore.setState({
-        logsByExecutionId: { e1: liveSuperset },
+        logsByExecutionId: {
+          e1: { logs: liveSuperset, fallbackCost: 0 },
+        },
       });
     });
     expect(result.current.logsByExecutionId.e1).toBe(liveSuperset);
@@ -138,7 +140,9 @@ describe("useSubtreeSessionLogs", () => {
     act(() => {
       useSessionLogStore.getState().appendLog("e1", log("e1-live-2"));
     });
-    await waitFor(() => expect(renderCount).toBeGreaterThan(settledRenderCount));
+    await waitFor(() =>
+      expect(renderCount).toBeGreaterThan(settledRenderCount)
+    );
     expect(result.current.logsByExecutionId.e1).toEqual([log("e1-live-2")]);
   });
 
@@ -152,7 +156,9 @@ describe("useSubtreeSessionLogs", () => {
     expect(result.current.logsByExecutionId.e1).toEqual(fetched);
 
     act(() => {
-      useSessionLogStore.setState({ logsByExecutionId: { e1: [] } });
+      useSessionLogStore.setState({
+        logsByExecutionId: { e1: { logs: [], fallbackCost: 0 } },
+      });
     });
     // Empty live bucket must NOT clobber the fetched baseline.
     expect(result.current.logsByExecutionId.e1).toEqual(fetched);
@@ -168,7 +174,9 @@ describe("useSubtreeSessionLogs", () => {
 
     act(() => {
       useSessionLogStore.setState({
-        logsByExecutionId: { e1: [log("e1-fetched-2")] },
+        logsByExecutionId: {
+          e1: { logs: [log("e1-fetched-2")], fallbackCost: 0 },
+        },
       });
     });
 
@@ -193,9 +201,7 @@ describe("useSubtreeSessionLogs", () => {
 
   it("refetch reissues the requests", async () => {
     mockGetExecutionLogs.mockResolvedValue({ status: "ok", data: [] });
-    const { result } = renderHook(() =>
-      useSubtreeSessionLogs([exec("e1")])
-    );
+    const { result } = renderHook(() => useSubtreeSessionLogs([exec("e1")]));
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
     });

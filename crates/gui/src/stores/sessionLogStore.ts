@@ -5,9 +5,16 @@ import {
   costFromSessionLogs,
 } from "../utils/computeExecutionRollups";
 
+const SESSION_LOG_MAX_BATCH_SIZE = 256;
+const SESSION_LOG_MAX_FLUSH_INTERVAL_MS = 50;
+
+export interface ExecutionLogBucket {
+  logs: SessionLog[];
+  fallbackCost: number;
+}
+
 interface SessionLogState {
-  logsByExecutionId: Record<string, SessionLog[]>;
-  fallbackCostByExecutionId: Record<string, number>;
+  logsByExecutionId: Record<string, ExecutionLogBucket>;
 }
 
 interface SessionLogActions {
@@ -15,6 +22,7 @@ interface SessionLogActions {
   appendLog: (executionId: string, log: SessionLog) => void;
   upsertLog: (executionId: string, log: SessionLog) => void;
   applyLogBatch: (entries: readonly SessionLogBatchEntry[]) => void;
+  flushPending: () => void;
   clearLogs: (executionId: string) => void;
   reset: () => void;
 }
@@ -29,13 +37,13 @@ export interface SessionLogBatchEntry {
 
 /** Select only the live log buckets needed by a consumer. */
 export function selectSessionLogsForExecutionIds(
-  logsByExecutionId: Readonly<Record<string, SessionLog[]>>,
+  logsByExecutionId: Readonly<Record<string, ExecutionLogBucket>>,
   executionIds: readonly (string | null | undefined)[]
 ): Record<string, SessionLog[]> {
   const scoped: Record<string, SessionLog[]> = {};
   for (const executionId of executionIds) {
     if (executionId && logsByExecutionId[executionId] !== undefined) {
-      scoped[executionId] = logsByExecutionId[executionId];
+      scoped[executionId] = logsByExecutionId[executionId].logs;
     }
   }
   return scoped;
@@ -43,13 +51,13 @@ export function selectSessionLogsForExecutionIds(
 
 /** Select incrementally maintained fallback costs for the same execution scope. */
 export function selectSessionLogCostsForExecutionIds(
-  fallbackCostByExecutionId: Readonly<Record<string, number>>,
+  logsByExecutionId: Readonly<Record<string, ExecutionLogBucket>>,
   executionIds: readonly (string | null | undefined)[]
 ): Record<string, number> {
   const scoped: Record<string, number> = {};
   for (const executionId of executionIds) {
-    if (executionId && fallbackCostByExecutionId[executionId] !== undefined) {
-      scoped[executionId] = fallbackCostByExecutionId[executionId];
+    if (executionId && logsByExecutionId[executionId] !== undefined) {
+      scoped[executionId] = logsByExecutionId[executionId].fallbackCost;
     }
   }
   return scoped;
@@ -57,46 +65,81 @@ export function selectSessionLogCostsForExecutionIds(
 
 const initialState: SessionLogState = {
   logsByExecutionId: {},
-  fallbackCostByExecutionId: {},
 };
 
-export const useSessionLogStore = create<SessionLogStore>((set) => ({
-  ...initialState,
+let pendingEntries: SessionLogBatchEntry[] = [];
+let frameHandle: number | null = null;
+let timerHandle: ReturnType<typeof setTimeout> | null = null;
 
-  setLogs: (executionId, logs) =>
-    set((state) => ({
-      logsByExecutionId: { ...state.logsByExecutionId, [executionId]: logs },
-      fallbackCostByExecutionId: {
-        ...state.fallbackCostByExecutionId,
-        [executionId]: costFromSessionLogs(logs),
-      },
-    })),
+function cancelScheduledFlush(): void {
+  if (frameHandle !== null) {
+    if (typeof globalThis.cancelAnimationFrame === "function") {
+      globalThis.cancelAnimationFrame(frameHandle);
+    }
+    frameHandle = null;
+  }
+  if (timerHandle !== null) {
+    globalThis.clearTimeout(timerHandle);
+    timerHandle = null;
+  }
+}
 
-  appendLog: (executionId, log) =>
-    set((state) =>
-      applyLogBatch(state, [{ executionId, log, operation: "append" }])
-    ),
+function scheduleFlush(): void {
+  if (pendingEntries.length === 0) return;
+  if (frameHandle !== null || timerHandle !== null) return;
 
-  upsertLog: (executionId, log) =>
-    set((state) =>
-      applyLogBatch(state, [{ executionId, log, operation: "upsert" }])
-    ),
+  if (typeof globalThis.requestAnimationFrame === "function") {
+    frameHandle = globalThis.requestAnimationFrame(() => {
+      frameHandle = null;
+      if (timerHandle !== null) {
+        globalThis.clearTimeout(timerHandle);
+        timerHandle = null;
+      }
+      flushOneBatch();
+      scheduleFlush();
+    });
+  }
 
-  applyLogBatch: (entries) => set((state) => applyLogBatch(state, entries)),
+  timerHandle = globalThis.setTimeout(() => {
+    timerHandle = null;
+    if (frameHandle !== null) {
+      if (typeof globalThis.cancelAnimationFrame === "function") {
+        globalThis.cancelAnimationFrame(frameHandle);
+      }
+      frameHandle = null;
+    }
+    flushOneBatch();
+    scheduleFlush();
+  }, SESSION_LOG_MAX_FLUSH_INTERVAL_MS);
+}
 
-  clearLogs: (executionId) =>
-    set((state) => {
-      const logsByExecutionId = { ...state.logsByExecutionId };
-      const fallbackCostByExecutionId = {
-        ...state.fallbackCostByExecutionId,
-      };
-      delete logsByExecutionId[executionId];
-      delete fallbackCostByExecutionId[executionId];
-      return { logsByExecutionId, fallbackCostByExecutionId };
-    }),
+function queueLog(entry: SessionLogBatchEntry): void {
+  pendingEntries.push(entry);
+  scheduleFlush();
+}
 
-  reset: () => set(initialState),
-}));
+function flushOneBatch(): void {
+  if (pendingEntries.length === 0) return;
+  const batch = pendingEntries.splice(0, SESSION_LOG_MAX_BATCH_SIZE);
+  try {
+    useSessionLogStore.getState().applyLogBatch(batch);
+  } catch (error) {
+    pendingEntries.unshift(...batch);
+    scheduleFlush();
+    throw error;
+  }
+}
+
+function flushPendingNow(): void {
+  cancelScheduledFlush();
+  flushOneBatch();
+  scheduleFlush();
+}
+
+function discardPending(): void {
+  cancelScheduledFlush();
+  pendingEntries = [];
+}
 
 interface MutableExecutionLogs {
   logs: SessionLog[];
@@ -106,14 +149,14 @@ interface MutableExecutionLogs {
 }
 
 function mutableExecutionLogs(
-  logs: readonly SessionLog[],
-  fallbackCost: number
+  bucket: ExecutionLogBucket | undefined
 ): MutableExecutionLogs {
+  const logs = bucket?.logs ?? [];
   const mutable: MutableExecutionLogs = {
     logs: [...logs],
     ids: new Map(),
     logicalKeys: new Map(),
-    fallbackCost,
+    fallbackCost: bucket?.fallbackCost ?? costFromSessionLogs(logs),
   };
   logs.forEach((log, index) => {
     if (log.id) mutable.ids.set(log.id, index);
@@ -178,11 +221,8 @@ function applyLogBatch(
   for (const entry of entries) {
     let mutable = mutableByExecutionId.get(entry.executionId);
     if (!mutable) {
-      const existingLogs = state.logsByExecutionId[entry.executionId] ?? [];
       mutable = mutableExecutionLogs(
-        existingLogs,
-        state.fallbackCostByExecutionId[entry.executionId] ??
-          costFromSessionLogs(existingLogs)
+        state.logsByExecutionId[entry.executionId]
       );
       mutableByExecutionId.set(entry.executionId, mutable);
     }
@@ -204,13 +244,50 @@ function applyLogBatch(
 
   if (!changed) return state;
   const logsByExecutionId = { ...state.logsByExecutionId };
-  const fallbackCostByExecutionId = {
-    ...state.fallbackCostByExecutionId,
-  };
   for (const executionId of changedExecutionIds) {
     const mutable = mutableByExecutionId.get(executionId)!;
-    logsByExecutionId[executionId] = mutable.logs;
-    fallbackCostByExecutionId[executionId] = mutable.fallbackCost;
+    logsByExecutionId[executionId] = {
+      logs: mutable.logs,
+      fallbackCost: mutable.fallbackCost,
+    };
   }
-  return { logsByExecutionId, fallbackCostByExecutionId };
+  return { logsByExecutionId };
 }
+
+export const useSessionLogStore = create<SessionLogStore>((set) => ({
+  ...initialState,
+
+  setLogs: (executionId, logs) =>
+    set((state) => ({
+      logsByExecutionId: {
+        ...state.logsByExecutionId,
+        [executionId]: {
+          logs,
+          fallbackCost: costFromSessionLogs(logs),
+        },
+      },
+    })),
+
+  appendLog: (executionId, log) =>
+    queueLog({ executionId, log, operation: "append" }),
+
+  upsertLog: (executionId, log) =>
+    queueLog({ executionId, log, operation: "upsert" }),
+
+  applyLogBatch: (entries) => set((state) => applyLogBatch(state, entries)),
+
+  flushPending: flushPendingNow,
+
+  clearLogs: (executionId) =>
+    set((state) => {
+      if (state.logsByExecutionId[executionId] === undefined) return state;
+      const logsByExecutionId = { ...state.logsByExecutionId };
+      delete logsByExecutionId[executionId];
+      return { logsByExecutionId };
+    }),
+
+  reset: () => {
+    discardPending();
+    set(initialState);
+  },
+}));

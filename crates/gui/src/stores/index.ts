@@ -18,7 +18,11 @@ export {
   selectSessionLogCostsForExecutionIds,
   selectSessionLogsForExecutionIds,
 } from "./sessionLogStore";
-export type { SessionLogBatchEntry, SessionLogStore } from "./sessionLogStore";
+export type {
+  ExecutionLogBucket,
+  SessionLogBatchEntry,
+  SessionLogStore,
+} from "./sessionLogStore";
 
 export { useChatStore } from "./chatStore";
 export type { ChatStore, ChatSession, ChatMessage } from "./chatStore";

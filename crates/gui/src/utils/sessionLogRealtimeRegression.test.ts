@@ -21,6 +21,22 @@ const PROJECT_SCOPE = "child-6-regression";
 const EXECUTION_IDS = ["exec-a", "exec-b", "exec-c"] as const;
 const EMPTY_LOGS: SessionLog[] = [];
 
+function liveLogs() {
+  return Object.fromEntries(
+    Object.entries(useSessionLogStore.getState().logsByExecutionId).map(
+      ([executionId, bucket]) => [executionId, bucket.logs]
+    )
+  );
+}
+
+function liveCosts() {
+  return Object.fromEntries(
+    Object.entries(useSessionLogStore.getState().logsByExecutionId).map(
+      ([executionId, bucket]) => [executionId, bucket.fallbackCost]
+    )
+  );
+}
+
 function harnessLog(
   executionId: string,
   id: string,
@@ -277,8 +293,8 @@ describe("session-log realtime regression", () => {
               executionId,
               computeExecutionRollups(
                 [currentExecution],
-                state.logsByExecutionId,
-                state.fallbackCostByExecutionId
+                liveLogs(),
+                liveCosts()
               )
             );
             monitor.recordRollup(
@@ -288,7 +304,7 @@ describe("session-log realtime regression", () => {
             );
             monitor.recordRetainedRecords(
               { projectScope: PROJECT_SCOPE, executionId },
-              state.logsByExecutionId[executionId]?.length ?? 0
+              state.logsByExecutionId[executionId]?.logs.length ?? 0
             );
           },
         })
@@ -299,7 +315,7 @@ describe("session-log realtime regression", () => {
     const { result: activeConsumer, unmount } = renderHook(() => {
       activeConsumerRenders += 1;
       return useSessionLogStore(
-        (state) => state.logsByExecutionId[EXECUTION_IDS[0]] ?? EMPTY_LOGS
+        (state) => state.logsByExecutionId[EXECUTION_IDS[0]]?.logs ?? EMPTY_LOGS
       );
     });
     const settledActiveConsumerRenders = activeConsumerRenders;
@@ -362,7 +378,7 @@ describe("session-log realtime regression", () => {
 
     const state = useSessionLogStore.getState();
     for (const executionId of EXECUTION_IDS) {
-      const logs = state.logsByExecutionId[executionId];
+      const logs = state.logsByExecutionId[executionId]?.logs ?? EMPTY_LOGS;
       expect(logs).toHaveLength(28);
       expect(logs[0].id).toBe(`${executionId}-terminal-v2`);
       expect(
@@ -376,7 +392,7 @@ describe("session-log realtime regression", () => {
         logs.some((log) => log.id === `${executionId}-gap-recovered`)
       ).toBe(true);
     }
-    expect(state.fallbackCostByExecutionId).toEqual({
+    expect(liveCosts()).toEqual({
       "exec-a": 0.2,
       "exec-b": 0,
       "exec-c": 0.4,
@@ -385,8 +401,8 @@ describe("session-log realtime regression", () => {
     const allExecutions = EXECUTION_IDS.map(execution);
     const finalRollups = computeExecutionRollups(
       allExecutions,
-      state.logsByExecutionId,
-      state.fallbackCostByExecutionId
+      liveLogs(),
+      liveCosts()
     );
     expect(finalRollups.totalCost).toBeCloseTo(0.6, 10);
     expect(finalRollups).toMatchObject({
@@ -401,8 +417,8 @@ describe("session-log realtime regression", () => {
     const derivationStats = getSessionLogCostDerivationStats();
     expect(derivationStats).toEqual({
       fullTranscriptParses: 0,
-      incrementalRecordParses: 93,
-      recordsParsed: 93,
+      incrementalRecordParses: 6,
+      recordsParsed: 6,
     });
     expect(rollupsByExecution.get("exec-a")?.totalCost).toBeCloseTo(0.2, 10);
     expect(rollupsByExecution.get("exec-b")?.totalCost).toBeCloseTo(0, 10);

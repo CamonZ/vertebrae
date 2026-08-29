@@ -40,12 +40,15 @@ function createSessionEndLog(
   });
 }
 
+function logsFor(executionId: string): SessionLog[] {
+  return (
+    useSessionLogStore.getState().logsByExecutionId[executionId]?.logs ?? []
+  );
+}
+
 describe("sessionLogStore", () => {
   beforeEach(() => {
-    useSessionLogStore.setState({
-      logsByExecutionId: {},
-      fallbackCostByExecutionId: {},
-    });
+    useSessionLogStore.getState().reset();
     resetSessionLogCostDerivationStats();
   });
 
@@ -64,12 +67,11 @@ describe("sessionLogStore", () => {
 
       useSessionLogStore.getState().setLogs("exec-1", logs);
 
-      const state = useSessionLogStore.getState();
-      expect(state.logsByExecutionId["exec-1"]).toHaveLength(2);
-      expect(state.logsByExecutionId["exec-1"][0].id).toBe("log-1");
-      expect(state.logsByExecutionId["exec-1"][0].content).toBe("first");
-      expect(state.logsByExecutionId["exec-1"][1].id).toBe("log-2");
-      expect(state.logsByExecutionId["exec-1"][1].content).toBe("second");
+      expect(logsFor("exec-1")).toHaveLength(2);
+      expect(logsFor("exec-1")[0].id).toBe("log-1");
+      expect(logsFor("exec-1")[0].content).toBe("first");
+      expect(logsFor("exec-1")[1].id).toBe("log-2");
+      expect(logsFor("exec-1")[1].content).toBe("second");
     });
 
     it("replaces existing logs for the same execution ID", () => {
@@ -85,10 +87,9 @@ describe("sessionLogStore", () => {
           createMockSessionLog({ id: "log-2", content: "new" }),
         ]);
 
-      const state = useSessionLogStore.getState();
-      expect(state.logsByExecutionId["exec-1"]).toHaveLength(1);
-      expect(state.logsByExecutionId["exec-1"][0].id).toBe("log-2");
-      expect(state.logsByExecutionId["exec-1"][0].content).toBe("new");
+      expect(logsFor("exec-1")).toHaveLength(1);
+      expect(logsFor("exec-1")[0].id).toBe("log-2");
+      expect(logsFor("exec-1")[0].content).toBe("new");
     });
 
     it("does not affect other execution IDs", () => {
@@ -104,13 +105,12 @@ describe("sessionLogStore", () => {
           createMockSessionLog({ id: "log-2", content: "exec-2 log" }),
         ]);
 
-      const state = useSessionLogStore.getState();
-      expect(state.logsByExecutionId["exec-1"]).toHaveLength(1);
-      expect(state.logsByExecutionId["exec-1"][0].id).toBe("log-1");
-      expect(state.logsByExecutionId["exec-1"][0].content).toBe("exec-1 log");
-      expect(state.logsByExecutionId["exec-2"]).toHaveLength(1);
-      expect(state.logsByExecutionId["exec-2"][0].id).toBe("log-2");
-      expect(state.logsByExecutionId["exec-2"][0].content).toBe("exec-2 log");
+      expect(logsFor("exec-1")).toHaveLength(1);
+      expect(logsFor("exec-1")[0].id).toBe("log-1");
+      expect(logsFor("exec-1")[0].content).toBe("exec-1 log");
+      expect(logsFor("exec-2")).toHaveLength(1);
+      expect(logsFor("exec-2")[0].id).toBe("log-2");
+      expect(logsFor("exec-2")[0].content).toBe("exec-2 log");
     });
   });
 
@@ -128,13 +128,13 @@ describe("sessionLogStore", () => {
           "exec-1",
           createMockSessionLog({ id: "log-2", content: "second" })
         );
+      useSessionLogStore.getState().flushPending();
 
-      const state = useSessionLogStore.getState();
-      expect(state.logsByExecutionId["exec-1"]).toHaveLength(2);
-      expect(state.logsByExecutionId["exec-1"][0].id).toBe("log-1");
-      expect(state.logsByExecutionId["exec-1"][0].content).toBe("first");
-      expect(state.logsByExecutionId["exec-1"][1].id).toBe("log-2");
-      expect(state.logsByExecutionId["exec-1"][1].content).toBe("second");
+      expect(logsFor("exec-1")).toHaveLength(2);
+      expect(logsFor("exec-1")[0].id).toBe("log-1");
+      expect(logsFor("exec-1")[0].content).toBe("first");
+      expect(logsFor("exec-1")[1].id).toBe("log-2");
+      expect(logsFor("exec-1")[1].content).toBe("second");
     });
 
     it("creates new bucket when execution ID does not exist", () => {
@@ -144,11 +144,11 @@ describe("sessionLogStore", () => {
           "exec-new",
           createMockSessionLog({ id: "log-1", content: "brand new" })
         );
+      useSessionLogStore.getState().flushPending();
 
-      const state = useSessionLogStore.getState();
-      expect(state.logsByExecutionId["exec-new"]).toHaveLength(1);
-      expect(state.logsByExecutionId["exec-new"][0].id).toBe("log-1");
-      expect(state.logsByExecutionId["exec-new"][0].content).toBe("brand new");
+      expect(logsFor("exec-new")).toHaveLength(1);
+      expect(logsFor("exec-new")[0].id).toBe("log-1");
+      expect(logsFor("exec-new")[0].content).toBe("brand new");
     });
 
     it("does not append a log whose id is already in the execution bucket", () => {
@@ -164,8 +164,9 @@ describe("sessionLogStore", () => {
           "exec-1",
           createMockSessionLog({ id: "log-1", content: "replayed copy" })
         );
+      useSessionLogStore.getState().flushPending();
 
-      const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
+      const logs = logsFor("exec-1");
       expect(logs).toHaveLength(1);
       expect(logs[0].id).toBe("log-1");
       expect(logs[0].content).toBe("first copy");
@@ -189,12 +190,12 @@ describe("sessionLogStore", () => {
           "exec-1",
           createMockSessionLog({ id: "log-3", content: "appended" })
         );
+      useSessionLogStore.getState().flushPending();
 
-      const state = useSessionLogStore.getState();
-      expect(state.logsByExecutionId["exec-1"]).toHaveLength(2);
-      expect(state.logsByExecutionId["exec-2"]).toHaveLength(1);
-      expect(state.logsByExecutionId["exec-2"][0].id).toBe("log-2");
-      expect(state.logsByExecutionId["exec-2"][0].content).toBe("exec-2 log");
+      expect(logsFor("exec-1")).toHaveLength(2);
+      expect(logsFor("exec-2")).toHaveLength(1);
+      expect(logsFor("exec-2")[0].id).toBe("log-2");
+      expect(logsFor("exec-2")[0].content).toBe("exec-2 log");
     });
   });
 
@@ -213,8 +214,9 @@ describe("sessionLogStore", () => {
           "exec-1",
           createMockSessionLog({ id: "log-1", content: "updated" })
         );
+      useSessionLogStore.getState().flushPending();
 
-      const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
+      const logs = logsFor("exec-1");
       expect(logs).toHaveLength(2);
       expect(logs[0].id).toBe("log-1");
       expect(logs[0].content).toBe("updated");
@@ -240,8 +242,9 @@ describe("sessionLogStore", () => {
           content: "new snapshot",
         })
       );
+      useSessionLogStore.getState().flushPending();
 
-      const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
+      const logs = logsFor("exec-1");
       expect(logs).toHaveLength(2);
       expect(logs[0].id).toBe("new-id");
       expect(logs[0].content).toBe("new snapshot");
@@ -255,8 +258,9 @@ describe("sessionLogStore", () => {
           "exec-new",
           createMockSessionLog({ id: "log-1", content: "first update" })
         );
+      useSessionLogStore.getState().flushPending();
 
-      const logs = useSessionLogStore.getState().logsByExecutionId["exec-new"];
+      const logs = logsFor("exec-new");
       expect(logs).toHaveLength(1);
       expect(logs[0].id).toBe("log-1");
       expect(logs[0].content).toBe("first update");
@@ -290,7 +294,7 @@ describe("sessionLogStore", () => {
 
       unsubscribe();
 
-      const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
+      const logs = logsFor("exec-1");
       expect(notifications).toHaveLength(1);
       expect(logs.map(({ id, content }) => ({ id, content }))).toEqual([
         { id: "log-1", content: "corrected" },
@@ -334,7 +338,7 @@ describe("sessionLogStore", () => {
         },
       ]);
 
-      const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
+      const logs = logsFor("exec-1");
       expect(logs.map(({ id, content }) => ({ id, content }))).toEqual([
         { id: "ephemeral-new", content: "new snapshot" },
         { id: "durable", content: "durable row" },
@@ -403,13 +407,12 @@ describe("sessionLogStore", () => {
       expect(stats.incrementalRecordParses).toBe(3);
       expect(stats.recordsParsed).toBe(3);
       expect(
-        useSessionLogStore.getState().fallbackCostByExecutionId["exec-1"]
+        useSessionLogStore.getState().logsByExecutionId["exec-1"].fallbackCost
       ).toBeCloseTo(0.5, 10);
-      expect(
-        useSessionLogStore
-          .getState()
-          .logsByExecutionId["exec-1"].map(({ id }) => id)
-      ).toEqual(["log-corrected", "log-2"]);
+      expect(logsFor("exec-1").map(({ id }) => id)).toEqual([
+        "log-corrected",
+        "log-2",
+      ]);
     });
   });
 
@@ -442,9 +445,9 @@ describe("sessionLogStore", () => {
 
       const state = useSessionLogStore.getState();
       expect(state.logsByExecutionId["exec-1"]).toBeUndefined();
-      expect(state.logsByExecutionId["exec-2"]).toHaveLength(1);
-      expect(state.logsByExecutionId["exec-2"][0].id).toBe("log-2");
-      expect(state.logsByExecutionId["exec-2"][0].content).toBe("exec-2 log");
+      expect(logsFor("exec-2")).toHaveLength(1);
+      expect(logsFor("exec-2")[0].id).toBe("log-2");
+      expect(logsFor("exec-2")[0].content).toBe("exec-2 log");
     });
 
     it("is a no-op for non-existent execution ID", () => {
@@ -455,8 +458,8 @@ describe("sessionLogStore", () => {
       useSessionLogStore.getState().clearLogs("exec-nonexistent");
 
       const state = useSessionLogStore.getState();
-      expect(state.logsByExecutionId["exec-1"]).toHaveLength(1);
-      expect(state.logsByExecutionId["exec-1"][0].id).toBe("log-1");
+      expect(logsFor("exec-1")).toHaveLength(1);
+      expect(logsFor("exec-1")[0].id).toBe("log-1");
       expect(state.logsByExecutionId["exec-nonexistent"]).toBeUndefined();
     });
   });

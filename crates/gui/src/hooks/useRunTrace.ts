@@ -34,7 +34,7 @@ function seedSessionLogs(
   }
   for (const [executionId, bucket] of logsByExecutionId) {
     const currentLogs =
-      useSessionLogStore.getState().logsByExecutionId[executionId];
+      useSessionLogStore.getState().logsByExecutionId[executionId]?.logs;
     const logsAtFetchStart = logsByExecutionIdAtFetchStart[executionId];
     setLogs(
       executionId,
@@ -147,8 +147,11 @@ export function useRunTrace(
       const generationAtFetchStart = projectScopeGeneration;
       const traceAtFetchStart =
         queryClient.getQueryData<TaskRunTrace>(queryKey);
-      const logsByExecutionIdAtFetchStart =
-        useSessionLogStore.getState().logsByExecutionId;
+      const logsByExecutionIdAtFetchStart = Object.fromEntries(
+        Object.entries(useSessionLogStore.getState().logsByExecutionId).map(
+          ([executionId, bucket]) => [executionId, bucket.logs]
+        )
+      );
       const fetchedTrace = await unwrapCommand(
         commands.getTaskRunTrace(activeRunId!)
       );

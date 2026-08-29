@@ -91,7 +91,7 @@ export function useSubtreeSessionLogs(
   );
   const liveCosts = useSessionLogStore(
     useShallow((state) =>
-      selectSessionLogCostsForExecutionIds(state.fallbackCostByExecutionId, ids)
+      selectSessionLogCostsForExecutionIds(state.logsByExecutionId, ids)
     )
   );
 

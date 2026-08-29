@@ -10,14 +10,6 @@ import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
-import {
-  createSessionLogEventQueue,
-  isUrgentSessionLog,
-} from "../utils/sessionLogEventQueue";
-import {
-  makeSessionLogPerformanceCorrelation,
-  sessionLogPerformance,
-} from "../utils/sessionLogPerformance";
 
 /** Options for the session log change listener hook */
 interface UseSessionLogChangeListenerOptions {
@@ -45,77 +37,22 @@ export function useSessionLogChangeListener(
     }
 
     let disposed = false;
-    const projectScope = String(projectScopeGeneration);
     const isCurrentScope = () =>
       !disposed && projectScopeGeneration === getProjectScopeGeneration();
-    const monitor = sessionLogPerformance;
-    const queue = createSessionLogEventQueue({
-      onFlush: (queuedEvents) => {
-        if (!isCurrentScope()) return;
-        const startedAt =
-          monitor.enabled && typeof performance !== "undefined"
-            ? performance.now()
-            : 0;
-        useSessionLogStore.getState().applyLogBatch(
-          queuedEvents.map(({ executionId, log, operation }) => ({
-            executionId,
-            log,
-            operation,
-          }))
-        );
-        if (!monitor.enabled) return;
-        const durationMs =
-          typeof performance !== "undefined"
-            ? Math.max(0, performance.now() - startedAt)
-            : 0;
-        monitor.recordFlush({ projectScope }, queuedEvents.length, durationMs);
-        for (const queuedEvent of queuedEvents) {
-          if (queuedEvent.correlation) {
-            monitor.recordVisible(queuedEvent.correlation);
-          }
-        }
-      },
-      onQueued: (queuedEvent, pendingCount) => {
-        if (monitor.enabled) {
-          monitor.recordQueued(
-            {
-              projectScope,
-              executionId: queuedEvent.executionId,
-            },
-            pendingCount
-          );
-        }
-      },
-      onOverflow: () => {
-        if (monitor.enabled) {
-          monitor.recordOverflowReconciliation({ projectScope });
-        }
-      },
-    });
 
     const enqueue = (
       operation: "append" | "upsert",
       event: { payload: SessionLogCreatedEvent | SessionLogUpdatedEvent }
     ) => {
       if (!isCurrentScope()) return;
-      const { log_id, step_execution_id, session_log } = event.payload;
+      const { step_execution_id, session_log } = event.payload;
       if (!session_log) return;
-      const correlation = monitor.enabled
-        ? makeSessionLogPerformanceCorrelation({
-            projectScope,
-            executionId: step_execution_id,
-            logId: log_id,
-            logicalKey: session_log.logical_key,
-          })
-        : undefined;
-      if (correlation) monitor.recordReceived(correlation);
-      queue.enqueue({
-        executionId: step_execution_id,
-        log: session_log,
-        operation,
-        urgent: isUrgentSessionLog(session_log),
-        correlation,
-      });
+      const store = useSessionLogStore.getState();
+      if (operation === "append") {
+        store.appendLog(step_execution_id, session_log);
+      } else {
+        store.upsertLog(step_execution_id, session_log);
+      }
     };
 
     const unlistenCreatedPromise = events.sessionLogCreatedEvent.listen(
@@ -131,18 +68,18 @@ export function useSessionLogChangeListener(
           isCurrentScope() &&
           (event.payload === "reconnecting" || event.payload === "disconnected")
         ) {
-          queue.flushNow();
+          useSessionLogStore.getState().flushPending();
         }
       }
     );
 
     return () => {
       try {
-        queue.dispose({
-          flush: projectScopeGeneration === getProjectScopeGeneration(),
-        });
-      } finally {
         disposed = true;
+        if (projectScopeGeneration === getProjectScopeGeneration()) {
+          useSessionLogStore.getState().flushPending();
+        }
+      } finally {
         void unlistenCreatedPromise.then((unlisten) => unlisten());
         void unlistenUpdatedPromise.then((unlisten) => unlisten());
         void unlistenWebsocketPromise.then((unlisten) => unlisten());

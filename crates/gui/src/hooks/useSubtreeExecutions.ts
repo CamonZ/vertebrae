@@ -80,7 +80,7 @@ export function useSubtreeExecutions(
   const fallbackCostByExecutionId = useSessionLogStore(
     useShallow((state) =>
       selectSessionLogCostsForExecutionIds(
-        state.fallbackCostByExecutionId,
+        state.logsByExecutionId,
         executionIds
       )
     )

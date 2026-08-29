@@ -39,6 +39,16 @@ vi.mock("../bindings", () => ({
 import { useSessionLogChangeListener } from "./useSessionLogChangeListener";
 import { useNotificationStore, useSessionLogStore } from "../stores";
 
+function logsFor(executionId: string) {
+  return (
+    useSessionLogStore.getState().logsByExecutionId[executionId]?.logs ?? []
+  );
+}
+
+function bucketFor(executionId: string) {
+  return useSessionLogStore.getState().logsByExecutionId[executionId];
+}
+
 describe("useSessionLogChangeListener", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -47,7 +57,7 @@ describe("useSessionLogChangeListener", () => {
       eventListeners[key] = [];
     });
     // Reset stores between tests
-    useSessionLogStore.setState({ logsByExecutionId: {} });
+    useSessionLogStore.getState().reset();
     useNotificationStore.getState().clearNotifications();
   });
 
@@ -86,7 +96,7 @@ describe("useSessionLogChangeListener", () => {
 
     await flushQueuedEvents();
 
-    const logs = useSessionLogStore.getState().logsByExecutionId["exec-001"];
+    const logs = logsFor("exec-001");
     expect(logs).toHaveLength(1);
     expect(logs[0]).toEqual(sessionLog);
     expect(logs[0].id).toBe("log-abc123");
@@ -116,15 +126,11 @@ describe("useSessionLogChangeListener", () => {
       });
     });
 
-    expect(
-      useSessionLogStore.getState().logsByExecutionId["exec-unmount"]
-    ).toBeUndefined();
+    expect(bucketFor("exec-unmount")).toBeUndefined();
 
     act(() => unmount());
 
-    expect(
-      useSessionLogStore.getState().logsByExecutionId["exec-unmount"]
-    ).toEqual([sessionLog]);
+    expect(logsFor("exec-unmount")).toEqual([sessionLog]);
   });
 
   it("does not call appendLog when a created event has null session_log", async () => {
@@ -142,7 +148,7 @@ describe("useSessionLogChangeListener", () => {
       });
     });
 
-    const logs = useSessionLogStore.getState().logsByExecutionId["exec-002"];
+    const logs = bucketFor("exec-002");
     expect(logs).toBeUndefined();
   });
 
@@ -170,7 +176,7 @@ describe("useSessionLogChangeListener", () => {
       });
     });
 
-    const logs = useSessionLogStore.getState().logsByExecutionId["exec-003"];
+    const logs = bucketFor("exec-003");
     expect(logs).toBeUndefined();
   });
 
@@ -213,10 +219,8 @@ describe("useSessionLogChangeListener", () => {
 
     await flushQueuedEvents();
 
-    const alphaLogs =
-      useSessionLogStore.getState().logsByExecutionId["exec-alpha"];
-    const betaLogs =
-      useSessionLogStore.getState().logsByExecutionId["exec-beta"];
+    const alphaLogs = logsFor("exec-alpha");
+    const betaLogs = logsFor("exec-beta");
 
     expect(alphaLogs).toHaveLength(1);
     expect(alphaLogs[0].id).toBe("log-a1");
@@ -269,7 +273,7 @@ describe("useSessionLogChangeListener", () => {
 
     await flushQueuedEvents();
 
-    const logs = useSessionLogStore.getState().logsByExecutionId["exec-001"];
+    const logs = logsFor("exec-001");
     expect(logs).toHaveLength(2);
     expect(logs[0]).toEqual(updatedLog);
     expect(logs[1]).toEqual(durableLog);
@@ -300,7 +304,7 @@ describe("useSessionLogChangeListener", () => {
 
     await flushQueuedEvents();
 
-    const logs = useSessionLogStore.getState().logsByExecutionId["exec-002"];
+    const logs = logsFor("exec-002");
     expect(logs).toHaveLength(1);
     expect(logs[0]).toEqual(updatedLog);
   });

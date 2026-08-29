@@ -307,7 +307,7 @@ export function SubtreeRail({
   const liveCosts = useSessionLogStore(
     useShallow((state) =>
       selectSessionLogCostsForExecutionIds(
-        state.fallbackCostByExecutionId,
+        state.logsByExecutionId,
         providedLogs === undefined ? executionIds : []
       )
     )

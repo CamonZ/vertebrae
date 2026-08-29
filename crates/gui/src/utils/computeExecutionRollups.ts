@@ -142,6 +142,19 @@ function sumSessionEndCosts(logs: readonly SessionLog[]): number {
 
 /** Parse one changed record for incremental live cost reconciliation. */
 export function costFromSessionLog(log: SessionLog): number {
+  if (log.format !== "harness") return 0;
+
+  let type: unknown;
+  try {
+    const payload: unknown = JSON.parse(log.content ?? "");
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      type = (payload as { type?: unknown }).type;
+    }
+  } catch {
+    return 0;
+  }
+  if (type !== "turn_finished" && type !== "run_finished") return 0;
+
   sessionLogCostStats.incrementalRecordParses += 1;
   sessionLogCostStats.recordsParsed += 1;
   return sumSessionEndCosts([log]);
