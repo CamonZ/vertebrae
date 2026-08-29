@@ -5,7 +5,9 @@
  * clobbering enrichments that arrived after the last installed page (resolved
  * permission requests, completed file edits). Every helper here is pure and
  * keyed by message identity + occurrence, so duplicate messages merge
- * positionally instead of collapsing.
+ * positionally instead of collapsing. Unmatched live messages retain their
+ * position relative to matched replay messages so a live user input is not
+ * moved after the replayed assistant response it produced.
  */
 
 import type { ChatMessage } from "./chatStore";
@@ -84,30 +86,79 @@ function mergeHydratedMatch(
 
 /**
  * Merge a replayed history with the live session messages: replayed order
- * wins for matched messages, unmatched live messages are appended.
+ * wins for matched messages, while unmatched live messages remain in their
+ * current position relative to those matches.
  */
 export function mergeHydratedMessages(
   hydrated: ChatMessage[],
   current: ChatMessage[]
 ): ChatMessage[] {
-  if (current.length === 0) return hydrated;
+  return mergeHydratedMessagesWithBoundary(hydrated, current).messages;
+}
+
+interface HydratedMergeResult {
+  messages: ChatMessage[];
+  installedMessageCount: number;
+}
+
+function mergeHydratedMessagesWithBoundary(
+  hydrated: ChatMessage[],
+  current: ChatMessage[]
+): HydratedMergeResult {
+  if (current.length === 0) {
+    return { messages: hydrated, installedMessageCount: hydrated.length };
+  }
+
   const currentKeys = occurrenceKeys(current, "reverse");
   const hydratedKeys = occurrenceKeys(hydrated, "reverse");
   const currentByOccurrence = new Map(
     currentKeys.map((key, index) => [key, current[index]])
   );
-  const consumed = new Set<string>();
-  const merged = hydrated.map((replayed, index) => {
-    const key = hydratedKeys[index];
-    const live = currentByOccurrence.get(key);
-    if (!live) return replayed;
-    consumed.add(key);
-    return mergeHydratedMatch(replayed, live);
+  const currentIndexByOccurrence = new Map(
+    currentKeys.map((key, index) => [key, index])
+  );
+  const hydratedKeySet = new Set(hydratedKeys);
+  const anchors = hydratedKeys.flatMap((key, index) => {
+    const currentIndex = currentIndexByOccurrence.get(key);
+    return currentIndex === undefined
+      ? []
+      : [{ hydratedIndex: index, currentIndex }];
   });
-  currentKeys.forEach((key, index) => {
-    if (!consumed.has(key)) merged.push(current[index]);
-  });
-  return merged;
+  const merged: ChatMessage[] = [];
+  let hydratedStart = 0;
+  let currentStart = 0;
+
+  for (const anchor of anchors) {
+    for (let index = hydratedStart; index < anchor.hydratedIndex; index += 1) {
+      if (!currentByOccurrence.has(hydratedKeys[index])) {
+        merged.push(hydrated[index]);
+      }
+    }
+    for (let index = currentStart; index < anchor.currentIndex; index += 1) {
+      if (!hydratedKeySet.has(currentKeys[index])) {
+        merged.push(current[index]);
+      }
+    }
+    const live = currentByOccurrence.get(hydratedKeys[anchor.hydratedIndex]);
+    if (live) {
+      merged.push(mergeHydratedMatch(hydrated[anchor.hydratedIndex], live));
+    }
+    hydratedStart = anchor.hydratedIndex + 1;
+    currentStart = anchor.currentIndex + 1;
+  }
+
+  for (let index = hydratedStart; index < hydrated.length; index += 1) {
+    if (!currentByOccurrence.has(hydratedKeys[index])) {
+      merged.push(hydrated[index]);
+    }
+  }
+  const installedMessageCount = merged.length;
+  for (let index = currentStart; index < current.length; index += 1) {
+    if (!hydratedKeySet.has(currentKeys[index])) {
+      merged.push(current[index]);
+    }
+  }
+  return { messages: merged, installedMessageCount };
 }
 
 /** Merge the initial (newest) replay page into the session. */
@@ -115,13 +166,7 @@ export function mergeReplayMessages(
   replayed: ChatMessage[],
   current: ChatMessage[]
 ): { messages: ChatMessage[]; installedMessageCount: number } {
-  if (current.length === 0) {
-    return { messages: replayed, installedMessageCount: replayed.length };
-  }
-  return {
-    messages: mergeHydratedMessages(replayed, current),
-    installedMessageCount: replayed.length,
-  };
+  return mergeHydratedMessagesWithBoundary(replayed, current);
 }
 
 /**

@@ -1382,6 +1382,37 @@ export const useChatStore = create<ChatStore>((set, get) => {
     }
   };
 
+  const requestInitialProviderReplayPage = async (
+    session: ChatSession
+  ): Promise<
+    | { status: "ok"; page: LoadLocalChatSessionReplayOutput }
+    | { status: "error"; error: string }
+  > => {
+    let cursor: string | null = null;
+    const seenCursors = new Set<string>();
+
+    while (true) {
+      const result = await requestProviderReplayPage(session, cursor);
+      if (result.status === "error") return result;
+      if (
+        result.page.events.length > 0 ||
+        !result.page.has_more ||
+        !result.page.next_cursor
+      ) {
+        return result;
+      }
+
+      if (seenCursors.has(result.page.next_cursor)) {
+        return {
+          status: "error",
+          error: "Provider transcript returned a repeated page cursor.",
+        };
+      }
+      seenCursors.add(result.page.next_cursor);
+      cursor = result.page.next_cursor;
+    }
+  };
+
   /** Apply a pure replay-state transition to one session inside `set`. */
   const updateProviderReplay = (
     sessionId: string,
@@ -1426,7 +1457,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       };
     });
 
-    void requestProviderReplayPage(session, null).then((result) => {
+    void requestInitialProviderReplayPage(session).then((result) => {
       set((state) => {
         const current = state.sessions[sessionId];
         const replay = current?.providerReplay;
