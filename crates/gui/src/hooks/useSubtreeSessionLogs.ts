@@ -1,16 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
 import { commands, type SessionLog, type StepExecution } from "../bindings";
-import {
-  selectSessionLogCostsForExecutionIds,
-  selectSessionLogsForExecutionIds,
-  useSessionLogStore,
-} from "../stores";
 import { costFromSessionLogs } from "../utils/computeExecutionRollups";
 import {
   getProjectScopeGeneration,
   isCurrentProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import { useScopedSessionLogs } from "./useScopedSessionLogs";
 
 export interface UseSubtreeSessionLogsResult {
   /** Map: execution_id -> SessionLog[] */
@@ -84,23 +79,14 @@ export function useSubtreeSessionLogs(
     fetchAll();
   }, [fetchAll]);
 
-  const liveLogs = useSessionLogStore(
-    useShallow((state) =>
-      selectSessionLogsForExecutionIds(state.logsByExecutionId, ids)
-    )
-  );
-  const liveCosts = useSessionLogStore(
-    useShallow((state) =>
-      selectSessionLogCostsForExecutionIds(state.logsByExecutionId, ids)
-    )
-  );
+  const liveBuckets = useScopedSessionLogs(ids);
 
   const merged = useMemo(() => {
     if (ids.length === 0) return {} as Record<string, SessionLog[]>;
     const out: Record<string, SessionLog[]> = {};
     for (const id of ids) {
       const fetched = logsByExecutionId[id];
-      const live = liveLogs[id];
+      const live = liveBuckets[id]?.logs;
       if (!live || live.length === 0) {
         if (fetched !== undefined) out[id] = fetched;
         continue;
@@ -112,25 +98,26 @@ export function useSubtreeSessionLogs(
       out[id] = live.length >= fetchedLen ? live : (fetched ?? live);
     }
     return out;
-  }, [ids, logsByExecutionId, liveLogs]);
+  }, [ids, logsByExecutionId, liveBuckets]);
 
   const fallbackCostByExecutionId = useMemo(() => {
     const out: Record<string, number> = {};
     for (const id of ids) {
       const fetched = logsByExecutionId[id];
-      const live = liveLogs[id];
+      const live = liveBuckets[id]?.logs;
+      const liveCost = liveBuckets[id]?.fallbackCost;
       const liveWins =
         live && live.length > 0 && live.length >= (fetched?.length ?? 0);
       if (liveWins) {
-        out[id] = liveCosts[id] ?? costFromSessionLogs(live);
+        out[id] = liveCost ?? costFromSessionLogs(live);
       } else if (fetched !== undefined) {
         out[id] = costFromSessionLogs(fetched);
       } else if (live !== undefined) {
-        out[id] = liveCosts[id] ?? costFromSessionLogs(live);
+        out[id] = liveCost ?? costFromSessionLogs(live);
       }
     }
     return out;
-  }, [ids, logsByExecutionId, liveCosts, liveLogs]);
+  }, [ids, logsByExecutionId, liveBuckets]);
 
   return {
     logsByExecutionId: merged,

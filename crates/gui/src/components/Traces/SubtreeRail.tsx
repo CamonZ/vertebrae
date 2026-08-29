@@ -1,16 +1,11 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { useShallow } from "zustand/react/shallow";
 import type {
   ExecutionStatus,
   SessionLog,
   StepExecution,
   Task,
 } from "../../bindings";
-import {
-  selectSessionLogCostsForExecutionIds,
-  selectSessionLogsForExecutionIds,
-  useSessionLogStore,
-} from "../../stores/sessionLogStore";
+import { useScopedSessionLogs } from "../../hooks/useScopedSessionLogs";
 import {
   computeExecutionRollups,
   costFromSessionLogs,
@@ -36,6 +31,9 @@ interface SubtreeRailProps {
   onToggleCollapsed?: () => void;
   onSwitchTask?: () => void;
 }
+
+const EMPTY_LOGS_BY_EXECUTION_ID: Readonly<Record<string, SessionLog[]>> = {};
+const EMPTY_COSTS_BY_EXECUTION_ID: Readonly<Record<string, number>> = {};
 
 interface GroupRow {
   task: Task;
@@ -281,7 +279,7 @@ function GroupSection({
   );
 }
 
-export function SubtreeRail({
+function SubtreeRailContent({
   rootTaskId,
   tasks,
   subtreeTaskIds,
@@ -292,28 +290,9 @@ export function SubtreeRail({
   onToggleCollapsed,
   onSwitchTask,
 }: SubtreeRailProps): ReactNode {
-  const executionIds = useMemo(
-    () => executions.map((execution) => execution.id),
-    [executions]
-  );
-  const liveLogs = useSessionLogStore(
-    useShallow((state) =>
-      selectSessionLogsForExecutionIds(
-        state.logsByExecutionId,
-        providedLogs === undefined ? executionIds : []
-      )
-    )
-  );
-  const liveCosts = useSessionLogStore(
-    useShallow((state) =>
-      selectSessionLogCostsForExecutionIds(
-        state.logsByExecutionId,
-        providedLogs === undefined ? executionIds : []
-      )
-    )
-  );
-  const logsByExecutionId = providedLogs ?? liveLogs;
-  const fallbackCostByExecutionId = providedFallbackCosts ?? liveCosts;
+  const logsByExecutionId = providedLogs ?? EMPTY_LOGS_BY_EXECUTION_ID;
+  const fallbackCostByExecutionId =
+    providedFallbackCosts ?? EMPTY_COSTS_BY_EXECUTION_ID;
   const rows = useMemo<GroupRow[]>(() => {
     const taskById = new Map<string, Task>();
     for (const t of tasks) taskById.set(t.id, t);
@@ -444,4 +423,47 @@ export function SubtreeRail({
       </div>
     </aside>
   );
+}
+
+function LiveSubtreeRail(props: SubtreeRailProps): ReactNode {
+  const executionIds = useMemo(
+    () => props.executions.map((execution) => execution.id),
+    [props.executions]
+  );
+  const liveBuckets = useScopedSessionLogs(executionIds);
+  const logsByExecutionId = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(liveBuckets).map(([id, bucket]) => [id, bucket.logs])
+      ),
+    [liveBuckets]
+  );
+  const fallbackCostByExecutionId = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(liveBuckets).map(([id, bucket]) => [
+          id,
+          bucket.fallbackCost,
+        ])
+      ),
+    [liveBuckets]
+  );
+
+  return (
+    <SubtreeRailContent
+      {...props}
+      logsByExecutionId={logsByExecutionId}
+      fallbackCostByExecutionId={fallbackCostByExecutionId}
+    />
+  );
+}
+
+export function SubtreeRail(props: SubtreeRailProps): ReactNode {
+  if (
+    props.logsByExecutionId !== undefined ||
+    props.fallbackCostByExecutionId !== undefined
+  ) {
+    return <SubtreeRailContent {...props} />;
+  }
+  return <LiveSubtreeRail {...props} />;
 }

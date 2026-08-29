@@ -36,28 +36,14 @@ export interface SessionLogBatchEntry {
 }
 
 /** Select only the live log buckets needed by a consumer. */
-export function selectSessionLogsForExecutionIds(
+export function selectSessionLogBucketsForExecutionIds(
   logsByExecutionId: Readonly<Record<string, ExecutionLogBucket>>,
   executionIds: readonly (string | null | undefined)[]
-): Record<string, SessionLog[]> {
-  const scoped: Record<string, SessionLog[]> = {};
+): Record<string, ExecutionLogBucket> {
+  const scoped: Record<string, ExecutionLogBucket> = {};
   for (const executionId of executionIds) {
     if (executionId && logsByExecutionId[executionId] !== undefined) {
-      scoped[executionId] = logsByExecutionId[executionId].logs;
-    }
-  }
-  return scoped;
-}
-
-/** Select incrementally maintained fallback costs for the same execution scope. */
-export function selectSessionLogCostsForExecutionIds(
-  logsByExecutionId: Readonly<Record<string, ExecutionLogBucket>>,
-  executionIds: readonly (string | null | undefined)[]
-): Record<string, number> {
-  const scoped: Record<string, number> = {};
-  for (const executionId of executionIds) {
-    if (executionId && logsByExecutionId[executionId] !== undefined) {
-      scoped[executionId] = logsByExecutionId[executionId].fallbackCost;
+      scoped[executionId] = logsByExecutionId[executionId];
     }
   }
   return scoped;

@@ -6,6 +6,7 @@ export { useTask } from "./useTask";
 export { useDeleteTask } from "./useDeleteTask";
 export { useSubtreeExecutions } from "./useSubtreeExecutions";
 export type { UseSubtreeExecutionsResult } from "./useSubtreeExecutions";
+export { useScopedSessionLogs } from "./useScopedSessionLogs";
 export {
   useActiveTaskRun,
   useActiveTaskRunsForTasks,

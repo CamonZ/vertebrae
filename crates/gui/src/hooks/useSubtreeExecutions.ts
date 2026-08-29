@@ -1,14 +1,9 @@
 import { useCallback, useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { useShallow } from "zustand/react/shallow";
 import type { StepExecution } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
-import {
-  selectSessionLogCostsForExecutionIds,
-  selectSessionLogsForExecutionIds,
-  useSessionLogStore,
-} from "../stores/sessionLogStore";
 import { useTasks } from "./useTasks";
+import { useScopedSessionLogs } from "./useScopedSessionLogs";
 import {
   computeExecutionRollups,
   getDescendantTaskIds,
@@ -72,18 +67,23 @@ export function useSubtreeExecutions(
     () => executions.map((execution) => execution.id),
     [executions]
   );
-  const logsByExecutionId = useSessionLogStore(
-    useShallow((state) =>
-      selectSessionLogsForExecutionIds(state.logsByExecutionId, executionIds)
-    )
+  const liveBuckets = useScopedSessionLogs(executionIds);
+  const logsByExecutionId = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(liveBuckets).map(([id, bucket]) => [id, bucket.logs])
+      ),
+    [liveBuckets]
   );
-  const fallbackCostByExecutionId = useSessionLogStore(
-    useShallow((state) =>
-      selectSessionLogCostsForExecutionIds(
-        state.logsByExecutionId,
-        executionIds
-      )
-    )
+  const fallbackCostByExecutionId = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(liveBuckets).map(([id, bucket]) => [
+          id,
+          bucket.fallbackCost,
+        ])
+      ),
+    [liveBuckets]
   );
 
   const rollups = useMemo(
