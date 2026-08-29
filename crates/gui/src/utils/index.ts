@@ -23,6 +23,17 @@ export type {
   SessionLogPerformanceScope,
   SessionLogPerformanceSnapshot,
 } from "./sessionLogPerformance";
+export {
+  createSessionLogEventQueue,
+  flushSessionLogEventQueues,
+  isUrgentSessionLog,
+  SessionLogEventQueue,
+} from "./sessionLogEventQueue";
+export type {
+  QueuedSessionLogEvent,
+  SessionLogChangeOperation,
+  SessionLogEventQueueOptions,
+} from "./sessionLogEventQueue";
 export { formatCost } from "./formatCost";
 export {
   resolveContextWindow,

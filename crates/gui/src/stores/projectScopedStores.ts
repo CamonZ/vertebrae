@@ -4,6 +4,7 @@ import { useEntityPanelStore } from "./entityPanelStore";
 import { useFactoryFilterStore } from "./factoryFilterStore";
 import { useSessionLogStore } from "./sessionLogStore";
 import { queryClient } from "../query/queryClient";
+import { flushSessionLogEventQueues } from "../utils/sessionLogEventQueue";
 
 interface ProjectScopeState {
   generation: number;
@@ -33,6 +34,7 @@ export function useProjectScopeGeneration() {
  * normal query fetches repopulate state for the active project.
  */
 export function resetProjectScopedStores() {
+  flushSessionLogEventQueues();
   useProjectScopeStore.getState().bumpGeneration();
   queryClient.clear();
   useEntityPanelStore.getState().reset();

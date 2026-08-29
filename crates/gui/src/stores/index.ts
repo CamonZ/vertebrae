@@ -14,7 +14,7 @@ export { useDebugStore } from "./debugStore";
 export type { DebugStore } from "./debugStore";
 
 export { useSessionLogStore } from "./sessionLogStore";
-export type { SessionLogStore } from "./sessionLogStore";
+export type { SessionLogBatchEntry, SessionLogStore } from "./sessionLogStore";
 
 export { useChatStore } from "./chatStore";
 export type { ChatStore, ChatSession, ChatMessage } from "./chatStore";

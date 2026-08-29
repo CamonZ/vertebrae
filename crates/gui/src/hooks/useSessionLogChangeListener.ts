@@ -1,4 +1,5 @@
-import { useEffect, useCallback } from "react";
+import { useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   events,
   type SessionLogCreatedEvent,
@@ -9,6 +10,14 @@ import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import {
+  createSessionLogEventQueue,
+  isUrgentSessionLog,
+} from "../utils/sessionLogEventQueue";
+import {
+  makeSessionLogPerformanceCorrelation,
+  sessionLogPerformance,
+} from "../utils/sessionLogPerformance";
 
 /** Options for the session log change listener hook */
 interface UseSessionLogChangeListenerOptions {
@@ -28,67 +37,117 @@ export function useSessionLogChangeListener(
   options: UseSessionLogChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const appendLog = useSessionLogStore((state) => state.appendLog);
-  const upsertLog = useSessionLogStore((state) => state.upsertLog);
   const projectScopeGeneration = useProjectScopeGeneration();
-
-  const handleSessionLogCreated = useCallback(
-    (event: { payload: SessionLogCreatedEvent }) => {
-      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
-
-      const { log_id, step_execution_id, session_log } = event.payload;
-
-      console.debug(
-        `[SessionLogChangeListener] Log ${log_id.slice(0, 6)} created for execution ${step_execution_id.slice(0, 6)}`
-      );
-
-      if (session_log) {
-        appendLog(step_execution_id, session_log);
-      } else {
-        console.debug(
-          `[SessionLogChangeListener] session_log is null for log ${log_id.slice(0, 6)}, skipping append`
-        );
-      }
-    },
-    [appendLog, projectScopeGeneration]
-  );
-
-  const handleSessionLogUpdated = useCallback(
-    (event: { payload: SessionLogUpdatedEvent }) => {
-      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
-
-      const { log_id, step_execution_id, session_log } = event.payload;
-
-      console.debug(
-        `[SessionLogChangeListener] Log ${log_id.slice(0, 6)} updated for execution ${step_execution_id.slice(0, 6)}`
-      );
-
-      if (session_log) {
-        upsertLog(step_execution_id, session_log);
-      } else {
-        console.debug(
-          `[SessionLogChangeListener] session_log is null for log ${log_id.slice(0, 6)}, skipping upsert`
-        );
-      }
-    },
-    [projectScopeGeneration, upsertLog]
-  );
 
   useEffect(() => {
     if (!enabled) {
       return;
     }
 
+    let disposed = false;
+    const projectScope = String(projectScopeGeneration);
+    const isCurrentScope = () =>
+      !disposed && projectScopeGeneration === getProjectScopeGeneration();
+    const monitor = sessionLogPerformance;
+    const queue = createSessionLogEventQueue({
+      onFlush: (queuedEvents) => {
+        if (!isCurrentScope()) return;
+        const startedAt =
+          monitor.enabled && typeof performance !== "undefined"
+            ? performance.now()
+            : 0;
+        useSessionLogStore.getState().applyLogBatch(
+          queuedEvents.map(({ executionId, log, operation }) => ({
+            executionId,
+            log,
+            operation,
+          }))
+        );
+        if (!monitor.enabled) return;
+        const durationMs =
+          typeof performance !== "undefined"
+            ? Math.max(0, performance.now() - startedAt)
+            : 0;
+        monitor.recordFlush(
+          { projectScope },
+          queuedEvents.length,
+          durationMs
+        );
+        for (const queuedEvent of queuedEvents) {
+          if (queuedEvent.correlation) {
+            monitor.recordVisible(queuedEvent.correlation);
+          }
+        }
+      },
+      onQueued: (queuedEvent, pendingCount) => {
+        if (monitor.enabled) {
+          monitor.recordQueued(
+            {
+              projectScope,
+              executionId: queuedEvent.executionId,
+            },
+            pendingCount
+          );
+        }
+      },
+      onOverflow: () => {
+        if (monitor.enabled) {
+          monitor.recordOverflowReconciliation({ projectScope });
+        }
+      },
+    });
+
+    const enqueue = (
+      operation: "append" | "upsert",
+      event: { payload: SessionLogCreatedEvent | SessionLogUpdatedEvent }
+    ) => {
+      if (!isCurrentScope()) return;
+      const { log_id, step_execution_id, session_log } = event.payload;
+      if (!session_log) return;
+      const correlation = monitor.enabled
+        ? makeSessionLogPerformanceCorrelation({
+            projectScope,
+            executionId: step_execution_id,
+            logId: log_id,
+            logicalKey: session_log.logical_key,
+          })
+        : undefined;
+      if (correlation) monitor.recordReceived(correlation);
+      queue.enqueue({
+        executionId: step_execution_id,
+        log: session_log,
+        operation,
+        urgent: isUrgentSessionLog(session_log),
+        correlation,
+      });
+    };
+
     const unlistenCreatedPromise = events.sessionLogCreatedEvent.listen(
-      handleSessionLogCreated
+      (event) => enqueue("append", event)
     );
     const unlistenUpdatedPromise = events.sessionLogUpdatedEvent.listen(
-      handleSessionLogUpdated
+      (event) => enqueue("upsert", event)
+    );
+    const unlistenWebsocketPromise = listen<string>(
+      "websocket-state-changed",
+      (event) => {
+        if (
+          isCurrentScope() &&
+          (event.payload === "reconnecting" || event.payload === "disconnected")
+        ) {
+          queue.flushNow();
+        }
+      }
     );
 
     return () => {
-      unlistenCreatedPromise.then((unlisten) => unlisten());
-      unlistenUpdatedPromise.then((unlisten) => unlisten());
+      disposed = true;
+      queue.dispose({
+        flush: projectScopeGeneration === getProjectScopeGeneration(),
+      });
+      void unlistenCreatedPromise.then((unlisten) => unlisten());
+      void unlistenUpdatedPromise.then((unlisten) => unlisten());
+      void unlistenWebsocketPromise.then((unlisten) => unlisten());
     };
-  }, [enabled, handleSessionLogCreated, handleSessionLogUpdated]);
+  }, [enabled, projectScopeGeneration]);
 }

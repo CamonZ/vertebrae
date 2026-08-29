@@ -195,6 +195,110 @@ describe("sessionLogStore", () => {
     });
   });
 
+  describe("applyLogBatch", () => {
+    it("applies ordered appends and updates with one store notification", () => {
+      const notifications: string[][] = [];
+      const unsubscribe = useSessionLogStore.subscribe((state) => {
+        notifications.push(Object.keys(state.logsByExecutionId));
+      });
+
+      useSessionLogStore.getState().applyLogBatch([
+        {
+          executionId: "exec-1",
+          operation: "append",
+          log: createMockSessionLog({ id: "log-1", content: "first" }),
+        },
+        {
+          executionId: "exec-1",
+          operation: "append",
+          log: createMockSessionLog({ id: "log-2", content: "second" }),
+        },
+        {
+          executionId: "exec-1",
+          operation: "upsert",
+          log: createMockSessionLog({ id: "log-1", content: "corrected" }),
+        },
+      ]);
+
+      unsubscribe();
+
+      const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
+      expect(notifications).toHaveLength(1);
+      expect(logs.map(({ id, content }) => ({ id, content }))).toEqual([
+        { id: "log-1", content: "corrected" },
+        { id: "log-2", content: "second" },
+      ]);
+    });
+
+    it("deduplicates replayed appends and reconciles logical-key updates in order", () => {
+      const existing = [
+        createMockSessionLog({
+          id: "ephemeral-old",
+          logical_key: "thinking:1",
+          content: "old snapshot",
+        }),
+        createMockSessionLog({ id: "durable", content: "durable row" }),
+      ];
+      useSessionLogStore.getState().setLogs("exec-1", existing);
+
+      useSessionLogStore.getState().applyLogBatch([
+        {
+          executionId: "exec-1",
+          operation: "append",
+          log: createMockSessionLog({ id: "durable", content: "replayed row" }),
+        },
+        {
+          executionId: "exec-1",
+          operation: "upsert",
+          log: createMockSessionLog({
+            id: "ephemeral-new",
+            logical_key: "thinking:1",
+            content: "new snapshot",
+          }),
+        },
+        {
+          executionId: "exec-1",
+          operation: "append",
+          log: createMockSessionLog({ id: "after-reconnect", content: "new row" }),
+        },
+      ]);
+
+      const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
+      expect(logs.map(({ id, content }) => ({ id, content }))).toEqual([
+        { id: "ephemeral-new", content: "new snapshot" },
+        { id: "durable", content: "durable row" },
+        { id: "after-reconnect", content: "new row" },
+      ]);
+    });
+
+    it("preserves untouched execution bucket references for duplicate-only entries", () => {
+      const unchanged = [createMockSessionLog({ id: "log-2", content: "untouched" })];
+      useSessionLogStore.getState().setLogs("exec-1", [
+        createMockSessionLog({ id: "log-1", content: "existing" }),
+      ]);
+      useSessionLogStore.getState().setLogs("exec-2", unchanged);
+      const before = useSessionLogStore.getState().logsByExecutionId;
+
+      useSessionLogStore.getState().applyLogBatch([
+        {
+          executionId: "exec-1",
+          operation: "append",
+          log: createMockSessionLog({ id: "log-1", content: "replayed" }),
+        },
+        {
+          executionId: "exec-2",
+          operation: "append",
+          log: createMockSessionLog({ id: "log-2", content: "replayed" }),
+        },
+      ]);
+
+      const after = useSessionLogStore.getState().logsByExecutionId;
+      expect(after).toBe(before);
+      expect(after["exec-1"]).toBe(before["exec-1"]);
+      expect(after["exec-2"]).toBe(before["exec-2"]);
+    });
+  });
+
   describe("clearLogs", () => {
     it("removes logs for the given execution ID", () => {
       useSessionLogStore
