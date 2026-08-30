@@ -71,7 +71,7 @@ impl SacrumStepService {
             agent_config,
             step_type,
             output_schema: response.output_schema.clone(),
-            route_config: None,
+            route_config: response.route_config.clone(),
             persistence_options: response.persistence_options.clone(),
             transitions_to,
             order: response.step_order,
@@ -124,6 +124,12 @@ impl StepService for SacrumStepService {
                 ServiceError::validation_failed(format!("Invalid persistence options: {}", e))
             })?;
             variables["persistence_options"] = json!(options_str);
+        }
+        if let Some(route_config) = &step.route_config {
+            let route_config_str = serde_json::to_string(route_config).map_err(|e| {
+                ServiceError::validation_failed(format!("Invalid route config: {}", e))
+            })?;
+            variables["route_config"] = json!(route_config_str);
         }
 
         let response: WorkflowStepResponse = self
@@ -251,6 +257,15 @@ impl StepService for SacrumStepService {
     }
 
     async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String> {
+        if matches!(
+            (&updates.step_type, &updates.prompt),
+            (Some(StepType::Route), Some(Some(_)))
+        ) {
+            return Err(ServiceError::validation_failed(
+                "route steps may only clear an existing prompt",
+            ));
+        }
+
         if let (Some(StepType::Stop), Some(transitions_to)) =
             (&updates.step_type, &updates.transitions_to)
         {
@@ -267,7 +282,10 @@ impl StepService for SacrumStepService {
             variables["goal"] = json!(goal);
         }
         if let Some(prompt) = &updates.prompt {
-            variables["prompt"] = json!(prompt);
+            variables["prompt"] = match prompt {
+                Some(prompt) => json!(prompt),
+                None => serde_json::Value::Null,
+            };
         }
         if let Some(agents) = &updates.agents {
             variables["agents"] = json!(agents);
@@ -308,6 +326,18 @@ impl StepService for SacrumStepService {
             }
             Some(None) => {
                 variables["persistence_options"] = serde_json::Value::Null;
+            }
+            None => {}
+        }
+        match &updates.route_config {
+            Some(Some(route_config)) => {
+                let route_config_str = serde_json::to_string(route_config).map_err(|e| {
+                    ServiceError::validation_failed(format!("Invalid route config: {}", e))
+                })?;
+                variables["route_config"] = json!(route_config_str);
+            }
+            Some(None) => {
+                variables["route_config"] = serde_json::Value::Null;
             }
             None => {}
         }
@@ -426,6 +456,10 @@ mod tests {
             persistence_options: Some(json!({
                 "artifact": {"logical_name": "step_result"}
             })),
+            route_config: Some(json!({
+                "version": 1,
+                "future": {"unknown": ["nested", true, null]}
+            })),
             step_order: 0,
             workflow_id: "wf-1".to_string(),
             transitions: Some(vec![StepTransitionResponse {
@@ -451,6 +485,13 @@ mod tests {
             step.persistence_options,
             Some(json!({"artifact": {"logical_name": "step_result"}}))
         );
+        assert_eq!(
+            step.route_config,
+            Some(json!({
+                "version": 1,
+                "future": {"unknown": ["nested", true, null]}
+            }))
+        );
         assert_eq!(step.order, 0);
         assert_eq!(step.workflow_id, "wf-1");
         assert_eq!(step.transitions_to, vec!["step-2"]);
@@ -470,6 +511,7 @@ mod tests {
             step_type: None,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
             step_order: 5,
             workflow_id: "wf-1".to_string(),
             transitions: None,
@@ -505,6 +547,7 @@ mod tests {
             step_type: Some("route".to_string()),
             output_schema: None,
             persistence_options: None,
+            route_config: None,
             step_order: 0,
             workflow_id: "wf-1".to_string(),
             transitions: None,
@@ -530,6 +573,7 @@ mod tests {
             step_type: Some("future_type".to_string()),
             output_schema: None,
             persistence_options: None,
+            route_config: None,
             step_order: 0,
             workflow_id: "wf-1".to_string(),
             transitions: None,
@@ -567,6 +611,7 @@ mod tests {
                 step_type: Some(input.to_string()),
                 output_schema: None,
                 persistence_options: None,
+                route_config: None,
                 step_order: 0,
                 workflow_id: "wf-1".to_string(),
                 transitions: None,
@@ -629,6 +674,10 @@ mod tests {
             "agents": [],
             "skills": [],
             "agent_config": null,
+            "prompt": null,
+            "output_schema": null,
+            "persistence_options": null,
+            "route_config": null,
             "step_order": step_order,
             "workflow_id": workflow_id,
             "project_id": "test-project",
@@ -688,6 +737,39 @@ mod tests {
         assert_eq!(
             body["variables"]["persistence_options"],
             r#"{"artifact":{"logical_name":"step_result"}}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_step_serializes_route_config_without_reinterpretation() {
+        let server = MockServer::start().await;
+        let route_config = json!({
+            "version": 1,
+            "rules": [{
+                "id": "future-rule",
+                "when": {"ref": "task.level", "op": "eq", "value": "task"},
+                "future": ["keep", 3, false, null]
+            }]
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(
+                "create_workflow_step",
+                make_step_response("step-route", "Route", "wf-1", 0),
+            )))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let step = Step::new("Route", "wf-1").with_route_config(route_config.clone());
+        service.create_step(&step).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(
+            body["variables"]["route_config"],
+            serde_json::to_string(&route_config).unwrap()
         );
     }
 
@@ -884,7 +966,14 @@ mod tests {
             .and(path("/graphql"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": null,
-                "errors": [{"message": "validation failed", "path": ["workflow_step"]}]
+                "errors": [{
+                    "message": "route_config validation failed",
+                    "path": ["workflowStep", "routeConfig"],
+                    "extensions": {
+                        "rule": "unknown destination",
+                        "field_path": "$.rules[0].transition.step_id"
+                    }
+                }]
             })))
             .mount(&server)
             .await;
@@ -892,7 +981,12 @@ mod tests {
         let service = create_wiremock_service(&server.uri());
         let result = service.get_step("step-1").await;
 
-        assert!(result.is_err());
+        let error = result.unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("route_config validation failed"));
+        assert!(message.contains("workflowStep.routeConfig"));
+        assert!(message.contains("unknown destination"));
+        assert!(message.contains("$.rules[0].transition.step_id"));
     }
 
     #[tokio::test]
@@ -977,6 +1071,82 @@ mod tests {
         );
         let clear_body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
         assert!(clear_body["variables"]["persistence_options"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_update_step_serializes_route_config_set_and_explicit_clear() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(
+                "update_workflow_step",
+                make_step_response("step-1", "Updated", "wf-1", 0),
+            )))
+            .mount(&server)
+            .await;
+
+        let route_config = json!({
+            "version": 1,
+            "unknown": {"nested": ["value", 7, true, null]}
+        });
+        let service = create_wiremock_service(&server.uri());
+        service
+            .update_step(
+                "step-1",
+                &StepUpdate::new().with_route_config(Some(route_config.clone())),
+            )
+            .await
+            .unwrap();
+        service
+            .update_step("step-1", &StepUpdate::new().with_route_config(None))
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let set_body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(
+            set_body["variables"]["route_config"],
+            serde_json::to_string(&route_config).unwrap()
+        );
+        let clear_body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert!(clear_body["variables"]["route_config"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_update_step_sends_explicit_null_to_clear_prompt() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(
+                "update_workflow_step",
+                make_step_response("step-1", "Updated", "wf-1", 0),
+            )))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        service
+            .update_step("step-1", &StepUpdate::new().clear_prompt())
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert!(body["variables"]["prompt"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_update_step_rejects_prompt_write_for_explicit_route_result() {
+        let service = create_wiremock_service("http://localhost:4000");
+        let updates = StepUpdate::new()
+            .with_step_type(StepType::Route)
+            .with_prompt("routing prompt");
+
+        let error = service.update_step("step-1", &updates).await.unwrap_err();
+
+        assert!(error.to_string().contains("prompt"));
+        assert!(error.to_string().contains("route"));
     }
 
     #[tokio::test]

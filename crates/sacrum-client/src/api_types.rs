@@ -428,6 +428,8 @@ pub struct WorkflowStepResponse {
     #[serde(default)]
     pub persistence_options: Option<serde_json::Value>,
     #[serde(default)]
+    pub route_config: Option<serde_json::Value>,
+    #[serde(default)]
     pub step_order: i32,
     pub workflow_id: String,
     #[serde(default)]
@@ -967,6 +969,10 @@ mod tests {
             "skills": ["code-review"],
             "agent_config": {"model": "opus"},
             "step_type": "finish",
+            "route_config": {
+                "version": 1,
+                "future": {"array": ["value", 2, false, null]}
+            },
             "step_order": 0,
             "workflow_id": "wf-1",
             "transitions": [
@@ -981,6 +987,13 @@ mod tests {
         assert_eq!(step.agents, vec!["claude"]);
         assert_eq!(step.skills, vec!["code-review"]);
         assert_eq!(step.step_type.as_deref(), Some("finish"));
+        assert_eq!(
+            step.route_config,
+            Some(serde_json::json!({
+                "version": 1,
+                "future": {"array": ["value", 2, false, null]}
+            }))
+        );
         assert_eq!(step.step_order, 0);
         assert_eq!(step.workflow_id, "wf-1");
         assert_eq!(step.transitions.as_ref().unwrap().len(), 1);

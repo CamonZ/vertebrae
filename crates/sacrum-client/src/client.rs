@@ -24,10 +24,22 @@ struct GraphqlResponse<T> {
 #[derive(Debug, Deserialize)]
 struct GraphqlErrorItem {
     message: String,
-    #[allow(dead_code)]
     path: Option<Vec<String>>,
-    #[allow(dead_code)]
     extensions: Option<Value>,
+}
+
+fn format_graphql_error(error: &GraphqlErrorItem) -> String {
+    let mut message = error.message.clone();
+
+    if let Some(path) = error.path.as_ref().filter(|path| !path.is_empty()) {
+        message.push_str(&format!(" (path: {})", path.join(".")));
+    }
+
+    if let Some(extensions) = &error.extensions {
+        message.push_str(&format!(" (extensions: {})", extensions));
+    }
+
+    message
 }
 
 /// GraphQL request body
@@ -131,7 +143,7 @@ impl GraphqlClient {
         if let Some(errors) = gql_response.errors.as_ref()
             && !errors.is_empty()
         {
-            let messages: Vec<String> = errors.iter().map(|e| e.message.clone()).collect();
+            let messages: Vec<String> = errors.iter().map(format_graphql_error).collect();
             let message = messages.join("; ");
             return Err(SacrumClientError::GraphqlError { messages, message });
         }
@@ -404,6 +416,27 @@ mod tests {
 
         assert_eq!(client1.project_id(), client2.project_id());
         assert_eq!(client1.endpoint, client2.endpoint);
+    }
+
+    #[test]
+    fn test_graphql_error_keeps_path_and_extensions_diagnostics() {
+        let error = GraphqlErrorItem {
+            message: "route_config is invalid".to_string(),
+            path: Some(vec![
+                "updateWorkflowStep".to_string(),
+                "routeConfig".to_string(),
+            ]),
+            extensions: Some(serde_json::json!({
+                "rule": "reference must exist",
+                "field_path": "$.rules[0].transition.step_id"
+            })),
+        };
+
+        let formatted = format_graphql_error(&error);
+        assert!(formatted.contains("route_config is invalid"));
+        assert!(formatted.contains("path: updateWorkflowStep.routeConfig"));
+        assert!(formatted.contains("reference must exist"));
+        assert!(formatted.contains("$.rules[0].transition.step_id"));
     }
 
     #[test]
