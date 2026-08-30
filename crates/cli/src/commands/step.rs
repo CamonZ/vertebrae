@@ -303,6 +303,11 @@ impl StepAddCommand {
             route_config.as_ref(),
             &transitions_to,
         )?;
+        if matches!(&step_type, StepType::Route) && output_schema.is_some() {
+            return Err(ServiceError::validation_failed(
+                "route steps do not accept output_schema; use --route-config",
+            ));
+        }
 
         let mut step = Step::new(&self.name, workflow_id)
             .with_agent_config(agent_config)
@@ -729,12 +734,22 @@ impl StepUpdateCommand {
         } else {
             existing.transitions_to.clone()
         };
+        let prompt_for_validation = if matches!(&resulting_step_type, StepType::Route) {
+            self.prompt.as_deref()
+        } else {
+            resulting_prompt
+        };
         validate_step_constraints(
             &resulting_step_type,
-            resulting_prompt,
+            prompt_for_validation,
             resulting_route_config,
             &resulting_transitions,
         )?;
+        if matches!(&resulting_step_type, StepType::Route) && self.output_schema.is_some() {
+            return Err(ServiceError::validation_failed(
+                "route steps do not accept output_schema; use --route-config",
+            ));
+        }
 
         let mut updates = StepUpdate::new();
 

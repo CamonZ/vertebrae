@@ -3342,22 +3342,17 @@ mod route_config_tests {
         let mut to_route = update_command("convert");
         to_route.step_type = Some(CliStepType::Route);
         to_route.route_config = Some(config.to_string());
-        let error = to_route.execute(services.steps()).await.unwrap_err();
-        assert!(error.to_string().contains("only clear"));
-        let unchanged = services.steps().get_step("convert").await.unwrap().unwrap();
-        assert_eq!(unchanged.step_type, StepType::Execute);
-        assert_eq!(unchanged.prompt.as_deref(), Some(prompt));
-        assert_eq!(unchanged.route_config, None);
-
-        let mut to_route = update_command("convert");
-        to_route.step_type = Some(CliStepType::Route);
-        to_route.route_config = Some(config.clone().to_string());
-        to_route.clear_prompt = true;
         to_route.execute(services.steps()).await.unwrap();
+        let routed_with_prompt = services.steps().get_step("convert").await.unwrap().unwrap();
+        assert_eq!(routed_with_prompt.step_type, StepType::Route);
+        assert_eq!(routed_with_prompt.prompt.as_deref(), Some(prompt));
+        assert_eq!(routed_with_prompt.route_config, Some(config.clone()));
+
+        let mut clear_prompt = update_command("convert");
+        clear_prompt.clear_prompt = true;
+        clear_prompt.execute(services.steps()).await.unwrap();
         let routed = services.steps().get_step("convert").await.unwrap().unwrap();
-        assert_eq!(routed.step_type, StepType::Route);
         assert_eq!(routed.prompt, None);
-        assert_eq!(routed.route_config, Some(config.clone()));
 
         let mut to_execute = update_command("convert");
         to_execute.step_type = Some(CliStepType::Execute);
