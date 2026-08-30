@@ -158,27 +158,60 @@ Feature: Step fields: prompt and agent-config
     Then the command should succeed
     And the step "Evaluator" in the workflow should not have an output_schema
 
-  Scenario: Creating a route step with invalid output schema fails
-    When I add a route step "BadRoute" to the workflow with an invalid --output-schema
-    Then the command should fail with "routing contract schema"
-
-  Scenario: Create a route step with the with-handoff routing contract schema
-    When I add a route step "HandoffRoute" to the workflow with the with-handoff schema
+  Scenario: Configure, replace, and clear a deterministic route
+    When I add and configure a deterministic route step "Router" to the workflow
     Then the command should succeed
-    And the step "HandoffRoute" in the workflow should have step_type "route"
-    And the step "HandoffRoute" in the workflow should have a handoff property in its output_schema
-
-  Scenario: Update a route step to switch to the with-handoff schema
-    When I add a step "SwapRoute" to the workflow with --step-type "route" and --output-schema
-    And I update the route step "SwapRoute" to use the with-handoff schema
-    Then the command should succeed
-    And the step "SwapRoute" in the workflow should have a handoff property in its output_schema
-
-  Scenario: Step show displays step type and output schema
-    When I add a step "Visible" to the workflow with --step-type "route" and --output-schema
-    And I show the step "Visible"
+    And the step "Router" in the workflow should have step_type "route"
+    When I show the step "Router"
     Then the output should contain "Step Type:     route"
-    And the output should contain "Output Schema:"
+    And the output should contain "Route Config:"
+    And the output should contain "match_policy"
+    When I show the step "Router" as JSON
+    Then the step show JSON should contain the deterministic route config
+    When I replace the route config for step "Router"
+    Then the command should succeed
+    When I show the step "Router" as JSON
+    Then the step show JSON should contain the replacement route config
+    When I update the step "Router" in the workflow with flag "--clear-route-config" and no value
+    Then the command should succeed
+    When I show the step "Router" as JSON
+    Then the step show JSON should have null route_config
+
+  Scenario: Route drafts and local route JSON validation
+    When I add a step "DraftRouter" to the workflow with flag "--step-type" and value "route"
+    Then the command should succeed
+    And the step "DraftRouter" in the workflow should have step_type "route"
+    When I show the step "DraftRouter"
+    Then the output should contain "Route Config:   (none)"
+    When I update the step "DraftRouter" in the workflow with flag "--route-config" and value "{bad json}"
+    Then the command should fail with "--route-config JSON"
+
+  Scenario: Backend route validation keeps the offending path
+    When I add and configure a deterministic route step "InvalidRouter" to the workflow
+    And I update the configured route step "InvalidRouter" with an invalid reference
+    Then the command should fail with "$.rules[0].when.ref"
+    And the error should contain "route_config"
+
+  Scenario: Retained route prompts are readable and clear-only
+    When I create a route step "RetainedPrompt" with a retained prompt
+    And I show the step "RetainedPrompt"
+    Then the output should contain "Prompt:        retained prompt"
+    When I show the step "RetainedPrompt" as JSON
+    Then the step show JSON should have prompt "retained prompt"
+    When I update the step "RetainedPrompt" in the workflow with flag "--clear-prompt" and no value
+    Then the command should succeed
+    When I show the step "RetainedPrompt" as JSON
+    Then the step show JSON should have null prompt
+    When I update the step "RetainedPrompt" in the workflow with flag "--prompt" and value "replacement prompt"
+    Then the command should fail with "route steps"
+
+  Scenario: Converting a configured route requires an atomic clear
+    When I add and configure a deterministic route step "ConvertRouter" to the workflow
+    And I update the step "ConvertRouter" in the workflow with flag "--step-type" and value "execute"
+    Then the command should fail with "route_config"
+    When I convert the configured route step "ConvertRouter" to execute and clear its route config
+    Then the command should succeed
+    And the step "ConvertRouter" in the workflow should have step_type "execute"
 
   Scenario: Structured-output persistence options round-trip and display
     When I add a step "Persisted" to the workflow with persistence logical name "step_result"
