@@ -274,7 +274,7 @@ Each step has a `--step-type` that determines its role in the workflow:
 | Type | Description |
 |------|-------------|
 | `execute` | **Default.** Runs the step's prompt via Claude and produces output. |
-| `evaluate` | Assesses the output of a previous step. Used with `eval_prompt` to determine which transition to follow when a step has multiple outgoing paths. |
+| `evaluate` | Assesses the output of a previous step and can determine which transition to follow when a step has multiple outgoing paths. |
 | `route` | Sacrum-local deterministic control step. Evaluates `route_config`; it does not dispatch a daemon prompt or use `output_schema` as a routing program. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
 | `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. |

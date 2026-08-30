@@ -149,7 +149,6 @@ control action.
 | `step_type` | `execute` (default), `evaluate`, `route`, `wait_children`, `human_input`, or `finish` — determines step behavior |
 | `goal` | What this step accomplishes |
 | `prompt` | Template sent to the executing agent for execute/evaluate steps; retained route prompts are readable and clear-only |
-| `eval_prompt` | Template for evaluating output and choosing next transition |
 | `output_schema` | JSON Schema for execute/evaluate structured output (passed as `--json-schema` to the selected harness) |
 | `route_config` | Nullable opaque V1 deterministic route program, validated and evaluated locally by Sacrum |
 | `persistence_options` | Optional Sacrum-owned artifact configuration, currently `{"artifact":{"logical_name":"..."}}`; requires `output_schema` |
@@ -160,7 +159,7 @@ control action.
 
 **Step types:**
 - **`execute`** — Standard execution. Runs the prompt via Claude and produces output.
-- **`evaluate`** — Assesses previous output. Used with `eval_prompt` and multiple outgoing transitions to create branching decisions.
+- **`evaluate`** — Assesses previous output and can create branching decisions through multiple outgoing transitions.
 - **`route`** — Sacrum-local deterministic control step. Sacrum evaluates
   `route_config` against the closed route context and graph; it does not
   dispatch a daemon prompt or use `output_schema` as a routing program.
@@ -271,10 +270,9 @@ This is the core loop: a task moves through a workflow, and each step is execute
    └── GUI receives via WebSocket, updates in real-time
 
 9. Orchestrator catches PubSub event
-   ├── If step has eval_prompt AND multiple outgoing transitions:
-   │   ├── :evaluating — dispatch eval execution to daemon
-   │   └── Daemon runs eval, returns transition label
-   └── Else: follow single outgoing transition (or terminal finish)
+   ├── If the completed step is a deterministic route:
+   │   └── Sacrum evaluates route_config locally and selects the transition
+   └── Else: follow the configured outgoing transition (or terminal finish)
 
 10. :transitioning
     ├── advance_to_step(task_id, next_step_id)
@@ -284,10 +282,6 @@ This is the core loop: a task moves through a workflow, and each step is execute
     ├── If on_done_workflow: chain to new workflow (→ :initializing)
     └── Else: :completed — notify scheduler
 ```
-
-### Conditional Transitions via Eval Prompts
-
-When a step has multiple outgoing transitions (e.g., "pass" → code review, "fail" → fix bugs), the `eval_prompt` determines which path to take. The daemon runs a separate evaluation execution with the previous output interpolated into the eval prompt. The eval output is matched against transition labels. This creates a **branching state machine** driven by AI judgment.
 
 ---
 
@@ -427,7 +421,7 @@ Rather than putting implementation plans in conversation messages (which disappe
 
 ### 3. Autonomous Multi-Step Execution
 
-Workflows encode the stages of a development process as a state machine. The daemon executes each stage by spawning Claude Code with a stage-specific prompt and tool configuration. The orchestrator handles transitions, branching logic (via eval prompts), and workflow chaining. Complex tasks (implement → test → review → merge) run autonomously end-to-end.
+Workflows encode the stages of a development process as a state machine. The daemon executes each daemon-backed stage by spawning Claude Code with a stage-specific prompt and tool configuration. Sacrum handles transitions, deterministic route decisions, and workflow chaining. Complex tasks (implement → test → review → merge) run autonomously end-to-end.
 
 ### 4. Progress Tracking and Auditability
 
