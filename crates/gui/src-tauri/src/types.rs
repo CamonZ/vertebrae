@@ -1368,6 +1368,8 @@ pub struct CreateStepOptions {
     pub output_schema: Option<serde_json::Value>,
     #[serde(default)]
     pub persistence_options: Option<serde_json::Value>,
+    #[serde(default)]
+    pub route_config: Option<serde_json::Value>,
 }
 
 /// Options for updating a workflow step.

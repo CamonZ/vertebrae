@@ -1755,6 +1755,7 @@ export type CreateStepOptions = {
   step_type?: StepType;
   output_schema: JsonValue | null;
   persistence_options?: JsonValue | null;
+  route_config?: JsonValue | null;
 };
 /**
  * Execution status - mirrors db::ExecutionStatus

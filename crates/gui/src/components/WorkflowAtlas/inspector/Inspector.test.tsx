@@ -555,6 +555,43 @@ describe("StepInspector", () => {
     );
   });
 
+  it("clears route configuration when converting a configured route", async () => {
+    mockUseStep(
+      stepFixture({
+        id: "s3",
+        name: "Ship",
+        step_type: "route",
+        route_config: { version: 1, rules: [] },
+        prompt: null,
+      })
+    );
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s3"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "execute" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+
+    await waitFor(() =>
+      expect(commands.updateStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          step_type: "execute",
+          route_config: null,
+          clear_route_config: true,
+        })
+      )
+    );
+  });
+
   it("edits and displays orchestrator persistence options", async () => {
     mockUseStep(
       stepFixture({

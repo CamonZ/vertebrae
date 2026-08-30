@@ -94,6 +94,21 @@ pub(crate) async fn create_step_inner(
         options.name,
         options.order
     );
+    if matches!(&options.step_type, crate::types::StepType::Route)
+        && (options.prompt.is_some() || options.output_schema.is_some())
+    {
+        return Err(CommandError {
+            message: "route steps may not write prompt or output_schema; use route_config"
+                .to_string(),
+        });
+    }
+    if !matches!(&options.step_type, crate::types::StepType::Route)
+        && options.route_config.is_some()
+    {
+        return Err(CommandError {
+            message: "route_config is only valid for route steps".to_string(),
+        });
+    }
     let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
@@ -129,6 +144,10 @@ pub(crate) async fn create_step_inner(
 
     if let Some(persistence_options) = options.persistence_options {
         step = step.with_persistence_options(persistence_options);
+    }
+
+    if let Some(route_config) = options.route_config {
+        step = step.with_route_config(route_config);
     }
 
     match service.steps().create_step(&step).await {
@@ -190,6 +209,48 @@ pub(crate) async fn update_step_inner(
     step_id: &str,
     update: vertebrae_core::StepUpdate,
 ) -> Result<String, CommandError> {
+    let existing = service
+        .steps()
+        .get_step(step_id)
+        .await?
+        .ok_or_else(|| CommandError {
+            message: format!("Step not found: {step_id}"),
+        })?;
+    let resulting_step_type = update
+        .step_type
+        .clone()
+        .unwrap_or_else(|| existing.step_type.clone());
+
+    if matches!(&resulting_step_type, vertebrae_core::StepType::Route)
+        && matches!(&update.prompt, Some(Some(_)))
+    {
+        return Err(CommandError {
+            message: "route steps may only clear an existing prompt".to_string(),
+        });
+    }
+    if matches!(&resulting_step_type, vertebrae_core::StepType::Route)
+        && matches!(&update.output_schema, Some(Some(_)))
+    {
+        return Err(CommandError {
+            message: "route steps do not accept output_schema; use route_config".to_string(),
+        });
+    }
+    if !matches!(&resulting_step_type, vertebrae_core::StepType::Route)
+        && matches!(&update.route_config, Some(Some(_)))
+    {
+        return Err(CommandError {
+            message: "route_config is only valid for route steps".to_string(),
+        });
+    }
+    if !matches!(&resulting_step_type, vertebrae_core::StepType::Route)
+        && existing.route_config.is_some()
+        && !matches!(&update.route_config, Some(None))
+    {
+        return Err(CommandError {
+            message: "converting a configured route requires clearing route_config".to_string(),
+        });
+    }
+
     let workflow_id = service.steps().update_step(step_id, &update).await?;
     log::info!("update_step succeeded for step: {}", step_id);
     Ok(workflow_id)
@@ -287,6 +348,7 @@ mod tests {
                 persistence_options: Some(serde_json::json!({
                     "artifact": { "logical_name": "review-result" }
                 })),
+                route_config: None,
             },
         )
         .await
@@ -301,6 +363,34 @@ mod tests {
         let fetched = get_step(state, step.id.clone().unwrap()).await.unwrap();
         assert!(fetched.is_some());
         assert_eq!(fetched.unwrap().name, "Review");
+    }
+
+    #[tokio::test]
+    async fn create_route_step_rejects_prompt_and_output_schema() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let result = create_step_inner(
+            state,
+            crate::types::CreateStepOptions {
+                workflow_id: "wf-route".to_string(),
+                name: "Router".to_string(),
+                goal: None,
+                prompt: Some("legacy route prompt".to_string()),
+                agents: vec![],
+                skills: vec![],
+                agent_config: None,
+                order: 0,
+                transitions_to: vec![],
+                step_type: crate::types::StepType::Route,
+                output_schema: Some(serde_json::json!({"type": "object"})),
+                persistence_options: None,
+                route_config: None,
+            },
+        )
+        .await;
+
+        assert!(result.unwrap_err().message.contains("route steps"));
     }
 
     #[tokio::test]
@@ -322,6 +412,7 @@ mod tests {
                 step_type: crate::types::StepType::Finish,
                 output_schema: None,
                 persistence_options: None,
+                route_config: None,
             },
         )
         .await
@@ -354,6 +445,7 @@ mod tests {
                 step_type: crate::types::StepType::Stop,
                 output_schema: Some(serde_json::json!({"type": "object"})),
                 persistence_options: None,
+                route_config: None,
             },
         )
         .await
@@ -399,6 +491,7 @@ mod tests {
                 step_type: Default::default(),
                 output_schema: None,
                 persistence_options: None,
+                route_config: None,
             },
         )
         .await
@@ -418,6 +511,7 @@ mod tests {
                 step_type: Default::default(),
                 output_schema: None,
                 persistence_options: None,
+                route_config: None,
             },
         )
         .await
@@ -446,6 +540,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(wf_id, "wf-1");
+    }
+
+    #[tokio::test]
+    async fn update_route_step_rejects_prompt_write_without_type_change() {
+        let services = mock_services();
+        let step = vertebrae_core::Step::new("Router", "wf-1".to_string())
+            .with_step_type(vertebrae_core::StepType::Route)
+            .with_prompt("legacy route prompt");
+        let created = services.steps().create_step(&step).await.unwrap();
+        let step_id = created.id.unwrap();
+
+        let result = update_step_inner(
+            &services,
+            &step_id,
+            vertebrae_core::StepUpdate::new().with_prompt("new route prompt"),
+        )
+        .await;
+
+        assert!(result.unwrap_err().message.contains("route steps"));
+        assert_eq!(
+            services
+                .steps()
+                .get_step(&step_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .prompt
+                .as_deref(),
+            Some("legacy route prompt")
+        );
     }
 
     #[tokio::test]

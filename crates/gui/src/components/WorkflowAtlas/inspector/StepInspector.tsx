@@ -203,6 +203,11 @@ export function StepInspector({
     backendTypeForKind(step.kind);
   const isRouteResult = type === "route";
   const isRouteConfigVisible = isRouteResult || stepTypeLabel === "route";
+  const isConfiguredRouteConversion =
+    cfg?.step_type === "route" &&
+    cfg.route_config !== null &&
+    cfg.route_config !== undefined &&
+    !isRouteResult;
   const hasPrompt = cfg?.prompt !== null && cfg?.prompt !== undefined;
   const hasRouteConfig =
     cfg?.route_config !== null && cfg?.route_config !== undefined;
@@ -221,7 +226,7 @@ export function StepInspector({
     }
 
     let parsedSchema: JsonValue | null = null;
-    if (outputSchema.trim()) {
+    if (!isRouteResult && outputSchema.trim()) {
       try {
         parsedSchema = JSON.parse(outputSchema) as JsonValue;
       } catch {
@@ -297,12 +302,12 @@ export function StepInspector({
             ? { ...cfg.agent_config, model: modelValue || null }
             : undefined,
           step_type: type,
-          output_schema: parsedSchema,
-          clear_output_schema: !outputSchema.trim(),
+          output_schema: isRouteResult ? null : parsedSchema,
+          clear_output_schema: isRouteResult || !outputSchema.trim(),
           persistence_options: parsedPersistence,
           clear_persistence_options: clearPersistenceOptions,
           route_config: null,
-          clear_route_config: false,
+          clear_route_config: isConfiguredRouteConversion,
           order: step.order,
           transitions_to: nextTransitions,
         })
