@@ -87,7 +87,7 @@ describe("useRunTrace", () => {
     ).toEqual([]);
     await waitFor(() => {
       expect(useSessionLogStore.getState().logsByExecutionId).toEqual({
-        "exec-1": [log],
+        "exec-1": { logs: [log], fallbackCost: 0 },
       });
     });
     expect(result.current.logsByExecutionId).toEqual({ "exec-1": [log] });
@@ -222,6 +222,7 @@ describe("useRunTrace", () => {
       useSessionLogStore.getState().upsertLog("exec-1", liveDurableLog);
       useSessionLogStore.getState().upsertLog("exec-1", liveLogicalLog);
       useSessionLogStore.getState().appendLog("exec-1", liveAppendOnlyLog);
+      useSessionLogStore.getState().flushPending();
     });
     act(() => {
       resolveTrace!({
@@ -236,10 +237,8 @@ describe("useRunTrace", () => {
     });
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(useSessionLogStore.getState().logsByExecutionId["exec-1"]).toEqual([
-      liveDurableLog,
-      liveLogicalLog,
-      liveAppendOnlyLog,
-    ]);
+    expect(
+      useSessionLogStore.getState().logsByExecutionId["exec-1"]?.logs
+    ).toEqual([liveDurableLog, liveLogicalLog, liveAppendOnlyLog]);
   });
 });

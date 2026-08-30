@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commands, type SessionLog, type StepExecution } from "../bindings";
-import { useSessionLogStore } from "../stores";
+import type { ExecutionLogBucket } from "../stores/sessionLogStore";
+import { costFromSessionLogs } from "../utils/computeExecutionRollups";
 import {
   getProjectScopeGeneration,
   isCurrentProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import { useScopedSessionLogs } from "./useScopedSessionLogs";
 
 export interface UseSubtreeSessionLogsResult {
   /** Map: execution_id -> SessionLog[] */
   logsByExecutionId: Record<string, SessionLog[]>;
+  /** Map: execution_id -> merged logs and incrementally maintained cost. */
+  logBucketsByExecutionId: Record<string, ExecutionLogBucket>;
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
@@ -76,26 +80,58 @@ export function useSubtreeSessionLogs(
     fetchAll();
   }, [fetchAll]);
 
-  const liveLogs = useSessionLogStore((s) => s.logsByExecutionId);
+  const liveBuckets = useScopedSessionLogs(ids);
 
-  const merged = useMemo(() => {
-    if (ids.length === 0) return {} as Record<string, SessionLog[]>;
-    const out: Record<string, SessionLog[]> = {};
+  const logBucketsByExecutionId = useMemo(() => {
+    if (ids.length === 0) return {} as Record<string, ExecutionLogBucket>;
+    const out: Record<string, ExecutionLogBucket> = {};
     for (const id of ids) {
       const fetched = logsByExecutionId[id];
-      const live = liveLogs[id];
-      if (!live || live.length === 0) {
-        if (fetched !== undefined) out[id] = fetched;
+      const liveBucket = liveBuckets[id];
+      if (!liveBucket || liveBucket.logs.length === 0) {
+        if (fetched !== undefined) {
+          out[id] = {
+            logs: fetched,
+            fallbackCost: costFromSessionLogs(fetched),
+          };
+        }
         continue;
       }
       // If live has at least as many entries as fetched, prefer live (it's a
       // superset that includes appended events). Otherwise treat the fetched
       // baseline as authoritative for now.
       const fetchedLen = fetched?.length ?? 0;
-      out[id] = live.length >= fetchedLen ? live : (fetched ?? live);
+      const liveWins = liveBucket.logs.length >= fetchedLen;
+      if (liveWins) {
+        out[id] = liveBucket;
+      } else if (fetched !== undefined) {
+        out[id] = {
+          logs: fetched,
+          fallbackCost: costFromSessionLogs(fetched),
+        };
+      } else {
+        out[id] = liveBucket;
+      }
     }
     return out;
-  }, [ids, logsByExecutionId, liveLogs]);
+  }, [ids, logsByExecutionId, liveBuckets]);
 
-  return { logsByExecutionId: merged, isLoading, error, refetch: fetchAll };
+  const mergedLogsByExecutionId = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(logBucketsByExecutionId).map(([id, bucket]) => [
+          id,
+          bucket.logs,
+        ])
+      ),
+    [logBucketsByExecutionId]
+  );
+
+  return {
+    logsByExecutionId: mergedLogsByExecutionId,
+    logBucketsByExecutionId,
+    isLoading,
+    error,
+    refetch: fetchAll,
+  };
 }

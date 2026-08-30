@@ -9,7 +9,10 @@ import {
   isCurrentProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
-import { useSessionLogStore } from "../stores/sessionLogStore";
+import {
+  useSessionLogStore,
+  type ExecutionLogBucket,
+} from "../stores/sessionLogStore";
 import { useSubtreeSessionLogs } from "./useSubtreeSessionLogs";
 import {
   errorMessage,
@@ -34,7 +37,7 @@ function seedSessionLogs(
   }
   for (const [executionId, bucket] of logsByExecutionId) {
     const currentLogs =
-      useSessionLogStore.getState().logsByExecutionId[executionId];
+      useSessionLogStore.getState().logsByExecutionId[executionId]?.logs;
     const logsAtFetchStart = logsByExecutionIdAtFetchStart[executionId];
     setLogs(
       executionId,
@@ -116,6 +119,8 @@ export interface UseRunTraceResult {
   stepExecutions: StepExecution[];
   /** Session logs keyed by `step_execution_id` for the run's executions. */
   logsByExecutionId: Record<string, SessionLog[]>;
+  /** Session-log buckets keyed by `step_execution_id`. */
+  logBucketsByExecutionId: Record<string, ExecutionLogBucket>;
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
@@ -145,8 +150,11 @@ export function useRunTrace(
       const generationAtFetchStart = projectScopeGeneration;
       const traceAtFetchStart =
         queryClient.getQueryData<TaskRunTrace>(queryKey);
-      const logsByExecutionIdAtFetchStart =
-        useSessionLogStore.getState().logsByExecutionId;
+      const logsByExecutionIdAtFetchStart = Object.fromEntries(
+        Object.entries(useSessionLogStore.getState().logsByExecutionId).map(
+          ([executionId, bucket]) => [executionId, bucket.logs]
+        )
+      );
       const fetchedTrace = await unwrapCommand(
         commands.getTaskRunTrace(activeRunId!)
       );
@@ -172,11 +180,13 @@ export function useRunTrace(
   });
 
   const stepExecutions = query.data?.step_executions ?? [];
-  const { logsByExecutionId } = useSubtreeSessionLogs(stepExecutions);
+  const { logsByExecutionId, logBucketsByExecutionId } =
+    useSubtreeSessionLogs(stepExecutions);
 
   return {
     stepExecutions,
     logsByExecutionId,
+    logBucketsByExecutionId,
     isLoading: query.isLoading,
     error: query.error ? errorMessage(query.error) : null,
     refetch: () => {

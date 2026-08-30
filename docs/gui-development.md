@@ -106,6 +106,51 @@ Live chat and trace replay share one normalized stream:
   discovered/parsed by the provider harness crate; the frontend receives only
   serialized `HarnessEventV1` records.
 
+### Realtime session-log pacing contract
+
+Live session-log notifications are a UI delivery contract, not the durable
+record. The websocket continues to deliver individual `SessionLog` records;
+the frontend queues them in the session-log store and applies them in ordered,
+bounded batches. Created records append, updated records upsert by `id` or
+`logical_key`, and the record's existing ID, execution ID, content, format,
+and timestamps are not rewritten. Reconnects may replay records, so idempotent
+reconciliation is required. A complete historical result still comes from
+`getExecutionLogs`/`getTaskRunTrace`; live state is merged with that durable
+baseline.
+
+The frontend delivery policy is:
+
+| Measure | Budget / policy |
+| --- | --- |
+| Store flush cadence | One scheduled animation frame, with a 50 ms timer fallback when frames are unavailable or delayed |
+| Records per store application | 256 maximum |
+| Pending records | Records are retained and drained in successive bounded batches; there is no synchronous drain-all or automatic overflow refetch |
+| Recovery | The durable baseline is refreshed only by the owning trace hook's explicit refetch path; project reset cancels and drops pending work, while reconnect does not synchronously drain it |
+
+The session-log store owns the pending buffer and scheduling. A burst may
+therefore take several frames to catch up, but each store application remains
+bounded and unrelated execution buckets keep their existing references. There
+is no production performance monitor or per-event correlation allocation in
+this path.
+
+### WebSocket diagnostics
+
+Normal GUI operation does not create per-event WebSocket trace files, and the
+webview receives only warnings and errors from the WebSocket module. Routine
+dispatch and emission records are native `debug` logs; they are not forwarded
+to the webview unless diagnostics are enabled.
+
+For event-order investigations, set `VERTEBRAE_WEBSOCKET_DIAGNOSTICS=1` before
+starting the GUI. This enables WebSocket debug records at the webview boundary
+and writes a line-oriented trace to
+`/app/test-output/websocket-events.log`. Set
+`VERTEBRAE_WEBSOCKET_TRACE_PATH` to choose another trace path. The trace sink
+and its output directory are initialized once; each diagnostic line includes a
+wall-clock timestamp and process-local sequence number. This mode intentionally
+serializes every traced event and should be limited to debugging or acceptance
+runs because it has measurable I/O overhead. Trace initialization or write
+failures are reported as warnings and never stop the WebSocket loop.
+
 ### Claude compaction lifecycle
 
 Claude context compaction is exposed as lifecycle state, not as transcript

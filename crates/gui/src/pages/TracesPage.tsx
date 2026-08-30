@@ -198,6 +198,7 @@ export function TracesPage(): ReactNode {
   const {
     stepExecutions,
     logsByExecutionId,
+    logBucketsByExecutionId,
     isLoading: isTraceLoading,
     error: traceError,
   } = useRunTrace(currentTaskId, activeRunId);
@@ -225,8 +226,8 @@ export function TracesPage(): ReactNode {
   }, [activeRun, filteredExecutions, logsByExecutionId]);
 
   const rollups = useMemo(
-    () => computeExecutionRollups(filteredExecutions, logsByExecutionId),
-    [filteredExecutions, logsByExecutionId]
+    () => computeExecutionRollups(filteredExecutions, logBucketsByExecutionId),
+    [filteredExecutions, logBucketsByExecutionId]
   );
 
   // Scope-chip counts come from the full run; the chips + search narrow the

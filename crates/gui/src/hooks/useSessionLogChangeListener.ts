@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect } from "react";
 import {
   events,
   type SessionLogCreatedEvent,
@@ -28,67 +28,42 @@ export function useSessionLogChangeListener(
   options: UseSessionLogChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const appendLog = useSessionLogStore((state) => state.appendLog);
-  const upsertLog = useSessionLogStore((state) => state.upsertLog);
   const projectScopeGeneration = useProjectScopeGeneration();
-
-  const handleSessionLogCreated = useCallback(
-    (event: { payload: SessionLogCreatedEvent }) => {
-      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
-
-      const { log_id, step_execution_id, session_log } = event.payload;
-
-      console.debug(
-        `[SessionLogChangeListener] Log ${log_id.slice(0, 6)} created for execution ${step_execution_id.slice(0, 6)}`
-      );
-
-      if (session_log) {
-        appendLog(step_execution_id, session_log);
-      } else {
-        console.debug(
-          `[SessionLogChangeListener] session_log is null for log ${log_id.slice(0, 6)}, skipping append`
-        );
-      }
-    },
-    [appendLog, projectScopeGeneration]
-  );
-
-  const handleSessionLogUpdated = useCallback(
-    (event: { payload: SessionLogUpdatedEvent }) => {
-      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
-
-      const { log_id, step_execution_id, session_log } = event.payload;
-
-      console.debug(
-        `[SessionLogChangeListener] Log ${log_id.slice(0, 6)} updated for execution ${step_execution_id.slice(0, 6)}`
-      );
-
-      if (session_log) {
-        upsertLog(step_execution_id, session_log);
-      } else {
-        console.debug(
-          `[SessionLogChangeListener] session_log is null for log ${log_id.slice(0, 6)}, skipping upsert`
-        );
-      }
-    },
-    [projectScopeGeneration, upsertLog]
-  );
 
   useEffect(() => {
     if (!enabled) {
       return;
     }
 
+    let disposed = false;
+    const isCurrentScope = () =>
+      !disposed && projectScopeGeneration === getProjectScopeGeneration();
+
+    const enqueue = (
+      operation: "append" | "upsert",
+      event: { payload: SessionLogCreatedEvent | SessionLogUpdatedEvent }
+    ) => {
+      if (!isCurrentScope()) return;
+      const { step_execution_id, session_log } = event.payload;
+      if (!session_log) return;
+      const store = useSessionLogStore.getState();
+      if (operation === "append") {
+        store.appendLog(step_execution_id, session_log);
+      } else {
+        store.upsertLog(step_execution_id, session_log);
+      }
+    };
+
     const unlistenCreatedPromise = events.sessionLogCreatedEvent.listen(
-      handleSessionLogCreated
+      (event) => enqueue("append", event)
     );
     const unlistenUpdatedPromise = events.sessionLogUpdatedEvent.listen(
-      handleSessionLogUpdated
+      (event) => enqueue("upsert", event)
     );
-
     return () => {
-      unlistenCreatedPromise.then((unlisten) => unlisten());
-      unlistenUpdatedPromise.then((unlisten) => unlisten());
+      disposed = true;
+      void unlistenCreatedPromise.then((unlisten) => unlisten());
+      void unlistenUpdatedPromise.then((unlisten) => unlisten());
     };
-  }, [enabled, handleSessionLogCreated, handleSessionLogUpdated]);
+  }, [enabled, projectScopeGeneration]);
 }

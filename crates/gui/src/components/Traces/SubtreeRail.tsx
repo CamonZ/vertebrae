@@ -1,14 +1,9 @@
 import { useMemo, useState, type ReactNode } from "react";
-import type {
-  ExecutionStatus,
-  SessionLog,
-  StepExecution,
-  Task,
-} from "../../bindings";
-import { useSessionLogStore } from "../../stores/sessionLogStore";
+import type { ExecutionStatus, StepExecution, Task } from "../../bindings";
+import { useScopedSessionLogs } from "../../hooks/useScopedSessionLogs";
+import type { ExecutionLogBucket } from "../../stores/sessionLogStore";
 import {
   computeExecutionRollups,
-  costFromSessionLogs,
   formatCost,
   parseCost,
   type ExecutionRollups,
@@ -19,17 +14,16 @@ interface SubtreeRailProps {
   tasks: readonly Task[];
   subtreeTaskIds: readonly string[];
   executions: readonly StepExecution[];
-  /**
-   * Per-execution session logs. When an execution lacks a populated
-   * `cost` field, the per-task and per-execution rollups fall back to
-   * summing `cost_usd` from `session_end` log entries. Defaults to the
-   * global live `sessionLogStore` map when omitted.
-   */
-  logsByExecutionId?: Readonly<Record<string, SessionLog[]>>;
+  /** Per-execution logs and their incrementally maintained fallback cost. */
+  logBucketsByExecutionId?: Readonly<Record<string, ExecutionLogBucket>>;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   onSwitchTask?: () => void;
 }
+
+const EMPTY_BUCKETS_BY_EXECUTION_ID: Readonly<
+  Record<string, ExecutionLogBucket>
+> = {};
 
 interface GroupRow {
   task: Task;
@@ -121,14 +115,14 @@ function StatusPip({ status }: { status: ExecutionStatus }): ReactNode {
 
 function ExecutionRow({
   execution,
-  logs,
+  bucket,
 }: {
   execution: StepExecution;
-  logs: SessionLog[] | undefined;
+  bucket: ExecutionLogBucket | undefined;
 }): ReactNode {
   let displayCost: number | null = parseCost(execution.cost);
   if (displayCost === null) {
-    const fromLogs = costFromSessionLogs(logs);
+    const fromLogs = bucket?.fallbackCost ?? 0;
     if (fromLogs > 0) displayCost = fromLogs;
   }
   return (
@@ -154,13 +148,13 @@ function ExecutionRow({
 interface GroupSectionProps {
   row: GroupRow;
   initiallyExpanded: boolean;
-  logsByExecutionId: Readonly<Record<string, SessionLog[]>>;
+  logBucketsByExecutionId: Readonly<Record<string, ExecutionLogBucket>>;
 }
 
 function GroupSection({
   row,
   initiallyExpanded,
-  logsByExecutionId,
+  logBucketsByExecutionId,
 }: GroupSectionProps): ReactNode {
   const [expanded, setExpanded] = useState(initiallyExpanded);
   const { task, depth, executions, rollups } = row;
@@ -258,7 +252,7 @@ function GroupSection({
               <ExecutionRow
                 key={exec.id ?? `${task.id}-${idx}`}
                 execution={exec}
-                logs={exec.id ? logsByExecutionId[exec.id] : undefined}
+                bucket={exec.id ? logBucketsByExecutionId[exec.id] : undefined}
               />
             ))
           )}
@@ -268,18 +262,18 @@ function GroupSection({
   );
 }
 
-export function SubtreeRail({
+function SubtreeRailContent({
   rootTaskId,
   tasks,
   subtreeTaskIds,
   executions,
-  logsByExecutionId: providedLogs,
+  logBucketsByExecutionId: providedBuckets,
   collapsed,
   onToggleCollapsed,
   onSwitchTask,
 }: SubtreeRailProps): ReactNode {
-  const liveLogs = useSessionLogStore((state) => state.logsByExecutionId);
-  const logsByExecutionId = providedLogs ?? liveLogs;
+  const logBucketsByExecutionId =
+    providedBuckets ?? EMPTY_BUCKETS_BY_EXECUTION_ID;
   const rows = useMemo<GroupRow[]>(() => {
     const taskById = new Map<string, Task>();
     for (const t of tasks) taskById.set(t.id, t);
@@ -307,7 +301,7 @@ export function SubtreeRail({
         task,
         depth: depths.get(id) ?? 0,
         executions: taskExecs,
-        rollups: computeExecutionRollups(taskExecs, logsByExecutionId),
+        rollups: computeExecutionRollups(taskExecs, logBucketsByExecutionId),
       });
     }
 
@@ -317,7 +311,7 @@ export function SubtreeRail({
     });
 
     return built;
-  }, [rootTaskId, tasks, subtreeTaskIds, executions, logsByExecutionId]);
+  }, [rootTaskId, tasks, subtreeTaskIds, executions, logBucketsByExecutionId]);
 
   if (collapsed) {
     return (
@@ -391,11 +385,30 @@ export function SubtreeRail({
               key={row.task.id}
               row={row}
               initiallyExpanded={row.depth === 0}
-              logsByExecutionId={logsByExecutionId}
+              logBucketsByExecutionId={logBucketsByExecutionId}
             />
           ))
         )}
       </div>
     </aside>
   );
+}
+
+function LiveSubtreeRail(props: SubtreeRailProps): ReactNode {
+  const executionIds = useMemo(
+    () => props.executions.map((execution) => execution.id),
+    [props.executions]
+  );
+  const liveBuckets = useScopedSessionLogs(executionIds);
+
+  return (
+    <SubtreeRailContent {...props} logBucketsByExecutionId={liveBuckets} />
+  );
+}
+
+export function SubtreeRail(props: SubtreeRailProps): ReactNode {
+  if (props.logBucketsByExecutionId !== undefined) {
+    return <SubtreeRailContent {...props} />;
+  }
+  return <LiveSubtreeRail {...props} />;
 }

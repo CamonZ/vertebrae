@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { computeExecutionRollups } from "./computeExecutionRollups";
+import {
+  computeExecutionRollups,
+  costFromSessionLogs,
+} from "./computeExecutionRollups";
 import type { SessionLog, StepExecution } from "../bindings";
 
 function sessionEndLog(execId: string, costUsd: number, idx = 0): SessionLog {
@@ -40,6 +43,10 @@ function exec(overrides: Partial<StepExecution> = {}): StepExecution {
     status: "completed",
     ...overrides,
   };
+}
+
+function logBucket(logs: SessionLog[]) {
+  return { logs, fallbackCost: costFromSessionLogs(logs) };
 }
 
 describe("computeExecutionRollups", () => {
@@ -226,29 +233,36 @@ describe("computeExecutionRollups", () => {
     // carry the real cost. The rollup must walk the logs to recover Σ COST.
     const e1 = exec({ id: "exec-1", cost: null });
     const e2 = exec({ id: "exec-2", cost: null });
-    const logsByExecutionId = {
-      "exec-1": [sessionEndLog("exec-1", 0.0742)],
-      "exec-2": [sessionEndLog("exec-2", 0.1166)],
+    const logBucketsByExecutionId = {
+      "exec-1": logBucket([sessionEndLog("exec-1", 0.0742)]),
+      "exec-2": logBucket([sessionEndLog("exec-2", 0.1166)]),
     };
-    const rollups = computeExecutionRollups([e1, e2], logsByExecutionId);
+    const rollups = computeExecutionRollups([e1, e2], logBucketsByExecutionId);
     // Both legacy executions have no task_run_id → one unknown pseudo-run.
     expect(rollups.totalRuns).toBe(1);
     expect(rollups.totalAttempts).toBe(2);
     expect(rollups.totalCost).toBeCloseTo(0.0742 + 0.1166, 10);
   });
 
+  it("memoizes fallback cost for an unchanged transcript array", () => {
+    const logs = [sessionEndLog("exec-1", 0.0742)];
+
+    expect(costFromSessionLogs(logs)).toBeCloseTo(0.0742, 10);
+    expect(costFromSessionLogs(logs)).toBeCloseTo(0.0742, 10);
+  });
+
   it("sums multiple session_end events within a single execution", () => {
     // A resumed execution can emit more than one `result` line; we want all
     // of them counted, not just the first or last.
     const e = exec({ id: "exec-1", cost: null });
-    const logsByExecutionId = {
-      "exec-1": [
+    const logBucketsByExecutionId = {
+      "exec-1": logBucket([
         sessionEndLog("exec-1", 0.05, 0),
         sessionEndLog("exec-1", 0.07, 1),
-      ],
+      ]),
     };
     expect(
-      computeExecutionRollups([e], logsByExecutionId).totalCost
+      computeExecutionRollups([e], logBucketsByExecutionId).totalCost
     ).toBeCloseTo(0.12, 10);
   });
 
@@ -256,19 +270,21 @@ describe("computeExecutionRollups", () => {
     // The backend value is canonical; the log fallback only fires when
     // StepExecution.cost is null. This avoids double-counting on healthy rows.
     const e = exec({ id: "exec-1", cost: "0.01" });
-    const logsByExecutionId = {
-      "exec-1": [sessionEndLog("exec-1", 0.99)],
+    const logBucketsByExecutionId = {
+      "exec-1": logBucket([sessionEndLog("exec-1", 0.99)]),
     };
     expect(
-      computeExecutionRollups([e], logsByExecutionId).totalCost
+      computeExecutionRollups([e], logBucketsByExecutionId).totalCost
     ).toBeCloseTo(0.01, 10);
   });
 
   it("ignores logs whose execution.id is missing", () => {
     const e = exec({ id: null, cost: null });
-    const logsByExecutionId = {
-      "exec-1": [sessionEndLog("exec-1", 0.5)],
+    const logBucketsByExecutionId = {
+      "exec-1": logBucket([sessionEndLog("exec-1", 0.5)]),
     };
-    expect(computeExecutionRollups([e], logsByExecutionId).totalCost).toBe(0);
+    expect(
+      computeExecutionRollups([e], logBucketsByExecutionId).totalCost
+    ).toBe(0);
   });
 });

@@ -1,7 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
-import { render, createMockTask, createMockStepExecution } from "../../test/test-utils";
+import {
+  render,
+  createMockTask,
+  createMockStepExecution,
+} from "../../test/test-utils";
 import { SubtreeRail } from "./SubtreeRail";
+import { useSessionLogStore } from "../../stores/sessionLogStore";
 
 const root = createMockTask({
   id: "root",
@@ -223,5 +228,22 @@ describe("SubtreeRail", () => {
     const rail = screen.getByTestId("subtree-rail");
     expect(rail.getAttribute("data-collapsed")).toBe("true");
     expect(screen.getByTestId("subtree-rail-toggle")).toBeInTheDocument();
+  });
+
+  it("does not subscribe to live logs when the parent supplies scoped data", () => {
+    const subscribe = vi.spyOn(useSessionLogStore, "subscribe");
+
+    render(
+      <SubtreeRail
+        rootTaskId="root"
+        tasks={tasks}
+        subtreeTaskIds={subtreeTaskIds}
+        executions={executions}
+        logBucketsByExecutionId={{}}
+      />
+    );
+
+    expect(subscribe).not.toHaveBeenCalled();
+    subscribe.mockRestore();
   });
 });

@@ -3,6 +3,7 @@ export { buildTreeFromTasks } from "./buildTreeFromTasks";
 export { getDescendantTaskIds } from "./getDescendantTaskIds";
 export {
   computeExecutionRollups,
+  costFromSessionLog,
   costFromSessionLogs,
   parseCost,
 } from "./computeExecutionRollups";

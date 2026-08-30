@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
 type EventCallback = (event: { payload: Record<string, unknown> }) => void;
@@ -39,16 +39,37 @@ vi.mock("../bindings", () => ({
 import { useSessionLogChangeListener } from "./useSessionLogChangeListener";
 import { useNotificationStore, useSessionLogStore } from "../stores";
 
+function logsFor(executionId: string) {
+  return (
+    useSessionLogStore.getState().logsByExecutionId[executionId]?.logs ?? []
+  );
+}
+
+function bucketFor(executionId: string) {
+  return useSessionLogStore.getState().logsByExecutionId[executionId];
+}
+
 describe("useSessionLogChangeListener", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
     Object.keys(eventListeners).forEach((key) => {
       eventListeners[key] = [];
     });
     // Reset stores between tests
-    useSessionLogStore.setState({ logsByExecutionId: {} });
+    useSessionLogStore.getState().reset();
     useNotificationStore.getState().clearNotifications();
   });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function flushQueuedEvents() {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+  }
 
   it("calls appendLog when a created event has session_log", async () => {
     renderHook(() => useSessionLogChangeListener());
@@ -73,12 +94,43 @@ describe("useSessionLogChangeListener", () => {
       });
     });
 
-    const logs = useSessionLogStore.getState().logsByExecutionId["exec-001"];
+    await flushQueuedEvents();
+
+    const logs = logsFor("exec-001");
     expect(logs).toHaveLength(1);
     expect(logs[0]).toEqual(sessionLog);
     expect(logs[0].id).toBe("log-abc123");
     expect(logs[0].content).toBe("Step started execution");
     expect(logs[0].step_execution_id).toBe("exec-001");
+  });
+
+  it("does not synchronously flush pending records when the listener unmounts", async () => {
+    const { unmount } = renderHook(() => useSessionLogChangeListener());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const sessionLog = {
+      id: "log-unmount",
+      step_execution_id: "exec-unmount",
+      content: "Pending before cleanup",
+      created_at: "2026-03-17T10:00:00Z",
+    };
+
+    act(() => {
+      emitEvent("sessionLogCreated", {
+        log_id: sessionLog.id,
+        step_execution_id: sessionLog.step_execution_id,
+        session_log: sessionLog,
+      });
+    });
+
+    expect(bucketFor("exec-unmount")).toBeUndefined();
+
+    act(() => unmount());
+
+    expect(logsFor("exec-unmount")).toEqual([]);
   });
 
   it("does not call appendLog when a created event has null session_log", async () => {
@@ -96,7 +148,7 @@ describe("useSessionLogChangeListener", () => {
       });
     });
 
-    const logs = useSessionLogStore.getState().logsByExecutionId["exec-002"];
+    const logs = bucketFor("exec-002");
     expect(logs).toBeUndefined();
   });
 
@@ -124,7 +176,7 @@ describe("useSessionLogChangeListener", () => {
       });
     });
 
-    const logs = useSessionLogStore.getState().logsByExecutionId["exec-003"];
+    const logs = bucketFor("exec-003");
     expect(logs).toBeUndefined();
   });
 
@@ -165,10 +217,10 @@ describe("useSessionLogChangeListener", () => {
       });
     });
 
-    const alphaLogs =
-      useSessionLogStore.getState().logsByExecutionId["exec-alpha"];
-    const betaLogs =
-      useSessionLogStore.getState().logsByExecutionId["exec-beta"];
+    await flushQueuedEvents();
+
+    const alphaLogs = logsFor("exec-alpha");
+    const betaLogs = logsFor("exec-beta");
 
     expect(alphaLogs).toHaveLength(1);
     expect(alphaLogs[0].id).toBe("log-a1");
@@ -207,7 +259,9 @@ describe("useSessionLogChangeListener", () => {
       created_at: "2026-03-17T10:02:00Z",
     };
 
-    useSessionLogStore.getState().setLogs("exec-001", [originalLog, durableLog]);
+    useSessionLogStore
+      .getState()
+      .setLogs("exec-001", [originalLog, durableLog]);
 
     act(() => {
       emitEvent("sessionLogUpdated", {
@@ -217,7 +271,9 @@ describe("useSessionLogChangeListener", () => {
       });
     });
 
-    const logs = useSessionLogStore.getState().logsByExecutionId["exec-001"];
+    await flushQueuedEvents();
+
+    const logs = logsFor("exec-001");
     expect(logs).toHaveLength(2);
     expect(logs[0]).toEqual(updatedLog);
     expect(logs[1]).toEqual(durableLog);
@@ -246,7 +302,9 @@ describe("useSessionLogChangeListener", () => {
       });
     });
 
-    const logs = useSessionLogStore.getState().logsByExecutionId["exec-002"];
+    await flushQueuedEvents();
+
+    const logs = logsFor("exec-002");
     expect(logs).toHaveLength(1);
     expect(logs[0]).toEqual(updatedLog);
   });
@@ -272,6 +330,8 @@ describe("useSessionLogChangeListener", () => {
         session_log: sessionLog,
       });
     });
+
+    await flushQueuedEvents();
 
     const notifications = useNotificationStore.getState().notifications;
     expect(notifications).toHaveLength(0);

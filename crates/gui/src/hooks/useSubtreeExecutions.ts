@@ -2,8 +2,8 @@ import { useCallback, useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import type { StepExecution } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
-import { useSessionLogStore } from "../stores/sessionLogStore";
 import { useTasks } from "./useTasks";
+import { useScopedSessionLogs } from "./useScopedSessionLogs";
 import {
   computeExecutionRollups,
   getDescendantTaskIds,
@@ -63,13 +63,15 @@ export function useSubtreeExecutions(
     executionQueries.refetch();
   }, [executionQueries]);
 
-  const logsByExecutionId = useSessionLogStore(
-    (state) => state.logsByExecutionId
+  const executionIds = useMemo(
+    () => executions.map((execution) => execution.id),
+    [executions]
   );
+  const liveBuckets = useScopedSessionLogs(executionIds);
 
   const rollups = useMemo(
-    () => computeExecutionRollups(executions, logsByExecutionId),
-    [executions, logsByExecutionId]
+    () => computeExecutionRollups(executions, liveBuckets),
+    [executions, liveBuckets]
   );
 
   return {
