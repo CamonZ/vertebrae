@@ -41,8 +41,21 @@ impl From<CliStepType> for StepType {
 fn validate_step_constraints(
     step_type: &StepType,
     prompt: Option<&str>,
+    route_config: Option<&serde_json::Value>,
     transitions_to: &[String],
 ) -> Result<(), ServiceError> {
+    if matches!(step_type, StepType::Route) && prompt.is_some() {
+        return Err(ServiceError::validation_failed(
+            "Route steps may only clear an existing prompt",
+        ));
+    }
+
+    if !matches!(step_type, StepType::Route) && route_config.is_some() {
+        return Err(ServiceError::validation_failed(
+            "route_config is only valid for route steps",
+        ));
+    }
+
     if matches!(step_type, StepType::Finish) && (prompt.is_some() || !transitions_to.is_empty()) {
         return Err(ServiceError::validation_failed(
             "Finish steps cannot define a prompt or outgoing transitions",
@@ -167,6 +180,10 @@ pub struct StepAddCommand {
     #[arg(long, value_name = "JSON")]
     pub persistence_options: Option<String>,
 
+    /// Deterministic route configuration (raw JSON string)
+    #[arg(long, value_name = "JSON")]
+    pub route_config: Option<String>,
+
     /// Step order (0-indexed, defaults to 0)
     #[arg(long, short, default_value = "0")]
     pub order: i32,
@@ -269,8 +286,23 @@ impl StepAddCommand {
             })
             .transpose()?;
 
+        let route_config = self
+            .route_config
+            .as_deref()
+            .map(|json_str| {
+                serde_json::from_str::<serde_json::Value>(json_str).map_err(|e| {
+                    ServiceError::validation_failed(format!("Invalid --route-config JSON: {}", e))
+                })
+            })
+            .transpose()?;
+
         let step_type: StepType = self.step_type.clone().into();
-        validate_step_constraints(&step_type, self.prompt.as_deref(), &transitions_to)?;
+        validate_step_constraints(
+            &step_type,
+            self.prompt.as_deref(),
+            route_config.as_ref(),
+            &transitions_to,
+        )?;
 
         let mut step = Step::new(&self.name, workflow_id)
             .with_agent_config(agent_config)
@@ -282,6 +314,9 @@ impl StepAddCommand {
         }
         if let Some(options) = persistence_options {
             step = step.with_persistence_options(options);
+        }
+        if let Some(route_config) = route_config {
+            step = step.with_route_config(route_config);
         }
         if let Some(goal) = &self.goal {
             step = step.with_goal(goal);
@@ -465,6 +500,14 @@ impl StepShowCommand {
             .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
             .unwrap_or_else(|| "(none)".to_string());
 
+        let prompt = s.prompt.as_deref().unwrap_or("(none)");
+
+        let route_config = s
+            .route_config
+            .as_ref()
+            .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
+            .unwrap_or_else(|| "(none)".to_string());
+
         let output = format!(
             r#"Step: {} - {}
 ============================================================
@@ -475,9 +518,11 @@ Step Type:     {}
 Goal:          {}
 Agents:        {}
 Skills:        {}
-            Model:         {}
+Model:         {}
+Prompt:        {}
 Output Schema: {}
 Persistence:    {}
+Route Config:   {}
 Transitions:   {}
 Created:       {}
 Updated:       {}"#,
@@ -490,8 +535,10 @@ Updated:       {}"#,
             agents,
             skills,
             model,
+            prompt,
             output_schema,
             persistence_options,
+            route_config,
             transitions,
             s.created_at
                 .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
@@ -539,6 +586,10 @@ pub struct StepUpdateCommand {
     /// New prompt for the step
     #[arg(long)]
     pub prompt: Option<String>,
+
+    /// Clear the existing prompt
+    #[arg(long)]
+    pub clear_prompt: bool,
 
     /// Full agent config as a JSON string (e.g. '{"model":"opus","max_budget_usd":5.0}')
     #[arg(long, value_name = "JSON")]
@@ -589,6 +640,14 @@ pub struct StepUpdateCommand {
     #[arg(long)]
     pub clear_persistence_options: bool,
 
+    /// Replace the deterministic route configuration with JSON
+    #[arg(long, value_name = "JSON")]
+    pub route_config: Option<String>,
+
+    /// Clear the deterministic route configuration
+    #[arg(long)]
+    pub clear_route_config: bool,
+
     /// New order for the step
     #[arg(long, short)]
     pub order: Option<i32>,
@@ -629,7 +688,38 @@ impl StepUpdateCommand {
             .as_ref()
             .map(|step_type| StepType::from(step_type.clone()))
             .unwrap_or_else(|| existing.step_type.clone());
-        let resulting_prompt = self.prompt.as_deref().or(existing.prompt.as_deref());
+
+        if self.prompt.is_some() && self.clear_prompt {
+            return Err(ServiceError::validation_failed(
+                "--prompt and --clear-prompt cannot be used together",
+            ));
+        }
+        if self.route_config.is_some() && self.clear_route_config {
+            return Err(ServiceError::validation_failed(
+                "--route-config and --clear-route-config cannot be used together",
+            ));
+        }
+
+        let route_config = self
+            .route_config
+            .as_deref()
+            .map(|json_str| {
+                serde_json::from_str::<serde_json::Value>(json_str).map_err(|e| {
+                    ServiceError::validation_failed(format!("Invalid --route-config JSON: {}", e))
+                })
+            })
+            .transpose()?;
+
+        let resulting_prompt = if self.clear_prompt {
+            None
+        } else {
+            self.prompt.as_deref().or(existing.prompt.as_deref())
+        };
+        let resulting_route_config = if self.clear_route_config {
+            None
+        } else {
+            route_config.as_ref().or(existing.route_config.as_ref())
+        };
         let resulting_transitions = if self.clear_transitions || !self.transitions_to.is_empty() {
             if self.clear_transitions {
                 Vec::new()
@@ -642,6 +732,7 @@ impl StepUpdateCommand {
         validate_step_constraints(
             &resulting_step_type,
             resulting_prompt,
+            resulting_route_config,
             &resulting_transitions,
         )?;
 
@@ -657,6 +748,9 @@ impl StepUpdateCommand {
 
         if let Some(prompt) = &self.prompt {
             updates = updates.with_prompt(prompt);
+        }
+        if self.clear_prompt {
+            updates = updates.clear_prompt();
         }
 
         if self.clear_agents {
@@ -694,6 +788,12 @@ impl StepUpdateCommand {
                 ))
             })?;
             updates = updates.with_persistence_options(Some(value));
+        }
+
+        if self.clear_route_config {
+            updates = updates.with_route_config(None);
+        } else if let Some(route_config) = route_config {
+            updates = updates.with_route_config(Some(route_config));
         }
 
         if let Some(order) = self.order {
@@ -1210,6 +1310,31 @@ mod tests {
     }
 
     #[test]
+    fn test_step_add_with_route_config() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Router",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "route",
+            "--route-config",
+            r#"{"version":1,"rules":[]}"#,
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                assert_eq!(
+                    cmd.route_config,
+                    Some(r#"{"version":1,"rules":[]}"#.to_string())
+                );
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
     fn test_step_add_with_agent_config_json() {
         let cli = TestCli::try_parse_from([
             "test",
@@ -1271,6 +1396,45 @@ mod tests {
         match cli.unwrap().command {
             StepCommand::Update(cmd) => {
                 assert_eq!(cmd.prompt, Some("New prompt text".to_string()));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_route_config_and_prompt_clear() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--route-config",
+            r#"{"version":1}"#,
+            "--clear-prompt",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                assert_eq!(cmd.route_config, Some(r#"{"version":1}"#.to_string()));
+                assert!(cmd.clear_prompt);
+                assert!(!cmd.clear_route_config);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_route_config_clear() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--clear-route-config",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                assert!(cmd.route_config.is_none());
+                assert!(cmd.clear_route_config);
             }
             _ => panic!("Expected Update command"),
         }
@@ -1504,7 +1668,7 @@ mod tests {
 
     #[test]
     fn test_stop_requires_exactly_one_transition() {
-        let error = validate_step_constraints(&StepType::Stop, None, &[]).unwrap_err();
+        let error = validate_step_constraints(&StepType::Stop, None, None, &[]).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -1512,7 +1676,8 @@ mod tests {
         );
 
         let transitions = vec!["step-1".to_string(), "step-2".to_string()];
-        let error = validate_step_constraints(&StepType::Stop, None, &transitions).unwrap_err();
+        let error =
+            validate_step_constraints(&StepType::Stop, None, None, &transitions).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -1522,6 +1687,7 @@ mod tests {
         validate_step_constraints(
             &StepType::Stop,
             Some("ignored by the orchestrator"),
+            None,
             &["step-1".to_string()],
         )
         .unwrap();
