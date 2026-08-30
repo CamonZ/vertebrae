@@ -3,7 +3,7 @@
 
    Rendered as the CONTENT inside a right-docked FloatingDetailPanel shell. The
    topology shape (ordering, transitions, kind) comes from the pure `AtlasModel`;
-   the rich configuration (goal, prompt, agents, skills, model) is fetched live
+   the rich configuration (goal, prompt, agents, skills, model, route config) is fetched live
    via `useStep(stepId)` because `PipelineStep` carries none of it.
 
    Transitions — the implicit forward step plus every explicit out-edge — are
@@ -100,6 +100,7 @@ export function StepInspector({
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [clearPrompt, setClearPrompt] = useState(false);
   const [type, setType] = useState<StepType>("execute");
   const [agentsText, setAgentsText] = useState("");
   const [skillsText, setSkillsText] = useState("");
@@ -113,6 +114,7 @@ export function StepInspector({
     setName(cfg.name);
     setGoal(cfg.goal ?? "");
     setPrompt(cfg.prompt ?? "");
+    setClearPrompt(false);
     setType(cfg.step_type ?? "execute");
     setAgentsText((cfg.agents ?? []).join(", "));
     setSkillsText((cfg.skills ?? []).join(", "));
@@ -199,6 +201,11 @@ export function StepInspector({
     stepTypeLabelFor(step.stepType) ??
     stepTypeLabelFor(cfg?.step_type) ??
     backendTypeForKind(step.kind);
+  const isRouteResult = type === "route";
+  const isRouteConfigVisible = isRouteResult || stepTypeLabel === "route";
+  const hasPrompt = cfg?.prompt !== null && cfg?.prompt !== undefined;
+  const hasRouteConfig =
+    cfg?.route_config !== null && cfg?.route_config !== undefined;
 
   const listValue = (value: string) =>
     value
@@ -282,7 +289,8 @@ export function StepInspector({
           step_id: stepId,
           name,
           goal,
-          prompt,
+          prompt: isRouteResult ? null : prompt,
+          clear_prompt: clearPrompt,
           agents: listValue(agentsText),
           skills: listValue(skillsText),
           agent_config: cfg?.agent_config
@@ -293,6 +301,8 @@ export function StepInspector({
           clear_output_schema: !outputSchema.trim(),
           persistence_options: parsedPersistence,
           clear_persistence_options: clearPersistenceOptions,
+          route_config: null,
+          clear_route_config: false,
           order: step.order,
           transitions_to: nextTransitions,
         })
@@ -380,15 +390,48 @@ export function StepInspector({
           </label>
           <label>
             Prompt
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={
-                isStop
-                  ? "Not dispatched for a stop boundary"
-                  : "Optional prompt"
-              }
-            />
+            {isRouteResult ? (
+              <>
+                <textarea
+                  value={clearPrompt ? "" : prompt}
+                  readOnly
+                  disabled
+                  placeholder="Route prompts are read-only"
+                />
+                {hasPrompt ? (
+                  <button
+                    className="wfd-action"
+                    onClick={() => {
+                      if (clearPrompt) {
+                        setPrompt(cfg?.prompt ?? "");
+                        setClearPrompt(false);
+                      } else {
+                        setPrompt("");
+                        setClearPrompt(true);
+                      }
+                    }}
+                    type="button"
+                  >
+                    {clearPrompt ? "Undo clear prompt" : "Clear prompt"}
+                  </button>
+                ) : null}
+                {clearPrompt ? (
+                  <span className="wfd-help">
+                    Prompt will be cleared on save.
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder={
+                  isStop
+                    ? "Not dispatched for a stop boundary"
+                    : "Optional prompt"
+                }
+              />
+            )}
           </label>
           <label>
             Agents <span className="wfd-help">comma or newline separated</span>
@@ -604,6 +647,26 @@ export function StepInspector({
             </div>
           )}
         </section>
+
+        {isRouteConfigVisible ? (
+          <section className="wfd-sec" data-testid="route-config-section">
+            <div className="wfd-lbl">Route Config</div>
+            {isLoading ? (
+              <div className="wfd-placeholder">Loading…</div>
+            ) : hasRouteConfig ? (
+              <pre data-testid="route-config-value" className="wfd-prompt">
+                {JSON.stringify(cfg?.route_config, null, 2)}
+              </pre>
+            ) : (
+              <div
+                data-testid="route-config-unconfigured"
+                className="wfd-placeholder"
+              >
+                Unconfigured route draft
+              </div>
+            )}
+          </section>
+        ) : null}
       </div>
     </div>
   );

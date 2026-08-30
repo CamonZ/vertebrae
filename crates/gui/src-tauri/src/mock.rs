@@ -1265,7 +1265,7 @@ impl StepService for MockStepService {
             step.goal = Some(goal.clone());
         }
         if let Some(prompt) = &updates.prompt {
-            step.prompt = Some(prompt.clone());
+            step.prompt = prompt.clone();
         }
         if let Some(agents) = &updates.agents {
             step.agents = agents.clone();
@@ -1287,6 +1287,9 @@ impl StepService for MockStepService {
         }
         if let Some(persistence_update) = &updates.persistence_options {
             step.persistence_options = persistence_update.clone();
+        }
+        if let Some(route_config_update) = &updates.route_config {
+            step.route_config = route_config_update.clone();
         }
         if let Some(agent_config_value) = &updates.agent_config {
             step.agent_config = serde_json::from_value(agent_config_value.clone())

@@ -147,6 +147,7 @@ const stepFixture = (overrides: Partial<Step> = {}): Step => ({
     json_schema: null,
   },
   step_type: "execute",
+  route_config: null,
   transitions_to: [],
   order: 0,
   created_at: null,
@@ -450,6 +451,108 @@ describe("StepInspector", () => {
     expect(screen.getByText("Output Schema")).toBeInTheDocument();
     expect(screen.getByTestId("schema-tree")).toBeInTheDocument();
     expect(screen.getByTestId("schema-node-verdict")).toBeInTheDocument();
+  });
+
+  it("renders nested route configuration and its unconfigured draft state", () => {
+    const configured = {
+      version: 1,
+      rules: [
+        {
+          when: { kind: "result", path: "$.decision" },
+          then: { kind: "step", step_id: "approved" },
+        },
+      ],
+      future: { nested: ["keep", 2, false, null] },
+    };
+    mockUseStep(
+      stepFixture({
+        id: "s3",
+        name: "Ship",
+        step_type: "route",
+        route_config: configured,
+      })
+    );
+    const { rerender } = render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s3"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("route-config-value")).toHaveTextContent(
+      "$.decision"
+    );
+    expect(screen.getByTestId("route-config-value")).toHaveTextContent(
+      '"future"'
+    );
+
+    mockUseStep(
+      stepFixture({
+        id: "s3",
+        name: "Ship",
+        step_type: "route",
+        route_config: null,
+        prompt: null,
+      })
+    );
+    rerender(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s3"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("route-config-unconfigured")).toHaveTextContent(
+      "Unconfigured route draft"
+    );
+  });
+
+  it("only allows retained route prompts to be cleared", async () => {
+    mockUseStep(
+      stepFixture({
+        id: "s3",
+        name: "Ship",
+        step_type: "route",
+        route_config: {},
+        prompt: "legacy prompt",
+      })
+    );
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s3"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const prompt = screen.getByLabelText("Prompt");
+    expect(prompt).toBeDisabled();
+    expect(prompt).toHaveValue("legacy prompt");
+    fireEvent.click(screen.getByRole("button", { name: "Clear prompt" }));
+    expect(prompt).toHaveValue("");
+    expect(
+      screen.getByText("Prompt will be cleared on save.")
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+    await waitFor(() =>
+      expect(commands.updateStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: null,
+          clear_prompt: true,
+          route_config: null,
+          clear_route_config: false,
+        })
+      )
+    );
   });
 
   it("edits and displays orchestrator persistence options", async () => {

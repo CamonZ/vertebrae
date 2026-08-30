@@ -2441,6 +2441,10 @@ export type Step = {
    */
   persistence_options?: JsonValue | null;
   /**
+   * Opaque deterministic route configuration for route steps
+   */
+  route_config?: JsonValue | null;
+  /**
    * List of step IDs this step can transition to
    */
   transitions_to?: string[];
@@ -3017,6 +3021,7 @@ export type UpdateStepOptions = {
   name: string | null;
   goal: string | null;
   prompt: string | null;
+  clear_prompt?: boolean;
   agents: string[] | null;
   skills: string[] | null;
   agent_config?: AgentConfig | null;
@@ -3025,6 +3030,8 @@ export type UpdateStepOptions = {
   clear_output_schema?: boolean;
   persistence_options?: JsonValue | null;
   clear_persistence_options?: boolean;
+  route_config?: JsonValue | null;
+  clear_route_config?: boolean;
   order: number | null;
   transitions_to: string[] | null;
 };
