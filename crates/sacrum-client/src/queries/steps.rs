@@ -125,6 +125,86 @@ pub const UPDATE_STEP: &str = r#"
     }
 "#;
 
+/// The nullable update arguments must be omitted from the GraphQL document when
+/// an update does not touch them. Passing a missing variable to an explicit
+/// nullable argument coerces it to null, which would turn an unrelated update
+/// into an accidental clear on the backend.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UpdateStepQueryOptions {
+    pub name: bool,
+    pub goal: bool,
+    pub prompt: bool,
+    pub agents: bool,
+    pub skills: bool,
+    pub agent_config: bool,
+    pub step_type: bool,
+    pub output_schema: bool,
+    pub persistence_options: bool,
+    pub route_config: bool,
+    pub clear_output_schema: bool,
+    pub step_order: bool,
+}
+
+/// Build an update mutation containing only fields represented by the update.
+pub fn update_step_query(options: UpdateStepQueryOptions) -> String {
+    let mut definitions = vec!["$id: Uuid4!".to_string()];
+    let mut arguments = vec!["id: $id".to_string()];
+
+    let mut add = |enabled: bool, definition: &str, argument: &str| {
+        if enabled {
+            definitions.push(definition.to_string());
+            arguments.push(argument.to_string());
+        }
+    };
+
+    add(options.name, "$name: String", "name: $name");
+    add(options.goal, "$goal: String", "goal: $goal");
+    add(options.prompt, "$prompt: String", "prompt: $prompt");
+    add(options.agents, "$agents: [String!]", "agents: $agents");
+    add(options.skills, "$skills: [String!]", "skills: $skills");
+    add(
+        options.agent_config,
+        "$agent_config: Json",
+        "agent_config: $agent_config",
+    );
+    add(
+        options.step_type,
+        "$step_type: String",
+        "step_type: $step_type",
+    );
+    add(
+        options.output_schema,
+        "$output_schema: Json",
+        "output_schema: $output_schema",
+    );
+    add(
+        options.persistence_options,
+        "$persistence_options: Json",
+        "persistence_options: $persistence_options",
+    );
+    add(
+        options.route_config,
+        "$route_config: Json",
+        "route_config: $route_config",
+    );
+    add(
+        options.clear_output_schema,
+        "$clear_output_schema: Boolean",
+        "clear_output_schema: $clear_output_schema",
+    );
+    add(
+        options.step_order,
+        "$step_order: Int",
+        "step_order: $step_order",
+    );
+
+    format!(
+        "mutation UpdateStep(\n        {}\n    ) {{\n        update_workflow_step(\n            {}\n        ) {{\n            ...StepFields\n        }}\n    }}",
+        definitions.join(",\n        "),
+        arguments.join(",\n            ")
+    )
+}
+
 pub const DELETE_STEP: &str = r#"
     mutation DeleteStep($id: Uuid4!) {
         delete_workflow_step(id: $id) {
@@ -164,5 +244,22 @@ mod tests {
         assert!(UPDATE_STEP.contains("route_config: $route_config"));
         assert!(UPDATE_STEP.contains("$prompt: String"));
         assert!(UPDATE_STEP.contains("prompt: $prompt"));
+    }
+
+    #[test]
+    fn update_step_query_omits_unmodified_nullable_fields() {
+        let query = update_step_query(UpdateStepQueryOptions {
+            name: true,
+            route_config: true,
+            ..Default::default()
+        });
+
+        assert!(query.contains("$name: String"));
+        assert!(query.contains("name: $name"));
+        assert!(query.contains("$route_config: Json"));
+        assert!(query.contains("route_config: $route_config"));
+        assert!(!query.contains("$prompt: String"));
+        assert!(!query.contains("prompt: $prompt"));
+        assert!(!query.contains("$clear_output_schema: Boolean"));
     }
 }

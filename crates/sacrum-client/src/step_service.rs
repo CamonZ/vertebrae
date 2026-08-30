@@ -14,7 +14,7 @@ use crate::client::{GraphqlClient, with_fragments};
 use crate::error::SacrumClientError;
 use crate::queries::steps::{
     CREATE_STEP, DELETE_STEP, GET_STEP, LIST_STEPS, RESOLVE_STEP_SHORT_ID, STEP_FIELDS,
-    SYNC_STEP_TRANSITIONS, UPDATE_STEP,
+    SYNC_STEP_TRANSITIONS, UpdateStepQueryOptions, update_step_query,
 };
 use crate::queries::workflows::{LIST_WORKFLOWS, WORKFLOW_FIELDS};
 
@@ -92,12 +92,45 @@ impl SacrumStepService {
 
         Ok(())
     }
+
+    fn validate_route_step_writes(
+        step_type: &StepType,
+        prompt_write: bool,
+        output_schema_write: bool,
+        route_config_write: bool,
+    ) -> ServiceResult<()> {
+        if matches!(step_type, StepType::Route) && prompt_write {
+            return Err(ServiceError::validation_failed(
+                "route steps may only clear an existing prompt",
+            ));
+        }
+
+        if matches!(step_type, StepType::Route) && output_schema_write {
+            return Err(ServiceError::validation_failed(
+                "route steps do not accept output_schema; use route_config",
+            ));
+        }
+
+        if !matches!(step_type, StepType::Route) && route_config_write {
+            return Err(ServiceError::validation_failed(
+                "route_config is only valid for route steps",
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl StepService for SacrumStepService {
     async fn create_step(&self, step: &Step) -> ServiceResult<Step> {
         Self::validate_stop_transitions(&step.step_type, &step.transitions_to)?;
+        Self::validate_route_step_writes(
+            &step.step_type,
+            step.prompt.is_some(),
+            step.output_schema.is_some(),
+            step.route_config.is_some(),
+        )?;
 
         let query = with_fragments(CREATE_STEP, &[STEP_FIELDS]);
         let agent_config_str = serde_json::to_string(&step.agent_config)
@@ -257,13 +290,26 @@ impl StepService for SacrumStepService {
     }
 
     async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String> {
-        if matches!(
-            (&updates.step_type, &updates.prompt),
-            (Some(StepType::Route), Some(Some(_)))
-        ) {
-            return Err(ServiceError::validation_failed(
-                "route steps may only clear an existing prompt",
-            ));
+        let existing = if updates.step_type.is_none()
+            && (matches!(updates.prompt, Some(Some(_)))
+                || matches!(updates.output_schema, Some(Some(_)))
+                || matches!(updates.route_config, Some(Some(_))))
+        {
+            self.get_step(id).await?
+        } else {
+            None
+        };
+        let resulting_step_type = updates
+            .step_type
+            .clone()
+            .or_else(|| existing.as_ref().map(|step| step.step_type.clone()));
+        if let Some(step_type) = resulting_step_type.as_ref() {
+            Self::validate_route_step_writes(
+                step_type,
+                matches!(updates.prompt, Some(Some(_))),
+                matches!(updates.output_schema, Some(Some(_))),
+                matches!(updates.route_config, Some(Some(_))),
+            )?;
         }
 
         if let (Some(StepType::Stop), Some(transitions_to)) =
@@ -272,7 +318,23 @@ impl StepService for SacrumStepService {
             Self::validate_stop_transitions(&StepType::Stop, transitions_to)?;
         }
 
-        let query = with_fragments(UPDATE_STEP, &[STEP_FIELDS]);
+        let query = with_fragments(
+            &update_step_query(UpdateStepQueryOptions {
+                name: updates.name.is_some(),
+                goal: updates.goal.is_some(),
+                prompt: updates.prompt.is_some(),
+                agents: updates.agents.is_some(),
+                skills: updates.skills.is_some(),
+                agent_config: updates.agent_config.is_some(),
+                step_type: updates.step_type.is_some(),
+                output_schema: matches!(updates.output_schema, Some(Some(_))),
+                persistence_options: updates.persistence_options.is_some(),
+                route_config: updates.route_config.is_some(),
+                clear_output_schema: matches!(updates.output_schema, Some(None)),
+                step_order: updates.order.is_some(),
+            }),
+            &[STEP_FIELDS],
+        );
         let mut variables = json!({ "id": id });
 
         if let Some(name) = &updates.name {
@@ -710,6 +772,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_route_step_rejects_prompt_and_output_schema_writes() {
+        let service = create_wiremock_service("http://localhost:4000");
+        let step = Step::new("Route", "wf-1")
+            .with_step_type(StepType::Route)
+            .with_prompt("legacy route prompt");
+
+        let error = service.create_step(&step).await.unwrap_err();
+
+        assert!(error.to_string().contains("route steps"));
+    }
+
+    #[tokio::test]
     async fn test_create_step_serializes_persistence_options_and_maps_response() {
         let server = MockServer::start().await;
 
@@ -762,7 +836,9 @@ mod tests {
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        let step = Step::new("Route", "wf-1").with_route_config(route_config.clone());
+        let step = Step::new("Route", "wf-1")
+            .with_step_type(StepType::Route)
+            .with_route_config(route_config.clone());
         service.create_step(&step).await.unwrap();
 
         let requests = server.received_requests().await.unwrap();
@@ -1036,6 +1112,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_update_step_omits_unmodified_nullable_arguments() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(
+                "update_workflow_step",
+                make_step_response("step-1", "Updated", "wf-1", 0),
+            )))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        service
+            .update_step("step-1", &StepUpdate::new().with_name("Updated"))
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let query = body["query"].as_str().unwrap();
+        let operation = query.split("fragment StepFields").next().unwrap();
+        assert!(!operation.contains("prompt: $prompt"));
+        assert!(!operation.contains("route_config: $route_config"));
+        assert_eq!(body["variables"]["name"], "Updated");
+    }
+
+    #[tokio::test]
+    async fn test_update_existing_route_rejects_prompt_write_without_type_change() {
+        let server = MockServer::start().await;
+        let mut route_response = make_step_response("step-1", "Route", "wf-1", 0);
+        route_response["step_type"] = json!("route");
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(graphql_response("workflow_step", route_response)),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let error = service
+            .update_step("step-1", &StepUpdate::new().with_prompt("new prompt"))
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("route steps"));
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_update_route_config_rejects_non_route_result_before_mutation() {
+        let service = create_wiremock_service("http://localhost:4000");
+        let updates = StepUpdate::new()
+            .with_step_type(StepType::Execute)
+            .with_route_config(Some(json!({"version": 1})));
+
+        let error = service.update_step("step-1", &updates).await.unwrap_err();
+
+        assert!(error.to_string().contains("only valid for route steps"));
+    }
+
+    #[tokio::test]
     async fn test_update_step_serializes_and_clears_persistence_options() {
         let server = MockServer::start().await;
 
@@ -1093,12 +1234,19 @@ mod tests {
         service
             .update_step(
                 "step-1",
-                &StepUpdate::new().with_route_config(Some(route_config.clone())),
+                &StepUpdate::new()
+                    .with_step_type(StepType::Route)
+                    .with_route_config(Some(route_config.clone())),
             )
             .await
             .unwrap();
         service
-            .update_step("step-1", &StepUpdate::new().with_route_config(None))
+            .update_step(
+                "step-1",
+                &StepUpdate::new()
+                    .with_step_type(StepType::Route)
+                    .with_route_config(None),
+            )
             .await
             .unwrap();
 
