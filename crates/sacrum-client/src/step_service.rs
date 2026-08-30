@@ -71,6 +71,7 @@ impl SacrumStepService {
             agent_config,
             step_type,
             output_schema: response.output_schema.clone(),
+            route_config: None,
             persistence_options: response.persistence_options.clone(),
             transitions_to,
             order: response.step_order,
