@@ -7,6 +7,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -882,12 +883,26 @@ impl ClaudeSessionRuntime {
             .lock()
             .map_err(|_| LocalChatSessionError::SendFailed("Claude turn state is poisoned".into()))?
             .take();
-        let interrupt_error = if let Some(turn) = active_turn {
-            turn.interrupt().await.err()
-        } else {
-            None
+        let interrupt_error = match active_turn.as_ref() {
+            Some(turn) => {
+                match tokio::time::timeout(Duration::from_secs(2), turn.interrupt()).await {
+                    Ok(result) => result.err(),
+                    Err(_) => Some(HarnessError::Operation(
+                        "timed out interrupting active Claude turn".into(),
+                    )),
+                }
+            }
+            None => None,
         };
         let close_result = closing_session.session().handle.close().await;
+        if let Some(turn) = active_turn {
+            if tokio::time::timeout(Duration::from_secs(2), turn.await_outcome())
+                .await
+                .is_err()
+            {
+                log::warn!("Timed out awaiting Claude turn settlement for {session_id}");
+            }
+        }
         let result = match (interrupt_error, close_result) {
             (_, Ok(_)) => Ok(()),
             (None, Err(error)) => Err(LocalChatSessionError::SendFailed(error.to_string())),
@@ -897,27 +912,6 @@ impl ClaudeSessionRuntime {
         };
         closing_session.finish().await;
         result
-    }
-
-    pub(crate) async fn shutdown(&self) {
-        let session_ids = self
-            .sessions
-            .read()
-            .await
-            .active
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-
-        for session_id in session_ids {
-            if let Err(error) = self.close_session(&session_id).await {
-                log::warn!(
-                    "Failed to close Claude local-chat session {} during GUI shutdown: {}",
-                    session_id,
-                    error
-                );
-            }
-        }
     }
 
     pub(crate) async fn has_session(&self, session_id: &str) -> bool {

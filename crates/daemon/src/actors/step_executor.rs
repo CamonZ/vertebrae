@@ -431,25 +431,35 @@ impl Actor for StepExecutor {
         tracing::info!("StepExecutor stopping for execution {}", state.execution_id);
 
         let _ = state.harness_cancel_tx.send(true);
-        if let Some(turn) = state.harness_turn.take() {
-            let _ = turn.interrupt().await;
-            if tokio::time::timeout(std::time::Duration::from_secs(10), turn.await_outcome())
+        let turn = state.harness_turn.take();
+        if let Some(turn) = turn.as_ref()
+            && tokio::time::timeout(std::time::Duration::from_secs(2), turn.interrupt())
                 .await
                 .is_err()
-            {
-                tracing::error!(
-                    "Timed out awaiting Codex turn cleanup for execution {}",
-                    state.execution_id
-                );
-            }
+        {
+            tracing::error!(
+                "Timed out interrupting provider turn for execution {}",
+                state.execution_id
+            );
         }
-        if let Some(session) = state.harness_session.take()
+        let session = state.harness_session.take();
+        if let Some(session) = session
             && tokio::time::timeout(std::time::Duration::from_secs(10), session.close())
                 .await
                 .is_err()
         {
             tracing::error!(
-                "Timed out closing Codex App Server session for execution {}",
+                "Timed out closing provider session for execution {}",
+                state.execution_id
+            );
+        }
+        if let Some(turn) = turn
+            && tokio::time::timeout(std::time::Duration::from_secs(2), turn.await_outcome())
+                .await
+                .is_err()
+        {
+            tracing::error!(
+                "Timed out awaiting provider turn cleanup for execution {}",
                 state.execution_id
             );
         }

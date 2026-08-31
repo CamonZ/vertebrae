@@ -300,6 +300,7 @@ async fn get_or_create_project(
 #[specta::specta]
 pub async fn remove_project(
     state: State<'_, AppState>,
+    local_chat_manager: State<'_, LocalChatSessionManager>,
     socket_state: State<'_, tokio::sync::Mutex<crate::websocket_client::SacrumSocket>>,
     slug: String,
 ) -> Result<(), CommandError> {
@@ -316,8 +317,10 @@ pub async fn remove_project(
         });
     }
 
-    // If the removed project was the current one, clear selection, services, and socket
-    if state.project_config.get_current_project().as_deref() == Some(&slug) {
+    let removing_current = state.project_config.get_current_project().as_deref() == Some(&slug);
+    if removing_current {
+        log::info!("[LOCAL_CHAT] Closing sessions before removing current project {slug}");
+        let _project_switch = local_chat_manager.begin_project_switch().await;
         state
             .project_config
             .set_current_project(None)
@@ -376,16 +379,11 @@ pub async fn get_current_project_path(
 pub async fn set_current_project(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
+    local_chat_manager: State<'_, LocalChatSessionManager>,
     socket_state: State<'_, tokio::sync::Mutex<crate::websocket_client::SacrumSocket>>,
     slug: Option<String>,
 ) -> Result<(), CommandError> {
     log::info!("set_current_project called with slug: {:?}", slug);
-
-    // Update config
-    state
-        .project_config
-        .set_current_project(slug.clone())
-        .map_err(|e| CommandError { message: e })?;
 
     // Load Sacrum config once (used for both services and WebSocket)
     let sacrum_config = if let Some(ref project_slug) = slug {
@@ -400,6 +398,17 @@ pub async fn set_current_project(
     } else {
         None
     };
+
+    log::info!(
+        "[LOCAL_CHAT] Closing sessions before switching to project {:?}",
+        slug
+    );
+    let _project_switch = local_chat_manager.begin_project_switch().await;
+
+    state
+        .project_config
+        .set_current_project(slug.clone())
+        .map_err(|e| CommandError { message: e })?;
 
     // Switch the Phoenix project channel over the existing socket when the
     // Sacrum backend credentials are unchanged. Recreate only for backend

@@ -103,6 +103,7 @@ impl std::fmt::Debug for DaemonConfig {
 
 /// Maximum delay between reconnection attempts (30 seconds).
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
+const PROJECT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Compute the next backoff delay by doubling `current`, capped at `max`.
 fn next_backoff(current: Duration, max: Duration) -> Duration {
@@ -304,6 +305,23 @@ impl Actor for DaemonSupervisor {
     ) -> Result<(), ActorProcessingErr> {
         tracing::info!("DaemonSupervisor stopping, cleaning up");
 
+        let projects = std::mem::take(&mut state.projects);
+        for (project_id, actor_ref) in projects {
+            if let Err(error) = actor_ref
+                .stop_and_wait(
+                    Some("daemon post-stop cleanup".to_string()),
+                    Some(PROJECT_SHUTDOWN_TIMEOUT),
+                )
+                .await
+            {
+                tracing::error!(
+                    "ProjectSupervisor for {} did not finish post-stop cleanup: {:?}",
+                    project_id,
+                    error
+                );
+            }
+        }
+
         // Abort the reader pump
         if let Some(handle) = state.reader_handle.take() {
             handle.abort();
@@ -441,8 +459,19 @@ impl DaemonSupervisor {
             return Ok(());
         };
 
-        // Stop the ProjectSupervisor child actor.
-        actor_ref.stop(Some("project removed".to_string()));
+        if let Err(error) = actor_ref
+            .stop_and_wait(
+                Some("project removed".to_string()),
+                Some(PROJECT_SHUTDOWN_TIMEOUT),
+            )
+            .await
+        {
+            tracing::error!(
+                "ProjectSupervisor for {} did not finish shutdown cleanly: {:?}",
+                project_id,
+                error
+            );
+        }
 
         let topic = format!("project:{}", project_id);
         if let Err(e) = state.socket.leave(&topic).await {
@@ -606,10 +635,21 @@ impl DaemonSupervisor {
             handle.abort();
         }
 
-        // Stop all ProjectSupervisor children and leave channels.
         let entries: Vec<(String, ActorRef<ProjectMessage>)> = state.projects.drain().collect();
         for (project_id, actor_ref) in &entries {
-            actor_ref.stop(Some("daemon shutdown".to_string()));
+            if let Err(error) = actor_ref
+                .stop_and_wait(
+                    Some("daemon shutdown".to_string()),
+                    Some(PROJECT_SHUTDOWN_TIMEOUT),
+                )
+                .await
+            {
+                tracing::error!(
+                    "ProjectSupervisor for {} did not finish daemon shutdown cleanly: {:?}",
+                    project_id,
+                    error
+                );
+            }
             let topic = format!("project:{}", project_id);
             if let Err(e) = state.socket.leave(&topic).await {
                 tracing::warn!("Failed to leave channel {topic} during shutdown: {e}");

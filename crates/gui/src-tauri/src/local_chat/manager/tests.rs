@@ -1,6 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use vertebrae_harness_core::{
+    ApprovalCategory, ApprovalRequest, ControlRequest, ControlRequestEnvelope, ControlRequestId,
+    SessionId,
+};
 
 use super::*;
 use crate::local_chat::{HarnessCreateSessionInput, LocalChatHarnessInfo, LocalChatModelOption};
@@ -15,7 +19,6 @@ enum MockCall {
     Close {
         backend_session_id: String,
     },
-    Shutdown,
 }
 
 #[derive(Clone)]
@@ -121,13 +124,6 @@ impl LocalChatHarness for MockHarness {
                 backend_session_id: backend_session_id.to_string(),
             });
         Ok(())
-    }
-
-    async fn shutdown(&self) {
-        self.calls
-            .lock()
-            .expect("mock calls lock poisoned")
-            .push(MockCall::Shutdown);
     }
 
     async fn has_session(&self, _backend_session_id: &str) -> bool {
@@ -296,7 +292,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
 }
 
 #[tokio::test]
-async fn shutdown_closes_each_registered_harness_once_and_is_idempotent() {
+async fn close_all_sessions_closes_transient_ownership_and_can_be_reused() {
     let claude = MockHarness::new(LocalChatHarnessKind::Claude);
     let codex = MockHarness::new(LocalChatHarnessKind::Codex);
     let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![
@@ -304,11 +300,168 @@ async fn shutdown_closes_each_registered_harness_once_and_is_idempotent() {
         Arc::new(codex.clone()),
     ]);
 
+    manager
+        .create_session_with_runtime(
+            create_input(LocalChatHarnessKind::Claude, "project-a-session"),
+            LocalChatRuntime::inert_for_tests(),
+        )
+        .await
+        .expect("first project session should be registered");
+    manager
+        .create_session_with_runtime(
+            create_input(LocalChatHarnessKind::Codex, "project-a-codex"),
+            LocalChatRuntime::inert_for_tests(),
+        )
+        .await
+        .expect("second project session should be registered");
+
+    manager.close_all_sessions().await;
+
+    assert_eq!(
+        manager.send_message("project-a-session", "stale").await,
+        Err(LocalChatSessionError::SessionNotFound(
+            "project-a-session".to_string()
+        ))
+    );
+    manager
+        .create_session_with_runtime(
+            create_input(LocalChatHarnessKind::Claude, "project-b-session"),
+            LocalChatRuntime::inert_for_tests(),
+        )
+        .await
+        .expect("manager should accept sessions after a project switch");
+
+    assert_eq!(
+        claude
+            .calls()
+            .into_iter()
+            .filter(|call| matches!(call, MockCall::Close { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        codex
+            .calls()
+            .into_iter()
+            .filter(|call| matches!(call, MockCall::Close { .. }))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn project_switch_guard_blocks_new_session_creation_until_boundary_finishes() {
+    let manager = Arc::new(LocalChatSessionManager::with_harnesses_for_tests(vec![
+        Arc::new(MockHarness::new(LocalChatHarnessKind::Claude)),
+    ]));
+    let project_switch = manager.begin_project_switch().await;
+    let manager_for_create = Arc::clone(&manager);
+    let mut create = tokio::spawn(async move {
+        manager_for_create
+            .create_session_with_runtime(
+                create_input(LocalChatHarnessKind::Claude, "after-switch"),
+                LocalChatRuntime::inert_for_tests(),
+            )
+            .await
+    });
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(20), &mut create)
+            .await
+            .is_err(),
+        "session creation must wait while the project switch guard is held"
+    );
+    drop(project_switch);
+    create
+        .await
+        .expect("creation task should join")
+        .expect("creation should proceed after the project switch boundary");
+}
+
+#[tokio::test]
+async fn close_all_sessions_denies_pending_controls_before_provider_close() {
+    let bridge = PermissionBridge::new();
+    let harness = MockHarness::new(LocalChatHarnessKind::Codex);
+    let manager = LocalChatSessionManager::with_harnesses_and_permission_bridge(
+        vec![Arc::new(harness.clone())],
+        bridge.clone(),
+    );
+    let response = bridge.queue_harness_control_for_tests(
+        "control-session",
+        ControlRequestEnvelope {
+            request_id: ControlRequestId::new("control-request"),
+            session_id: Some(SessionId::new("control-session")),
+            turn_id: None,
+            thread_id: None,
+            is_root: Some(true),
+            request: ControlRequest::Approval(ApprovalRequest {
+                category: ApprovalCategory::CommandExecution,
+                title: "Run command".into(),
+                details: None,
+                modification_supported: false,
+            }),
+            presentation: None,
+            timeout_ms: None,
+            automatic_resolution: None,
+        },
+    );
+    manager
+        .create_session_with_runtime(
+            create_input(LocalChatHarnessKind::Codex, "control-session"),
+            LocalChatRuntime::inert_for_tests(),
+        )
+        .await
+        .expect("control session should be registered");
+
+    manager.close_all_sessions().await;
+
+    let decision = response.await.expect("close should resolve the control");
+    assert_eq!(decision.behavior, "deny");
+    assert!(decision
+        .message
+        .as_deref()
+        .is_some_and(|message| message.contains("project")));
+    assert_eq!(
+        bridge.pending_harness_control_count_for_session("control-session"),
+        0
+    );
+}
+
+#[tokio::test]
+async fn shutdown_reuses_close_all_sessions_and_is_idempotent() {
+    let claude = MockHarness::new(LocalChatHarnessKind::Claude);
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![Arc::new(claude.clone())]);
+    manager
+        .create_session_with_runtime(
+            create_input(LocalChatHarnessKind::Claude, "shutdown-session"),
+            LocalChatRuntime::inert_for_tests(),
+        )
+        .await
+        .expect("shutdown session should be registered");
+
     manager.shutdown().await;
     manager.shutdown().await;
 
-    assert_eq!(claude.calls(), vec![MockCall::Shutdown]);
-    assert_eq!(codex.calls(), vec![MockCall::Shutdown]);
+    assert_eq!(
+        claude
+            .calls()
+            .into_iter()
+            .filter(|call| matches!(call, MockCall::Close { .. }))
+            .count(),
+        1
+    );
+
+    assert_eq!(
+        manager
+            .create_session_with_runtime(
+                create_input(LocalChatHarnessKind::Claude, "after-shutdown"),
+                LocalChatRuntime::inert_for_tests(),
+            )
+            .await,
+        Err(LocalChatSessionError::StartFailed(
+            "cannot create a local chat session while the application is shutting down".into(),
+        ))
+    );
 }
 
 #[tokio::test]

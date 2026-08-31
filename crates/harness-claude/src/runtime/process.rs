@@ -42,6 +42,8 @@ pub(super) async fn spawn_process(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(unix)]
+    command.process_group(0);
     for attempt in 0..=EXECUTABLE_BUSY_RETRIES {
         match command.spawn() {
             Ok(child) => return Ok(child),
@@ -123,10 +125,16 @@ pub(super) async fn wait_then_reap(
     child: &mut Child,
     grace: std::time::Duration,
 ) -> (Option<std::process::ExitStatus>, bool) {
+    let pid = child.id();
     match tokio::time::timeout(grace, child.wait()).await {
-        Ok(Ok(status)) => (Some(status), false),
+        Ok(Ok(status)) => {
+            terminate_process_group(pid, true);
+            (Some(status), false)
+        }
         Ok(Err(_)) => (None, false),
         Err(_) => {
+            terminate_process_group(pid, false);
+            #[cfg(not(unix))]
             let _ = child.start_kill();
             let status = tokio::time::timeout(
                 grace.max(std::time::Duration::from_millis(250)),
@@ -135,6 +143,21 @@ pub(super) async fn wait_then_reap(
             .await
             .ok()
             .and_then(Result::ok);
+            let status = if status.is_none() {
+                terminate_process_group(pid, true);
+                #[cfg(not(unix))]
+                let _ = child.start_kill();
+                tokio::time::timeout(
+                    grace.max(std::time::Duration::from_millis(250)),
+                    child.wait(),
+                )
+                .await
+                .ok()
+                .and_then(Result::ok)
+            } else {
+                terminate_process_group(pid, true);
+                status
+            };
             (status, true)
         }
     }
@@ -144,15 +167,51 @@ pub(super) async fn reap(
     child: &mut Child,
     cleanup_timeout: std::time::Duration,
 ) -> Option<std::process::ExitStatus> {
+    let pid = child.id();
     if let Ok(Some(status)) = child.try_wait() {
+        terminate_process_group(pid, true);
         return Some(status);
     }
+    terminate_process_group(pid, false);
+    #[cfg(not(unix))]
     let _ = child.start_kill();
-    tokio::time::timeout(cleanup_timeout, child.wait())
+    let status = tokio::time::timeout(cleanup_timeout, child.wait())
         .await
         .ok()
-        .and_then(Result::ok)
+        .and_then(Result::ok);
+    if status.is_none() {
+        terminate_process_group(pid, true);
+        #[cfg(not(unix))]
+        let _ = child.start_kill();
+        tokio::time::timeout(cleanup_timeout, child.wait())
+            .await
+            .ok()
+            .and_then(Result::ok)
+    } else {
+        terminate_process_group(pid, true);
+        status
+    }
 }
+
+#[cfg(unix)]
+fn terminate_process_group(pid: Option<u32>, force: bool) {
+    let Some(pid) = pid else {
+        return;
+    };
+    let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
+    let result = unsafe { libc::kill(-(pid as libc::pid_t), signal) };
+    if result == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            log::warn!(
+                "[CLAUDE] failed to clean up process group pid={pid}, force={force}: {error}"
+            );
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_process_group(_pid: Option<u32>, _force: bool) {}
 
 #[cfg(all(test, unix))]
 mod tests {
@@ -215,5 +274,32 @@ mod tests {
             .expect("the launcher should retry a transient executable-busy error");
         release_writer.await.unwrap();
         assert!(child.wait().await.unwrap().success());
+    }
+
+    #[tokio::test]
+    async fn reap_terminates_descendants_after_leader_exits() {
+        let temp = TempDir::new().expect("temporary directory should be available");
+        let marker = temp.path().join("descendant-survived");
+        let script = format!(
+            "trap '' TERM; (sleep 1; touch '{}') & exit 0",
+            marker.display()
+        );
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(script)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0);
+        let mut child = command.spawn().expect("fixture process should start");
+
+        let status = reap(&mut child, Duration::from_millis(250)).await;
+        tokio::time::sleep(Duration::from_millis(1_200)).await;
+
+        assert!(status.is_some(), "the provider child must be reaped");
+        assert!(
+            !marker.exists(),
+            "a Claude helper process must not outlive its provider tree"
+        );
     }
 }
