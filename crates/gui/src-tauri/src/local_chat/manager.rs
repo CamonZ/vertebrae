@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -178,10 +178,8 @@ impl LocalChatSessionManager {
         let harness_kind = self.registry_harness(backend_session_id).await?;
         let harness = self.harness(harness_kind)?;
         let result = harness.close_session(backend_session_id).await;
-        if result.is_ok() || matches!(result, Err(LocalChatSessionError::SessionNotFound(_))) {
-            self.remove_registry_entry(backend_session_id, harness_kind)
-                .await;
-        }
+        self.remove_registry_entry(backend_session_id, harness_kind)
+            .await;
         result
     }
 
@@ -245,7 +243,7 @@ impl LocalChatSessionManager {
                     log::error!(
                         "[LOCAL_CHAT] close_all_sessions cannot resolve harness {harness_kind:?} for session {session_id}"
                     );
-                    return (session_id, true);
+                    return true;
                 };
                 match tokio::time::timeout(
                     LOCAL_CHAT_SHUTDOWN_TIMEOUT,
@@ -257,34 +255,27 @@ impl LocalChatSessionManager {
                     log::debug!(
                         "[LOCAL_CHAT] close_all_sessions closed session {session_id} via {harness_kind:?}"
                     );
-                    (session_id, false)
+                    false
                 }
                 Ok(Err(error)) => {
                     log::warn!(
                         "[LOCAL_CHAT] close_all_sessions failed for session {session_id} via {harness_kind:?}: {error}"
                     );
-                    (session_id, true)
+                    true
                 }
                 Err(_) => {
                     log::error!(
                         "[LOCAL_CHAT] close_all_sessions timed out closing session {session_id} via {harness_kind:?}"
                     );
-                    (session_id, true)
+                    true
                 }
                 }
             },
         ))
         .await;
-        let failed_ids = results
-            .into_iter()
-            .filter_map(|(session_id, failed)| failed.then_some(session_id))
-            .collect::<HashSet<_>>();
-        let failures = failed_ids.len();
+        let failures = results.into_iter().filter(|failed| *failed).count();
 
-        self.session_registry
-            .write()
-            .await
-            .retain(|session_id, _| failed_ids.contains(session_id));
+        self.session_registry.write().await.clear();
         log::info!(
             "[LOCAL_CHAT] close_all_sessions finished: {} session(s), {} close failure(s)",
             session_count,

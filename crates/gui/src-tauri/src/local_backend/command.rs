@@ -177,7 +177,8 @@ impl ProcessRunner for SystemProcessRunner {
                 output: error.to_string(),
             })?,
             Err(_) => {
-                terminate_process_group(&mut child).await;
+                vertebrae_harness_core::signal_process_group(child.id(), true);
+                let _ = child.kill().await;
                 let _ = child.wait().await;
                 let stdout = stdout_task.await.unwrap_or_default();
                 let stderr = stderr_task.await.unwrap_or_default();
@@ -233,25 +234,6 @@ async fn read_bounded(mut reader: impl AsyncRead + Unpin, limit: usize) -> Bound
         text: String::from_utf8_lossy(&captured).into_owned(),
         truncated,
     }
-}
-
-#[cfg(unix)]
-async fn terminate_process_group(child: &mut tokio::process::Child) {
-    if let Some(id) = child.id() {
-        // The child is created as its own process-group leader, so the negative PID
-        // targets only that command tree and cannot signal the GUI's process group.
-        let result = unsafe { libc::kill(-(id as i32), libc::SIGKILL) };
-        if result != 0 {
-            let _ = child.kill().await;
-        }
-    } else {
-        let _ = child.kill().await;
-    }
-}
-
-#[cfg(not(unix))]
-async fn terminate_process_group(child: &mut tokio::process::Child) {
-    let _ = child.kill().await;
 }
 
 pub(crate) fn discover_docker_cli() -> Result<PathBuf, LocalBackendError> {

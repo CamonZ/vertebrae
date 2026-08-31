@@ -27,6 +27,7 @@ struct MockHarness {
     available: bool,
     unavailable_reason: Option<String>,
     fail_create: Option<LocalChatSessionError>,
+    fail_close: Option<LocalChatSessionError>,
     calls: Arc<Mutex<Vec<MockCall>>>,
 }
 
@@ -37,6 +38,7 @@ impl MockHarness {
             available: true,
             unavailable_reason: None,
             fail_create: None,
+            fail_close: None,
             calls: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -49,6 +51,11 @@ impl MockHarness {
 
     fn fail_create(mut self, error: LocalChatSessionError) -> Self {
         self.fail_create = Some(error);
+        self
+    }
+
+    fn fail_close(mut self, error: LocalChatSessionError) -> Self {
+        self.fail_close = Some(error);
         self
     }
 
@@ -123,6 +130,9 @@ impl LocalChatHarness for MockHarness {
             .push(MockCall::Close {
                 backend_session_id: backend_session_id.to_string(),
             });
+        if let Some(error) = self.fail_close.clone() {
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -289,6 +299,35 @@ async fn manager_routes_create_send_and_close_through_registry() {
             },
         ]
     );
+}
+
+#[tokio::test]
+async fn close_all_sessions_drops_registry_when_provider_close_fails() {
+    let harness = MockHarness::new(LocalChatHarnessKind::Codex)
+        .fail_close(LocalChatSessionError::StartFailed("close timed out".into()));
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![Arc::new(harness)]);
+
+    manager
+        .create_session_with_runtime(
+            create_input(LocalChatHarnessKind::Codex, "ghost-session"),
+            LocalChatRuntime::inert_for_tests(),
+        )
+        .await
+        .expect("session should be registered");
+
+    manager.close_all_sessions().await;
+
+    assert!(
+        !manager.has_session("ghost-session").await,
+        "failed close must still drop live ownership"
+    );
+    manager
+        .create_session_with_runtime(
+            create_input(LocalChatHarnessKind::Codex, "ghost-session"),
+            LocalChatRuntime::inert_for_tests(),
+        )
+        .await
+        .expect("the same conversation id must be recreatable after a failed close");
 }
 
 #[tokio::test]

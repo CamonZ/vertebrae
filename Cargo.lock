@@ -2426,7 +2426,6 @@ dependencies = [
  "fs2",
  "futures",
  "getrandom 0.2.17",
- "libc",
  "log",
  "objc2-app-kit",
  "objc2-foundation",
@@ -7439,7 +7438,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "libc",
  "log",
  "serde",
  "serde_json",
@@ -7457,7 +7455,6 @@ dependencies = [
  "chrono",
  "futures",
  "jsonschema",
- "libc",
  "log",
  "serde",
  "serde_json",
@@ -7474,6 +7471,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "libc",
+ "log",
  "serde",
  "serde_json",
  "tempfile",

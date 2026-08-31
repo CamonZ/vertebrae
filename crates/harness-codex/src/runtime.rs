@@ -621,8 +621,7 @@ struct SessionState {
     root_thread_id: ThreadId,
     default_output_schema: Option<Value>,
     root_turn_gate: AsyncMutex<()>,
-    turn_cancellations: AsyncMutex<HashMap<String, watch::Sender<bool>>>,
-    close_gate: AsyncMutex<()>,
+    cleanup: AsyncMutex<Option<watch::Receiver<Option<SessionCloseOutcome>>>>,
     children: Mutex<HashMap<String, ChildInfo>>,
     declared_threads: Mutex<HashSet<String>>,
     closed: watch::Sender<bool>,
@@ -1034,6 +1033,7 @@ impl SessionState {
         // provider instead of dropping messages from a broadcast ring.
         let mut notifications = self.connection.notifications.lock().await;
         let mut connection_closed = self.connection.closed.subscribe();
+        let mut session_closed = self.closed_rx.clone();
         let correlation = self.root_correlation(Some(turn_id.clone()), run_id.clone());
         self.emit(
             self.root_stream_id.clone(),
@@ -1101,7 +1101,29 @@ impl SessionState {
                 return Err(HarnessError::Operation(error));
             }
             let outcome = loop {
+                if *session_closed.borrow() {
+                    break cancelled_outcome(
+                        if run_id.is_none() {
+                            CompletionStatus::Interrupted
+                        } else {
+                            CompletionStatus::Cancelled
+                        },
+                        accumulator.usage,
+                    );
+                }
                 tokio::select! {
+                    changed = session_closed.changed() => {
+                        if changed.is_ok() && *session_closed.borrow() {
+                            break cancelled_outcome(
+                                if run_id.is_none() {
+                                    CompletionStatus::Interrupted
+                                } else {
+                                    CompletionStatus::Cancelled
+                                },
+                                accumulator.usage,
+                            );
+                        }
+                    }
                     changed = cancel_rx.changed() => {
                         if changed.is_ok() && *cancel_rx.borrow() {
                             let provider_terminal = tokio::time::timeout(
@@ -1256,22 +1278,33 @@ impl SessionState {
     }
 
     async fn close(
-        &self,
+        self: &Arc<Self>,
         status: SessionCloseStatus,
         error: Option<String>,
     ) -> Result<SessionCloseOutcome, HarnessError> {
-        let _close_gate = self.close_gate.lock().await;
-        if *self.closed_rx.borrow() {
-            return Ok(SessionCloseOutcome {
-                status: SessionCloseStatus::Closed,
-                error: None,
-            });
+        let mut slot = self.cleanup.lock().await;
+        if let Some(rx) = slot.as_ref() {
+            let rx = rx.clone();
+            drop(slot);
+            return wait_cleanup(rx).await;
         }
+        let (tx, rx) = watch::channel(None);
+        *slot = Some(rx.clone());
+        drop(slot);
+        let this = Arc::clone(self);
+        tokio::spawn(async move {
+            let outcome = this.close_inner(status, error).await;
+            let _ = tx.send(Some(outcome));
+        });
+        wait_cleanup(rx).await
+    }
+
+    async fn close_inner(
+        &self,
+        status: SessionCloseStatus,
+        error: Option<String>,
+    ) -> SessionCloseOutcome {
         let _ = self.closed.send(true);
-        let cancellations = std::mem::take(&mut *self.turn_cancellations.lock().await);
-        for cancel in cancellations.values() {
-            let _ = cancel.send(true);
-        }
         self.connection.close().await;
         let mut process = self.process.lock().await;
         cleanup_process(&mut process, self.config.cleanup_timeout).await;
@@ -1296,7 +1329,20 @@ impl SessionState {
                 UpdateSemantics::Snapshot,
             )
             .await;
-        Ok(outcome)
+        outcome
+    }
+}
+
+async fn wait_cleanup(
+    mut rx: watch::Receiver<Option<SessionCloseOutcome>>,
+) -> Result<SessionCloseOutcome, HarnessError> {
+    loop {
+        if let Some(outcome) = rx.borrow().clone() {
+            return Ok(outcome);
+        }
+        rx.changed().await.map_err(|_| {
+            HarnessError::Operation("Codex App Server cleanup ended without an outcome".into())
+        })?;
     }
 }
 
@@ -1453,12 +1499,6 @@ impl SessionHandle for CodexSessionHandle {
         let turn_id = request.turn_id.clone();
         let turn_id_for_task = turn_id.clone();
         let task_state = Arc::clone(&state);
-        let cancellation_key = turn_id.as_str().to_string();
-        state
-            .turn_cancellations
-            .lock()
-            .await
-            .insert(cancellation_key.clone(), cancel.clone());
         tokio::spawn(async move {
             let _gate = task_state.root_turn_gate.lock().await;
             let result = if *task_state.closed_rx.borrow() {
@@ -1475,11 +1515,6 @@ impl SessionHandle for CodexSessionHandle {
                     )
                     .await
             };
-            task_state
-                .turn_cancellations
-                .lock()
-                .await
-                .remove(&cancellation_key);
             let _ = tx.send(match result {
                 Ok(value) => OutcomeState::Ready(value),
                 Err(error) => OutcomeState::Failed(error.into()),
@@ -1492,14 +1527,7 @@ impl SessionHandle for CodexSessionHandle {
         }))
     }
     async fn close(&self) -> Result<SessionCloseOutcome, HarnessError> {
-        let state = Arc::clone(&self.state);
-        tokio::spawn(async move { state.close(SessionCloseStatus::Closed, None).await })
-            .await
-            .map_err(|error| {
-                HarnessError::Operation(format!(
-                    "Codex App Server cleanup task failed to join: {error}"
-                ))
-            })?
+        self.state.close(SessionCloseStatus::Closed, None).await
     }
 }
 
@@ -1640,11 +1668,6 @@ impl HarnessRuntime for CodexRuntime {
         let task_run_id = run_id.clone();
         let task_state = Arc::clone(&state);
         let turn_key = format!("{}:turn", task_run_id);
-        state
-            .turn_cancellations
-            .lock()
-            .await
-            .insert(turn_key.clone(), cancel.clone());
         tokio::spawn(async move {
             let _gate = task_state.root_turn_gate.lock().await;
             let outcome = if *task_state.closed_rx.borrow() {
@@ -1661,7 +1684,6 @@ impl HarnessRuntime for CodexRuntime {
                     )
                     .await
             };
-            task_state.turn_cancellations.lock().await.remove(&turn_key);
             let run = match outcome {
                 Ok(outcome) => RunOutcome {
                     status: outcome.status,
@@ -1864,8 +1886,7 @@ async fn setup_session(
         root_thread_id: root_thread_id.clone(),
         default_output_schema,
         root_turn_gate: AsyncMutex::new(()),
-        turn_cancellations: AsyncMutex::new(HashMap::new()),
-        close_gate: AsyncMutex::new(()),
+        cleanup: AsyncMutex::new(None),
         children: Mutex::new(HashMap::new()),
         declared_threads: Mutex::new([thread.clone()].into_iter().collect()),
         closed,

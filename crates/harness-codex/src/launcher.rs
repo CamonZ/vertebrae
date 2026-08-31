@@ -7,7 +7,7 @@ use tokio::{
     process::{Child, Command},
     time::{Instant, sleep},
 };
-use vertebrae_harness_core::HarnessError;
+use vertebrae_harness_core::{HarnessError, ReapMode, reap_optional_process};
 
 use crate::CodexProviderConfig;
 
@@ -134,84 +134,5 @@ pub async fn ready_probe(address: impl ToSocketAddrs) -> Result<bool, HarnessErr
 }
 
 pub(crate) async fn cleanup_process(process: &mut Option<Child>, timeout: Duration) {
-    let Some(child) = process.as_mut() else {
-        return;
-    };
-    let pid = child.id();
-    if let Ok(Ok(_)) = tokio::time::timeout(timeout, child.wait()).await {
-        terminate_process_group(pid, "normal exit", true);
-        *process = None;
-        return;
-    }
-    terminate_process_group(pid, "graceful cleanup", false);
-    #[cfg(not(unix))]
-    let _ = child.start_kill();
-    if tokio::time::timeout(timeout, child.wait()).await.is_err() {
-        terminate_process_group(pid, "forced cleanup", true);
-        #[cfg(not(unix))]
-        let _ = child.start_kill();
-        let _ = tokio::time::timeout(timeout, child.wait()).await;
-    } else {
-        terminate_process_group(pid, "forced cleanup after leader exit", true);
-    }
-    log::debug!("[CODEX] cleaned up App Server process tree pid={pid:?}");
-    *process = None;
-}
-
-#[cfg(unix)]
-fn terminate_process_group(pid: Option<u32>, phase: &str, force: bool) {
-    let Some(pid) = pid else {
-        return;
-    };
-    let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
-    let result = unsafe { libc::kill(-(pid as libc::pid_t), signal) };
-    if result == -1 {
-        let error = std::io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ESRCH) {
-            log::warn!("[CODEX] failed {phase} process-group cleanup for pid={pid}: {error}");
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn terminate_process_group(_pid: Option<u32>, _phase: &str, _force: bool) {}
-
-#[cfg(all(test, unix))]
-mod tests {
-    use std::process::Stdio;
-    use std::time::Duration;
-
-    use tempfile::TempDir;
-    use tokio::process::Command;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn cleanup_process_terminates_descendants_after_leader_exits() {
-        let temp = TempDir::new().expect("temporary directory should be available");
-        let marker = temp.path().join("descendant-survived");
-        let script = format!(
-            "trap '' TERM; (sleep 1; touch '{}') & exit 0",
-            marker.display()
-        );
-        let mut command = Command::new("sh");
-        command
-            .arg("-c")
-            .arg(script)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .process_group(0);
-        let child = command.spawn().expect("fixture process should start");
-        let mut process = Some(child);
-
-        cleanup_process(&mut process, Duration::from_millis(250)).await;
-        tokio::time::sleep(Duration::from_millis(1_200)).await;
-
-        assert!(process.is_none(), "cleanup should release the child handle");
-        assert!(
-            !marker.exists(),
-            "a descendant must not outlive the App Server process tree"
-        );
-    }
+    let _ = reap_optional_process(process, timeout, ReapMode::WaitThenSignal).await;
 }

@@ -5,7 +5,7 @@ use tokio::{
     process::{Child, Command},
     sync::mpsc,
 };
-use vertebrae_harness_core::HarnessError;
+use vertebrae_harness_core::{HarnessError, ReapMode, reap_process_tree};
 
 use crate::ClaudeCommandSpec;
 
@@ -125,93 +125,18 @@ pub(super) async fn wait_then_reap(
     child: &mut Child,
     grace: std::time::Duration,
 ) -> (Option<std::process::ExitStatus>, bool) {
-    let pid = child.id();
-    match tokio::time::timeout(grace, child.wait()).await {
-        Ok(Ok(status)) => {
-            terminate_process_group(pid, true);
-            (Some(status), false)
-        }
-        Ok(Err(_)) => (None, false),
-        Err(_) => {
-            terminate_process_group(pid, false);
-            #[cfg(not(unix))]
-            let _ = child.start_kill();
-            let status = tokio::time::timeout(
-                grace.max(std::time::Duration::from_millis(250)),
-                child.wait(),
-            )
-            .await
-            .ok()
-            .and_then(Result::ok);
-            let status = if status.is_none() {
-                terminate_process_group(pid, true);
-                #[cfg(not(unix))]
-                let _ = child.start_kill();
-                tokio::time::timeout(
-                    grace.max(std::time::Duration::from_millis(250)),
-                    child.wait(),
-                )
-                .await
-                .ok()
-                .and_then(Result::ok)
-            } else {
-                terminate_process_group(pid, true);
-                status
-            };
-            (status, true)
-        }
-    }
+    let outcome = reap_process_tree(child, grace, ReapMode::WaitThenSignal).await;
+    (outcome.status, outcome.forced)
 }
 
 pub(super) async fn reap(
     child: &mut Child,
     cleanup_timeout: std::time::Duration,
 ) -> Option<std::process::ExitStatus> {
-    let pid = child.id();
-    if let Ok(Some(status)) = child.try_wait() {
-        terminate_process_group(pid, true);
-        return Some(status);
-    }
-    terminate_process_group(pid, false);
-    #[cfg(not(unix))]
-    let _ = child.start_kill();
-    let status = tokio::time::timeout(cleanup_timeout, child.wait())
+    reap_process_tree(child, cleanup_timeout, ReapMode::SignalFirst)
         .await
-        .ok()
-        .and_then(Result::ok);
-    if status.is_none() {
-        terminate_process_group(pid, true);
-        #[cfg(not(unix))]
-        let _ = child.start_kill();
-        tokio::time::timeout(cleanup_timeout, child.wait())
-            .await
-            .ok()
-            .and_then(Result::ok)
-    } else {
-        terminate_process_group(pid, true);
-        status
-    }
+        .status
 }
-
-#[cfg(unix)]
-fn terminate_process_group(pid: Option<u32>, force: bool) {
-    let Some(pid) = pid else {
-        return;
-    };
-    let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
-    let result = unsafe { libc::kill(-(pid as libc::pid_t), signal) };
-    if result == -1 {
-        let error = std::io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ESRCH) {
-            log::warn!(
-                "[CLAUDE] failed to clean up process group pid={pid}, force={force}: {error}"
-            );
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn terminate_process_group(_pid: Option<u32>, _force: bool) {}
 
 #[cfg(all(test, unix))]
 mod tests {

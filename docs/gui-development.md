@@ -97,9 +97,12 @@ The manager's session registry is authoritative live ownership and is
 intentionally transient. `close_all_sessions()` is awaited before a project
 switch and during Tauri exit; it interrupts active turns, fails pending
 permission controls, closes provider transports, and delegates bounded
-process-tree reaping to the provider harnesses. Project switches do not delete
-chat history or provider resume IDs, so the next project-scoped view can start
-a fresh provider session and resume durable conversation state when supported.
+process-tree reaping to the provider harnesses. Registry entries are dropped
+once close is initiated, including when a close times out or fails, so a later
+create for the same conversation id is not blocked by a ghost owner. Project
+switches do not delete chat history or provider resume IDs, so the next
+project-scoped view can start a fresh provider session and resume durable
+conversation state when supported.
 
 The GUI currently uses one Codex App Server process per live GUI session. A
 single long-lived App Server was evaluated, but the existing harness contract
