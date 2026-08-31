@@ -589,6 +589,94 @@ done
 }
 
 #[tokio::test]
+async fn persistent_session_correlates_task_notification_continuations_before_next_turn() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "persistent-task-notification",
+        r#"#!/bin/sh
+initialized=0
+turn=0
+while IFS= read -r line; do
+  if [ "$initialized" -eq 0 ]; then
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"notification-session","transcript_path":"opaque://notification.jsonl"}'
+    initialized=1
+  fi
+  if [ "$turn" -eq 0 ]; then
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"first answer"}]}}'
+    printf '%s\n' '{"type":"result","subtype":"success","result":"first answer"}'
+    printf '%s\n' '{"type":"system","subtype":"task_notification","task_id":"task-1","status":"completed"}'
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"background answer"}]}}'
+    printf '%s\n' '{"type":"result","subtype":"success","result":"background answer"}'
+    turn=1
+  else
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"follow-up answer"}]}}'
+    printf '%s\n' '{"type":"result","subtype":"success","result":"follow-up answer"}'
+  fi
+done
+"#,
+    );
+    let sink = Arc::new(CollectSink::default());
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("requested-notification-session"),
+                stream_id: StreamId::from("notification-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            sink.clone(),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+
+    for (turn_id, content) in [("turn-1", "first"), ("turn-2", "follow-up")] {
+        let turn = session
+            .send(SendTurnRequest {
+                turn_id: TurnId::from(turn_id),
+                content: content.into(),
+                output_schema: None,
+            })
+            .await
+            .unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(3), turn.await_outcome())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(outcome.status, CompletionStatus::Completed);
+        assert_balanced_turn(&sink.0.lock().unwrap(), turn_id, &outcome);
+    }
+
+    assert_eq!(
+        session.close().await.unwrap().status,
+        vertebrae_harness_core::SessionCloseStatus::Closed
+    );
+
+    let events = sink.0.lock().unwrap();
+    let background = events
+        .iter()
+        .filter(|event| {
+            event.correlation.turn_id.as_ref().map(TurnId::as_str)
+                == Some("claude-task-notification-4")
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        background
+            .iter()
+            .any(|event| matches!(event.payload, HarnessEventPayloadV1::TurnStarted(_)))
+    );
+    assert!(
+        background
+            .iter()
+            .any(|event| matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_)))
+    );
+    assert!(background.iter().any(|event| {
+        matches!(&event.payload, HarnessEventPayloadV1::Text(text) if text.text == "background answer")
+    }));
+}
+
+#[tokio::test]
 async fn persistent_session_survives_compact_skill_records() {
     let temp = TempDir::new().unwrap();
     let executable = script(

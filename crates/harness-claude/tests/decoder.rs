@@ -207,6 +207,66 @@ fn benign_protocol_records_are_silent_but_rate_limit_failures_are_errors() {
 }
 
 #[test]
+fn task_notification_continuation_gets_a_correlated_root_turn() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::interactive(
+        SessionId::from("task-notification-session"),
+        StreamId::from("task-notification-stream"),
+    ));
+    decoder
+        .decode_line(
+            r#"{"type":"system","subtype":"init","session_id":"task-notification-session"}"#,
+        )
+        .unwrap();
+
+    assert!(decoder
+        .decode_line(
+            r#"{"type":"system","subtype":"task_notification","task_id":"task-1","status":"completed","session_id":"task-notification-session"}"#,
+        )
+        .unwrap()
+        .is_empty());
+
+    let started_events = decoder
+        .decode_line(
+            r#"{"type":"stream_event","session_id":"task-notification-session","parent_tool_use_id":null,"event":{"type":"message_start"}}"#,
+        )
+        .unwrap();
+    let started = started_events
+        .iter()
+        .find(|draft| matches!(&draft.payload, HarnessEventPayloadV1::TurnStarted(_)))
+        .expect("background continuation should start a root turn");
+    let continuation = decoder
+        .decode_line(
+            r#"{"type":"stream_event","session_id":"task-notification-session","parent_tool_use_id":null,"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"background result"}}}"#,
+        )
+        .unwrap();
+    let text = continuation
+        .iter()
+        .find(|draft| matches!(&draft.payload, HarnessEventPayloadV1::Text(_)))
+        .expect("background continuation should preserve its text");
+    let turn_id = started
+        .correlation
+        .turn_id
+        .as_ref()
+        .expect("background continuation should have a turn id");
+    assert_eq!(text.correlation.turn_id.as_ref(), Some(turn_id));
+    assert_eq!(
+        text.correlation.thread_id.as_ref().unwrap().as_str(),
+        "task-notification-session"
+    );
+
+    let terminal = decoder
+        .decode_line(
+            r#"{"type":"result","subtype":"success","session_id":"task-notification-session","result":"done","is_error":false}"#,
+        )
+        .unwrap();
+    let finished = terminal
+        .iter()
+        .find(|draft| matches!(&draft.payload, HarnessEventPayloadV1::TurnFinished(_)))
+        .expect("background continuation should finish its root turn");
+    assert_eq!(finished.correlation.turn_id.as_ref(), Some(turn_id));
+}
+
+#[test]
 fn tool_input_json_deltas_are_silent_until_complete_tool_use() {
     let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
         RunId::from("tool-input-run"),
