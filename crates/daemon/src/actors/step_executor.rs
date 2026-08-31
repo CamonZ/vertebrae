@@ -24,6 +24,7 @@ use vertebrae_harness_core::{
     ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
     RequestConfig, ResolutionSource, RunHandle, RunOutcome, SendTurnRequest, SessionCloseStatus,
     SessionHandle, SessionUsage, StartSessionRequest, StreamId, TurnHandle, TurnId, TurnOutcome,
+    interrupt_close_and_await,
 };
 
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
@@ -431,25 +432,30 @@ impl Actor for StepExecutor {
         tracing::info!("StepExecutor stopping for execution {}", state.execution_id);
 
         let _ = state.harness_cancel_tx.send(true);
-        if let Some(turn) = state.harness_turn.take() {
-            let _ = turn.interrupt().await;
-            if tokio::time::timeout(std::time::Duration::from_secs(10), turn.await_outcome())
-                .await
-                .is_err()
-            {
-                tracing::error!(
-                    "Timed out awaiting Codex turn cleanup for execution {}",
-                    state.execution_id
-                );
-            }
-        }
-        if let Some(session) = state.harness_session.take()
-            && tokio::time::timeout(std::time::Duration::from_secs(10), session.close())
-                .await
-                .is_err()
-        {
+        let turn = state.harness_turn.take();
+        let session = state.harness_session.take();
+        let shutdown = interrupt_close_and_await(turn, session).await;
+        if shutdown.interrupt_timed_out {
             tracing::error!(
-                "Timed out closing Codex App Server session for execution {}",
+                "Timed out interrupting provider turn for execution {}",
+                state.execution_id
+            );
+        }
+        if shutdown.close_timed_out {
+            tracing::error!(
+                "Timed out closing provider session for execution {}",
+                state.execution_id
+            );
+        }
+        if shutdown.outcome_timed_out {
+            tracing::error!(
+                "Timed out awaiting provider turn cleanup for execution {}",
+                state.execution_id
+            );
+        }
+        if let Some(Err(error)) = shutdown.close {
+            tracing::error!(
+                "Failed closing provider session for execution {}: {error}",
                 state.execution_id
             );
         }
@@ -804,7 +810,7 @@ impl StepExecutor {
         if let Some(turn) = state.harness_turn.as_ref() {
             if let Err(error) = turn.interrupt().await {
                 tracing::warn!(
-                    "Failed to interrupt Codex turn for execution {}: {}",
+                    "Failed to interrupt provider turn for execution {}: {}",
                     state.execution_id,
                     error
                 );

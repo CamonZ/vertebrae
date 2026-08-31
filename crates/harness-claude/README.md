@@ -5,6 +5,11 @@
 configuration translation, process lifetime, live stream-json decoding, and
 neutral `HarnessEventV1` production.
 
+Provider processes are launched in their own process group on Unix. Shutdown
+uses a bounded graceful-then-forced group cleanup and reaps the provider child,
+so CLI wrappers and helper descendants cannot survive a terminal session,
+cancellation, or daemon shutdown path.
+
 Surface crates construct `ClaudeProviderConfig` with their Claude executable,
 plugin/installed-skills roots, permission transport, environment compatibility,
 and cleanup policy. Provider-owned arguments that must precede request overrides

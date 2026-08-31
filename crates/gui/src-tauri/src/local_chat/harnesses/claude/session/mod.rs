@@ -15,9 +15,9 @@ use tokio::sync::RwLock;
 use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
-    EventSink, HarnessError, HarnessEventPayloadV1, HarnessEventV1, ProviderResumeId,
-    ProviderThreadRef, RequestConfig, SendTurnRequest, SessionCloseStatus, SessionHandle,
-    SessionId, SpeedTier, StartSessionRequest, StreamId, TurnId,
+    interrupt_close_and_await, EventSink, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
+    ProviderResumeId, ProviderThreadRef, RequestConfig, SendTurnRequest, SessionCloseStatus,
+    SessionHandle, SessionId, SpeedTier, StartSessionRequest, StreamId, TurnId,
 };
 
 use crate::commands::AppState;
@@ -882,42 +882,33 @@ impl ClaudeSessionRuntime {
             .lock()
             .map_err(|_| LocalChatSessionError::SendFailed("Claude turn state is poisoned".into()))?
             .take();
-        let interrupt_error = if let Some(turn) = active_turn {
-            turn.interrupt().await.err()
+        let session_handle = Arc::clone(&closing_session.session().handle);
+        let shutdown = interrupt_close_and_await(active_turn, Some(session_handle)).await;
+        if shutdown.outcome_timed_out {
+            log::warn!("Timed out awaiting Claude turn settlement for {session_id}");
+        }
+        let interrupt_error = if shutdown.interrupt_timed_out {
+            Some("timed out interrupting active Claude turn".to_string())
         } else {
-            None
+            shutdown.interrupt_error
         };
-        let close_result = closing_session.session().handle.close().await;
+        let close_result = if shutdown.close_timed_out {
+            Err("timed out closing Claude session".to_string())
+        } else {
+            match shutdown.close {
+                Some(Ok(_)) | None => Ok(()),
+                Some(Err(error)) => Err(error.to_string()),
+            }
+        };
         let result = match (interrupt_error, close_result) {
-            (_, Ok(_)) => Ok(()),
-            (None, Err(error)) => Err(LocalChatSessionError::SendFailed(error.to_string())),
+            (_, Ok(())) => Ok(()),
+            (None, Err(error)) => Err(LocalChatSessionError::SendFailed(error)),
             (Some(interrupt), Err(close)) => Err(LocalChatSessionError::SendFailed(format!(
                 "failed to interrupt active Claude turn: {interrupt}; failed to close Claude session: {close}"
             ))),
         };
         closing_session.finish().await;
         result
-    }
-
-    pub(crate) async fn shutdown(&self) {
-        let session_ids = self
-            .sessions
-            .read()
-            .await
-            .active
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-
-        for session_id in session_ids {
-            if let Err(error) = self.close_session(&session_id).await {
-                log::warn!(
-                    "Failed to close Claude local-chat session {} during GUI shutdown: {}",
-                    session_id,
-                    error
-                );
-            }
-        }
     }
 
     pub(crate) async fn has_session(&self, session_id: &str) -> bool {

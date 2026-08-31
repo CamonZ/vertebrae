@@ -9,6 +9,7 @@ mod capabilities;
 mod control;
 mod event;
 mod lifecycle;
+mod process;
 mod projection;
 mod replay;
 mod runtime;
@@ -17,6 +18,9 @@ pub use capabilities::*;
 pub use control::*;
 pub use event::*;
 pub use lifecycle::*;
+pub use process::{
+    ReapMode, ReapOutcome, reap_optional_process, reap_process_tree, signal_process_group,
+};
 pub use projection::*;
 pub use replay::*;
 pub use runtime::*;

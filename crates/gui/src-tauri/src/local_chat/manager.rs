@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::sync::RwLock;
 
@@ -20,11 +20,16 @@ use crate::local_chat::{
 pub struct LocalChatSessionManager {
     harnesses: HashMap<LocalChatHarnessKind, Arc<dyn LocalChatHarness>>,
     session_registry: RwLock<HashMap<String, LocalChatHarnessKind>>,
+    lifecycle_gate: RwLock<()>,
     permission_bridge: PermissionBridge,
     shutdown_started: AtomicBool,
 }
 
-const LOCAL_CHAT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+const LOCAL_CHAT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
+
+pub(crate) struct ProjectSwitchGuard<'a> {
+    _lifecycle: tokio::sync::RwLockWriteGuard<'a, ()>,
+}
 
 impl LocalChatSessionManager {
     pub fn new() -> Self {
@@ -72,6 +77,7 @@ impl LocalChatSessionManager {
         Self {
             harnesses,
             session_registry: RwLock::new(HashMap::new()),
+            lifecycle_gate: RwLock::new(()),
             permission_bridge,
             shutdown_started: AtomicBool::new(false),
         }
@@ -110,6 +116,12 @@ impl LocalChatSessionManager {
         input: CreateLocalChatSessionInput,
         runtime: LocalChatRuntime,
     ) -> Result<(), LocalChatSessionError> {
+        let _lifecycle = self.lifecycle_gate.read().await;
+        if self.shutdown_started.load(Ordering::Acquire) {
+            return Err(LocalChatSessionError::StartFailed(
+                "cannot create a local chat session while the application is shutting down".into(),
+            ));
+        }
         let harness_kind = input.harness;
         let backend_session_id = input.backend_session_id.clone();
         let harness = self.harness(harness_kind)?;
@@ -147,6 +159,7 @@ impl LocalChatSessionManager {
         backend_session_id: &str,
         content: &str,
     ) -> Result<(), LocalChatSessionError> {
+        let _lifecycle = self.lifecycle_gate.read().await;
         let harness_kind = self.registry_harness(backend_session_id).await?;
         let harness = self.harness(harness_kind)?;
         let result = harness.send_message(backend_session_id, content).await;
@@ -161,17 +174,17 @@ impl LocalChatSessionManager {
         &self,
         backend_session_id: &str,
     ) -> Result<(), LocalChatSessionError> {
+        let _lifecycle = self.lifecycle_gate.read().await;
         let harness_kind = self.registry_harness(backend_session_id).await?;
         let harness = self.harness(harness_kind)?;
         let result = harness.close_session(backend_session_id).await;
-        if result.is_ok() || matches!(result, Err(LocalChatSessionError::SessionNotFound(_))) {
-            self.remove_registry_entry(backend_session_id, harness_kind)
-                .await;
-        }
+        self.remove_registry_entry(backend_session_id, harness_kind)
+            .await;
         result
     }
 
     pub async fn has_session(&self, backend_session_id: &str) -> bool {
+        let _lifecycle = self.lifecycle_gate.read().await;
         let Ok(harness_kind) = self.registry_harness(backend_session_id).await else {
             return false;
         };
@@ -181,50 +194,107 @@ impl LocalChatSessionManager {
         harness.has_session(backend_session_id).await
     }
 
+    pub async fn close_all_sessions(&self) {
+        self.close_all_sessions_with_reason(
+            "Local chat session ended because its project is being changed",
+        )
+        .await;
+    }
+
+    pub(crate) async fn begin_project_switch(&self) -> ProjectSwitchGuard<'_> {
+        let lifecycle = self.lifecycle_gate.write().await;
+        self.close_all_sessions_locked(
+            "Local chat session ended because its project is being changed",
+        )
+        .await;
+        ProjectSwitchGuard {
+            _lifecycle: lifecycle,
+        }
+    }
+
+    async fn close_all_sessions_with_reason(&self, permission_message: &str) {
+        let _lifecycle = self.lifecycle_gate.write().await;
+        self.close_all_sessions_locked(permission_message).await;
+    }
+
+    async fn close_all_sessions_locked(&self, permission_message: &str) {
+        let session_entries = self
+            .session_registry
+            .read()
+            .await
+            .iter()
+            .map(|(session_id, harness)| (session_id.clone(), *harness))
+            .collect::<Vec<_>>();
+        let session_count = session_entries.len();
+
+        if session_entries.is_empty() {
+            log::debug!("[LOCAL_CHAT] close_all_sessions: no live sessions");
+            return;
+        }
+
+        for (session_id, _) in &session_entries {
+            self.permission_bridge
+                .fail_pending_permissions_for_session(session_id, permission_message);
+        }
+
+        let results = futures::future::join_all(session_entries.into_iter().map(
+            |(session_id, harness_kind)| async move {
+                let Ok(harness) = self.harness(harness_kind) else {
+                    log::error!(
+                        "[LOCAL_CHAT] close_all_sessions cannot resolve harness {harness_kind:?} for session {session_id}"
+                    );
+                    return true;
+                };
+                match tokio::time::timeout(
+                    LOCAL_CHAT_SHUTDOWN_TIMEOUT,
+                    harness.close_session(&session_id),
+                )
+                .await
+                {
+                Ok(Ok(())) | Ok(Err(LocalChatSessionError::SessionNotFound(_))) => {
+                    log::debug!(
+                        "[LOCAL_CHAT] close_all_sessions closed session {session_id} via {harness_kind:?}"
+                    );
+                    false
+                }
+                Ok(Err(error)) => {
+                    log::warn!(
+                        "[LOCAL_CHAT] close_all_sessions failed for session {session_id} via {harness_kind:?}: {error}"
+                    );
+                    true
+                }
+                Err(_) => {
+                    log::error!(
+                        "[LOCAL_CHAT] close_all_sessions timed out closing session {session_id} via {harness_kind:?}"
+                    );
+                    true
+                }
+                }
+            },
+        ))
+        .await;
+        let failures = results.into_iter().filter(|failed| *failed).count();
+
+        self.session_registry.write().await.clear();
+        log::info!(
+            "[LOCAL_CHAT] close_all_sessions finished: {} session(s), {} close failure(s)",
+            session_count,
+            failures
+        );
+    }
+
     /// Gracefully close all provider sessions before the Tauri process exits.
     ///
     /// Tauri can deliver more than one exit-related event while a shutdown is
-    /// in progress, so this operation is intentionally idempotent. Provider
-    /// shutdowns run concurrently and share one bounded deadline.
+    /// in progress, so this operation is intentionally idempotent.
     pub async fn shutdown(&self) {
         if self.shutdown_started.swap(true, Ordering::AcqRel) {
             return;
         }
-
-        let session_ids = self
-            .session_registry
-            .read()
-            .await
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        for session_id in session_ids {
-            self.permission_bridge.fail_pending_permissions_for_session(
-                &session_id,
-                "Local chat session ended because the GUI application is shutting down",
-            );
-        }
-
-        let deadline = Instant::now() + LOCAL_CHAT_SHUTDOWN_TIMEOUT;
-        let shutdowns = self
-            .harnesses
-            .values()
-            .cloned()
-            .map(|harness| tokio::spawn(async move { harness.shutdown().await }))
-            .collect::<Vec<_>>();
-
-        for shutdown in shutdowns {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                log::warn!("[LOCAL_CHAT] Shutdown deadline reached before all harnesses closed");
-                break;
-            }
-            if tokio::time::timeout(remaining, shutdown).await.is_err() {
-                log::warn!("[LOCAL_CHAT] Harness shutdown exceeded the application exit deadline");
-            }
-        }
-
-        self.session_registry.write().await.clear();
+        self.close_all_sessions_with_reason(
+            "Local chat session ended because the application is shutting down",
+        )
+        .await;
     }
 
     /// Resolve a permission request through the neutral permission bridge.

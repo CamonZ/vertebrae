@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::future::join_all;
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
 use tokio_tungstenite::tungstenite::Message;
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
@@ -103,6 +104,31 @@ impl std::fmt::Debug for DaemonConfig {
 
 /// Maximum delay between reconnection attempts (30 seconds).
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
+const PROJECT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
+
+async fn stop_projects(
+    projects: impl IntoIterator<Item = (String, ActorRef<ProjectMessage>)>,
+    reason: &str,
+) {
+    let reason = reason.to_string();
+    let results = join_all(projects.into_iter().map(|(project_id, actor_ref)| {
+        let reason = reason.clone();
+        async move {
+            let result = actor_ref
+                .stop_and_wait(Some(reason.clone()), Some(PROJECT_SHUTDOWN_TIMEOUT))
+                .await;
+            (project_id, reason, result)
+        }
+    }))
+    .await;
+    for (project_id, reason, result) in results {
+        if let Err(error) = result {
+            tracing::error!(
+                "ProjectSupervisor for {project_id} did not finish {reason}: {error:?}"
+            );
+        }
+    }
+}
 
 /// Compute the next backoff delay by doubling `current`, capped at `max`.
 fn next_backoff(current: Duration, max: Duration) -> Duration {
@@ -304,6 +330,12 @@ impl Actor for DaemonSupervisor {
     ) -> Result<(), ActorProcessingErr> {
         tracing::info!("DaemonSupervisor stopping, cleaning up");
 
+        stop_projects(
+            std::mem::take(&mut state.projects),
+            "daemon post-stop cleanup",
+        )
+        .await;
+
         // Abort the reader pump
         if let Some(handle) = state.reader_handle.take() {
             handle.abort();
@@ -441,8 +473,7 @@ impl DaemonSupervisor {
             return Ok(());
         };
 
-        // Stop the ProjectSupervisor child actor.
-        actor_ref.stop(Some("project removed".to_string()));
+        stop_projects(vec![(project_id.to_string(), actor_ref)], "project removed").await;
 
         let topic = format!("project:{}", project_id);
         if let Err(e) = state.socket.leave(&topic).await {
@@ -606,11 +637,14 @@ impl DaemonSupervisor {
             handle.abort();
         }
 
-        // Stop all ProjectSupervisor children and leave channels.
         let entries: Vec<(String, ActorRef<ProjectMessage>)> = state.projects.drain().collect();
-        for (project_id, actor_ref) in &entries {
-            actor_ref.stop(Some("daemon shutdown".to_string()));
-            let topic = format!("project:{}", project_id);
+        let project_ids = entries
+            .iter()
+            .map(|(project_id, _)| project_id.clone())
+            .collect::<Vec<_>>();
+        stop_projects(entries, "daemon shutdown").await;
+        for project_id in project_ids {
+            let topic = format!("project:{project_id}");
             if let Err(e) = state.socket.leave(&topic).await {
                 tracing::warn!("Failed to leave channel {topic} during shutdown: {e}");
             }

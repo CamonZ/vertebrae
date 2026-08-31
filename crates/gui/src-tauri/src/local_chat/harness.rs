@@ -228,9 +228,5 @@ pub(crate) trait LocalChatHarness: Send + Sync {
 
     async fn close_session(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError>;
 
-    /// Close every live provider session owned by this harness during GUI
-    /// application shutdown.
-    async fn shutdown(&self);
-
     async fn has_session(&self, backend_session_id: &str) -> bool;
 }

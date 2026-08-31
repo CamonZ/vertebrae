@@ -7,7 +7,7 @@ use tokio::{
     process::{Child, Command},
     time::{Instant, sleep},
 };
-use vertebrae_harness_core::HarnessError;
+use vertebrae_harness_core::{HarnessError, ReapMode, reap_optional_process};
 
 use crate::CodexProviderConfig;
 
@@ -49,10 +49,12 @@ impl CodexAppServerLauncher for ProcessCodexAppServerLauncher {
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
+            #[cfg(unix)]
+            command.process_group(0);
             if let Some(path) = &self.config.search_path {
                 command.env("PATH", path.to_string_lossy().into_owned());
             }
-            let mut process = command.spawn().map_err(|error| {
+            let process = command.spawn().map_err(|error| {
                 HarnessError::Operation(format!("failed to spawn {}: {error}", binary.display()))
             })?;
             match wait_for_ready(ready_addr, self.config.readiness_timeout).await {
@@ -63,8 +65,8 @@ impl CodexAppServerLauncher for ProcessCodexAppServerLauncher {
                     });
                 }
                 Err(error) => {
-                    let _ = process.kill().await;
-                    let _ = process.wait().await;
+                    let mut process = Some(process);
+                    cleanup_process(&mut process, self.config.cleanup_timeout).await;
                     last_error = Some(error);
                 }
             }
@@ -132,14 +134,5 @@ pub async fn ready_probe(address: impl ToSocketAddrs) -> Result<bool, HarnessErr
 }
 
 pub(crate) async fn cleanup_process(process: &mut Option<Child>, timeout: Duration) {
-    let Some(child) = process.as_mut() else {
-        return;
-    };
-    if let Ok(Ok(_)) = tokio::time::timeout(timeout, child.wait()).await {
-        *process = None;
-        return;
-    }
-    let _ = child.kill().await;
-    let _ = tokio::time::timeout(timeout, child.wait()).await;
-    *process = None;
+    let _ = reap_optional_process(process, timeout, ReapMode::WaitThenSignal).await;
 }

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -301,4 +301,75 @@ pub trait HarnessRuntime: Send + Sync {
         event_sink: Arc<dyn EventSink>,
         control_sink: Arc<dyn ControlSink>,
     ) -> Result<Arc<dyn RunHandle>, HarnessError>;
+}
+
+/// Best-effort interrupt, then session close, then turn settlement.
+pub const DEFAULT_TURN_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(2);
+pub const DEFAULT_SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(10);
+pub const DEFAULT_TURN_OUTCOME_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Outcome of [`interrupt_close_and_await`]. Callers log; this helper does not.
+#[derive(Debug)]
+pub struct SessionShutdown {
+    pub interrupt_timed_out: bool,
+    pub interrupt_error: Option<String>,
+    pub close: Option<Result<SessionCloseOutcome, HarnessError>>,
+    pub close_timed_out: bool,
+    pub outcome_timed_out: bool,
+}
+
+/// Interrupt an optional in-flight turn, close the session, then await the turn.
+///
+/// Timeouts are bounded and independent. A timed-out interrupt still proceeds
+/// to close; a timed-out close still awaits the turn so the caller can drop
+/// ownership. Process reaping belongs in `SessionHandle::close`.
+pub async fn interrupt_close_and_await(
+    turn: Option<Arc<dyn TurnHandle>>,
+    session: Option<Arc<dyn SessionHandle>>,
+) -> SessionShutdown {
+    interrupt_close_and_await_with_timeouts(
+        turn,
+        session,
+        DEFAULT_TURN_INTERRUPT_TIMEOUT,
+        DEFAULT_SESSION_CLOSE_TIMEOUT,
+        DEFAULT_TURN_OUTCOME_TIMEOUT,
+    )
+    .await
+}
+
+pub async fn interrupt_close_and_await_with_timeouts(
+    turn: Option<Arc<dyn TurnHandle>>,
+    session: Option<Arc<dyn SessionHandle>>,
+    interrupt_timeout: Duration,
+    close_timeout: Duration,
+    outcome_timeout: Duration,
+) -> SessionShutdown {
+    let mut shutdown = SessionShutdown {
+        interrupt_timed_out: false,
+        interrupt_error: None,
+        close: None,
+        close_timed_out: false,
+        outcome_timed_out: false,
+    };
+    if let Some(turn) = turn.as_ref() {
+        match tokio::time::timeout(interrupt_timeout, turn.interrupt()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => shutdown.interrupt_error = Some(error.to_string()),
+            Err(_) => shutdown.interrupt_timed_out = true,
+        }
+    }
+    if let Some(session) = session {
+        match tokio::time::timeout(close_timeout, session.close()).await {
+            Ok(result) => shutdown.close = Some(result),
+            Err(_) => shutdown.close_timed_out = true,
+        }
+    }
+    if let Some(turn) = turn
+        && tokio::time::timeout(outcome_timeout, turn.await_outcome())
+            .await
+            .is_err()
+    {
+        shutdown.outcome_timed_out = true;
+    }
+    shutdown
 }

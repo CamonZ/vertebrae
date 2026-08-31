@@ -121,6 +121,7 @@ pub(crate) mod test_support {
                 sacrum_client: RwLock::new(None),
                 project_config,
             })
+            .manage(LocalChatSessionManager::with_harnesses_for_tests(Vec::new()))
             .manage(tokio::sync::Mutex::new(
                 crate::websocket_client::SacrumSocket::disconnected(),
             ))
@@ -139,6 +140,7 @@ pub(crate) mod test_support {
                 sacrum_client: RwLock::new(None),
                 project_config,
             })
+            .manage(LocalChatSessionManager::with_harnesses_for_tests(Vec::new()))
             .manage(tokio::sync::Mutex::new(
                 crate::websocket_client::SacrumSocket::disconnected(),
             ))

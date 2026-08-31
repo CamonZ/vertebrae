@@ -9,7 +9,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
+use futures::future::join_all;
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
 use vertebrae_core::VertebraeServices;
 use vertebrae_core::execution_service::UpdateExecutionStatusParams;
@@ -22,6 +24,8 @@ use crate::actors::step_executor::{
 use crate::capabilities::SharedDaemonCapabilities;
 use crate::output_validator::SchemaValidationError;
 use crate::phoenix::PhoenixMessage;
+
+const STEP_EXECUTOR_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(crate) fn build_failure_output_payload(
     error: &str,
@@ -482,6 +486,39 @@ impl Actor for ProjectSupervisor {
         _myself: ActorRef<Self::Msg>,
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
+        let executors = std::mem::take(&mut state.running_executors);
+        if !executors.is_empty() {
+            tracing::info!(
+                "[project:{}] Stopping {} running StepExecutor(s) before project shutdown",
+                state.project_id,
+                executors.len()
+            );
+        }
+
+        let results = join_all(executors.into_iter().map(
+            |(execution_id, executor_ref)| async move {
+                let result = executor_ref
+                    .stop_and_wait(
+                        Some("project shutdown".to_string()),
+                        Some(STEP_EXECUTOR_SHUTDOWN_TIMEOUT),
+                    )
+                    .await;
+                (execution_id, result)
+            },
+        ))
+        .await;
+        for (execution_id, result) in results {
+            if let Err(error) = result {
+                tracing::error!(
+                    "[project:{}] StepExecutor {} did not finish shutdown cleanly: {:?}",
+                    state.project_id,
+                    execution_id,
+                    error
+                );
+            }
+            state.pending_metadata.remove(&execution_id);
+        }
+        state.pending_metadata.clear();
         tracing::info!("ProjectSupervisor stopped for project {}", state.project_id);
         Ok(())
     }
@@ -768,7 +805,7 @@ impl ProjectSupervisor {
         task_id: &str,
         state: &mut ProjectState,
     ) {
-        if let Some(executor_ref) = state.running_executors.remove(step_execution_id) {
+        if let Some(executor_ref) = state.running_executors.get(step_execution_id).cloned() {
             tracing::info!(
                 "[project:{}] Cancelling step execution {} for task {}",
                 state.project_id,

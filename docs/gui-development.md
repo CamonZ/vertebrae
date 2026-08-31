@@ -93,6 +93,30 @@ Adding a provider therefore means adding a `harnesses/<provider>/` module that
 supplies the model catalog and session creation. Event translation stays in
 `harnesses/shared.rs` because it works on the neutral `HarnessEventV1` stream.
 
+The manager's session registry is authoritative live ownership and is
+intentionally transient. `close_all_sessions()` is awaited before a project
+switch and during Tauri exit; it interrupts active turns, fails pending
+permission controls, closes provider transports, and delegates bounded
+process-tree reaping to the provider harnesses. Registry entries are dropped
+once close is initiated, including when a close times out or fails, so a later
+create for the same conversation id is not blocked by a ghost owner. Project
+switches do not delete chat history or provider resume IDs, so the next
+project-scoped view can start a fresh provider session and resume durable
+conversation state when supported.
+
+The GUI currently uses one Codex App Server process per live GUI session. A
+single long-lived App Server was evaluated, but the existing harness contract
+has one lossless notification receiver, one root-thread identity, and one
+session-specific event/control sink per connection. Sharing it would require a
+larger connection multiplexer and ownership redesign; the manager-wide close
+boundary therefore remains the compatible lifecycle guarantee for this
+architecture.
+
+The GUI and daemon have separate lifecycles. GUI exit and project switching
+close only the GUI's registered local-chat harnesses; they must not stop the
+installed `vtb-daemon`. Daemon-owned Codex/Claude cleanup is performed by the
+daemon when its own step, project, or process lifecycle ends.
+
 ### Chat event delivery and replay
 
 Live chat and trace replay share one normalized stream:

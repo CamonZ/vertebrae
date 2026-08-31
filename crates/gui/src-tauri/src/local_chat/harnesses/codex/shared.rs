@@ -5,8 +5,8 @@ use tokio::sync::{Mutex, OnceCell, RwLock};
 use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
-    EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId, SpeedTier,
-    StartSessionRequest, StreamId, TurnHandle, TurnId,
+    interrupt_close_and_await, EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId,
+    SpeedTier, StartSessionRequest, StreamId, TurnHandle, TurnId,
 };
 
 use crate::local_chat::{
@@ -240,21 +240,6 @@ impl LocalChatHarness for CodexLocalChatHarness {
         Ok(())
     }
 
-    async fn shutdown(&self) {
-        let sessions = {
-            let mut sessions = self.sessions.write().await;
-            std::mem::take(&mut *sessions)
-                .into_values()
-                .collect::<Vec<_>>()
-        };
-
-        for session in sessions {
-            if let Err(error) = session.close().await {
-                log::warn!("Failed to close Codex local-chat session during GUI shutdown: {error}");
-            }
-        }
-    }
-
     async fn has_session(&self, backend_session_id: &str) -> bool {
         self.sessions.read().await.contains_key(backend_session_id)
     }
@@ -325,14 +310,31 @@ impl CodexLocalChatSession {
             &self.adapter.backend_session_id,
             "Codex session ended before the permission request was resolved",
         );
-        if let Some(turn) = self.active_turn.lock().await.take() {
-            let _ = turn.interrupt().await;
+        let active_turn = self.active_turn.lock().await.take();
+        let shutdown =
+            interrupt_close_and_await(active_turn, Some(Arc::clone(&self.session))).await;
+        if shutdown.interrupt_timed_out {
+            log::warn!(
+                "[LOCAL_CHAT] timed out interrupting Codex turn for {}",
+                self.adapter.backend_session_id
+            );
         }
-        self.session
-            .close()
-            .await
-            .map_err(|error| LocalChatSessionError::StartFailed(error.to_string()))?;
-        Ok(())
+        if shutdown.outcome_timed_out {
+            log::warn!(
+                "[LOCAL_CHAT] timed out awaiting Codex turn settlement for {}",
+                self.adapter.backend_session_id
+            );
+        }
+        if shutdown.close_timed_out {
+            return Err(LocalChatSessionError::StartFailed(format!(
+                "timed out closing Codex session {}",
+                self.adapter.backend_session_id
+            )));
+        }
+        match shutdown.close {
+            Some(Ok(_)) | None => Ok(()),
+            Some(Err(error)) => Err(LocalChatSessionError::StartFailed(error.to_string())),
+        }
     }
 }
 
