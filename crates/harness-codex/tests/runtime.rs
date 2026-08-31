@@ -697,9 +697,9 @@ async fn explicit_session_close_preserves_terminal_before_outcome_ordering() {
     let close = tokio::spawn(async move { session_to_close.close().await });
 
     let outcome = sink
-        .await_ordered_outcome(&turn, CompletionStatus::Failed)
+        .await_ordered_outcome(&turn, CompletionStatus::Interrupted)
         .await;
-    assert!(outcome.error.as_deref().unwrap().contains("closed"));
+    assert_eq!(outcome.error.as_deref(), Some("Codex turn interrupted"));
     assert_eq!(
         close.await.unwrap().unwrap().status,
         vertebrae_harness_core::SessionCloseStatus::Closed

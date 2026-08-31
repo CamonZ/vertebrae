@@ -469,6 +469,7 @@ describe("WorkflowAtlas", () => {
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
 
     await waitFor(() => {
+      expect(screen.getByTestId("step-node-Plan")).toBeInTheDocument();
       expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument();
       expect(
         screen.getByTestId("factory-region-Factory A")
@@ -480,7 +481,6 @@ describe("WorkflowAtlas", () => {
         document.querySelector(".factory-overview-workflow-edges")
       ).toHaveClass("is-visible");
     });
-    expect(screen.getByText("Plan")).toBeInTheDocument();
     expect(
       document.querySelectorAll(".factory-overview-factories .uv-wf")
     ).toHaveLength(4);

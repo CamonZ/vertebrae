@@ -1068,7 +1068,7 @@ impl SessionState {
             }
             self.config.permission.apply_to_params(&mut params);
             self.connection.begin_root_turn(turn_id.clone());
-            let response = self
+            let response = match self
                 .connection
                 .request_with_timeout(
                     "turn/start",
@@ -1076,7 +1076,21 @@ impl SessionState {
                     self.config.request_timeout,
                     turn_id.clone(),
                 )
-                .await?;
+                .await
+            {
+                Ok(response) => response,
+                Err(_error) if *session_closed.borrow() => {
+                    return Ok(cancelled_outcome(
+                        if run_id.is_none() {
+                            CompletionStatus::Interrupted
+                        } else {
+                            CompletionStatus::Cancelled
+                        },
+                        None,
+                    ));
+                }
+                Err(error) => return Err(error),
+            };
             let provider_turn = required_string(
                 response.get("turn").unwrap_or(&response),
                 &["/id", "/turn/id"],
