@@ -1195,10 +1195,23 @@ impl SessionState {
         }
         .await;
         self.connection.finish_root_turn(&turn_id);
-        let result = validate_structured_output(
-            result.unwrap_or_else(failed_outcome),
-            validation_schema.as_ref(),
-        );
+        let result = match result {
+            Ok(outcome) => outcome,
+            // Session shutdown closes the connection after publishing the
+            // closed signal. Both notifications can therefore become ready
+            // in the same select, and the connection error may win even
+            // though shutdown is the cause of the interruption.
+            Err(_error) if *self.closed_rx.borrow() => cancelled_outcome(
+                if run_id.is_none() {
+                    CompletionStatus::Interrupted
+                } else {
+                    CompletionStatus::Cancelled
+                },
+                None,
+            ),
+            Err(error) => failed_outcome(error),
+        };
+        let result = validate_structured_output(result, validation_schema.as_ref());
         if run_id.is_none() {
             self.emit(
                 self.root_stream_id.clone(),

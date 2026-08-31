@@ -19,6 +19,7 @@ import {
   vscDarkPlus,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useIsLightTheme } from "../../hooks/useTheme";
+import { requestMermaidSvg } from "../../mermaid/requestMermaidSvg";
 import { loadGraphviz } from "../../utils/graphviz";
 import { LocalFileReferenceLink } from "./LocalFileReferenceLink";
 import { parseLocalFileReference } from "./localFileReference";
@@ -264,7 +265,11 @@ type RenderedDiagram = {
 
 type DiagramRenderer = {
   label: string;
-  render?: (source: string, elementId: string) => Promise<RenderedDiagram>;
+  render?: (
+    source: string,
+    elementId: string,
+    signal?: AbortSignal
+  ) => Promise<RenderedDiagram>;
 };
 
 const diagramRenderers: Record<string, DiagramRenderer> = {
@@ -290,7 +295,7 @@ const diagramRenderers: Record<string, DiagramRenderer> = {
   kroki: { label: "Kroki" },
 };
 
-let mermaidInitialized = false;
+const MAX_MERMAID_SVG_LENGTH = 1_000_000;
 
 async function renderDotDiagram(source: string): Promise<RenderedDiagram> {
   const graphviz = await loadGraphviz();
@@ -307,27 +312,13 @@ async function renderDotDiagram(source: string): Promise<RenderedDiagram> {
 
 async function renderMermaidDiagram(
   source: string,
-  elementId: string
+  elementId: string,
+  signal?: AbortSignal
 ): Promise<RenderedDiagram> {
-  const { default: mermaid } = await import("mermaid");
-
-  if (!mermaidInitialized) {
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "strict",
-      deterministicIds: true,
-      deterministicIDSeed: "vertebrae-chat",
-      theme: "dark",
-      fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
-      htmlLabels: false,
-      flowchart: { htmlLabels: false, useMaxWidth: true },
-      sequence: { useMaxWidth: true },
-    });
-    mermaidInitialized = true;
+  const svg = await requestMermaidSvg(source, elementId, signal);
+  if (svg.length > MAX_MERMAID_SVG_LENGTH) {
+    throw new Error("Renderer returned an SVG that is too large.");
   }
-
-  await mermaid.parse(source);
-  const { svg } = await mermaid.render(elementId, source);
   const sanitized = sanitizeSvg(svg);
   if (!sanitized) {
     throw new Error("Renderer returned an invalid SVG.");
@@ -512,9 +503,14 @@ function DiagramBlock({ language, source, renderer }: DiagramBlockProps) {
     }
 
     let cancelled = false;
+    const abortController = new AbortController();
     setResult({ status: "rendering" });
     renderer
-      .render(source, diagramElementId(`diagram-${reactId}`, source))
+      .render(
+        source,
+        diagramElementId(`diagram-${reactId}`, source),
+        abortController.signal
+      )
       .then(({ document, frameStyle }) => {
         if (!cancelled) setResult({ status: "rendered", document, frameStyle });
       })
@@ -529,6 +525,7 @@ function DiagramBlock({ language, source, renderer }: DiagramBlockProps) {
 
     return () => {
       cancelled = true;
+      abortController.abort();
     };
   }, [reactId, renderer, source]);
 
