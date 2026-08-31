@@ -25,12 +25,15 @@ pub fn resulting_option<'a, T>(
 /// Validate the Vertebrae-owned coupling between route fields.
 ///
 /// Sacrum remains responsible for validating and evaluating the opaque route
-/// configuration itself. This helper only enforces which fields can coexist
-/// with the resulting step type.
+/// configuration itself. This helper only enforces which fields can be
+/// authored with the resulting step type. Legacy route rows may still expose
+/// an old output schema; an update that does not write that field preserves it.
 pub fn validate_route_fields(
     resulting_type: &StepType,
     prompt_write: bool,
-    resulting_output_schema: Option<&Value>,
+    // Whether the update creates or replaces an output schema. Route steps
+    // reject writes, but retained legacy values are not rewritten here.
+    output_schema_write: bool,
     resulting_route_config: Option<&Value>,
 ) -> ServiceResult<()> {
     if matches!(resulting_type, StepType::Route) && prompt_write {
@@ -39,7 +42,7 @@ pub fn validate_route_fields(
         ));
     }
 
-    if matches!(resulting_type, StepType::Route) && resulting_output_schema.is_some() {
+    if matches!(resulting_type, StepType::Route) && output_schema_write {
         return Err(crate::error::ServiceError::validation_failed(
             "route steps do not accept output_schema; use route_config",
         ));
@@ -57,15 +60,13 @@ pub fn validate_route_fields(
 /// Validate route fields after merging an update with the existing step.
 pub fn validate_route_update(existing: &Step, updates: &StepUpdate) -> ServiceResult<()> {
     let resulting_type = updates.step_type.as_ref().unwrap_or(&existing.step_type);
-    let resulting_output_schema =
-        resulting_option(&updates.output_schema, existing.output_schema.as_ref());
     let resulting_route_config =
         resulting_option(&updates.route_config, existing.route_config.as_ref());
 
     validate_route_fields(
         resulting_type,
         matches!(updates.prompt, Some(Some(_))),
-        resulting_output_schema,
+        matches!(updates.output_schema, Some(Some(_))),
         resulting_route_config,
     )
 }
@@ -93,7 +94,7 @@ mod tests {
     }
 
     #[test]
-    fn route_rejects_set_or_retained_output_schema() {
+    fn route_rejects_output_schema_writes_but_allows_legacy_values() {
         let step = route();
         let schema = serde_json::json!({"type": "object"});
 
@@ -106,8 +107,8 @@ mod tests {
         );
 
         let step = step.with_output_schema(schema);
-        assert!(validate_route_update(&step, &StepUpdate::new()).is_err());
-        assert!(validate_route_update(&step, &StepUpdate::new().with_output_schema(None)).is_ok());
+        assert!(validate_route_update(&step, &StepUpdate::new()).is_ok());
+        assert!(validate_route_update(&step, &StepUpdate::new().clear_prompt()).is_ok());
     }
 
     #[test]

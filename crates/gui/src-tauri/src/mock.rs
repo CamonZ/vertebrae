@@ -1191,7 +1191,7 @@ impl StepService for MockStepService {
         vertebrae_core::validate_route_fields(
             &step.step_type,
             step.prompt.is_some(),
-            step.output_schema.as_ref(),
+            step.output_schema.is_some(),
             step.route_config.as_ref(),
         )?;
         let mut s = self.state.lock().unwrap();
@@ -1205,7 +1205,7 @@ impl StepService for MockStepService {
         vertebrae_core::validate_route_fields(
             &step.step_type,
             step.prompt.is_some(),
-            step.output_schema.as_ref(),
+            step.output_schema.is_some(),
             step.route_config.as_ref(),
         )?;
         let mut s = self.state.lock().unwrap();

@@ -288,7 +288,7 @@ impl StepAddCommand {
         validate_route_fields(
             &step_type,
             self.prompt.is_some(),
-            output_schema.as_ref(),
+            output_schema.is_some(),
             route_config.as_ref(),
         )?;
 

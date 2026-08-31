@@ -403,11 +403,12 @@ Sacrum validate the complete graph. `--clear-route-config` leaves a non-runnable
 route draft. Retained route prompts are readable and can be cleared with
 `--clear-prompt`, but `--prompt` is never a route authoring mechanism. Ordinary
 `execute` and `evaluate` steps retain their normal prompt and `output_schema`
-behavior. Route steps cannot retain an `output_schema`; when converting a
+behavior. New route authoring cannot set an `output_schema`; when converting a
 structured step to `route`, clear it in the same update with
-`--clear-output-schema` (the GUI does this automatically). Existing
-prompt/output-schema routes require a manual migration to this contract;
-Vertebrae does not infer or rewrite persisted route programs.
+`--clear-output-schema` (the GUI does this automatically). Legacy
+prompt/output-schema routes may expose their retained output schema for
+inspection, but new Vertebrae writes do not author or interpret that old
+routing contract. Existing route programs are not inferred or rewritten.
 
 ### Output Schemas
 

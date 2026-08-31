@@ -122,7 +122,7 @@ impl StepService for SacrumStepService {
         validate_route_fields(
             &step.step_type,
             step.prompt.is_some(),
-            step.output_schema.as_ref(),
+            step.output_schema.is_some(),
             step.route_config.as_ref(),
         )?;
 
@@ -305,7 +305,7 @@ impl StepService for SacrumStepService {
             validate_route_fields(
                 step_type,
                 matches!(updates.prompt, Some(Some(_))),
-                updates.output_schema.as_ref().and_then(Option::as_ref),
+                matches!(updates.output_schema, Some(Some(_))),
                 updates.route_config.as_ref().and_then(Option::as_ref),
             )?;
         }
