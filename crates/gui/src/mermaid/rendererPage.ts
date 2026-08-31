@@ -1,25 +1,9 @@
 import mermaid from "mermaid";
-
-const RENDER_REQUEST = "vertebrae-mermaid-render";
-const RENDER_RESULT = "vertebrae-mermaid-result";
-
-interface MermaidRenderRequest {
-  type: typeof RENDER_REQUEST;
-  requestId: string;
-  source: string;
-  elementId: string;
-}
-
-function isMermaidRenderRequest(value: unknown): value is MermaidRenderRequest {
-  if (typeof value !== "object" || value === null) return false;
-  const request = value as Partial<MermaidRenderRequest>;
-  return (
-    request.type === RENDER_REQUEST &&
-    typeof request.requestId === "string" &&
-    typeof request.source === "string" &&
-    typeof request.elementId === "string"
-  );
-}
+import {
+  isMermaidRenderRequest,
+  mermaidRenderResult,
+  type MermaidRenderRequest,
+} from "./protocol";
 
 mermaid.initialize({
   startOnLoad: false,
@@ -40,23 +24,21 @@ async function render(request: MermaidRenderRequest): Promise<void> {
     // before the isolated renderer can be torn down on timeout.
     const { svg } = await mermaid.render(request.elementId, request.source);
     window.parent.postMessage(
-      {
-        type: RENDER_RESULT,
+      mermaidRenderResult({
         requestId: request.requestId,
         status: "rendered",
         svg,
-      },
+      }),
       "*"
     );
   } catch (error: unknown) {
     window.parent.postMessage(
-      {
-        type: RENDER_RESULT,
+      mermaidRenderResult({
         requestId: request.requestId,
         status: "error",
         message:
           error instanceof Error ? error.message : "Unknown renderer error.",
-      },
+      }),
       "*"
     );
   }

@@ -19,6 +19,7 @@ import {
   vscDarkPlus,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useIsLightTheme } from "../../hooks/useTheme";
+import { requestMermaidSvg } from "../../mermaid/requestMermaidSvg";
 import { loadGraphviz } from "../../utils/graphviz";
 import { LocalFileReferenceLink } from "./LocalFileReferenceLink";
 import { parseLocalFileReference } from "./localFileReference";
@@ -294,135 +295,7 @@ const diagramRenderers: Record<string, DiagramRenderer> = {
   kroki: { label: "Kroki" },
 };
 
-const MERMAID_RENDER_TIMEOUT_MS = 10_000;
 const MAX_MERMAID_SVG_LENGTH = 1_000_000;
-const MERMAID_RENDER_REQUEST = "vertebrae-mermaid-render";
-const MERMAID_RENDER_RESULT = "vertebrae-mermaid-result";
-
-type MermaidRenderResultMessage =
-  | {
-      type: typeof MERMAID_RENDER_RESULT;
-      requestId: string;
-      status: "rendered";
-      svg: string;
-    }
-  | {
-      type: typeof MERMAID_RENDER_RESULT;
-      requestId: string;
-      status: "error";
-      message: string;
-    };
-
-function isMermaidRenderResultMessage(
-  value: unknown
-): value is MermaidRenderResultMessage {
-  if (typeof value !== "object" || value === null) return false;
-  const message = value as Partial<MermaidRenderResultMessage>;
-  if (
-    message.type !== MERMAID_RENDER_RESULT ||
-    typeof message.requestId !== "string"
-  ) {
-    return false;
-  }
-  if (message.status === "rendered") return typeof message.svg === "string";
-  return message.status === "error" && typeof message.message === "string";
-}
-
-function mermaidRendererUrl(): string {
-  return new URL("/mermaid-renderer.html", window.location.href).href;
-}
-
-function requestMermaidSvg(
-  source: string,
-  elementId: string,
-  signal?: AbortSignal
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const iframe = document.createElement("iframe");
-    const requestId = `${elementId}-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2)}`;
-    let settled = false;
-    const timeout: { id?: ReturnType<typeof setTimeout> } = {};
-
-    const cleanup = () => {
-      window.removeEventListener("message", onMessage);
-      iframe.removeEventListener("load", onLoad);
-      iframe.removeEventListener("error", onError);
-      signal?.removeEventListener("abort", onAbort);
-      if (timeout.id !== undefined) window.clearTimeout(timeout.id);
-      iframe.remove();
-    };
-
-    const settle = (callback: () => void) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      callback();
-    };
-
-    const onMessage = (event: MessageEvent<unknown>) => {
-      if (event.source !== iframe.contentWindow) return;
-      if (!isMermaidRenderResultMessage(event.data)) return;
-      const message = event.data;
-      if (message.requestId !== requestId) return;
-
-      if (message.status === "rendered") {
-        settle(() => resolve(message.svg));
-      } else {
-        settle(() => reject(new Error(message.message)));
-      }
-    };
-
-    const onLoad = () => {
-      iframe.contentWindow?.postMessage(
-        {
-          type: MERMAID_RENDER_REQUEST,
-          requestId,
-          source,
-          elementId,
-        },
-        "*"
-      );
-    };
-
-    const onError = () => {
-      settle(() => reject(new Error("Mermaid renderer failed to load.")));
-    };
-
-    const onAbort = () => {
-      settle(() => reject(new Error("Mermaid rendering was cancelled.")));
-    };
-
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
-
-    iframe.setAttribute("sandbox", "allow-scripts");
-    iframe.setAttribute("aria-hidden", "true");
-    iframe.title = "Mermaid renderer";
-    iframe.style.position = "fixed";
-    iframe.style.left = "-2000px";
-    iframe.style.top = "-2000px";
-    iframe.style.width = "1024px";
-    iframe.style.height = "768px";
-    iframe.style.border = "0";
-    iframe.style.opacity = "0";
-    iframe.style.pointerEvents = "none";
-    iframe.addEventListener("load", onLoad);
-    iframe.addEventListener("error", onError);
-    signal?.addEventListener("abort", onAbort, { once: true });
-    window.addEventListener("message", onMessage);
-    timeout.id = setTimeout(() => {
-      settle(() =>
-        reject(new Error("Mermaid rendering timed out after 10 seconds."))
-      );
-    }, MERMAID_RENDER_TIMEOUT_MS);
-    iframe.src = mermaidRendererUrl();
-    document.body.appendChild(iframe);
-  });
-}
 
 async function renderDotDiagram(source: string): Promise<RenderedDiagram> {
   const graphviz = await loadGraphviz();
