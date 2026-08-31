@@ -131,6 +131,10 @@ pub(crate) async fn create_step_inner(
         step = step.with_persistence_options(persistence_options);
     }
 
+    if let Some(route_config) = options.route_config {
+        step = step.with_route_config(route_config);
+    }
+
     match service.steps().create_step(&step).await {
         Ok(created) => {
             log::info!("create_step succeeded: {:?}", created.id);
@@ -287,6 +291,7 @@ mod tests {
                 persistence_options: Some(serde_json::json!({
                     "artifact": { "logical_name": "review-result" }
                 })),
+                route_config: None,
             },
         )
         .await
@@ -301,6 +306,34 @@ mod tests {
         let fetched = get_step(state, step.id.clone().unwrap()).await.unwrap();
         assert!(fetched.is_some());
         assert_eq!(fetched.unwrap().name, "Review");
+    }
+
+    #[tokio::test]
+    async fn create_route_step_rejects_prompt_and_output_schema() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let result = create_step_inner(
+            state,
+            crate::types::CreateStepOptions {
+                workflow_id: "wf-route".to_string(),
+                name: "Router".to_string(),
+                goal: None,
+                prompt: Some("legacy route prompt".to_string()),
+                agents: vec![],
+                skills: vec![],
+                agent_config: None,
+                order: 0,
+                transitions_to: vec![],
+                step_type: crate::types::StepType::Route,
+                output_schema: Some(serde_json::json!({"type": "object"})),
+                persistence_options: None,
+                route_config: None,
+            },
+        )
+        .await;
+
+        assert!(result.unwrap_err().message.contains("route steps"));
     }
 
     #[tokio::test]
@@ -322,6 +355,7 @@ mod tests {
                 step_type: crate::types::StepType::Finish,
                 output_schema: None,
                 persistence_options: None,
+                route_config: None,
             },
         )
         .await
@@ -354,6 +388,7 @@ mod tests {
                 step_type: crate::types::StepType::Stop,
                 output_schema: Some(serde_json::json!({"type": "object"})),
                 persistence_options: None,
+                route_config: None,
             },
         )
         .await
@@ -399,6 +434,7 @@ mod tests {
                 step_type: Default::default(),
                 output_schema: None,
                 persistence_options: None,
+                route_config: None,
             },
         )
         .await
@@ -418,6 +454,7 @@ mod tests {
                 step_type: Default::default(),
                 output_schema: None,
                 persistence_options: None,
+                route_config: None,
             },
         )
         .await
@@ -446,6 +483,43 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(wf_id, "wf-1");
+    }
+
+    #[tokio::test]
+    async fn update_route_step_rejects_prompt_write_without_type_change() {
+        let services = mock_services();
+        let step = vertebrae_core::Step::new("Router", "wf-1".to_string())
+            .with_prompt("legacy route prompt");
+        let created = services.steps().create_step(&step).await.unwrap();
+        let step_id = created.id.unwrap();
+        services
+            .steps()
+            .update_step(
+                &step_id,
+                &vertebrae_core::StepUpdate::new().with_step_type(vertebrae_core::StepType::Route),
+            )
+            .await
+            .unwrap();
+
+        let result = update_step_inner(
+            &services,
+            &step_id,
+            vertebrae_core::StepUpdate::new().with_prompt("new route prompt"),
+        )
+        .await;
+
+        assert!(result.unwrap_err().message.contains("route steps"));
+        assert_eq!(
+            services
+                .steps()
+                .get_step(&step_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .prompt
+                .as_deref(),
+            Some("legacy route prompt")
+        );
     }
 
     #[tokio::test]

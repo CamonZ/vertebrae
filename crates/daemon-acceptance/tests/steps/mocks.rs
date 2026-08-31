@@ -79,9 +79,23 @@ pub async fn script_malformed_fence(world: &mut DaemonWorld) {
 
 #[when("the mock emits valid fenced JSON with surrounding prose")]
 pub async fn script_valid_fence_with_prose(world: &mut DaemonWorld) {
+    // Compatibility fixture for the daemon's legacy result-text fallback.
     let result_line = r#"{"type":"result","subtype":"success","cost_usd":0.0,"duration_ms":1.0,"is_error":false,"result":"Some preamble.\n\n```json\n{\"answer\":\"ok\"}\n```\n\nTrailing thoughts.","session_id":"sess-prose","usage":{"input_tokens":1,"output_tokens":1} }"#;
     let builder = world
         .mock_response("prose-fence")
+        .with_exit_code(0)
+        .with_stdout_line(result_line);
+    set_prompt(world, builder).await;
+}
+
+#[when("the mock emits structured JSON output")]
+pub async fn script_structured_json_output(world: &mut DaemonWorld) {
+    // Claude emits schema-conforming JSON in the terminal `structured_output`
+    // field when structured output is requested. The daemon should persist
+    // this value directly instead of extracting JSON from result text.
+    let result_line = r#"{"type":"result","subtype":"success","cost_usd":0.0,"duration_ms":1.0,"is_error":false,"result":"computed answer","structured_output":{"answer":"ok"},"session_id":"sess-structured","usage":{"input_tokens":1,"output_tokens":1} }"#;
+    let builder = world
+        .mock_response("structured-output")
         .with_exit_code(0)
         .with_stdout_line(result_line);
     set_prompt(world, builder).await;

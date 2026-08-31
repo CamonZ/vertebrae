@@ -5,7 +5,7 @@
 use super::mock::mock_services;
 use vertebrae_cli::commands::step::*;
 use vertebrae_cli::commands::{Command, CommandResult};
-use vertebrae_core::CreateWorkflowOptions;
+use vertebrae_core::{CreateWorkflowOptions, StepUpdate};
 
 // ============================================================================
 // Step creation tests
@@ -46,6 +46,7 @@ mod step_create_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         let result = cmd.execute(services.steps()).await.unwrap();
@@ -81,6 +82,7 @@ mod step_create_tests {
             step_type: CliStepType::Execute,
             output_schema: Some(r#"{"type":"object"}"#.to_string()),
             persistence_options: Some(persistence.to_string()),
+            route_config: None,
         };
         add.execute(services.steps()).await.unwrap();
         assert_eq!(
@@ -118,6 +120,9 @@ mod step_create_tests {
                 r#"{"artifact":{"logical_name":"latest_result"}}"#.to_string(),
             ),
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         }
         .execute(services.steps())
         .await
@@ -155,6 +160,9 @@ mod step_create_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: true,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         }
         .execute(services.steps())
         .await
@@ -198,6 +206,7 @@ mod step_create_tests {
             step_type: CliStepType::Finish,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -240,6 +249,7 @@ mod step_create_tests {
             step_type: CliStepType::Finish,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         let error = cmd.execute(services.steps()).await.unwrap_err();
@@ -277,6 +287,7 @@ mod step_create_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         let result = cmd.execute(services.steps()).await.unwrap();
@@ -325,6 +336,7 @@ mod step_create_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -373,6 +385,7 @@ mod step_create_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -413,6 +426,7 @@ mod step_create_tests {
             step_type: CliStepType::Finish,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -460,6 +474,7 @@ mod step_create_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -513,6 +528,7 @@ mod step_create_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -559,6 +575,7 @@ mod step_create_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -607,6 +624,7 @@ mod step_create_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -666,6 +684,7 @@ mod step_list_tests {
                 },
                 output_schema: None,
                 persistence_options: None,
+                route_config: None,
             };
             cmd.execute(services.steps()).await.unwrap();
         }
@@ -712,6 +731,7 @@ mod step_list_tests {
             step_type: CliStepType::Evaluate,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -789,6 +809,7 @@ mod step_list_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -841,6 +862,7 @@ mod step_show_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -888,6 +910,7 @@ mod step_show_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -933,6 +956,7 @@ mod step_show_tests {
             step_type: CliStepType::Finish,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -987,6 +1011,7 @@ mod step_show_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1030,6 +1055,7 @@ mod step_show_tests {
             persistence_options: Some(
                 r#"{"artifact":{"logical_name":"human-result"}}"#.to_string(),
             ),
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1098,6 +1124,7 @@ mod step_update_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1124,6 +1151,9 @@ mod step_update_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1158,6 +1188,7 @@ mod step_update_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         }
         .execute(services.steps())
         .await
@@ -1185,6 +1216,9 @@ mod step_update_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         }
         .execute(services.steps())
         .await
@@ -1223,6 +1257,7 @@ mod step_update_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1249,6 +1284,9 @@ mod step_update_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1286,6 +1324,7 @@ mod step_update_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1312,6 +1351,9 @@ mod step_update_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1349,6 +1391,7 @@ mod step_update_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1375,6 +1418,9 @@ mod step_update_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1420,6 +1466,7 @@ mod step_update_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1446,6 +1493,9 @@ mod step_update_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1483,6 +1533,7 @@ mod step_update_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1509,6 +1560,9 @@ mod step_update_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1559,6 +1613,7 @@ mod step_update_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1585,6 +1640,9 @@ mod step_update_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1621,6 +1679,7 @@ mod step_update_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1646,6 +1705,9 @@ mod step_update_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1704,6 +1766,7 @@ mod step_dispatcher_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         });
 
         // Call through the dispatcher, not the inner command directly
@@ -1754,6 +1817,7 @@ mod step_delete_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1818,6 +1882,7 @@ mod step_delete_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1861,6 +1926,7 @@ mod step_delete_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1913,6 +1979,7 @@ mod step_prompt_and_agent_config_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -1953,6 +2020,7 @@ mod step_prompt_and_agent_config_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -1992,6 +2060,7 @@ mod step_prompt_and_agent_config_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -2043,6 +2112,7 @@ mod step_prompt_and_agent_config_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         let result = cmd.execute(services.steps()).await;
@@ -2084,6 +2154,7 @@ mod step_prompt_and_agent_config_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -2109,6 +2180,9 @@ mod step_prompt_and_agent_config_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -2144,6 +2218,7 @@ mod step_prompt_and_agent_config_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -2170,6 +2245,9 @@ mod step_prompt_and_agent_config_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -2205,6 +2283,7 @@ mod step_prompt_and_agent_config_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -2230,6 +2309,9 @@ mod step_prompt_and_agent_config_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         };
 
         let result = update_cmd.execute(services.steps()).await;
@@ -2271,6 +2353,7 @@ mod step_prompt_and_agent_config_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -2281,169 +2364,6 @@ mod step_prompt_and_agent_config_tests {
         assert_eq!(step.agent_config.model, Some("opus".to_string()));
         assert_eq!(step.agent_config.max_budget_usd, Some(15.0));
         assert_eq!(step.order, 2);
-    }
-}
-
-// ============================================================================
-// Route step output_schema validation tests
-// ============================================================================
-
-#[cfg(test)]
-mod route_step_schema_tests {
-    use super::*;
-    use vertebrae_core::models::StepType;
-
-    async fn workflow_id_for(services: &vertebrae_core::VertebraeServices) -> String {
-        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
-        services
-            .workflows()
-            .create_workflow(workflow_options)
-            .await
-            .unwrap()
-    }
-
-    fn route_add_cmd(workflow_id: String, id: &str, schema_json: String) -> StepAddCommand {
-        StepAddCommand {
-            name: "Router".to_string(),
-            workflow: workflow_id,
-            id: Some(id.to_string()),
-            goal: None,
-            agent: vec![],
-            skill: vec![],
-            prompt: None,
-            agent_config: None,
-            model: None,
-            provider: None,
-            reasoning_effort: None,
-            codex_model_provider: None,
-            order: 0,
-            transitions_to: vec![],
-            step_type: CliStepType::Route,
-            output_schema: Some(schema_json),
-            persistence_options: None,
-        }
-    }
-
-    fn route_update_cmd(id: &str, schema_json: String) -> StepUpdateCommand {
-        StepUpdateCommand {
-            id: id.to_string(),
-            name: None,
-            goal: None,
-            agent: vec![],
-            clear_agents: false,
-            skill: vec![],
-            clear_skills: false,
-            prompt: None,
-            agent_config: None,
-            model: None,
-            provider: None,
-            reasoning_effort: None,
-            codex_model_provider: None,
-            order: None,
-            transitions_to: vec![],
-            clear_transitions: false,
-            step_type: Some(CliStepType::Route),
-            output_schema: Some(schema_json),
-            clear_output_schema: false,
-            persistence_options: None,
-            clear_persistence_options: false,
-        }
-    }
-
-    #[tokio::test]
-    async fn test_step_add_route_accepts_schema_with_handoff() {
-        let services = mock_services();
-        let workflow_id = workflow_id_for(&services).await;
-
-        let schema = StepType::routing_contract_schema();
-        let cmd = route_add_cmd(workflow_id, "route-with-handoff", schema.to_string());
-
-        let result = cmd.execute(services.steps()).await.unwrap();
-        assert!(result.contains("Created step:"));
-
-        let step = services
-            .steps()
-            .get_step("route-with-handoff")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(step.step_type, StepType::Route);
-        assert_eq!(step.output_schema, Some(schema));
-    }
-
-    #[tokio::test]
-    async fn test_step_add_route_accepts_schema_without_handoff() {
-        let services = mock_services();
-        let workflow_id = workflow_id_for(&services).await;
-
-        let schema = StepType::routing_contract_schema_without_handoff();
-        let cmd = route_add_cmd(workflow_id, "route-without-handoff", schema.to_string());
-
-        let result = cmd.execute(services.steps()).await.unwrap();
-        assert!(result.contains("Created step:"));
-
-        let step = services
-            .steps()
-            .get_step("route-without-handoff")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(step.step_type, StepType::Route);
-        assert_eq!(step.output_schema, Some(schema));
-    }
-
-    #[tokio::test]
-    async fn test_step_update_route_accepts_schema_with_handoff() {
-        let services = mock_services();
-        let workflow_id = workflow_id_for(&services).await;
-
-        // Seed with the without-handoff shape.
-        let initial_schema = StepType::routing_contract_schema_without_handoff();
-        route_add_cmd(workflow_id, "route-upd", initial_schema.to_string())
-            .execute(services.steps())
-            .await
-            .unwrap();
-
-        let new_schema = StepType::routing_contract_schema();
-        let update_cmd = route_update_cmd("route-upd", new_schema.to_string());
-
-        let msg = update_cmd.execute(services.steps()).await.unwrap();
-        assert!(msg.contains("Updated step: route-upd"));
-
-        let step = services
-            .steps()
-            .get_step("route-upd")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(step.output_schema, Some(new_schema));
-    }
-
-    #[tokio::test]
-    async fn test_step_update_route_accepts_schema_without_handoff() {
-        let services = mock_services();
-        let workflow_id = workflow_id_for(&services).await;
-
-        // Seed with the with-handoff shape.
-        let initial_schema = StepType::routing_contract_schema();
-        route_add_cmd(workflow_id, "route-upd2", initial_schema.to_string())
-            .execute(services.steps())
-            .await
-            .unwrap();
-
-        let new_schema = StepType::routing_contract_schema_without_handoff();
-        let update_cmd = route_update_cmd("route-upd2", new_schema.to_string());
-
-        let msg = update_cmd.execute(services.steps()).await.unwrap();
-        assert!(msg.contains("Updated step: route-upd2"));
-
-        let step = services
-            .steps()
-            .get_step("route-upd2")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(step.output_schema, Some(new_schema));
     }
 }
 
@@ -2482,6 +2402,7 @@ mod provider_tests {
             step_type: CliStepType::Execute,
             output_schema: None,
             persistence_options: None,
+            route_config: None,
         }
     }
 
@@ -2513,6 +2434,9 @@ mod provider_tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
         }
     }
 
@@ -3090,5 +3014,367 @@ mod provider_tests {
         let step = services.steps().get_step("ok-1").await.unwrap().unwrap();
         assert_eq!(step.agent_config.provider, Some(Provider::Openai));
         assert_eq!(step.agent_config.model.as_deref(), Some("gpt-4o"));
+    }
+}
+
+// ============================================================================
+// Deterministic route configuration tests
+// ============================================================================
+
+#[cfg(test)]
+mod route_config_tests {
+    use super::*;
+    use vertebrae_core::{Step, StepType};
+
+    fn route_config() -> serde_json::Value {
+        serde_json::json!({
+            "version": 1,
+            "rules": [
+                {
+                    "id": "result-rule",
+                    "when": {"kind": "result", "step_id": "source", "path": "$.decision"},
+                    "then": {"kind": "step", "step_id": "approved"}
+                },
+                {
+                    "id": "level-tag-visit-rule",
+                    "when": {
+                        "all": [
+                            {"kind": "level", "value": "task"},
+                            {"kind": "tag", "value": "urgent"},
+                            {"kind": "visit_count", "step_id": "router", "value": 2}
+                        ]
+                    },
+                    "then": {
+                        "kind": "workflow_step",
+                        "workflow_id": "workflow-b",
+                        "step_id": "review"
+                    }
+                }
+            ],
+            "future": {"nested": ["preserve", 3, false, null]}
+        })
+    }
+
+    fn add_command(workflow: &str, id: &str, route_config: Option<String>) -> StepAddCommand {
+        StepAddCommand {
+            name: "Router".to_string(),
+            workflow: workflow.to_string(),
+            id: Some(id.to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: 0,
+            transitions_to: vec![],
+            step_type: CliStepType::Route,
+            output_schema: None,
+            persistence_options: None,
+            route_config,
+        }
+    }
+
+    fn update_command(id: &str) -> StepUpdateCommand {
+        StepUpdateCommand {
+            id: id.to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            clear_prompt: false,
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
+            route_config: None,
+            clear_route_config: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn route_config_can_be_drafted_set_replaced_and_cleared_exactly() {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Routes", vec![]))
+            .await
+            .unwrap();
+
+        add_command(&workflow_id, "router", None)
+            .execute(services.steps())
+            .await
+            .unwrap();
+        assert_eq!(
+            services
+                .steps()
+                .get_step("router")
+                .await
+                .unwrap()
+                .unwrap()
+                .route_config,
+            None
+        );
+
+        let first = route_config();
+        let mut update = update_command("router");
+        update.route_config = Some(first.to_string());
+        update.execute(services.steps()).await.unwrap();
+        assert_eq!(
+            services
+                .steps()
+                .get_step("router")
+                .await
+                .unwrap()
+                .unwrap()
+                .route_config,
+            Some(first.clone())
+        );
+
+        let replacement = serde_json::json!({
+            "version": 2,
+            "rules": [{"future_rule": {"array": [1, true, null]}}]
+        });
+        let mut update = update_command("router");
+        update.route_config = Some(replacement.to_string());
+        update.execute(services.steps()).await.unwrap();
+        assert_eq!(
+            services
+                .steps()
+                .get_step("router")
+                .await
+                .unwrap()
+                .unwrap()
+                .route_config,
+            Some(replacement)
+        );
+
+        let mut update = update_command("router");
+        update.clear_route_config = true;
+        update.execute(services.steps()).await.unwrap();
+        assert_eq!(
+            services
+                .steps()
+                .get_step("router")
+                .await
+                .unwrap()
+                .unwrap()
+                .route_config,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn route_prompt_clear_is_distinct_from_empty_prompt_and_visible_in_reads() {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Routes", vec![]))
+            .await
+            .unwrap();
+        let config = route_config();
+        let mut route_step = Step::new("Router", workflow_id).with_prompt("legacy prompt");
+        route_step.id = Some("router".to_string());
+        services.steps().create_step(&route_step).await.unwrap();
+        services
+            .steps()
+            .update_step(
+                "router",
+                &StepUpdate::new()
+                    .with_step_type(StepType::Route)
+                    .with_route_config(Some(config.clone())),
+            )
+            .await
+            .unwrap();
+
+        let human = StepShowCommand {
+            id: "router".to_string(),
+        }
+        .execute(services.steps())
+        .await
+        .unwrap();
+        assert!(human.contains("Prompt:        legacy prompt"));
+        assert!(human.contains("Route Config:"));
+        assert!(human.contains("\"future\""));
+
+        let json = Command::Step(StepCommand::Show(StepShowCommand {
+            id: "router".to_string(),
+        }))
+        .execute_json(&services)
+        .await
+        .unwrap();
+        let CommandResult::Json(json) = json else {
+            panic!("step show --json should return the raw step");
+        };
+        assert_eq!(json["prompt"], "legacy prompt");
+        assert_eq!(json["route_config"], config);
+
+        let mut update = update_command("router");
+        update.clear_prompt = true;
+        update.execute(services.steps()).await.unwrap();
+        assert_eq!(
+            services
+                .steps()
+                .get_step("router")
+                .await
+                .unwrap()
+                .unwrap()
+                .prompt,
+            None
+        );
+
+        let mut update = update_command("router");
+        update.prompt = Some(String::new());
+        let error = update.execute(services.steps()).await.unwrap_err();
+        assert!(error.to_string().contains("route steps"));
+    }
+
+    #[tokio::test]
+    async fn route_invariants_reject_invalid_arguments_before_mutation() {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Routes", vec![]))
+            .await
+            .unwrap();
+
+        let mut non_route = add_command(&workflow_id, "execute", Some(route_config().to_string()));
+        non_route.step_type = CliStepType::Execute;
+        let error = non_route.execute(services.steps()).await.unwrap_err();
+        assert!(error.to_string().contains("only valid for route steps"));
+        assert!(
+            services
+                .steps()
+                .get_step("execute")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let mut prompted_route = add_command(&workflow_id, "prompted", None);
+        prompted_route.prompt = Some("write this".to_string());
+        let error = prompted_route.execute(services.steps()).await.unwrap_err();
+        assert!(error.to_string().contains("only clear"));
+        assert!(
+            services
+                .steps()
+                .get_step("prompted")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let malformed = add_command(&workflow_id, "malformed", Some("{not-json}".to_string()));
+        let error = malformed.execute(services.steps()).await.unwrap_err();
+        assert!(error.to_string().contains("Invalid --route-config JSON"));
+        assert!(
+            services
+                .steps()
+                .get_step("malformed")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        add_command(&workflow_id, "conflict", None)
+            .execute(services.steps())
+            .await
+            .unwrap();
+        let mut conflict = update_command("conflict");
+        conflict.route_config = Some(route_config().to_string());
+        conflict.clear_route_config = true;
+        let error = conflict.execute(services.steps()).await.unwrap_err();
+        assert!(error.to_string().contains("cannot be used together"));
+        assert_eq!(
+            services
+                .steps()
+                .get_step("conflict")
+                .await
+                .unwrap()
+                .unwrap()
+                .route_config,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn conversion_away_from_configured_route_requires_atomic_clear() {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Routes", vec![]))
+            .await
+            .unwrap();
+        let prompt = "keep until explicitly cleared";
+        let config = route_config();
+        StepAddCommand {
+            name: "Execute".to_string(),
+            workflow: workflow_id,
+            id: Some("convert".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: Some(prompt.to_string()),
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: 0,
+            transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
+            persistence_options: None,
+            route_config: None,
+        }
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        let mut to_route = update_command("convert");
+        to_route.step_type = Some(CliStepType::Route);
+        to_route.route_config = Some(config.to_string());
+        to_route.execute(services.steps()).await.unwrap();
+        let routed_with_prompt = services.steps().get_step("convert").await.unwrap().unwrap();
+        assert_eq!(routed_with_prompt.step_type, StepType::Route);
+        assert_eq!(routed_with_prompt.prompt.as_deref(), Some(prompt));
+        assert_eq!(routed_with_prompt.route_config, Some(config.clone()));
+
+        let mut clear_prompt = update_command("convert");
+        clear_prompt.clear_prompt = true;
+        clear_prompt.execute(services.steps()).await.unwrap();
+        let routed = services.steps().get_step("convert").await.unwrap().unwrap();
+        assert_eq!(routed.prompt, None);
+
+        let mut to_execute = update_command("convert");
+        to_execute.step_type = Some(CliStepType::Execute);
+        let error = to_execute.execute(services.steps()).await.unwrap_err();
+        assert!(error.to_string().contains("route_config"));
+        let still_routed = services.steps().get_step("convert").await.unwrap().unwrap();
+        assert_eq!(still_routed.step_type, StepType::Route);
+        assert_eq!(still_routed.route_config, Some(config.clone()));
+
+        let mut to_execute = update_command("convert");
+        to_execute.step_type = Some(CliStepType::Execute);
+        to_execute.clear_route_config = true;
+        to_execute.execute(services.steps()).await.unwrap();
+        let executed = services.steps().get_step("convert").await.unwrap().unwrap();
+        assert_eq!(executed.step_type, StepType::Execute);
+        assert_eq!(executed.route_config, None);
     }
 }

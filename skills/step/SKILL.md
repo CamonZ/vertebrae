@@ -66,6 +66,10 @@ vtb step add "Evaluate" -w <workflow-id> \
   --step-type evaluate \
   --output-schema '{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}'
 
+# Create a deterministic route draft, then configure it after graph targets exist
+vtb step add "Router" -w <workflow-id> --step-type route
+vtb step update <step-id> --route-config '<route-config-json>'
+
 # Persist validated structured output as a task artifact (Sacrum-owned)
 vtb step add "Evaluate" -w <workflow-id> \
   --step-type evaluate \
@@ -92,8 +96,9 @@ vtb --json step add "Review" -w <workflow-id>
 | `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
 | `--codex-model-provider` | | Codex upstream provider from `~/.codex/config.toml`; alias `--codex-provider` |
 | `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh` |
-| `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, or `human_input` (default: `execute`) |
+| `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (default: `execute`) |
 | `--output-schema` | | JSON Schema describing expected structured output |
+| `--route-config` | | Opaque deterministic route configuration as a JSON string; only valid for `route` steps |
 | `--persistence-options` | | Sacrum-owned JSON configuration for persisting structured output as a task artifact |
 | `--order` | `-o` | Step order (default: 0) |
 | `--transition-to` | `-t` | Steps this can transition to (repeatable) |
@@ -109,6 +114,12 @@ the field.
 `--persistence-options` accepts Sacrum's persistence configuration, currently
 `{"artifact":{"logical_name":"<name>"}}`. It requires an output schema;
 Sacrum validates the logical name and owns the resulting task artifact.
+
+`--route-config` accepts nullable, opaque deterministic route JSON and is only
+valid for `route` steps. A route may be created without it as a non-runnable
+draft; configure it after the workflow graph and predecessor contracts exist.
+Route authoring rejects `--prompt` and `--output-schema`; neither is a routing
+mechanism.
 
 ---
 
@@ -150,8 +161,8 @@ No steps found for workflow '<workflow-id>'
 
 `--json` returns the raw array of `Step` objects with fields such as `id`,
 `name`, `workflow_id`, `order`, `step_type`, `agent_config`,
-`transitions_to`, and timestamps. It does not wrap the result in an `output`
-field.
+`output_schema`, `route_config`, `persistence_options`, `transitions_to`, and
+timestamps. It does not wrap the result in an `output` field.
 
 ---
 
@@ -178,14 +189,19 @@ full UUID or an 8-character hex short ID and is resolved case-insensitively.
 There are no command aliases, defaults, or value enums for `step show`.
 
 Human-readable output is a flat detail view with the step ID and name, workflow
-ID, order, step type, goal, agents, skills, model, output schema, transitions,
-and persistence configuration, and created/updated timestamps. Missing optional fields are
-shown as `(none)`, and missing timestamps are shown as `-`.
+ID, order, step type, goal, agents, skills, model, output schema, route config,
+transitions, and persistence configuration, and created/updated timestamps.
+Missing optional fields are shown as `(none)`, and missing timestamps are shown
+as `-`.
 
 `--json` returns the raw `Step` object with fields such as `id`, `name`,
 `workflow_id`, `order`, `goal`, `prompt`, `agents`, `skills`, `step_type`,
-`agent_config`, `output_schema`, `persistence_options`, `transitions_to`, and timestamps.
+`agent_config`, `output_schema`, `route_config`, `persistence_options`,
+`transitions_to`, and timestamps.
 It does not wrap the result in an `output` field.
+
+`route_config` is nullable opaque JSON. An empty object is distinct from `null`;
+the CLI preserves the value without interpreting or normalizing the route AST.
 
 If a full UUID reaches `step show` but no matching step exists, the command
 fails with `Step not found: <id>`. If an 8-character hex short ID cannot be
@@ -216,10 +232,17 @@ vtb step update <step-id> --agent .claude/agents/reviewer.md
 # Replace skills list (replaces entire list, not additive)
 vtb step update <step-id> --skill review --skill simplify
 
-# Replace prompt, step type, and output schema
+# Replace prompt, step type, and output schema on an ordinary execution step
 vtb step update <step-id> --prompt "Review task {{task.id}}"
 vtb step update <step-id> --step-type evaluate
 vtb step update <step-id> --output-schema '{"type":"object"}'
+
+# Clear a retained prompt
+vtb step update <step-id> --clear-prompt
+
+# Configure or clear a deterministic route
+vtb step update <step-id> --route-config '<route-config-json>'
+vtb step update <step-id> --clear-route-config
 
 # Clear all agents
 vtb step update <step-id> --clear-agents
@@ -260,14 +283,17 @@ vtb --json step update <step-id> --goal "New goal"
 | `--skill` | `-s` | Replace skills list; repeatable |
 | `--clear-skills` | | Clear all skills |
 | `--prompt` | | New prompt |
+| `--clear-prompt` | | Explicitly clear a retained prompt |
 | `--agent-config` | | Full agent config as a JSON string |
 | `--model` | `-m` | Agent model shortcut |
 | `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
 | `--codex-model-provider` | | Codex upstream provider from `~/.codex/config.toml`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
 | `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh`; only valid when the resulting provider is OpenAI/Codex |
-| `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, or `human_input` |
+| `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, or `finish` |
 | `--output-schema` | | New output schema as a JSON string |
 | `--clear-output-schema` | | Clear the output schema |
+| `--route-config` | | Replace the opaque deterministic route configuration |
+| `--clear-route-config` | | Clear the route configuration, leaving a route draft |
 | `--persistence-options` | | Replace Sacrum's persistence configuration with JSON |
 | `--clear-persistence-options` | | Clear the persistence configuration (send `null`) |
 | `--order` | `-o` | New 0-indexed step order |
@@ -283,10 +309,17 @@ can replace the full config, and the shortcut flags (`--provider`, `--model`,
 `--codex-model-provider`, and `--reasoning-effort`) overlay individual fields.
 
 `--json` returns an operation envelope with `command`, `status`, and `step_id`.
-Invalid `--agent-config`, `--output-schema`, or `--persistence-options` JSON
-fails before persistence. Use `--clear-persistence-options` to remove the
+Invalid `--agent-config`, `--output-schema`, `--persistence-options`, or
+`--route-config` JSON fails before persistence. Use
+`--clear-persistence-options` to remove the
 nullable field; setting `{}` is accepted by Sacrum as an empty configuration,
 but it does not create an artifact and is not equivalent to clearing the field.
+For a resulting `route` step, `--prompt` and `--output-schema` are rejected;
+an existing prompt can only be inspected or explicitly removed with
+`--clear-prompt`. Route configuration is semantically validated by Sacrum, and
+nested diagnostics retain
+their `route_config` field paths. Clearing route configuration leaves an
+unconfigured, non-runnable route draft.
 Provider/model mismatches, Codex upstream provider usage when the resulting
 provider is Anthropic, and Anthropic reasoning effort are rejected by the CLI
 before the step is updated.
@@ -334,6 +367,54 @@ resolved, the shared ID resolver reports `step with prefix '<id>' not found`.
 ---
 
 ## Step Concepts
+
+### Deterministic route configuration
+
+`route_config` is nullable, opaque JSON owned semantically by Sacrum. Vertebrae
+only validates JSON syntax and argument consistency, transports the value, and
+renders backend diagnostics; it does not interpret the route AST or generate a
+prompt, output schema, or client-side evaluator.
+
+The V1 envelope has this general shape:
+
+```json
+{
+  "version": 1,
+  "match_policy": "exactly_one",
+  "rules": [
+    {
+      "id": "approved-result",
+      "when": {
+        "ref": "previous_output.route.result",
+        "op": "eq",
+        "value": "approved"
+      },
+      "transition": {
+        "type": "intra_workflow",
+        "step_id": "<target-step-id>"
+      }
+    }
+  ],
+  "default": {
+    "transition": {
+      "type": "intra_workflow",
+      "step_id": "<default-step-id>"
+    },
+    "handoff": {}
+  }
+}
+```
+
+Use persisted graph targets and let Sacrum validate the complete graph. A route
+can be created without configuration as a draft; `--clear-route-config` returns
+a configured route to that state. Retained route prompts are readable and can
+be cleared with `--clear-prompt`, but `--prompt` is never a route authoring
+mechanism. New route authoring cannot set an `output_schema`; when converting a
+structured step to `route`, clear it in the same update with
+`--clear-output-schema`. Legacy route rows may still expose their retained
+output schema for inspection, but Vertebrae does not write or interpret that
+old routing contract. Ordinary `execute` and `evaluate` steps retain their
+normal prompt and `output_schema` behavior.
 
 ### Persistence Options
 

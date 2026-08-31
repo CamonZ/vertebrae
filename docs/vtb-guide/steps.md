@@ -47,6 +47,9 @@ vtb step add "Needs Input" -w <workflow-id> --step-type human_input
 # Add a routing step
 vtb step add "Router" -w <workflow-id> --step-type route
 
+# Configure a route after its graph and predecessor contracts exist
+vtb step update <step-id> --route-config '<route-config-json>'
+
 # Add a promptless terminal step
 vtb step add "Complete" -w <workflow-id> --step-type finish
 
@@ -59,10 +62,13 @@ vtb --json step list <workflow-id>
 vtb step show <step-id>
 vtb step update <step-id> --goal "New goal" --model opus
 vtb step update <step-id> --prompt "New prompt for {{task.id}}"
+vtb step update <step-id> --clear-prompt
 vtb step update <step-id> --step-type evaluate
 vtb step update <step-id> --step-type stop --transition-to <next-step-id>
 vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
+vtb step update <step-id> --route-config '<route-config-json>'
+vtb step update <step-id> --clear-route-config
 vtb step update <step-id> --persistence-options '{"artifact":{"logical_name":"step_result"}}'
 vtb step update <step-id> --clear-persistence-options
 vtb step update <step-id> --clear-agents --clear-skills
@@ -115,6 +121,7 @@ Agents:        (none)
 Skills:        (none)
 Model:         gpt-5.5
 Output Schema: (none)
+Route Config:  (none)
 Transitions:   57d373b1-e40d-4a42-9ae4-1c6461d7a2b9
 Created:       2026-05-29 12:53
 Updated:       2026-05-30 16:48
@@ -134,9 +141,10 @@ vtb --json step show <step-id>
 
 The JSON object includes fields such as `id`, `name`, `workflow_id`, `order`,
 `goal`, `prompt`, `agents`, `skills`, `step_type`, `agent_config`,
-`output_schema`, `transitions_to`, `created_at`, and `updated_at`.
+`output_schema`, `route_config`, `transitions_to`, `created_at`, and `updated_at`.
 When configured, `persistence_options` is also included; it is `null`/absent
-for steps without persistence configuration.
+for steps without persistence configuration. `route_config` is nullable opaque
+JSON and an empty object is distinct from `null`.
 
 `vtb step update` takes exactly one required `<id>` argument: the step ID to
 update. It accepts a full UUID or an 8-character hex short ID and resolves IDs
@@ -153,6 +161,7 @@ request with no property changes before reporting success.
 | `--skill <SKILL>` | `-s` | Replace the full skills list; repeat for multiple skills |
 | `--clear-skills` | | Replace the skills list with an empty list |
 | `--prompt <PROMPT>` | | Replace the execution prompt |
+| `--clear-prompt` | | Explicitly clear a retained prompt |
 | `--agent-config <JSON>` | | Replace/overlay the full agent config from a JSON string |
 | `--model <MODEL>` | `-m` | Set `agent_config.model` |
 | `--provider <PROVIDER>` | | Set `agent_config.provider`; accepts `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
@@ -161,6 +170,8 @@ request with no property changes before reporting success.
 | `--step-type <STEP_TYPE>` | | Set the step type; values are `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, and `finish` |
 | `--output-schema <JSON>` | | Replace the step output schema from a JSON string |
 | `--clear-output-schema` | | Remove the output schema |
+| `--route-config <JSON>` | | Replace the opaque deterministic route configuration |
+| `--clear-route-config` | | Remove the route configuration, leaving a route draft |
 | `--persistence-options <JSON>` | | Replace Sacrum's persistence configuration |
 | `--clear-persistence-options` | | Remove the persistence configuration |
 | `--order <ORDER>` | `-o` | Replace the 0-indexed step order |
@@ -174,10 +185,17 @@ the supplied JSON; the shortcut flags (`--provider`, `--model`,
 `--codex-model-provider`, and `--reasoning-effort`) then overlay individual
 fields before the config is validated and persisted.
 
-Invalid JSON in `--agent-config`, `--output-schema`, or `--persistence-options`
+Invalid JSON in `--agent-config`, `--output-schema`, `--persistence-options`, or
+`--route-config`
 fails before persistence. Sacrum validates persistence configuration and
 surfaces errors for blank/overlong logical names, unknown keys, missing
 `output_schema`, and terminal `finish`/`stop` steps.
+For a resulting `route` step, `--prompt` is rejected; an existing prompt can
+only be inspected or explicitly removed with `--clear-prompt`. Route
+configuration errors are validated by Sacrum and retain their nested field
+path in the CLI diagnostic. A route may be created without configuration as a
+non-runnable draft, and `--clear-route-config` returns a configured route to
+that draft state.
 Provider/model mismatches, Codex upstream provider usage when the resulting
 provider is Anthropic, and Anthropic reasoning effort are rejected by the CLI
 before the step is updated.
@@ -247,6 +265,7 @@ matching step exists, the command fails with `Step not found: <id>`. If an
 | `transition-to` | Restrict which steps can follow this one |
 | `step-type` | Type of step: `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (see below) |
 | `output-schema` | JSON Schema for structured output enforcement (see below) |
+| `route-config` | Opaque nullable V1 deterministic route program; only valid for `route` steps |
 
 ### Step Types
 
@@ -255,8 +274,8 @@ Each step has a `--step-type` that determines its role in the workflow:
 | Type | Description |
 |------|-------------|
 | `execute` | **Default.** Runs the step's prompt via Claude and produces output. |
-| `evaluate` | Assesses the output of a previous step. Used with `eval_prompt` to determine which transition to follow when a step has multiple outgoing paths. |
-| `route` | Directs work to different paths based on conditions. Uses a fixed routing contract schema. |
+| `evaluate` | Assesses the output of a previous step and can determine which transition to follow when a step has multiple outgoing paths. |
+| `route` | Sacrum-local deterministic control step. Evaluates `route_config`; it does not dispatch a daemon prompt or use `output_schema` as a routing program. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
 | `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. |
 | `stop` | Run boundary. Ends the current TaskRun as `stopped` without completing the task or dispatching the step; it must have exactly one outgoing transition, which a later TaskRun follows. |
@@ -279,7 +298,12 @@ vtb step add "Pause Run" -w <wf-id> --step-type stop --transition-to <next-step-
 vtb step update <step-id> --step-type route
 ```
 
-When a step has type `evaluate` and multiple outgoing transitions, the daemon runs a separate evaluation execution whose output is matched against transition labels to determine the next step — creating a **branching state machine** driven by AI judgment.
+When a step has type `evaluate` and multiple outgoing transitions, the daemon
+runs a separate evaluation execution whose output is matched against transition
+labels to determine the next step — creating a **branching state machine**
+driven by AI judgment. A `route` step is different: Sacrum evaluates its
+`route_config` locally and deterministically, without a daemon execution or
+prompt/output-schema fallback.
 
 `finish` is the sole terminal step type. Its prompt, agent configuration, output
 schema, and outgoing transitions must be empty. Sacrum owns task completion and
@@ -293,18 +317,107 @@ does not dispatch the stop step. A later TaskRun bypasses the stop through its
 single outgoing transition. The CLI and client reject stop steps unless exactly
 one outgoing transition is provided.
 
-The seven step types are carried unchanged through the Sacrum API, core models,
+The step types are carried unchanged through the Sacrum API, core models,
 CLI JSON output, Tauri bindings, Atlas/task-location surfaces, and trace
 normalization. Unknown future wire values remain available through the
 `unsupported` compatibility variant.
 
+### Deterministic route configuration
+
+`route_config` is nullable, opaque JSON owned semantically by Sacrum. Vertebrae
+only parses JSON syntax, checks argument consistency, transports the value, and
+renders backend diagnostics. It must not interpret the route AST or generate a
+prompt, output schema, or client-side evaluator.
+
+A V1 configuration has this envelope:
+
+```json
+{
+  "version": 1,
+  "match_policy": "exactly_one",
+  "rules": [
+    {
+      "id": "approved-result",
+      "when": {
+        "ref": "previous_output.route.result",
+        "op": "eq",
+        "value": "approved"
+      },
+      "transition": {
+        "type": "intra_workflow",
+        "step_id": "00000000-0000-0000-0000-000000000001"
+      },
+      "handoff": {"decision": "{{ previous_output.route.result }}"}
+    },
+    {
+      "id": "urgent-task",
+      "when": {
+        "all": [
+          {"ref": "task.level", "op": "in", "value": ["ticket", "task"]},
+          {"ref": "task.tags", "op": "contains", "value": "urgent"},
+          {"ref": "execution.step_visit_count", "op": "lte", "value": 3}
+        ]
+      },
+      "transition": {
+        "type": "inter_workflow",
+        "workflow_id": "00000000-0000-0000-0000-000000000002"
+      }
+    }
+  ],
+  "default": {
+    "transition": {
+      "type": "intra_workflow",
+      "step_id": "00000000-0000-0000-0000-000000000003"
+    },
+    "handoff": {}
+  }
+}
+```
+
+This example shows the complete V1 node shapes; choose predicates and targets
+for the workflow so the rules remain mutually exclusive under
+`match_policy: "exactly_one"`.
+
+Replace the UUID placeholders with persisted graph targets. The closed V1
+references are `previous_output.route.result`, `task.level`, `task.tags`, and
+`execution.step_visit_count`. Their supported operators are respectively
+`eq`/`neq`/`in`, `eq`/`neq`/`in`, `contains`/`contains_any`/`contains_all`, and
+`eq`/`neq`/`lt`/`lte`/`gt`/`gte`/`in`. Conditions compose with non-empty `all`,
+`any`, and `not` nodes. Every rule has a unique identifier, a condition, and a
+transition; the optional handoff is copied into the next execution and may use
+only the closed route interpolation context.
+
+Sacrum requires exactly one rule to match. A `default` decision is used only
+when no rule matches; it is required when an open-domain reference such as tags
+or visit count leaves cases that rules cannot enumerate. An intra-workflow
+target names an outgoing step transition. An inter-workflow target names an
+outgoing workflow transition, which enters the destination workflow's configured
+target or initial step. Sacrum also checks predecessor result schemas, target
+edges, coverage, and graph legality; invalid nested rules are reported with
+their full `route_config` path.
+
+Recommended authoring order is: create the workflow topology and persisted
+transition targets; give each predecessor its structured `route` result
+contract; create the `route` step as a draft; then set `--route-config` and let
+Sacrum validate the complete graph. `--clear-route-config` leaves a non-runnable
+route draft. Retained route prompts are readable and can be cleared with
+`--clear-prompt`, but `--prompt` is never a route authoring mechanism. Ordinary
+`execute` and `evaluate` steps retain their normal prompt and `output_schema`
+behavior. New route authoring cannot set an `output_schema`; when converting a
+structured step to `route`, clear it in the same update with
+`--clear-output-schema` (the GUI does this automatically). Legacy
+prompt/output-schema routes may expose their retained output schema for
+inspection, but new Vertebrae writes do not author or interpret that old
+routing contract. Existing route programs are not inferred or rewritten.
+
 ### Output Schemas
 
-Steps can define an `output_schema` — a JSON Schema describing the expected structured output from the selected harness. When present:
+Execute and evaluate steps can define an `output_schema` — a JSON Schema
+describing the expected structured output from the selected harness. When present:
 
 - The daemon passes it to the selected harness subprocess, enforcing structured output
 - The step-level `output_schema` takes precedence over `agent_config.json_schema`
-- This enables reliable machine-readable responses for evaluation steps, routing decisions, and automated pipeline stages
+- This enables reliable machine-readable responses for execute/evaluate steps and other automated pipeline stages. It is not a route program: Sacrum routes from `route_config`.
 
 ```bash
 # Set output schema on creation
@@ -330,8 +443,9 @@ named JSON artifact attached to the current task:
 The `logical_name` must be nonblank and at most 255 characters. Artifact
 persistence requires an `output_schema`; Sacrum rejects unknown keys and
 rejects persistence on `finish` and `stop` steps. `execute`, `evaluate`,
-`route`, `human_input`, and `wait_children` outputs/snapshots are persisted by
-Sacrum, with repeated writes upserting the task's
+`human_input`, and `wait_children` outputs/snapshots are persisted by Sacrum,
+while route decisions are handled and audited locally by Sacrum. Repeated
+writes upsert the task's
 `<logical_name>.json` artifact. The daemon only executes and validates output;
 it does not interpret this setting or create artifacts.
 

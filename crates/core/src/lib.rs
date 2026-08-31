@@ -41,6 +41,7 @@ pub mod models;
 pub mod orchestrator;
 pub mod service;
 pub mod services;
+pub mod step_constraints;
 pub mod step_service;
 pub mod workflow_service;
 
@@ -65,6 +66,7 @@ pub use service::{
     CreateTaskOptions, MutationCallback, MutationEvent, TaskService, UpdateTaskOptions,
 };
 pub use services::VertebraeServices;
+pub use step_constraints::{resulting_option, validate_route_fields, validate_route_update};
 pub use step_service::StepService;
 pub use workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo,

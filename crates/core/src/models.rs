@@ -198,40 +198,6 @@ impl StepType {
             StepType::Unsupported(value) => value.as_str(),
         }
     }
-
-    /// The JSON Schema that route steps must use as their output_schema.
-    /// Must match the Sacrum backend's `routing_contract_schema/0`.
-    ///
-    /// The `handoff` property is optional; route steps that do not emit a
-    /// handoff payload may use [`Self::routing_contract_schema_without_handoff`]
-    /// instead. Both shapes are accepted by the Sacrum validator.
-    pub fn routing_contract_schema() -> serde_json::Value {
-        let mut schema = Self::routing_contract_schema_without_handoff();
-        schema["properties"]["handoff"] = serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "required": [],
-            "additionalProperties": false
-        });
-        schema["required"] = serde_json::json!(["transition_to", "transition_type", "handoff"]);
-        schema
-    }
-
-    /// The routing contract shape without the optional `handoff` property.
-    /// Kept as a canonical alternative so route steps that do not emit a
-    /// handoff payload still pass validation. Must match the Sacrum backend's
-    /// `routing_contract_schema_without_handoff/0`.
-    pub fn routing_contract_schema_without_handoff() -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "transition_to": {"type": "string"},
-                "transition_type": {"type": "string", "enum": ["intra_workflow", "inter_workflow"]}
-            },
-            "required": ["transition_to", "transition_type"],
-            "additionalProperties": false
-        })
-    }
 }
 
 impl serde::Serialize for StepType {
@@ -1668,6 +1634,10 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<serde_json::Value>,
 
+    /// Opaque nullable deterministic route configuration owned by Sacrum
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_config: Option<serde_json::Value>,
+
     /// Optional orchestrator-owned persistence configuration for structured output
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persistence_options: Option<serde_json::Value>,
@@ -1703,6 +1673,7 @@ impl Step {
             agent_config: AgentConfig::default(),
             step_type: StepType::default(),
             output_schema: None,
+            route_config: None,
             persistence_options: None,
             transitions_to: Vec::new(),
             order: 0,
@@ -1762,6 +1733,12 @@ impl Step {
     /// Set the output schema
     pub fn with_output_schema(mut self, schema: serde_json::Value) -> Self {
         self.output_schema = Some(schema);
+        self
+    }
+
+    /// Set the opaque deterministic route configuration.
+    pub fn with_route_config(mut self, route_config: serde_json::Value) -> Self {
+        self.route_config = Some(route_config);
         self
     }
 
@@ -2458,8 +2435,8 @@ pub struct StepUpdate {
     pub name: Option<String>,
     /// New goal
     pub goal: Option<String>,
-    /// New prompt
-    pub prompt: Option<String>,
+    /// New prompt (Some(Some(value)) sets it; Some(None) clears it)
+    pub prompt: Option<Option<String>>,
     /// New agents list
     pub agents: Option<Vec<String>>,
     /// New skills list
@@ -2470,6 +2447,8 @@ pub struct StepUpdate {
     pub step_type: Option<StepType>,
     /// New output schema
     pub output_schema: Option<Option<serde_json::Value>>,
+    /// New route configuration (Some(Some(value)) replaces it; Some(None) clears it)
+    pub route_config: Option<Option<serde_json::Value>>,
     /// New orchestrator-owned persistence configuration (Some(None) clears it)
     pub persistence_options: Option<Option<serde_json::Value>>,
     /// New transitions_to list (string IDs)
@@ -2498,7 +2477,13 @@ impl StepUpdate {
 
     /// Set a new prompt
     pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.prompt = Some(prompt.into());
+        self.prompt = Some(Some(prompt.into()));
+        self
+    }
+
+    /// Explicitly clear the prompt.
+    pub fn clear_prompt(mut self) -> Self {
+        self.prompt = Some(None);
         self
     }
 
@@ -2529,6 +2514,12 @@ impl StepUpdate {
     /// Set the output schema (Some to set, None to clear)
     pub fn with_output_schema(mut self, schema: Option<serde_json::Value>) -> Self {
         self.output_schema = Some(schema);
+        self
+    }
+
+    /// Set or clear the opaque deterministic route configuration.
+    pub fn with_route_config(mut self, route_config: Option<serde_json::Value>) -> Self {
+        self.route_config = Some(route_config);
         self
     }
 
@@ -3265,42 +3256,6 @@ mod tests {
     }
 
     #[test]
-    fn routing_contract_schema_includes_optional_handoff() {
-        let schema = StepType::routing_contract_schema();
-        let expected = serde_json::json!({
-            "type": "object",
-            "properties": {
-                "transition_to": {"type": "string"},
-                "transition_type": {"type": "string", "enum": ["intra_workflow", "inter_workflow"]},
-                "handoff": {
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                    "additionalProperties": false
-                }
-            },
-            "required": ["transition_to", "transition_type", "handoff"],
-            "additionalProperties": false
-        });
-        assert_eq!(schema, expected);
-    }
-
-    #[test]
-    fn routing_contract_schema_without_handoff_matches_previous_shape() {
-        let schema = StepType::routing_contract_schema_without_handoff();
-        let expected = serde_json::json!({
-            "type": "object",
-            "properties": {
-                "transition_to": {"type": "string"},
-                "transition_type": {"type": "string", "enum": ["intra_workflow", "inter_workflow"]}
-            },
-            "required": ["transition_to", "transition_type"],
-            "additionalProperties": false
-        });
-        assert_eq!(schema, expected);
-    }
-
-    #[test]
     fn step_type_serde_roundtrip() {
         for (variant, expected_json) in [
             (StepType::Execute, "\"execute\""),
@@ -3370,16 +3325,22 @@ mod tests {
 
     #[test]
     fn step_serde_roundtrip_with_new_fields() {
-        let schema = serde_json::json!({"type": "string"});
+        let route_config = serde_json::json!({
+            "version": 1,
+            "future": {
+                "array": ["text", 2.5, true, null],
+                "nested": {"unknown": "value"}
+            }
+        });
         let step = Step::new("route_step", "wf1")
             .with_step_type(StepType::Route)
-            .with_output_schema(schema.clone());
+            .with_route_config(route_config.clone());
 
         let json = serde_json::to_string(&step).unwrap();
         let deserialized: Step = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.step_type, StepType::Route);
-        assert_eq!(deserialized.output_schema, Some(schema));
+        assert_eq!(deserialized.route_config, Some(route_config));
     }
 
     #[test]
@@ -3388,6 +3349,7 @@ mod tests {
         let step: Step = serde_json::from_str(json).unwrap();
         assert_eq!(step.step_type, StepType::Execute);
         assert_eq!(step.output_schema, None);
+        assert_eq!(step.route_config, None);
         assert_eq!(step.persistence_options, None);
     }
 
@@ -3406,6 +3368,36 @@ mod tests {
     fn step_update_clear_output_schema() {
         let u = StepUpdate::new().with_output_schema(None);
         assert_eq!(u.output_schema, Some(None));
+    }
+
+    #[test]
+    fn step_update_distinguishes_route_config_unset_set_and_clear() {
+        let config = serde_json::json!({
+            "version": 1,
+            "rules": [{"future_operator": {"value": null}}]
+        });
+
+        assert_eq!(StepUpdate::new().route_config, None);
+        assert_eq!(
+            StepUpdate::new()
+                .with_route_config(Some(config.clone()))
+                .route_config,
+            Some(Some(config))
+        );
+        assert_eq!(
+            StepUpdate::new().with_route_config(None).route_config,
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn step_update_distinguishes_prompt_unset_set_and_clear() {
+        assert_eq!(StepUpdate::new().prompt, None);
+        assert_eq!(
+            StepUpdate::new().with_prompt("keep this").prompt,
+            Some(Some("keep this".to_string()))
+        );
+        assert_eq!(StepUpdate::new().clear_prompt().prompt, Some(None));
     }
 
     #[test]

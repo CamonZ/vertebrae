@@ -666,6 +666,9 @@ pub struct Step {
     /// Orchestrator-owned persistence configuration for this step
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persistence_options: Option<serde_json::Value>,
+    /// Opaque deterministic route configuration for route steps
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_config: Option<serde_json::Value>,
     /// List of step IDs this step can transition to
     #[serde(default)]
     pub transitions_to: Vec<String>,
@@ -693,6 +696,7 @@ impl From<vertebrae_core::Step> for Step {
             step_type: step.step_type.into(),
             output_schema: step.output_schema,
             persistence_options: step.persistence_options,
+            route_config: step.route_config,
             transitions_to: step.transitions_to,
             order: step.order,
             created_at: step.created_at.map(|dt| dt.to_rfc3339()),
@@ -1364,6 +1368,8 @@ pub struct CreateStepOptions {
     pub output_schema: Option<serde_json::Value>,
     #[serde(default)]
     pub persistence_options: Option<serde_json::Value>,
+    #[serde(default)]
+    pub route_config: Option<serde_json::Value>,
 }
 
 /// Options for updating a workflow step.
@@ -1375,6 +1381,8 @@ pub struct UpdateStepOptions {
     pub name: Option<String>,
     pub goal: Option<String>,
     pub prompt: Option<String>,
+    #[serde(default)]
+    pub clear_prompt: bool,
     pub agents: Option<Vec<String>>,
     pub skills: Option<Vec<String>>,
     #[serde(default)]
@@ -1387,6 +1395,10 @@ pub struct UpdateStepOptions {
     pub persistence_options: Option<serde_json::Value>,
     #[serde(default)]
     pub clear_persistence_options: bool,
+    #[serde(default)]
+    pub route_config: Option<serde_json::Value>,
+    #[serde(default)]
+    pub clear_route_config: bool,
     pub order: Option<i32>,
     pub transitions_to: Option<Vec<String>>,
 }
@@ -1400,7 +1412,9 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
         if let Some(goal) = opts.goal {
             update = update.with_goal(&goal);
         }
-        if let Some(prompt) = opts.prompt {
+        if opts.clear_prompt {
+            update = update.clear_prompt();
+        } else if let Some(prompt) = opts.prompt {
             update = update.with_prompt(&prompt);
         }
         if let Some(agents) = opts.agents {
@@ -1429,6 +1443,11 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
             update = update.with_persistence_options(None);
         } else if let Some(persistence_options) = opts.persistence_options {
             update = update.with_persistence_options(Some(persistence_options));
+        }
+        if opts.clear_route_config {
+            update = update.with_route_config(None);
+        } else if let Some(route_config) = opts.route_config {
+            update = update.with_route_config(Some(route_config));
         }
         if let Some(transitions) = opts.transitions_to {
             let transition_ids: Vec<String> =
@@ -2014,6 +2033,7 @@ mod tests {
             name: None,
             goal: None,
             prompt: None,
+            clear_prompt: false,
             agents: None,
             skills: None,
             agent_config: None,
@@ -2022,6 +2042,8 @@ mod tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_route_config: false,
             order: None,
             transitions_to: Some(vec![]),
         }
@@ -2038,6 +2060,7 @@ mod tests {
             name: None,
             goal: None,
             prompt: None,
+            clear_prompt: false,
             agents: None,
             skills: None,
             agent_config: Some(AgentConfig {
@@ -2050,6 +2073,8 @@ mod tests {
             clear_output_schema: true,
             persistence_options: None,
             clear_persistence_options: false,
+            route_config: None,
+            clear_route_config: false,
             order: None,
             transitions_to: Some(vec!["next".to_string()]),
         }
@@ -2071,6 +2096,7 @@ mod tests {
             name: None,
             goal: None,
             prompt: None,
+            clear_prompt: false,
             agents: None,
             skills: None,
             agent_config: None,
@@ -2081,6 +2107,11 @@ mod tests {
                 "artifact": { "logical_name": "result" }
             })),
             clear_persistence_options: false,
+            route_config: Some(serde_json::json!({
+                "version": 1,
+                "future": {"nested": ["value", true, null]}
+            })),
+            clear_route_config: false,
             order: None,
             transitions_to: None,
         }
@@ -2097,6 +2128,7 @@ mod tests {
             name: None,
             goal: None,
             prompt: None,
+            clear_prompt: false,
             agents: None,
             skills: None,
             agent_config: None,
@@ -2105,11 +2137,66 @@ mod tests {
             clear_output_schema: false,
             persistence_options: None,
             clear_persistence_options: true,
+            route_config: None,
+            clear_route_config: false,
             order: None,
             transitions_to: None,
         }
         .into();
         assert_eq!(cleared.persistence_options, Some(None));
+    }
+
+    #[test]
+    fn update_step_options_preserves_route_config_and_prompt_clear_state() {
+        let route_config = serde_json::json!({
+            "version": 1,
+            "unknown": {"array": [1, false, null]}
+        });
+        let configured: vertebrae_core::StepUpdate = UpdateStepOptions {
+            step_id: "route".to_string(),
+            name: None,
+            goal: None,
+            prompt: None,
+            clear_prompt: false,
+            agents: None,
+            skills: None,
+            agent_config: None,
+            step_type: Some(StepType::Route),
+            output_schema: None,
+            clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
+            route_config: Some(route_config.clone()),
+            clear_route_config: false,
+            order: None,
+            transitions_to: None,
+        }
+        .into();
+        assert_eq!(configured.route_config, Some(Some(route_config)));
+        assert_eq!(configured.prompt, None);
+
+        let cleared: vertebrae_core::StepUpdate = UpdateStepOptions {
+            step_id: "route".to_string(),
+            name: None,
+            goal: None,
+            prompt: None,
+            clear_prompt: true,
+            agents: None,
+            skills: None,
+            agent_config: None,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
+            route_config: None,
+            clear_route_config: true,
+            order: None,
+            transitions_to: None,
+        }
+        .into();
+        assert_eq!(cleared.prompt, Some(None));
+        assert_eq!(cleared.route_config, Some(None));
     }
 
     #[test]
@@ -2127,6 +2214,24 @@ mod tests {
         assert_eq!(gui.agents, vec!["claude"]);
         assert_eq!(gui.skills, vec!["code-review"]);
         assert_eq!(gui.order, 5);
+    }
+
+    #[test]
+    fn step_from_core_preserves_route_config_and_retained_prompt() {
+        let route_config = serde_json::json!({
+            "version": 1,
+            "rules": [{"future": {"nested": ["value", true, null]}}]
+        });
+        let core = vertebrae_core::Step::new("router", "wf1")
+            .with_step_type(vertebrae_core::StepType::Route)
+            .with_prompt("legacy prompt")
+            .with_route_config(route_config.clone());
+
+        let gui = Step::from(core);
+
+        assert_eq!(gui.step_type, StepType::Route);
+        assert_eq!(gui.prompt.as_deref(), Some("legacy prompt"));
+        assert_eq!(gui.route_config, Some(route_config));
     }
 
     // ─── Workflow Conversion Tests ──────────────────────────────────

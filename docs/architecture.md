@@ -113,7 +113,8 @@ Key types: `Task`, `Workflow`, `Step`, `Artifact`, `Section`, `CodeRef`, `StepEx
 
 Steps carry:
 - `step_type: StepType` — `Execute` (default), `Evaluate`, or `Route`
-- `output_schema: Option<Value>` — JSON Schema for structured output enforcement
+- `output_schema: Option<Value>` — JSON Schema for execute/evaluate structured output enforcement
+- `route_config: Option<Value>` — nullable opaque deterministic route program, validated and evaluated by Sacrum
 - `persistence_options: Option<Value>` — Sacrum-owned artifact persistence configuration
 - `agent_config: AgentConfig` — LLM configuration (model, budget, tools, permissions, json_schema)
 
@@ -263,20 +264,23 @@ DaemonSupervisor
 ```
 
 - Connects to Sacrum via Phoenix WebSocket (`client_type: "daemon"`)
-- Receives `run_step` events with prompt + agent config + output schema
+- Receives `run_step` events for daemon-executed steps with prompt + agent config + output schema
 - Passes `AgentConfig` and portable request options to the shared
   `HarnessRuntimeFactory`, which resolves the step's provider to a built-in
   harness: `anthropic` (default) → the Claude streaming harness,
   `openai` → the Codex App Server streaming harness. See
   [vtb Guide — Provider Selection](vtb-guide/steps.md#provider-selection-anthropic--openai).
-- When a step has an `output_schema`, passes it through the provider-neutral
-  harness request to enforce structured output
+- When an execute/evaluate step has an `output_schema`, passes it through the
+  provider-neutral harness request to enforce structured output
 - Step-level `output_schema` takes precedence over `agent_config.json_schema`
 - Persists the harness's normalized `HarnessEventV1` stream to Sacrum as
   `format=harness` `SessionLog` records via `SessionLogEventSink`
 - Reports completion/failure with token counts, cost, and the actual
   provider/model used, derived from the normalized usage and outcome events
-- Handles step types: `execute` (run prompt), `evaluate` (assess output for routing), `route` (branch logic)
+- Handles daemon-executed step types: `execute` (run prompt) and `evaluate`
+  (assess output for branching). `route` is a Sacrum-local deterministic
+  control step and is never dispatched to a daemon or evaluated from prompt/
+  `output_schema` output.
 - Runs as a macOS launchd or Linux systemd user service installed by the GUI onboarding flow
 
 At daemon boot, shell PATH, provider executable discovery, managed skill roots,
