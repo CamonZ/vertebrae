@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -11,8 +12,6 @@ import { MarkdownContent } from "./MarkdownContent";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 
 const mermaidMock = vi.hoisted(() => ({
-  initialize: vi.fn(),
-  parse: vi.fn(),
   render: vi.fn(),
 }));
 
@@ -25,6 +24,89 @@ const loadGraphvizMock = vi.hoisted(() => vi.fn());
 const openerMock = vi.hoisted(() => ({
   openUrl: vi.fn(),
 }));
+
+function installMermaidRendererFrameMock(): () => void {
+  const createElement = document.createElement.bind(document);
+  const createElementSpy = vi
+    .spyOn(document, "createElement")
+    .mockImplementation((localName, options) => {
+      const element = createElement(localName, options);
+      if (localName.toLowerCase() !== "iframe") return element;
+
+      const rendererWindow = {
+        postMessage(message: unknown) {
+          if (
+            typeof message !== "object" ||
+            message === null ||
+            (message as { type?: unknown }).type !== "vertebrae-mermaid-render"
+          ) {
+            return;
+          }
+
+          const request = message as {
+            requestId: string;
+            elementId: string;
+            source: string;
+          };
+          void Promise.resolve().then(async () => {
+            try {
+              const { svg } = await mermaidMock.render(
+                request.elementId,
+                request.source
+              );
+              window.dispatchEvent(
+                new MessageEvent("message", {
+                  source: rendererWindow,
+                  data: {
+                    type: "vertebrae-mermaid-result",
+                    requestId: request.requestId,
+                    status: "rendered",
+                    svg,
+                  },
+                })
+              );
+            } catch (error: unknown) {
+              window.dispatchEvent(
+                new MessageEvent("message", {
+                  source: rendererWindow,
+                  data: {
+                    type: "vertebrae-mermaid-result",
+                    requestId: request.requestId,
+                    status: "error",
+                    message:
+                      error instanceof Error ? error.message : "Unknown error",
+                  },
+                })
+              );
+            }
+          });
+        },
+      } as unknown as Window;
+      Object.defineProperty(element, "contentWindow", {
+        configurable: true,
+        value: rendererWindow,
+      });
+      return element;
+    });
+  const appendChild = Node.prototype.appendChild;
+  const appendChildSpy = vi
+    .spyOn(Node.prototype, "appendChild")
+    .mockImplementation(function (this: Node, node: Node) {
+      const result = appendChild.call(this, node);
+      if (
+        node instanceof HTMLIFrameElement &&
+        node.title === "Mermaid renderer"
+      ) {
+        queueMicrotask(() => fireEvent.load(node));
+      }
+      return result;
+    });
+
+  return () => {
+    createElementSpy.mockRestore();
+    appendChildSpy.mockRestore();
+  };
+}
 
 vi.mock("mermaid", () => ({
   default: mermaidMock,
@@ -40,14 +122,13 @@ vi.mock("@tauri-apps/plugin-opener", () => openerMock);
 Element.prototype.scrollIntoView = vi.fn();
 
 describe("MarkdownContent", () => {
+  let restoreMermaidRendererFrameMock: (() => void) | undefined;
+
   beforeEach(() => {
     useEntityPanelStore.getState().reset();
     openerMock.openUrl.mockReset();
     openerMock.openUrl.mockResolvedValue(undefined);
-    mermaidMock.initialize.mockClear();
-    mermaidMock.parse.mockReset();
     mermaidMock.render.mockReset();
-    mermaidMock.parse.mockResolvedValue(true);
     mermaidMock.render.mockResolvedValue({
       svg: '<svg viewBox="0 0 100 40" style="max-width: 50px;" onload="alert(1)"><text>A --&gt; B</text><script>alert("x")</script></svg>',
     });
@@ -57,10 +138,13 @@ describe("MarkdownContent", () => {
     );
     loadGraphvizMock.mockReset();
     loadGraphvizMock.mockResolvedValue(graphvizMock);
+    restoreMermaidRendererFrameMock = installMermaidRendererFrameMock();
   });
 
   afterEach(() => {
     cleanup();
+    restoreMermaidRendererFrameMock?.();
+    restoreMermaidRendererFrameMock = undefined;
     useEntityPanelStore.getState().reset();
     document.documentElement.classList.remove("light");
   });
@@ -412,7 +496,6 @@ describe("MarkdownContent", () => {
         "srcdoc",
         expect.not.stringContaining("onload")
       );
-      expect(mermaidMock.parse).toHaveBeenCalledWith("graph TD\n  A --> B");
       expect(mermaidMock.render).toHaveBeenCalledWith(
         expect.stringMatching(/^diagram-/),
         "graph TD\n  A --> B"
@@ -420,12 +503,91 @@ describe("MarkdownContent", () => {
       expect(screen.queryByTestId("diagram-fallback")).toBeNull();
     });
 
+    it("keeps Mermaid work in a sandboxed renderer frame while it is pending", async () => {
+      let finishRender: (result: { svg: string }) => void = () => undefined;
+      mermaidMock.render.mockReturnValueOnce(
+        new Promise<{ svg: string }>((resolve) => {
+          finishRender = resolve;
+        })
+      );
+      render(
+        <>
+          <MarkdownContent text={"```mermaid\ngraph TD\n  A --> B\n```"} />
+          <MarkdownContent text="Another chat session remains interactive." />
+        </>
+      );
+
+      await waitFor(() => {
+        expect(mermaidMock.render).toHaveBeenCalled();
+      });
+      const rendererFrame = screen.getByTitle("Mermaid renderer");
+      expect(rendererFrame).toHaveAttribute("sandbox", "allow-scripts");
+      expect(rendererFrame).toHaveAttribute(
+        "src",
+        expect.stringContaining("mermaid-renderer.html")
+      );
+      expect(
+        screen.getByText("Another chat session remains interactive.")
+      ).toBeInTheDocument();
+
+      finishRender({
+        svg: '<svg viewBox="0 0 100 40"><text>A --&gt; B</text></svg>',
+      });
+
+      expect(await screen.findByTitle("Mermaid diagram")).toBeInTheDocument();
+      expect(screen.queryByTitle("Mermaid renderer")).toBeNull();
+    });
+
+    it("tears down the isolated renderer when the diagram is unmounted", async () => {
+      mermaidMock.render.mockReturnValueOnce(new Promise(() => undefined));
+      const { unmount } = render(
+        <MarkdownContent text={"```mermaid\ngraph TD\n  A --> B\n```"} />
+      );
+
+      await waitFor(() => {
+        expect(mermaidMock.render).toHaveBeenCalled();
+      });
+      expect(screen.getByTitle("Mermaid renderer")).toBeInTheDocument();
+
+      unmount();
+
+      expect(screen.queryByTitle("Mermaid renderer")).toBeNull();
+    });
+
+    it("falls back and tears down the renderer when Mermaid times out", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        mermaidMock.render.mockReturnValueOnce(new Promise(() => undefined));
+        const { container } = render(
+          <MarkdownContent text={"```mermaid\ngraph TD\n  A --> B\n```"} />
+        );
+
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        await act(async () => {
+          vi.advanceTimersByTime(10_000);
+          await Promise.resolve();
+        });
+
+        expect(
+          screen.getByText(
+            "Unable to render Mermaid diagram: Mermaid rendering timed out after 10 seconds."
+          )
+        ).toBeInTheDocument();
+        expect(screen.queryByTitle("Mermaid renderer")).toBeNull();
+        expect(container.querySelector('[title="Mermaid diagram"]')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("does not process a large diagram before expansion and renders its full source", async () => {
       const diagram = `graph TD\n${"  A --> B\n".repeat(250)}  TAIL --> END`;
       render(<MarkdownContent text={`\`\`\`mermaid\n${diagram}\n\`\`\``} />);
 
       expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
-      expect(mermaidMock.parse).not.toHaveBeenCalled();
       expect(mermaidMock.render).not.toHaveBeenCalled();
 
       fireEvent.click(
@@ -433,7 +595,6 @@ describe("MarkdownContent", () => {
       );
 
       expect(await screen.findByTitle("Mermaid diagram")).toBeInTheDocument();
-      expect(mermaidMock.parse).toHaveBeenCalledWith(diagram);
       expect(mermaidMock.render).toHaveBeenCalledWith(
         expect.stringMatching(/^diagram-/),
         diagram
@@ -441,7 +602,7 @@ describe("MarkdownContent", () => {
     });
 
     it("falls back to highlighted source with an error for invalid Mermaid", async () => {
-      mermaidMock.parse.mockRejectedValueOnce(new Error("Parse error"));
+      mermaidMock.render.mockRejectedValueOnce(new Error("Parse error"));
       const markdown = "```mermaid\ngraph TD\n  A -- B\n```";
       const { container } = render(<MarkdownContent text={markdown} />);
 
@@ -456,13 +617,13 @@ describe("MarkdownContent", () => {
     });
 
     it("safely falls back with the complete source for a malformed large diagram", async () => {
-      mermaidMock.parse.mockRejectedValueOnce(new Error("Large parse error"));
+      mermaidMock.render.mockRejectedValueOnce(new Error("Large parse error"));
       const diagram = `graph TD\n${"  A -- B\n".repeat(250)}  BROKEN TAIL`;
       const { container } = render(
         <MarkdownContent text={`\`\`\`mermaid\n${diagram}\n\`\`\``} />
       );
 
-      expect(mermaidMock.parse).not.toHaveBeenCalled();
+      expect(mermaidMock.render).not.toHaveBeenCalled();
       fireEvent.click(
         screen.getByRole("button", { name: /Show full content/ })
       );
@@ -670,7 +831,7 @@ describe("MarkdownContent", () => {
         container.querySelector('[data-testid="markdown-content"]')
       ).toBeInTheDocument();
       await waitFor(() => {
-        expect(mermaidMock.parse).not.toHaveBeenCalled();
+        expect(mermaidMock.render).not.toHaveBeenCalled();
       });
       expect(screen.queryByTitle("Mermaid diagram")).toBeNull();
       expect(screen.queryByTestId("diagram-fallback")).toBeNull();

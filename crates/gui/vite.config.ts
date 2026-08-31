@@ -1,7 +1,10 @@
 /// <reference types="vitest" />
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+
+const guiRoot = fileURLToPath(new URL(".", import.meta.url));
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -20,6 +23,12 @@ export default defineConfig({
     // Tauri expects the frontend to be in ../dist relative to src-tauri
     outDir: "dist",
     emptyDirFirst: true,
+    rollupOptions: {
+      input: {
+        main: `${guiRoot}/index.html`,
+        mermaidRenderer: `${guiRoot}/mermaid-renderer.html`,
+      },
+    },
   },
   test: {
     globals: true,

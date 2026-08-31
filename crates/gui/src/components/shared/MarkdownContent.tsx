@@ -264,7 +264,11 @@ type RenderedDiagram = {
 
 type DiagramRenderer = {
   label: string;
-  render?: (source: string, elementId: string) => Promise<RenderedDiagram>;
+  render?: (
+    source: string,
+    elementId: string,
+    signal?: AbortSignal
+  ) => Promise<RenderedDiagram>;
 };
 
 const diagramRenderers: Record<string, DiagramRenderer> = {
@@ -290,7 +294,135 @@ const diagramRenderers: Record<string, DiagramRenderer> = {
   kroki: { label: "Kroki" },
 };
 
-let mermaidInitialized = false;
+const MERMAID_RENDER_TIMEOUT_MS = 10_000;
+const MAX_MERMAID_SVG_LENGTH = 1_000_000;
+const MERMAID_RENDER_REQUEST = "vertebrae-mermaid-render";
+const MERMAID_RENDER_RESULT = "vertebrae-mermaid-result";
+
+type MermaidRenderResultMessage =
+  | {
+      type: typeof MERMAID_RENDER_RESULT;
+      requestId: string;
+      status: "rendered";
+      svg: string;
+    }
+  | {
+      type: typeof MERMAID_RENDER_RESULT;
+      requestId: string;
+      status: "error";
+      message: string;
+    };
+
+function isMermaidRenderResultMessage(
+  value: unknown
+): value is MermaidRenderResultMessage {
+  if (typeof value !== "object" || value === null) return false;
+  const message = value as Partial<MermaidRenderResultMessage>;
+  if (
+    message.type !== MERMAID_RENDER_RESULT ||
+    typeof message.requestId !== "string"
+  ) {
+    return false;
+  }
+  if (message.status === "rendered") return typeof message.svg === "string";
+  return message.status === "error" && typeof message.message === "string";
+}
+
+function mermaidRendererUrl(): string {
+  return new URL("/mermaid-renderer.html", window.location.href).href;
+}
+
+function requestMermaidSvg(
+  source: string,
+  elementId: string,
+  signal?: AbortSignal
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const iframe = document.createElement("iframe");
+    const requestId = `${elementId}-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}`;
+    let settled = false;
+    const timeout: { id?: ReturnType<typeof setTimeout> } = {};
+
+    const cleanup = () => {
+      window.removeEventListener("message", onMessage);
+      iframe.removeEventListener("load", onLoad);
+      iframe.removeEventListener("error", onError);
+      signal?.removeEventListener("abort", onAbort);
+      if (timeout.id !== undefined) window.clearTimeout(timeout.id);
+      iframe.remove();
+    };
+
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+
+    const onMessage = (event: MessageEvent<unknown>) => {
+      if (event.source !== iframe.contentWindow) return;
+      if (!isMermaidRenderResultMessage(event.data)) return;
+      const message = event.data;
+      if (message.requestId !== requestId) return;
+
+      if (message.status === "rendered") {
+        settle(() => resolve(message.svg));
+      } else {
+        settle(() => reject(new Error(message.message)));
+      }
+    };
+
+    const onLoad = () => {
+      iframe.contentWindow?.postMessage(
+        {
+          type: MERMAID_RENDER_REQUEST,
+          requestId,
+          source,
+          elementId,
+        },
+        "*"
+      );
+    };
+
+    const onError = () => {
+      settle(() => reject(new Error("Mermaid renderer failed to load.")));
+    };
+
+    const onAbort = () => {
+      settle(() => reject(new Error("Mermaid rendering was cancelled.")));
+    };
+
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    iframe.setAttribute("sandbox", "allow-scripts");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.title = "Mermaid renderer";
+    iframe.style.position = "fixed";
+    iframe.style.left = "-2000px";
+    iframe.style.top = "-2000px";
+    iframe.style.width = "1024px";
+    iframe.style.height = "768px";
+    iframe.style.border = "0";
+    iframe.style.opacity = "0";
+    iframe.style.pointerEvents = "none";
+    iframe.addEventListener("load", onLoad);
+    iframe.addEventListener("error", onError);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    window.addEventListener("message", onMessage);
+    timeout.id = setTimeout(() => {
+      settle(() =>
+        reject(new Error("Mermaid rendering timed out after 10 seconds."))
+      );
+    }, MERMAID_RENDER_TIMEOUT_MS);
+    iframe.src = mermaidRendererUrl();
+    document.body.appendChild(iframe);
+  });
+}
 
 async function renderDotDiagram(source: string): Promise<RenderedDiagram> {
   const graphviz = await loadGraphviz();
@@ -307,27 +439,13 @@ async function renderDotDiagram(source: string): Promise<RenderedDiagram> {
 
 async function renderMermaidDiagram(
   source: string,
-  elementId: string
+  elementId: string,
+  signal?: AbortSignal
 ): Promise<RenderedDiagram> {
-  const { default: mermaid } = await import("mermaid");
-
-  if (!mermaidInitialized) {
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "strict",
-      deterministicIds: true,
-      deterministicIDSeed: "vertebrae-chat",
-      theme: "dark",
-      fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
-      htmlLabels: false,
-      flowchart: { htmlLabels: false, useMaxWidth: true },
-      sequence: { useMaxWidth: true },
-    });
-    mermaidInitialized = true;
+  const svg = await requestMermaidSvg(source, elementId, signal);
+  if (svg.length > MAX_MERMAID_SVG_LENGTH) {
+    throw new Error("Renderer returned an SVG that is too large.");
   }
-
-  await mermaid.parse(source);
-  const { svg } = await mermaid.render(elementId, source);
   const sanitized = sanitizeSvg(svg);
   if (!sanitized) {
     throw new Error("Renderer returned an invalid SVG.");
@@ -512,9 +630,14 @@ function DiagramBlock({ language, source, renderer }: DiagramBlockProps) {
     }
 
     let cancelled = false;
+    const abortController = new AbortController();
     setResult({ status: "rendering" });
     renderer
-      .render(source, diagramElementId(`diagram-${reactId}`, source))
+      .render(
+        source,
+        diagramElementId(`diagram-${reactId}`, source),
+        abortController.signal
+      )
       .then(({ document, frameStyle }) => {
         if (!cancelled) setResult({ status: "rendered", document, frameStyle });
       })
@@ -529,6 +652,7 @@ function DiagramBlock({ language, source, renderer }: DiagramBlockProps) {
 
     return () => {
       cancelled = true;
+      abortController.abort();
     };
   }, [reactId, renderer, source]);
 
