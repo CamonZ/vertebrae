@@ -550,6 +550,41 @@ describe("StepInspector", () => {
           clear_prompt: true,
           route_config: null,
           clear_route_config: false,
+          clear_output_schema: false,
+        })
+      )
+    );
+  });
+
+  it("clears an existing output schema when converting to a route", async () => {
+    mockUseStep(
+      stepFixture({
+        step_type: "execute",
+        output_schema: { type: "object" },
+      })
+    );
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "route" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+
+    await waitFor(() =>
+      expect(commands.updateStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          step_type: "route",
+          output_schema: null,
+          clear_output_schema: true,
         })
       )
     );

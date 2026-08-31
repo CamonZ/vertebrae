@@ -5,7 +5,7 @@
 use super::mock::mock_services;
 use vertebrae_cli::commands::step::*;
 use vertebrae_cli::commands::{Command, CommandResult};
-use vertebrae_core::CreateWorkflowOptions;
+use vertebrae_core::{CreateWorkflowOptions, StepUpdate};
 
 // ============================================================================
 // Step creation tests
@@ -3188,12 +3188,19 @@ mod route_config_tests {
             .await
             .unwrap();
         let config = route_config();
-        let mut route_step = Step::new("Router", workflow_id)
-            .with_step_type(StepType::Route)
-            .with_prompt("legacy prompt")
-            .with_route_config(config.clone());
+        let mut route_step = Step::new("Router", workflow_id).with_prompt("legacy prompt");
         route_step.id = Some("router".to_string());
         services.steps().create_step(&route_step).await.unwrap();
+        services
+            .steps()
+            .update_step(
+                "router",
+                &StepUpdate::new()
+                    .with_step_type(StepType::Route)
+                    .with_route_config(Some(config.clone())),
+            )
+            .await
+            .unwrap();
 
         let human = StepShowCommand {
             id: "router".to_string(),
@@ -3234,7 +3241,7 @@ mod route_config_tests {
         let mut update = update_command("router");
         update.prompt = Some(String::new());
         let error = update.execute(services.steps()).await.unwrap_err();
-        assert!(error.to_string().contains("Route steps"));
+        assert!(error.to_string().contains("route steps"));
     }
 
     #[tokio::test]

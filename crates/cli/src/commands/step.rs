@@ -6,7 +6,7 @@ use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
     AgentConfig, Provider, ServiceError, Step, StepService, StepType, StepUpdate,
     VertebraeServices, normalize_provider_reasoning_effort,
-    validate_provider_model_with_codex_provider,
+    validate_provider_model_with_codex_provider, validate_route_fields, validate_route_update,
 };
 
 /// CLI representation of step types, maps to `vertebrae_core::StepType`.
@@ -41,21 +41,8 @@ impl From<CliStepType> for StepType {
 fn validate_step_constraints(
     step_type: &StepType,
     prompt: Option<&str>,
-    route_config: Option<&serde_json::Value>,
     transitions_to: &[String],
 ) -> Result<(), ServiceError> {
-    if matches!(step_type, StepType::Route) && prompt.is_some() {
-        return Err(ServiceError::validation_failed(
-            "Route steps may only clear an existing prompt",
-        ));
-    }
-
-    if !matches!(step_type, StepType::Route) && route_config.is_some() {
-        return Err(ServiceError::validation_failed(
-            "route_config is only valid for route steps",
-        ));
-    }
-
     if matches!(step_type, StepType::Finish) && (prompt.is_some() || !transitions_to.is_empty()) {
         return Err(ServiceError::validation_failed(
             "Finish steps cannot define a prompt or outgoing transitions",
@@ -297,17 +284,13 @@ impl StepAddCommand {
             .transpose()?;
 
         let step_type: StepType = self.step_type.clone().into();
-        validate_step_constraints(
+        validate_step_constraints(&step_type, self.prompt.as_deref(), &transitions_to)?;
+        validate_route_fields(
             &step_type,
-            self.prompt.as_deref(),
+            self.prompt.is_some(),
+            output_schema.as_ref(),
             route_config.as_ref(),
-            &transitions_to,
         )?;
-        if matches!(&step_type, StepType::Route) && output_schema.is_some() {
-            return Err(ServiceError::validation_failed(
-                "route steps do not accept output_schema; use --route-config",
-            ));
-        }
 
         let mut step = Step::new(&self.name, workflow_id)
             .with_agent_config(agent_config)
@@ -720,11 +703,6 @@ impl StepUpdateCommand {
         } else {
             self.prompt.as_deref().or(existing.prompt.as_deref())
         };
-        let resulting_route_config = if self.clear_route_config {
-            None
-        } else {
-            route_config.as_ref().or(existing.route_config.as_ref())
-        };
         let resulting_transitions = if self.clear_transitions || !self.transitions_to.is_empty() {
             if self.clear_transitions {
                 Vec::new()
@@ -734,22 +712,11 @@ impl StepUpdateCommand {
         } else {
             existing.transitions_to.clone()
         };
-        let prompt_for_validation = if matches!(&resulting_step_type, StepType::Route) {
-            self.prompt.as_deref()
-        } else {
-            resulting_prompt
-        };
         validate_step_constraints(
             &resulting_step_type,
-            prompt_for_validation,
-            resulting_route_config,
+            resulting_prompt,
             &resulting_transitions,
         )?;
-        if matches!(&resulting_step_type, StepType::Route) && self.output_schema.is_some() {
-            return Err(ServiceError::validation_failed(
-                "route steps do not accept output_schema; use --route-config",
-            ));
-        }
 
         let mut updates = StepUpdate::new();
 
@@ -834,6 +801,8 @@ impl StepUpdateCommand {
             })?;
             updates = updates.with_agent_config(config_value);
         }
+
+        validate_route_update(&existing, &updates)?;
 
         if self.clear_transitions {
             updates = updates.with_transitions_to(vec![]);
@@ -1683,7 +1652,7 @@ mod tests {
 
     #[test]
     fn test_stop_requires_exactly_one_transition() {
-        let error = validate_step_constraints(&StepType::Stop, None, None, &[]).unwrap_err();
+        let error = validate_step_constraints(&StepType::Stop, None, &[]).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -1691,8 +1660,7 @@ mod tests {
         );
 
         let transitions = vec!["step-1".to_string(), "step-2".to_string()];
-        let error =
-            validate_step_constraints(&StepType::Stop, None, None, &transitions).unwrap_err();
+        let error = validate_step_constraints(&StepType::Stop, None, &transitions).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -1702,7 +1670,6 @@ mod tests {
         validate_step_constraints(
             &StepType::Stop,
             Some("ignored by the orchestrator"),
-            None,
             &["step-1".to_string()],
         )
         .unwrap();

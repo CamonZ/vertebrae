@@ -203,7 +203,7 @@ Feature: Step fields: prompt and agent-config
     When I show the step "RetainedPrompt" as JSON
     Then the step show JSON should have null prompt
     When I update the step "RetainedPrompt" in the workflow with flag "--prompt" and value "replacement prompt"
-    Then the command should fail with "Route steps may only clear an existing prompt"
+    Then the command should fail with "route steps may only clear an existing prompt"
 
   Scenario: Converting a configured route requires an atomic clear
     When I add and configure a deterministic route step "ConvertRouter" to the workflow

@@ -203,6 +203,8 @@ export function StepInspector({
     backendTypeForKind(step.kind);
   const isRouteResult = type === "route";
   const isRouteConfigVisible = isRouteResult || stepTypeLabel === "route";
+  const isConvertingToRoute =
+    isRouteResult && cfg?.step_type !== "route";
   const isConfiguredRouteConversion =
     cfg?.step_type === "route" &&
     cfg.route_config !== null &&
@@ -303,7 +305,8 @@ export function StepInspector({
             : undefined,
           step_type: type,
           output_schema: isRouteResult ? null : parsedSchema,
-          clear_output_schema: isRouteResult || !outputSchema.trim(),
+          clear_output_schema:
+            isConvertingToRoute || (!isRouteResult && !outputSchema.trim()),
           persistence_options: parsedPersistence,
           clear_persistence_options: clearPersistenceOptions,
           route_config: null,

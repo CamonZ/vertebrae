@@ -94,21 +94,6 @@ pub(crate) async fn create_step_inner(
         options.name,
         options.order
     );
-    if matches!(&options.step_type, crate::types::StepType::Route)
-        && (options.prompt.is_some() || options.output_schema.is_some())
-    {
-        return Err(CommandError {
-            message: "route steps may not write prompt or output_schema; use route_config"
-                .to_string(),
-        });
-    }
-    if !matches!(&options.step_type, crate::types::StepType::Route)
-        && options.route_config.is_some()
-    {
-        return Err(CommandError {
-            message: "route_config is only valid for route steps".to_string(),
-        });
-    }
     let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
@@ -209,48 +194,6 @@ pub(crate) async fn update_step_inner(
     step_id: &str,
     update: vertebrae_core::StepUpdate,
 ) -> Result<String, CommandError> {
-    let existing = service
-        .steps()
-        .get_step(step_id)
-        .await?
-        .ok_or_else(|| CommandError {
-            message: format!("Step not found: {step_id}"),
-        })?;
-    let resulting_step_type = update
-        .step_type
-        .clone()
-        .unwrap_or_else(|| existing.step_type.clone());
-
-    if matches!(&resulting_step_type, vertebrae_core::StepType::Route)
-        && matches!(&update.prompt, Some(Some(_)))
-    {
-        return Err(CommandError {
-            message: "route steps may only clear an existing prompt".to_string(),
-        });
-    }
-    if matches!(&resulting_step_type, vertebrae_core::StepType::Route)
-        && matches!(&update.output_schema, Some(Some(_)))
-    {
-        return Err(CommandError {
-            message: "route steps do not accept output_schema; use route_config".to_string(),
-        });
-    }
-    if !matches!(&resulting_step_type, vertebrae_core::StepType::Route)
-        && matches!(&update.route_config, Some(Some(_)))
-    {
-        return Err(CommandError {
-            message: "route_config is only valid for route steps".to_string(),
-        });
-    }
-    if !matches!(&resulting_step_type, vertebrae_core::StepType::Route)
-        && existing.route_config.is_some()
-        && !matches!(&update.route_config, Some(None))
-    {
-        return Err(CommandError {
-            message: "converting a configured route requires clearing route_config".to_string(),
-        });
-    }
-
     let workflow_id = service.steps().update_step(step_id, &update).await?;
     log::info!("update_step succeeded for step: {}", step_id);
     Ok(workflow_id)
@@ -546,10 +489,17 @@ mod tests {
     async fn update_route_step_rejects_prompt_write_without_type_change() {
         let services = mock_services();
         let step = vertebrae_core::Step::new("Router", "wf-1".to_string())
-            .with_step_type(vertebrae_core::StepType::Route)
             .with_prompt("legacy route prompt");
         let created = services.steps().create_step(&step).await.unwrap();
         let step_id = created.id.unwrap();
+        services
+            .steps()
+            .update_step(
+                &step_id,
+                &vertebrae_core::StepUpdate::new().with_step_type(vertebrae_core::StepType::Route),
+            )
+            .await
+            .unwrap();
 
         let result = update_step_inner(
             &services,
