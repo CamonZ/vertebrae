@@ -4,6 +4,7 @@ import { isMermaidRenderRequest, mermaidRenderResult } from "./protocol";
 import {
   MERMAID_RENDER_TIMEOUT_MS,
   requestMermaidSvg,
+  resetMermaidRendererForTests,
 } from "./requestMermaidSvg";
 
 function installMermaidRendererFrameMock(): () => void {
@@ -61,12 +62,16 @@ describe("requestMermaidSvg", () => {
   let restoreFrameMock: (() => void) | undefined;
 
   afterEach(() => {
+    resetMermaidRendererForTests();
+    document
+      .querySelectorAll('iframe[title="Mermaid renderer"]')
+      .forEach((frame) => frame.remove());
     restoreFrameMock?.();
     restoreFrameMock = undefined;
     vi.useRealTimers();
   });
 
-  it("renders through a sandboxed mermaid-renderer frame and tears it down", async () => {
+  it("renders through one persistent sandboxed mermaid-renderer frame", async () => {
     restoreFrameMock = installMermaidRendererFrameMock();
 
     const svgPromise = requestMermaidSvg("graph TD\n  A --> B", "diagram-1");
@@ -74,19 +79,22 @@ describe("requestMermaidSvg", () => {
       'iframe[title="Mermaid renderer"]'
     );
     expect(rendererFrame).not.toBeNull();
-    expect(rendererFrame).toHaveAttribute("sandbox", "allow-scripts");
+    expect(rendererFrame).toHaveAttribute(
+      "sandbox",
+      "allow-scripts allow-same-origin"
+    );
     expect(rendererFrame).toHaveAttribute(
       "src",
       expect.stringContaining("mermaid-renderer.html")
     );
 
     await expect(svgPromise).resolves.toContain("graph TD");
-    expect(
-      document.querySelector('iframe[title="Mermaid renderer"]')
-    ).toBeNull();
+    expect(document.querySelector('iframe[title="Mermaid renderer"]')).not.toBeNull();
+    await expect(requestMermaidSvg("graph TD\n  B --> C", "diagram-2")).resolves.toContain("diagram-2");
+    expect(document.querySelectorAll('iframe[title="Mermaid renderer"]')).toHaveLength(1);
   });
 
-  it("tears down the renderer when rendering is aborted", async () => {
+  it("rejects on abort and waits for the renderer to finish before teardown", async () => {
     restoreFrameMock = installMermaidRendererFrameMock();
     const controller = new AbortController();
     const pending = requestMermaidSvg(
@@ -104,9 +112,7 @@ describe("requestMermaidSvg", () => {
 
     controller.abort();
     await cancelled;
-    expect(
-      document.querySelector('iframe[title="Mermaid renderer"]')
-    ).toBeNull();
+    expect(document.querySelector('iframe[title="Mermaid renderer"]')).not.toBeNull();
   });
 
   it("rejects immediately when the abort signal is already aborted", async () => {
@@ -121,7 +127,7 @@ describe("requestMermaidSvg", () => {
     ).toBeNull();
   });
 
-  it("times out and tears down the renderer", async () => {
+  it("times out without destroying an in-flight renderer", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const createElement = document.createElement.bind(document);
     const createElementSpy = vi
@@ -150,6 +156,6 @@ describe("requestMermaidSvg", () => {
     await timedOut;
     expect(
       document.querySelector('iframe[title="Mermaid renderer"]')
-    ).toBeNull();
+    ).not.toBeNull();
   });
 });

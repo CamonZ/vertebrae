@@ -2,98 +2,83 @@ import { isMermaidRenderResultMessage, mermaidRenderRequest } from "./protocol";
 
 export const MERMAID_RENDER_TIMEOUT_MS = 10_000;
 
-/**
- * Render Mermaid source to an SVG string in an isolated document.
- *
- * Mermaid's renderer needs a real `Document` (layout, SVG, d3). A Worker
- * cannot host that. A unique-origin iframe (`sandbox="allow-scripts"` without
- * `allow-same-origin`) is the browsing context we can create and destroy
- * without sharing the chat page's DOM. Timeout and abort tear that context
- * down.
- */
-export function requestMermaidSvg(
-  source: string,
-  elementId: string,
-  signal?: AbortSignal
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const iframe = document.createElement("iframe");
-    const requestId = `${elementId}-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2)}`;
-    let settled = false;
-    const timeout: { id?: ReturnType<typeof setTimeout> } = {};
+type PendingRequest = {
+  requestId: string; source: string; elementId: string;
+  resolve: (svg: string) => void; reject: (error: Error) => void;
+  timeout?: ReturnType<typeof setTimeout>; settled: boolean;
+};
 
-    const cleanup = () => {
-      window.removeEventListener("message", onMessage);
-      iframe.removeEventListener("load", onLoad);
-      iframe.removeEventListener("error", onError);
-      signal?.removeEventListener("abort", onAbort);
-      if (timeout.id !== undefined) window.clearTimeout(timeout.id);
-      iframe.remove();
-    };
+let iframe: HTMLIFrameElement | undefined;
+let frameReady = false;
+let frameLoading = false;
+let active: PendingRequest | undefined;
+const queue: PendingRequest[] = [];
 
-    const settle = (callback: () => void) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      callback();
-    };
+function dispatchNext(): void {
+  if (!frameReady || active || !queue.length || !iframe) return;
+  active = queue.shift();
+  if (!active) return;
+  const request = active;
+  iframe.contentWindow?.postMessage(mermaidRenderRequest({ requestId: request.requestId, source: request.source, elementId: request.elementId }), "*");
+}
 
-    const onMessage = (event: MessageEvent<unknown>) => {
-      if (event.source !== iframe.contentWindow) return;
-      if (!isMermaidRenderResultMessage(event.data)) return;
-      const message = event.data;
-      if (message.requestId !== requestId) return;
+function ensureRenderer(): void {
+  if (iframe || frameLoading) return;
+  frameLoading = true;
+  iframe = document.createElement("iframe");
+  // Mermaid is loaded as an ES module. An opaque-origin sandbox prevents
+  // WebKit/Tauri from loading the module graph, so retain the app origin while
+  // keeping scripts isolated from the parent document's DOM.
+  iframe.setAttribute("sandbox", "allow-scripts allow-same-origin"); iframe.setAttribute("aria-hidden", "true"); iframe.title = "Mermaid renderer";
+  Object.assign(iframe.style, { position: "fixed", left: "-2000px", top: "-2000px", width: "1024px", height: "768px", border: "0", opacity: "0", pointerEvents: "none" });
+  iframe.addEventListener("load", () => { frameReady = true; frameLoading = false; dispatchNext(); });
+  iframe.addEventListener("error", () => { frameReady = false; frameLoading = false; const error = new Error("Mermaid renderer failed to load."); while (queue.length) queue.shift()!.reject(error); active?.reject(error); active = undefined; });
+  iframe.src = new URL("/mermaid-renderer.html", window.location.href).href;
+  document.body.appendChild(iframe);
+}
 
-      if (message.status === "rendered") {
-        settle(() => resolve(message.svg));
-      } else {
-        settle(() => reject(new Error(message.message)));
-      }
-    };
-
-    const onLoad = () => {
-      iframe.contentWindow?.postMessage(
-        mermaidRenderRequest({ requestId, source, elementId }),
-        "*"
-      );
-    };
-
-    const onError = () => {
-      settle(() => reject(new Error("Mermaid renderer failed to load.")));
-    };
-
-    const onAbort = () => {
-      settle(() => reject(new Error("Mermaid rendering was cancelled.")));
-    };
-
-    if (signal?.aborted) {
-      onAbort();
-      return;
+function onMessage(event: MessageEvent<unknown>): void {
+  if (!iframe || event.source !== iframe.contentWindow || !isMermaidRenderResultMessage(event.data)) return;
+  if (!active || event.data.requestId !== active.requestId) return;
+  const request = active; active = undefined;
+  if (request.timeout !== undefined) clearTimeout(request.timeout);
+  if (!request.settled) {
+    request.settled = true;
+    if (event.data.status === "rendered") {
+      request.resolve(event.data.svg);
+    } else {
+      request.reject(new Error(event.data.message));
     }
+  }
+  dispatchNext();
+}
 
-    iframe.setAttribute("sandbox", "allow-scripts");
-    iframe.setAttribute("aria-hidden", "true");
-    iframe.title = "Mermaid renderer";
-    iframe.style.position = "fixed";
-    iframe.style.left = "-2000px";
-    iframe.style.top = "-2000px";
-    iframe.style.width = "1024px";
-    iframe.style.height = "768px";
-    iframe.style.border = "0";
-    iframe.style.opacity = "0";
-    iframe.style.pointerEvents = "none";
-    iframe.addEventListener("load", onLoad);
-    iframe.addEventListener("error", onError);
-    signal?.addEventListener("abort", onAbort, { once: true });
-    window.addEventListener("message", onMessage);
-    timeout.id = setTimeout(() => {
-      settle(() =>
-        reject(new Error("Mermaid rendering timed out after 10 seconds."))
-      );
+window.addEventListener("message", onMessage);
+
+export function requestMermaidSvg(source: string, elementId: string, signal?: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const request: PendingRequest = { requestId: `${elementId}-${Date.now()}-${Math.random().toString(36).slice(2)}`, source, elementId, resolve, reject, settled: false };
+    const abort = () => { if (request.settled) return; request.settled = true; const index = queue.indexOf(request); if (index >= 0) queue.splice(index, 1); if (request.timeout !== undefined) clearTimeout(request.timeout); reject(new Error("Mermaid rendering was cancelled.")); };
+    if (signal?.aborted) return abort();
+    request.timeout = setTimeout(() => {
+      if (request.settled) return;
+      request.settled = true;
+      const index = queue.indexOf(request);
+      if (index >= 0) queue.splice(index, 1);
+      if (request.timeout !== undefined) clearTimeout(request.timeout);
+      reject(new Error("Mermaid rendering timed out after 10 seconds."));
     }, MERMAID_RENDER_TIMEOUT_MS);
-    iframe.src = new URL("/mermaid-renderer.html", window.location.href).href;
-    document.body.appendChild(iframe);
+    signal?.addEventListener("abort", abort, { once: true });
+    queue.push(request); ensureRenderer(); dispatchNext();
   });
+}
+
+// Kept private to production behavior; tests use it to isolate the singleton.
+export function resetMermaidRendererForTests(): void {
+  iframe?.remove();
+  iframe = undefined;
+  frameReady = false;
+  frameLoading = false;
+  active = undefined;
+  queue.length = 0;
 }
