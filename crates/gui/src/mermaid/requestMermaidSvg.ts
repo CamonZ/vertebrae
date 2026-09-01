@@ -26,7 +26,10 @@ function ensureRenderer(): void {
   if (iframe || frameLoading) return;
   frameLoading = true;
   iframe = document.createElement("iframe");
-  iframe.setAttribute("sandbox", "allow-scripts"); iframe.setAttribute("aria-hidden", "true"); iframe.title = "Mermaid renderer";
+  // Mermaid is loaded as an ES module. An opaque-origin sandbox prevents
+  // WebKit/Tauri from loading the module graph, so retain the app origin while
+  // keeping scripts isolated from the parent document's DOM.
+  iframe.setAttribute("sandbox", "allow-scripts allow-same-origin"); iframe.setAttribute("aria-hidden", "true"); iframe.title = "Mermaid renderer";
   Object.assign(iframe.style, { position: "fixed", left: "-2000px", top: "-2000px", width: "1024px", height: "768px", border: "0", opacity: "0", pointerEvents: "none" });
   iframe.addEventListener("load", () => { frameReady = true; frameLoading = false; dispatchNext(); });
   iframe.addEventListener("error", () => { frameReady = false; frameLoading = false; const error = new Error("Mermaid renderer failed to load."); while (queue.length) queue.shift()!.reject(error); active?.reject(error); active = undefined; });

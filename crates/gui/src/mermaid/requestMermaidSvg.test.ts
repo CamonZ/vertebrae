@@ -79,7 +79,10 @@ describe("requestMermaidSvg", () => {
       'iframe[title="Mermaid renderer"]'
     );
     expect(rendererFrame).not.toBeNull();
-    expect(rendererFrame).toHaveAttribute("sandbox", "allow-scripts");
+    expect(rendererFrame).toHaveAttribute(
+      "sandbox",
+      "allow-scripts allow-same-origin"
+    );
     expect(rendererFrame).toHaveAttribute(
       "src",
       expect.stringContaining("mermaid-renderer.html")
