@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   commands,
@@ -22,6 +22,7 @@ import {
   resetLocalChatTurnRoutingForTests,
   useLocalChatEventRouter,
 } from "./useLocalChatEventRouter";
+import { useLocalChat } from "./useLocalChat";
 
 const { listen, unlisteners } = vi.hoisted(() => {
   const unlisteners: Array<ReturnType<typeof vi.fn>> = [];
@@ -515,6 +516,57 @@ describe("useLocalChatEventRouter route functions", () => {
           message.kind === "user" && message.text === "queued follow-up"
       )
     ).toHaveLength(1);
+  });
+
+  it("does not resurrect an idle Claude session from uncorrelated root content", async () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "turn-normal");
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-normal",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        duration_ms: 1,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "done",
+        is_error: false,
+        context_tokens: 0,
+        context_window: 200000,
+      })
+    ).toBe(true);
+
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: null,
+        thread_id: "backend-local-thread",
+        is_root: true,
+        text: "background task notification",
+        is_partial: true,
+        parent_tool_use_id: null,
+      })
+    ).toBe(false);
+    expect(useChatStore.getState().sessions.local.lifecycle).toBe("idle");
+
+    const hook = renderHook(() => useLocalChat("local"));
+    await act(async () => {
+      await hook.result.current.sendMessage("follow-up");
+    });
+    expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledWith(
+      "backend-local",
+      "follow-up"
+    );
+    expect(useChatStore.getState().sessions.local.queuedMessages).toBeUndefined();
   });
 
   it("does not hand off queued work when End races a stopping turn", async () => {

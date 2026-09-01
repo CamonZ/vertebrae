@@ -3,8 +3,8 @@ use vertebrae_harness_core::{
     CompactionEvent, CompactionState, ControlDecision, ControlResolution, DiagnosticEvent,
     HarnessEventDraftV1, HarnessEventPayloadV1, PlanEntry, PlanEvent, ProviderResumeId,
     ResolutionSource, SessionId, SessionStarted, SpeedTier, SpeedTierStatus, StreamId, TextEvent,
-    ThreadDeclared, ThreadId, ThreadKind, ToolCallId, ToolOutputEvent, ToolStatus, TurnInput,
-    TurnInputProvenance, UpdateSemantics,
+    ThreadDeclared, ThreadId, ThreadKind, ToolCallId, ToolOutputEvent, ToolStatus, TurnId,
+    TurnInput, TurnInputProvenance, UpdateSemantics,
 };
 
 use super::controls::decode_control_request;
@@ -232,6 +232,17 @@ impl ClaudeStreamDecoder {
                             }],
                         }),
                     ));
+                }
+            }
+            "system" if string(object, "subtype") == Some("task_notification") => {
+                if self.root_declared
+                    && self.context.turn_id.is_none()
+                    && self.context.run_id.is_none()
+                    && self.pending_background_turn.is_none()
+                {
+                    self.pending_background_turn = Some(TurnId::new(format!(
+                        "claude-task-notification-{provider_sequence}"
+                    )));
                 }
             }
             "system" if string(object, "subtype") == Some("status") => {

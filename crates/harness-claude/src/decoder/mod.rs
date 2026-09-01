@@ -4,10 +4,11 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use vertebrae_harness_core::{
     AgentMetadata, ControlRequestId, FileChange, HarnessEventDraftV1, ProviderResumeId,
     ProviderThreadRef, RunId, SessionId, SpeedTier, StreamId, ThreadId, ToolCallId, TurnId,
+    TurnStarted,
 };
 
 use crate::ClaudeRootLocatorResolver;
@@ -105,6 +106,7 @@ pub struct ClaudeStreamDecoder {
     root_locator_resolver: Option<Arc<dyn ClaudeRootLocatorResolver>>,
     pending_root_records: VecDeque<BufferedRootRecord>,
     pending_agent_records: VecDeque<BufferedAgentRecord>,
+    pending_background_turn: Option<TurnId>,
     agent_locators: HashMap<String, ProviderThreadRef>,
     agent_spawn_tools: HashMap<String, ToolCallId>,
     provider_control_inputs: HashMap<ControlRequestId, Value>,
@@ -136,6 +138,7 @@ impl ClaudeStreamDecoder {
             root_locator_resolver,
             pending_root_records: VecDeque::new(),
             pending_agent_records: VecDeque::new(),
+            pending_background_turn: None,
             agent_locators: HashMap::new(),
             agent_spawn_tools: HashMap::new(),
             provider_control_inputs: HashMap::new(),
@@ -153,6 +156,13 @@ impl ClaudeStreamDecoder {
 
     pub fn context(&self) -> &ClaudeDecodeContext {
         &self.context
+    }
+
+    /// A task-notification continuation is provider-owned work that can begin
+    /// after the interactive turn has settled. A real user turn takes
+    /// precedence if it starts before that continuation produces content.
+    pub(crate) fn clear_pending_background_turn(&mut self) {
+        self.pending_background_turn = None;
     }
 
     /// Seed the canonical root identity for a bounded durable tail. The init
@@ -312,8 +322,45 @@ impl ClaudeStreamDecoder {
             }
         }
 
-        let mut drafts = self.decode_canonical_value(value, provider_sequence)?;
+        let mut drafts = self.begin_pending_background_turn(
+            object,
+            parent_tool_call.clone(),
+            agent_id.is_none(),
+        );
+        drafts.extend(self.decode_canonical_value(value, provider_sequence)?);
         drafts.extend(self.flush_resolvable_agents()?);
         Ok(drafts)
+    }
+
+    fn begin_pending_background_turn(
+        &mut self,
+        object: &Map<String, Value>,
+        parent_tool_call: Option<ToolCallId>,
+        is_root: bool,
+    ) -> Vec<HarnessEventDraftV1> {
+        let record_type = string(object, "type");
+        let begins_continuation = matches!(record_type, Some("assistant" | "stream_event"));
+        if !is_root
+            || !begins_continuation
+            || self.context.turn_id.is_some()
+            || self.context.run_id.is_some()
+            || !self.root_declared
+        {
+            return Vec::new();
+        }
+        let Some(turn_id) = self.pending_background_turn.take() else {
+            return Vec::new();
+        };
+        self.context.turn_id = Some(turn_id);
+        let root_thread = self.context.root_thread_id.clone();
+        vec![self.draft(
+            self.context.root_stream_id.clone(),
+            &root_thread,
+            parent_tool_call,
+            vertebrae_harness_core::UpdateSemantics::Snapshot,
+            vertebrae_harness_core::HarnessEventPayloadV1::TurnStarted(TurnStarted {
+                input_summary: None,
+            }),
+        )]
     }
 }

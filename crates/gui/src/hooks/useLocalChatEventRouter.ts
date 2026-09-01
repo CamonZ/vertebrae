@@ -17,6 +17,7 @@ import type {
 import {
   findSessionIdByBackendSessionId,
   getLocalChatLifecycle,
+  isLocalChatLifecycleBusy,
   useChatStore,
 } from "../stores/chatStore";
 import {
@@ -96,7 +97,19 @@ function shouldRouteContentEvent(
   payload: CorrelatedEvent,
   allowSettled = false
 ): boolean {
-  if (!payload.turn_id) return true;
+  if (!payload.turn_id) {
+    if (payload.is_root !== true) return true;
+    const routed = rootTurnByBackendSessionId.get(backendSessionId);
+    const session = useChatStore.getState().sessions[sessionId];
+    // Root content without a turn id cannot be correlated to the settled
+    // turn. It is safe to accept only while a known root turn is busy; once
+    // idle, accepting it would resurrect streaming and strand queued input.
+    return (
+      routed?.phase === "active" &&
+      !!session &&
+      isLocalChatLifecycleBusy(getLocalChatLifecycle(session))
+    );
+  }
   if (payload.is_root === false) return true;
   const turn = rootTurnByBackendSessionId.get(backendSessionId);
   if (payload.is_root !== true || turn?.turnId !== payload.turn_id) {

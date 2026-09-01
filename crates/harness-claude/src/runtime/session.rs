@@ -278,12 +278,24 @@ pub(super) async fn run_persistent_process_v2(
                         for draft in drafts {
                             saw_root_declaration |= matches!(&draft.payload, HarnessEventPayloadV1::ThreadDeclared(declaration) if declaration.kind == ThreadKind::Root);
                             let terminal = match &draft.payload {
-                                HarnessEventPayloadV1::TurnFinished(outcome) => Some(outcome.clone()),
+                                HarnessEventPayloadV1::TurnFinished(outcome)
+                                    if draft.stream_id == stream_id =>
+                                {
+                                    Some((draft.correlation.turn_id.clone(), outcome.clone()))
+                                }
                                 _ => None,
                             };
+                            let is_root_terminal = terminal.is_some();
+                            let terminal_matches_pending = terminal.as_ref().is_some_and(
+                                |(turn_id, _)| {
+                                    pending_turn.as_ref().is_some_and(|pending| {
+                                        turn_id.as_ref() == Some(&pending.id)
+                                    })
+                                },
+                            );
                             let provider_input = provider_control_input(&mut decoder, &draft);
                             if let Err(error) = dispatch_provider_draft(&sequenced, control_sink.clone(), &control_tx, &mut controls, draft, provider_input).await {
-                                if terminal.is_some()
+                                if terminal_matches_pending
                                     && let Some(mut turn) = pending_turn.take()
                                 {
                                     let sink_error = event_sink_message(&error);
@@ -317,7 +329,8 @@ pub(super) async fn run_persistent_process_v2(
                                     let _ = response.send(Ok(()));
                                 }
                             }
-                            if let Some(outcome) = terminal
+                            if terminal_matches_pending
+                                && let Some((_, outcome)) = terminal
                                 && let Some(mut turn) = pending_turn.take()
                             {
                                 let settled_turn_id = turn.id.to_string();
@@ -364,6 +377,43 @@ pub(super) async fn run_persistent_process_v2(
                                     ));
                                     break 'process;
                                 }
+                            }
+                            if is_root_terminal
+                                && pending_turn.is_none()
+                                && let Some(settled_turn_id) = decoder.context_mut().turn_id.take()
+                            {
+                                trace(
+                                    decoder.context().root_thread_id.as_str(),
+                                    "turn.terminal",
+                                    "provider_to_harness",
+                                    Some(settled_turn_id.as_str()),
+                                    "settling",
+                                    Some("background continuation"),
+                                    None,
+                                );
+                                if let Err(error) = settle_pending_controls(
+                                    &sequenced,
+                                    &mut controls,
+                                    ResolutionSource::Cancelled,
+                                    "Claude turn ended",
+                                )
+                                .await
+                                {
+                                    close_status = SessionCloseStatus::Failed;
+                                    close_error = Some(format!(
+                                        "event sink failed while settling Claude controls: {error}"
+                                    ));
+                                    break 'process;
+                                }
+                                trace(
+                                    decoder.context().root_thread_id.as_str(),
+                                    "turn.settled",
+                                    "internal",
+                                    Some(settled_turn_id.as_str()),
+                                    "idle",
+                                    None,
+                                    None,
+                                );
                             }
                         }
                     }
@@ -603,6 +653,7 @@ pub(super) async fn begin_persistent_turn(
         let _ = response.send(Err(error.clone()));
         return Err(error);
     }
+    decoder.clear_pending_background_turn();
     let context = decoder.context().clone();
     let encoded = encode_user_message(context.session_id.as_ref(), &request.content);
     let request_turn_id = request.turn_id.to_string();
