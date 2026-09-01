@@ -61,6 +61,9 @@ describe("requestMermaidSvg", () => {
   let restoreFrameMock: (() => void) | undefined;
 
   afterEach(() => {
+    document
+      .querySelectorAll('iframe[title="Mermaid renderer"]')
+      .forEach((frame) => frame.remove());
     restoreFrameMock?.();
     restoreFrameMock = undefined;
     vi.useRealTimers();
@@ -86,7 +89,7 @@ describe("requestMermaidSvg", () => {
     ).toBeNull();
   });
 
-  it("tears down the renderer when rendering is aborted", async () => {
+  it("rejects on abort and waits for the renderer to finish before teardown", async () => {
     restoreFrameMock = installMermaidRendererFrameMock();
     const controller = new AbortController();
     const pending = requestMermaidSvg(
@@ -104,9 +107,7 @@ describe("requestMermaidSvg", () => {
 
     controller.abort();
     await cancelled;
-    expect(
-      document.querySelector('iframe[title="Mermaid renderer"]')
-    ).toBeNull();
+    expect(document.querySelector('iframe[title="Mermaid renderer"]')).not.toBeNull();
   });
 
   it("rejects immediately when the abort signal is already aborted", async () => {
@@ -121,7 +122,7 @@ describe("requestMermaidSvg", () => {
     ).toBeNull();
   });
 
-  it("times out and tears down the renderer", async () => {
+  it("times out without destroying an in-flight renderer", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const createElement = document.createElement.bind(document);
     const createElementSpy = vi
@@ -150,6 +151,6 @@ describe("requestMermaidSvg", () => {
     await timedOut;
     expect(
       document.querySelector('iframe[title="Mermaid renderer"]')
-    ).toBeNull();
+    ).not.toBeNull();
   });
 });

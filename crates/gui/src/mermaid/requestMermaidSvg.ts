@@ -8,8 +8,9 @@ export const MERMAID_RENDER_TIMEOUT_MS = 10_000;
  * Mermaid's renderer needs a real `Document` (layout, SVG, d3). A Worker
  * cannot host that. A unique-origin iframe (`sandbox="allow-scripts"` without
  * `allow-same-origin`) is the browsing context we can create and destroy
- * without sharing the chat page's DOM. Timeout and abort tear that context
- * down.
+ * without sharing the chat page's DOM. A timeout or abort rejects immediately,
+ * but the context stays alive until an in-flight render finishes. Destroying
+ * it during Mermaid layout can make WebKit abort the native app.
  */
 export function requestMermaidSvg(
   source: string,
@@ -22,15 +23,22 @@ export function requestMermaidSvg(
       .toString(36)
       .slice(2)}`;
     let settled = false;
+    let frameRemoved = false;
     const timeout: { id?: ReturnType<typeof setTimeout> } = {};
 
-    const cleanup = () => {
-      window.removeEventListener("message", onMessage);
+    const removeFrame = () => {
+      if (frameRemoved) return;
+      frameRemoved = true;
+      iframe.remove();
+    };
+
+    const cleanup = (removeRenderer = true) => {
+      if (removeRenderer) window.removeEventListener("message", onMessage);
       iframe.removeEventListener("load", onLoad);
       iframe.removeEventListener("error", onError);
       signal?.removeEventListener("abort", onAbort);
       if (timeout.id !== undefined) window.clearTimeout(timeout.id);
-      iframe.remove();
+      if (removeRenderer) removeFrame();
     };
 
     const settle = (callback: () => void) => {
@@ -45,6 +53,12 @@ export function requestMermaidSvg(
       if (!isMermaidRenderResultMessage(event.data)) return;
       const message = event.data;
       if (message.requestId !== requestId) return;
+
+      if (settled) {
+        window.removeEventListener("message", onMessage);
+        removeFrame();
+        return;
+      }
 
       if (message.status === "rendered") {
         settle(() => resolve(message.svg));
@@ -65,7 +79,10 @@ export function requestMermaidSvg(
     };
 
     const onAbort = () => {
-      settle(() => reject(new Error("Mermaid rendering was cancelled.")));
+      if (settled) return;
+      settled = true;
+      cleanup(false);
+      reject(new Error("Mermaid rendering was cancelled."));
     };
 
     if (signal?.aborted) {
@@ -89,9 +106,10 @@ export function requestMermaidSvg(
     signal?.addEventListener("abort", onAbort, { once: true });
     window.addEventListener("message", onMessage);
     timeout.id = setTimeout(() => {
-      settle(() =>
-        reject(new Error("Mermaid rendering timed out after 10 seconds."))
-      );
+      if (settled) return;
+      settled = true;
+      cleanup(false);
+      reject(new Error("Mermaid rendering timed out after 10 seconds."));
     }, MERMAID_RENDER_TIMEOUT_MS);
     iframe.src = new URL("/mermaid-renderer.html", window.location.href).href;
     document.body.appendChild(iframe);
