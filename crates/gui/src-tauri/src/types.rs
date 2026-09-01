@@ -505,6 +505,12 @@ pub struct AgentConfig {
     pub fallback_model: Option<String>,
     /// OpenAI/Codex reasoning effort for the configured model
     pub reasoning_effort: Option<String>,
+    /// Provider serving speed preference.
+    pub speed_tier: Option<String>,
+    /// Provider style identifier.
+    pub personality: Option<String>,
+    /// Provider output detail level.
+    pub verbosity: Option<String>,
     /// System prompt to use for the session
     pub system_prompt: Option<String>,
     /// Append a system prompt to the default system prompt
@@ -545,6 +551,9 @@ impl From<vertebrae_core::AgentConfig> for AgentConfig {
             codex_model_provider: config.codex_model_provider,
             fallback_model: config.fallback_model,
             reasoning_effort: config.reasoning_effort,
+            speed_tier: config.speed_tier.map(|value| value.as_str().into()),
+            personality: config.personality,
+            verbosity: config.verbosity.map(|value| value.as_str().into()),
             system_prompt: config.system_prompt,
             append_system_prompt: config.append_system_prompt,
             agents: config.agents.map(|v| v.to_string()),
@@ -571,6 +580,15 @@ impl From<AgentConfig> for vertebrae_core::AgentConfig {
             codex_model_provider: config.codex_model_provider,
             fallback_model: config.fallback_model,
             reasoning_effort: config.reasoning_effort,
+            speed_tier: config
+                .speed_tier
+                .as_deref()
+                .and_then(vertebrae_core::SpeedTier::parse),
+            personality: config.personality.map(|value| value.trim().to_ascii_lowercase()),
+            verbosity: config
+                .verbosity
+                .as_deref()
+                .and_then(vertebrae_core::OutputVerbosity::parse),
             system_prompt: config.system_prompt,
             append_system_prompt: config.append_system_prompt,
             agents: config.agents.map(|value| {
