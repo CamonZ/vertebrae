@@ -7479,6 +7479,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+ "vertebrae-core",
 ]
 
 [[package]]

@@ -3,41 +3,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::ApprovalCategory;
-
-/// Provider-neutral speed tiers exposed by local-chat providers.
-///
-/// Adapters map these values to their native request settings. In particular,
-/// Codex uses `priority` for `Fast`, while Claude uses its `fastMode` setting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SpeedTier {
-    Default,
-    Fast,
-}
-
-impl SpeedTier {
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "default" => Some(Self::Default),
-            "fast" => Some(Self::Fast),
-            _ => None,
-        }
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::Fast => "fast",
-        }
-    }
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Default => "Standard",
-            Self::Fast => "Fast",
-        }
-    }
-}
+pub use vertebrae_core::{OutputVerbosity, SpeedTier};
 
 /// Provider-reported speed state for a started session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

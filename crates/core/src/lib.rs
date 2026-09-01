@@ -35,6 +35,7 @@
 pub mod artifact_service;
 pub mod error;
 pub mod execution_service;
+pub mod execution_settings;
 pub mod id_generator;
 pub mod model_catalog;
 pub mod models;
@@ -52,6 +53,7 @@ pub use execution_service::{
     ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService, StopRunTarget,
     UpdateExecutionStatusParams,
 };
+pub use execution_settings::{OutputVerbosity, SpeedTier};
 pub use model_catalog::{
     Provider, ProviderModelMismatch, ProviderReasoningEffortMismatch,
     SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model, normalize_provider_reasoning_effort,
