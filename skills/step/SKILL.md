@@ -40,6 +40,14 @@ vtb step add "Coding" -w <workflow-id> \
   --model gpt-5.5 \
   --reasoning-effort high
 
+# Codex with serving speed, personality, and output detail
+vtb step add "Codex review" -w <workflow-id> \
+  --provider openai \
+  --model gpt-5.5 \
+  --speed-tier fast \
+  --personality pragmatic \
+  --verbosity high
+
 # Codex/OpenAI with a configured upstream provider
 vtb step add "Coding" -w <workflow-id> \
   --provider openai \
@@ -96,6 +104,9 @@ vtb --json step add "Review" -w <workflow-id>
 | `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
 | `--codex-model-provider` | | Codex upstream provider from `~/.codex/config.toml`; alias `--codex-provider` |
 | `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh` |
+| `--speed-tier` | | Provider serving speed preference: `default` or `fast` |
+| `--personality` | | Provider style identifier; Codex accepts `none`, `friendly`, or `pragmatic` when supported by the selected model |
+| `--verbosity` | | Output detail level: `low`, `medium`, or `high`; alias `--output-verbosity`; currently valid with OpenAI/Codex |
 | `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (default: `execute`) |
 | `--output-schema` | | JSON Schema describing expected structured output |
 | `--route-config` | | Opaque deterministic route configuration as a JSON string; only valid for `route` steps |
@@ -110,6 +121,13 @@ creation envelope with `command`, `status`, `step_id`, and `workflow_id`.
 `--reasoning-effort` is only valid with the OpenAI/Codex provider. Supported
 values are `low`, `medium`, `high`, and `xhigh`; Claude/Anthropic steps reject
 the field.
+
+`--speed-tier` accepts `default` and `fast`. `--personality` is normalized to a
+lowercase provider style identifier. Codex accepts `none`, `friendly`, and
+`pragmatic`, subject to the selected model's live capability; Claude forwards
+the value as its `outputStyle`. `--verbosity` accepts `low`, `medium`, and
+`high`, with `--output-verbosity` as an alias, and is currently only valid for
+OpenAI/Codex steps. The three settings are independent of reasoning effort.
 
 `--persistence-options` accepts Sacrum's persistence configuration, currently
 `{"artifact":{"logical_name":"<name>"}}`. It requires an output schema;
@@ -220,6 +238,20 @@ vtb step update <step-id> --goal "New goal description"
 # Change model
 vtb step update <step-id> --model opus
 
+# Configure provider model settings
+vtb step update <step-id> \
+  --provider openai \
+  --model gpt-5.5 \
+  --speed-tier fast \
+  --personality friendly \
+  --verbosity low
+
+# Clear model settings independently
+vtb step update <step-id> \
+  --clear-speed-tier \
+  --clear-personality \
+  --clear-verbosity
+
 # Move a step to Codex and set reasoning effort
 vtb step update <step-id> --provider openai --model gpt-5.5 --reasoning-effort high
 
@@ -299,6 +331,12 @@ vtb --json step update <step-id> --goal "New goal"
 | `--order` | `-o` | New 0-indexed step order |
 | `--transition-to` | `-t` | Replace transitions list; repeatable |
 | `--clear-transitions` | | Clear all transitions |
+| `--speed-tier` | | New provider serving speed preference: `default` or `fast` |
+| `--personality` | | New provider style identifier; Codex accepts `none`, `friendly`, or `pragmatic` when supported by the selected model |
+| `--verbosity` | | New output detail level: `low`, `medium`, or `high`; alias `--output-verbosity`; currently valid with OpenAI/Codex |
+| `--clear-speed-tier` | | Remove the stored speed preference |
+| `--clear-personality` | | Remove the stored personality |
+| `--clear-verbosity` | | Remove the stored output verbosity |
 
 The required positional argument is `<id>`, the step ID to update. It accepts a
 full UUID or an 8-character short ID and resolves case-insensitively.
@@ -306,7 +344,15 @@ full UUID or an 8-character short ID and resolves case-insensitively.
 `--agent`, `--skill`, and `--transition-to` replace their entire existing lists.
 Use the matching `--clear-*` flag to persist an empty list. `--agent-config`
 can replace the full config, and the shortcut flags (`--provider`, `--model`,
-`--codex-model-provider`, and `--reasoning-effort`) overlay individual fields.
+`--codex-model-provider`, `--reasoning-effort`, `--speed-tier`,
+`--personality`, and `--verbosity`) overlay individual fields. The
+equivalent JSON fields are `provider`, `model`, `codex_model_provider`,
+`reasoning_effort`, `speed_tier`, `personality`, and `verbosity`:
+
+```bash
+vtb step update <step-id> \
+  --agent-config '{"provider":"openai","model":"gpt-5.5","speed_tier":"fast","personality":"pragmatic","verbosity":"high"}'
+```
 
 `--json` returns an operation envelope with `command`, `status`, and `step_id`.
 Invalid `--agent-config`, `--output-schema`, `--persistence-options`, or
@@ -321,8 +367,9 @@ nested diagnostics retain
 their `route_config` field paths. Clearing route configuration leaves an
 unconfigured, non-runnable route draft.
 Provider/model mismatches, Codex upstream provider usage when the resulting
-provider is Anthropic, and Anthropic reasoning effort are rejected by the CLI
-before the step is updated.
+provider is Anthropic, Anthropic reasoning effort, and Anthropic verbosity are
+rejected by the CLI before the step is updated. Codex personality values outside
+`none`, `friendly`, and `pragmatic` are also rejected.
 
 ---
 
