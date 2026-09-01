@@ -55,8 +55,9 @@ pub use execution_service::{
 };
 pub use execution_settings::{OutputVerbosity, SpeedTier};
 pub use model_catalog::{
-    Provider, ProviderModelMismatch, ProviderReasoningEffortMismatch,
-    SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model, normalize_provider_reasoning_effort,
+    Provider, ProviderModelMismatch, ProviderPersonalityMismatch, ProviderReasoningEffortMismatch,
+    ProviderVerbosityMismatch, SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model,
+    normalize_personality, normalize_provider_reasoning_effort, normalize_provider_verbosity,
     validate_provider_model, validate_provider_model_with_codex_provider,
     validate_provider_reasoning_effort,
 };

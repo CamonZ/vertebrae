@@ -14,6 +14,7 @@
 //! - `openai` (Codex / GPT): `gpt-*` prefix, `o*` reasoning models
 //!   (e.g. `o1`, `o3`, `o4-mini`), and `codex-*`.
 
+use crate::OutputVerbosity;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -220,6 +221,37 @@ pub fn validate_provider_reasoning_effort(
     normalize_provider_reasoning_effort(provider, reasoning_effort).map(|_| ())
 }
 
+/// Normalize the opaque provider style identifier carried by the shared
+/// request contract.
+pub fn normalize_personality(
+    personality: Option<&str>,
+) -> Result<Option<String>, ProviderPersonalityMismatch> {
+    let Some(personality) = personality else {
+        return Ok(None);
+    };
+    let normalized = personality.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Err(ProviderPersonalityMismatch::Empty);
+    }
+    Ok(Some(normalized))
+}
+
+/// Validate output verbosity against the provider adapter that will consume
+/// it. Codex is the first provider with a native output-detail setting.
+pub fn normalize_provider_verbosity(
+    provider: Provider,
+    verbosity: Option<OutputVerbosity>,
+) -> Result<Option<OutputVerbosity>, ProviderVerbosityMismatch> {
+    let Some(verbosity) = verbosity else {
+        return Ok(None);
+    };
+    if provider == Provider::Openai {
+        Ok(Some(verbosity))
+    } else {
+        Err(ProviderVerbosityMismatch::UnsupportedProvider { provider })
+    }
+}
+
 /// Reasons a `(provider, model)` pair can fail validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderModelMismatch {
@@ -278,6 +310,42 @@ pub enum ProviderReasoningEffortMismatch {
     /// The effort is valid for Codex but was attached to another provider.
     UnsupportedProvider { provider: Provider, effort: String },
 }
+
+/// Reasons a personality value can fail shared-contract validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderPersonalityMismatch {
+    Empty,
+}
+
+impl fmt::Display for ProviderPersonalityMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("personality must not be empty"),
+        }
+    }
+}
+
+impl std::error::Error for ProviderPersonalityMismatch {}
+
+/// Reasons an output verbosity value can fail provider validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderVerbosityMismatch {
+    UnsupportedProvider { provider: Provider },
+}
+
+impl fmt::Display for ProviderVerbosityMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedProvider { provider } => write!(
+                f,
+                "output verbosity is not supported by the {} provider",
+                provider
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ProviderVerbosityMismatch {}
 
 impl fmt::Display for ProviderReasoningEffortMismatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

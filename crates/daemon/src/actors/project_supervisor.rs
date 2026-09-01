@@ -1405,6 +1405,33 @@ mod tests {
     }
 
     #[test]
+    fn build_step_config_preserves_execution_settings_from_payload() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-settings",
+            "task_id": "task-settings",
+            "agent_config": {
+                "provider": "openai",
+                "speed_tier": "fast",
+                "personality": "friendly",
+                "verbosity": "high"
+            }
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+
+        assert_eq!(
+            config.agent_config.speed_tier,
+            Some(vertebrae_core::SpeedTier::Fast)
+        );
+        assert_eq!(config.agent_config.personality.as_deref(), Some("friendly"));
+        assert_eq!(
+            config.agent_config.verbosity,
+            Some(vertebrae_core::OutputVerbosity::High)
+        );
+    }
+
+    #[test]
     fn build_step_config_falls_back_when_no_prompt() {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-2",

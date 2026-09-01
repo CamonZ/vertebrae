@@ -2242,6 +2242,7 @@ mod tests {
         add_developer_instructions(
             &mut params,
             &vertebrae_harness_core::RequestConfig {
+                verbosity: None,
                 developer_instructions: Some("reference contract".into()),
                 ..Default::default()
             },
@@ -2259,6 +2260,7 @@ mod tests {
             add_service_tier(
                 &mut params,
                 &vertebrae_harness_core::RequestConfig {
+                    verbosity: None,
                     speed_tier: Some(speed_tier),
                     ..Default::default()
                 },

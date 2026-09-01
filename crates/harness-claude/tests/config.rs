@@ -36,6 +36,7 @@ fn persistent_and_resumed_specs_preserve_exact_provider_configuration() {
         ..ClaudeProviderConfig::default()
     };
     let request = RequestConfig {
+        verbosity: None,
         working_directory: Some(cwd.clone()),
         model: Some("opus".into()),
         output_schema: Some(json!({"type":"object"})),
@@ -128,6 +129,7 @@ fn request_personality_is_translated_by_the_claude_adapter() {
         ..ClaudeProviderConfig::default()
     };
     let request = RequestConfig {
+        verbosity: None,
         personality: Some("Explanatory".into()),
         ..RequestConfig::default()
     };
@@ -177,6 +179,7 @@ fn speed_tier_is_passed_as_an_inline_settings_override() {
         ..ClaudeProviderConfig::default()
     };
     let request = RequestConfig {
+        verbosity: None,
         speed_tier: Some(SpeedTier::Fast),
         ..RequestConfig::default()
     };

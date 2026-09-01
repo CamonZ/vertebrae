@@ -1482,6 +1482,7 @@ while IFS= read -r _; do :; done
                     "resume-canonical",
                 )),
                 config: RequestConfig {
+                    verbosity: None,
                     working_directory: Some(cwd.clone()),
                     environment: std::collections::BTreeMap::from([(
                         "COMPAT".into(),

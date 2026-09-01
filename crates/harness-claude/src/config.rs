@@ -378,6 +378,7 @@ mod tests {
             ..Default::default()
         };
         let request = RequestConfig {
+            verbosity: None,
             developer_instructions: Some("reference contract".into()),
             ..Default::default()
         };

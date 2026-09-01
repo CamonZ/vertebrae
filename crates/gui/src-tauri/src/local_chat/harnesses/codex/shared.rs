@@ -141,6 +141,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
             stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
             resume_id: input.provider_resume_id.map(Into::into),
             config: vertebrae_harness_core::RequestConfig {
+                verbosity: None,
                 working_directory: input.working_dir.map(PathBuf::from),
                 model,
                 reasoning_effort,
