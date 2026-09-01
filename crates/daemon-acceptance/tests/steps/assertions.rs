@@ -368,6 +368,40 @@ pub async fn codex_request_contains_model_and_provider(
     assert_eq!(thread_start["params"]["modelProvider"], model_provider);
 }
 
+#[then(
+    expr = "the Codex App Server request contains service tier {string} and personality {string}"
+)]
+pub async fn codex_request_contains_service_tier_and_personality(
+    world: &mut DaemonWorld,
+    service_tier: String,
+    personality: String,
+) {
+    let requests = world.captured_codex_requests();
+    let thread_start = requests
+        .iter()
+        .find(|request| request["method"] == "thread/start")
+        .unwrap_or_else(|| panic!("no thread/start request captured: {requests:?}"));
+    assert_eq!(thread_start["params"]["serviceTier"], service_tier);
+    assert_eq!(thread_start["params"]["personality"], personality);
+}
+
+#[then("the Codex App Server request omits optional model settings")]
+pub async fn codex_request_omits_optional_model_settings(world: &mut DaemonWorld) {
+    let requests = world.captured_codex_requests();
+    let thread_start = requests
+        .iter()
+        .find(|request| request["method"] == "thread/start")
+        .unwrap_or_else(|| panic!("no thread/start request captured: {requests:?}"));
+    assert!(
+        thread_start["params"].get("serviceTier").is_none(),
+        "unexpected serviceTier: {thread_start}"
+    );
+    assert!(
+        thread_start["params"].get("personality").is_none(),
+        "unexpected personality: {thread_start}"
+    );
+}
+
 #[then("the Codex App Server uses the persistent session RPC flow")]
 pub async fn codex_uses_persistent_session_rpc_flow(world: &mut DaemonWorld) {
     let requests = world.captured_codex_requests();
@@ -393,5 +427,39 @@ pub async fn codex_uses_persistent_session_rpc_flow(world: &mut DaemonWorld) {
     assert!(
         thread_start < turn_start,
         "thread must start before the turn"
+    );
+}
+
+#[then(expr = "the mock argv contains Claude output style {string}")]
+pub async fn argv_contains_claude_output_style(world: &mut DaemonWorld, expected: String) {
+    let argv = world.captured_argv();
+    assert!(
+        argv.windows(2).any(|pair| {
+            pair[0] == "--settings"
+                && serde_json::from_str::<serde_json::Value>(&pair[1])
+                    .ok()
+                    .and_then(|settings| settings["outputStyle"].as_str().map(str::to_owned))
+                    .as_deref()
+                    == Some(expected.as_str())
+        }),
+        "expected Claude outputStyle={expected:?} in argv: {argv:?}"
+    );
+}
+
+#[then(expr = "the mock argv contains Claude fast mode {string}")]
+pub async fn argv_contains_claude_fast_mode(world: &mut DaemonWorld, expected: String) {
+    let argv = world.captured_argv();
+    let expected = expected
+        .parse::<bool>()
+        .unwrap_or_else(|_| panic!("expected Claude fast mode to be true or false"));
+    assert!(
+        argv.windows(2).any(|pair| {
+            pair[0] == "--settings"
+                && serde_json::from_str::<serde_json::Value>(&pair[1])
+                    .ok()
+                    .and_then(|settings| settings["fastMode"].as_bool())
+                    == Some(expected)
+        }),
+        "expected Claude fastMode={expected} in argv: {argv:?}"
     );
 }
