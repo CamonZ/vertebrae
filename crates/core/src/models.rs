@@ -3,7 +3,7 @@
 //! These are the canonical domain models for the Vertebrae task management system.
 //! All IDs are plain strings rather than database-specific record types.
 
-use crate::model_catalog::Provider;
+use crate::{OutputVerbosity, SpeedTier, model_catalog::Provider};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -671,6 +671,15 @@ pub struct AgentConfig {
     pub codex_model_provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Provider-neutral serving speed preference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed_tier: Option<SpeedTier>,
+    /// Provider-specific style identifier, normalized but otherwise opaque.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personality: Option<String>,
+    /// Provider-neutral output-detail preference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verbosity: Option<OutputVerbosity>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -719,6 +728,21 @@ impl AgentConfig {
 
     pub fn with_reasoning_effort(mut self, effort: impl Into<String>) -> Self {
         self.reasoning_effort = Some(effort.into().trim().to_ascii_lowercase());
+        self
+    }
+
+    pub fn with_speed_tier(mut self, speed_tier: SpeedTier) -> Self {
+        self.speed_tier = Some(speed_tier);
+        self
+    }
+
+    pub fn with_personality(mut self, personality: impl Into<String>) -> Self {
+        self.personality = Some(personality.into().trim().to_ascii_lowercase());
+        self
+    }
+
+    pub fn with_verbosity(mut self, verbosity: OutputVerbosity) -> Self {
+        self.verbosity = Some(verbosity);
         self
     }
 
@@ -848,6 +872,9 @@ impl AgentConfig {
             && self.model.is_none()
             && self.codex_model_provider.is_none()
             && self.reasoning_effort.is_none()
+            && self.speed_tier.is_none()
+            && self.personality.is_none()
+            && self.verbosity.is_none()
             && self.fallback_model.is_none()
             && self.system_prompt.is_none()
             && self.append_system_prompt.is_none()
@@ -874,6 +901,15 @@ impl AgentConfig {
         }
         if other.reasoning_effort.is_some() {
             self.reasoning_effort = other.reasoning_effort;
+        }
+        if other.speed_tier.is_some() {
+            self.speed_tier = other.speed_tier;
+        }
+        if other.personality.is_some() {
+            self.personality = other.personality;
+        }
+        if other.verbosity.is_some() {
+            self.verbosity = other.verbosity;
         }
         if other.fallback_model.is_some() {
             self.fallback_model = other.fallback_model;
@@ -921,6 +957,9 @@ impl PartialEq for AgentConfig {
             && self.model == other.model
             && self.codex_model_provider == other.codex_model_provider
             && self.reasoning_effort == other.reasoning_effort
+            && self.speed_tier == other.speed_tier
+            && self.personality == other.personality
+            && self.verbosity == other.verbosity
             && self.fallback_model == other.fallback_model
             && self.system_prompt == other.system_prompt
             && self.append_system_prompt == other.append_system_prompt
@@ -3928,6 +3967,36 @@ mod tests {
     }
 
     #[test]
+    fn agent_config_with_execution_settings() {
+        let config = AgentConfig::new()
+            .with_speed_tier(crate::SpeedTier::Fast)
+            .with_personality(" Friendly ")
+            .with_verbosity(crate::OutputVerbosity::High);
+
+        assert_eq!(config.speed_tier, Some(crate::SpeedTier::Fast));
+        assert_eq!(config.personality.as_deref(), Some("friendly"));
+        assert_eq!(config.verbosity, Some(crate::OutputVerbosity::High));
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn agent_config_execution_settings_round_trip_json() {
+        let config = AgentConfig::new()
+            .with_speed_tier(crate::SpeedTier::Fast)
+            .with_personality("pragmatic")
+            .with_verbosity(crate::OutputVerbosity::Low);
+
+        let serialized = serde_json::to_value(&config).expect("serialize agent config");
+        assert_eq!(serialized["speed_tier"], "fast");
+        assert_eq!(serialized["personality"], "pragmatic");
+        assert_eq!(serialized["verbosity"], "low");
+        assert_eq!(
+            serde_json::from_value::<AgentConfig>(serialized).unwrap(),
+            config
+        );
+    }
+
+    #[test]
     fn agent_config_reasoning_effort_round_trips_json() {
         let config = AgentConfig::new()
             .with_provider(Provider::Openai)
@@ -4102,6 +4171,23 @@ mod tests {
         let merged = config1.merge(config2);
         assert_eq!(merged.model.as_deref(), Some("gpt-5.5"));
         assert_eq!(merged.reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn agent_config_merge_overlays_execution_settings() {
+        let base = AgentConfig::new()
+            .with_speed_tier(crate::SpeedTier::Default)
+            .with_personality("friendly")
+            .with_verbosity(crate::OutputVerbosity::Low);
+        let overlay = AgentConfig::new()
+            .with_speed_tier(crate::SpeedTier::Fast)
+            .with_personality("pragmatic")
+            .with_verbosity(crate::OutputVerbosity::High);
+
+        let merged = base.merge(overlay);
+        assert_eq!(merged.speed_tier, Some(crate::SpeedTier::Fast));
+        assert_eq!(merged.personality.as_deref(), Some("pragmatic"));
+        assert_eq!(merged.verbosity, Some(crate::OutputVerbosity::High));
     }
 
     #[test]
