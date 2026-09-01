@@ -164,6 +164,14 @@ impl CodexProviderConfig {
                 directory.display()
             )));
         }
+        if let Some(personality) = request.personality.as_deref()
+            && !matches!(personality, "none" | "friendly" | "pragmatic")
+        {
+            return Err(HarnessError::InvalidRequest(format!(
+                "personality '{}' is not supported by Codex; supported values are none, friendly, and pragmatic",
+                personality
+            )));
+        }
         Ok(())
     }
 }

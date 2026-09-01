@@ -357,12 +357,15 @@ fn capabilities_from_catalog(mut catalog: CodexModelCatalog) -> HarnessCapabilit
                 .into_iter()
                 .map(|level| level.effort)
                 .collect::<BTreeSet<_>>();
+            let supports_personality = model
+                .supports_personality
+                .or_else(|| legacy_personality_support(&model.slug));
             (
                 model.slug,
                 model.display_name,
                 reasoning_efforts,
                 supported_speed_tiers,
-                model.supports_personality,
+                supports_personality,
             )
         })
         .collect();
@@ -447,6 +450,18 @@ fn capabilities_from_catalog(mut catalog: CodexModelCatalog) -> HarnessCapabilit
             automatic_resolution: true,
         },
     }
+}
+
+/// Compatibility projection for Codex versions whose bundled catalog omits
+/// `supports_personality`. Known GPT-5.6 models are explicitly disabled based
+/// on the authoritative app-server behavior; other legacy catalog entries
+/// retain the Codex personality enum rather than silently losing the setting.
+fn legacy_personality_support(model_id: &str) -> Option<bool> {
+    let model_id = model_id.trim().to_ascii_lowercase();
+    Some(!matches!(
+        model_id.as_str(),
+        "gpt-5.6-luna" | "gpt-5.6-terra" | "gpt-5.6-sol"
+    ))
 }
 
 fn supported_speed_tiers(model: &CodexCatalogModel) -> BTreeSet<SpeedTier> {
@@ -582,6 +597,8 @@ mod tests {
             capabilities.models[2].supported_speed_tiers,
             BTreeSet::from([SpeedTier::Default, SpeedTier::Fast])
         );
+        assert_eq!(capabilities.models[1].supports_personality, Some(true));
+        assert_eq!(capabilities.models[2].supports_personality, Some(true));
         assert_eq!(
             capabilities.models[1].supported_speed_tiers,
             BTreeSet::from([SpeedTier::Default])
@@ -596,6 +613,13 @@ mod tests {
                 .iter()
                 .any(|model| model.id == "hidden-model")
         );
+    }
+
+    #[test]
+    fn legacy_personality_fallback_keeps_known_luna_family_restricted() {
+        assert_eq!(legacy_personality_support("gpt-5.6-luna"), Some(false));
+        assert_eq!(legacy_personality_support("GPT-5.6-TERRA"), Some(false));
+        assert_eq!(legacy_personality_support("gpt-5.5"), Some(true));
     }
 
     #[test]

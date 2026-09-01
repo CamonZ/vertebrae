@@ -24,6 +24,14 @@ vtb step add "Coding" -w <workflow-id> \
   --prompt "Implement the task described in {{task.id}}" \
   --agent-config '{"model":"opus","max_budget_usd":5.0}'
 
+# Add provider execution settings
+vtb step add "Codex review" -w <workflow-id> \
+  --provider openai \
+  --model gpt-5.5 \
+  --speed-tier fast \
+  --personality pragmatic \
+  --verbosity high
+
 # Add step with agents and skills
 vtb step add "Review" -w <workflow-id> \
   --agent .claude/agents/reviewer.md \
@@ -61,6 +69,8 @@ vtb step list <workflow-id>
 vtb --json step list <workflow-id>
 vtb step show <step-id>
 vtb step update <step-id> --goal "New goal" --model opus
+vtb step update <step-id> --speed-tier fast --personality friendly --verbosity low
+vtb step update <step-id> --clear-speed-tier --clear-personality --clear-verbosity
 vtb step update <step-id> --prompt "New prompt for {{task.id}}"
 vtb step update <step-id> --clear-prompt
 vtb step update <step-id> --step-type evaluate
@@ -167,6 +177,12 @@ request with no property changes before reporting success.
 | `--provider <PROVIDER>` | | Set `agent_config.provider`; accepts `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
 | `--codex-model-provider <PROVIDER>` | | Set `agent_config.codex_model_provider`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
 | `--reasoning-effort <EFFORT>` | | Set `agent_config.reasoning_effort`; valid values are `low`, `medium`, `high`, and `xhigh`; only valid when the resulting provider is OpenAI/Codex |
+| `--speed-tier <TIER>` | | Set `agent_config.speed_tier`; values are `default` and `fast` |
+| `--personality <STYLE>` | | Set the provider style identifier; Codex accepts `none`, `friendly`, and `pragmatic` when the selected model advertises support |
+| `--verbosity <LEVEL>` | | Set `agent_config.verbosity` to `low`, `medium`, or `high`; alias `--output-verbosity`; currently valid for OpenAI/Codex |
+| `--clear-speed-tier` | | Remove `agent_config.speed_tier` |
+| `--clear-personality` | | Remove `agent_config.personality` |
+| `--clear-verbosity` | | Remove `agent_config.verbosity` |
 | `--step-type <STEP_TYPE>` | | Set the step type; values are `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, and `finish` |
 | `--output-schema <JSON>` | | Replace the step output schema from a JSON string |
 | `--clear-output-schema` | | Remove the output schema |
@@ -181,9 +197,11 @@ request with no property changes before reporting success.
 For replacement-list fields, update is not additive: any provided `--agent`,
 `--skill`, or `--transition-to` values replace the existing list. The matching
 `--clear-*` flags win for that field when present. `--agent-config` starts from
-the supplied JSON; the shortcut flags (`--provider`, `--model`,
-`--codex-model-provider`, and `--reasoning-effort`) then overlay individual
-fields before the config is validated and persisted.
+the supplied JSON; shortcut flags then overlay individual fields before the
+config is validated and persisted. Speed tier, personality, and verbosity are
+independent settings: reasoning effort controls internal reasoning, speed tier
+selects serving latency, personality selects style, and verbosity controls
+output detail.
 
 Invalid JSON in `--agent-config`, `--output-schema`, `--persistence-options`, or
 `--route-config`
@@ -197,8 +215,8 @@ path in the CLI diagnostic. A route may be created without configuration as a
 non-runnable draft, and `--clear-route-config` returns a configured route to
 that draft state.
 Provider/model mismatches, Codex upstream provider usage when the resulting
-provider is Anthropic, and Anthropic reasoning effort are rejected by the CLI
-before the step is updated.
+provider is Anthropic, Anthropic reasoning effort, and Anthropic output
+verbosity are rejected by the CLI before the step is updated.
 If a full UUID reaches `step update` but no matching step exists, the command
 fails with `Step not found: <id>`. If an 8-character hex short ID cannot be
 resolved, the shared ID resolver reports `step with prefix '<id>' not found`.
@@ -536,6 +554,21 @@ Reasoning effort is OpenAI/Codex-only. Valid values are `low`, `medium`,
 `high`, and `xhigh`; unsupported values such as `minimal` are rejected. A step
 with `--provider anthropic` / Claude plus `--reasoning-effort` is rejected
 before persistence or execution.
+
+Speed tier accepts `default` and `fast`. Codex maps these to its `default` and
+`priority` service tiers; Claude preserves its existing standard/fast-mode
+mapping. Personality is forwarded independently of reasoning effort and speed.
+Codex exposes `friendly`, `pragmatic`, and `none`, but the GUI filters these by
+the selected model's live `supportsPersonality` capability. GPT-5.6 Luna,
+Terra, and Sol currently report that capability as false, so they expose only
+None/provider default; GPT-5.5 and Codex Spark report true.
+
+Output verbosity accepts `low`, `medium`, and `high`. Codex's current
+app-server accepts this as the process-local `model_verbosity` setting, which
+maps to the Responses API's `text.verbosity` concept. Vertebrae applies it to
+the app-server process for that workflow execution, so concurrent task runs do
+not race through a shared Codex configuration. Claude does not currently
+support this setting and rejects an explicit value.
 
 #### Recognized model aliases
 

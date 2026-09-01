@@ -33,3 +33,7 @@ Codex personality is sent through the app-server `personality` request field,
 but its availability is model-specific and must come from authoritative
 capability discovery. A missing capability is not treated as support; the
 surface must represent that state explicitly or apply a documented fallback.
+For older Codex versions whose bundled catalog omits the field, Vertebrae uses
+an explicit compatibility projection: known GPT-5.6 Luna/Terra/Sol models are
+restricted, while other legacy catalog models retain the existing Codex
+personality enum until live app-server discovery is available.

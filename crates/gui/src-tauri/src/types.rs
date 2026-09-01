@@ -584,7 +584,9 @@ impl From<AgentConfig> for vertebrae_core::AgentConfig {
                 .speed_tier
                 .as_deref()
                 .and_then(vertebrae_core::SpeedTier::parse),
-            personality: config.personality.map(|value| value.trim().to_ascii_lowercase()),
+            personality: config
+                .personality
+                .map(|value| value.trim().to_ascii_lowercase()),
             verbosity: config
                 .verbosity
                 .as_deref()

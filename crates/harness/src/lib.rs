@@ -292,9 +292,11 @@ fn normalized_request_config(
             request_config.reasoning_effort.as_deref(),
         )
         .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
-    request_config.personality =
-        vertebrae_core::normalize_personality(request_config.personality.as_deref())
-            .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+    request_config.personality = vertebrae_core::normalize_provider_personality(
+        provider,
+        request_config.personality.as_deref(),
+    )
+    .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
     request_config.verbosity =
         vertebrae_core::normalize_provider_verbosity(provider, request_config.verbosity)
             .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;

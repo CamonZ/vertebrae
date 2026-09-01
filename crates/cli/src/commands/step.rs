@@ -5,8 +5,9 @@
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
     AgentConfig, OutputVerbosity, Provider, ServiceError, SpeedTier, Step, StepService, StepType,
-    StepUpdate, VertebraeServices, normalize_provider_reasoning_effort,
-    validate_provider_model_with_codex_provider, validate_route_fields, validate_route_update,
+    StepUpdate, VertebraeServices, normalize_provider_personality,
+    normalize_provider_reasoning_effort, validate_provider_model_with_codex_provider,
+    validate_route_fields, validate_route_update,
 };
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -228,16 +229,21 @@ fn parse_provider_arg(input: &str) -> Result<Provider, String> {
     Provider::parse(input)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct AgentConfigOverrides<'a> {
+    provider: Option<Provider>,
+    model: Option<&'a str>,
+    codex_model_provider: Option<&'a str>,
+    reasoning_effort: Option<&'a str>,
+    speed_tier: Option<SpeedTier>,
+    personality: Option<&'a str>,
+    verbosity: Option<OutputVerbosity>,
+}
+
 fn build_overlayed_agent_config(
     base: AgentConfig,
     json: Option<&str>,
-    provider: Option<Provider>,
-    model: Option<&str>,
-    codex_model_provider: Option<&str>,
-    reasoning_effort: Option<&str>,
-    speed_tier: Option<SpeedTier>,
-    personality: Option<&str>,
-    verbosity: Option<OutputVerbosity>,
+    overrides: AgentConfigOverrides<'_>,
 ) -> Result<AgentConfig, ServiceError> {
     let mut config = match json {
         Some(json_str) => serde_json::from_str::<AgentConfig>(json_str).map_err(|e| {
@@ -245,28 +251,28 @@ fn build_overlayed_agent_config(
         })?,
         None => base,
     };
-    if let Some(provider) = provider {
+    if let Some(provider) = overrides.provider {
         config = config.with_provider(provider);
-        if provider != Provider::Openai && reasoning_effort.is_none() {
+        if provider != Provider::Openai && overrides.reasoning_effort.is_none() {
             config.reasoning_effort = None;
         }
     }
-    if let Some(model) = model {
+    if let Some(model) = overrides.model {
         config = config.with_model(model);
     }
-    if let Some(codex_model_provider) = codex_model_provider {
+    if let Some(codex_model_provider) = overrides.codex_model_provider {
         config = config.with_codex_model_provider(codex_model_provider);
     }
-    if let Some(reasoning_effort) = reasoning_effort {
+    if let Some(reasoning_effort) = overrides.reasoning_effort {
         config = config.with_reasoning_effort(reasoning_effort);
     }
-    if let Some(speed_tier) = speed_tier {
+    if let Some(speed_tier) = overrides.speed_tier {
         config = config.with_speed_tier(speed_tier);
     }
-    if let Some(personality) = personality {
+    if let Some(personality) = overrides.personality {
         config = config.with_personality(personality);
     }
-    if let Some(verbosity) = verbosity {
+    if let Some(verbosity) = overrides.verbosity {
         config = config.with_verbosity(verbosity);
     }
     if config.provider.is_some() || config.codex_model_provider.is_some() {
@@ -284,14 +290,9 @@ fn build_overlayed_agent_config(
             normalize_provider_reasoning_effort(provider, config.reasoning_effort.as_deref())
                 .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
     }
-    if let Some(personality) = config.personality.as_mut() {
-        *personality = personality.trim().to_ascii_lowercase();
-        if personality.is_empty() {
-            return Err(ServiceError::validation_failed(
-                "personality must not be empty",
-            ));
-        }
-    }
+    let provider = config.provider.unwrap_or(Provider::Anthropic);
+    config.personality = normalize_provider_personality(provider, config.personality.as_deref())
+        .map_err(|error| ServiceError::validation_failed(error.to_string()))?;
     if config.verbosity.is_some()
         && config.provider.unwrap_or(Provider::Anthropic) != Provider::Openai
     {
@@ -309,13 +310,15 @@ impl StepAddCommand {
         let agent_config = build_overlayed_agent_config(
             AgentConfig::new(),
             self.agent_config.as_deref(),
-            self.provider,
-            self.model.as_deref(),
-            self.codex_model_provider.as_deref(),
-            self.reasoning_effort.as_deref(),
-            self.speed_tier.map(Into::into),
-            self.personality.as_deref(),
-            self.verbosity.map(Into::into),
+            AgentConfigOverrides {
+                provider: self.provider,
+                model: self.model.as_deref(),
+                codex_model_provider: self.codex_model_provider.as_deref(),
+                reasoning_effort: self.reasoning_effort.as_deref(),
+                speed_tier: self.speed_tier.map(Into::into),
+                personality: self.personality.as_deref(),
+                verbosity: self.verbosity.map(Into::into),
+            },
         )?;
 
         let transitions_to: Vec<String> = self
@@ -895,13 +898,15 @@ impl StepUpdateCommand {
             let mut agent_config = build_overlayed_agent_config(
                 existing.agent_config.clone(),
                 self.agent_config.as_deref(),
-                self.provider,
-                self.model.as_deref(),
-                self.codex_model_provider.as_deref(),
-                self.reasoning_effort.as_deref(),
-                self.speed_tier.map(Into::into),
-                self.personality.as_deref(),
-                self.verbosity.map(Into::into),
+                AgentConfigOverrides {
+                    provider: self.provider,
+                    model: self.model.as_deref(),
+                    codex_model_provider: self.codex_model_provider.as_deref(),
+                    reasoning_effort: self.reasoning_effort.as_deref(),
+                    speed_tier: self.speed_tier.map(Into::into),
+                    personality: self.personality.as_deref(),
+                    verbosity: self.verbosity.map(Into::into),
+                },
             )?;
             if self.clear_speed_tier {
                 agent_config.speed_tier = None;
