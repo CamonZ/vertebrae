@@ -5,7 +5,7 @@ use tempfile::TempDir;
 use vertebrae_harness_claude::{
     ClaudeLaunchMode, ClaudePermissionMode, ClaudeProviderConfig, ClaudeProviderPrelude,
 };
-use vertebrae_harness_core::{RequestConfig, SpeedTier};
+use vertebrae_harness_core::{OutputVerbosity, RequestConfig, SpeedTier};
 
 #[test]
 fn persistent_and_resumed_specs_preserve_exact_provider_configuration() {
@@ -36,6 +36,7 @@ fn persistent_and_resumed_specs_preserve_exact_provider_configuration() {
         ..ClaudeProviderConfig::default()
     };
     let request = RequestConfig {
+        verbosity: None,
         working_directory: Some(cwd.clone()),
         model: Some("opus".into()),
         output_schema: Some(json!({"type":"object"})),
@@ -128,6 +129,7 @@ fn request_personality_is_translated_by_the_claude_adapter() {
         ..ClaudeProviderConfig::default()
     };
     let request = RequestConfig {
+        verbosity: None,
         personality: Some("Explanatory".into()),
         ..RequestConfig::default()
     };
@@ -177,6 +179,7 @@ fn speed_tier_is_passed_as_an_inline_settings_override() {
         ..ClaudeProviderConfig::default()
     };
     let request = RequestConfig {
+        verbosity: None,
         speed_tier: Some(SpeedTier::Fast),
         ..RequestConfig::default()
     };
@@ -188,6 +191,26 @@ fn speed_tier_is_passed_as_an_inline_settings_override() {
             .windows(2)
             .any(|pair| { pair[0] == "--settings" && pair[1] == r#"{"fastMode":true}"# })
     );
+}
+
+#[test]
+fn unsupported_verbosity_is_rejected_instead_of_dropped() {
+    let temp = TempDir::new().unwrap();
+    let executable = temp.path().join("claude");
+    fs::write(&executable, "fixture").unwrap();
+    let config = ClaudeProviderConfig {
+        executable: Some(executable),
+        ..ClaudeProviderConfig::default()
+    };
+    let request = RequestConfig {
+        verbosity: Some(OutputVerbosity::Low),
+        ..RequestConfig::default()
+    };
+
+    let error = config
+        .command_spec(ClaudeLaunchMode::Persistent { resume_id: None }, &request)
+        .expect_err("Claude must not silently ignore output verbosity");
+    assert!(error.to_string().contains("output verbosity"));
 }
 
 #[test]

@@ -25,6 +25,65 @@ pub async fn given_workflow_with_codex_step_and_reasoning_effort(
 }
 
 #[given(
+    expr = "a workflow with one execute step using openai, speed tier {string}, personality {string}, and verbosity {string}"
+)]
+pub async fn given_workflow_with_codex_step_and_model_settings(
+    world: &mut DaemonWorld,
+    speed_tier: String,
+    personality: String,
+    verbosity: String,
+) {
+    create_workflow_and_step(world, None).await;
+    let step_id = world.step_id.as_ref().expect("step not created").clone();
+    world
+        .run_vtb(&[
+            "step",
+            "update",
+            &step_id,
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-5.5",
+            "--speed-tier",
+            &speed_tier,
+            "--personality",
+            &personality,
+            "--verbosity",
+            &verbosity,
+        ])
+        .await;
+    world.assert_vtb_ok("step update --model-settings");
+}
+
+#[given(
+    expr = "a workflow with one execute step using anthropic, speed tier {string}, and personality {string}"
+)]
+pub async fn given_workflow_with_claude_step_and_model_settings(
+    world: &mut DaemonWorld,
+    speed_tier: String,
+    personality: String,
+) {
+    create_workflow_and_step(world, None).await;
+    let step_id = world.step_id.as_ref().expect("step not created").clone();
+    world
+        .run_vtb(&[
+            "step",
+            "update",
+            &step_id,
+            "--provider",
+            "anthropic",
+            "--model",
+            "claude-sonnet-4-6",
+            "--speed-tier",
+            &speed_tier,
+            "--personality",
+            &personality,
+        ])
+        .await;
+    world.assert_vtb_ok("step update --model-settings");
+}
+
+#[given(
     expr = "a workflow with one execute step using openai, codex model provider {string}, and model {string}"
 )]
 pub async fn given_workflow_with_codex_step_model_provider_and_model(

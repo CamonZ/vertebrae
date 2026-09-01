@@ -703,6 +703,7 @@ impl ClaudeSessionRuntime {
             stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
             resume_id: input.provider_resume_id.clone().map(ProviderResumeId::new),
             config: RequestConfig {
+                verbosity: None,
                 working_directory: Some(working_dir),
                 model,
                 reasoning_effort: input.reasoning_effort,

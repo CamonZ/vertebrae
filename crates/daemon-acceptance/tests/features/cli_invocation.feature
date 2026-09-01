@@ -14,6 +14,17 @@ Feature: Daemon translates step config into Claude CLI invocation
     Then the mock argv contains "--model" followed by "claude-opus-4-5"
     And the mock argv contains the managed manifestless skill plugin root exactly once
 
+  Scenario: Claude model settings reach the CLI invocation
+    Given a configured daemon test environment
+    And a workflow with one execute step using anthropic, speed tier "fast", and personality "friendly"
+    And a task assigned to the workflow
+    When the mock is scripted to succeed with full metrics
+    And run_step is invoked
+    And I wait for the execution to reach status "completed"
+    Then the execution status is "completed"
+    And the mock argv contains Claude output style "friendly"
+    And the mock argv contains Claude fast mode "true"
+
   Scenario: permission_mode plan is passed through and not overridden
     Given a configured daemon test environment
     And a workflow with one execute step

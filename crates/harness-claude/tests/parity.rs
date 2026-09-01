@@ -215,6 +215,7 @@ async fn interruption_and_cancellation_keep_their_distinct_lifecycle_contract() 
                 stream_id: StreamId::from("persistent-stream"),
                 resume_id: None,
                 config: RequestConfig {
+                    verbosity: None,
                     output_schema: Some(json!({"type": "object"})),
                     ..RequestConfig::default()
                 },
@@ -351,6 +352,7 @@ fn gui_persistent_and_daemon_one_shot_own_distinct_exact_launch_policies() {
         ..ClaudeProviderConfig::default()
     };
     let gui_request_owned = RequestConfig {
+        verbosity: None,
         working_directory: Some(temp.path().to_path_buf()),
         model: Some("sonnet".into()),
         output_schema: Some(json!({"type": "object"})),
@@ -421,6 +423,7 @@ fn gui_persistent_and_daemon_one_shot_own_distinct_exact_launch_policies() {
         ..ClaudeProviderConfig::default()
     };
     let daemon_request_owned = RequestConfig {
+        verbosity: None,
         working_directory: Some(temp.path().to_path_buf()),
         model: Some("opus".into()),
         output_schema: Some(json!({"type": "object"})),
@@ -740,6 +743,7 @@ async fn run_persistent(
                 stream_id: StreamId::from("persistent-stream"),
                 resume_id: resume_id.map(ProviderResumeId::from),
                 config: RequestConfig {
+                    verbosity: None,
                     output_schema: Some(json!({"type": "object"})),
                     ..RequestConfig::default()
                 },
@@ -779,6 +783,7 @@ async fn run_one_shot(executable: &Path, controls: Arc<dyn ControlSink>) -> Scen
                 stream_id: StreamId::from("one-shot-stream"),
                 prompt: "exact prompt".into(),
                 config: RequestConfig {
+                    verbosity: None,
                     output_schema: Some(json!({"type": "object"})),
                     ..RequestConfig::default()
                 },

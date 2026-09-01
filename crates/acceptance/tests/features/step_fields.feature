@@ -57,6 +57,52 @@ Feature: Step fields: prompt and agent-config
     When I add a step "BadClaude" to the workflow with provider "anthropic", model "opus", and reasoning effort "high"
     Then the command should fail with "only supported with --provider openai"
 
+  Scenario: Create a Codex step with speed tier, personality, and verbosity
+    When I add a step "ConfiguredCodex" to the workflow with provider "openai", model "gpt-5.5", speed tier "fast", personality "friendly", and verbosity "high"
+    Then the command should succeed
+    And the step "ConfiguredCodex" in the workflow should have agent_config field "provider" equal to "openai"
+    And the step "ConfiguredCodex" in the workflow should have agent model "gpt-5.5"
+    And the step "ConfiguredCodex" in the workflow should have agent_config field "speed_tier" equal to "fast"
+    And the step "ConfiguredCodex" in the workflow should have agent_config field "personality" equal to "friendly"
+    And the step "ConfiguredCodex" in the workflow should have agent_config field "verbosity" equal to "high"
+
+  Scenario: Update a step with model settings and preserve existing configuration
+    When I add a step "UpdatedCodex" to the workflow with provider "openai", model "gpt-5.5", and reasoning effort "medium"
+    And I update the step "UpdatedCodex" in the workflow with speed tier "fast", personality "pragmatic", and verbosity "low"
+    Then the command should succeed
+    And the step "UpdatedCodex" in the workflow should have agent_config field "provider" equal to "openai"
+    And the step "UpdatedCodex" in the workflow should have agent model "gpt-5.5"
+    And the step "UpdatedCodex" in the workflow should have agent_config field "reasoning_effort" equal to "medium"
+    And the step "UpdatedCodex" in the workflow should have agent_config field "speed_tier" equal to "fast"
+    And the step "UpdatedCodex" in the workflow should have agent_config field "personality" equal to "pragmatic"
+    And the step "UpdatedCodex" in the workflow should have agent_config field "verbosity" equal to "low"
+
+  Scenario: Output verbosity alias configures a step
+    When I add a step "VerbosityAlias" to the workflow with provider "openai", model "gpt-5.5"
+    And I update the step "VerbosityAlias" in the workflow with flag "--output-verbosity" and value "low"
+    Then the command should succeed
+    And the step "VerbosityAlias" in the workflow should have agent_config field "verbosity" equal to "low"
+
+  Scenario: Model settings can be cleared independently
+    When I add a step "ClearableCodex" to the workflow with provider "openai", model "gpt-5.5", speed tier "fast", personality "friendly", and verbosity "high"
+    And I update the step "ClearableCodex" in the workflow with flag "--clear-speed-tier" and no value
+    Then the command should succeed
+    And the step "ClearableCodex" in the workflow should not have agent_config field "speed_tier"
+    When I update the step "ClearableCodex" in the workflow with flag "--clear-personality" and no value
+    Then the command should succeed
+    And the step "ClearableCodex" in the workflow should not have agent_config field "personality"
+    When I update the step "ClearableCodex" in the workflow with flag "--clear-verbosity" and no value
+    Then the command should succeed
+    And the step "ClearableCodex" in the workflow should not have agent_config field "verbosity"
+
+  Scenario: Anthropic step with output verbosity is rejected
+    When I add a step "BadVerbosity" to the workflow with provider "anthropic", model "opus", and verbosity "high"
+    Then the command should fail with "verbosity is currently supported only"
+
+  Scenario: Codex step with unsupported personality is rejected
+    When I add a step "BadPersonality" to the workflow with provider "openai", model "gpt-5.5", and personality "explanatory"
+    Then the command should fail with "supported Codex values"
+
   Scenario: Anthropic step with Codex upstream model provider is rejected
     When I add a step "BadCodexProvider" to the workflow with provider "anthropic", codex model provider "openrouter", and model "opus"
     Then the command should fail with "only valid with --provider openai"

@@ -29,6 +29,9 @@ mod step_create_tests {
 
         // Create step
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: None,
@@ -65,6 +68,9 @@ mod step_create_tests {
 
         let persistence = r#"{"artifact":{"logical_name":"step_result"}}"#;
         let add = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Persisted".to_string(),
             workflow: workflow_id,
             id: Some("persisted-step".to_string()),
@@ -97,6 +103,12 @@ mod step_create_tests {
         );
 
         StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "persisted-step".to_string(),
             name: None,
             goal: None,
@@ -139,6 +151,12 @@ mod step_create_tests {
         );
 
         StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "persisted-step".to_string(),
             name: None,
             goal: None,
@@ -189,6 +207,9 @@ mod step_create_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Finish".to_string(),
             workflow: workflow_id,
             id: Some("finish-step".to_string()),
@@ -232,6 +253,9 @@ mod step_create_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Invalid Finish".to_string(),
             workflow: workflow_id,
             id: Some("invalid-finish".to_string()),
@@ -270,6 +294,9 @@ mod step_create_tests {
 
         // Create step with custom ID
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("review-step".to_string()),
@@ -319,6 +346,9 @@ mod step_create_tests {
 
         // Create step with goal
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Code Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("code-review".to_string()),
@@ -368,6 +398,9 @@ mod step_create_tests {
 
         // Create step with specific order
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Deploy".to_string(),
             workflow: workflow_id.clone(),
             id: Some("deploy".to_string()),
@@ -409,6 +442,9 @@ mod step_create_tests {
 
         // Create finish step
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Complete".to_string(),
             workflow: workflow_id.clone(),
             id: Some("complete".to_string()),
@@ -454,6 +490,9 @@ mod step_create_tests {
 
         // Create step with agents
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Analysis".to_string(),
             workflow: workflow_id.clone(),
             id: Some("analysis".to_string()),
@@ -511,6 +550,9 @@ mod step_create_tests {
 
         // Create step with skills
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Testing".to_string(),
             workflow: workflow_id.clone(),
             id: Some("testing".to_string()),
@@ -554,6 +596,9 @@ mod step_create_tests {
 
         // Create step with transitions
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Decision".to_string(),
             workflow: workflow_id.clone(),
             id: Some("decision".to_string()),
@@ -607,6 +652,9 @@ mod step_create_tests {
 
         // Create step with legacy model field
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "LegacyStep".to_string(),
             workflow: workflow_id.clone(),
             id: Some("legacy-step".to_string()),
@@ -663,6 +711,9 @@ mod step_list_tests {
         // Create steps
         for i in 0..3 {
             let cmd = StepAddCommand {
+                speed_tier: None,
+                personality: None,
+                verbosity: None,
                 name: format!("Step {}", i + 1),
                 workflow: workflow_id.clone(),
                 id: Some(format!("step-{}", i)),
@@ -714,6 +765,9 @@ mod step_list_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("review-step".to_string()),
@@ -792,6 +846,9 @@ mod step_list_tests {
 
         // Create step
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "MyStep".to_string(),
             workflow: workflow_id.clone(),
             id: Some("mystep".to_string()),
@@ -845,6 +902,9 @@ mod step_show_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("review".to_string()),
@@ -893,6 +953,9 @@ mod step_show_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Analysis".to_string(),
             workflow: workflow_id,
             id: Some("analysis".to_string()),
@@ -939,6 +1002,9 @@ mod step_show_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Complete".to_string(),
             workflow: workflow_id,
             id: Some("complete".to_string()),
@@ -994,6 +1060,9 @@ mod step_show_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "MyStep".to_string(),
             workflow: workflow_id,
             id: Some("mystep".to_string()),
@@ -1036,6 +1105,9 @@ mod step_show_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Ask human".to_string(),
             workflow: workflow_id.clone(),
             id: Some("human-gate".to_string()),
@@ -1107,6 +1179,9 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Original".to_string(),
             workflow: workflow_id,
             id: Some("step1".to_string()),
@@ -1130,6 +1205,12 @@ mod step_update_tests {
 
         // Update name
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "step1".to_string(),
             name: Some("Updated".to_string()),
             goal: None,
@@ -1171,6 +1252,9 @@ mod step_update_tests {
             .unwrap();
 
         StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Prompted".to_string(),
             workflow: workflow_id,
             id: Some("prompted".to_string()),
@@ -1195,6 +1279,12 @@ mod step_update_tests {
         .unwrap();
 
         let error = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "prompted".to_string(),
             name: None,
             goal: None,
@@ -1240,6 +1330,9 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Analysis".to_string(),
             workflow: workflow_id,
             id: Some("analysis".to_string()),
@@ -1263,6 +1356,12 @@ mod step_update_tests {
 
         // Update goal
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "analysis".to_string(),
             name: None,
             goal: Some("New goal".to_string()),
@@ -1307,6 +1406,9 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
@@ -1330,6 +1432,12 @@ mod step_update_tests {
 
         // Update order
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "step".to_string(),
             name: None,
             goal: None,
@@ -1374,6 +1482,9 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
@@ -1397,6 +1508,12 @@ mod step_update_tests {
 
         // Add agents
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "step".to_string(),
             name: None,
             goal: None,
@@ -1449,6 +1566,9 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
@@ -1472,6 +1592,12 @@ mod step_update_tests {
 
         // Clear agents
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "step".to_string(),
             name: None,
             goal: None,
@@ -1516,6 +1642,9 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
@@ -1539,6 +1668,12 @@ mod step_update_tests {
 
         // Add transitions
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "step".to_string(),
             name: None,
             goal: None,
@@ -1596,6 +1731,9 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
@@ -1619,6 +1757,12 @@ mod step_update_tests {
 
         // Clear transitions
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "step".to_string(),
             name: None,
             goal: None,
@@ -1662,6 +1806,9 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
@@ -1684,6 +1831,12 @@ mod step_update_tests {
         cmd.execute(services.steps()).await.unwrap();
 
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "step".to_string(),
             name: None,
             goal: None,
@@ -1749,6 +1902,9 @@ mod step_dispatcher_tests {
             .unwrap();
 
         let cmd = StepCommand::Add(StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Dispatched".to_string(),
             workflow: workflow_id,
             id: Some("dispatched".to_string()),
@@ -1800,6 +1956,9 @@ mod step_delete_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "ToDelete".to_string(),
             workflow: workflow_id,
             id: Some("todelete".to_string()),
@@ -1865,6 +2024,9 @@ mod step_delete_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
@@ -1909,6 +2071,9 @@ mod step_delete_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("mystep".to_string()),
@@ -1961,6 +2126,9 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Review".to_string(),
             workflow: workflow_id,
             id: Some("review".to_string()),
@@ -2003,6 +2171,9 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Deploy".to_string(),
             workflow: workflow_id,
             id: Some("deploy".to_string()),
@@ -2043,6 +2214,9 @@ mod step_prompt_and_agent_config_tests {
 
         // --agent-config sets model to "sonnet", but --model overrides to "opus"
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Override".to_string(),
             workflow: workflow_id,
             id: Some("override".to_string()),
@@ -2095,6 +2269,9 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Bad".to_string(),
             workflow: workflow_id,
             id: None,
@@ -2137,6 +2314,9 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let add_cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
@@ -2159,6 +2339,12 @@ mod step_prompt_and_agent_config_tests {
         add_cmd.execute(services.steps()).await.unwrap();
 
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "step".to_string(),
             name: None,
             goal: None,
@@ -2201,6 +2387,9 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let add_cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
@@ -2224,6 +2413,12 @@ mod step_prompt_and_agent_config_tests {
 
         // --agent-config sets model to "sonnet", --model overrides to "opus"
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "step".to_string(),
             name: None,
             goal: None,
@@ -2266,6 +2461,9 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let add_cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
@@ -2288,6 +2486,12 @@ mod step_prompt_and_agent_config_tests {
         add_cmd.execute(services.steps()).await.unwrap();
 
         let update_cmd = StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: "step".to_string(),
             name: None,
             goal: None,
@@ -2336,6 +2540,9 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "FullStep".to_string(),
             workflow: workflow_id,
             id: Some("full".to_string()),
@@ -2385,6 +2592,9 @@ mod provider_tests {
         provider: Option<Provider>,
     ) -> StepAddCommand {
         StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: name.to_string(),
             workflow: workflow_id,
             id: Some(id.to_string()),
@@ -2413,6 +2623,12 @@ mod provider_tests {
         provider: Option<Provider>,
     ) -> StepUpdateCommand {
         StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: id.to_string(),
             name: None,
             goal: None,
@@ -3057,6 +3273,9 @@ mod route_config_tests {
 
     fn add_command(workflow: &str, id: &str, route_config: Option<String>) -> StepAddCommand {
         StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Router".to_string(),
             workflow: workflow.to_string(),
             id: Some(id.to_string()),
@@ -3080,6 +3299,12 @@ mod route_config_tests {
 
     fn update_command(id: &str) -> StepUpdateCommand {
         StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
             id: id.to_string(),
             name: None,
             goal: None,
@@ -3323,6 +3548,9 @@ mod route_config_tests {
         let prompt = "keep until explicitly cleared";
         let config = route_config();
         StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
             name: "Execute".to_string(),
             workflow: workflow_id,
             id: Some("convert".to_string()),

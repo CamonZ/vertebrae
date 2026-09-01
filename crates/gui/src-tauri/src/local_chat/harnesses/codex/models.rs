@@ -34,10 +34,10 @@ pub(super) fn requested_reasoning_effort(reasoning_effort: Option<&str>) -> Opti
 pub(super) fn local_chat_harness_info_from_capabilities(
     capabilities: HarnessCapabilities,
 ) -> LocalChatHarnessInfo {
-    let supports_personality = capabilities
+    let has_known_personality_capability = capabilities
         .models
         .iter()
-        .any(|model| model.supports_personality == Some(true));
+        .any(|model| model.supports_personality.is_some());
     let mut reasoning_effort_ids = BTreeSet::new();
     let supports_fast = capabilities.models.iter().any(|model| {
         model
@@ -121,7 +121,7 @@ pub(super) fn local_chat_harness_info_from_capabilities(
             Vec::new()
         },
         permission_modes: Some(permission_modes),
-        personality_options: supports_personality.then(|| {
+        personality_options: has_known_personality_capability.then(|| {
             CODEX_PERSONALITIES
                 .iter()
                 .map(|(id, label)| LocalChatPersonalityOption {
@@ -233,6 +233,15 @@ mod tests {
             }]
         );
         assert_eq!(
+            info.personality_options
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["friendly", "pragmatic", "none"]
+        );
+        assert_eq!(
             info.permission_modes,
             Some(vec![
                 LocalChatPermissionModeOption {
@@ -248,6 +257,65 @@ mod tests {
             ])
         );
         assert!(!info.models.iter().any(|model| model.id == "gpt-5.5"));
+    }
+
+    #[test]
+    fn codex_exposes_none_when_all_models_report_personality_unsupported() {
+        let info = local_chat_harness_info_from_capabilities(HarnessCapabilities {
+            provider: "openai".into(),
+            available: true,
+            unavailable_reason: None,
+            persistent_sessions: true,
+            one_shot_runs: true,
+            session_resumption: true,
+            default_model: Some("luna".into()),
+            models: vec![ModelCapability {
+                id: "luna".into(),
+                label: "Luna".into(),
+                reasoning_efforts: BTreeSet::new(),
+                supported_speed_tiers: BTreeSet::new(),
+                supports_personality: Some(false),
+            }],
+            default_permission_mode: None,
+            permission_modes: Vec::new(),
+            approval_categories: BTreeSet::new(),
+            questions: QuestionCapabilities::default(),
+        });
+
+        assert_eq!(
+            info.personality_options
+                .unwrap()
+                .into_iter()
+                .map(|option| option.id)
+                .collect::<Vec<_>>(),
+            vec!["friendly", "pragmatic", "none"]
+        );
+    }
+
+    #[test]
+    fn codex_hides_personality_options_when_capability_is_unknown() {
+        let info = local_chat_harness_info_from_capabilities(HarnessCapabilities {
+            provider: "openai".into(),
+            available: true,
+            unavailable_reason: None,
+            persistent_sessions: true,
+            one_shot_runs: true,
+            session_resumption: true,
+            default_model: Some("unknown".into()),
+            models: vec![ModelCapability {
+                id: "unknown".into(),
+                label: "Unknown".into(),
+                reasoning_efforts: BTreeSet::new(),
+                supported_speed_tiers: BTreeSet::new(),
+                supports_personality: None,
+            }],
+            default_permission_mode: None,
+            permission_modes: Vec::new(),
+            approval_categories: BTreeSet::new(),
+            questions: QuestionCapabilities::default(),
+        });
+
+        assert!(info.personality_options.is_none());
     }
 
     #[test]

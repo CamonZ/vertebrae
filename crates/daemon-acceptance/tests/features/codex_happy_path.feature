@@ -25,6 +25,28 @@ Feature: Codex App Server step execution
     Then the execution status is "completed"
     And the Codex App Server request contains model "gpt-5.5" and reasoning effort "high"
 
+  Scenario: Codex request carries speed tier, personality, and verbosity
+    Given a configured daemon test environment
+    And a workflow with one execute step using openai, speed tier "fast", personality "friendly", and verbosity "high"
+    And a task assigned to the workflow
+    When the codex mock is scripted to succeed with full metrics
+    And run_step is invoked
+    And I wait for the execution to reach status "completed"
+    Then the execution status is "completed"
+    And the Codex App Server request contains service tier "priority" and personality "friendly"
+    And the mock argv contains "-c" followed by "model_verbosity=high"
+
+  Scenario: Codex request omits model settings when they are unset
+    Given a configured daemon test environment
+    And a workflow with one execute step using openai
+    And a task assigned to the workflow
+    When the codex mock is scripted to succeed with full metrics
+    And run_step is invoked
+    And I wait for the execution to reach status "completed"
+    Then the execution status is "completed"
+    And the Codex App Server request omits optional model settings
+    And the mock argv contains "-c" exactly 0 time(s)
+
   Scenario: Codex request carries an upstream model provider
     Given a configured daemon test environment
     And a workflow with one execute step using openai, codex model provider "openrouter", and model "deepseek/deepseek-v4-flash"

@@ -35,6 +35,7 @@
 pub mod artifact_service;
 pub mod error;
 pub mod execution_service;
+pub mod execution_settings;
 pub mod id_generator;
 pub mod model_catalog;
 pub mod models;
@@ -52,11 +53,13 @@ pub use execution_service::{
     ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService, StopRunTarget,
     UpdateExecutionStatusParams,
 };
+pub use execution_settings::{OutputVerbosity, SpeedTier};
 pub use model_catalog::{
-    Provider, ProviderModelMismatch, ProviderReasoningEffortMismatch,
-    SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model, normalize_provider_reasoning_effort,
-    validate_provider_model, validate_provider_model_with_codex_provider,
-    validate_provider_reasoning_effort,
+    Provider, ProviderModelMismatch, ProviderPersonalityMismatch, ProviderReasoningEffortMismatch,
+    ProviderVerbosityMismatch, SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model,
+    normalize_personality, normalize_provider_personality, normalize_provider_reasoning_effort,
+    normalize_provider_verbosity, validate_provider_model,
+    validate_provider_model_with_codex_provider, validate_provider_reasoning_effort,
 };
 pub use orchestrator::{
     ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_MODEL, ORCHESTRATOR_PROMPT_TEMPLATE, OrchestratorOutput,

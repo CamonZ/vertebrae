@@ -4,10 +4,43 @@
 
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
-    AgentConfig, Provider, ServiceError, Step, StepService, StepType, StepUpdate,
-    VertebraeServices, normalize_provider_reasoning_effort,
-    validate_provider_model_with_codex_provider, validate_route_fields, validate_route_update,
+    AgentConfig, OutputVerbosity, Provider, ServiceError, SpeedTier, Step, StepService, StepType,
+    StepUpdate, VertebraeServices, normalize_provider_personality,
+    normalize_provider_reasoning_effort, validate_provider_model_with_codex_provider,
+    validate_route_fields, validate_route_update,
 };
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum CliSpeedTier {
+    Default,
+    Fast,
+}
+
+impl From<CliSpeedTier> for SpeedTier {
+    fn from(value: CliSpeedTier) -> Self {
+        match value {
+            CliSpeedTier::Default => Self::Default,
+            CliSpeedTier::Fast => Self::Fast,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum CliOutputVerbosity {
+    Low,
+    Medium,
+    High,
+}
+
+impl From<CliOutputVerbosity> for OutputVerbosity {
+    fn from(value: CliOutputVerbosity) -> Self {
+        match value {
+            CliOutputVerbosity::Low => Self::Low,
+            CliOutputVerbosity::Medium => Self::Medium,
+            CliOutputVerbosity::High => Self::High,
+        }
+    }
+}
 
 /// CLI representation of step types, maps to `vertebrae_core::StepType`.
 #[derive(Debug, Clone, ValueEnum)]
@@ -148,6 +181,18 @@ pub struct StepAddCommand {
     #[arg(long, value_name = "EFFORT")]
     pub reasoning_effort: Option<String>,
 
+    /// Provider serving speed preference (default or fast).
+    #[arg(long, value_enum)]
+    pub speed_tier: Option<CliSpeedTier>,
+
+    /// Provider style identifier (for example friendly, pragmatic, or none).
+    #[arg(long)]
+    pub personality: Option<String>,
+
+    /// Output detail level (low, medium, or high; alias: --output-verbosity).
+    #[arg(long, alias = "output-verbosity", value_enum)]
+    pub verbosity: Option<CliOutputVerbosity>,
+
     /// Built-in execution provider for this step (anthropic, openai; alias: --model-provider).
     ///
     /// Convenience shortcut for `agent_config.provider`. Use `--agent-config`
@@ -184,13 +229,21 @@ fn parse_provider_arg(input: &str) -> Result<Provider, String> {
     Provider::parse(input)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct AgentConfigOverrides<'a> {
+    provider: Option<Provider>,
+    model: Option<&'a str>,
+    codex_model_provider: Option<&'a str>,
+    reasoning_effort: Option<&'a str>,
+    speed_tier: Option<SpeedTier>,
+    personality: Option<&'a str>,
+    verbosity: Option<OutputVerbosity>,
+}
+
 fn build_overlayed_agent_config(
     base: AgentConfig,
     json: Option<&str>,
-    provider: Option<Provider>,
-    model: Option<&str>,
-    codex_model_provider: Option<&str>,
-    reasoning_effort: Option<&str>,
+    overrides: AgentConfigOverrides<'_>,
 ) -> Result<AgentConfig, ServiceError> {
     let mut config = match json {
         Some(json_str) => serde_json::from_str::<AgentConfig>(json_str).map_err(|e| {
@@ -198,20 +251,29 @@ fn build_overlayed_agent_config(
         })?,
         None => base,
     };
-    if let Some(provider) = provider {
+    if let Some(provider) = overrides.provider {
         config = config.with_provider(provider);
-        if provider != Provider::Openai && reasoning_effort.is_none() {
+        if provider != Provider::Openai && overrides.reasoning_effort.is_none() {
             config.reasoning_effort = None;
         }
     }
-    if let Some(model) = model {
+    if let Some(model) = overrides.model {
         config = config.with_model(model);
     }
-    if let Some(codex_model_provider) = codex_model_provider {
+    if let Some(codex_model_provider) = overrides.codex_model_provider {
         config = config.with_codex_model_provider(codex_model_provider);
     }
-    if let Some(reasoning_effort) = reasoning_effort {
+    if let Some(reasoning_effort) = overrides.reasoning_effort {
         config = config.with_reasoning_effort(reasoning_effort);
+    }
+    if let Some(speed_tier) = overrides.speed_tier {
+        config = config.with_speed_tier(speed_tier);
+    }
+    if let Some(personality) = overrides.personality {
+        config = config.with_personality(personality);
+    }
+    if let Some(verbosity) = overrides.verbosity {
+        config = config.with_verbosity(verbosity);
     }
     if config.provider.is_some() || config.codex_model_provider.is_some() {
         let provider = config.provider.unwrap_or(Provider::Anthropic);
@@ -228,6 +290,16 @@ fn build_overlayed_agent_config(
             normalize_provider_reasoning_effort(provider, config.reasoning_effort.as_deref())
                 .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
     }
+    let provider = config.provider.unwrap_or(Provider::Anthropic);
+    config.personality = normalize_provider_personality(provider, config.personality.as_deref())
+        .map_err(|error| ServiceError::validation_failed(error.to_string()))?;
+    if config.verbosity.is_some()
+        && config.provider.unwrap_or(Provider::Anthropic) != Provider::Openai
+    {
+        return Err(ServiceError::validation_failed(
+            "verbosity is currently supported only by the openai / Codex provider",
+        ));
+    }
     Ok(config)
 }
 
@@ -238,10 +310,15 @@ impl StepAddCommand {
         let agent_config = build_overlayed_agent_config(
             AgentConfig::new(),
             self.agent_config.as_deref(),
-            self.provider,
-            self.model.as_deref(),
-            self.codex_model_provider.as_deref(),
-            self.reasoning_effort.as_deref(),
+            AgentConfigOverrides {
+                provider: self.provider,
+                model: self.model.as_deref(),
+                codex_model_provider: self.codex_model_provider.as_deref(),
+                reasoning_effort: self.reasoning_effort.as_deref(),
+                speed_tier: self.speed_tier.map(Into::into),
+                personality: self.personality.as_deref(),
+                verbosity: self.verbosity.map(Into::into),
+            },
         )?;
 
         let transitions_to: Vec<String> = self
@@ -601,6 +678,30 @@ pub struct StepUpdateCommand {
     #[arg(long, value_name = "EFFORT")]
     pub reasoning_effort: Option<String>,
 
+    /// New provider serving speed preference.
+    #[arg(long, value_enum)]
+    pub speed_tier: Option<CliSpeedTier>,
+
+    /// New provider style identifier.
+    #[arg(long)]
+    pub personality: Option<String>,
+
+    /// New output detail level (alias: --output-verbosity).
+    #[arg(long, alias = "output-verbosity", value_enum)]
+    pub verbosity: Option<CliOutputVerbosity>,
+
+    /// Clear the speed preference.
+    #[arg(long)]
+    pub clear_speed_tier: bool,
+
+    /// Clear the personality setting.
+    #[arg(long)]
+    pub clear_personality: bool,
+
+    /// Clear the output verbosity setting.
+    #[arg(long)]
+    pub clear_verbosity: bool,
+
     /// New built-in execution provider for this step (anthropic, openai; alias: --model-provider).
     ///
     /// Convenience shortcut for `agent_config.provider`. Use `--agent-config`
@@ -787,15 +888,35 @@ impl StepUpdateCommand {
             || self.provider.is_some()
             || self.codex_model_provider.is_some()
             || self.reasoning_effort.is_some()
+            || self.speed_tier.is_some()
+            || self.personality.is_some()
+            || self.verbosity.is_some()
+            || self.clear_speed_tier
+            || self.clear_personality
+            || self.clear_verbosity
         {
-            let agent_config = build_overlayed_agent_config(
+            let mut agent_config = build_overlayed_agent_config(
                 existing.agent_config.clone(),
                 self.agent_config.as_deref(),
-                self.provider,
-                self.model.as_deref(),
-                self.codex_model_provider.as_deref(),
-                self.reasoning_effort.as_deref(),
+                AgentConfigOverrides {
+                    provider: self.provider,
+                    model: self.model.as_deref(),
+                    codex_model_provider: self.codex_model_provider.as_deref(),
+                    reasoning_effort: self.reasoning_effort.as_deref(),
+                    speed_tier: self.speed_tier.map(Into::into),
+                    personality: self.personality.as_deref(),
+                    verbosity: self.verbosity.map(Into::into),
+                },
             )?;
+            if self.clear_speed_tier {
+                agent_config.speed_tier = None;
+            }
+            if self.clear_personality {
+                agent_config.personality = None;
+            }
+            if self.clear_verbosity {
+                agent_config.verbosity = None;
+            }
             let config_value = serde_json::to_value(&agent_config).map_err(|e| {
                 ServiceError::validation_failed(format!("Invalid agent config: {}", e))
             })?;
@@ -958,6 +1079,34 @@ mod tests {
                 assert_eq!(cmd.provider, Some(Provider::Openai));
                 assert_eq!(cmd.model.as_deref(), Some("gpt-5.5"));
                 assert_eq!(cmd.reasoning_effort.as_deref(), Some("high"));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_with_execution_settings_parses() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Review",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000007",
+            "--provider",
+            "openai",
+            "--speed-tier",
+            "fast",
+            "--personality",
+            "friendly",
+            "--verbosity",
+            "high",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Add(cmd) => {
+                assert!(matches!(cmd.speed_tier, Some(CliSpeedTier::Fast)));
+                assert_eq!(cmd.personality.as_deref(), Some("friendly"));
+                assert!(matches!(cmd.verbosity, Some(CliOutputVerbosity::High)));
             }
             _ => panic!("Expected Add command"),
         }
@@ -1136,6 +1285,36 @@ mod tests {
         match cli.unwrap().command {
             StepCommand::Update(cmd) => {
                 assert_eq!(cmd.reasoning_effort.as_deref(), Some("xhigh"));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_execution_settings_and_clear_flags_parses() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--speed-tier",
+            "default",
+            "--personality",
+            "pragmatic",
+            "--output-verbosity",
+            "low",
+            "--clear-speed-tier",
+            "--clear-personality",
+            "--clear-verbosity",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Update(cmd) => {
+                assert!(matches!(cmd.speed_tier, Some(CliSpeedTier::Default)));
+                assert_eq!(cmd.personality.as_deref(), Some("pragmatic"));
+                assert!(matches!(cmd.verbosity, Some(CliOutputVerbosity::Low)));
+                assert!(cmd.clear_speed_tier);
+                assert!(cmd.clear_personality);
+                assert!(cmd.clear_verbosity);
             }
             _ => panic!("Expected Update command"),
         }

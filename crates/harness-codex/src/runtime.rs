@@ -19,12 +19,13 @@ use vertebrae_harness_core::{
     ControlRequestEnvelope, ControlResolution, ControlSink, DiagnosticEvent, EventCorrelation,
     EventSequencer, EventSink, FileChange, FileChangeEvent, FileChangeKind, GrantScope,
     HarnessCapabilities, HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, HarnessRuntime,
-    ItemId, OutcomeMetrics, ProviderResumeId, ProviderThreadRef, QuestionCapabilities, RunHandle,
-    RunId, RunOutcome, RunRequest, SendTurnRequest, SequencedEventSink, SessionCloseOutcome,
-    SessionCloseStatus, SessionHandle, SessionId, SessionStarted, SessionUsage, SpeedTier,
-    StartSessionRequest, StreamId, TextEvent, ThreadDeclared, ThreadId, ThreadKind, TokenUsage,
-    ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus, TurnHandle, TurnId, TurnInput,
-    TurnInputProvenance, TurnOutcome, TurnStarted, TurnUsage, UpdateSemantics, UsageEvent,
+    ItemId, OutcomeMetrics, OutputVerbosity, ProviderResumeId, ProviderThreadRef,
+    QuestionCapabilities, RunHandle, RunId, RunOutcome, RunRequest, SendTurnRequest,
+    SequencedEventSink, SessionCloseOutcome, SessionCloseStatus, SessionHandle, SessionId,
+    SessionStarted, SessionUsage, SpeedTier, StartSessionRequest, StreamId, TextEvent,
+    ThreadDeclared, ThreadId, ThreadKind, TokenUsage, ToolCallEvent, ToolCallId, ToolOutputEvent,
+    ToolStatus, TurnHandle, TurnId, TurnInput, TurnInputProvenance, TurnOutcome, TurnStarted,
+    TurnUsage, UpdateSemantics, UsageEvent,
 };
 
 use crate::{
@@ -227,7 +228,7 @@ impl RootTurnIdentity {
     }
 }
 
-struct CodexConnection {
+pub(crate) struct CodexConnection {
     writer: Arc<AsyncMutex<futures::stream::SplitSink<WsStream, Message>>>,
     pending: Arc<AsyncMutex<HashMap<String, PendingResponse>>>,
     next_id: AsyncMutex<u64>,
@@ -238,7 +239,7 @@ struct CodexConnection {
 }
 
 impl CodexConnection {
-    async fn connect(
+    pub(crate) async fn connect(
         url: &str,
         control_sink: Arc<dyn ControlSink>,
     ) -> Result<Arc<Self>, HarnessError> {
@@ -354,7 +355,7 @@ impl CodexConnection {
         Ok(connection)
     }
 
-    async fn request(&self, method: &str, params: Value) -> Result<Value, HarnessError> {
+    pub(crate) async fn request(&self, method: &str, params: Value) -> Result<Value, HarnessError> {
         let id = {
             let mut next = self.next_id.lock().await;
             let id = *next;
@@ -440,7 +441,7 @@ impl CodexConnection {
             .await
     }
 
-    async fn notify(&self, method: &str, params: Value) -> Result<(), HarnessError> {
+    pub(crate) async fn notify(&self, method: &str, params: Value) -> Result<(), HarnessError> {
         self.send(json!({"method": method, "params": params})).await
     }
 
@@ -457,7 +458,7 @@ impl CodexConnection {
             })
     }
 
-    async fn close(&self) {
+    pub(crate) async fn close(&self) {
         self.root_turn_identity.clear();
         if let Some(reader) = self.reader.lock().await.take() {
             reader.abort();
@@ -1765,6 +1766,7 @@ async fn setup_session(
     if let Some(path) = request_config.environment.get("PATH") {
         launch_config.search_path = Some(path.clone().into());
     }
+    add_model_verbosity_override(&mut launch_config.extra_args, request_config.verbosity);
     let launcher: Arc<dyn CodexAppServerLauncher> = config
         .launcher
         .clone()
@@ -1983,6 +1985,16 @@ fn add_service_tier(params: &mut Value, request_config: &vertebrae_harness_core:
         SpeedTier::Default => "default",
         SpeedTier::Fast => "priority",
     });
+}
+
+fn add_model_verbosity_override(extra_args: &mut Vec<String>, verbosity: Option<OutputVerbosity>) {
+    let Some(verbosity) = verbosity else {
+        return;
+    };
+    extra_args.extend([
+        "-c".into(),
+        format!("model_verbosity={}", verbosity.as_str()),
+    ]);
 }
 
 async fn emit_direct(
@@ -2231,10 +2243,12 @@ mod tests {
 
     use super::{
         ControlDisposition, FileChangeKind, RootTurnIdentity, SessionState, ToolStatus,
-        add_developer_instructions, add_service_tier, control_request, file_change_event,
-        parse_usage, tool_call, tool_output,
+        add_developer_instructions, add_model_verbosity_override, add_service_tier,
+        control_request, file_change_event, parse_usage, tool_call, tool_output,
     };
-    use vertebrae_harness_core::{SessionId, SpeedTier, ThreadId, ToolCallId, TurnId};
+    use vertebrae_harness_core::{
+        OutputVerbosity, SessionId, SpeedTier, ThreadId, ToolCallId, TurnId,
+    };
 
     #[test]
     fn maps_additive_instructions_to_codex_developer_layer() {
@@ -2242,6 +2256,7 @@ mod tests {
         add_developer_instructions(
             &mut params,
             &vertebrae_harness_core::RequestConfig {
+                verbosity: None,
                 developer_instructions: Some("reference contract".into()),
                 ..Default::default()
             },
@@ -2259,6 +2274,7 @@ mod tests {
             add_service_tier(
                 &mut params,
                 &vertebrae_harness_core::RequestConfig {
+                    verbosity: None,
                     speed_tier: Some(speed_tier),
                     ..Default::default()
                 },
@@ -2275,6 +2291,23 @@ mod tests {
             &vertebrae_harness_core::RequestConfig::default(),
         );
         assert_eq!(params, json!({"serviceName": "vertebrae"}));
+    }
+
+    #[test]
+    fn maps_verbosity_to_a_process_local_codex_config_override() {
+        let mut args = vec!["--experimental-api".into()];
+        add_model_verbosity_override(&mut args, Some(OutputVerbosity::Medium));
+        assert_eq!(
+            args,
+            vec!["--experimental-api", "-c", "model_verbosity=medium"]
+        );
+    }
+
+    #[test]
+    fn omits_process_local_verbosity_override_when_unset() {
+        let mut args = Vec::new();
+        add_model_verbosity_override(&mut args, None);
+        assert!(args.is_empty());
     }
 
     #[test]

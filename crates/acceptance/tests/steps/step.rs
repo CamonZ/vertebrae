@@ -418,6 +418,99 @@ async fn when_add_step_with_provider_model_reasoning_effort(
 }
 
 #[when(
+    expr = "I add a step {string} to the workflow with provider {string}, model {string}, speed tier {string}, personality {string}, and verbosity {string}"
+)]
+async fn when_add_step_with_provider_model_settings(
+    world: &mut SmokeWorld,
+    name: String,
+    provider: String,
+    model: String,
+    speed_tier: String,
+    personality: String,
+    verbosity: String,
+) {
+    let wf_id = workflow_id(world);
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--provider",
+            &provider,
+            "--model",
+            &model,
+            "--speed-tier",
+            &speed_tier,
+            "--personality",
+            &personality,
+            "--verbosity",
+            &verbosity,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
+#[when(
+    expr = "I add a step {string} to the workflow with provider {string}, model {string}, and verbosity {string}"
+)]
+async fn when_add_step_with_provider_model_verbosity(
+    world: &mut SmokeWorld,
+    name: String,
+    provider: String,
+    model: String,
+    verbosity: String,
+) {
+    let wf_id = workflow_id(world);
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--provider",
+            &provider,
+            "--model",
+            &model,
+            "--verbosity",
+            &verbosity,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
+#[when(
+    expr = "I add a step {string} to the workflow with provider {string}, model {string}, and personality {string}"
+)]
+async fn when_add_step_with_provider_model_personality(
+    world: &mut SmokeWorld,
+    name: String,
+    provider: String,
+    model: String,
+    personality: String,
+) {
+    let wf_id = workflow_id(world);
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--provider",
+            &provider,
+            "--model",
+            &model,
+            "--personality",
+            &personality,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
+#[when(
     expr = "I add a step {string} to the workflow with provider {string}, codex model provider {string}, and model {string}"
 )]
 async fn when_add_step_with_provider_codex_model_provider_and_model(
@@ -558,6 +651,36 @@ async fn when_update_step_with_provider_codex_model_provider_and_model(
             &codex_model_provider,
             "--model",
             &model,
+        ])
+        .await;
+}
+
+#[when(
+    expr = "I update the step {string} in the workflow with speed tier {string}, personality {string}, and verbosity {string}"
+)]
+async fn when_update_step_with_model_settings(
+    world: &mut SmokeWorld,
+    name: String,
+    speed_tier: String,
+    personality: String,
+    verbosity: String,
+) {
+    let step_id = world
+        .stored_ids
+        .get(&format!("step:{}", name))
+        .cloned()
+        .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
+    world
+        .run_vtb(&[
+            "step",
+            "update",
+            &step_id,
+            "--speed-tier",
+            &speed_tier,
+            "--personality",
+            &personality,
+            "--verbosity",
+            &verbosity,
         ])
         .await;
 }
@@ -773,6 +896,24 @@ async fn then_step_should_have_agent_config_field(
         actual, expected,
         "step '{}' agent_config.{} mismatch: expected '{}', got '{}'\nJSON: {}",
         step_name, field, expected, actual, json
+    );
+}
+
+#[then(expr = "the step {string} in the workflow should not have agent_config field {string}")]
+async fn then_step_should_not_have_agent_config_field(
+    world: &mut SmokeWorld,
+    step_name: String,
+    field: String,
+) {
+    let json = get_step_json(world, &step_name)
+        .await
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
+    assert!(
+        json["agent_config"][&field].is_null(),
+        "step '{}' agent_config.{} should be absent, got JSON: {}",
+        step_name,
+        field,
+        json
     );
 }
 

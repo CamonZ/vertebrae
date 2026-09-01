@@ -215,6 +215,11 @@ impl ClaudeProviderConfig {
                 directory.display()
             )));
         }
+        if request.verbosity.is_some() {
+            return Err(HarnessError::InvalidRequest(
+                "output verbosity is not supported by the Claude provider".into(),
+            ));
+        }
         let program = self.resolve_executable()?;
         let mut args = Vec::new();
         if let Some(personality) = request
@@ -378,6 +383,7 @@ mod tests {
             ..Default::default()
         };
         let request = RequestConfig {
+            verbosity: None,
             developer_instructions: Some("reference contract".into()),
             ..Default::default()
         };

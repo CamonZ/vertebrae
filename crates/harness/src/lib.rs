@@ -274,6 +274,15 @@ fn normalized_request_config(
     if request_config.reasoning_effort.is_none() {
         request_config.reasoning_effort = agent_config.reasoning_effort.clone();
     }
+    if request_config.speed_tier.is_none() {
+        request_config.speed_tier = agent_config.speed_tier;
+    }
+    if request_config.personality.is_none() {
+        request_config.personality = agent_config.personality.clone();
+    }
+    if request_config.verbosity.is_none() {
+        request_config.verbosity = agent_config.verbosity;
+    }
     if request_config.output_schema.is_none() {
         request_config.output_schema = agent_config.json_schema.clone();
     }
@@ -283,6 +292,14 @@ fn normalized_request_config(
             request_config.reasoning_effort.as_deref(),
         )
         .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+    request_config.personality = vertebrae_core::normalize_provider_personality(
+        provider,
+        request_config.personality.as_deref(),
+    )
+    .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+    request_config.verbosity =
+        vertebrae_core::normalize_provider_verbosity(provider, request_config.verbosity)
+            .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
     Ok(request_config)
 }
 
@@ -431,6 +448,68 @@ mod tests {
 
         assert_eq!(claude.provider, Provider::Anthropic);
         assert_eq!(claude.request_config.model.as_deref(), Some("fable"));
+    }
+
+    #[test]
+    fn request_settings_override_agent_config_settings() {
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            openai_executable: Some(executable()),
+            search_path: Some(OsString::new()),
+            ..HarnessFactoryConfig::default()
+        });
+
+        let codex = factory
+            .create(HarnessRuntimeOptions {
+                agent_config: AgentConfig::new()
+                    .with_provider(Provider::Openai)
+                    .with_model("gpt-5.5")
+                    .with_speed_tier(vertebrae_core::SpeedTier::Default)
+                    .with_personality("friendly")
+                    .with_verbosity(vertebrae_core::OutputVerbosity::Low),
+                request_config: RequestConfig {
+                    speed_tier: Some(vertebrae_harness_core::SpeedTier::Fast),
+                    personality: Some("pragmatic".into()),
+                    verbosity: Some(vertebrae_harness_core::OutputVerbosity::High),
+                    ..Default::default()
+                },
+            })
+            .expect("Codex runtime should be selected");
+
+        assert_eq!(
+            codex.request_config.speed_tier,
+            Some(vertebrae_harness_core::SpeedTier::Fast)
+        );
+        assert_eq!(
+            codex.request_config.personality.as_deref(),
+            Some("pragmatic")
+        );
+        assert_eq!(
+            codex.request_config.verbosity,
+            Some(vertebrae_core::OutputVerbosity::High)
+        );
+    }
+
+    #[test]
+    fn rejects_verbosity_for_claude_before_starting_runtime() {
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            anthropic_executable: Some(executable()),
+            search_path: Some(OsString::new()),
+            ..HarnessFactoryConfig::default()
+        });
+
+        let result = factory.create(HarnessRuntimeOptions {
+            agent_config: AgentConfig::new()
+                .with_provider(Provider::Anthropic)
+                .with_model("sonnet")
+                .with_verbosity(vertebrae_core::OutputVerbosity::Low),
+            request_config: RequestConfig::default(),
+        });
+
+        assert!(matches!(
+            result,
+            Err(HarnessError::InvalidRequest(message))
+                if message.contains("output verbosity")
+        ));
     }
 
     #[test]
