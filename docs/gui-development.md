@@ -157,24 +157,6 @@ bounded and unrelated execution buckets keep their existing references. There
 is no production performance monitor or per-event correlation allocation in
 this path.
 
-### WebSocket diagnostics
-
-Normal GUI operation does not create per-event WebSocket trace files, and the
-webview receives only warnings and errors from the WebSocket module. Routine
-dispatch and emission records are native `debug` logs; they are not forwarded
-to the webview unless diagnostics are enabled.
-
-For event-order investigations, set `VERTEBRAE_WEBSOCKET_DIAGNOSTICS=1` before
-starting the GUI. This enables WebSocket debug records at the webview boundary
-and writes a line-oriented trace to
-`/app/test-output/websocket-events.log`. Set
-`VERTEBRAE_WEBSOCKET_TRACE_PATH` to choose another trace path. The trace sink
-and its output directory are initialized once; each diagnostic line includes a
-wall-clock timestamp and process-local sequence number. This mode intentionally
-serializes every traced event and should be limited to debugging or acceptance
-runs because it has measurable I/O overhead. Trace initialization or write
-failures are reported as warnings and never stop the WebSocket loop.
-
 ### Claude compaction lifecycle
 
 Claude context compaction is exposed as lifecycle state, not as transcript

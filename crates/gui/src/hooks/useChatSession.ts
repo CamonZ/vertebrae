@@ -31,7 +31,6 @@ import {
   lifecycleLabel,
   isSessionHarnessLocked,
 } from "../components/ChatWindow/chatHelpers";
-import { recordLocalChatTrace } from "../utils/localChatDebug";
 
 // ---------------------------------------------------------------------------
 // useChatSession
@@ -447,15 +446,6 @@ export function useChatSession(sessionId: string) {
     const trimmed = inputValue.trim();
     if (!trimmed) return;
     if (!canSendMessage) {
-      recordLocalChatTrace({
-        source: "gui",
-        kind: "composer.submit.dropped",
-        sessionId,
-        backendSessionId: session?.backendSessionId,
-        state: lifecycle,
-        detail: `can_send=false; active=${isActive}; queue=${canQueueMessage}; busy=${isBusy}; pending_question=${hasPendingUserQuestion}`,
-        payload: trimmed,
-      });
       return;
     }
     void sendMessage(trimmed);
@@ -475,14 +465,6 @@ export function useChatSession(sessionId: string) {
 
   const handleStartSession = useCallback(() => {
     const initialPrompt = inputValue.trim();
-    recordLocalChatTrace({
-      source: "gui",
-      kind: "composer.start.submitted",
-      sessionId,
-      backendSessionId: session?.backendSessionId,
-      state: lifecycle,
-      payload: initialPrompt || undefined,
-    });
     void startSession(initialPrompt || undefined);
     setInputValue("");
   }, [inputValue, lifecycle, session?.backendSessionId, sessionId, startSession]);

@@ -201,27 +201,6 @@ fn local_chat_session_index_path() -> Result<PathBuf, CommandError> {
     Ok(data_dir.join("local-chat-session-index.json"))
 }
 
-fn local_chat_trace(
-    kind: &str,
-    direction: &str,
-    backend_session_id: Option<&str>,
-    state: &str,
-    detail: Option<String>,
-    payload: Option<&str>,
-) {
-    let record = serde_json::json!({
-        "timestamp_ms": chrono::Utc::now().timestamp_millis(),
-        "source": "tauri",
-        "kind": kind,
-        "direction": direction,
-        "backend_session_id": backend_session_id,
-        "state": state,
-        "detail": detail,
-        "payload": payload,
-    });
-    log::info!("[LOCAL_CHAT_TRACE] {record}");
-}
-
 // ============================================================================
 // Local Chat Commands
 // ============================================================================
@@ -253,35 +232,7 @@ pub async fn create_local_chat_session(
         input.permission_mode
     );
 
-    let backend_session_id = input.backend_session_id.clone();
-    local_chat_trace(
-        "command.create.requested",
-        "gui_to_tauri",
-        Some(&backend_session_id),
-        "starting",
-        None,
-        input.initial_prompt.as_deref(),
-    );
-    let result = local_chat_manager.create_session(input, app_handle).await;
-    match &result {
-        Ok(()) => local_chat_trace(
-            "command.create.accepted",
-            "tauri_to_gui",
-            Some(&backend_session_id),
-            "accepted",
-            None,
-            None,
-        ),
-        Err(error) => local_chat_trace(
-            "command.create.rejected",
-            "tauri_to_gui",
-            Some(&backend_session_id),
-            "error",
-            Some(error.to_string()),
-            None,
-        ),
-    }
-    result
+    local_chat_manager.create_session(input, app_handle).await
 }
 
 /// Send a message to a provider-neutral local chat session.
@@ -298,36 +249,9 @@ pub async fn send_local_chat_message(
         content.len()
     );
 
-    local_chat_trace(
-        "command.send.requested",
-        "gui_to_tauri",
-        Some(&backend_session_id),
-        "sending",
-        None,
-        Some(&content),
-    );
-    let result = local_chat_manager
+    local_chat_manager
         .send_message(&backend_session_id, &content)
-        .await;
-    match &result {
-        Ok(()) => local_chat_trace(
-            "command.send.accepted",
-            "tauri_to_gui",
-            Some(&backend_session_id),
-            "accepted",
-            None,
-            None,
-        ),
-        Err(error) => local_chat_trace(
-            "command.send.rejected",
-            "tauri_to_gui",
-            Some(&backend_session_id),
-            "error",
-            Some(error.to_string()),
-            None,
-        ),
-    }
-    result
+        .await
 }
 
 /// Close a provider-neutral local chat session.

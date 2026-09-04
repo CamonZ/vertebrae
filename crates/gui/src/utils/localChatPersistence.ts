@@ -6,7 +6,6 @@ import type {
 } from "../stores/chatStore";
 import type { LocalChatHarnessKind, PermissionMode } from "../bindings";
 import { commands } from "../bindings";
-import { recordLocalChatTrace } from "./localChatDebug";
 
 const MODEL_STORAGE_KEY = "local-chat-model:last-used:v1";
 const CLEARED_KEY_PREFIX = "local-chat-session-cleared:v1:";
@@ -700,14 +699,6 @@ export function persistLocalChatSession(
 ): Promise<boolean> {
   const sessions = readSessions();
   const serialized = serializeSession(session, sessions[session.id]);
-  recordLocalChatTrace({
-    source: "gui",
-    kind: "persistence.write",
-    direction: "internal",
-    sessionId: session.id,
-    state: session.lifecycle ?? "unknown",
-    detail: `durable_messages=${durableMessages(session.messages).length}; serialized_messages=${serialized.messages.length}; message_count=${serialized.messageCount}`,
-  });
   if (isDisposableClosedLocalChatSession(session)) {
     delete sessions[session.id];
     return writeSessions(sessions);

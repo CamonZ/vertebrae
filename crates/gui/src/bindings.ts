@@ -14,23 +14,6 @@ export const commands = {
     return await TAURI_INVOKE("greet", { name });
   },
   /**
-   * Write diagnostic export data to the path selected by the native save dialog.
-   */
-  async writeDebugExport(
-    path: string,
-    contents: string
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("write_debug_export", { path, contents }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
    * Get the list of saved projects
    */
   async getProjects(): Promise<Result<SavedProject[], CommandError>> {
