@@ -49,7 +49,6 @@ import {
   reconcileReplayMessages,
   unmatchedMessages,
 } from "./providerReplayMerge";
-import { recordLocalChatTrace } from "../utils/localChatDebug";
 
 /**
  * Message types for the Claude chat
@@ -2068,18 +2067,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     addMessage: (sessionId, message) => {
-      if (message.kind === "user") {
-        const session = get().sessions[sessionId];
-        recordLocalChatTrace({
-          source: "gui",
-          kind: "message.added",
-          direction: "internal",
-          sessionId,
-          backendSessionId: session?.backendSessionId,
-          state: session?.lifecycle,
-          payload: message.text,
-        });
-      }
       updateSession(
         sessionId,
         (session) => {

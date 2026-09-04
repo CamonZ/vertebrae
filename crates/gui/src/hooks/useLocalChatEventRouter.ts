@@ -37,7 +37,6 @@ import {
   handleWarningEvent,
   handleCompactionEvent,
 } from "./useLocalChat";
-import { recordLocalChatTrace } from "../utils/localChatDebug";
 
 type Unlisten = () => void;
 
@@ -125,16 +124,6 @@ export function routeLocalChatTurnStartedEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId || !payload.is_root || !payload.turn_id) {
-    recordLocalChatTrace({
-      source: "gui",
-      kind: "event.turn_started.dropped",
-      direction: "tauri_to_gui",
-      sessionId,
-      backendSessionId: payload.backend_session_id,
-      turnId: payload.turn_id,
-      state: "dropped",
-      detail: !sessionId ? "unknown session" : "missing root turn identity",
-    });
     return false;
   }
   const routedTurn = rootTurnByBackendSessionId.get(payload.backend_session_id);
@@ -152,16 +141,6 @@ export function routeLocalChatTurnStartedEvent(
     phase: "active",
   });
   const bound = useChatStore.getState().bindActiveTurn(sessionId, payload.turn_id);
-  recordLocalChatTrace({
-    source: "gui",
-    kind: "event.turn_started.routed",
-    direction: "tauri_to_gui",
-    sessionId,
-    backendSessionId: payload.backend_session_id,
-    turnId: payload.turn_id,
-    state: "active",
-    detail: bound ? "active turn bound" : "routing state recorded without local bind",
-  });
   return bound;
 }
 
@@ -307,28 +286,9 @@ export function routeLocalChatSessionEndEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) {
-    recordLocalChatTrace({
-      source: "gui",
-      kind: "event.end.dropped",
-      direction: "tauri_to_gui",
-      backendSessionId: payload.backend_session_id,
-      turnId: payload.turn_id,
-      state: "dropped",
-      detail: "unknown session",
-    });
     return false;
   }
   if (!matchesActiveRootTurn(sessionId, payload.backend_session_id, payload)) {
-    recordLocalChatTrace({
-      source: "gui",
-      kind: "event.end.dropped",
-      direction: "tauri_to_gui",
-      sessionId,
-      backendSessionId: payload.backend_session_id,
-      turnId: payload.turn_id,
-      state: "dropped",
-      detail: "active turn identity did not match",
-    });
     return false;
   }
   const wasStopping =
@@ -350,16 +310,6 @@ export function routeLocalChatSessionEndEvent(
     store.clearStreamingAssistant
   );
   if (!wasStopping) void flushNextQueuedMessage(sessionId);
-  recordLocalChatTrace({
-    source: "gui",
-    kind: "event.end.routed",
-    direction: "tauri_to_gui",
-    sessionId,
-    backendSessionId: payload.backend_session_id,
-    turnId: payload.turn_id,
-    state: wasStopping ? "stopped" : "idle",
-    detail: wasStopping ? "active turn was stopping" : "queued-message flush scheduled",
-  });
   return true;
 }
 

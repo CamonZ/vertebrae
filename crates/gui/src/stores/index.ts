@@ -10,9 +10,6 @@ export {
 } from "./notificationStore";
 export type { NotificationStore } from "./notificationStore";
 
-export { useDebugStore } from "./debugStore";
-export type { DebugStore } from "./debugStore";
-
 export { useSessionLogStore } from "./sessionLogStore";
 export { selectSessionLogBucketsForExecutionIds } from "./sessionLogStore";
 export type {

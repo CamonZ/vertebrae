@@ -5,10 +5,7 @@ import { RouterProvider } from "react-router-dom";
 import "./index.css";
 import { router } from "./router";
 import { SplashScreen, GlobalListeners } from "./components";
-import { DebugConsole } from "./components/DebugConsole";
 import { commands } from "./bindings";
-import { useDebugLogger } from "./hooks/useDebugLogger";
-import { useDebugStore } from "./stores/debugStore";
 import { queryClient } from "./query/queryClient";
 import {
   checkGuiUpdateChannels,
@@ -16,7 +13,6 @@ import {
   createGuiUpdateScheduler,
 } from "./update";
 import { installActionableReferenceClickRecovery } from "./utils/actionableReferenceClickRecovery";
-import { isDebugConsoleShortcut } from "./utils/debugShortcut";
 
 function App() {
   const [booting, setBooting] = useState(true);
@@ -28,22 +24,7 @@ function App() {
     })
   );
 
-  // Subscribe to Rust backend logs for the debug console
-  useDebugLogger();
-
   useEffect(() => installActionableReferenceClickRecovery(), []);
-
-  // Global Cmd+Shift+D to toggle debug console
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (isDebugConsoleShortcut(e)) {
-        e.preventDefault();
-        useDebugStore.getState().toggleDebugPanel();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown, { capture: true });
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, []);
 
   useEffect(() => {
     updateScheduler.start();
@@ -72,7 +53,6 @@ function App() {
     return (
       <>
         <SplashScreen status={status} />
-        <DebugConsole />
       </>
     );
   }
@@ -81,7 +61,6 @@ function App() {
     <>
       <GlobalListeners />
       <RouterProvider router={router} />
-      <DebugConsole />
     </>
   );
 }

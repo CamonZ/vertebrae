@@ -68,15 +68,6 @@ impl CommandError {
     }
 }
 
-/// Write diagnostic export data to the path selected by the native save dialog.
-#[tauri::command]
-#[specta::specta]
-pub fn write_debug_export(path: String, contents: String) -> Result<(), CommandError> {
-    std::fs::write(&path, contents).map_err(|error| CommandError {
-        message: format!("Could not write diagnostic export to {path}: {error}"),
-    })
-}
-
 mod artifact;
 mod backend;
 mod execution;
@@ -210,22 +201,5 @@ mod tests {
 
         let err = CommandError::no_project_selected();
         assert!(err.message.contains("No project selected"));
-    }
-
-    #[test]
-    fn write_debug_export_writes_contents_to_selected_path() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("vertebrae-debug.json");
-
-        write_debug_export(
-            path.to_string_lossy().into_owned(),
-            "{\"schema_version\":1}".to_string(),
-        )
-        .unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(path).unwrap(),
-            "{\"schema_version\":1}"
-        );
     }
 }

@@ -31,7 +31,6 @@ import {
   isAutomaticLocalChatLabel,
 } from "../utils/localChatPersistence";
 import { resolveContextWindow } from "../utils/modelContextWindow";
-import { recordLocalChatTrace } from "../utils/localChatDebug";
 
 const MAX_TITLE_USER_MESSAGES = 3;
 
@@ -595,15 +594,6 @@ export async function doStartSession(
   const initialPrompt = userMessage || undefined;
   deps.setBackendSessionId(sessionId, backendSessionId);
   deps.setBackendSessionIdRef?.(backendSessionId);
-  recordLocalChatTrace({
-    source: "gui",
-    kind: "session.start.requested",
-    direction: "gui_to_tauri",
-    sessionId,
-    backendSessionId,
-    state: resumeId ? "resuming" : "starting",
-    payload: initialPrompt ?? undefined,
-  });
   const completionIsStale = makeStalenessCheck(
     deps,
     sessionId,
@@ -663,25 +653,8 @@ export async function doStartSession(
       personality,
     });
     if (result.status === "error") {
-      recordLocalChatTrace({
-        source: "gui",
-        kind: "session.start.rejected",
-        direction: "tauri_to_gui",
-        sessionId,
-        backendSessionId,
-        state: "error",
-        detail: commandErrorMessage(result.error),
-      });
       throw new Error(commandErrorMessage(result.error));
     }
-    recordLocalChatTrace({
-      source: "gui",
-      kind: "session.start.accepted",
-      direction: "tauri_to_gui",
-      sessionId,
-      backendSessionId,
-      state: userMessage ? "streaming" : "idle",
-    });
     // A Stop (or a replacement start) that landed while this create was in
     // flight already nulled the backend session. Writing "streaming" back here
     // strands the session busy with nothing running and no way to recover.
@@ -690,15 +663,6 @@ export async function doStartSession(
   } catch (error) {
     if (completionIsStale()) return;
     const message = commandErrorMessage(error);
-    recordLocalChatTrace({
-      source: "gui",
-      kind: "session.start.failed",
-      direction: "internal",
-      sessionId,
-      backendSessionId,
-      state: "error",
-      detail: message,
-    });
     deps.setBackendSessionId(sessionId, null);
     deps.setBackendSessionIdRef?.(null);
     deps.addMessage(sessionId, {
@@ -738,15 +702,6 @@ export async function doSendMessage(
     activeTurnLocalId
   );
   deps.setSessionLifecycle(sessionId, "sending");
-  recordLocalChatTrace({
-    source: "gui",
-    kind: "message.send.requested",
-    direction: "gui_to_tauri",
-    sessionId,
-    backendSessionId,
-    state: "sending",
-    payload: content,
-  });
   if (options.addUserMessage !== false) {
     deps.addMessage(sessionId, {
       kind: "user",
@@ -765,15 +720,6 @@ export async function doSendMessage(
     // this send was abandoned by a Stop.
     if (completionIsStale()) return;
     if (result.status === "error") {
-      recordLocalChatTrace({
-        source: "gui",
-        kind: "message.send.rejected",
-        direction: "tauri_to_gui",
-        sessionId,
-        backendSessionId,
-        state: "error",
-        detail: commandErrorMessage(result.error),
-      });
       if (isSessionNotFoundError(result.error)) {
         deps.setBackendSessionId?.(sessionId, null);
         deps.setBackendSessionIdRef?.(null);
@@ -786,26 +732,9 @@ export async function doSendMessage(
       );
       return;
     }
-    recordLocalChatTrace({
-      source: "gui",
-      kind: "message.send.accepted",
-      direction: "tauri_to_gui",
-      sessionId,
-      backendSessionId,
-      state: "streaming",
-    });
     deps.markStreamingIfSending(sessionId);
   } catch (error) {
     if (completionIsStale()) return;
-    recordLocalChatTrace({
-      source: "gui",
-      kind: "message.send.failed",
-      direction: "internal",
-      sessionId,
-      backendSessionId,
-      state: "error",
-      detail: commandErrorMessage(error),
-    });
     deps.settleActiveTurn?.(sessionId);
     deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
   }
@@ -1012,14 +941,6 @@ export function useLocalChat(sessionId: string | null) {
     async (content: string) => {
       if (!sessionId) return;
       if (!session?.backendSessionId) {
-        recordLocalChatTrace({
-          source: "gui",
-          kind: "message.dropped.no_backend_session",
-          direction: "internal",
-          sessionId,
-          state: session?.lifecycle ?? "unknown",
-          payload: content,
-        });
         return;
       }
       const lifecycle = getLocalChatLifecycle(session);
@@ -1037,15 +958,6 @@ export function useLocalChat(sessionId: string | null) {
           setSessionTitleCandidate
         );
         enqueueQueuedMessage(sessionId, content);
-        recordLocalChatTrace({
-          source: "gui",
-          kind: "message.queued",
-          direction: "internal",
-          sessionId,
-          backendSessionId: session.backendSessionId,
-          state: lifecycle,
-          payload: content,
-        });
         addMessage(sessionId, {
           kind: "user",
           text: content,
