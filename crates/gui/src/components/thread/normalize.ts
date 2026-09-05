@@ -580,6 +580,8 @@ function stepExecutionToThread(
     const events = parseSessionLogs(logs);
     turns = eventsToTurns(events, exec, runStartMs);
     turns = appendStepResult(turns, exec, execId);
+    // Reprojection must retain row identity so completed prose stays mounted.
+    turns.forEach((turn) => stabilizeHistoricMessageKeys(turn.messages, turn.id));
   }
 
   const toolCount = turns.reduce(
