@@ -14,6 +14,8 @@ workflow guidance stays curated.
   maintained guide page for the command family.
 - Human workflow guidance: project docs, especially `AGENTS.md`,
   `docs/vtb-guide/overview.md`, and repo-specific GUI development notes.
+- Project artifact operations: `skills/artifact/SKILL.md` and
+  `docs/vtb-guide/artifacts.md`.
 - GUI visual-feedback procedure: `.claude/skills/gui-dev/SKILL.md` and the
   Hammerspoon helpers under `hammerspoon/`.
 
@@ -97,9 +99,14 @@ the local CLI exposes the command.
 
 ## Inventory
 
+The active inventory includes the project artifact skill below. The
+`.agents/plugins/vertebrae-vtb` implementation skill is provider/plugin guidance
+and is audited separately from the embedded CLI command skills.
+
 | Skill file | Command/topic | Category | Source of truth | Disposition | Notes |
 |---|---|---|---|---|---|
 | `skills/add/SKILL.md` | `vtb add` | Command reference | Live `vtb add --help`; `docs/vtb-guide/tasks.md` | keep-generated | Regenerate syntax from live help and keep hierarchy guidance brief. |
+| `skills/artifact/SKILL.md` | `vtb artifact ...` | Command reference | Live artifact help; `docs/vtb-guide/artifacts.md` | keep-generated | Project-scoped artifact lookup and attachment syntax. |
 | `skills/archive/SKILL.md` | `vtb archive`; `vtb unarchive` | Command reference | Live `vtb archive --help` and `vtb unarchive --help`; `docs/vtb-guide/tasks.md` | keep-generated | `unarchive` is related and can remain in the same skill. |
 | `skills/blockers/SKILL.md` | `vtb blockers` | Command reference | Live `vtb blockers --help`; `docs/vtb-guide/dependencies.md` | keep-generated | Verify examples against live help. |
 | `skills/check-item/SKILL.md` | `vtb check-item` | Command reference | Live `vtb check-item --help`; `docs/vtb-guide/tasks.md`; `docs/vtb-guide/sections.md` | keep-generated | Keep 1-based checklist indexing. |

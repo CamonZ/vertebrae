@@ -15,6 +15,8 @@ This index is the source of truth for project documentation entrypoints.
 | [Testing](testing.md) | Local test commands, coverage, linting, and acceptance-test constraints |
 | [Git Hooks](git-hooks.md) | Pre-commit hook setup and checks |
 | [Skills Audit](skills-audit.md) | Installed skill inventory, live-help validation policy, and Sacrum parity findings |
+| [Agent Session Contract](agent-session-contract.md) | Assignment scope, authorization, verification, and handoff |
+| [Agent Guidelines](agent-guidelines.md) | Selective project-scoped guideline retrieval and provenance |
 
 ## Fast Paths
 
@@ -22,3 +24,9 @@ This index is the source of truth for project documentation entrypoints.
 - Need to run or script `vtb`: read [vtb Guide](vtb-guide.md), then [Sacrum Config](SACRUM_CONFIG.md).
 - Need to work on the GUI: read [GUI Development](gui-development.md), then [Architecture](architecture.md).
 - Need to verify changes: read [Testing](testing.md) and [Git Hooks](git-hooks.md).
+- Need to implement an assigned unit: read [Agent Session Contract](agent-session-contract.md),
+  then [Agent Guidelines](agent-guidelines.md).
+- Need to work on providers or replay: read [Architecture](architecture.md) and the
+  relevant `crates/harness-*` adapter README.
+- Need packaging/update behavior: read [Project Overview](project-overview.md) and
+  [Updates](updates.md).
