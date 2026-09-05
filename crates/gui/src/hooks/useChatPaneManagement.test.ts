@@ -8,9 +8,7 @@ import {
   type ChatPaneLayout,
 } from "../stores/chatStore";
 
-function makeSession(
-  overrides: Partial<ChatSession> = {}
-): ChatSession {
+function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: "s1",
     label: "Test",
@@ -45,7 +43,7 @@ function renderPaneHook(opts: {
       useChatPaneManagement({
         isMaximized,
         renderedPanelWidth,
-        activeSession,
+        activeSessionId: activeSession?.id ?? null,
       }),
     {
       initialProps: {
@@ -70,10 +68,7 @@ describe("useChatPaneManagement", () => {
   describe("non-maximized mode", () => {
     it("renders a single fallback pane from the active session", () => {
       const session = makeSession({ id: "s1" });
-      setStoreState(
-        { s1: session },
-        { panes: [], activePaneId: null }
-      );
+      setStoreState({ s1: session }, { panes: [], activePaneId: null });
       const { result } = renderPaneHook({
         isMaximized: false,
         activeSession: session,

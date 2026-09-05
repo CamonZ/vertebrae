@@ -492,6 +492,10 @@ interface ChatStoreState {
   panelOpen: boolean;
   /** Persisted metadata index used by history surfaces. */
   localSessionSummaries: Record<string, LocalChatSessionSummary>;
+  /** Revisions for changes visible in shared activity/spawn projections. */
+  activityRevisions: Record<string, number>;
+  spawnOutlineRevisions: Record<string, number>;
+  spawnOutlineSignatures: Record<string, string>;
 }
 
 interface ChatStoreActions {
@@ -534,6 +538,7 @@ interface ChatStoreActions {
     label?: string | null;
     title?: string | null;
     model?: string | null;
+    preferredPaneId?: string;
   }) => Promise<string | null>;
   /** Start a new local chat without reusing an existing session */
   startFreshSession: (label: string, projectPath?: string | null) => string;
@@ -672,6 +677,9 @@ const emptyState: ChatStoreState = {
   paneLayout: emptyPaneLayout,
   panelOpen: false,
   localSessionSummaries: {},
+  activityRevisions: {},
+  spawnOutlineRevisions: {},
+  spawnOutlineSignatures: {},
 };
 
 const GENERATED_TITLE_CONFIDENCE_THRESHOLD = 0.72;
@@ -686,6 +694,49 @@ function generateSessionId(): string {
 
 function generatePaneId(): string {
   return `pane-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
+function spawnOutlineSignature(
+  messages: readonly ChatMessage[],
+  providerResumeId: string | null | undefined
+): string {
+  return `${providerResumeId ?? ""}\0${messages
+    .filter(
+      (message): message is Extract<ChatMessage, { kind: "tool_call" }> =>
+        message.kind === "tool_call" &&
+        !message.parentToolUseId &&
+        /^(agent|task)$/i.test(message.toolName)
+    )
+    .map((message) => `${message.toolId}:${message.input}`)
+    .join("\0")}`;
+}
+
+function spawnOutlineMetadataPatch(
+  state: ChatStoreState,
+  sessionId: string,
+  previous: ChatSession,
+  next: ChatSession
+): Pick<ChatStoreState, "spawnOutlineRevisions" | "spawnOutlineSignatures"> {
+  const previousSignature =
+    state.spawnOutlineSignatures[sessionId] ??
+    spawnOutlineSignature(previous.messages, previous.providerResumeId);
+  const nextSignature = spawnOutlineSignature(
+    next.messages,
+    next.providerResumeId
+  );
+  const changed = previousSignature !== nextSignature;
+  return {
+    spawnOutlineSignatures: {
+      ...state.spawnOutlineSignatures,
+      [sessionId]: nextSignature,
+    },
+    spawnOutlineRevisions: changed
+      ? {
+          ...state.spawnOutlineRevisions,
+          [sessionId]: (state.spawnOutlineRevisions[sessionId] ?? 0) + 1,
+        }
+      : state.spawnOutlineRevisions,
+  };
 }
 
 let activeTurnGeneration = 0;
@@ -1181,7 +1232,6 @@ function focusSessionInPaneLayout(
       },
     };
   }
-
   const activePaneId = paneLayout.activePaneId ?? paneLayout.panes[0]?.id;
   if (activePaneId) {
     return {
@@ -1478,31 +1528,33 @@ export const useChatStore = create<ChatStore>((set, get) => {
         );
         const projected = replayLinesToChatMessages(lines, current);
         const merged = mergeReplayMessages(projected, current.messages);
+        const nextSession = {
+          ...current,
+          messages: merged.messages,
+          messageCount: Math.max(
+            merged.messages.length,
+            current.messageCount ?? 0
+          ),
+          hasUserMessage:
+            current.hasUserMessage ??
+            merged.messages.some((message) => message.kind === "user"),
+          providerReplay: applyInitialPage(
+            replay,
+            {
+              cacheKey: result.page.cache_key,
+              events: lines,
+              nextCursor: result.page.next_cursor,
+              hasMore: result.page.has_more,
+            },
+            merged
+          ),
+        };
         return {
           sessions: {
             ...state.sessions,
-            [sessionId]: {
-              ...current,
-              messages: merged.messages,
-              messageCount: Math.max(
-                merged.messages.length,
-                current.messageCount ?? 0
-              ),
-              hasUserMessage:
-                current.hasUserMessage ??
-                merged.messages.some((message) => message.kind === "user"),
-              providerReplay: applyInitialPage(
-                replay,
-                {
-                  cacheKey: result.page.cache_key,
-                  events: lines,
-                  nextCursor: result.page.next_cursor,
-                  hasMore: result.page.has_more,
-                },
-                merged
-              ),
-            },
+            [sessionId]: nextSession,
           },
+          ...spawnOutlineMetadataPatch(state, sessionId, current, nextSession),
         };
       });
     });
@@ -1524,11 +1576,29 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ? { ...next, messageCount: next.messages.length }
           : next;
       updated = normalized;
+      const messagesChanged = normalized.messages !== session.messages;
+      const outlineInputsChanged =
+        messagesChanged ||
+        normalized.providerResumeId !== session.providerResumeId;
+      const activityChanged =
+        normalized.activeTurn !== session.activeTurn ||
+        normalized.compactionActive !== session.compactionActive;
       return {
         sessions: {
           ...state.sessions,
           [sessionId]: normalized,
         },
+        ...(activityChanged
+          ? {
+              activityRevisions: {
+                ...state.activityRevisions,
+                [sessionId]: (state.activityRevisions[sessionId] ?? 0) + 1,
+              },
+            }
+          : {}),
+        ...(outlineInputsChanged
+          ? spawnOutlineMetadataPatch(state, sessionId, session, normalized)
+          : {}),
       };
     });
     const updatedSession = updated as ChatSession | null;
@@ -1782,13 +1852,26 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     hydrateLocalSessionIndex: async () => {
       const { sessions } = await hydrateLocalChatSessionIndex();
-      set((state) => ({
-        localSessionSummaries: localSessionSummariesFromSessions(sessions),
-        sessions: {
+      set((state) => {
+        const nextSessions = {
           ...sessions,
           ...state.sessions,
-        },
-      }));
+        };
+        const spawnOutlineSignatures = {
+          ...state.spawnOutlineSignatures,
+        };
+        for (const session of Object.values(nextSessions)) {
+          spawnOutlineSignatures[session.id] = spawnOutlineSignature(
+            session.messages,
+            session.providerResumeId
+          );
+        }
+        return {
+          localSessionSummaries: localSessionSummariesFromSessions(sessions),
+          sessions: nextSessions,
+          spawnOutlineSignatures,
+        };
+      });
     },
 
     selectPersistedSession: async (sessionId, preferredPaneId) => {
@@ -1926,25 +2009,27 @@ export const useChatStore = create<ChatStore>((set, get) => {
           return updateProviderReplay(sessionId, state, () => outcome.replay);
         }
         applied = true;
+        const nextSession = {
+          ...current,
+          messages: outcome.messages,
+          messageCount: Math.max(
+            outcome.messages.length,
+            current.messageCount ?? 0
+          ),
+          providerReplay: {
+            ...outcome.replay,
+            installedMessages: outcome.messages.slice(
+              0,
+              outcome.installedMessageCount
+            ),
+          },
+        };
         return {
           sessions: {
             ...state.sessions,
-            [sessionId]: {
-              ...current,
-              messages: outcome.messages,
-              messageCount: Math.max(
-                outcome.messages.length,
-                current.messageCount ?? 0
-              ),
-              providerReplay: {
-                ...outcome.replay,
-                installedMessages: outcome.messages.slice(
-                  0,
-                  outcome.installedMessageCount
-                ),
-              },
-            },
+            [sessionId]: nextSession,
           },
+          ...spawnOutlineMetadataPatch(state, sessionId, current, nextSession),
         };
       });
       return applied;
@@ -1961,7 +2046,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const matchingRuntime = get().sessions[runtimeSessionId];
       if (matchingRuntime) {
         set((state) => ({
-          ...focusSessionInPaneLayout(state, matchingRuntime.id),
+          ...focusSessionInPaneLayout(
+            state,
+            matchingRuntime.id,
+            input.preferredPaneId
+          ),
           panelOpen: true,
         }));
         return matchingRuntime.id;
@@ -1979,7 +2068,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           sessions: nextSessions,
           ...focusSessionInPaneLayout(
             { ...state, sessions: nextSessions },
-            hydrated.id
+            hydrated.id,
+            input.preferredPaneId
           ),
           panelOpen: true,
         };
@@ -2791,43 +2881,39 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (!get().sessions[sessionId]) return;
       markLocalChatSessionCleared(sessionId);
       const timestamp = new Date().toISOString();
-      set((state) => {
-        const session = state.sessions[sessionId];
-        if (!session) return state;
-        const localSessionSummaries = omitLocalSessionSummary(
+      updateSession(
+        sessionId,
+        (session) => ({
+          ...session,
+          messages: [],
+          hasUserMessage: false,
+          title: null,
+          titleStatus: "pending",
+          titleConfidence: null,
+          titleUserMessageCount: 0,
+          backendSessionId: null,
+          providerResumeId: null,
+          selectedModelId: session.selectedModelId ?? null,
+          model: undefined,
+          tokenUsage: undefined,
+          status: "open",
+          lifecycle: "idle",
+          lifecycleError: null,
+          activeTurn: null,
+          streamingAssistant: null,
+          providerReplay: undefined,
+          queuedMessages: undefined,
+          updatedAt: timestamp,
+          messageCount: 0,
+        }),
+        { persist: false }
+      );
+      set((state) => ({
+        localSessionSummaries: omitLocalSessionSummary(
           state.localSessionSummaries,
           sessionId
-        );
-        return {
-          sessions: {
-            ...state.sessions,
-            [sessionId]: {
-              ...session,
-              messages: [],
-              hasUserMessage: false,
-              title: null,
-              titleStatus: "pending",
-              titleConfidence: null,
-              titleUserMessageCount: 0,
-              backendSessionId: null,
-              providerResumeId: null,
-              selectedModelId: session.selectedModelId ?? null,
-              model: undefined,
-              tokenUsage: undefined,
-              status: "open",
-              lifecycle: "idle",
-              lifecycleError: null,
-              activeTurn: null,
-              streamingAssistant: null,
-              providerReplay: undefined,
-              queuedMessages: undefined,
-              updatedAt: timestamp,
-              messageCount: 0,
-            },
-          },
-          localSessionSummaries,
-        };
-      });
+        ),
+      }));
     },
 
     togglePanel: () => {

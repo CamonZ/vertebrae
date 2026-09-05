@@ -1957,6 +1957,168 @@ describe("ChatWindowManager", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("isolates text deltas to the pane that owns the session", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const longHistory = (label: string) =>
+      Array.from({ length: 40 }, (_, index) => ({
+        kind: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        text: `${label} history ${index}`,
+        timestamp: `2026-01-01T00:00:${String(index).padStart(2, "0")}Z`,
+      }));
+    const left = createSession({
+      id: "left",
+      label: "Left Chat",
+      messages: longHistory("left"),
+    });
+    const right = createSession({
+      id: "right",
+      label: "Right Chat",
+      messages: longHistory("right"),
+    });
+    useChatStore.setState({
+      sessions: { left, right },
+      activeSessionId: "left",
+      paneLayout: {
+        panes: [
+          { id: "pane-left", sessionId: "left" },
+          { id: "pane-right", sessionId: "right" },
+        ],
+        activePaneId: "pane-left",
+      },
+      panelOpen: true,
+    });
+
+    const renders = new Map<string, number>();
+    const observe = (paneId: string, part: "transcript" | "composer") => {
+      const key = `${paneId}:${part}`;
+      renders.set(key, (renders.get(key) ?? 0) + 1);
+    };
+    render(<ChatWindowManager renderObserver={observe} />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(commands.getSupportedLocalChatHarnesses).toHaveBeenCalledTimes(2);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const baseline = new Map(renders);
+    const rightReference = useChatStore.getState().sessions.right;
+
+    for (let index = 0; index < 3; index += 1) {
+      act(() => {
+        useChatStore
+          .getState()
+          .updateLastAssistantMessage("left", `left delta ${index}`);
+      });
+    }
+
+    expect(
+      within(screen.getAllByTestId("chat-pane")[0]).getByText(/left delta 2/)
+    ).toBeVisible();
+    expect(renders.get("pane-left:transcript")).toBeGreaterThan(
+      baseline.get("pane-left:transcript") ?? 0
+    );
+    expect(renders.get("pane-right:transcript") ?? 0).toBe(
+      baseline.get("pane-right:transcript") ?? 0
+    );
+    expect(renders.get("pane-right:composer") ?? 0).toBe(
+      baseline.get("pane-right:composer") ?? 0
+    );
+    expect(useChatStore.getState().sessions.right).toBe(rightReference);
+
+    const leftReference = useChatStore.getState().sessions.left;
+    const rightTranscriptBefore = renders.get("pane-right:transcript") ?? 0;
+    for (let index = 0; index < 3; index += 1) {
+      act(() => {
+        useChatStore
+          .getState()
+          .updateLastAssistantMessage("right", `right delta ${index}`);
+      });
+    }
+    expect(
+      within(screen.getAllByTestId("chat-pane")[1]).getByText(/right delta 2/)
+    ).toBeVisible();
+    expect(renders.get("pane-right:transcript")).toBeGreaterThan(
+      rightTranscriptBefore
+    );
+    expect(useChatStore.getState().sessions.left).toBe(leftReference);
+  });
+
+  it("scopes drafts to the session when a pane is switched", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const user = userEvent.setup();
+    const left = createSession({ id: "draft-left", label: "Draft Left" });
+    const right = createSession({ id: "draft-right", label: "Draft Right" });
+    const replacement = createSession({
+      id: "draft-replacement",
+      label: "Replacement",
+    });
+    useChatStore.setState({
+      sessions: {
+        [left.id]: left,
+        [right.id]: right,
+        [replacement.id]: replacement,
+      },
+      activeSessionId: left.id,
+      paneLayout: {
+        panes: [
+          { id: "draft-pane-left", sessionId: left.id },
+          { id: "draft-pane-right", sessionId: right.id },
+        ],
+        activePaneId: "draft-pane-left",
+      },
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
+    });
+    const panes = screen.getAllByTestId("chat-pane");
+    await user.type(
+      within(panes[0]).getByTestId("local-chat-composer"),
+      "left draft"
+    );
+    await user.type(
+      within(panes[1]).getByTestId("local-chat-composer"),
+      "right draft"
+    );
+
+    act(() => {
+      expect(
+        useChatStore
+          .getState()
+          .bindPaneToSession("draft-pane-left", replacement.id)
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(
+        within(screen.getAllByTestId("chat-pane")[0]).getByTestId(
+          "local-chat-composer"
+        )
+      ).toHaveValue("");
+    });
+    expect(
+      within(screen.getAllByTestId("chat-pane")[1]).getByTestId(
+        "local-chat-composer"
+      )
+    ).toHaveValue("right draft");
+    expect(useChatStore.getState().paneLayout.panes[1].sessionId).toBe(
+      right.id
+    );
+  });
+
   it("routes mini selector choices to the selected pane without duplicating visible sessions", async () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,

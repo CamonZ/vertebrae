@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Profiler, useEffect, useRef } from "react";
 import { useChatSession } from "../../hooks/useChatSession";
 import { useChatStore } from "../../stores/chatStore";
 import { ChatHeader } from "./ChatHeader";
@@ -7,6 +7,7 @@ import { ChatComposer } from "./ChatComposer";
 import { localChatSessionProjectDisplayName } from "../../utils/localChatSessionGroups";
 
 interface ChatWindowProps {
+  renderObserver?: (part: "transcript" | "composer") => void;
   sessionId: string;
   /** Closes the whole chat panel (the header's ✕). Provided by the manager. */
   onClosePanel?: () => void;
@@ -47,6 +48,7 @@ export function ChatWindow({
   onClosePane,
   autoFocusComposer = true,
   projectLabel,
+  renderObserver,
 }: ChatWindowProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -97,62 +99,72 @@ export function ChatWindow({
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
       />
-      <ChatMessages
-        sessionId={sessionId}
-        projectPath={chat.session.projectPath}
-        messages={chat.messages}
-        assistantLabel={chat.assistantLabel}
-        isEmpty={isEmpty}
-        isActive={chat.isActive}
-        isWaiting={chat.isWaiting}
-        activityLabel={chat.activityLabel}
-        compactionSummary={chat.compactionSummary}
-        streamingAssistant={chat.streamingAssistant}
-        isLoadingInitialHistory={
-          chat.session.providerReplay?.loading === "initial"
-        }
-        hasOlderMessages={chat.session.providerReplay?.hasMore === true}
-        isLoadingOlderMessages={
-          chat.session.providerReplay?.loading === "older"
-        }
-        replayError={chat.session.providerReplay?.error ?? null}
-        onLoadOlderMessages={() => loadOlderReplayMessages(sessionId)}
-      />
-      <ChatComposer
-        session={chat.session}
-        inputValue={chat.inputValue}
-        setInputValue={chat.setInputValue}
-        inputRef={inputRef}
-        harnessCatalog={chat.harnessCatalog}
-        visibleHarness={chat.visibleHarness}
-        providerOptions={chat.providerOptions}
-        supportedModelIds={chat.supportedModelIds}
-        reasoningEfforts={chat.reasoningEfforts}
-        supportedReasoningEffortIds={chat.supportedReasoningEffortIds}
-        speedTiers={chat.speedTiers}
-        supportedSpeedTierIds={chat.supportedSpeedTierIds}
-        isBusy={chat.isBusy}
-        isActive={chat.isActive}
-        lockedHarness={chat.lockedHarness}
-        hasResume={chat.hasResume}
-        hasAvailableHarness={chat.hasAvailableHarness}
-        canUseComposer={chat.canUseComposer}
-        canSendMessage={chat.canSendMessage}
-        shouldStartOrResume={chat.shouldStartOrResume}
-        submitLabel={chat.submitLabel}
-        composerPlaceholder={chat.composerPlaceholder}
-        ctxPct={chat.ctxPct}
-        ctxColor={chat.ctxColor}
-        usage={chat.usage}
-        threadTotalTokens={chat.threadTotalTokens}
-        onSend={chat.handleSend}
-        onStartSession={chat.handleStartSession}
-        onHarnessChange={chat.handleHarnessChange}
-        onModelChange={chat.handleModelChange}
-        onReasoningEffortChange={chat.handleReasoningEffortChange}
-        onSpeedTierChange={chat.handleSpeedTierChange}
-        onPermissionModeChange={chat.handlePermissionModeChange}
-      />
+      <Profiler
+        id={`${sessionId}-transcript`}
+        onRender={() => renderObserver?.("transcript")}
+      >
+        <ChatMessages
+          sessionId={sessionId}
+          projectPath={chat.session.projectPath}
+          messages={chat.messages}
+          assistantLabel={chat.assistantLabel}
+          isEmpty={isEmpty}
+          isActive={chat.isActive}
+          isWaiting={chat.isWaiting}
+          activityLabel={chat.activityLabel}
+          compactionSummary={chat.compactionSummary}
+          streamingAssistant={chat.streamingAssistant}
+          isLoadingInitialHistory={
+            chat.session.providerReplay?.loading === "initial"
+          }
+          hasOlderMessages={chat.session.providerReplay?.hasMore === true}
+          isLoadingOlderMessages={
+            chat.session.providerReplay?.loading === "older"
+          }
+          replayError={chat.session.providerReplay?.error ?? null}
+          onLoadOlderMessages={() => loadOlderReplayMessages(sessionId)}
+        />
+      </Profiler>
+      <Profiler
+        id={`${sessionId}-composer`}
+        onRender={() => renderObserver?.("composer")}
+      >
+        <ChatComposer
+          session={chat.session}
+          inputValue={chat.inputValue}
+          setInputValue={chat.setInputValue}
+          inputRef={inputRef}
+          harnessCatalog={chat.harnessCatalog}
+          visibleHarness={chat.visibleHarness}
+          providerOptions={chat.providerOptions}
+          supportedModelIds={chat.supportedModelIds}
+          reasoningEfforts={chat.reasoningEfforts}
+          supportedReasoningEffortIds={chat.supportedReasoningEffortIds}
+          speedTiers={chat.speedTiers}
+          supportedSpeedTierIds={chat.supportedSpeedTierIds}
+          isBusy={chat.isBusy}
+          isActive={chat.isActive}
+          lockedHarness={chat.lockedHarness}
+          hasResume={chat.hasResume}
+          hasAvailableHarness={chat.hasAvailableHarness}
+          canUseComposer={chat.canUseComposer}
+          canSendMessage={chat.canSendMessage}
+          shouldStartOrResume={chat.shouldStartOrResume}
+          submitLabel={chat.submitLabel}
+          composerPlaceholder={chat.composerPlaceholder}
+          ctxPct={chat.ctxPct}
+          ctxColor={chat.ctxColor}
+          usage={chat.usage}
+          threadTotalTokens={chat.threadTotalTokens}
+          onSend={chat.handleSend}
+          onStartSession={chat.handleStartSession}
+          onHarnessChange={chat.handleHarnessChange}
+          onModelChange={chat.handleModelChange}
+          onReasoningEffortChange={chat.handleReasoningEffortChange}
+          onSpeedTierChange={chat.handleSpeedTierChange}
+          onPermissionModeChange={chat.handlePermissionModeChange}
+        />
+      </Profiler>
     </div>
   );
 }

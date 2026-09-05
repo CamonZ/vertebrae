@@ -6,7 +6,6 @@ import {
   useState,
 } from "react";
 import { useChatStore } from "../../stores/chatStore";
-import type { ChatSession } from "../../stores/chatStore";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { usePanelExitTransition } from "../../hooks/usePanelExitTransition";
 import { doCloseSession } from "../../hooks/useLocalChat";
@@ -31,11 +30,7 @@ import { ChatHistoryResizeHandle } from "./ChatHistoryResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import type { LocalChatSessionActivity } from "./LocalChatMiniPanel";
 import { ChatShortcutHints } from "./ChatShortcutHints";
-import {
-  buildSpawnOutline,
-  isAgentSpawnTool,
-  scrollToSpawn,
-} from "./sessionListUtils";
+import { buildSpawnOutline, scrollToSpawn } from "./sessionListUtils";
 import type { SpawnOutlineItem } from "./sessionListUtils";
 import { useUIStore } from "../../stores/uiStore";
 
@@ -48,9 +43,22 @@ const EXIT_MS = 180;
  * FloatingChatLauncher pill). Renders the active session's ChatWindow, which
  * owns the single header band (title + status) and the composer.
  */
-export function ChatWindowManager() {
-  const sessions = useChatStore((s) => s.sessions);
+export function ChatWindowManager({
+  renderObserver,
+}: {
+  renderObserver?: (paneId: string, part: "transcript" | "composer") => void;
+}) {
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const activeProviderThreadId = useChatStore((s) =>
+    s.activeSessionId
+      ? (s.sessions[s.activeSessionId]?.providerResumeId ?? null)
+      : null
+  );
+  const sessionIdsToken = useChatStore((s) =>
+    Object.keys(s.sessions).join("\0")
+  );
+  const activityRevisions = useChatStore((s) => s.activityRevisions);
+  const spawnOutlineRevisions = useChatStore((s) => s.spawnOutlineRevisions);
   const panelOpen = useChatStore((s) => s.panelOpen);
   const togglePanel = useChatStore((s) => s.togglePanel);
   const selectPersistedSession = useChatStore((s) => s.selectPersistedSession);
@@ -59,6 +67,7 @@ export function ChatWindowManager() {
   );
   const deleteLocalSession = useChatStore((s) => s.deleteLocalSession);
   const startFreshSession = useChatStore((s) => s.startFreshSession);
+  const bindPaneToSession = useChatStore((s) => s.bindPaneToSession);
   const openProjectSession = useChatStore((s) => s.openProjectSession);
   const startFreshSessionInNewPane = useChatStore(
     (s) => s.startFreshSessionInNewPane
@@ -81,16 +90,18 @@ export function ChatWindowManager() {
   );
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const sessionList = Object.values(sessions);
+  const sessionList = useMemo(
+    () => sessionIdsToken.split("\0").filter(Boolean),
+    [sessionIdsToken]
+  );
   const sessionActivityToken = sessionList
-    .map(
-      (session) =>
-        `${session.id}:${session.compactionActive ? "compacting" : (session.activeTurn?.phase ?? "idle")}`
-    )
+    .map((sessionId) => `${sessionId}:${activityRevisions[sessionId] ?? 0}`)
     .join("\0");
   const activityBySessionId = useMemo(() => {
     const activity = new Map<string, LocalChatSessionActivity>();
-    for (const session of sessionList) {
+    for (const sessionId of sessionList) {
+      const session = useChatStore.getState().sessions[sessionId];
+      if (!session) continue;
       if (session.compactionActive) {
         activity.set(session.id, "compacting");
       } else if (session.activeTurn?.phase === "stopping") {
@@ -112,30 +123,14 @@ export function ChatWindowManager() {
         }:${session.providerResumeId ?? ""}:${session.lifecycle}`
     )
     .join("\0");
-  const activeSession: ChatSession | null = activeSessionId
-    ? sessions[activeSessionId]
-    : null;
   const spawnOutlineToken = sessionList
-    .map((session) =>
-      session.messages
-        .filter(
-          (
-            message
-          ): message is Extract<
-            ChatSession["messages"][number],
-            { kind: "tool_call" }
-          > =>
-            message.kind === "tool_call" &&
-            !message.parentToolUseId &&
-            isAgentSpawnTool(message.toolName)
-        )
-        .map((message) => `${session.id}:${message.toolId}:${message.input}`)
-        .join("\0")
-    )
+    .map((sessionId) => `${sessionId}:${spawnOutlineRevisions[sessionId] ?? 0}`)
     .join("\0");
   const spawnOutlineBySessionId = useMemo(() => {
     const outlines = new Map<string, ReturnType<typeof buildSpawnOutline>>();
-    for (const session of sessionList) {
+    for (const sessionId of sessionList) {
+      const session = useChatStore.getState().sessions[sessionId];
+      if (!session) continue;
       const outline = buildSpawnOutline(session.messages).filter(
         (spawn) => spawn.threadId !== session.providerResumeId
       );
@@ -145,11 +140,13 @@ export function ChatWindowManager() {
     // Intentionally keyed by top-level agent tool-call inputs only; assistant
     // streaming text should not re-render the mini-panel outline.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spawnOutlineToken]);
+  }, [sessionList, spawnOutlineToken]);
   const childProviderThreadIds = useMemo(() => {
     const threadIds = new Set<string>();
-    for (const session of sessionList) {
-      const outline = spawnOutlineBySessionId.get(session.id) ?? [];
+    for (const sessionId of sessionList) {
+      const session = useChatStore.getState().sessions[sessionId];
+      if (!session) continue;
+      const outline = spawnOutlineBySessionId.get(sessionId) ?? [];
       for (const spawn of outline) {
         if (spawn.threadId && spawn.threadId !== session.providerResumeId) {
           threadIds.add(spawn.threadId);
@@ -189,14 +186,14 @@ export function ChatWindowManager() {
         labels.set(session.id, group.label);
       }
     }
-    for (const session of Object.values(sessions)) {
+    for (const session of Object.values(localSessionSummaries)) {
       if (labels.has(session.id)) continue;
       const path = normalizeProjectPath(session.projectPath);
       const label = path ? projectLabelsByPath.get(path) : undefined;
       if (label) labels.set(session.id, label);
     }
     return labels;
-  }, [allLocalSessionGroups, projectLabelsByPath, sessions]);
+  }, [allLocalSessionGroups, localSessionSummaries, projectLabelsByPath]);
   const visibleLocalSessionGroups = useMemo(() => {
     // Search and child-thread filtering must precede the cap so older
     // matching sessions remain eligible for the visible seven rows.
@@ -236,7 +233,7 @@ export function ChatWindowManager() {
   } = useChatPaneManagement({
     isMaximized,
     renderedPanelWidth,
-    activeSession,
+    activeSessionId,
   });
   const historyMaxWidth = maxHistoryWidthForLayout(
     renderedPanelWidth,
@@ -262,18 +259,24 @@ export function ChatWindowManager() {
     togglePanel();
   }, [togglePanel]);
 
-  const startFreshActiveSession = useCallback(async () => {
-    if (!activeSession) return false;
-    const projectPath = await loadCurrentProjectPath();
-    commitCurrentProjectPath(projectPath);
-    startFreshSession("New Chat", projectPath);
-    return true;
-  }, [
-    activeSession,
-    commitCurrentProjectPath,
-    loadCurrentProjectPath,
-    startFreshSession,
-  ]);
+  const startFreshActiveSession = useCallback(
+    async (paneId: string) => {
+      const projectPath = await loadCurrentProjectPath();
+      const paneStillVisible = useChatStore
+        .getState()
+        .paneLayout.panes.some((pane) => pane.id === paneId);
+      if (!paneStillVisible) return false;
+      commitCurrentProjectPath(projectPath);
+      const sessionId = startFreshSession("New Chat", projectPath);
+      return bindPaneToSession(paneId, sessionId);
+    },
+    [
+      bindPaneToSession,
+      commitCurrentProjectPath,
+      loadCurrentProjectPath,
+      startFreshSession,
+    ]
+  );
 
   const splitWithFreshSession = useCallback(async () => {
     if (!canAddSplitPane) return false;
@@ -380,10 +383,18 @@ export function ChatWindowManager() {
   );
 
   const selectAgentThreadForActivePane = useCallback(
-    async (parentSessionId: string, agent: SpawnOutlineItem) => {
+    async (
+      parentSessionId: string,
+      agent: SpawnOutlineItem,
+      preferredPaneId?: string
+    ) => {
+      const targetPaneId =
+        preferredPaneId ??
+        useChatStore.getState().paneLayout.activePaneId ??
+        undefined;
       const parent = useChatStore.getState().sessions[parentSessionId];
       if (!parent || !agent.threadId) {
-        await selectHistorySessionForActivePane(parentSessionId);
+        await selectHistorySessionForActivePane(parentSessionId, targetPaneId);
         requestAnimationFrame(() =>
           scrollToSpawn(parentSessionId, agent.spawnId)
         );
@@ -397,6 +408,7 @@ export function ChatWindowManager() {
         label: agent.label,
         title: agent.label,
         model: parent.model ?? parent.selectedModelId ?? null,
+        preferredPaneId: targetPaneId,
       });
     },
     [selectHistorySessionForActivePane, selectProviderThreadSession]
@@ -437,12 +449,17 @@ export function ChatWindowManager() {
     ]
   );
 
+  const startFreshActiveSessionForKeyboard = useCallback(() => {
+    const paneId = activePaneId ?? normalizedPaneLayout.panes[0]?.id;
+    return paneId ? startFreshActiveSession(paneId) : Promise.resolve(false);
+  }, [activePaneId, normalizedPaneLayout.panes, startFreshActiveSession]);
+
   useChatKeyboardShortcuts({
     open,
     dispatch: {
       shortcutsOpen,
       canAddSplitPane,
-      hasActiveSession: !!activeSession,
+      hasActiveSession: !!activeSessionId,
       focusPaneByIndex,
       focusPaneByOffset,
       historyNavigationEnabled: isMaximized,
@@ -451,7 +468,7 @@ export function ChatWindowManager() {
       closeActivePane,
       keepOnlyActivePane,
       splitWithFreshSession,
-      startFreshActiveSession,
+      startFreshActiveSession: startFreshActiveSessionForKeyboard,
       toggleHistorySelector,
       toggleMaximized,
     },
@@ -533,7 +550,7 @@ export function ChatWindowManager() {
             <LocalChatMiniPanel
               width={effectiveHistoryWidth}
               activeSessionId={activeSessionId ?? visiblePanes[0].sessionId}
-              activeProviderThreadId={activeSession?.providerResumeId ?? null}
+              activeProviderThreadId={activeProviderThreadId}
               searchQuery={sessionQuery}
               onSearchQueryChange={setSessionQuery}
               hasLocalChatSessions={hasLocalChatSessions}
@@ -563,7 +580,6 @@ export function ChatWindowManager() {
           )}
           <ChatPaneList
             visiblePanes={visiblePanes}
-            sessions={sessions}
             activePaneId={activePaneId}
             isMaximized={isMaximized}
             canAddSplitPane={canAddSplitPane}
@@ -576,6 +592,7 @@ export function ChatWindowManager() {
             startFreshActiveSession={startFreshActiveSession}
             splitWithFreshSession={splitWithFreshSession}
             projectLabelBySessionId={projectLabelBySessionId}
+            renderObserver={renderObserver}
           />
         </div>
       )}
