@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commands, type SessionLog, type StepExecution } from "../bindings";
-import type { ExecutionLogBucket } from "../stores/sessionLogStore";
-import { costFromSessionLogs } from "../utils/computeExecutionRollups";
 import {
-  getProjectScopeGeneration,
+  isLiveSessionLog,
+  useSessionLogStore,
+  type ExecutionLogBucket,
+} from "../stores/sessionLogStore";
+import { mergeFetchedSessionLogs } from "../stores/mergeFetchedSessionLogs";
+import {
   isCurrentProjectScopeGeneration,
+  useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
 import { useScopedSessionLogs } from "./useScopedSessionLogs";
 
@@ -19,19 +23,14 @@ export interface UseSubtreeSessionLogsResult {
 }
 
 /**
- * Fetches session logs for a set of executions and merges them with live
- * appends from the global `sessionLogStore` (populated by the
- * `useSessionLogChangeListener`). The store wins on a per-execution basis when
- * its bucket has at least as many logs as the initial fetch — this lets THREAD
- * mode live-tail new SessionLogCreatedEvents without dropping the historical
- * baseline before the listener observed any logs.
+ * Seeds fetched history into the same store that receives live log events.
+ * Reconcile by identity, preserving updates received while a fetch is in flight;
+ * row counts cannot establish whether a live bucket contains the fetched history.
  */
 export function useSubtreeSessionLogs(
   executions: readonly StepExecution[]
 ): UseSubtreeSessionLogsResult {
-  const [logsByExecutionId, setLogsByExecutionId] = useState<
-    Record<string, SessionLog[]>
-  >({});
+  const projectScopeGeneration = useProjectScopeGeneration();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fetchSeqRef = useRef(0);
@@ -44,13 +43,13 @@ export function useSubtreeSessionLogs(
   const ids = useMemo(() => (idsKey ? idsKey.split("|") : []), [idsKey]);
 
   const fetchAll = useCallback(async () => {
+    const seq = ++fetchSeqRef.current;
     if (ids.length === 0) {
-      setLogsByExecutionId({});
       setError(null);
+      setIsLoading(false);
       return;
     }
-    const seq = ++fetchSeqRef.current;
-    const projectScopeGeneration = getProjectScopeGeneration();
+    const bucketsAtFetchStart = useSessionLogStore.getState().logsByExecutionId;
     setIsLoading(true);
     setError(null);
     const results = await Promise.all(
@@ -62,59 +61,38 @@ export function useSubtreeSessionLogs(
     ) {
       return;
     }
-    const next: Record<string, SessionLog[]> = {};
     let firstError: string | null = null;
     for (const { id, r } of results) {
       if (r.status === "ok") {
-        next[id] = r.data;
+        const store = useSessionLogStore.getState();
+        store.setLogs(
+          id,
+          mergeFetchedSessionLogs(
+            r.data,
+            store.logsByExecutionId[id]?.logs,
+            bucketsAtFetchStart[id]?.logs,
+            // Full execution history supersedes concurrent run snapshots,
+            // but must still yield to actual live updates.
+            isLiveSessionLog
+          )
+        );
       } else if (!firstError) {
         firstError = r.error.message;
       }
     }
-    setLogsByExecutionId(next);
     if (firstError) setError(firstError);
     setIsLoading(false);
-  }, [ids]);
+  }, [ids, projectScopeGeneration]);
 
   useEffect(() => {
+    const fetchSequence = fetchSeqRef;
     fetchAll();
+    return () => {
+      ++fetchSequence.current;
+    };
   }, [fetchAll]);
 
-  const liveBuckets = useScopedSessionLogs(ids);
-
-  const logBucketsByExecutionId = useMemo(() => {
-    if (ids.length === 0) return {} as Record<string, ExecutionLogBucket>;
-    const out: Record<string, ExecutionLogBucket> = {};
-    for (const id of ids) {
-      const fetched = logsByExecutionId[id];
-      const liveBucket = liveBuckets[id];
-      if (!liveBucket || liveBucket.logs.length === 0) {
-        if (fetched !== undefined) {
-          out[id] = {
-            logs: fetched,
-            fallbackCost: costFromSessionLogs(fetched),
-          };
-        }
-        continue;
-      }
-      // If live has at least as many entries as fetched, prefer live (it's a
-      // superset that includes appended events). Otherwise treat the fetched
-      // baseline as authoritative for now.
-      const fetchedLen = fetched?.length ?? 0;
-      const liveWins = liveBucket.logs.length >= fetchedLen;
-      if (liveWins) {
-        out[id] = liveBucket;
-      } else if (fetched !== undefined) {
-        out[id] = {
-          logs: fetched,
-          fallbackCost: costFromSessionLogs(fetched),
-        };
-      } else {
-        out[id] = liveBucket;
-      }
-    }
-    return out;
-  }, [ids, logsByExecutionId, liveBuckets]);
+  const logBucketsByExecutionId = useScopedSessionLogs(ids);
 
   const mergedLogsByExecutionId = useMemo(
     () =>

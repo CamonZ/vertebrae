@@ -12,6 +12,7 @@ vi.mock("../bindings", () => ({
 import { useSubtreeSessionLogs } from "./useSubtreeSessionLogs";
 import type { SessionLog, StepExecution } from "../bindings";
 import { useSessionLogStore } from "../stores";
+import { resetProjectScopedStores } from "../stores/projectScopedStores";
 
 function exec(id: string | null): StepExecution {
   return {
@@ -28,7 +29,7 @@ function exec(id: string | null): StepExecution {
 function log(id: string, content = "{}"): SessionLog {
   return {
     id,
-    execution_id: "e",
+    step_execution_id: "e",
     content,
     created_at: "2026-01-01T00:00:00.000Z",
   } as SessionLog;
@@ -122,6 +123,32 @@ describe("useSubtreeSessionLogs", () => {
     expect(result.current.logsByExecutionId.e1).toHaveLength(2);
   });
 
+  it("preserves history while showing live appends and updates to existing rows", async () => {
+    const fetched = [
+      log("history-1"),
+      log("history-2"),
+      log("thinking", "old"),
+    ];
+    mockGetExecutionLogs.mockResolvedValue({ status: "ok", data: fetched });
+    const { result } = renderHook(() => useSubtreeSessionLogs([exec("e1")]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    const updated = log("thinking", "new thinking");
+    const appended = log("live", "new output");
+    act(() => {
+      useSessionLogStore.getState().upsertLog("e1", updated);
+      useSessionLogStore.getState().appendLog("e1", appended);
+      useSessionLogStore.getState().flushPending();
+    });
+
+    expect(result.current.logsByExecutionId.e1).toEqual([
+      fetched[0],
+      fetched[1],
+      updated,
+      appended,
+    ]);
+  });
+
   it("does not rerender for live logs outside the requested executions", async () => {
     mockGetExecutionLogs.mockResolvedValue({
       status: "ok",
@@ -147,10 +174,13 @@ describe("useSubtreeSessionLogs", () => {
     await waitFor(() =>
       expect(renderCount).toBeGreaterThan(settledRenderCount)
     );
-    expect(result.current.logsByExecutionId.e1).toEqual([log("e1-live-2")]);
+    expect(result.current.logsByExecutionId.e1).toEqual([
+      log("e1-fetched-1"),
+      log("e1-live-2"),
+    ]);
   });
 
-  it("falls back to fetched baseline when live store is empty for that execution", async () => {
+  it("clears rendered history when the shared store resets", async () => {
     const fetched = [log("e1-fetched-1")];
     mockGetExecutionLogs.mockResolvedValue({ status: "ok", data: fetched });
     const { result } = renderHook(() => useSubtreeSessionLogs([exec("e1")]));
@@ -164,18 +194,11 @@ describe("useSubtreeSessionLogs", () => {
         logsByExecutionId: { e1: { logs: [], fallbackCost: 0 } },
       });
     });
-    // Empty live bucket must NOT clobber the fetched baseline.
-    expect(result.current.logsByExecutionId.e1).toEqual(fetched);
+    expect(result.current.logsByExecutionId.e1).toEqual([]);
   });
 
   it("keeps the complete fetched trace when the live bucket is only a retained subset", async () => {
     const fetched = [log("e1-fetched-1"), log("e1-fetched-2")];
-    mockGetExecutionLogs.mockResolvedValue({ status: "ok", data: fetched });
-    const { result } = renderHook(() => useSubtreeSessionLogs([exec("e1")]));
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-    });
-
     act(() => {
       useSessionLogStore.setState({
         logsByExecutionId: {
@@ -183,6 +206,9 @@ describe("useSubtreeSessionLogs", () => {
         },
       });
     });
+    mockGetExecutionLogs.mockResolvedValue({ status: "ok", data: fetched });
+    const { result } = renderHook(() => useSubtreeSessionLogs([exec("e1")]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.logsByExecutionId.e1).toEqual(fetched);
   });
@@ -201,6 +227,84 @@ describe("useSubtreeSessionLogs", () => {
     });
     expect(result.current.logsByExecutionId.present).toBeDefined();
     expect("missing" in result.current.logsByExecutionId).toBe(false);
+  });
+
+  it("preserves live changes by id and logical key when history resolves late", async () => {
+    const oldThinking = {
+      ...log("thinking-old", "old"),
+      logical_key: "thinking",
+    };
+    useSessionLogStore.getState().setLogs("e1", [oldThinking]);
+    let resolveFetch!: (value: unknown) => void;
+    mockGetExecutionLogs.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+    const { result } = renderHook(() => useSubtreeSessionLogs([exec("e1")]));
+    await waitFor(() => expect(mockGetExecutionLogs).toHaveBeenCalled());
+
+    const updated = { ...log("thinking-new", "new"), logical_key: "thinking" };
+    const appended = log("live", "new output");
+    act(() => {
+      useSessionLogStore.getState().upsertLog("e1", updated);
+      useSessionLogStore.getState().appendLog("e1", appended);
+      useSessionLogStore.getState().flushPending();
+      resolveFetch({ status: "ok", data: [log("history"), oldThinking] });
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.logsByExecutionId.e1).toEqual([
+      log("history"),
+      updated,
+      appended,
+    ]);
+  });
+
+  it("does not repopulate the store with an old project's pending history", async () => {
+    let resolveFetch!: (value: unknown) => void;
+    mockGetExecutionLogs.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+    mockGetExecutionLogs.mockResolvedValue({
+      status: "ok",
+      data: [log("new-project")],
+    });
+    const { result } = renderHook(() => useSubtreeSessionLogs([exec("e1")]));
+    await waitFor(() => expect(mockGetExecutionLogs).toHaveBeenCalledTimes(1));
+
+    act(() => resetProjectScopedStores());
+    await waitFor(() =>
+      expect(result.current.logsByExecutionId.e1).toEqual([log("new-project")])
+    );
+    await act(async () =>
+      resolveFetch({ status: "ok", data: [log("old-project")] })
+    );
+    expect(result.current.logsByExecutionId.e1).toEqual([log("new-project")]);
+  });
+
+  it("does not seed an abandoned fetch after the execution selection is cleared", async () => {
+    let resolveFetch!: (value: unknown) => void;
+    mockGetExecutionLogs.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+    const { result, rerender } = renderHook(
+      ({ executions }) => useSubtreeSessionLogs(executions),
+      {
+        initialProps: { executions: [exec("e1")] },
+      }
+    );
+    await waitFor(() => expect(mockGetExecutionLogs).toHaveBeenCalled());
+    rerender({ executions: [] });
+    await act(async () =>
+      resolveFetch({ status: "ok", data: [log("abandoned")] })
+    );
+    expect(result.current.isLoading).toBe(false);
+    expect(useSessionLogStore.getState().logsByExecutionId).toEqual({});
   });
 
   it("refetch reissues the requests", async () => {

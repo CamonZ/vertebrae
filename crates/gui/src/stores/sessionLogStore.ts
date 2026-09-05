@@ -56,6 +56,13 @@ const initialState: SessionLogState = {
 let pendingEntries: SessionLogBatchEntry[] = [];
 let frameHandle: number | null = null;
 let timerHandle: ReturnType<typeof setTimeout> | null = null;
+// Fetched rows also replace object references. Track actual event rows so a
+// concurrent history response is never mistaken for a newer realtime update.
+let liveLogRows = new WeakSet<SessionLog>();
+
+export function isLiveSessionLog(log: SessionLog): boolean {
+  return liveLogRows.has(log);
+}
 
 function cancelScheduledFlush(): void {
   if (frameHandle !== null) {
@@ -176,6 +183,7 @@ function replaceExecutionLog(
   index: number,
   log: SessionLog
 ) {
+  liveLogRows.add(log);
   const previous = mutable.logs[index];
   removeIndex(mutable.ids, previous.id, index);
   removeIndex(mutable.logicalKeys, previous.logical_key, index);
@@ -187,6 +195,7 @@ function replaceExecutionLog(
 }
 
 function appendExecutionLog(mutable: MutableExecutionLogs, log: SessionLog) {
+  liveLogRows.add(log);
   const index = mutable.logs.length;
   mutable.logs.push(log);
   mutable.fallbackCost += costFromSessionLog(log);
@@ -274,6 +283,7 @@ export const useSessionLogStore = create<SessionLogStore>((set) => ({
 
   reset: () => {
     discardPending();
+    liveLogRows = new WeakSet();
     set(initialState);
   },
 }));
