@@ -40,3 +40,7 @@ available. Therefore this report contains no performance score, latency,
 context-size, or clarification-count claim. Before claiming improved model
 behavior, run the same matrix with a recorded runner, model/version, fixed
 inputs, isolated workspace, and captured tool/evidence trace.
+
+The evaluation fixture is documentation-only: it cannot prove that a session
+selected the expected guide or avoided an unauthorized tool call. Those
+assertions remain acceptance criteria for a future authorized runner trial.
