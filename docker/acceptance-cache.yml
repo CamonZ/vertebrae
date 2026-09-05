@@ -1,0 +1,36 @@
+# Used by scripts/acceptance.py. Runtime/database volumes remain disposable.
+services:
+  test-runner:
+    image: ${VTB_ACCEPTANCE_CACHE_KEY}-cli
+    volumes:
+      - rustup-cache:/usr/local/rustup
+      - ${VTB_ACCEPTANCE_OUTPUT}:/app/test-output
+  daemon-test-runner:
+    image: ${VTB_ACCEPTANCE_CACHE_KEY}-daemon
+    volumes:
+      - rustup-cache:/usr/local/rustup
+      - ${VTB_ACCEPTANCE_OUTPUT}:/app/test-output
+  gui-test-runner:
+    image: ${VTB_ACCEPTANCE_CACHE_KEY}-gui
+    environment:
+      npm_config_cache: /npm-cache
+      GUI_ACCEPTANCE_SCREENSHOTS: ${GUI_ACCEPTANCE_SCREENSHOTS:-failure}
+    volumes:
+      - rustup-cache:/usr/local/rustup
+      - npm-cache:/npm-cache
+      - gui-node-modules:/app/crates/gui/node_modules
+      - ${VTB_ACCEPTANCE_OUTPUT}:/app/test-output
+volumes:
+  cargo-cache:
+    external: true
+    name: ${VTB_ACCEPTANCE_CACHE_KEY}-cargo
+  target-cache:
+    external: true
+    name: ${VTB_ACCEPTANCE_CACHE_KEY}-target
+  rustup-cache:
+    external: true
+    name: ${VTB_ACCEPTANCE_CACHE_KEY}-rustup
+  npm-cache:
+    external: true
+    name: ${VTB_ACCEPTANCE_CACHE_KEY}-npm
+  gui-node-modules:

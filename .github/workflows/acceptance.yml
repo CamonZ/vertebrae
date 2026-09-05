@@ -32,32 +32,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
 
-      - name: Run CLI acceptance tests
-        id: cli
-        continue-on-error: true
-        run: docker compose run --rm test-runner
+      - name: Run acceptance suites
+        env:
+          # One job per runner; retain its compilation cache across checkouts.
+          VTB_ACCEPTANCE_CACHE_KEY: ${{ runner.name }}
+          VTB_ACCEPTANCE_OUTPUT: ${{ github.workspace }}/test-output/acceptance
+        run: python3 scripts/acceptance.py
 
-      - name: Run GUI acceptance tests
-        id: gui
-        continue-on-error: true
-        run: docker compose run --rm gui-test-runner
-
-      - name: Run daemon acceptance tests
-        id: daemon
-        continue-on-error: true
-        run: docker compose run --rm daemon-test-runner
-
-      - name: Report acceptance results
+      - name: Ensure acceptance resources are removed
         if: always()
-        run: |
-          cli="${{ steps.cli.outcome }}"
-          gui="${{ steps.gui.outcome }}"
-          daemon="${{ steps.daemon.outcome }}"
-          echo "CLI:    $cli"
-          echo "GUI:    $gui"
-          echo "Daemon: $daemon"
-          [ "$cli" = "success" ] && [ "$gui" = "success" ] && [ "$daemon" = "success" ]
+        env:
+          VTB_ACCEPTANCE_OUTPUT: ${{ github.workspace }}/test-output/acceptance
+        run: python3 scripts/acceptance.py --cleanup
 
-      - name: Tear down
+      - name: Upload acceptance diagnostics and timings
         if: always()
-        run: docker compose down -v
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-output/acceptance
+          if-no-files-found: warn

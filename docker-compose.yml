@@ -93,7 +93,7 @@ services:
       - cargo-cache:/cargo
       - target-cache:/app/target
     working_dir: /app
-    command: ["/bin/sh", "-c", "cargo build --bin vtb --quiet && cargo test -p acceptance --test acceptance -- --concurrency 8"]
+    command: ["/app/docker/test-entrypoint.sh"]
 
   daemon-test-runner:
     build:

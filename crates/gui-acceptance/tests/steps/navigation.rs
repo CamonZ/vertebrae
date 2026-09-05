@@ -3,6 +3,10 @@ use fantoccini::Locator;
 
 use crate::GuiWorld;
 
+// Generic actions wait for their target to become actionable. Their effects
+// (a menu, route, search result, etc.) are checked by the next bounded assertion
+// or action, so no fixed post-action delay is needed.
+
 pub async fn navigate_to(world: &mut GuiWorld, path: &str, label: &str) {
     let wd = world
         .webdriver
@@ -17,7 +21,7 @@ pub async fn navigate_to(world: &mut GuiWorld, path: &str, label: &str) {
         .await
         .unwrap_or_else(|_| panic!("failed to navigate to {path}"));
 
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    gui_acceptance::wait_for_page(&client, path, world.project_slug.as_deref()).await;
     world.screenshot(&client, label).await;
 }
 
@@ -51,32 +55,18 @@ async fn select_factory(world: &mut GuiWorld, factory: String) {
         .expect("WebDriver session not initialized")
         .clone();
     let client = wd.lock().await;
-    let select = client
-        .wait()
-        .at_most(std::time::Duration::from_secs(10))
-        .for_element(Locator::Css("[data-testid='atlas-factory-filter-select']"))
-        .await
-        .unwrap_or_else(|_| panic!("factory filter not found while selecting '{factory}'"));
-
     let value = if factory == "No Factory" {
         "__no_factory__"
     } else {
         factory.as_str()
     };
-    client
-        .wait()
-        .at_most(std::time::Duration::from_secs(10))
-        .for_element(Locator::Css(&format!(
-            "[data-testid='atlas-factory-filter-select'] option[value=\"{value}\"]"
-        )))
-        .await
-        .unwrap_or_else(|_| panic!("factory option '{factory}' not found within 10 seconds"));
-    select
-        .select_by_value(value)
-        .await
-        .unwrap_or_else(|_| panic!("failed to select factory scope '{factory}'"));
+    gui_acceptance::select_when_ready(
+        &client,
+        Locator::Css("[data-testid='atlas-factory-filter-select']"),
+        value,
+    )
+    .await;
 
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     world
         .screenshot(&client, &format!("after-select-factory-{factory}"))
         .await;
@@ -235,6 +225,9 @@ async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
             )
         });
 
+    // Text matches can be non-interactive labels inside a clickable ancestor.
+    // Preserve the native-click/ancestor fallback instead of requiring the
+    // label itself to report an enabled interaction state.
     let click_result = element.click().await;
     if let Err(element_click_err) = click_result {
         let clickable = client
@@ -266,8 +259,6 @@ async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
         }
     }
 
-    // Brief pause to let the UI respond to the click.
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     world
         .screenshot(&client, &format!("after-click-{text}"))
         .await;
@@ -480,13 +471,13 @@ async fn gui_should_show_exactly_elements_with_test_id_within(
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
 
     loop {
-        if let Ok(elements) = client.find_all(locator).await {
-            if elements.len() as u64 == expected_count {
-                world
-                    .screenshot(&client, &format!("after-assert-count-testid-{test_id}"))
-                    .await;
-                return;
-            }
+        if let Ok(elements) = client.find_all(locator).await
+            && elements.len() as u64 == expected_count
+        {
+            world
+                .screenshot(&client, &format!("after-assert-count-testid-{test_id}"))
+                .await;
+            return;
         }
 
         if tokio::time::Instant::now() >= deadline {
@@ -706,19 +697,13 @@ async fn click_element_with_title(world: &mut GuiWorld, title: String) {
         .clone();
     let client = wd.lock().await;
 
-    let element = client
-        .wait()
-        .at_most(std::time::Duration::from_secs(5))
-        .for_element(Locator::XPath(&format!("//*[@title='{}']", title)))
-        .await
-        .unwrap_or_else(|_| panic!("element with title '{}' not found within 5 seconds", title));
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css(&format!("[title=\"{}\"]", title)),
+        &format!("element with title '{title}'"),
+    )
+    .await;
 
-    element
-        .click()
-        .await
-        .unwrap_or_else(|_| panic!("failed to click element with title '{}'", title));
-
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     world
         .screenshot(&client, &format!("after-click-title-{title}"))
         .await;
@@ -764,12 +749,12 @@ async fn click_local_chat_row_with_title(world: &mut GuiWorld, title: &str, acti
             panic!("local chat {state} row with title '{title}' not found within 5 seconds")
         });
 
+    gui_acceptance::wait_actionable(&element).await;
     element.click().await.unwrap_or_else(|_| {
         let state = if active { "active" } else { "inactive" };
         panic!("failed to click local chat {state} row with title '{title}'")
     });
 
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     let state = if active { "active" } else { "inactive" };
     world
         .screenshot(&client, &format!("after-click-{state}-local-chat-{title}"))
@@ -824,12 +809,13 @@ async fn click_element_with_test_id(world: &mut GuiWorld, test_id: String) {
         )
         .await;
 
-    element
-        .click()
-        .await
-        .unwrap_or_else(|_| panic!("failed to click element with test id '{}'", test_id));
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css(&format!("[data-testid=\"{}\"]", test_id)),
+        &format!("element with test id '{test_id}'"),
+    )
+    .await;
 
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     world
         .screenshot(&client, &format!("after-click-testid-{test_id}"))
         .await;
@@ -908,6 +894,7 @@ async fn type_into_element_with_test_id(world: &mut GuiWorld, text: String, test
             )
         });
 
+    gui_acceptance::wait_actionable(&element).await;
     element
         .click()
         .await
@@ -920,7 +907,6 @@ async fn type_into_element_with_test_id(world: &mut GuiWorld, text: String, test
         )
     });
 
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     world
         .screenshot(&client, &format!("after-type-{test_id}"))
         .await;
@@ -969,7 +955,6 @@ async fn press_key(world: &mut GuiWorld, key_name: String) {
         .await
         .unwrap_or_else(|_| panic!("failed to send key '{}' to active element", key_name));
 
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     world
         .screenshot(&client, &format!("after-key-{key_name}"))
         .await;
@@ -1026,6 +1011,14 @@ async fn focused_element_has_test_id(world: &mut GuiWorld, expected_test_id: Str
         .clone();
     let client = wd.lock().await;
 
+    gui_acceptance::wait_for_js(
+        &client,
+        "expected focused element",
+        "return document.activeElement?.getAttribute('data-testid') === arguments[0];",
+        vec![expected_test_id.clone().into()],
+        std::time::Duration::from_secs(5),
+    )
+    .await;
     let active = client
         .active_element()
         .await

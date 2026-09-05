@@ -81,6 +81,8 @@ pub struct GuiWorld {
     /// Scenario name, used as the screenshot subdirectory.
     pub scenario_name: String,
 
+    scenario_timing: Option<gui_acceptance::Timing>,
+
     /// Per-scenario screenshot sequence counter for ordered filenames.
     screenshot_seq: u32,
 
@@ -133,6 +135,7 @@ impl GuiWorld {
             last_stderr: String::new(),
             last_exit_code: 0,
             scenario_name: String::new(),
+            scenario_timing: None,
             screenshot_seq: 0,
             daemon: None,
             feature_slug: String::new(),
@@ -340,6 +343,8 @@ async fn main() {
             // `@multi_project` provisions a second project for switcher tests.
             let multi_project = is_multi_project(feature, scenario);
             Box::pin(async move {
+                world.scenario_timing =
+                    Some(gui_acceptance::Timing::new("scenario", &scenario_name));
                 let _ = std::fs::remove_file(gui_acceptance::MOCK_CHAT_RESPONSE_FILE);
                 world.feature_slug = slugify(&feature_name);
                 world.scenario_slug = slugify(&scenario_name);
@@ -357,20 +362,37 @@ async fn main() {
             let scenario_name = world
                 .as_ref()
                 .map(|w| w.scenario_name.clone())
-                .unwrap_or_default();
+                .unwrap_or_else(|| scenario.name.clone());
             Box::pin(async move {
                 let _ = std::fs::remove_file(gui_acceptance::MOCK_CHAT_RESPONSE_FILE);
+                let _cleanup_timing = gui_acceptance::Timing::new("cleanup", &scenario_name);
+                if prefix == "F" {
+                    // Covers every step and before-hook failure, including assertions
+                    // that never call the optional diagnostic screenshot helper.
+                    if let Some(wd) = world.as_ref().and_then(|w| w.webdriver.as_ref()) {
+                        let client = wd.lock().await;
+                        gui_acceptance::screenshot(&client, &scenario_name, 999, "fail-scenario")
+                            .await;
+                    } else {
+                        gui_acceptance::screenshot_existing_session(&scenario_name).await;
+                    }
+                }
                 // Rename the screenshot folder to include the outcome prefix.
                 let safe_name = gui_acceptance::sanitize_name(&scenario_name);
                 if !safe_name.is_empty() {
-                    let src = format!("/app/test-output/{safe_name}");
-                    let dst = format!("/app/test-output/{prefix} - {safe_name}");
+                    let src = format!("{}/{safe_name}", gui_acceptance::output_dir().display());
+                    let dst = format!(
+                        "{}/{prefix} - {safe_name}",
+                        gui_acceptance::output_dir().display()
+                    );
                     // Remove stale destination from a previous run so rename succeeds.
                     let _ = std::fs::remove_dir_all(&dst);
                     // Also remove the opposite-prefix folder so stale F→S flips are cleaned.
                     let other = if prefix == "S" { "F" } else { "S" };
-                    let _ =
-                        std::fs::remove_dir_all(format!("/app/test-output/{other} - {safe_name}"));
+                    let _ = std::fs::remove_dir_all(format!(
+                        "{}/{other} - {safe_name}",
+                        gui_acceptance::output_dir().display()
+                    ));
                     let _ = std::fs::rename(&src, &dst);
                 }
 
@@ -404,6 +426,7 @@ async fn main() {
                         }
                     }
                     steps::setup::after_scenario(world, first_run).await;
+                    world.scenario_timing.take();
                 }
             })
         })

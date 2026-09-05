@@ -94,6 +94,32 @@ async fn create_task_artifact_via_cli(world: &mut GuiWorld, filename: String, ki
         .as_deref()
         .expect("no task ID stored")
         .to_owned();
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver initialized")
+        .clone();
+    {
+        let client = wd.lock().await;
+        // Wait for the selected task's initial attachment query to finish.
+        // Otherwise its empty initial response can overwrite the invalidation
+        // triggered by the CLI mutation immediately after opening the panel.
+        gui_acceptance::wait_for_js(
+            &client,
+            &format!("task {task_id} attachment list loaded"),
+            r#"const panel = document.querySelector('[data-testid="task-detail-panel"]');
+            const id = panel?.querySelector('[data-testid="task-detail-id"]');
+            const section = panel?.querySelector('[data-testid="attachments-section"]');
+            return !!panel && panel.getClientRects().length > 0 &&
+                id?.getAttribute('data-full-id') === arguments[0] && !!section &&
+                !section.querySelector('[role="alert"]') &&
+                (section.textContent.includes('No attachments') ||
+                    !!section.querySelector('[data-testid^="task-artifact-"]'));"#,
+            vec![task_id.clone().into()],
+            std::time::Duration::from_secs(10),
+        )
+        .await;
+    }
     create_artifact(world, &filename, &kind, Some(&task_id), None).await;
 }
 

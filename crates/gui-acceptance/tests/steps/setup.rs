@@ -130,6 +130,7 @@ pub async fn before_scenario(
     first_run: bool,
     multi_project: bool,
 ) {
+    let _timing = gui_acceptance::Timing::new("setup", scenario_name);
     world.scenario_name = scenario_name.to_string();
 
     if first_run {
@@ -210,7 +211,7 @@ pub async fn before_scenario(
         .await;
 
     if project_row.is_err() {
-        world.screenshot(&client, "setup-debug").await;
+        world.screenshot(&client, "fail-setup-project-row").await;
         panic!(
             "project row not found on /setup page for slug '{}' — check test-output/ for screenshot",
             slug
@@ -225,8 +226,8 @@ pub async fn before_scenario(
         .await
         .expect("failed to click project row");
 
-    // Wait for redirect away from /setup (the app navigates to / -> /tasks)
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    gui_acceptance::wait_for_page(&client, "/tasks", Some(&slug)).await;
+    wait_for_realtime(world, &client).await;
     world.screenshot(&client, "after-setup-select").await;
 
     // Release the WebDriver lock before any further provisioning.
@@ -272,4 +273,79 @@ pub async fn after_scenario(world: &mut GuiWorld, first_run: bool) {
     if first_run {
         clear_installed_links();
     }
+}
+
+/// A rendered page (and even a connected socket) can precede project-channel
+/// subscription. Round-trip a mutation through the live task list so the first
+/// scenario mutation cannot be lost during that subscription window.
+async fn wait_for_realtime(world: &mut GuiWorld, client: &fantoccini::Client) {
+    use std::time::Duration;
+    use vertebrae_core::service::{CreateTaskOptions, TaskService, UpdateTaskOptions};
+
+    let _timing = gui_acceptance::Timing::new("realtime-readiness", &world.scenario_name);
+    let service = vertebrae_sacrum_client::SacrumTaskService::new(
+        world
+            .graphql_client
+            .as_ref()
+            .expect("project client initialized")
+            .clone(),
+    );
+    let marker = format!("acceptance-readiness-{}", uuid::Uuid::new_v4());
+    let sentinel_id = tokio::time::timeout(
+        Duration::from_secs(10),
+        service.create_task(CreateTaskOptions::new(&marker)),
+    )
+    .await
+    .expect("timed out creating realtime readiness task")
+    .expect("create realtime readiness task");
+    // Keep a fallback cleanup reference until deletion succeeds, without
+    // changing the task_id the scenario steps use.
+    world.created_task_ids.push(sentinel_id.clone());
+    let result = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut revision = 0;
+        let mut observations = 0;
+        loop {
+            revision += 1;
+            let title = format!("{marker}-{revision}");
+            service.update_task(&sentinel_id, UpdateTaskOptions::new().with_title(&title))
+                .await.map_err(|error| error.to_string())?;
+            let observed = gui_acceptance::wait_until("live readiness task update", Duration::from_millis(250), || async {
+                client.execute(
+                    "return Array.from(document.querySelectorAll('[data-testid=\"task-tree-node-row\"] .t-title')).some(el => el.textContent === arguments[0] && el.getClientRects().length > 0);",
+                    vec![title.clone().into()],
+                ).await.map(|value| value.as_bool() == Some(true)).map_err(|error| error.to_string())
+            }).await;
+            if observed.is_ok() {
+                observations += 1;
+                // The first title could arrive in the initial list query.
+                // A second distinct revision proves live delivery after it.
+                if observations == 2 {
+                    return Ok::<(), String>(());
+                }
+            }
+            // Retry the mutation, not just the observation: the first event may
+            // have preceded the project-channel join.
+        }
+    }).await;
+
+    let deleted = tokio::time::timeout(
+        Duration::from_secs(5),
+        service.delete_task(&sentinel_id, true),
+    )
+    .await;
+    if matches!(deleted, Ok(Ok(()))) {
+        world.created_task_ids.retain(|id| id != &sentinel_id);
+    }
+    assert!(
+        matches!(result, Ok(Ok(()))),
+        "GUI did not observe a live task update in project {:?} within 10s: {result:?}",
+        world.project_slug
+    );
+    assert!(
+        matches!(deleted, Ok(Ok(()))),
+        "failed to remove readiness task: {deleted:?}"
+    );
+    gui_acceptance::wait_for_js(client, "readiness task removed from live list",
+        "return !Array.from(document.querySelectorAll('[data-testid=\"task-tree-node-row\"] .t-title')).some(el => el.textContent.startsWith(arguments[0]));",
+        vec![marker.into()], Duration::from_secs(10)).await;
 }
