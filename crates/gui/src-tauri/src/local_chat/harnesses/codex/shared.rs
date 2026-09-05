@@ -396,6 +396,7 @@ fn emit_error(runtime: &LocalChatRuntime, backend_session_id: &str, error: Strin
             thread_id: None,
             is_root: true,
             error,
+            item_id: None,
         }));
 }
 

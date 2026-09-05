@@ -406,6 +406,10 @@ export function ChatMessages({
           text: streamingAssistant.text,
           timestamp: streamingAssistant.timestamp,
           isPartial: true,
+          lifecycle: "streaming",
+          ...(streamingAssistant.itemId
+            ? { itemId: streamingAssistant.itemId }
+            : {}),
         },
       ],
       { assistantLabel }

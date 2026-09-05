@@ -50,4 +50,54 @@ describe("mergeReplayMessages", () => {
     ).toEqual(["question", "response", "new question"]);
     expect(result.installedMessageCount).toBe(2);
   });
+
+  it("matches keyed streaming and completed items by identity, not text", () => {
+    const result = mergeReplayMessages(
+      [
+        {
+          kind: "assistant",
+          itemId: "item-a",
+          text: "completed A",
+          timestamp: "2026-01-01T00:00:02Z",
+          isPartial: false,
+          lifecycle: "completed",
+        },
+        {
+          kind: "assistant",
+          itemId: "item-b",
+          text: "same text",
+          timestamp: "2026-01-01T00:00:03Z",
+          isPartial: false,
+          lifecycle: "completed",
+        },
+      ],
+      [
+        {
+          kind: "assistant",
+          itemId: "item-a",
+          text: "partial A",
+          timestamp: "2026-01-01T00:00:01Z",
+          isPartial: true,
+          lifecycle: "streaming",
+        },
+        {
+          kind: "assistant",
+          itemId: "item-b",
+          text: "same text",
+          timestamp: "2026-01-01T00:00:03Z",
+          isPartial: false,
+          lifecycle: "completed",
+        },
+      ]
+    );
+
+    expect(result.messages).toEqual([
+      expect.objectContaining({
+        itemId: "item-a",
+        text: "completed A",
+        lifecycle: "completed",
+      }),
+      expect.objectContaining({ itemId: "item-b", text: "same text" }),
+    ]);
+  });
 });

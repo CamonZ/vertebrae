@@ -14,12 +14,12 @@ use std::{
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value, json};
 use vertebrae_harness_core::{
-    AgentMetadata, EventCorrelation, FileChange, FileChangeEvent, FileChangeKind, HarnessError,
-    HarnessEventDraftV1, HarnessEventPayloadV1, PlanEntry, PlanEvent, ProviderResumeId,
-    ProviderThreadRef, SessionId, SessionStarted, StreamId, TailReadOutcome, TextEvent,
-    ThreadDeclared, ThreadId, ThreadKind, ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus,
-    TranscriptReplayRequest, TranscriptTailLines, TurnInput, TurnInputProvenance, UpdateSemantics,
-    record_timestamp,
+    AgentMetadata, CompletionStatus, EventCorrelation, FileChange, FileChangeEvent, FileChangeKind,
+    HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, ItemId, PlanEntry, PlanEvent,
+    ProviderResumeId, ProviderThreadRef, SessionId, SessionStarted, StreamId, TailReadOutcome,
+    TextEvent, ThreadDeclared, ThreadId, ThreadKind, ToolCallEvent, ToolCallId, ToolOutputEvent,
+    ToolStatus, TranscriptReplayRequest, TranscriptTailLines, TurnInput, TurnInputProvenance,
+    UpdateSemantics, record_timestamp,
 };
 
 #[derive(Debug)]
@@ -67,6 +67,18 @@ impl ReplayState {
             provider_sequence: Some(provider_sequence),
             payload,
         }
+    }
+
+    fn item_draft(
+        &self,
+        timestamp: DateTime<Utc>,
+        provider_sequence: u64,
+        item_id: Option<ItemId>,
+        payload: HarnessEventPayloadV1,
+    ) -> HarnessEventDraftV1 {
+        let mut draft = self.draft(timestamp, provider_sequence, payload);
+        draft.correlation.item_id = item_id;
+        draft
     }
 
     fn start_events(
@@ -317,10 +329,14 @@ fn parse_response_item(
                 // They are provider-injected context, not model output, and
                 // replaying them renders the system prompt as a first turn.
                 Some("developer" | "system") => Vec::new(),
-                _ => vec![state.draft(
+                _ => vec![state.item_draft(
                     timestamp,
                     provider_sequence,
-                    HarnessEventPayloadV1::Text(TextEvent { text }),
+                    string(payload, "id").map(ItemId::new),
+                    HarnessEventPayloadV1::Text(TextEvent {
+                        text,
+                        completion_status: Some(CompletionStatus::Completed),
+                    }),
                 )],
             }
         }
@@ -388,10 +404,14 @@ fn parse_exec_item(
         Some("agent_message") => string(item, "text")
             .filter(|text| !text.is_empty())
             .map(|text| {
-                vec![state.draft(
+                vec![state.item_draft(
                     timestamp,
                     provider_sequence,
-                    HarnessEventPayloadV1::Text(TextEvent { text }),
+                    string(item, "id").map(ItemId::new),
+                    HarnessEventPayloadV1::Text(TextEvent {
+                        text,
+                        completion_status: Some(CompletionStatus::Completed),
+                    }),
                 )]
             })
             .unwrap_or_default(),

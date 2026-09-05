@@ -45,6 +45,7 @@ import type {
 } from "../../bindings";
 import {
   parseSessionLogs,
+  type AssistantMessageLifecycle,
   type ConversationEvent,
   type ToolCallEvent,
   type ToolResultEvent,
@@ -90,6 +91,9 @@ export interface ChatMsg {
   speaker?: string;
   model?: string;
   streaming?: boolean;
+  itemId?: string;
+  lifecycle?: AssistantMessageLifecycle;
+  proseFormat?: "markdown" | "plain";
   /** Pre-shaped tool rows (chat owns its own tool toggling). */
   tools?: ToolMessage[];
   /** Rendered prose (markdown string in production). */
@@ -444,7 +448,9 @@ function agentMessage(
   runStartMs: number | null,
   speaker: string | undefined,
   model: string | undefined,
-  reasoning: boolean
+  reasoning: boolean,
+  lifecycle?: AssistantMessageLifecycle,
+  itemId?: string
 ): AgentMessage {
   const atMs = ms(timestamp);
   return {
@@ -459,6 +465,14 @@ function agentMessage(
       : speaker,
     model,
     prose: text,
+    ...(lifecycle
+      ? {
+          lifecycle,
+          ...(itemId ? { itemId } : {}),
+          streaming: lifecycle === "streaming",
+          ...(lifecycle !== "completed" ? { proseFormat: "plain" } : {}),
+        }
+      : {}),
   };
 }
 
@@ -827,7 +841,16 @@ function eventsToMessages(
       }
       case "assistant_message":
         out.push(
-          agentMessage(ev.text, ev.timestamp, runStartMs, speaker, model, false)
+          agentMessage(
+            ev.text,
+            ev.timestamp,
+            runStartMs,
+            speaker,
+            model,
+            false,
+            ev.lifecycle,
+            ev.itemId
+          )
         );
         break;
       case "tool_call":
@@ -1247,6 +1270,9 @@ export function msgsToThread(
         speaker: m.speaker ?? "Backend",
         model: m.model,
         streaming: m.streaming,
+        itemId: m.itemId,
+        lifecycle: m.lifecycle,
+        proseFormat: m.proseFormat,
         tools,
         prose: m.prose,
       };
@@ -1394,7 +1420,10 @@ function stabilizeHistoricMessageKeys(
 ): void {
   messages.forEach((message, index) => {
     if (message.type !== "tool" && message.type !== "spawn") {
-      message.evt = `${prefix}-m${index}`;
+      message.evt =
+        message.type === "agent" && message.itemId
+          ? `${prefix}-item-${message.itemId}`
+          : `${prefix}-m${index}`;
     }
     if (message.type === "spawn") {
       message.thread.turns.forEach((turn, turnIndex) =>

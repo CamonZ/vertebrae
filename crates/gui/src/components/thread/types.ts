@@ -38,6 +38,7 @@
  */
 
 import type { ReactNode } from "react";
+import type { AssistantMessageLifecycle } from "../../types/conversation";
 
 // ===========================================================================
 // Capability flags — how a Thread tree is presented on a given surface.
@@ -266,6 +267,10 @@ export interface AgentMessage extends BaseMessage {
   tools?: ToolMessage[];
   /** Streaming bubble: render a blinking cursor and a spinner speaker dot. */
   streaming?: boolean;
+  /** Provider item identity, retained across live updates and replay. */
+  itemId?: string;
+  /** Per-item lifecycle, including interrupted terminal output. */
+  lifecycle?: AssistantMessageLifecycle;
 }
 
 /**

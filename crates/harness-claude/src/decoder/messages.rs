@@ -1,8 +1,8 @@
 use serde_json::{Map, Value};
 use vertebrae_harness_core::{
-    AgentMetadata, FileChange, FileChangeEvent, FileChangeKind, HarnessEventDraftV1,
-    HarnessEventPayloadV1, PlanEntry, PlanEvent, StreamId, TextEvent, ThreadId, ToolCallEvent,
-    ToolCallId, ToolOutputEvent, ToolStatus, UpdateSemantics,
+    AgentMetadata, CompletionStatus, FileChange, FileChangeEvent, FileChangeKind,
+    HarnessEventDraftV1, HarnessEventPayloadV1, PlanEntry, PlanEvent, StreamId, TextEvent,
+    ThreadId, ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus, UpdateSemantics,
 };
 
 use super::drafts::{is_spawn_tool, optional_bool, required_nonempty_string, required_string};
@@ -60,13 +60,20 @@ impl ClaudeStreamDecoder {
                 "text" => {
                     let text = required_string(item, "text", "text content block")?;
                     if assistant {
-                        drafts.push(self.draft(
+                        let mut draft = self.draft(
                             stream_id.clone(),
                             thread_id,
                             parent.clone(),
                             UpdateSemantics::Snapshot,
-                            HarnessEventPayloadV1::Text(TextEvent { text: text.into() }),
-                        ));
+                            HarnessEventPayloadV1::Text(TextEvent {
+                                text: text.into(),
+                                completion_status: Some(CompletionStatus::Completed),
+                            }),
+                        );
+                        draft.correlation.item_id = self.current_item_id.as_ref().map(|id| {
+                            vertebrae_harness_core::ItemId::new(format!("{id}:block:{index}"))
+                        });
+                        drafts.push(draft);
                     }
                 }
                 "thinking" => {

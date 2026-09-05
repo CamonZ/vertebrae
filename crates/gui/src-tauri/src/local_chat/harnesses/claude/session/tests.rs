@@ -436,6 +436,7 @@ async fn tauri_delivery_failure_is_returned_to_the_harness_event_source() {
             UpdateSemantics::Delta,
             HarnessEventPayloadV1::Text(TextEvent {
                 text: "lost".into(),
+                ..Default::default()
             }),
         ),
     )
@@ -560,7 +561,10 @@ async fn harness_events_preserve_init_text_tool_usage_terminal_and_diagnostic_se
     sink.emit(event(
         2,
         UpdateSemantics::Delta,
-        HarnessEventPayloadV1::Text(TextEvent { text: "hel".into() }),
+        HarnessEventPayloadV1::Text(TextEvent {
+            text: "hel".into(),
+            ..Default::default()
+        }),
     ))
     .await
     .unwrap();
@@ -569,6 +573,7 @@ async fn harness_events_preserve_init_text_tool_usage_terminal_and_diagnostic_se
         UpdateSemantics::Snapshot,
         HarnessEventPayloadV1::Text(TextEvent {
             text: "hello".into(),
+            ..Default::default()
         }),
     ))
     .await

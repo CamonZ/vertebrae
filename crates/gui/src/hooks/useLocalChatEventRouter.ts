@@ -307,7 +307,9 @@ export function routeLocalChatSessionEndEvent(
     payload.backend_session_id,
     sessionId,
     wasStopping ? () => {} : store.setSessionLifecycle,
-    store.clearStreamingAssistant
+    store.clearStreamingAssistant,
+    store.interruptStreamingAssistant,
+    store.completeAssistantMessage
   );
   if (!wasStopping) void flushNextQueuedMessage(sessionId);
   return true;
@@ -320,6 +322,11 @@ export function routeLocalChatSessionErrorEvent(
   if (!sessionId) return false;
   const store = useChatStore.getState();
   if (payload.is_root === false) {
+    store.interruptStreamingAssistant(
+      sessionId,
+      payload.turn_id,
+      payload.item_id
+    );
     store.addMessage(sessionId, {
       kind: "error",
       message: payload.error,
@@ -354,7 +361,9 @@ export function routeLocalChatSessionErrorEvent(
     store.addMessage,
     store.setSessionLifecycle,
     store.clearStreamingAssistant,
-    store.setBackendSessionId
+    store.setBackendSessionId,
+    undefined,
+    store.interruptStreamingAssistant
   );
   store.clearQueuedMessages(sessionId);
   return true;

@@ -73,7 +73,10 @@ async fn sequenced_sink_assigns_ids_and_sequences_per_stream() {
         .emit(HarnessEventDraftV1::new(
             "a",
             UpdateSemantics::Delta,
-            HarnessEventPayloadV1::Text(TextEvent { text: "a1".into() }),
+            HarnessEventPayloadV1::Text(TextEvent {
+                text: "a1".into(),
+                ..Default::default()
+            }),
         ))
         .await
         .unwrap();
@@ -81,7 +84,10 @@ async fn sequenced_sink_assigns_ids_and_sequences_per_stream() {
         .emit(HarnessEventDraftV1::new(
             "b",
             UpdateSemantics::Delta,
-            HarnessEventPayloadV1::Text(TextEvent { text: "b1".into() }),
+            HarnessEventPayloadV1::Text(TextEvent {
+                text: "b1".into(),
+                ..Default::default()
+            }),
         ))
         .await
         .unwrap();
@@ -89,7 +95,10 @@ async fn sequenced_sink_assigns_ids_and_sequences_per_stream() {
         .emit(HarnessEventDraftV1::new(
             "a",
             UpdateSemantics::Delta,
-            HarnessEventPayloadV1::Text(TextEvent { text: "a2".into() }),
+            HarnessEventPayloadV1::Text(TextEvent {
+                text: "a2".into(),
+                ..Default::default()
+            }),
         ))
         .await
         .unwrap();
@@ -113,7 +122,10 @@ async fn ambiguous_dispatch_failure_closes_only_the_affected_stream() {
         HarnessEventDraftV1::new(
             stream,
             UpdateSemantics::Delta,
-            HarnessEventPayloadV1::Text(TextEvent { text: "x".into() }),
+            HarnessEventPayloadV1::Text(TextEvent {
+                text: "x".into(),
+                ..Default::default()
+            }),
         )
     };
 
@@ -143,7 +155,10 @@ async fn cancelling_dispatch_fails_the_reserved_stream_closed() {
             .emit(HarnessEventDraftV1::new(
                 "stream",
                 UpdateSemantics::Delta,
-                HarnessEventPayloadV1::Text(TextEvent { text: "x".into() }),
+                HarnessEventPayloadV1::Text(TextEvent {
+                    text: "x".into(),
+                    ..Default::default()
+                }),
             ))
             .await
     });
@@ -154,7 +169,10 @@ async fn cancelling_dispatch_fails_the_reserved_stream_closed() {
         sink.emit(HarnessEventDraftV1::new(
             "stream",
             UpdateSemantics::Delta,
-            HarnessEventPayloadV1::Text(TextEvent { text: "y".into() }),
+            HarnessEventPayloadV1::Text(TextEvent {
+                text: "y".into(),
+                ..Default::default()
+            }),
         ))
         .await
         .is_err()

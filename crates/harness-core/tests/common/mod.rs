@@ -56,6 +56,9 @@ pub fn text_event(id: &str, stream: &str, sequence: u64, text: &str) -> HarnessE
         stream,
         sequence,
         UpdateSemantics::Delta,
-        HarnessEventPayloadV1::Text(TextEvent { text: text.into() }),
+        HarnessEventPayloadV1::Text(TextEvent {
+            text: text.into(),
+            ..Default::default()
+        }),
     )
 }

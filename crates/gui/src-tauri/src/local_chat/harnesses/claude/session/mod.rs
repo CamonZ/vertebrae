@@ -1299,6 +1299,7 @@ fn emit_start_error(event_sink: &LocalChatEventSink, session_id: &str, error: St
         thread_id: None,
         is_root: true,
         error,
+        item_id: None,
     }));
 }
 

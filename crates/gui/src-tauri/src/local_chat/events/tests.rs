@@ -19,7 +19,9 @@ fn local_chat_event_names_match_public_contract() {
             is_root: true,
             text: "hello".to_string(),
             is_partial: true,
+            completion_status: None,
             parent_tool_use_id: None,
+            item_id: None,
         }),
         LocalChatEvent::TurnStarted(LocalChatTurnStartedEvent {
             backend_session_id: "session-1".to_string(),
@@ -89,6 +91,8 @@ fn local_chat_event_names_match_public_contract() {
             is_error: false,
             context_tokens: 0,
             context_window: 200_000,
+            item_id: None,
+            completion_status: None,
         }),
         LocalChatEvent::Error(LocalChatSessionErrorEvent {
             backend_session_id: "session-1".to_string(),
@@ -97,6 +101,7 @@ fn local_chat_event_names_match_public_contract() {
             thread_id: Some("thread-1".to_string()),
             is_root: true,
             error: "boom".to_string(),
+            item_id: None,
         }),
         LocalChatEvent::Warning(LocalChatSessionWarningEvent {
             backend_session_id: "session-1".to_string(),

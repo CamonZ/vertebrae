@@ -44,7 +44,7 @@ function expectBlockMarkdown(
 }
 
 describe("chat agent prose markdown rendering", () => {
-  it("renders local chat assistant prose as block markdown", () => {
+  it("preserves local partial prose as literal text", () => {
     const markdown = [
       "Plan:",
       "",
@@ -69,12 +69,8 @@ describe("chat agent prose markdown rendering", () => {
       chatMessagesToThread(messages, { collapsed: new Set<string>() })
     );
 
-    expectBlockMarkdown(
-      prose,
-      ["First local item", "Second local item"],
-      "ts",
-      "const local = true;"
-    );
+    expect(prose.querySelector(".markdown-content")).not.toBeInTheDocument();
+    expect(prose.textContent).toBe(markdown);
     expect(prose.querySelector(".ev-cursor")).toBeInTheDocument();
   });
 

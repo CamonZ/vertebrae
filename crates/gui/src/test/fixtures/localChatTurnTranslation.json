@@ -63,7 +63,8 @@
       "result": "root done",
       "is_error": false,
       "context_tokens": 0,
-      "context_window": 1000
+      "context_window": 1000,
+      "completion_status": "completed"
     }
   }
 ]

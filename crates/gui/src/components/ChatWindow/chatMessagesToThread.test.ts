@@ -296,6 +296,44 @@ describe("chatMessagesToThread", () => {
     expect(agent.streaming ?? false).toBe(false);
   });
 
+  it("preserves item identity and renders interrupted text as plain non-streaming prose", () => {
+    const thread = build([
+      {
+        kind: "assistant",
+        itemId: "item-interrupted",
+        text: "received text with *literal* markers",
+        timestamp: TS,
+        isPartial: false,
+        lifecycle: "interrupted",
+      },
+      {
+        kind: "assistant",
+        itemId: "item-completed",
+        text: "**rich completed text**",
+        timestamp: TS,
+        isPartial: false,
+        lifecycle: "completed",
+      },
+    ]);
+    const agents = thread.turns[0].messages.filter(
+      (message): message is AgentMessage => message.type === "agent"
+    );
+
+    expect(agents[0]).toMatchObject({
+      itemId: "item-interrupted",
+      lifecycle: "interrupted",
+      proseFormat: "plain",
+      streaming: false,
+      prose: "received text with *literal* markers",
+    });
+    expect(agents[1]).toMatchObject({
+      itemId: "item-completed",
+      lifecycle: "completed",
+      prose: "**rich completed text**",
+    });
+    expect(agents[1].proseFormat).toBeUndefined();
+  });
+
   it("merges tool_call + tool_result into ONE standalone ToolMessage with body", () => {
     const thread = build([
       { kind: "assistant", text: "running", timestamp: TS, isPartial: false },
@@ -523,6 +561,7 @@ describe("chatMessagesToThread", () => {
       (m) => m.type === "agent"
     ) as AgentMessage;
     expect(a.streaming).toBe(true);
+    expect(a.proseFormat).toBe("plain");
 
     const done = build([
       { kind: "assistant", text: "done", timestamp: TS, isPartial: false },

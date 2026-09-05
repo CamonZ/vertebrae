@@ -313,6 +313,165 @@ describe("parseSessionLogs", () => {
     });
   });
 
+  it("keeps interleaved item identities and terminal lifecycles distinct during replay", () => {
+    const raw = (
+      sequence: number,
+      itemId: string | undefined,
+      semantics: "delta" | "snapshot",
+      text: string,
+      completionStatus?: string
+    ) =>
+      JSON.stringify({
+        version: 1,
+        event_id: `item-${sequence}`,
+        stream_id: "item-stream",
+        sequence,
+        correlation: {
+          session_id: "session-1",
+          thread_id: "root-thread",
+          turn_id: "turn-items",
+          ...(itemId ? { item_id: itemId } : {}),
+        },
+        timestamp: `2024-01-04T08:00:0${sequence}Z`,
+        semantics,
+        type: "text",
+        data: {
+          text,
+          ...(completionStatus ? { completion_status: completionStatus } : {}),
+        },
+      });
+    const logs = [
+      raw(1, "item-a", "delta", "A "),
+      raw(2, "item-b", "delta", "B "),
+      raw(3, "item-a", "snapshot", "A complete", "completed"),
+      raw(4, "item-b", "snapshot", "B complete", "completed"),
+      raw(5, "item-a", "snapshot", "duplicate"),
+      JSON.stringify({
+        version: 1,
+        event_id: "item-end",
+        stream_id: "item-stream",
+        sequence: 6,
+        correlation: {
+          session_id: "session-1",
+          thread_id: "root-thread",
+          turn_id: "turn-items",
+        },
+        timestamp: "2024-01-04T08:00:06Z",
+        semantics: "snapshot",
+        type: "turn_finished",
+        data: { status: "completed" },
+      }),
+    ].map((content, index) => ({
+      ...createLog(content, `2024-01-04T08:00:0${index}Z`, "item-exec"),
+      id: `item-log-${index}`,
+      format: "harness",
+    })) as SessionLog[];
+
+    const assistants = parseSessionLogs(logs).filter(
+      (event): event is Extract<typeof event, { kind: "assistant_message" }> =>
+        event.kind === "assistant_message"
+    );
+
+    expect(assistants).toMatchObject([
+      {
+        itemId: "item-a",
+        text: "A complete",
+        lifecycle: "completed",
+      },
+      {
+        itemId: "item-b",
+        text: "B complete",
+        lifecycle: "completed",
+      },
+    ]);
+  });
+
+  it("does not treat an unclassified item snapshot as successful completion", () => {
+    const logs = [
+      JSON.stringify({
+        version: 1,
+        event_id: "unclassified-delta",
+        stream_id: "unclassified-stream",
+        correlation: { turn_id: "turn-unclassified", item_id: "item-a" },
+        semantics: "delta",
+        type: "text",
+        data: { text: "received" },
+      }),
+      JSON.stringify({
+        version: 1,
+        event_id: "unclassified-snapshot",
+        stream_id: "unclassified-stream",
+        correlation: { turn_id: "turn-unclassified", item_id: "item-a" },
+        semantics: "snapshot",
+        type: "text",
+        data: { text: "provider replacement" },
+      }),
+    ].map((content, index) => ({
+      ...createLog(content, `2024-01-06T08:00:0${index}Z`, "unclassified-exec"),
+      id: `unclassified-log-${index}`,
+      format: "harness",
+    })) as SessionLog[];
+
+    expect(parseSessionLogs(logs)).toEqual([
+      expect.objectContaining({
+        kind: "assistant_message",
+        itemId: "item-a",
+        text: "received",
+        turnId: "turn-unclassified",
+        lifecycle: "streaming",
+      }),
+    ]);
+  });
+
+  it.each(["turn_finished", "error"] as const)("interrupts pending text on %s", (terminalType) => {
+    const makeLog = (
+      sequence: number,
+      type: "text" | "turn_finished" | "error",
+      data: Record<string, unknown>,
+      itemId?: string
+    ): SessionLog => ({
+      ...createLog(
+        JSON.stringify({
+          version: 1,
+          event_id: `cancel-${sequence}`,
+          stream_id: "cancel-stream",
+          sequence,
+          correlation: {
+            turn_id: "cancelled-turn",
+            ...(itemId ? { item_id: itemId } : {}),
+          },
+          timestamp: `2024-01-05T08:00:0${sequence}Z`,
+          semantics: type === "text" ? "delta" : "snapshot",
+          type,
+          data,
+        }),
+        `2024-01-05T08:00:0${sequence}Z`,
+        "cancel-exec"
+      ),
+      id: `cancel-log-${sequence}`,
+      format: "harness",
+    });
+
+    const assistants = parseSessionLogs([
+      makeLog(1, "text", { text: "received A" }, "item-a"),
+      makeLog(2, "text", { text: "received B" }, "item-b"),
+      makeLog(3, terminalType, { status: "cancelled" }),
+    ]).filter((event) => event.kind === "assistant_message");
+
+    expect(assistants).toEqual([
+      expect.objectContaining({
+        itemId: "item-a",
+        text: "received A",
+        lifecycle: "interrupted",
+      }),
+      expect.objectContaining({
+        itemId: "item-b",
+        text: "received B",
+        lifecycle: "interrupted",
+      }),
+    ]);
+  });
+
   it("uses the provider label when a harness session start has no model", () => {
     const events = parseSessionLogs([
       {
