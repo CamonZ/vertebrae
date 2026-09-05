@@ -11,3 +11,6 @@ vertebrae-core = { path = "../core" }
 vertebrae-harness-claude = { path = "../harness-claude" }
 vertebrae-harness-codex = { path = "../harness-codex" }
 vertebrae-harness-core = { path = "../harness-core" }
+
+[lints]
+workspace = true

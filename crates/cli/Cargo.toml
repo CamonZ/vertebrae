@@ -42,3 +42,6 @@ vertebrae-core = { path = "../core" }
 [[test]]
 name = "integration_tests"
 path = "tests/integration_tests/mod.rs"
+
+[lints]
+workspace = true

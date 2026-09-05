@@ -2,6 +2,21 @@
 
 ## Rust Tests
 
+### Guideline enforcement
+
+The workspace's focused Clippy policy and its limits are documented in
+[Rust guideline enforcement](rust-guideline-enforcement.md). Every member opts
+into the shared lint table. CI denies warnings and checks policy fixtures:
+
+```bash
+cargo clippy --locked --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance -- -D warnings
+python3 scripts/check-rust-guidelines.py
+```
+
+The fixture script requires Python 3.11+ and cached `tracing` dependencies from
+the preceding Clippy build; its temporary Cargo project runs offline. GUI
+Clippy checks still require the documented Tauri sidecar preparation.
+
 ### Unit and Integration Tests
 
 ```bash

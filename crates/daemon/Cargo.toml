@@ -35,3 +35,6 @@ vertebrae-sacrum-client = { path = "../sacrum-client" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
+
+[lints]
+workspace = true

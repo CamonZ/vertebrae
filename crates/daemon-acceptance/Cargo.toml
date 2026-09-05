@@ -27,3 +27,6 @@ path = "src/bin/mock_codex.rs"
 [[test]]
 name = "daemon_acceptance"
 harness = false
+
+[lints]
+workspace = true
