@@ -61,17 +61,30 @@ async fn uncheck_install_component(world: &mut GuiWorld, test_id: String) {
         .expect("failed to read checkbox selected state");
 
     if is_checked {
+        gui_acceptance::wait_actionable(&checkbox).await;
         checkbox
             .click()
             .await
             .unwrap_or_else(|_| panic!("failed to uncheck '{}'", test_id));
     }
 
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     world
         .screenshot(&client, &format!("after-uncheck-{test_id}"))
         .await;
 
+    gui_acceptance::wait_until(
+        "unchecked install component",
+        std::time::Duration::from_secs(10),
+        || async {
+            checkbox
+                .is_selected()
+                .await
+                .map(|checked| !checked)
+                .map_err(|error| error.to_string())
+        },
+    )
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
     let still_checked = checkbox
         .is_selected()
         .await

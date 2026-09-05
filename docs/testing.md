@@ -171,3 +171,61 @@ Checks run in order:
 2. `cargo clippy --quiet -- -D warnings` — linting
 3. `cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance --fail-under-lines 75` — tests + coverage >= 75%
 4. `npm run test` (in `crates/gui`) — React tests
+
+### Timed acceptance runs with reusable caches
+
+Use Python 3 on the host to run the isolated Docker stack:
+
+```bash
+python3 scripts/acceptance.py              # CLI, GUI, daemon; all results collected
+python3 scripts/acceptance.py gui          # One suite
+GUI_ACCEPTANCE_SCREENSHOTS=all python3 scripts/acceptance.py gui
+python3 -m unittest discover -s scripts/tests -p test_acceptance_runner.py
+```
+
+The runner creates a unique Compose project for every invocation and always
+tears it down, including its database and temporary GUI node_modules volume.
+The cache overlay keeps Cargo downloads, compiled targets, Rust toolchains, and
+npm downloads in external Docker volumes. These survive runtime teardown.
+Local cache identity derives from the checkout path; CI supplies the runner name
+through `VTB_ACCEPTANCE_CACHE_KEY`. The runner prints the resolved cache name.
+To benchmark an empty cache, supply a new key; reuse that key for warm runs.
+Only remove these named cache volumes when no run is using them.
+
+The runner uses nonblocking Unix file locks on both the checkout and cache
+identity. A second run that would modify the same staged sidecars, frontend
+files, or compiled binaries fails with a clear message. Independent worktrees
+with different cache identities can run independently. Direct `docker compose`
+commands remain available, but do not use the cache overlay or these locks;
+do not overlap them with a managed run in the same checkout.
+
+Logs, failure screenshots, and JSONL timings are written to a unique directory
+under `test-output/`, or to `VTB_ACCEPTANCE_OUTPUT` when explicitly supplied.
+Use a distinct output directory for each run. CI uploads this directory even
+when a suite fails. Runner timings separate image preparation, backend startup,
+seeding, each suite, and cleanup. Entrypoint timings separate compilation from
+scenario execution; the latter includes an incremental Cargo freshness check.
+GUI timings additionally record setup, scenario, cleanup, and screenshot costs.
+Scenario timing includes setup and cleanup; do not add these nested measurements
+together when computing total wall time.
+
+GUI navigation and project setup wait for the expected route, visible page
+content, and selected project. Setup also creates a temporary task, observes two
+distinct title updates through the live list, then deletes it and waits for its
+removal. This closes the gap between page rendering and channel subscription;
+the first observation alone could come from the initial fetch. The task remains
+tracked for fallback cleanup if readiness fails. Interaction targets must be visible and enabled;
+subsequent assertions wait for their required state. The waits probe immediately
+and share a bounded deadline, including slow WebDriver requests. Failure
+screenshots are enabled by default; `GUI_ACCEPTANCE_SCREENSHOTS=all` restores
+per-action diagnostics. Mock delays that test cancellation remain intact.
+
+Suite execution remains sequential by default. The GUI already reuses a single
+WebDriver session and shares its installation links and mock response path.
+Any future GUI sharding must isolate those resources and assign every feature
+exactly once. Likewise, suite-level parallelism requires a separate build phase
+and immutable runtime artifacts; concurrently invoking today's build entrypoints
+would contend for the same Cargo target and staging paths. Compare the recorded
+execution times and available CPU/memory before adding either mechanism.
+The existing dev/test optimization profiles are retained until a controlled
+benchmark demonstrates that aligning them improves total build-plus-test time.

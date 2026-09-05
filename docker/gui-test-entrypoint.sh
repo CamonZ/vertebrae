@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source /app/docker/acceptance-timing.sh
+ACCEPTANCE_SUITE=gui
+cleanup() {
+    for process_id in "${TAURI_DRIVER_PID:-}" "${VITE_PID:-}" "${XVFB_PID:-}"; do
+        if [ -n "$process_id" ]; then
+            kill "$process_id" 2>/dev/null || true
+        fi
+    done
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Copy the base config to a writable location — tests need to register/unregister
 # per-scenario projects into this file.
@@ -30,7 +42,7 @@ done
 # Install frontend dependencies
 echo "==> Installing frontend dependencies..."
 cd /app/crates/gui
-npm ci --prefer-offline
+acceptance_time npm-install npm ci --prefer-offline
 
 # Start Vite dev server in the background — the debug Tauri binary connects to
 # localhost:1420 rather than serving embedded assets.
@@ -56,13 +68,13 @@ cd /app
 # script validates that every `externalBin` declared in tauri.conf.json exists
 # for the active target triple, so they must be present first.
 echo "==> Staging vtb/vtb-daemon/vtb-gate sidecars (debug)..."
-SIDECAR_PROFILE=debug node /app/crates/gui/scripts/prepare-sidecars.mjs
+acceptance_time build-sidecars env SIDECAR_PROFILE=debug node /app/crates/gui/scripts/prepare-sidecars.mjs
 
 # Build the Tauri app and mock-claude (debug mode for speed). The sidecars
 # were already built by the sidecar staging step above.
 echo "==> Building Tauri app, mock Claude/Codex binaries..."
-VERTEBRAE_BUNDLE_SIDECARS=1 cargo build -p gui --bin gui --quiet
-cargo build -p daemon-acceptance --bin mock-claude --bin mock-codex --quiet
+acceptance_time build-gui env VERTEBRAE_BUNDLE_SIDECARS=1 cargo build --locked -p gui --bin gui --quiet
+acceptance_time build-mocks cargo build --locked -p daemon-acceptance --bin mock-claude --bin mock-codex --quiet
 
 # Install the component binaries that the GUI expects to find on a normal
 # machine. The files in data_bin are the managed install; ~/.local/bin contains
@@ -105,23 +117,18 @@ echo "==> Starting tauri-driver on port 4444..."
 tauri-driver --port 4444 &
 TAURI_DRIVER_PID=$!
 
-# Give tauri-driver a moment to bind
-sleep 1
+# Check the listening socket instead of paying a fixed startup delay.
+for i in $(seq 1 100); do
+    if (echo > /dev/tcp/127.0.0.1/4444) 2>/dev/null; then
+        break
+    fi
+    if ! kill -0 "$TAURI_DRIVER_PID" 2>/dev/null || [ "$i" -eq 100 ]; then
+        echo "ERROR: tauri-driver failed to become ready" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
 
-# Verify tauri-driver is running
-if ! kill -0 "$TAURI_DRIVER_PID" 2>/dev/null; then
-    echo "ERROR: tauri-driver failed to start"
-    exit 1
-fi
-echo "==> tauri-driver started (PID: $TAURI_DRIVER_PID)"
-
-# Run the GUI acceptance tests
 echo "==> Running GUI acceptance tests..."
-cargo test -p gui-acceptance --test gui_acceptance
-TEST_EXIT=$?
-
-# Cleanup
-kill "$TAURI_DRIVER_PID" 2>/dev/null || true
-kill "$VITE_PID" 2>/dev/null || true
-kill "$XVFB_PID" 2>/dev/null || true
-exit $TEST_EXIT
+acceptance_time build-tests cargo test --locked -p gui-acceptance --test gui_acceptance --no-run
+acceptance_time scenarios cargo test --locked -p gui-acceptance --test gui_acceptance -- "$@"

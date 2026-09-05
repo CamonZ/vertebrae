@@ -51,12 +51,15 @@ async fn click_project_entry(world: &mut GuiWorld, slug: &str) {
         )
         .await;
 
+    gui_acceptance::wait_actionable(&element).await;
     element
         .click()
         .await
         .unwrap_or_else(|_| panic!("failed to click element with test id '{}'", test_id));
 
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    gui_acceptance::wait_for_js(&client, "selected project and closed switcher",
+        "return document.querySelector('[data-testid=\"sidebar-project-avatar\"]')?.getAttribute('aria-label') === 'Switch project · ' + arguments[0] && !document.querySelector('[data-testid=\"sidebar-project-switcher\"]');",
+        vec![slug.into()], std::time::Duration::from_secs(10)).await;
     world
         .screenshot(&client, &format!("after-click-testid-{test_id}"))
         .await;
@@ -94,11 +97,11 @@ async fn click_local_chat_plus_action(world: &mut GuiWorld, project: String) {
         .for_element(Locator::XPath(&format!("//*[@title='{title}']")))
         .await
         .unwrap_or_else(|_| panic!("local chat plus action for project '{slug}' not found"));
+    gui_acceptance::wait_actionable(&element).await;
     element
         .click()
         .await
         .unwrap_or_else(|_| panic!("failed to click local chat plus action for '{slug}'"));
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     world
         .screenshot(&client, &format!("after-project-chat-plus-{project}"))
         .await;
@@ -160,7 +163,6 @@ async fn choose_local_chat_provider(world: &mut GuiWorld, provider: String) {
         .select_by_value(&provider)
         .await
         .expect("failed to select local chat provider");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     world
         .screenshot(&client, &format!("after-select-provider-{provider}"))
         .await;
@@ -180,8 +182,11 @@ async fn local_chat_provider_should_be(world: &mut GuiWorld, provider: String, t
         .for_element(Locator::Css("[data-testid='local-chat-provider-picker']"))
         .await
         .expect("local chat provider picker not found");
+    gui_acceptance::wait_for_js(&client, "selected local chat provider",
+        "return document.querySelector('[data-testid=\"local-chat-provider-picker\"]')?.value === arguments[0];",
+        vec![provider.clone().into()], std::time::Duration::from_secs(timeout)).await;
     let value = element
-        .attr("value")
+        .prop("value")
         .await
         .expect("failed to read local chat provider")
         .unwrap_or_default();
@@ -210,11 +215,11 @@ async fn second_project_is_active_within(world: &mut GuiWorld, timeout: u64) {
         .for_element(Locator::Css("[data-testid=\"sidebar-project-avatar\"]"))
         .await
         .expect("project avatar not found within 5 seconds");
+    gui_acceptance::wait_actionable(&avatar).await;
     avatar
         .click()
         .await
         .expect("failed to click project avatar to re-open the switcher");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     world
         .screenshot(&client, "before-assert-second-project-active")

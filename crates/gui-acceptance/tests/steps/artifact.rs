@@ -43,11 +43,15 @@ async fn toggle_artifact_folder(world: &mut GuiWorld, folder: &str, action: &str
         .find(Locator::Css(&format!("button[aria-label=\"{action}\"]")))
         .await
         .unwrap_or_else(|_| panic!("artifact folder '{folder}' is not {action}able"));
+    gui_acceptance::wait_actionable(&button).await;
     button
         .click()
         .await
         .unwrap_or_else(|_| panic!("failed to {action} artifact folder '{folder}'"));
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    gui_acceptance::wait_for_js(&client, &format!("{action} artifact folder {folder}"),
+        "return document.querySelector('[data-testid=' + CSS.escape(arguments[0]) + ']')?.getAttribute('aria-expanded') === arguments[1];",
+        vec![folder_test_id(folder).into(), (if action == "Expand" { "true" } else { "false" }).into()],
+        std::time::Duration::from_secs(10)).await;
     world
         .screenshot(&client, &format!("after-{action}-artifact-folder-{folder}"))
         .await;
@@ -68,23 +72,22 @@ async fn artifact_tree_folder_should_be_expanded(
     let locator = Locator::Css(&format!("[data-testid=\"{}\"]", folder_test_id(&folder)));
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
     loop {
-        if let Ok(element) = client.find(locator).await {
-            if element
+        if let Ok(element) = client.find(locator).await
+            && element
                 .attr("aria-expanded")
                 .await
                 .ok()
                 .flatten()
                 .as_deref()
                 == Some("true")
-            {
-                world
-                    .screenshot(
-                        &client,
-                        &format!("after-assert-expanded-artifact-folder-{folder}"),
-                    )
-                    .await;
-                return;
-            }
+        {
+            world
+                .screenshot(
+                    &client,
+                    &format!("after-assert-expanded-artifact-folder-{folder}"),
+                )
+                .await;
+            return;
         }
         if tokio::time::Instant::now() >= deadline {
             world
