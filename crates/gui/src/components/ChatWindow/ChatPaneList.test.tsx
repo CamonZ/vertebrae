@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ChatPaneList } from "./ChatPaneList";
+import { useChatStore } from "../../stores/chatStore";
 import type { ChatPane, ChatSession } from "../../stores/chatStore";
 
 vi.mock("./ChatWindow", () => ({
@@ -29,11 +30,13 @@ function createSession(id: string): ChatSession {
 function renderPaneList() {
   const panes: ChatPane[] = [{ id: "pane-1", sessionId: "session-1" }];
   const focusPane = vi.fn();
+  useChatStore.setState({
+    sessions: { "session-1": createSession("session-1") },
+  });
 
   render(
     <ChatPaneList
       visiblePanes={panes}
-      sessions={{ "session-1": createSession("session-1") }}
       activePaneId={null}
       isMaximized={false}
       canAddSplitPane={false}

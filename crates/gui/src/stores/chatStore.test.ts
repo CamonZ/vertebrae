@@ -20,6 +20,8 @@ describe("chatStore", () => {
       paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
       localSessionSummaries: {},
+      spawnOutlineRevisions: {},
+      spawnOutlineSignatures: {},
     });
   });
 
@@ -559,12 +561,13 @@ describe("chatStore", () => {
       expect(reopened).toBe(id);
 
       await vi.waitFor(() =>
-        expect(useChatStore.getState().sessions[id].providerReplay)
-          .toMatchObject({
-            loading: null,
-            loaded: false,
-            error: "transcript unavailable",
-          })
+        expect(
+          useChatStore.getState().sessions[id].providerReplay
+        ).toMatchObject({
+          loading: null,
+          loaded: false,
+          error: "transcript unavailable",
+        })
       );
       expect(replay).toHaveBeenCalledTimes(1);
       // Title regeneration derives from the replay state machine and must not
@@ -1853,6 +1856,29 @@ describe("chatStore", () => {
   });
 
   describe("addMessage", () => {
+    it("invalidates the spawn outline when the first agent call is inserted", () => {
+      const id = useChatStore.getState().openSession("Spawn outline");
+      // A session loaded by an older runtime may not have the derived
+      // signature yet. The first relevant mutation must still invalidate it.
+      useChatStore.setState({
+        spawnOutlineRevisions: {},
+        spawnOutlineSignatures: {},
+      });
+
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent-1",
+        input: '{"description":"inspect"}',
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+
+      expect(useChatStore.getState().spawnOutlineRevisions[id]).toBe(1);
+      expect(useChatStore.getState().spawnOutlineSignatures[id]).toContain(
+        "agent-1"
+      );
+    });
+
     it("appends a message to the session", () => {
       const id = useChatStore.getState().openSession("T1");
 
@@ -2689,6 +2715,17 @@ describe("chatStore", () => {
   });
 
   describe("setProviderResumeId", () => {
+    it("invalidates spawn filtering when the provider resume ID changes", () => {
+      const id = useChatStore.getState().openSession("Provider thread");
+      const before = useChatStore.getState().spawnOutlineRevisions[id] ?? 0;
+
+      useChatStore.getState().setProviderResumeId(id, "conv-abc-123");
+
+      expect(useChatStore.getState().spawnOutlineRevisions[id]).toBe(
+        before + 1
+      );
+    });
+
     it("sets the conversation ID", () => {
       const id = useChatStore.getState().openSession("T1");
 
@@ -3145,9 +3182,9 @@ describe("chatStore", () => {
         localSessionSummaries: {},
       });
 
-      await expect(useChatStore.getState().selectPersistedSession(id)).resolves.toBe(
-        true
-      );
+      await expect(
+        useChatStore.getState().selectPersistedSession(id)
+      ).resolves.toBe(true);
 
       expect(useChatStore.getState().sessions[id]).toMatchObject({
         title: "Keep This Title",
@@ -3211,6 +3248,27 @@ describe("chatStore", () => {
   });
 
   describe("clearMessages", () => {
+    it("invalidates spawn metadata when clearing a session", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent-clear",
+        input: "{}",
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+      const before = useChatStore.getState().spawnOutlineRevisions[id] ?? 0;
+
+      useChatStore.getState().clearMessages(id);
+
+      expect(useChatStore.getState().spawnOutlineRevisions[id]).toBe(
+        before + 1
+      );
+      expect(useChatStore.getState().spawnOutlineSignatures[id]).not.toContain(
+        "agent-clear"
+      );
+    });
+
     it("empties durable messages and removes the streaming tail", () => {
       const id = useChatStore.getState().openSession("T1");
 

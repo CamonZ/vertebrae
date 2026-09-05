@@ -1,10 +1,6 @@
 import { useCallback, useMemo } from "react";
-import {
-  MAX_CHAT_PANES,
-  normalizePaneLayout,
-  useChatStore,
-} from "../stores/chatStore";
-import type { ChatPane, ChatSession } from "../stores/chatStore";
+import { MAX_CHAT_PANES, useChatStore } from "../stores/chatStore";
+import type { ChatPane, ChatPaneLayout } from "../stores/chatStore";
 
 /** Pane split requires a minimum width per pane plus the history column. */
 export const MIN_SPLIT_PANE_WIDTH = 360;
@@ -20,12 +16,12 @@ interface UseChatPaneManagementOptions {
   isMaximized: boolean;
   /** The currently rendered panel width (used for split eligibility). */
   renderedPanelWidth: number;
-  /** The active chat session, if any. */
-  activeSession: ChatSession | null;
+  /** The active chat session ID, if any. */
+  activeSessionId: string | null;
 }
 
 interface UseChatPaneManagementResult {
-  normalizedPaneLayout: ReturnType<typeof normalizePaneLayout>;
+  normalizedPaneLayout: ChatPaneLayout;
   visiblePanes: ChatPane[];
   activePaneId: string | null;
   canAddSplitPane: boolean;
@@ -43,28 +39,27 @@ interface UseChatPaneManagementResult {
 export function useChatPaneManagement({
   isMaximized,
   renderedPanelWidth,
-  activeSession,
+  activeSessionId,
 }: UseChatPaneManagementOptions): UseChatPaneManagementResult {
-  const sessions = useChatStore((s) => s.sessions);
   const paneLayout = useChatStore((s) => s.paneLayout);
   const focusPane = useChatStore((s) => s.focusPane);
   const closePane = useChatStore((s) => s.closePane);
   const unsplitPanes = useChatStore((s) => s.unsplitPanes);
 
-  const normalizedPaneLayout = useMemo(
-    () => normalizePaneLayout(paneLayout, sessions),
-    [paneLayout, sessions]
-  );
+  // Store actions keep pane bindings synchronized with open sessions. Avoid
+  // subscribing to the sessions map here: text deltas replace that map while
+  // leaving the pane layout unchanged.
+  const normalizedPaneLayout = paneLayout;
   const normalizedPanes = normalizedPaneLayout.panes;
   const fallbackPane = useMemo<ChatPane | null>(
     () =>
-      activeSession
+      activeSessionId
         ? {
-            id: paneLayout.activePaneId ?? `single-${activeSession.id}`,
-            sessionId: activeSession.id,
+            id: paneLayout.activePaneId ?? `single-${activeSessionId}`,
+            sessionId: activeSessionId,
           }
         : null,
-    [activeSession, paneLayout.activePaneId]
+    [activeSessionId, paneLayout.activePaneId]
   );
   const visiblePanes = useMemo<ChatPane[]>(() => {
     if (isMaximized && normalizedPanes.length > 0) return normalizedPanes;
