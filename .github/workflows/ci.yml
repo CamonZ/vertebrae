@@ -40,30 +40,9 @@ jobs:
         run: npm ci
         working-directory: crates/gui
 
-      - name: Run React tests
-        run: npm test
-        working-directory: crates/gui
-
-      - name: Check formatting
-        run: cargo fmt --check
-
-      # The GUI declares vtb/vtb-daemon/vtb-gate as Tauri externalBin
-      # sidecars. Stage them before compiling the GUI crate.
-      - name: Stage Tauri sidecars
-        run: cd crates/gui && SIDECAR_PROFILE=debug npm run tauri:prepare-sidecars
-
-      - name: Test Tauri sidecar staging
-        run: cd crates/gui && npm run test:sidecars
-
-      - name: Run clippy
-        run: cargo clippy --locked --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance -- -D warnings
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Verify Rust guideline enforcement
-        run: python3 scripts/check-rust-guidelines.py
-
-      - name: Run tests with coverage
-        run: cargo llvm-cov --workspace --exclude gui --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance --fail-under-lines 75
+      - name: Run authoritative validation
+        run: scripts/validate.sh

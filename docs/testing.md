@@ -1,5 +1,21 @@
 # Testing
 
+## Validation entrypoint
+
+Use the repository entrypoint for the authoritative completion checks:
+
+```bash
+scripts/validate.sh rust  # focused Rust iteration
+scripts/validate.sh gui   # focused GUI iteration
+scripts/validate.sh       # full completion profile
+```
+
+The script resolves paths from the repository root, fails on the first failed
+profile command, and does not run acceptance tests or mutate the local Sacrum
+database. GUI prerequisites are installed with `npm ci` in `crates/gui`.
+Acceptance suites remain Docker-only and are intentionally outside these
+profiles.
+
 ## Rust Tests
 
 ### Guideline enforcement
