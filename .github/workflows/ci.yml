@@ -56,7 +56,14 @@ jobs:
         run: cd crates/gui && npm run test:sidecars
 
       - name: Run clippy
-        run: cargo clippy --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance -- -D warnings
+        run: cargo clippy --locked --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance -- -D warnings
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify Rust guideline enforcement
+        run: python3 scripts/check-rust-guidelines.py
 
       - name: Run tests with coverage
         run: cargo llvm-cov --workspace --exclude gui --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance --fail-under-lines 75

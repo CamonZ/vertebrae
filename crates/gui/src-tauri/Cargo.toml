@@ -91,3 +91,6 @@ tempfile = "3"
 serial_test = "3"
 wiremock = "0.6"
 toml = "0.9"
+
+[lints]
+workspace = true

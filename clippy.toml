@@ -1,0 +1,6 @@
+# OBS-003: synchronous tracing span guards must not cross suspension points.
+# These checks do not prove complete span propagation or general async safety.
+await-holding-invalid-types = [
+  { path = "tracing::span::Entered", reason = "Use Instrument or end the synchronous span guard before awaiting (OBS-003)." },
+  { path = "tracing::span::EnteredSpan", reason = "Use Instrument or end the synchronous span guard before awaiting (OBS-003)." },
+]

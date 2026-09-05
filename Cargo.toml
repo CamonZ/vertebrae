@@ -25,3 +25,12 @@ lto = "thin"                    # Good balance of speed and link time
 codegen-units = 16
 strip = true
 panic = "abort"
+
+# Focused checks mapped to docs/rust-guideline-enforcement.json.
+# Do not enable the entire restriction/pedantic groups without a scoped audit.
+[workspace.lints.clippy]
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+await_holding_invalid_type = "deny"
+let_underscore_future = "deny"
+dbg_macro = "deny"
