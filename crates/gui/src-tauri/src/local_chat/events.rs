@@ -42,7 +42,13 @@ pub struct LocalChatTextEvent {
     pub is_root: bool,
     pub text: String,
     pub is_partial: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub completion_status: Option<String>,
     pub parent_tool_use_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub item_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
@@ -157,6 +163,12 @@ pub struct LocalChatSessionEndEvent {
     pub is_error: bool,
     pub context_tokens: u32,
     pub context_window: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub completion_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
@@ -173,6 +185,9 @@ pub struct LocalChatSessionErrorEvent {
     #[specta(optional)]
     pub is_root: bool,
     pub error: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub item_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]

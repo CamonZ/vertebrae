@@ -18,6 +18,7 @@ interface HarnessRawEvent {
     thread_id?: string;
     turn_id?: string;
     run_id?: string;
+    item_id?: string;
     parent_tool_call_id?: string;
     provider_resume_id?: string;
   };
@@ -72,9 +73,16 @@ export interface ThinkingEvent extends BaseEvent {
 }
 
 /** Final assistant text intended for the user. */
+export type AssistantMessageLifecycle = "streaming" | "completed" | "interrupted";
+
 export interface AssistantMessageEvent extends BaseEvent {
   kind: "assistant_message";
   text: string;
+  /** Provider-neutral item identity, when the harness supplies one. */
+  itemId?: string;
+  turnId?: string;
+  /** Terminal/streaming state for this individual assistant item. */
+  lifecycle?: AssistantMessageLifecycle;
 }
 
 /** Provider heartbeat activity, when represented by a harness adapter. */
@@ -431,6 +439,16 @@ function harnessTurnKey(event: HarnessRawEvent): string | undefined {
   return undefined;
 }
 
+function harnessItemId(event: HarnessRawEvent): string | undefined {
+  return readString(readRecord(event.correlation)?.item_id);
+}
+
+function terminalAssistantLifecycle(
+  status: string | undefined
+): AssistantMessageLifecycle {
+  return !status || status === "completed" ? "completed" : "interrupted";
+}
+
 /**
  * Projects persisted provider-neutral harness events onto the shared
  * conversation-event model.
@@ -486,7 +504,22 @@ function parseHarnessEvent(
       const text = readString(data.text);
       if (text) {
         if (turnKey) state.turnsWithText.add(turnKey);
-        events.push({ kind: "assistant_message", timestamp, text });
+        const itemId = harnessItemId(raw);
+        const completionStatus = readString(data.completion_status)?.toLowerCase();
+        const lifecycle =
+          raw.semantics === "delta"
+            ? "streaming"
+            : completionStatus
+              ? terminalAssistantLifecycle(completionStatus)
+              : undefined;
+        events.push({
+          kind: "assistant_message",
+          timestamp,
+          text,
+          ...(itemId ? { itemId } : {}),
+          ...(raw.correlation?.turn_id ? { turnId: raw.correlation.turn_id } : {}),
+          ...(itemId && lifecycle ? { lifecycle } : {}),
+        });
       }
       break;
     }
@@ -590,8 +623,19 @@ function parseHarnessEvent(
     case "turn_finished":
     case "run_finished": {
       const resultText = readString(data.result_text);
+      const lifecycle = terminalAssistantLifecycle(
+        readString(data.status)?.toLowerCase()
+      );
       if (resultText && (!turnKey || !state.turnsWithText.has(turnKey))) {
-        events.push({ kind: "assistant_message", timestamp, text: resultText });
+        const itemId = harnessItemId(raw);
+        events.push({
+          kind: "assistant_message",
+          timestamp,
+          text: resultText,
+          ...(itemId ? { itemId } : {}),
+          ...(raw.correlation?.turn_id ? { turnId: raw.correlation.turn_id } : {}),
+          ...(itemId || lifecycle === "interrupted" ? { lifecycle } : {}),
+        });
       }
       events.push({
         kind: "session_end",
@@ -608,6 +652,8 @@ function parseHarnessEvent(
 interface HarnessParseState {
   /** Current text/reasoning delta row, keyed by turn and payload type. */
   activeDeltaByPayloadKey: Map<string, number>;
+  /** Terminal/streaming assistant rows keyed by provider item identity. */
+  assistantIndexByItemId: Map<string, number>;
   /** Avoid duplicating a terminal result after provider text was already shown. */
   turnsWithText: Set<string>;
   /** Snapshot plans replace their prior version instead of growing the trace. */
@@ -618,7 +664,9 @@ interface HarnessParseState {
 function harnessDeltaPayloadKey(raw: HarnessRawEvent): string | undefined {
   if (raw.type !== "text" && raw.type !== "reasoning") return undefined;
   const turnKey = harnessTurnKey(raw);
-  return turnKey ? `${turnKey}:${raw.type}` : undefined;
+  const itemId = harnessItemId(raw);
+  if (!turnKey && !itemId) return undefined;
+  return `${turnKey ?? `stream:${raw.stream_id}`}:${raw.type}:${itemId ?? "legacy"}`;
 }
 
 function mergeHarnessDeltaEvent(
@@ -632,12 +680,37 @@ function mergeHarnessDeltaEvent(
   const isSnapshot = raw.semantics === "snapshot";
 
   if (
-    !payloadKey ||
     (event.kind !== "assistant_message" && event.kind !== "thinking") ||
     (!isDelta && !isSnapshot)
   ) {
     return false;
   }
+
+  if (event.kind === "assistant_message" && event.itemId) {
+    const priorIndex = state.assistantIndexByItemId.get(event.itemId);
+    if (priorIndex !== undefined) {
+      const previous = events[priorIndex];
+      if (previous?.kind !== "assistant_message") return true;
+      if (previous.lifecycle !== "streaming") return true;
+      if (isSnapshot && event.lifecycle && event.lifecycle !== "streaming") {
+        events[priorIndex] = event;
+        state.activeDeltaByPayloadKey.delete(payloadKey ?? "");
+        return true;
+      }
+      if (isSnapshot) return true;
+      if (isDelta) {
+        events[priorIndex] = {
+          ...previous,
+          text: previous.text + event.text,
+          timestamp: event.timestamp,
+        };
+        return true;
+      }
+    }
+    state.assistantIndexByItemId.set(event.itemId, events.length);
+  }
+
+  if (!payloadKey) return false;
 
   const activeIndex = state.activeDeltaByPayloadKey.get(payloadKey);
   if (isDelta && activeIndex !== undefined) {
@@ -702,6 +775,7 @@ export function parseSessionLogs(
     if (!state) {
       state = {
         activeDeltaByPayloadKey: new Map(),
+        assistantIndexByItemId: new Map(),
         turnsWithText: new Set(),
         todoListByItemId: new Map(),
         fileEditByToolId: new Map(),
@@ -743,10 +817,19 @@ export function parseSessionLogs(
     const turnKey = harnessTurnKey(raw);
     if (
       turnKey &&
-      (raw.type === "turn_finished" || raw.type === "run_finished")
+      (raw.type === "turn_finished" || raw.type === "run_finished" || raw.type === "error")
     ) {
       for (const payloadKey of state.activeDeltaByPayloadKey.keys()) {
-        if (payloadKey.startsWith(turnKey + ":")) {
+        if (payloadKey.startsWith(turnKey + ":") &&
+            (!harnessItemId(raw) || payloadKey === harnessDeltaPayloadKey({...raw, type: "text"}))) {
+          const activeIndex = state.activeDeltaByPayloadKey.get(payloadKey);
+          const active =
+            activeIndex === undefined ? undefined : events[activeIndex];
+          if (active?.kind === "assistant_message") {
+            active.lifecycle = raw.type === "error" ? "interrupted" : terminalAssistantLifecycle(
+              readString(readRecord(raw.data)?.status)?.toLowerCase()
+            );
+          }
           state.activeDeltaByPayloadKey.delete(payloadKey);
         }
       }

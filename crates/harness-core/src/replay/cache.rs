@@ -382,6 +382,7 @@ mod tests {
             provider_sequence: Some(sequence),
             payload: HarnessEventPayloadV1::Text(TextEvent {
                 text: sequence.to_string(),
+                ..Default::default()
             }),
         }
     }

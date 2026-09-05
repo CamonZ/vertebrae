@@ -168,6 +168,7 @@
 .ev-tools { display: flex; flex-direction: column; gap: var(--s-1h); margin-bottom: var(--s-2); }
 .ev-tools:empty { display: none; }
 .evprose { font-family: var(--sans); font-size: var(--text-13); line-height: var(--leading-relaxed); color: var(--fg-soft); border-left: 2px solid var(--line-strong); padding-left: var(--s-3); }
+.evprose--plain { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; user-select: text; -webkit-user-select: text; }
 .evprose .markdown-content { display: contents; min-width: 0; font: inherit; font-size: inherit; line-height: inherit; color: inherit; }
 .evprose .markdown-content > :first-child { margin-top: 0; }
 .evprose .markdown-content > :last-child { margin-bottom: 0; }

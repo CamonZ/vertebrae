@@ -5,8 +5,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_json::Value;
 
 use crate::{
-    ControlRequestEnvelope, ControlResolution, RunOutcome, SessionCloseOutcome, SessionUsage,
-    SpeedTierStatus, TurnOutcome, TurnUsage,
+    CompletionStatus, ControlRequestEnvelope, ControlResolution, RunOutcome, SessionCloseOutcome,
+    SessionUsage, SpeedTierStatus, TurnOutcome, TurnUsage,
 };
 
 macro_rules! string_id {
@@ -190,9 +190,13 @@ pub struct ThreadDeclared {
     pub agent_metadata: Option<AgentMetadata>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TextEvent {
     pub text: String,
+    /// Explicit terminal status for provider snapshots. Delta events leave
+    /// this unset and are streaming until a correlated terminal outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_status: Option<CompletionStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -819,7 +819,10 @@ impl SessionState {
                 self.emit(
                     stream,
                     correlation,
-                    HarnessEventPayloadV1::Text(TextEvent { text }),
+                    HarnessEventPayloadV1::Text(TextEvent {
+                        text,
+                        ..Default::default()
+                    }),
                     UpdateSemantics::Delta,
                 )
                 .await?;
@@ -893,7 +896,12 @@ impl SessionState {
                                 self.emit(
                                     stream,
                                     correlation,
-                                    HarnessEventPayloadV1::Text(TextEvent { text: text.into() }),
+                                    HarnessEventPayloadV1::Text(TextEvent {
+                                        text: text.into(),
+                                        completion_status: Some(
+                                            vertebrae_harness_core::CompletionStatus::Completed,
+                                        ),
+                                    }),
                                     UpdateSemantics::Snapshot,
                                 )
                                 .await?;

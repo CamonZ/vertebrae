@@ -564,9 +564,22 @@ fn live_content_reasoning_plan_tools_usage_and_terminal_outcome_map_neutrally() 
     decoder
         .decode_line(r#"{"type":"system","subtype":"init","session_id":"conversation-2"}"#)
         .unwrap();
+    decoder
+        .decode_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"assistant-item-1"}}}"#,
+        )
+        .unwrap();
     let delta = decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"part"}}}"#).unwrap();
     assert!(matches!(delta[0].payload, HarnessEventPayloadV1::Text(_)));
     assert_eq!(delta[0].semantics, UpdateSemantics::Delta);
+    assert_eq!(
+        delta[0]
+            .correlation
+            .item_id
+            .as_ref()
+            .map(|item_id| item_id.as_str()),
+        Some("assistant-item-1:block:0")
+    );
     let thinking = decoder.decode_line(r#"{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"reason"}}"#).unwrap();
     assert!(matches!(
         thinking[0].payload,
@@ -1166,4 +1179,42 @@ fn configured_decoder(context: ClaudeDecodeContext) -> ClaudeStreamDecoder {
             ))))
         })),
     )
+}
+
+#[test]
+fn text_blocks_keep_identity_from_deltas_to_snapshot() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("run"),
+        StreamId::from("stream"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"session"}"#)
+        .unwrap();
+    decoder
+        .decode_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg"}}}"#,
+        )
+        .unwrap();
+    let first = decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"one"}}}"#).unwrap();
+    let second = decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"two"}}}"#).unwrap();
+    let complete = decoder.decode_line(r#"{"type":"assistant","uuid":"different-envelope-id","message":{"id":"msg","content":[{"type":"text","text":"one"},{"type":"text","text":"two"}]}}"#).unwrap();
+    let texts: Vec<_> = complete
+        .iter()
+        .filter(|d| matches!(d.payload, HarnessEventPayloadV1::Text(_)))
+        .collect();
+    assert_eq!(texts.len(), 2);
+    assert_eq!(first[0].correlation.item_id, texts[0].correlation.item_id);
+    assert_eq!(second[0].correlation.item_id, texts[1].correlation.item_id);
+    assert_ne!(texts[0].correlation.item_id, texts[1].correlation.item_id);
+    decoder
+        .decode_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"next"}}}"#,
+        )
+        .unwrap();
+    let error = decoder
+        .decode_line(
+            r#"{"type":"stream_event","event":{"type":"error","error":{"message":"interrupted"}}}"#,
+        )
+        .unwrap();
+    assert!(error[0].correlation.item_id.is_none());
 }

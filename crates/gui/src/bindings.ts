@@ -1964,6 +1964,8 @@ export type LocalChatSessionEndEvent = {
   is_error: boolean;
   context_tokens: number;
   context_window: number;
+  item_id?: string | null;
+  completion_status?: string | null;
 };
 export type LocalChatSessionError =
   | { SessionExists: string }
@@ -1985,6 +1987,7 @@ export type LocalChatSessionErrorEvent = {
   thread_id?: string | null;
   is_root?: boolean;
   error: string;
+  item_id?: string | null;
 };
 export type LocalChatSessionIndexEntry = {
   id: string;
@@ -2059,7 +2062,9 @@ export type LocalChatTextEvent = {
   is_root?: boolean;
   text: string;
   is_partial: boolean;
+  completion_status?: string | null;
   parent_tool_use_id: string | null;
+  item_id?: string | null;
 };
 export type LocalChatToolCallEvent = {
   backend_session_id: string;

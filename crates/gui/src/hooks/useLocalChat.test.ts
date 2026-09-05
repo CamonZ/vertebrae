@@ -532,6 +532,85 @@ describe("handleFileChangeEvent", () => {
       })
     );
   });
+
+  it("preserves an interrupted text snapshot as plain terminal content", () => {
+    useChatStore.getState().reset();
+    const store = useChatStore.getState();
+    const id = store.openSession("Interrupted item");
+    handleTextEvent({
+      backend_session_id: CLAUDE_SESSION_ID, harness: "claude",
+      turn_id: "turn-1", item_id: "item-1", parent_tool_use_id: null,
+      text: "**received**", is_partial: false, completion_status: "interrupted",
+    }, CLAUDE_SESSION_ID, id, store.updateLastAssistantMessage,
+    store.finalizeLastAssistantMessage, store.addMessage);
+    expect(useChatStore.getState().sessions[id].messages).toEqual([
+      expect.objectContaining({text: "**received**", lifecycle: "interrupted", isPartial: false}),
+    ]);
+  });
+
+  it("routes keyed live items by identity instead of the trailing overlay", () => {
+    useChatStore.getState().reset();
+    const id = useChatStore.getState().openSession("Live items");
+    useChatStore.getState().setBackendSessionId(id, CLAUDE_SESSION_ID);
+    const store = useChatStore.getState();
+    const update = store.updateLastAssistantMessage;
+    const finalize = store.finalizeLastAssistantMessage;
+
+    for (const payload of [
+      {
+        item_id: "item-a",
+        text: "A partial",
+        is_partial: true,
+      },
+      {
+        item_id: "item-b",
+        text: "B partial",
+        is_partial: true,
+      },
+      {
+        item_id: "item-a",
+        text: "A complete",
+        is_partial: false,
+      },
+      {
+        item_id: "item-b",
+        text: "B complete",
+        is_partial: false,
+      },
+    ]) {
+      handleTextEvent(
+        {
+          backend_session_id: CLAUDE_SESSION_ID,
+          harness: "claude",
+          turn_id: "turn-1",
+          is_root: true,
+          text: payload.text,
+          is_partial: payload.is_partial,
+          parent_tool_use_id: null,
+          item_id: payload.item_id,
+        },
+        CLAUDE_SESSION_ID,
+        id,
+        update,
+        finalize,
+        store.addMessage
+      );
+    }
+
+    expect(useChatStore.getState().sessions[id].messages).toEqual([
+      expect.objectContaining({
+        itemId: "item-a",
+        text: "A complete",
+        lifecycle: "completed",
+      }),
+      expect.objectContaining({
+        itemId: "item-b",
+        text: "B complete",
+        lifecycle: "completed",
+      }),
+    ]);
+    expect(useChatStore.getState().sessions[id].streamingAssistant).toBeNull();
+  });
 });
 
 describe("handleSacrumPermissionRequestEvent", () => {
@@ -644,6 +723,101 @@ describe("handleEndEvent", () => {
     );
     expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
     expect(setLifecycle).toHaveBeenCalledWith(SESSION_ID, "idle");
+  });
+
+  it("preserves received text as interrupted on cancellation", () => {
+    useChatStore.getState().reset();
+    const id = useChatStore.getState().openSession("Cancelled item");
+    useChatStore.getState().setBackendSessionId(id, CLAUDE_SESSION_ID);
+    useChatStore.getState().addMessage(id, {
+      kind: "assistant",
+      itemId: "item-cancelled",
+      turnId: "turn-cancelled",
+      text: "partial provider text",
+      timestamp: "2024-01-01T00:00:00Z",
+      isPartial: true,
+      lifecycle: "streaming",
+    });
+
+    const store = useChatStore.getState();
+    handleEndEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        turn_id: "turn-cancelled",
+        is_root: true,
+        duration_ms: 1000,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "cancelled",
+        is_error: true,
+        context_tokens: 0,
+        context_window: 200000,
+        completion_status: "cancelled",
+      },
+      CLAUDE_SESSION_ID,
+      id,
+      store.setSessionLifecycle,
+      store.clearStreamingAssistant,
+      store.interruptStreamingAssistant
+    );
+
+    expect(useChatStore.getState().sessions[id].messages).toEqual([
+      expect.objectContaining({
+        itemId: "item-cancelled",
+        text: "partial provider text",
+        lifecycle: "interrupted",
+        isPartial: false,
+      }),
+    ]);
+    expect(useChatStore.getState().sessions[id].streamingAssistant).toBeNull();
+  });
+
+  it("marks keyed delta-only text complete on a successful terminal event", () => {
+    useChatStore.getState().reset();
+    const id = useChatStore.getState().openSession("Completed item");
+    useChatStore.getState().setBackendSessionId(id, CLAUDE_SESSION_ID);
+    useChatStore.getState().addMessage(id, {
+      kind: "assistant",
+      itemId: "item-complete",
+      turnId: "turn-complete",
+      text: "received text",
+      timestamp: "2024-01-01T00:00:00Z",
+      isPartial: true,
+      lifecycle: "streaming",
+    });
+
+    const store = useChatStore.getState();
+    handleEndEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        turn_id: "turn-complete",
+        is_root: true,
+        duration_ms: 1000,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "",
+        is_error: false,
+        context_tokens: 0,
+        context_window: 200000,
+        completion_status: "completed",
+        item_id: "item-complete",
+      },
+      CLAUDE_SESSION_ID,
+      id,
+      store.setSessionLifecycle,
+      store.clearStreamingAssistant,
+      store.interruptStreamingAssistant,
+      store.completeAssistantMessage
+    );
+
+    expect(useChatStore.getState().sessions[id].messages[0]).toMatchObject({
+      itemId: "item-complete",
+      text: "received text",
+      lifecycle: "completed",
+      isPartial: false,
+    });
   });
 
   it("leaves token usage unchanged when session-end summary reports different context tokens", () => {
@@ -935,6 +1109,50 @@ describe("handleErrorEvent", () => {
       expect.objectContaining({
         kind: "assistant",
         text: "Interrupted reply",
+        isPartial: false,
+      }),
+      expect.objectContaining({ kind: "error", message: "provider failed" }),
+    ]);
+  });
+
+  it("marks a keyed item interrupted when the provider reports an error", () => {
+    useChatStore.getState().reset();
+    const id = useChatStore.getState().openSession("Errored item");
+    useChatStore.getState().setBackendSessionId(id, CLAUDE_SESSION_ID);
+    useChatStore.getState().addMessage(id, {
+      kind: "assistant",
+      itemId: "item-error",
+      turnId: "turn-error",
+      text: "received before provider error",
+      timestamp: "2024-01-01T00:00:00Z",
+      isPartial: true,
+      lifecycle: "streaming",
+    });
+
+    const store = useChatStore.getState();
+    handleErrorEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        turn_id: "turn-error",
+        item_id: "item-error",
+        error: "provider failed",
+      },
+      CLAUDE_SESSION_ID,
+      id,
+      store.addMessage,
+      store.setSessionLifecycle,
+      store.clearStreamingAssistant,
+      store.setBackendSessionId,
+      undefined,
+      store.interruptStreamingAssistant
+    );
+
+    expect(useChatStore.getState().sessions[id].messages).toEqual([
+      expect.objectContaining({
+        itemId: "item-error",
+        text: "received before provider error",
+        lifecycle: "interrupted",
         isPartial: false,
       }),
       expect.objectContaining({ kind: "error", message: "provider failed" }),
@@ -2264,7 +2482,7 @@ describe("doCloseSession", () => {
     expect(deps.settleActiveTurn).toHaveBeenCalledWith(SESSION_ID);
   });
 
-  it("commits and removes the streaming tail after a successful stop", async () => {
+  it("preserves the streaming tail as interrupted after a successful stop", async () => {
     useChatStore.getState().reset();
     const id = useChatStore.getState().openSession("Stop cleanup");
     useChatStore.getState().setBackendSessionId(id, CLAUDE_SESSION_ID);
@@ -2276,6 +2494,10 @@ describe("doCloseSession", () => {
       setSessionLifecycle: useChatStore.getState().setSessionLifecycle,
       setBackendSessionId: useChatStore.getState().setBackendSessionId,
       clearStreamingAssistant: useChatStore.getState().clearStreamingAssistant,
+      interruptStreamingAssistant:
+        useChatStore.getState().interruptStreamingAssistant,
+    }, {
+      preserveInterrupted: true,
     });
 
     expect(closed).toBe(true);
@@ -2284,11 +2506,12 @@ describe("doCloseSession", () => {
       lifecycle: "idle",
       streamingAssistant: null,
       messages: [
-        {
+        expect.objectContaining({
           kind: "assistant",
           text: "Stopped reply",
           isPartial: false,
-        },
+          lifecycle: "interrupted",
+        }),
       ],
     });
   });

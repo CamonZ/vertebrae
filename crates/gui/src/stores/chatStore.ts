@@ -23,6 +23,7 @@ import {
   parseSessionLogs,
   type ConversationEvent,
   type FileUpdateChange,
+  type AssistantMessageLifecycle,
 } from "../types/conversation";
 import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
 import type {
@@ -60,6 +61,12 @@ export type ChatMessage =
       text: string;
       timestamp: string;
       isPartial?: boolean;
+      /** Provider item identity; absent for legacy unkeyed streams. */
+      itemId?: string;
+      /** Lifecycle of this individual assistant item. */
+      lifecycle?: AssistantMessageLifecycle;
+      /** Turn identity used to interrupt legacy unkeyed overlays safely. */
+      turnId?: string;
       parentToolUseId?: string;
     }
   | {
@@ -256,6 +263,23 @@ function mergeToolCallInput(previous: string, next: string): string {
 
 type AssistantChatMessage = Extract<ChatMessage, { kind: "assistant" }>;
 
+function assistantLifecycle(
+  message: Pick<AssistantChatMessage, "isPartial" | "lifecycle">
+): AssistantMessageLifecycle {
+  return message.lifecycle ?? (message.isPartial ? "streaming" : "completed");
+}
+
+function matchesAssistantIdentity(
+  message: AssistantChatMessage,
+  turnId: string | null | undefined,
+  itemId: string | null | undefined
+): boolean {
+  if (itemId && message.itemId !== itemId) return false;
+  if (turnId && message.turnId !== turnId) return false;
+  if (itemId && !message.itemId) return false;
+  return true;
+}
+
 function sameParentToolUseId(
   message: AssistantChatMessage,
   parentToolUseId: string | undefined
@@ -398,6 +422,8 @@ export interface TitleCandidateOptions {
 export interface StreamingAssistantMessage {
   text: string;
   timestamp: string;
+  itemId?: string;
+  turnId?: string;
 }
 
 export interface ChatSession {
@@ -553,9 +579,21 @@ interface ChatStoreActions {
   /** Disable unresolved question cards after their backend session exits. */
   markPendingUserQuestionsUnavailable: (sessionId: string) => void;
   /** Update the last assistant message (for streaming) */
-  updateLastAssistantMessage: (sessionId: string, text: string) => void;
+  updateLastAssistantMessage: (
+    sessionId: string,
+    text: string,
+    itemId?: string | null,
+    turnId?: string | null
+  ) => void;
   /** Finalize the last partial assistant message */
   finalizeLastAssistantMessage: (sessionId: string, text: string) => void;
+  /** Mark keyed assistant items complete from an authoritative terminal event. */
+  completeAssistantMessage: (
+    sessionId: string,
+    turnId?: string | null,
+    itemId?: string | null,
+    text?: string | null
+  ) => void;
   /** Set explicit local lifecycle state */
   setSessionLifecycle: (
     sessionId: string,
@@ -588,6 +626,12 @@ interface ChatStoreActions {
   clearStreamingAssistant: (
     sessionId: string,
     commitToMessages?: boolean
+  ) => void;
+  /** Preserve received text as an interrupted assistant item. */
+  interruptStreamingAssistant: (
+    sessionId: string,
+    turnId?: string | null,
+    itemId?: string | null
   ) => void;
   /** Queue a user message until the active local turn reaches idle */
   enqueueQueuedMessage: (sessionId: string, content: string) => void;
@@ -862,6 +906,14 @@ function conversationEventToChatMessage(
         kind: "assistant",
         text: event.text,
         timestamp: event.timestamp,
+        ...(event.itemId ? { itemId: event.itemId } : {}),
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        ...(event.lifecycle
+          ? {
+              lifecycle: event.lifecycle,
+              isPartial: event.lifecycle === "streaming",
+            }
+          : {}),
         ...(event.parentToolUseId
           ? { parentToolUseId: event.parentToolUseId }
           : {}),
@@ -2157,6 +2209,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     addMessage: (sessionId, message) => {
+      const persistMessage =
+        message.kind === "user" ||
+        (message.kind === "assistant" && assistantLifecycle(message) !== "streaming");
       updateSession(
         sessionId,
         (session) => {
@@ -2235,6 +2290,55 @@ export const useChatStore = create<ChatStore>((set, get) => {
               };
             }
           }
+          if (message.kind === "assistant" && message.itemId) {
+            const lifecycle = assistantLifecycle(message);
+            const normalizedMessage: AssistantChatMessage = {
+              ...message,
+              lifecycle,
+              isPartial: lifecycle === "streaming",
+            };
+            const existingIndex = messages.findIndex(
+              (existing): existing is AssistantChatMessage =>
+                existing.kind === "assistant" &&
+                existing.itemId === message.itemId &&
+                sameParentToolUseId(existing, message.parentToolUseId)
+            );
+            if (existingIndex !== -1) {
+              const existing = messages[existingIndex] as AssistantChatMessage;
+              if (assistantLifecycle(existing) !== "streaming") return session;
+              messages[existingIndex] =
+                lifecycle === "streaming"
+                  ? {
+                      ...existing,
+                      ...normalizedMessage,
+                      // Keyed local events are neutral deltas. Their payload
+                      // is a segment, even when it happens to begin with the
+                      // text already received for this item.
+                      text: `${existing.text}${normalizedMessage.text}`,
+                      timestamp: normalizedMessage.timestamp,
+                    }
+                  : {
+                      ...existing,
+                      ...normalizedMessage,
+                      // The first received timestamp identifies the item; a
+                      // terminal update must not make its row jump in order.
+                      timestamp: existing.timestamp,
+                    };
+              return {
+                ...session,
+                messages,
+                hasUserMessage: nextHasUserMessage,
+                updatedAt: message.timestamp,
+              };
+            }
+            messages.push(normalizedMessage);
+            return {
+              ...session,
+              messages,
+              hasUserMessage: nextHasUserMessage,
+              updatedAt: message.timestamp,
+            };
+          }
           if (message.kind === "assistant" && message.parentToolUseId) {
             return {
               ...session,
@@ -2252,7 +2356,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             updatedAt: message.timestamp,
           };
         },
-        { persist: message.kind === "user" }
+        { persist: persistMessage }
       );
     },
 
@@ -2289,23 +2393,74 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }));
     },
 
-    updateLastAssistantMessage: (sessionId, text) => {
+    updateLastAssistantMessage: (sessionId, text, itemId = null, turnId = null) => {
       updateSession(
         sessionId,
         (session) => {
           if (!text) return session;
           const current = session.streamingAssistant;
+          const sameIdentity =
+            !current ||
+            (!itemId || current.itemId === itemId) &&
+              (!turnId || !current.turnId || current.turnId === turnId);
+          const currentText = sameIdentity ? (current?.text ?? "") : "";
+          const nextStreaming: StreamingAssistantMessage = {
+            text: mergeAssistantPartialText(currentText, text),
+            timestamp: sameIdentity
+              ? (current?.timestamp ?? new Date().toISOString())
+              : new Date().toISOString(),
+            ...(itemId ? { itemId } : sameIdentity && current?.itemId
+              ? { itemId: current.itemId }
+              : {}),
+            ...(turnId ? { turnId } : sameIdentity && current?.turnId
+              ? { turnId: current.turnId }
+              : {}),
+          };
           return {
             ...session,
             lifecycle: "streaming",
             lifecycleError: null,
-            streamingAssistant: {
-              text: mergeAssistantPartialText(current?.text ?? "", text),
-              timestamp: current?.timestamp ?? new Date().toISOString(),
-            },
+            streamingAssistant: nextStreaming,
           };
         },
         { persist: false }
+      );
+    },
+
+    completeAssistantMessage: (
+      sessionId,
+      turnId = null,
+      itemId = null,
+      text = null
+    ) => {
+      updateSession(
+        sessionId,
+        (session) => {
+          let changed = false;
+          const messages = session.messages.map((message) => {
+            if (
+              message.kind !== "assistant" ||
+              assistantLifecycle(message) !== "streaming" ||
+              !matchesAssistantIdentity(message, turnId, itemId)
+            ) {
+              return message;
+            }
+            changed = true;
+            return {
+              ...message,
+              ...(itemId && text ? { text } : {}),
+              isPartial: false,
+              lifecycle: "completed" as const,
+            };
+          });
+          if (!changed) return session;
+          return {
+            ...session,
+            messages,
+            updatedAt: new Date().toISOString(),
+          };
+        },
+        { persist: true }
       );
     },
 
@@ -2572,6 +2727,62 @@ export const useChatStore = create<ChatStore>((set, get) => {
         },
         { persist: commitToMessages }
       );
+    },
+
+    interruptStreamingAssistant: (sessionId, turnId = null, itemId = null) => {
+      updateSession(sessionId, (session) => {
+        const streaming = session.streamingAssistant;
+        let messagesChanged = false;
+        const messages = session.messages.map((message) => {
+          if (
+            message.kind !== "assistant" ||
+            assistantLifecycle(message) !== "streaming" ||
+            !matchesAssistantIdentity(message, turnId, itemId)
+          ) {
+            return message;
+          }
+          messagesChanged = true;
+          return {
+            ...message,
+            isPartial: false,
+            lifecycle: "interrupted" as const,
+          };
+        });
+
+        const overlayMatches =
+          streaming &&
+          (!itemId || streaming.itemId === itemId) &&
+          (!turnId || streaming.turnId === turnId);
+        if (overlayMatches && streaming.text) {
+          const alreadyCommitted = messages.some(
+            (message) =>
+              message.kind === "assistant" &&
+              message.text === streaming.text &&
+              assistantLifecycle(message) === "interrupted" &&
+              matchesAssistantIdentity(message, turnId, itemId)
+          );
+          if (!alreadyCommitted) {
+            messages.push({
+              kind: "assistant",
+              text: streaming.text,
+              timestamp: streaming.timestamp,
+              isPartial: false,
+              lifecycle: "interrupted",
+              ...(streaming.itemId ? { itemId: streaming.itemId } : {}),
+              ...(streaming.turnId ? { turnId: streaming.turnId } : {}),
+            });
+            messagesChanged = true;
+          }
+        }
+
+        if (!messagesChanged && !overlayMatches) return session;
+        return {
+          ...session,
+          messages,
+          ...(messagesChanged ? { updatedAt: new Date().toISOString() } : {}),
+          streamingAssistant: overlayMatches ? null : streaming,
+        };
+      });
     },
 
     enqueueQueuedMessage: (sessionId, content) => {

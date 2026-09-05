@@ -6,7 +6,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value};
 use vertebrae_harness_core::{
-    AgentMetadata, ControlRequestId, FileChange, HarnessEventDraftV1, ProviderResumeId,
+    AgentMetadata, ControlRequestId, FileChange, HarnessEventDraftV1, ItemId, ProviderResumeId,
     ProviderThreadRef, RunId, SessionId, SpeedTier, StreamId, ThreadId, ToolCallId, TurnId,
     TurnStarted,
 };
@@ -115,6 +115,7 @@ pub struct ClaudeStreamDecoder {
     compaction_boundary_emitted: bool,
     event_timestamp: Option<DateTime<Utc>>,
     fast_mode_state: Option<String>,
+    current_item_id: Option<ItemId>,
 }
 
 impl ClaudeStreamDecoder {
@@ -147,6 +148,7 @@ impl ClaudeStreamDecoder {
             compaction_boundary_emitted: false,
             event_timestamp: None,
             fast_mode_state: None,
+            current_item_id: None,
         }
     }
 

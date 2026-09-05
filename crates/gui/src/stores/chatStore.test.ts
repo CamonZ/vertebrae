@@ -742,6 +742,27 @@ describe("chatStore", () => {
       ).toBe("revision-new");
     });
 
+    it("interrupts a hydrated partial item using its original turn identity", async () => {
+      const id = useChatStore.getState().openSession("Replay interruption", "/repo/root");
+      useChatStore.getState().setProviderResumeId(id, "conv-interrupted");
+      useChatStore.setState({sessions: {}, activeSessionId: null, panelOpen: false});
+      vi.spyOn(commands, "loadLocalChatSessionReplay").mockResolvedValueOnce({
+        status: "ok", data: {
+          events: [JSON.stringify({version: 1, event_id: "delta", stream_id: "stream",
+            sequence: 1, correlation: {turn_id: "original-turn", item_id: "item"},
+            timestamp: "2026-01-01T00:00:00Z", semantics: "delta", type: "text",
+            data: {text: "**received**"}})],
+          cache_key: "revision", next_cursor: null, has_more: false,
+        },
+      });
+      useChatStore.getState().openSession("Replay interruption", "/repo/root");
+      await vi.waitFor(() => expect(useChatStore.getState().sessions[id].messages).toHaveLength(1));
+      useChatStore.getState().interruptStreamingAssistant(id, "original-turn");
+      expect(useChatStore.getState().sessions[id].messages).toEqual([
+        expect.objectContaining({text: "**received**", turnId: "original-turn", lifecycle: "interrupted", isPartial: false}),
+      ]);
+    });
+
     it("reprojects prepended pages without splitting text deltas or tool pairs", async () => {
       const id = useChatStore
         .getState()
@@ -817,6 +838,7 @@ describe("chatStore", () => {
         expect(useChatStore.getState().sessions[id].messages).toEqual([
           {
             kind: "assistant",
+            turnId: "turn-1",
             text: "lo",
             timestamp: "2026-01-01T00:00:04Z",
           },
@@ -842,6 +864,7 @@ describe("chatStore", () => {
         },
         {
           kind: "assistant",
+            turnId: "turn-1",
           text: "hello",
           timestamp: "2026-01-01T00:00:04Z",
         },
@@ -2117,6 +2140,149 @@ describe("chatStore", () => {
       });
 
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
+    });
+
+    it("tracks independently completing items and ignores duplicate terminal updates", () => {
+      const id = useChatStore.getState().openSession("Keyed items");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        itemId: "item-a",
+        turnId: "turn-1",
+        text: "A partial",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        lifecycle: "streaming",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        itemId: "item-b",
+        turnId: "turn-1",
+        text: "B partial",
+        timestamp: "2024-01-01T00:00:01Z",
+        isPartial: true,
+        lifecycle: "streaming",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        itemId: "item-a",
+        turnId: "turn-1",
+        text: "A complete",
+        timestamp: "2024-01-01T00:00:02Z",
+        isPartial: false,
+        lifecycle: "completed",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        itemId: "item-b",
+        turnId: "turn-1",
+        text: "B complete",
+        timestamp: "2024-01-01T00:00:03Z",
+        isPartial: false,
+        lifecycle: "completed",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        itemId: "item-a",
+        turnId: "turn-1",
+        text: "fabricated duplicate",
+        timestamp: "2024-01-01T00:00:04Z",
+        isPartial: false,
+        lifecycle: "completed",
+      });
+
+      expect(useChatStore.getState().sessions[id].messages).toEqual([
+        expect.objectContaining({
+          itemId: "item-a",
+          text: "A complete",
+          lifecycle: "completed",
+          isPartial: false,
+        }),
+        expect.objectContaining({
+          itemId: "item-b",
+          text: "B complete",
+          lifecycle: "completed",
+          isPartial: false,
+        }),
+      ]);
+    });
+
+    it("commits interrupted item text without turning it into a successful completion", () => {
+      const id = useChatStore.getState().openSession("Interrupted item");
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        itemId: "item-interrupted",
+        turnId: "turn-2",
+        text: "received before cancellation",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        lifecycle: "streaming",
+      });
+
+      useChatStore
+        .getState()
+        .interruptStreamingAssistant(id, "turn-2", "item-interrupted");
+
+      expect(useChatStore.getState().sessions[id].messages).toEqual([
+        expect.objectContaining({
+          itemId: "item-interrupted",
+          text: "received before cancellation",
+          lifecycle: "interrupted",
+          isPartial: false,
+        }),
+      ]);
+    });
+
+    it("appends keyed delta segments even when a segment repeats the prefix", () => {
+      const id = useChatStore.getState().openSession("Keyed delta");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        itemId: "item-delta",
+        turnId: "turn-delta",
+        text: "prefix",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        lifecycle: "streaming",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        itemId: "item-delta",
+        turnId: "turn-delta",
+        text: "prefix suffix",
+        timestamp: "2024-01-01T00:00:01Z",
+        isPartial: true,
+        lifecycle: "streaming",
+      });
+
+      expect(useChatStore.getState().sessions[id].messages[0]).toMatchObject({
+        text: "prefixprefix suffix",
+        lifecycle: "streaming",
+      });
+    });
+
+    it("settles keyed items from a terminal event without fabricating text", () => {
+      const id = useChatStore.getState().openSession("Keyed completion");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        itemId: "item-complete",
+        turnId: "turn-complete",
+        text: "received exactly",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        lifecycle: "streaming",
+      });
+      useChatStore
+        .getState()
+        .completeAssistantMessage(id, "turn-complete", "item-complete");
+
+      expect(useChatStore.getState().sessions[id].messages[0]).toMatchObject({
+        itemId: "item-complete",
+        text: "received exactly",
+        lifecycle: "completed",
+        isPartial: false,
+      });
     });
   });
 

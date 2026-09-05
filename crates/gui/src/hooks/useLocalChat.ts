@@ -299,24 +299,50 @@ export function handleTextEvent(
   payload: LocalChatTextEvent,
   backendSessionId: string | null,
   sessionId: string,
-  updateLastAssistantMessage: (sessionId: string, text: string) => void,
+  updateLastAssistantMessage: (
+    sessionId: string,
+    text: string,
+    itemId?: string | null,
+    turnId?: string | null
+  ) => void,
   finalizeLastAssistantMessage: (sessionId: string, text: string) => void,
   addMessage?: (sessionId: string, msg: ChatMessage) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
   const parentToolUseId = payload.parent_tool_use_id ?? undefined;
+  const itemId = payload.item_id ?? undefined;
+  const turnId = payload.turn_id ?? undefined;
+  if (itemId) {
+    addMessage?.(sessionId, {
+      kind: "assistant",
+      text: payload.text,
+      timestamp: new Date().toISOString(),
+      isPartial: payload.is_partial,
+      lifecycle: payload.is_partial ? "streaming" :
+        payload.completion_status && payload.completion_status !== "completed" ? "interrupted" : "completed",
+      itemId,
+      ...(turnId ? { turnId } : {}),
+      ...(parentToolUseId ? { parentToolUseId } : {}),
+    });
+    return;
+  }
   if (parentToolUseId) {
     addMessage?.(sessionId, {
       kind: "assistant",
       text: payload.text,
       timestamp: new Date().toISOString(),
       isPartial: payload.is_partial,
+      ...(turnId ? { turnId } : {}),
       parentToolUseId,
     });
     return;
   }
   if (payload.is_partial) {
-    updateLastAssistantMessage(sessionId, payload.text);
+    if (turnId) {
+      updateLastAssistantMessage(sessionId, payload.text, null, turnId);
+    } else {
+      updateLastAssistantMessage(sessionId, payload.text);
+    }
   } else {
     finalizeLastAssistantMessage(sessionId, payload.text);
   }
@@ -430,13 +456,40 @@ export function handleEndEvent(
   clearStreamingAssistant: (
     sessionId: string,
     commitToMessages?: boolean
+  ) => void,
+  interruptStreamingAssistant?: (
+    sessionId: string,
+    turnId?: string | null,
+    itemId?: string | null
+  ) => void,
+  completeAssistantMessage?: (
+    sessionId: string,
+    turnId?: string | null,
+    itemId?: string | null,
+    text?: string | null
   ) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
   // Session-end modelUsage is a session summary, not the per-turn request
   // input-context value that drives the badge.
-  clearStreamingAssistant(sessionId, true);
-  if (payload.is_error) {
+  const isInterrupted =
+    payload.completion_status !== undefined
+      ? payload.completion_status !== "completed"
+      : payload.is_error;
+  if (isInterrupted && interruptStreamingAssistant) {
+    interruptStreamingAssistant(sessionId, payload.turn_id, payload.item_id);
+  } else {
+    if (!isInterrupted) {
+      completeAssistantMessage?.(
+        sessionId,
+        payload.turn_id,
+        payload.item_id,
+        payload.result || null
+      );
+    }
+    clearStreamingAssistant(sessionId, true);
+  }
+  if (payload.is_error || isInterrupted) {
     setSessionLifecycle(
       sessionId,
       "error",
@@ -462,10 +515,19 @@ export function handleErrorEvent(
     commitToMessages?: boolean
   ) => void,
   setBackendSessionId: (sessionId: string, backendId: string | null) => void,
-  setBackendSessionIdRef?: (backendId: string | null) => void
+  setBackendSessionIdRef?: (backendId: string | null) => void,
+  interruptStreamingAssistant?: (
+    sessionId: string,
+    turnId?: string | null,
+    itemId?: string | null
+  ) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
-  clearStreamingAssistant(sessionId, true);
+  if (interruptStreamingAssistant) {
+    interruptStreamingAssistant(sessionId, payload.turn_id, payload.item_id);
+  } else {
+    clearStreamingAssistant(sessionId, true);
+  }
   setBackendSessionId(sessionId, null);
   setBackendSessionIdRef?.(null);
   setSessionLifecycle(sessionId, "error", payload.error);
@@ -753,6 +815,11 @@ export async function doCloseSession(
     setBackendSessionId: (id: string, backendId: string | null) => void;
     setBackendSessionIdRef?: (backendId: string | null) => void;
     clearStreamingAssistant?: (id: string, commitToMessages?: boolean) => void;
+    interruptStreamingAssistant?: (
+      id: string,
+      turnId?: string | null,
+      itemId?: string | null
+    ) => void;
     clearQueuedMessages?: (id: string) => void;
     markPendingUserQuestionsUnavailable?: (id: string) => void;
     settleActiveTurn?: (id: string, turnId?: string | null) => boolean;
@@ -761,6 +828,9 @@ export async function doCloseSession(
   options: {
     expectedActiveTurnLocalId?: string;
     failureLifecycle?: LocalChatLifecycle;
+    preserveInterrupted?: boolean;
+    interruptTurnId?: string | null;
+    interruptItemId?: string | null;
   } = {}
 ): Promise<boolean> {
   const completionIsStale = makeStalenessCheck(
@@ -780,7 +850,15 @@ export async function doCloseSession(
       if (isSessionNotFoundError(result.error)) {
         if (completionIsStale()) return true;
         if (sessionId) {
-          deps.clearStreamingAssistant?.(sessionId, true);
+          if (options.preserveInterrupted) {
+            deps.interruptStreamingAssistant?.(
+              sessionId,
+              options.interruptTurnId,
+              options.interruptItemId
+            );
+          } else {
+            deps.clearStreamingAssistant?.(sessionId, true);
+          }
           deps.markSessionClosed(sessionId);
           deps.setBackendSessionId(sessionId, null);
           deps.clearQueuedMessages?.(sessionId);
@@ -794,7 +872,15 @@ export async function doCloseSession(
     }
     if (sessionId) {
       if (completionIsStale()) return true;
-      deps.clearStreamingAssistant?.(sessionId, true);
+      if (options.preserveInterrupted) {
+        deps.interruptStreamingAssistant?.(
+          sessionId,
+          options.interruptTurnId,
+          options.interruptItemId
+        );
+      } else {
+        deps.clearStreamingAssistant?.(sessionId, true);
+      }
       deps.markSessionClosed(sessionId);
       deps.setBackendSessionId(sessionId, null);
       deps.clearQueuedMessages?.(sessionId);
@@ -860,6 +946,9 @@ export function useLocalChat(sessionId: string | null) {
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
   const clearStreamingAssistant = useChatStore(
     (s) => s.clearStreamingAssistant
+  );
+  const interruptStreamingAssistant = useChatStore(
+    (s) => s.interruptStreamingAssistant
   );
   const markPendingUserQuestionsUnavailable = useChatStore(
     (s) => s.markPendingUserQuestionsUnavailable
@@ -1012,6 +1101,7 @@ export function useLocalChat(sessionId: string | null) {
         setSessionLifecycle,
         setBackendSessionId,
         clearStreamingAssistant,
+        interruptStreamingAssistant,
         clearQueuedMessages,
         markPendingUserQuestionsUnavailable,
         settleActiveTurn,
@@ -1024,6 +1114,7 @@ export function useLocalChat(sessionId: string | null) {
       setSessionLifecycle,
       setBackendSessionId,
       clearStreamingAssistant,
+      interruptStreamingAssistant,
       clearQueuedMessages,
       markPendingUserQuestionsUnavailable,
       settleActiveTurn,
@@ -1051,6 +1142,7 @@ export function useLocalChat(sessionId: string | null) {
         setSessionLifecycle,
         setBackendSessionId,
         clearStreamingAssistant,
+        interruptStreamingAssistant,
         clearQueuedMessages,
         markPendingUserQuestionsUnavailable,
         settleActiveTurn,
@@ -1061,6 +1153,8 @@ export function useLocalChat(sessionId: string | null) {
       {
         expectedActiveTurnLocalId: activeTurn.localId,
         failureLifecycle,
+        preserveInterrupted: true,
+        interruptTurnId: activeTurn.turnId,
       }
     );
   }, [
@@ -1073,6 +1167,7 @@ export function useLocalChat(sessionId: string | null) {
     setSessionLifecycle,
     setBackendSessionId,
     clearStreamingAssistant,
+    interruptStreamingAssistant,
     clearQueuedMessages,
     markPendingUserQuestionsUnavailable,
     settleActiveTurn,

@@ -155,7 +155,10 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
             content: "hello\nwithout truncation".into(),
             provenance: TurnInputProvenance::Human,
         }),
-        HarnessEventPayloadV1::Text(TextEvent { text: "hi".into() }),
+        HarnessEventPayloadV1::Text(TextEvent {
+            text: "hi".into(),
+            ..Default::default()
+        }),
         HarnessEventPayloadV1::Reasoning(ReasoningEvent {
             text: "think".into(),
         }),
@@ -367,7 +370,10 @@ fn unsupported_version_and_invalid_known_payload_are_rejected() {
         "s",
         1,
         UpdateSemantics::Snapshot,
-        HarnessEventPayloadV1::Text(TextEvent { text: "x".into() }),
+        HarnessEventPayloadV1::Text(TextEvent {
+            text: "x".into(),
+            ..Default::default()
+        }),
     ))
     .unwrap();
     future["version"] = json!(2);

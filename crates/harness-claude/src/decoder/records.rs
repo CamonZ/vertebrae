@@ -1,7 +1,7 @@
 use serde_json::{Map, Value};
 use vertebrae_harness_core::{
     CompactionEvent, CompactionState, ControlDecision, ControlResolution, DiagnosticEvent,
-    HarnessEventDraftV1, HarnessEventPayloadV1, PlanEntry, PlanEvent, ProviderResumeId,
+    HarnessEventDraftV1, HarnessEventPayloadV1, ItemId, PlanEntry, PlanEvent, ProviderResumeId,
     ResolutionSource, SessionId, SessionStarted, SpeedTier, SpeedTierStatus, StreamId, TextEvent,
     ThreadDeclared, ThreadId, ThreadKind, ToolCallId, ToolOutputEvent, ToolStatus, TurnId,
     TurnInput, TurnInputProvenance, UpdateSemantics,
@@ -24,6 +24,17 @@ impl ClaudeStreamDecoder {
         self.provider_sequence = provider_sequence;
         let object = value.as_object().expect("validated Claude record object");
         let record_type = string(object, "type").expect("validated Claude record type");
+        if record_type == "assistant" {
+            self.current_item_id = object
+                .get("message")
+                .and_then(Value::as_object)
+                .and_then(|message| string(message, "id"))
+                .or_else(|| string(object, "uuid"))
+                .or_else(|| string(object, "id"))
+                .map(ItemId::new);
+        } else if !matches!(record_type, "stream_event" | "content_block_delta") {
+            self.current_item_id = None;
+        }
         let parent_tool_call = string(object, "parent_tool_use_id").map(ToolCallId::new);
         let agent_id = string(object, "agent_id")
             .or_else(|| string(object, "agentId"))
@@ -137,6 +148,7 @@ impl ClaudeStreamDecoder {
             "content_block_delta" => {
                 self.decode_delta(
                     object.get("delta").and_then(Value::as_object),
+                    object.get("index").and_then(Value::as_u64).unwrap_or(0),
                     &thread_id,
                     &stream_id,
                     parent_tool_call,
@@ -320,6 +332,9 @@ impl ClaudeStreamDecoder {
                     code: Some("claude_unknown_record".into()),
                 }),
             )),
+        }
+        if record_type == "assistant" {
+            self.current_item_id = None;
         }
         Ok(drafts)
     }
@@ -513,7 +528,7 @@ impl ClaudeStreamDecoder {
     }
 
     pub(super) fn decode_stream_event(
-        &self,
+        &mut self,
         event: &Map<String, Value>,
         thread_id: &ThreadId,
         stream_id: &StreamId,
@@ -523,6 +538,7 @@ impl ClaudeStreamDecoder {
         match string(event, "type") {
             Some("content_block_delta") => self.decode_delta(
                 event.get("delta").and_then(Value::as_object),
+                event.get("index").and_then(Value::as_u64).unwrap_or(0),
                 thread_id,
                 stream_id,
                 parent,
@@ -536,13 +552,15 @@ impl ClaudeStreamDecoder {
                     drafts.push(self.usage_draft(stream_id.clone(), thread_id, parent, usage));
                 }
             }
-            Some(
-                "message_start"
-                | "message_stop"
-                | "content_block_start"
-                | "content_block_stop"
-                | "ping",
-            ) => {}
+            Some("message_start") => {
+                self.current_item_id = event
+                    .get("message")
+                    .and_then(Value::as_object)
+                    .and_then(|message| string(message, "id"))
+                    .map(ItemId::new);
+            }
+            Some("message_stop") => self.current_item_id = None,
+            Some("content_block_start" | "content_block_stop" | "ping") => {}
             Some("error") => {
                 let message = event
                     .get("error")
@@ -586,6 +604,7 @@ impl ClaudeStreamDecoder {
     pub(super) fn decode_delta(
         &self,
         delta: Option<&Map<String, Value>>,
+        block_index: u64,
         thread_id: &ThreadId,
         stream_id: &StreamId,
         parent: Option<ToolCallId>,
@@ -606,7 +625,10 @@ impl ClaudeStreamDecoder {
             Some("text_delta") => {
                 let text = string(delta, "text")
                     .ok_or_else(|| ClaudeDecodeError::Malformed("text_delta has no text".into()))?;
-                HarnessEventPayloadV1::Text(TextEvent { text: text.into() })
+                HarnessEventPayloadV1::Text(TextEvent {
+                    text: text.into(),
+                    ..Default::default()
+                })
             }
             // Claude streams tool arguments as partial JSON before emitting
             // the completed assistant tool_use snapshot. The fragments are
@@ -631,13 +653,18 @@ impl ClaudeStreamDecoder {
                 ));
             }
         };
-        drafts.push(self.draft(
+        let mut draft = self.draft(
             stream_id.clone(),
             thread_id,
             parent,
             UpdateSemantics::Delta,
             payload,
-        ));
+        );
+        draft.correlation.item_id = self
+            .current_item_id
+            .as_ref()
+            .map(|id| ItemId::new(format!("{id}:block:{block_index}")));
+        drafts.push(draft);
         Ok(())
     }
 }

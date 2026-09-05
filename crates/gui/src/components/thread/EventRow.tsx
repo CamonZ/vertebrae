@@ -38,23 +38,28 @@ import type {
 function LogProse({
   prose,
   proseFormat = "markdown",
+  lifecycle,
   streaming,
 }: {
   prose?: ReactNode;
   proseFormat?: AgentMessage["proseFormat"];
+  lifecycle?: AgentMessage["lifecycle"];
   streaming?: boolean;
 }): ReactNode {
-  if (prose == null && !streaming) return null;
+  const isStreaming = lifecycle ? lifecycle === "streaming" : streaming;
+  if (prose == null && !isStreaming) return null;
+  const plain = proseFormat === "plain" ||
+    (lifecycle ? lifecycle !== "completed" : !!streaming);
   const inner =
-    typeof prose === "string" && proseFormat !== "plain" ? (
+    typeof prose === "string" && !plain ? (
       <MarkdownContent text={prose} />
     ) : (
       prose
     );
   return (
-    <div className="evprose">
+    <div className={`evprose${plain ? " evprose--plain" : ""}`}>
       {inner}
-      {streaming ? <span className="ev-cursor" /> : null}
+      {isStreaming ? <span className="ev-cursor" /> : null}
     </div>
   );
 }
@@ -274,6 +279,7 @@ function AgentBody({
   model,
   prose,
   proseFormat,
+  lifecycle,
   tools = [],
   streaming,
 }: {
@@ -281,13 +287,14 @@ function AgentBody({
   model?: string;
   prose?: ReactNode;
   proseFormat?: AgentMessage["proseFormat"];
+  lifecycle?: AgentMessage["lifecycle"];
   tools?: ToolMessage[];
   streaming?: boolean;
 }): ReactNode {
   return (
     <div className="evbody">
       <div className="ev-speaker">
-        {streaming ? (
+        {(lifecycle ? lifecycle === "streaming" : streaming) ? (
           <span className="evtool-spin" />
         ) : (
           <span className="ev-ember" />
@@ -302,7 +309,7 @@ function AgentBody({
           ))}
         </div>
       ) : null}
-      <LogProse prose={prose} proseFormat={proseFormat} streaming={streaming} />
+      <LogProse prose={prose} proseFormat={proseFormat} lifecycle={lifecycle} streaming={streaming} />
     </div>
   );
 }
@@ -374,6 +381,7 @@ export function EventRow(props: EventRowProps): ReactNode {
         model={m.model}
         prose={m.prose}
         proseFormat={m.proseFormat}
+        lifecycle={m.lifecycle}
         tools={m.tools}
         streaming={m.streaming}
       />

@@ -28,6 +28,15 @@ pub(crate) struct LocalChatSessionStats {
     pub(crate) model: String,
 }
 
+fn completion_status_name(status: &CompletionStatus) -> &'static str {
+    match status {
+        CompletionStatus::Completed => "completed",
+        CompletionStatus::Failed => "failed",
+        CompletionStatus::Interrupted => "interrupted",
+        CompletionStatus::Cancelled => "cancelled",
+    }
+}
+
 /// Translates provider-neutral harness events into the GUI's local-chat
 /// events. Provider adapters only own startup, session lifecycle, and
 /// provider-specific configuration; event compatibility stays here.
@@ -86,6 +95,7 @@ impl LocalChatHarnessEventSink {
             thread_id: None,
             is_root: true,
             error: error.into(),
+            item_id: None,
         }))
     }
 
@@ -101,6 +111,7 @@ impl LocalChatHarnessEventSink {
         &self,
         turn_id: String,
         thread_id: Option<String>,
+        item_id: Option<String>,
         status: CompletionStatus,
         result: Option<String>,
         metrics: &vertebrae_harness_core::OutcomeMetrics,
@@ -160,6 +171,8 @@ impl LocalChatHarnessEventSink {
             is_error: status != CompletionStatus::Completed,
             context_tokens,
             context_window,
+            item_id,
+            completion_status: Some(completion_status_name(&status).to_string()),
         }))
     }
 }
@@ -181,6 +194,7 @@ impl EventSink for LocalChatHarnessEventSink {
             .thread_id
             .as_ref()
             .map(ToString::to_string);
+        let item_id = event.correlation.item_id.as_ref().map(ToString::to_string);
 
         match event.payload {
             HarnessEventPayloadV1::SessionStarted(started) => {
@@ -243,7 +257,12 @@ impl EventSink for LocalChatHarnessEventSink {
                     is_root: is_root_stream,
                     text: value.text,
                     is_partial: event.semantics == UpdateSemantics::Delta,
+                    completion_status: value
+                        .completion_status
+                        .as_ref()
+                        .map(|status| completion_status_name(status).to_string()),
                     parent_tool_use_id,
+                    item_id,
                 }))?;
             }
             HarnessEventPayloadV1::ToolCall(value) => {
@@ -352,6 +371,7 @@ impl EventSink for LocalChatHarnessEventSink {
                 self.emit_end(
                     turn_id,
                     thread_id,
+                    item_id,
                     outcome.status,
                     outcome.result_text,
                     &outcome.metrics,
@@ -367,6 +387,7 @@ impl EventSink for LocalChatHarnessEventSink {
                 self.emit_end(
                     turn_id,
                     thread_id,
+                    item_id,
                     outcome.status,
                     outcome.result_text,
                     &outcome.metrics,
@@ -404,6 +425,7 @@ impl EventSink for LocalChatHarnessEventSink {
                     thread_id,
                     is_root: is_root_stream,
                     error: value.message,
+                    item_id,
                 }))?;
             }
             _ => {}
@@ -693,6 +715,7 @@ mod tests {
         let correlation = EventCorrelation {
             thread_id: Some(vertebrae_harness_core::ThreadId::new("root-thread")),
             turn_id: Some(vertebrae_harness_core::TurnId::new("root-turn")),
+            item_id: Some(vertebrae_harness_core::ItemId::new("root-item")),
             ..EventCorrelation::default()
         };
 
@@ -707,6 +730,7 @@ mod tests {
                 2,
                 HarnessEventPayloadV1::Text(vertebrae_harness_core::TextEvent {
                     text: "answer".into(),
+                    ..Default::default()
                 }),
             ),
             (
@@ -748,9 +772,12 @@ mod tests {
                 && text.turn_id.as_deref() == Some("root-turn")
                 && text.thread_id.as_deref() == Some("root-thread")
                 && text.is_root
+                && text.item_id.as_deref() == Some("root-item")
                 && end.turn_id == "root-turn"
                 && end.thread_id.as_deref() == Some("root-thread")
                 && end.is_root
+                && end.item_id.as_deref() == Some("root-item")
+                && end.completion_status.as_deref() == Some("completed")
         ));
     }
 
@@ -789,6 +816,7 @@ mod tests {
                 root.clone(),
                 HarnessEventPayloadV1::Text(vertebrae_harness_core::TextEvent {
                     text: "root answer".into(),
+                    ..Default::default()
                 }),
             ),
             (
@@ -806,6 +834,7 @@ mod tests {
                 child.clone(),
                 HarnessEventPayloadV1::Text(vertebrae_harness_core::TextEvent {
                     text: "child update".into(),
+                    ..Default::default()
                 }),
             ),
             (

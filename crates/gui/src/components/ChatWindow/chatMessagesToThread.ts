@@ -159,8 +159,16 @@ export function chatMessagesToThread(
           text: m.text,
           timestamp: m.timestamp,
           parentToolUseId: m.parentToolUseId,
+          ...(m.itemId ? { itemId: m.itemId } : {}),
+          ...(m.lifecycle
+            ? { lifecycle: m.lifecycle }
+            : m.isPartial
+              ? { lifecycle: "streaming" as const }
+              : {}),
         });
-        draft.endsWithPartialAssistant = m.isPartial === true;
+        draft.endsWithPartialAssistant =
+          (m.lifecycle ?? (m.isPartial ? "streaming" : "completed")) ===
+          "streaming";
         continue;
       }
 
@@ -286,7 +294,10 @@ export function chatMessagesToThread(
 function stabilizeKeys(messages: Message[], prefix: string): void {
   messages.forEach((m, i) => {
     if (m.type !== "tool" && m.type !== "spawn") {
-      m.evt = `${prefix}-m${i}`;
+      m.evt =
+        m.type === "agent" && m.itemId
+          ? `${prefix}-item-${m.itemId}`
+          : `${prefix}-m${i}`;
     }
     if (m.type === "spawn") {
       m.thread.turns.forEach((t, ti) =>
