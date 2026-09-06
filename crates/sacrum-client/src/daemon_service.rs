@@ -18,6 +18,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DaemonStatus {
     Pending,
     Active,
@@ -168,8 +169,10 @@ const REFUSAL_OWNERSHIP_UNKNOWN: &str =
 
 impl From<SacrumClientError> for DaemonServiceError {
     fn from(error: SacrumClientError) -> Self {
-        if let SacrumClientError::GraphqlError { messages, .. } = &error
-            && let Some(refusal) = classify_graphql_error(messages, &error.to_string())
+        if let SacrumClientError::GraphqlError {
+            items, messages, ..
+        } = &error
+            && let Some(refusal) = classify_graphql_error(items, messages, &error.to_string())
         {
             return refusal;
         }
@@ -186,8 +189,12 @@ impl From<SacrumClientError> for DaemonServiceError {
     }
 }
 
-fn classify_graphql_error(messages: &[String], display: &str) -> Option<DaemonServiceError> {
-    if messages.iter().any(|message| is_name_field_error(message)) {
+fn classify_graphql_error(
+    items: &[crate::error::GraphqlErrorItem],
+    messages: &[String],
+    display: &str,
+) -> Option<DaemonServiceError> {
+    if items.iter().any(is_name_field_error) {
         return Some(DaemonServiceError::InvalidName(display.to_string()));
     }
     for message in messages {
@@ -208,10 +215,14 @@ fn classify_graphql_error(messages: &[String], display: &str) -> Option<DaemonSe
     )))
 }
 
-fn is_name_field_error(message: &str) -> bool {
-    message.contains(r#""field":"name""#)
-        || message.contains(r#""field": "name""#)
-        || message.trim_start().starts_with("name: ")
+/// Structural detection: the backend tags validation targets via
+/// `extensions.field`, never by formatting the message text.
+fn is_name_field_error(item: &crate::error::GraphqlErrorItem) -> bool {
+    item.extensions
+        .as_ref()
+        .and_then(|extensions| extensions.get("field"))
+        .and_then(|field| field.as_str())
+        .is_some_and(|field| field == "name")
 }
 
 fn parse_timestamp(
@@ -502,6 +513,22 @@ mod tests {
             "inserted_at": "2026-09-05T10:00:00Z",
             "updated_at": "2026-09-05T10:00:00Z"
         })
+    }
+
+    #[test]
+    fn daemon_status_serde_round_trips_the_documented_snake_case_names() {
+        for (variant, wire) in [
+            (DaemonStatus::Pending, "pending"),
+            (DaemonStatus::Active, "active"),
+            (DaemonStatus::Revoked, "revoked"),
+            (DaemonStatus::Removed, "removed"),
+        ] {
+            assert_eq!(serde_json::to_value(variant.clone()).unwrap(), json!(wire));
+            assert_eq!(
+                serde_json::from_value::<DaemonStatus>(json!(wire)).unwrap(),
+                variant
+            );
+        }
     }
 
     #[test]
@@ -825,6 +852,7 @@ mod tests {
             (REFUSAL_OWNERSHIP_UNKNOWN, DaemonRefusal::OwnershipUnknown),
         ] {
             let error = SacrumClientError::GraphqlError {
+                items: Vec::new(),
                 messages: vec![message.to_string()],
                 message: message.to_string(),
             };
@@ -840,15 +868,44 @@ mod tests {
 
     #[tokio::test]
     async fn name_field_errors_map_to_invalid_name() {
-        let formatted = r#"name: has already been taken (extensions: {"field":"name"})"#;
         let error = SacrumClientError::GraphqlError {
-            messages: vec![formatted.to_string()],
-            message: formatted.to_string(),
+            items: vec![crate::error::GraphqlErrorItem {
+                message: "name: has already been taken".to_string(),
+                path: None,
+                extensions: Some(json!({ "field": "name" })),
+            }],
+            messages: vec!["name: has already been taken".to_string()],
+            message: "name: has already been taken".to_string(),
         };
         let adapted: DaemonServiceError = error.into();
         assert!(
             matches!(adapted, DaemonServiceError::InvalidName(message) if message.contains("name"))
         );
+    }
+
+    #[tokio::test]
+    async fn backend_name_field_extensions_classify_as_invalid_name() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("RenameDaemon"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "errors": [{
+                    "message": "name: has already been taken",
+                    "extensions": { "field": "name" }
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = service(&server)
+            .rename_daemon(DAEMON_ID, DaemonRename::Set("Farm bot".into()))
+            .await;
+        assert!(
+            matches!(result, Err(DaemonServiceError::InvalidName(message)) if message.contains("name"))
+        );
+        server.verify().await;
     }
 
     #[tokio::test]

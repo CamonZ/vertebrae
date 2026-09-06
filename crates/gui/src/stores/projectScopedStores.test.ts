@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { SessionLog } from "../bindings";
+import type { Daemon, SessionLog } from "../bindings";
 import { queryClient, queryKeys } from "../query";
 import {
   createMockStep,
@@ -98,5 +98,28 @@ describe("resetProjectScopedStores", () => {
       activeSessionId: null,
       panelOpen: false,
     });
+  });
+
+  it("removes project-scoped queries while connection-scoped sacrum queries survive", () => {
+    const daemon: Daemon = {
+      id: "33333333-3333-3333-3333-333333333333",
+      status: "active",
+      name: null,
+      display_name: "33333333",
+      enrolled_at: null,
+      removed_at: null,
+      created_at: "2026-09-05T10:00:00+00:00",
+      updated_at: "2026-09-05T10:00:00+00:00",
+    };
+    const generation = getProjectScopeGeneration();
+    const projectKey = queryKeys.tasks.list(generation, null);
+    const fleetKey = queryKeys.daemons.fleet("identity-a");
+    queryClient.setQueryData(projectKey, [createMockTask({ id: "task-1" })]);
+    queryClient.setQueryData(fleetKey, [daemon]);
+
+    resetProjectScopedStores();
+
+    expect(queryClient.getQueryData(projectKey)).toBeUndefined();
+    expect(queryClient.getQueryData(fleetKey)).toEqual([daemon]);
   });
 });

@@ -1,5 +1,5 @@
 import { CommandResultError } from "../query/commandResult";
-import { isCurrentSacrumConnectionIdentity } from "../stores/sacrumConnectionStore";
+import { queryClient, queryKeys } from "../query";
 import type { DaemonErrorKind } from "../bindings";
 
 export class StaleDaemonConnectionError extends Error {
@@ -20,13 +20,28 @@ export function assertCurrentDaemonSnapshot(
   captured: string,
   connectionId: string
 ): void {
-  if (
-    connectionId !== captured ||
-    !isCurrentSacrumConnectionIdentity(connectionId)
-  ) {
+  const currentIdentity =
+    queryClient.getQueryData<string | null>(queryKeys.sacrumConnection()) ??
+    null;
+  if (connectionId !== captured || currentIdentity !== connectionId) {
     throw new StaleDaemonConnectionError(connectionId);
   }
 }
+
+const DAEMON_ERROR_KINDS = [
+  "no_backend",
+  "stale_connection",
+  "ambiguous_transport",
+  "malformed_response",
+  "unavailable",
+  "not_found",
+  "terminal_state",
+  "active_session",
+  "ownership_unknown",
+  "invalid_name",
+  "invalid_input",
+  "unknown_refusal",
+] as const;
 
 export function daemonErrorKind(error: unknown): DaemonErrorKind | null {
   if (
@@ -36,7 +51,12 @@ export function daemonErrorKind(error: unknown): DaemonErrorKind | null {
     "kind" in error.cause
   ) {
     const kind = (error.cause as { kind: unknown }).kind;
-    return typeof kind === "string" ? (kind as DaemonErrorKind) : null;
+    if (
+      typeof kind === "string" &&
+      (DAEMON_ERROR_KINDS as readonly string[]).includes(kind)
+    ) {
+      return kind as DaemonErrorKind;
+    }
   }
   return null;
 }

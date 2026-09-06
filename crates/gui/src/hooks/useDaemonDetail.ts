@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import {
   commands,
   type Daemon,
@@ -8,30 +7,17 @@ import {
   useDaemonQuery,
   type DaemonReadResult,
 } from "../daemons/useDaemonQuery";
-import { queryClient, queryKeys, unwrapCommand } from "../query";
-import { useSacrumConnection } from "./useSacrumConnection";
+import { queryKeys, unwrapCommand } from "../query";
 
 export function useDaemonDetail(
   daemonId: string | null | undefined
 ): DaemonReadResult<Daemon | null> {
-  const { identity } = useSacrumConnection();
-
-  const initialData = useMemo(() => {
-    if (!identity || !daemonId) {
-      return undefined;
-    }
-    return queryClient
-      .getQueryData<Daemon[]>(queryKeys.daemons.fleet(identity))
-      ?.find((daemon) => daemon.id === daemonId);
-  }, [identity, daemonId]);
-
   return useDaemonQuery({
     queryKey: (connectionId) =>
       queryKeys.daemons.detail(connectionId, daemonId ?? ""),
     enabled: Boolean(daemonId),
     invoke: () => unwrapCommand(commands.getDaemon(daemonId as string)),
     project: (snapshot) => snapshot.daemon,
-    initialData,
   });
 }
 

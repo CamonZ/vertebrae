@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { queryClient } from "../query";
-import { useSacrumConnectionStore } from "../stores/sacrumConnectionStore";
+import { queryClient, queryKeys } from "../query";
 
 const mockGetSacrumConnectionIdentity = vi.fn();
 const mockListDaemonFleet = vi.fn();
@@ -41,7 +40,6 @@ describe("useDaemonFleet", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
-    useSacrumConnectionStore.getState().setIdentity(null);
     mockGetSacrumConnectionIdentity.mockResolvedValue({
       status: "ok",
       data: "identity-a",
@@ -65,7 +63,7 @@ describe("useDaemonFleet", () => {
 
   it("rejects a late response from a retired connection instead of caching it", async () => {
     mockListDaemonFleet.mockImplementation(async () => {
-      useSacrumConnectionStore.getState().setIdentity("identity-b");
+      queryClient.setQueryData(queryKeys.sacrumConnection(), "identity-b");
       return { status: "ok", data: snapshot("identity-a", [daemon]) };
     });
 

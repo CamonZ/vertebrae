@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   commands,
   type Daemon,
@@ -15,10 +15,11 @@ import {
 import {
   errorMessage,
   invalidateDaemonQueries,
+  queryClient,
+  queryKeys,
   unwrapCommand,
   type DaemonInvalidationScope,
 } from "../query";
-import { getSacrumConnectionIdentity } from "../stores/sacrumConnectionStore";
 
 interface DaemonMutationState {
   isBusy: boolean;
@@ -42,27 +43,34 @@ interface DaemonMutations extends DaemonMutationState {
 
 export function useDaemonMutations(): DaemonMutations {
   const [state, setState] = useState<DaemonMutationState>(IDLE);
+  const inFlight = useRef(0);
 
   const runMutation = useCallback(
     async <T extends { connection_id: string }>(
       invoke: () => Promise<T>,
-      scope: DaemonInvalidationScope
+      scope: DaemonInvalidationScope,
+      daemonId?: string
     ): Promise<T | null> => {
-      const connectionId = getSacrumConnectionIdentity();
+      const connectionId =
+        queryClient.getQueryData<string | null>(
+          queryKeys.sacrumConnection()
+        ) ?? null;
       if (!connectionId) {
         setState({
-          isBusy: false,
+          isBusy: inFlight.current > 0,
           error: NO_BACKEND_ERROR,
           errorKind: "no_backend",
         });
         return null;
       }
+      inFlight.current += 1;
       setState({ isBusy: true, error: null, errorKind: null });
       try {
         const result = await invoke();
         assertCurrentDaemonSnapshot(connectionId, result.connection_id);
-        invalidateDaemonQueries(connectionId, scope);
-        setState(IDLE);
+        invalidateDaemonQueries(connectionId, scope, daemonId);
+        inFlight.current -= 1;
+        setState({ isBusy: inFlight.current > 0, error: null, errorKind: null });
         return result;
       } catch (error) {
         const kind = daemonErrorKind(error);
@@ -70,7 +78,12 @@ export function useDaemonMutations(): DaemonMutations {
           // Never auto-retry: refresh safe metadata and surface explicit recovery.
           invalidateDaemonQueries(connectionId);
         }
-        setState({ isBusy: false, error: errorMessage(error), errorKind: kind });
+        inFlight.current -= 1;
+        setState({
+          isBusy: inFlight.current > 0,
+          error: errorMessage(error),
+          errorKind: kind,
+        });
         return null;
       }
     },
@@ -92,7 +105,8 @@ export function useDaemonMutations(): DaemonMutations {
     async (daemonId: string, name: DaemonNameUpdate): Promise<Daemon | null> => {
       const result = await runMutation(
         () => unwrapCommand(commands.renameDaemon(daemonId, name)),
-        { daemonId }
+        "daemon",
+        daemonId
       );
       return result?.daemon ?? null;
     },
@@ -103,7 +117,8 @@ export function useDaemonMutations(): DaemonMutations {
     async (daemonId: string): Promise<Daemon | null> => {
       const result = await runMutation(
         () => unwrapCommand(commands.revokeDaemon(daemonId)),
-        { daemonId, enrollment: true }
+        "daemonEnrollment",
+        daemonId
       );
       return result?.daemon ?? null;
     },
@@ -114,7 +129,8 @@ export function useDaemonMutations(): DaemonMutations {
     async (daemonId: string): Promise<Daemon | null> => {
       const result = await runMutation(
         () => unwrapCommand(commands.unregisterDaemon(daemonId)),
-        { daemonId, enrollment: true }
+        "daemonEnrollment",
+        daemonId
       );
       return result?.daemon ?? null;
     },
@@ -125,7 +141,8 @@ export function useDaemonMutations(): DaemonMutations {
     async (daemonId: string): Promise<DaemonBootstrap | null> => {
       const result = await runMutation(
         () => unwrapCommand(commands.rotateDaemonCredentials(daemonId)),
-        { daemonId, enrollment: true }
+        "daemonEnrollment",
+        daemonId
       );
       return result?.bootstrap ?? null;
     },

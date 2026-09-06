@@ -9,6 +9,7 @@ export function normalizeTaskFilter(
 }
 
 export const queryKeys = {
+  projectRoot: () => ["project"] as const,
   project: (generation: number) => ["project", generation] as const,
   sacrumConnection: () => ["sacrumConnection"] as const,
   daemons: {
@@ -87,7 +88,3 @@ export const queryKeys = {
       [...queryKeys.taskRuns.all(generation), "byTask", taskId] as const,
   },
 };
-
-export function isSacrumQueryKey(queryKey: readonly unknown[]): boolean {
-  return queryKey[0] === "sacrumConnection" || queryKey[0] === "sacrum";
-}

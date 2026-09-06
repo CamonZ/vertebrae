@@ -7,7 +7,7 @@
 //! - Fragment concatenation for reusable query parts
 
 use crate::config::SacrumConfig;
-use crate::error::{SacrumClientError, SacrumClientResult};
+use crate::error::{GraphqlErrorItem, SacrumClientError, SacrumClientResult};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -18,14 +18,6 @@ use serde_json::Value;
 struct GraphqlResponse<T> {
     data: Option<T>,
     errors: Option<Vec<GraphqlErrorItem>>,
-}
-
-/// Individual GraphQL error
-#[derive(Debug, Deserialize)]
-struct GraphqlErrorItem {
-    message: String,
-    path: Option<Vec<String>>,
-    extensions: Option<Value>,
 }
 
 fn format_graphql_error(error: &GraphqlErrorItem) -> String {
@@ -152,7 +144,11 @@ impl GraphqlClient {
         {
             let messages: Vec<String> = errors.iter().map(format_graphql_error).collect();
             let message = messages.join("; ");
-            return Err(SacrumClientError::GraphqlError { messages, message });
+            return Err(SacrumClientError::GraphqlError {
+                items: errors.clone(),
+                messages,
+                message,
+            });
         }
 
         Ok(gql_response)
@@ -181,6 +177,7 @@ impl GraphqlClient {
         let data = gql_response
             .data
             .ok_or_else(|| SacrumClientError::GraphqlError {
+                items: Vec::new(),
                 messages: vec!["No data in response".to_string()],
                 message: "No data in response".to_string(),
             })?;
@@ -190,6 +187,7 @@ impl GraphqlClient {
             .ok_or_else(|| {
                 let msg = format!("Field '{}' not found in response", field);
                 SacrumClientError::GraphqlError {
+                    items: Vec::new(),
                     messages: vec![msg.clone()],
                     message: msg,
                 }
@@ -215,6 +213,7 @@ impl GraphqlClient {
         gql_response
             .data
             .ok_or_else(|| SacrumClientError::GraphqlError {
+                items: Vec::new(),
                 messages: vec!["No data in response".to_string()],
                 message: "No data in response".to_string(),
             })

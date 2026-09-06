@@ -188,28 +188,38 @@ export function invalidateArtifactQuery(
 
 export type DaemonInvalidationScope =
   | "fleet"
-  | { daemonId: string; enrollment?: boolean }
+  | "daemon"
+  | "daemonEnrollment"
   | "all";
 
 export function invalidateDaemonQueries(
   connectionId: string,
-  scope: DaemonInvalidationScope = "all"
+  scope: DaemonInvalidationScope = "all",
+  daemonId?: string
 ) {
-  const scopesFor: readonly (readonly unknown[])[] =
-    scope === "all"
-      ? [queryKeys.daemons.all(connectionId)]
-      : scope === "fleet"
-        ? [queryKeys.daemons.fleet(connectionId)]
-        : scope.enrollment
+  const scopesFor: readonly (readonly unknown[])[] = (() => {
+    switch (scope) {
+      case "fleet":
+        return [queryKeys.daemons.fleet(connectionId)];
+      case "daemon":
+        return daemonId
           ? [
               queryKeys.daemons.fleet(connectionId),
-              queryKeys.daemons.detail(connectionId, scope.daemonId),
-              queryKeys.daemons.enrollment(connectionId, scope.daemonId),
+              queryKeys.daemons.detail(connectionId, daemonId),
             ]
-          : [
+          : [queryKeys.daemons.fleet(connectionId)];
+      case "daemonEnrollment":
+        return daemonId
+          ? [
               queryKeys.daemons.fleet(connectionId),
-              queryKeys.daemons.detail(connectionId, scope.daemonId),
-            ];
+              queryKeys.daemons.detail(connectionId, daemonId),
+              queryKeys.daemons.enrollment(connectionId, daemonId),
+            ]
+          : [queryKeys.daemons.fleet(connectionId)];
+      case "all":
+        return [queryKeys.daemons.all(connectionId)];
+    }
+  })();
   for (const queryKey of scopesFor) {
     void queryClient.invalidateQueries({ queryKey });
   }

@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { queryClient } from "../query";
-import { useSacrumConnectionStore } from "../stores/sacrumConnectionStore";
+import { queryClient, queryKeys } from "../query";
 
 const mockCreateDaemon = vi.fn();
 const mockRenameDaemon = vi.fn();
@@ -23,6 +22,7 @@ vi.mock("../bindings", () => ({
 import { useDaemonMutations } from "./useDaemonMutations";
 import type {
   Daemon,
+  DaemonBootstrap,
   DaemonBootstrapResult,
   DaemonMutationResult,
 } from "../bindings";
@@ -62,7 +62,7 @@ describe("useDaemonMutations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
-    useSacrumConnectionStore.getState().setIdentity("identity-a");
+    queryClient.setQueryData(queryKeys.sacrumConnection(), "identity-a");
     invalidateSpy = vi
       .spyOn(queryClient, "invalidateQueries")
       .mockImplementation(() => Promise.resolve());
@@ -117,7 +117,7 @@ describe("useDaemonMutations", () => {
 
   it("discards a late result from a retired connection without invalidating anything", async () => {
     mockRotateDaemonCredentials.mockImplementation(async () => {
-      useSacrumConnectionStore.getState().setIdentity("identity-b");
+      queryClient.setQueryData(queryKeys.sacrumConnection(), "identity-b");
       return {
         status: "ok",
         data: bootstrapResult("identity-a", "dtoken_old_account"),
@@ -174,7 +174,7 @@ describe("useDaemonMutations", () => {
   });
 
   it("refuses to mutate without a backend connection", async () => {
-    useSacrumConnectionStore.getState().setIdentity(null);
+    queryClient.setQueryData(queryKeys.sacrumConnection(), null);
 
     const { result } = renderHook(() => useDaemonMutations());
     let revoked: Awaited<ReturnType<typeof result.current.revokeDaemon>> = null;
@@ -185,5 +185,48 @@ describe("useDaemonMutations", () => {
     expect(mockRevokeDaemon).not.toHaveBeenCalled();
     expect(revoked).toBeNull();
     expect(result.current.errorKind).toBe("no_backend");
+  });
+
+  it("stays busy until every in-flight mutation has settled", async () => {
+    let resolveCreate: (value: unknown) => void = () => {};
+    let resolveRevoke: (value: unknown) => void = () => {};
+    mockCreateDaemon.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        })
+    );
+    mockRevokeDaemon.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRevoke = resolve;
+        })
+    );
+
+    const { result } = renderHook(() => useDaemonMutations());
+    let createPromise: Promise<DaemonBootstrap | null> = Promise.resolve(null);
+    let revokePromise: Promise<Daemon | null> = Promise.resolve(null);
+    act(() => {
+      createPromise = result.current.createDaemon(null);
+      revokePromise = result.current.revokeDaemon(daemon.id);
+    });
+    expect(result.current.isBusy).toBe(true);
+
+    await act(async () => {
+      resolveCreate({
+        status: "ok",
+        data: bootstrapResult("identity-a", "dtoken_dummy"),
+      });
+      await createPromise;
+    });
+    // The first mutation completed; the second is still in flight.
+    expect(result.current.isBusy).toBe(true);
+
+    await act(async () => {
+      resolveRevoke({ status: "ok", data: mutationResult("identity-a") });
+      await revokePromise;
+    });
+    expect(result.current.isBusy).toBe(false);
+    expect(result.current.error).toBeNull();
   });
 });

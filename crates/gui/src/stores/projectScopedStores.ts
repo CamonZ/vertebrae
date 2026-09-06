@@ -2,10 +2,9 @@ import { create } from "zustand";
 import { useChatStore } from "./chatStore";
 import { useEntityPanelStore } from "./entityPanelStore";
 import { useFactoryFilterStore } from "./factoryFilterStore";
-import { useSacrumConnectionStore } from "./sacrumConnectionStore";
 import { useSessionLogStore } from "./sessionLogStore";
 import { queryClient } from "../query/queryClient";
-import { isSacrumQueryKey, queryKeys } from "../query/queryKeys";
+import { queryKeys } from "../query/queryKeys";
 
 interface ProjectScopeState {
   generation: number;
@@ -39,12 +38,11 @@ export function useProjectScopeGeneration() {
 export function resetProjectScopedStores() {
   useProjectScopeStore.getState().bumpGeneration();
   queryClient.removeQueries({
-    predicate: (query) => !isSacrumQueryKey(query.queryKey),
+    queryKey: queryKeys.projectRoot(),
   });
   void queryClient.invalidateQueries({
     queryKey: queryKeys.sacrumConnection(),
   });
-  useSacrumConnectionStore.getState().reset();
   useEntityPanelStore.getState().reset();
   useFactoryFilterStore.getState().reset();
   useSessionLogStore.getState().reset();

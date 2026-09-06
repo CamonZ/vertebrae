@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { commands } from "../bindings";
 import { queryClient, queryKeys, unwrapCommand } from "../query";
-import { useSacrumConnectionStore } from "../stores/sacrumConnectionStore";
 
 interface SacrumConnection {
   identity: string | null;
@@ -10,8 +9,6 @@ interface SacrumConnection {
 }
 
 export function useSacrumConnection(): SacrumConnection {
-  const setIdentity = useSacrumConnectionStore((state) => state.setIdentity);
-  const identity = useSacrumConnectionStore((state) => state.identity);
   const previousIdentityRef = useRef<string | null>(null);
 
   const query = useQuery({
@@ -20,20 +17,20 @@ export function useSacrumConnection(): SacrumConnection {
   });
 
   useEffect(() => {
-    if (query.data === undefined) {
+    const identity = query.data;
+    if (identity === undefined) {
       return;
     }
-    setIdentity(query.data);
     const previous = previousIdentityRef.current;
-    if (query.data !== null && previous !== null && previous !== query.data) {
+    if (identity !== null && previous !== null && previous !== identity) {
       void queryClient.removeQueries({
         queryKey: queryKeys.daemons.all(previous),
       });
     }
-    if (query.data !== null) {
-      previousIdentityRef.current = query.data;
+    if (identity !== null) {
+      previousIdentityRef.current = identity;
     }
-  }, [query.data, setIdentity]);
+  }, [query.data]);
 
-  return { identity, isLoading: query.isPending };
+  return { identity: query.data ?? null, isLoading: query.isPending };
 }

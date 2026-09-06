@@ -26,7 +26,6 @@ interface DaemonQueryOptions<
   enabled?: boolean;
   invoke: (captured: string) => Promise<TSnapshot>;
   project: (snapshot: TSnapshot) => TData;
-  initialData?: TData;
 }
 
 export function useDaemonQuery<
@@ -40,7 +39,6 @@ export function useDaemonQuery<
       identity ?? queryKeys.daemons.unresolved
     ),
     enabled: identity !== null && (options.enabled ?? true),
-    initialData: options.initialData,
     queryFn: async () => {
       const captured = identity;
       if (!captured) {
@@ -62,7 +60,11 @@ export function useDaemonQuery<
       : query.error
         ? errorMessage(query.error)
         : null,
-    errorKind: query.error ? daemonErrorKind(query.error) : null,
+    errorKind: noBackend
+      ? "no_backend"
+      : query.error
+        ? daemonErrorKind(query.error)
+        : null,
     connectionId: identity,
     refetch: () => void query.refetch(),
   };
