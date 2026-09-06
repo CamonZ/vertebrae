@@ -835,6 +835,208 @@ pub struct ProjectListResponse {
     pub projects: Vec<ProjectResponse>,
 }
 
+/// Safe daemon fleet metadata from Sacrum's GraphQL API.
+///
+/// This projection never carries credential material; one-time bootstrap
+/// tokens live only in [`DaemonBootstrapResponse`]. Timestamps stay raw
+/// strings on the wire and are validated when converted into the service's
+/// domain types. Response keys mirror this crate's snake_case GraphQL
+/// selections verbatim; `display_name` is non-null in the Sacrum schema, so
+/// its absence fails decoding instead of defaulting silently.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonResponse {
+    pub id: String,
+    /// Credential-enrollment lifecycle status. Unknown future statuses are
+    /// preserved verbatim; classification happens in the service layer.
+    pub status: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub display_name: String,
+    #[serde(default)]
+    pub enrolled_at: Option<String>,
+    #[serde(default)]
+    pub removed_at: Option<String>,
+    #[serde(default)]
+    pub inserted_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+/// Safe credential audit projection for one daemon credential. Token hashes
+/// are not selectable on this type; only kind, status and timestamps exist.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonCredentialMetadataResponse {
+    pub id: String,
+    pub credential_kind: String,
+    pub status: String,
+    pub expires_at: String,
+    #[serde(default)]
+    pub consumed_at: Option<String>,
+    #[serde(default)]
+    pub revoked_at: Option<String>,
+    #[serde(default)]
+    pub inserted_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+/// Owner-scoped enrollment metadata for one daemon, without token material.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonEnrollmentMetadataResponse {
+    pub daemon_id: String,
+    pub status: String,
+    #[serde(default)]
+    pub enrolled_at: Option<String>,
+    #[serde(default)]
+    pub credentials: Vec<DaemonCredentialMetadataResponse>,
+}
+
+/// Short-lived bootstrap payload returned by create and rotate. The
+/// enrollment token is shown once and never appears in any other projection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonBootstrapResponse {
+    pub daemon: DaemonResponse,
+    pub enrollment_token: String,
+    pub expires_at: String,
+}
+
+#[cfg(test)]
+mod daemon_dto_tests {
+    use super::*;
+
+    #[test]
+    fn daemon_response_reads_snake_case_keys() {
+        let daemon: DaemonResponse = serde_json::from_str(
+            r#"{
+                "id": "33333333-3333-3333-3333-333333333333",
+                "status": "pending",
+                "name": null,
+                "display_name": "33333333",
+                "enrolled_at": null,
+                "removed_at": null,
+                "inserted_at": "2026-09-05T10:00:00.123456Z",
+                "updated_at": "2026-09-05T10:00:00.123456Z"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(daemon.display_name, "33333333");
+        assert_eq!(daemon.name, None);
+        assert_eq!(daemon.enrolled_at, None);
+        assert_eq!(
+            daemon.inserted_at.as_deref(),
+            Some("2026-09-05T10:00:00.123456Z")
+        );
+    }
+
+    #[test]
+    fn daemon_response_reads_enrolled_named_daemons() {
+        let daemon: DaemonResponse = serde_json::from_str(
+            r#"{
+                "id": "33333333-3333-3333-3333-333333333333",
+                "status": "active",
+                "name": "Farm bot",
+                "display_name": "Farm bot",
+                "enrolled_at": "2026-09-05T11:00:00Z",
+                "removed_at": null,
+                "inserted_at": null,
+                "updated_at": null
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(daemon.display_name, "Farm bot");
+        assert_eq!(daemon.enrolled_at.as_deref(), Some("2026-09-05T11:00:00Z"));
+    }
+
+    #[test]
+    fn daemon_response_requires_a_display_name() {
+        // `display_name` is non-null in the Sacrum schema; a response without
+        // it must fail decoding (surfacing as a malformed/ambiguous response
+        // at the service boundary) rather than silently defaulting.
+        let error = serde_json::from_str::<DaemonResponse>(
+            r#"{
+                "id": "33333333-3333-3333-3333-333333333333",
+                "status": "pending"
+            }"#,
+        )
+        .expect_err("missing display_name must not decode");
+        assert!(error.to_string().contains("display_name"));
+    }
+
+    #[test]
+    fn daemon_response_ignores_unknown_future_fields_and_statuses() {
+        let daemon: DaemonResponse = serde_json::from_str(
+            r#"{
+                "id": "33333333-3333-3333-3333-333333333333",
+                "status": "quarantined_by_future_policy",
+                "display_name": "fallback",
+                "future_field": {"anything": true}
+            }"#,
+        )
+        .unwrap();
+        // Unknown statuses are preserved verbatim and unknown fields are
+        // ignored, so newer servers do not break older clients.
+        assert_eq!(daemon.status, "quarantined_by_future_policy");
+    }
+
+    #[test]
+    fn credential_metadata_projects_only_safe_audit_fields() {
+        let metadata: DaemonEnrollmentMetadataResponse = serde_json::from_str(
+            r#"{
+                "daemon_id": "33333333-3333-3333-3333-333333333333",
+                "status": "active",
+                "enrolled_at": "2026-09-05T11:00:00Z",
+                "credentials": [
+                    {
+                        "id": "44444444-4444-4444-4444-444444444444",
+                        "credential_kind": "bootstrap",
+                        "status": "consumed",
+                        "expires_at": "2026-09-12T11:00:00Z",
+                        "consumed_at": "2026-09-05T11:30:00Z",
+                        "revoked_at": null,
+                        "inserted_at": null,
+                        "updated_at": null
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(metadata.daemon_id, "33333333-3333-3333-3333-333333333333");
+        assert_eq!(metadata.credentials.len(), 1);
+        assert_eq!(metadata.credentials[0].credential_kind, "bootstrap");
+        assert_eq!(metadata.credentials[0].expires_at, "2026-09-12T11:00:00Z");
+        let body = serde_json::to_value(&metadata).unwrap().to_string();
+        assert!(
+            !body.contains("token"),
+            "metadata projection must stay token-free"
+        );
+        assert!(
+            !body.contains("hash"),
+            "metadata projection must stay hash-free"
+        );
+    }
+
+    #[test]
+    fn bootstrap_response_separates_token_material_from_safe_metadata() {
+        let bootstrap: DaemonBootstrapResponse = serde_json::from_str(
+            r#"{
+                "daemon": {
+                    "id": "33333333-3333-3333-3333-333333333333",
+                    "status": "pending",
+                    "display_name": "33333333"
+                },
+                "enrollment_token": "dtoken_dummy_one_time_value",
+                "expires_at": "2026-09-05T12:00:00Z"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(bootstrap.enrollment_token, "dtoken_dummy_one_time_value");
+        assert_eq!(bootstrap.daemon.status, "pending");
+        // The safe daemon projection itself serializes without any token field.
+        let safe = serde_json::to_value(&bootstrap.daemon).unwrap();
+        assert!(!safe.to_string().contains("token"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

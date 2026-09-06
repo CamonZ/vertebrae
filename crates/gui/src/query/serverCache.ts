@@ -186,6 +186,55 @@ export function invalidateArtifactQuery(
   });
 }
 
+/**
+ * Which daemon queries a mutation invalidates for its connection scope.
+ *
+ * - `"fleet"` — the fleet list only (a mutation that adds one record and
+ *   cannot affect existing daemons).
+ * - `{ daemonId, enrollment? }` — the fleet list plus that daemon's detail,
+ *   and additionally its enrollment audit when `enrollment` is set (mutation
+ *   types that touch credentials or lifecycle).
+ * - `"all"` — the connection's whole daemon subtree; the conservative
+ *   default, also used when a possibly-applied ambiguous mutation requires a
+ *   broad refresh of safe metadata.
+ */
+export type DaemonInvalidationScope =
+  | "fleet"
+  | { daemonId: string; enrollment?: boolean }
+  | "all";
+
+/**
+ * Refresh account-scoped daemon queries for one backend/account connection.
+ *
+ * Scoping keeps invalidation proportional to what the mutation actually
+ * changed; see [`DaemonInvalidationScope`]. The `connectionId` must be the
+ * identity the mutation executed under; a retired connection's subtree is
+ * never touched.
+ */
+export function invalidateDaemonQueries(
+  connectionId: string,
+  scope: DaemonInvalidationScope = "all"
+) {
+  const scopesFor: readonly (readonly unknown[])[] =
+    scope === "all"
+      ? [queryKeys.daemons.all(connectionId)]
+      : scope === "fleet"
+        ? [queryKeys.daemons.fleet(connectionId)]
+        : scope.enrollment
+          ? [
+              queryKeys.daemons.fleet(connectionId),
+              queryKeys.daemons.detail(connectionId, scope.daemonId),
+              queryKeys.daemons.enrollment(connectionId, scope.daemonId),
+            ]
+          : [
+              queryKeys.daemons.fleet(connectionId),
+              queryKeys.daemons.detail(connectionId, scope.daemonId),
+            ];
+  for (const queryKey of scopesFor) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
+}
+
 export function upsertStepExecutionInList(
   executions: readonly StepExecution[],
   execution: StepExecution

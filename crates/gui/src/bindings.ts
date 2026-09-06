@@ -5,1679 +5,1341 @@
 
 /** user-defined commands **/
 
+
 export const commands = {
-  /**
-   * Example command that will be exported with type definitions.
-   * This serves as a template for future Tauri commands.
-   */
-  async greet(name: string): Promise<string> {
+/**
+ * Example command that will be exported with type definitions.
+ * This serves as a template for future Tauri commands.
+ */
+async greet(name: string) : Promise<string> {
     return await TAURI_INVOKE("greet", { name });
-  },
-  /**
-   * Get the list of saved projects
-   */
-  async getProjects(): Promise<Result<SavedProject[], CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("get_projects") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Read the shared Sacrum settings state without exposing the API token.
-   */
-  async sacrumConfigStatus(): Promise<
-    Result<SacrumConfigStatus, CommandError>
-  > {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("sacrum_config_status") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  async saveSacrumSettings(
-    url: string,
-    token: string
-  ): Promise<Result<SacrumConfigStatus, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("save_sacrum_settings", { url, token }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Provision or adopt the local Sacrum backend and persist its generated
-   * connection settings before project initialization begins.
-   */
-  async setupLocalBackend(
-    adoptLegacy: boolean
-  ): Promise<Result<LocalBackendSetupResult, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("setup_local_backend", { adoptLegacy }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Adopt an existing legacy development backend without selecting or
-   * initializing a project.
-   */
-  async adoptLocalBackend(
-    confirmed: boolean
-  ): Promise<Result<LocalBackendAdoptionResult, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("adopt_local_backend", { confirmed }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Initialize a local project from the GUI without shelling out to `vtb init`.
-   */
-  async initializeProject(
-    path: string,
-    name: string | null
-  ): Promise<Result<InitializeProjectResult, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("initialize_project", { path, name }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Add a project to the saved list
-   *
-   * Takes a directory path, derives a slug from the folder name,
-   * creates the project in Sacrum API if needed, and registers in global config.
-   */
-  async addProject(path: string): Promise<Result<SavedProject, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("add_project", { path }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Remove a project from the saved list
-   *
-   * Removes the project from config.toml by slug. If the removed project
-   * is the currently selected project, clears the selection and services.
-   */
-  async removeProject(slug: string): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("remove_project", { slug }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get the currently selected project slug
-   */
-  async getCurrentProject(): Promise<Result<string | null, CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("get_current_project") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get the currently selected project's git root path
-   */
-  async getCurrentProjectPath(): Promise<Result<string | null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_current_project_path"),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Set the current project by slug and connect to its backend
-   */
-  async setCurrentProject(
-    slug: string | null
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("set_current_project", { slug }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Check if a project is currently selected and database is connected
-   */
-  async hasProjectSelected(): Promise<Result<boolean, CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("has_project_selected") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * List tasks with optional filters
-   *
-   * Returns a list of task summaries matching the filter criteria.
-   */
-  async listTasks(
-    filter: TaskFilterOptions | null
-  ): Promise<Result<Task[], CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("list_tasks", { filter }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * List tasks that are ready to be worked on.
-   *
-   * Mirrors `vtb ready`: the backend `list_ready` query returns tasks that are
-   * not completed and have no incomplete blockers; archived tasks are filtered
-   * out here, exactly as the CLI does.
-   */
-  async listReady(): Promise<Result<Task[], CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("list_ready") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get a single task by ID with its relations
-   *
-   * Returns the full task details.
-   */
-  async getTask(id: string): Promise<Result<Task, CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("get_task", { id }) };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * List artifact files in the active project.
-   */
-  async listProjectArtifacts(): Promise<Result<Artifact[], CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("list_project_artifacts"),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * List artifact files attached to one task.
-   */
-  async listTaskArtifacts(
-    taskId: string
-  ): Promise<Result<Artifact[], CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("list_task_artifacts", { taskId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Set the parent task
-   *
-   * Sets the parent of the given task. If the task already has a parent, it will be replaced.
-   * Validates that both tasks exist.
-   */
-  async setParent(
-    taskId: string,
-    parentId: string
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("set_parent", { taskId, parentId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Remove the parent task
-   *
-   * Removes the parent relationship from the given task, making it a root task.
-   */
-  async removeParent(taskId: string): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("remove_parent", { taskId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Add a dependency relationship
-   *
-   * Makes the given task depend on another task (the task is blocked by the dependency).
-   * Validates that both tasks exist and that adding the dependency won't create a cycle.
-   */
-  async addDependency(
-    taskId: string,
-    dependsOnId: string
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("add_dependency", { taskId, dependsOnId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Remove a dependency relationship
-   *
-   * Removes a dependency from the given task (the task is no longer blocked by this dependency).
-   */
-  async removeDependency(
-    taskId: string,
-    dependsOnId: string
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("remove_dependency", { taskId, dependsOnId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Replace the full dependency set for a task
-   *
-   * Saves picker changes atomically instead of issuing one mutation per add/remove.
-   */
-  async syncDependencies(
-    taskId: string,
-    dependsOnIds: string[]
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("sync_dependencies", { taskId, dependsOnIds }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Create a new task with the given title, optional description, level, and parent task
-   *
-   * Returns the ID of the newly created task.
-   * Validates that parent task exists if specified.
-   */
-  async createTask(
-    title: string,
-    description: string | null,
-    level: string | null,
-    parentId: string | null
-  ): Promise<Result<string, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("create_task", {
-          title,
-          description,
-          level,
-          parentId,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Update a task with multiple fields
-   *
-   * Specify only the fields you want to update. Omitted fields remain unchanged.
-   */
-  async updateTask(
-    taskId: string,
-    options: UpdateTaskOptions
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("update_task", { taskId, options }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Assign a workflow to a task
-   *
-   * Associates the given workflow with the task for workflow state management.
-   */
-  async assignWorkflow(
-    taskId: string,
-    workflowId: string
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("assign_workflow", { taskId, workflowId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Delete a task with optional cascade delete for child tasks
-   *
-   * When cascade is true, deletes the task and all its descendants.
-   * When cascade is false, deletes the task but orphans its children (they lose their parent).
-   *
-   * This operation is atomic - either fully succeeds or fully fails.
-   */
-  async deleteTask(
-    taskId: string,
-    cascade: boolean
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("delete_task", { taskId, cascade }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Add a section to a task
-   *
-   * Creates a new section with the given type and content.
-   * For step and testing_criterion types, content can be optional.
-   * The order is assigned by Sacrum.
-   */
-  async addSection(
-    taskId: string,
-    sectionType: string,
-    content: string | null
-  ): Promise<Result<Section, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("add_section", {
-          taskId,
-          sectionType,
-          content,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Edit a section's content by its ordinal (position)
-   *
-   * Updates the content of an existing section identified by its type and ordinal.
-   */
-  async editSection(
-    taskId: string,
-    sectionType: string,
-    ordinal: number,
-    newContent: string
-  ): Promise<Result<Section, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("edit_section", {
-          taskId,
-          sectionType,
-          ordinal,
-          newContent,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Toggle the completion status of a checklist item
-   *
-   * Marks a checklist item as done or not done by toggling its done flag.
-   * For checklist item sections only (other types will return an error).
-   */
-  async toggleChecklistItemDone(
-    taskId: string,
-    ordinal: number
-  ): Promise<Result<Section, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("toggle_checklist_item_done", {
-          taskId,
-          ordinal,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Remove a section from a task by its ordinal (position)
-   *
-   * Deletes a section identified by its type and ordinal.
-   * Remaining sections of the same type are renumbered.
-   */
-  async removeSection(
-    taskId: string,
-    sectionType: string,
-    ordinal: number
-  ): Promise<Result<Section, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("remove_section", {
-          taskId,
-          sectionType,
-          ordinal,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Add a code reference to a testing criterion section
-   *
-   * Appends a code reference to an existing testing criterion section.
-   */
-  async addCriterionRef(
-    taskId: string,
-    sectionOrdinal: number,
-    filePath: string,
-    lineNumber: number | null,
-    name: string | null
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("add_criterion_ref", {
-          taskId,
-          sectionOrdinal,
-          filePath,
-          lineNumber,
-          name,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Add a code reference to a task
-   *
-   * Appends a code reference with optional line numbers and description.
-   */
-  async addCodeRef(
-    taskId: string,
-    path: string,
-    lineStart: number | null,
-    lineEnd: number | null,
-    name: string | null,
-    description: string | null
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("add_code_ref", {
-          taskId,
-          path,
-          lineStart,
-          lineEnd,
-          name,
-          description,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Remove code references from a task
-   *
-   * Deletes one or more code references from the given task.
-   *
-   * * `indices` - If provided, only these 0-based indices will be removed. Otherwise all are removed.
-   */
-  async removeCodeRefs(
-    taskId: string,
-    indices: number[] | null
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("remove_code_refs", { taskId, indices }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Replace all code references for a task
-   *
-   * Removes all existing code references and adds the provided ones.
-   */
-  async replaceCodeRefs(
-    taskId: string,
-    refs: CodeRef[]
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("replace_code_refs", { taskId, refs }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * List all workflows
-   *
-   * Returns a list of all workflows in the database.
-   */
-  async listWorkflows(): Promise<Result<Workflow[], CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("list_workflows") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get a single workflow by ID
-   *
-   * Returns the full workflow details including steps.
-   */
-  async getWorkflow(id: string): Promise<Result<Workflow, CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("get_workflow", { id }) };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get a workflow with its associated tasks
-   *
-   * Returns the workflow along with all tasks that reference this workflow.
-   */
-  async getWorkflowWithTasks(
-    id: string
-  ): Promise<Result<WorkflowWithTasks, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_workflow_with_tasks", { id }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get a workflow with its associated tasks including full details and relations
-   *
-   * Returns the workflow along with all tasks that reference this workflow,
-   * including full task details (sections, refs) and relations (parent, children, dependencies).
-   * Uses optimized single-query database access via graph traversal.
-   */
-  async getWorkflowWithTaskDetails(
-    id: string
-  ): Promise<Result<WorkflowWithTaskDetails, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_workflow_with_task_details", { id }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Fetch the full pipeline summary in a single GraphQL round-trip.
-   *
-   * Returns one entry per workflow with preloaded steps (each carrying
-   * `pipeline_counts`/`active_count` aggregates plus their outbound
-   * transitions) and inter-workflow transitions. The Sacrum resolver runs at
-   * most 4 SQL queries regardless of project size.
-   *
-   * The frontend keeps these aggregates fresh by refetching this authoritative
-   * summary after Sacrum websocket events that can change pipeline counts. It
-   * does NOT issue a per-task execution query on mount.
-   */
-  async getPipelineSummary(): Promise<Result<PipelineSummary, CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("get_pipeline_summary") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * List all workflow transitions
-   *
-   * Returns all defined transitions between workflows, including workflow names
-   * from the same workflow fetch.
-   */
-  async listWorkflowTransitions(): Promise<
-    Result<WorkflowTransition[], CommandError>
-  > {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("list_workflow_transitions"),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Create a workflow-to-workflow transition. Sacrum broadcasts the change over the
-   * project channel; clients refresh from the broadcast rather than this command.
-   */
-  async createWorkflowTransition(
-    fromWorkflowId: string,
-    toWorkflowId: string,
-    label: string | null,
-    targetStepId: string | null
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("create_workflow_transition", {
-          fromWorkflowId,
-          toWorkflowId,
-          label,
-          targetStepId,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Delete a workflow-to-workflow transition. Sacrum broadcasts the change.
-   */
-  async deleteWorkflowTransition(
-    fromWorkflowId: string,
-    toWorkflowId: string
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("delete_workflow_transition", {
-          fromWorkflowId,
-          toWorkflowId,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Update an existing workflow. Only fields that are Some will be updated.
-   */
-  async updateWorkflow(
-    options: UpdateWorkflowOptions
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("update_workflow", { options }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get all step executions for a task
-   *
-   * Returns a chronological list of all step executions for the given task.
-   * This shows how the task has progressed through workflow steps over time.
-   */
-  async getTaskExecutions(
-    taskId: string
-  ): Promise<Result<StepExecution[], CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_task_executions", { taskId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Fetch a single step execution by ID with full detail.
-   *
-   * Returns the full StepExecution struct (including prompt, output, context,
-   * transition_result, model, tokens, cost, duration_ms, handoff, session_id)
-   * or `None` when no execution matches the given ID.
-   */
-  async getExecution(
-    executionId: string
-  ): Promise<Result<StepExecution | null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_execution", { executionId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get all session logs for a step execution
-   *
-   * Returns a chronological list of all session logs for the given execution.
-   * This shows the content recorded during the step execution.
-   */
-  async getExecutionLogs(
-    executionId: string
-  ): Promise<Result<SessionLog[], CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_execution_logs", { executionId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get the active TaskRun for a task, if one is currently active.
-   */
-  async getActiveRun(
-    taskId: string
-  ): Promise<Result<TaskRun | null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_active_run", { taskId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * List durable TaskRuns for a task.
-   */
-  async getTaskRuns(taskId: string): Promise<Result<TaskRun[], CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_task_runs", { taskId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get the trace for a single TaskRun.
-   *
-   * `root_task_run_id` is a legacy parameter name; Sacrum accepts any TaskRun
-   * id and returns that run's scoped trace.
-   */
-  async getTaskRunTrace(
-    rootTaskRunId: string
-  ): Promise<Result<TaskRunTrace, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_task_run_trace", { rootTaskRunId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * List all steps for a workflow
-   *
-   * Returns all first-class Step entities associated with the given workflow ID.
-   */
-  async listStepsForWorkflow(
-    workflowId: string
-  ): Promise<Result<Step[], CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("list_steps_for_workflow", { workflowId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get a single step by ID
-   *
-   * Returns the Step entity with the given ID.
-   */
-  async getStep(stepId: string): Promise<Result<Step | null, CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("get_step", { stepId }) };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Create a new step for a workflow
-   *
-   * Creates a new first-class Step entity with the given properties.
-   */
-  async createStep(
-    options: CreateStepOptions
-  ): Promise<Result<Step, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("create_step", { options }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Update an existing step
-   *
-   * Updates the step with the given ID. Only fields that are Some will be updated.
-   */
-  async updateStep(
-    options: UpdateStepOptions
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("update_step", { options }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Delete a step
-   *
-   * Deletes the step with the given ID.
-   */
-  async deleteStep(stepId: string): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("delete_step", { stepId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Run a single workflow step for a task via Sacrum
-   *
-   * Sacrum creates a StepExecution record and broadcasts a run_step event
-   * to connected daemon clients, which pick up and execute the step.
-   */
-  async runStep(
-    taskId: string,
-    stepId: string
-  ): Promise<Result<StepExecution, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("run_step", { taskId, stepId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Start or schedule a durable TaskRun workflow via Sacrum.
-   */
-  async runWorkflow(
-    taskId: string,
-    maxConcurrency: number | null
-  ): Promise<Result<TaskRun, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("run_workflow", { taskId, maxConcurrency }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Stop a durable TaskRun by explicit run ID or by active task ID.
-   *
-   * If both IDs are provided, `task_run_id` takes precedence.
-   */
-  async stopRun(
-    request: StopRunRequest
-  ): Promise<Result<TaskRun | null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("stop_run", { request }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Orchestrate a task through its entire workflow via the TaskRun path.
-   *
-   * Compatibility shim for existing frontend call sites. New code should call
-   * `run_workflow`, which returns the durable TaskRun.
-   */
-  async orchestrateTask(taskId: string): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("orchestrate_task", { taskId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Stop the running TaskRun for a task via Sacrum.
-   *
-   * Idempotent: if no orchestrator is running for the task, the call still
-   * resolves successfully. The daemon receives the corresponding cancel_step
-   * event and terminates any in-flight child process.
-   */
-  async stopOrchestrator(taskId: string): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("stop_orchestrator", { taskId }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * List supported local chat harnesses for provider-neutral local sessions.
-   */
-  async getSupportedLocalChatHarnesses(): Promise<
-    Result<LocalChatHarnessCatalog, CommandError>
-  > {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_supported_local_chat_harnesses"),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Return applications and known editor commands that can open local files.
-   */
-  async getLocalFileEditors(): Promise<
-    Result<LocalFileEditor[], CommandError>
-  > {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_local_file_editors"),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Return the canonical project and Git worktree roots that local-chat file
-   * references may target.
-   */
-  async getLocalFileRoots(
-    projectRoot: string
-  ): Promise<Result<string[], CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("get_local_file_roots", { projectRoot }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Open a validated local-chat file reference with the operating system's
-   * external file handler. The frontend supplies the captured project root and
-   * the raw reference path; canonicalization here closes symlink and traversal
-   * gaps before invoking the opener plugin.
-   */
-  async openLocalFile(
-    projectRoot: string,
-    path: string,
-    line: number | null,
-    column: number | null,
-    editor: string | null
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("open_local_file", {
-          projectRoot,
-          path,
-          line,
-          column,
-          editor,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Create a provider-neutral local chat session.
-   */
-  async createLocalChatSession(
-    input: CreateLocalChatSessionInput
-  ): Promise<Result<null, LocalChatSessionError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("create_local_chat_session", { input }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Send a message to a provider-neutral local chat session.
-   */
-  async sendLocalChatMessage(
-    backendSessionId: string,
-    content: string
-  ): Promise<Result<null, LocalChatSessionError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("send_local_chat_message", {
-          backendSessionId,
-          content,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Close a provider-neutral local chat session.
-   */
-  async closeLocalChatSession(
-    backendSessionId: string
-  ): Promise<Result<null, LocalChatSessionError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("close_local_chat_session", {
-          backendSessionId,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Infer a concise display title for a local chat from its initial prompt.
-   */
-  async inferLocalChatSessionTitle(
-    input: InferLocalChatSessionTitleInput
-  ): Promise<Result<InferLocalChatSessionTitleOutput, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("infer_local_chat_session_title", { input }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Load the app-managed local chat metadata index.
-   */
-  async loadLocalChatSessionIndex(): Promise<
-    Result<LocalChatSessionIndexEntry[], CommandError>
-  > {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("load_local_chat_session_index"),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Save the app-managed local chat metadata index atomically.
-   */
-  async saveLocalChatSessionIndex(
-    input: SaveLocalChatSessionIndexInput
-  ): Promise<Result<null, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("save_local_chat_session_index", { input }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Discover and replay a persisted provider transcript through the
-   * provider-owned harness adapter. The GUI receives only normalized V1 event
-   * JSON and never needs to know the Claude or Codex file layout.
-   */
-  async loadLocalChatSessionReplay(
-    input: LoadLocalChatSessionReplayInput
-  ): Promise<Result<LoadLocalChatSessionReplayOutput, CommandError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("load_local_chat_session_replay", { input }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Resolve a local chat permission request shown in the GUI.
-   */
-  async resolvePermissionRequest(
-    input: ResolvePermissionRequestInput
-  ): Promise<Result<JsonValue, ResolvePermissionRequestError>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("resolve_permission_request", { input }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Get the current WebSocket connection status
-   */
-  async getWebsocketStatus(): Promise<Result<string, CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("get_websocket_status") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Quit the application.
-   *
-   * Used by the first-run install screen's Cancel button so a user who does not
-   * want to install the bundled tools can exit cleanly rather than being routed
-   * into an app that can't function without them.
-   */
-  async quitApplication(): Promise<Result<null, CommandError>> {
-    try {
-      return { status: "ok", data: await TAURI_INVOKE("quit_application") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Check the signed GUI release metadata for every supported channel.
-   *
-   * The updater plugin normally reads the single endpoint configured for the
-   * current bundle. Channel selection needs independent availability, so each
-   * endpoint is checked through a separate native updater builder. This keeps
-   * signature and platform validation identical to the normal updater path.
-   */
-  async checkGuiUpdateChannels(): Promise<GuiUpdateChannelStatus[]> {
+},
+/**
+ * Get the list of saved projects
+ */
+async getProjects() : Promise<Result<SavedProject[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_projects") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Read the shared Sacrum settings state without exposing the API token.
+ */
+async sacrumConfigStatus() : Promise<Result<SacrumConfigStatus, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sacrum_config_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveSacrumSettings(url: string, token: string) : Promise<Result<SacrumConfigStatus, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_sacrum_settings", { url, token }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Provision or adopt the local Sacrum backend and persist its generated
+ * connection settings before project initialization begins.
+ */
+async setupLocalBackend(adoptLegacy: boolean) : Promise<Result<LocalBackendSetupResult, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("setup_local_backend", { adoptLegacy }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Adopt an existing legacy development backend without selecting or
+ * initializing a project.
+ */
+async adoptLocalBackend(confirmed: boolean) : Promise<Result<LocalBackendAdoptionResult, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("adopt_local_backend", { confirmed }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Initialize a local project from the GUI without shelling out to `vtb init`.
+ */
+async initializeProject(path: string, name: string | null) : Promise<Result<InitializeProjectResult, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("initialize_project", { path, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a project to the saved list
+ * 
+ * Takes a directory path, derives a slug from the folder name,
+ * creates the project in Sacrum API if needed, and registers in global config.
+ */
+async addProject(path: string) : Promise<Result<SavedProject, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_project", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove a project from the saved list
+ * 
+ * Removes the project from config.toml by slug. If the removed project
+ * is the currently selected project, clears the selection and services.
+ */
+async removeProject(slug: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_project", { slug }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get the currently selected project slug
+ */
+async getCurrentProject() : Promise<Result<string | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_current_project") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get the currently selected project's git root path
+ */
+async getCurrentProjectPath() : Promise<Result<string | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_current_project_path") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Set the current project by slug and connect to its backend
+ */
+async setCurrentProject(slug: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_current_project", { slug }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Check if a project is currently selected and database is connected
+ */
+async hasProjectSelected() : Promise<Result<boolean, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("has_project_selected") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List tasks with optional filters
+ * 
+ * Returns a list of task summaries matching the filter criteria.
+ */
+async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_tasks", { filter }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List tasks that are ready to be worked on.
+ * 
+ * Mirrors `vtb ready`: the backend `list_ready` query returns tasks that are
+ * not completed and have no incomplete blockers; archived tasks are filtered
+ * out here, exactly as the CLI does.
+ */
+async listReady() : Promise<Result<Task[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_ready") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a single task by ID with its relations
+ * 
+ * Returns the full task details.
+ */
+async getTask(id: string) : Promise<Result<Task, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List artifact files in the active project.
+ */
+async listProjectArtifacts() : Promise<Result<Artifact[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_project_artifacts") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List artifact files attached to one task.
+ */
+async listTaskArtifacts(taskId: string) : Promise<Result<Artifact[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_task_artifacts", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Set the parent task
+ * 
+ * Sets the parent of the given task. If the task already has a parent, it will be replaced.
+ * Validates that both tasks exist.
+ */
+async setParent(taskId: string, parentId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_parent", { taskId, parentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove the parent task
+ * 
+ * Removes the parent relationship from the given task, making it a root task.
+ */
+async removeParent(taskId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_parent", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a dependency relationship
+ * 
+ * Makes the given task depend on another task (the task is blocked by the dependency).
+ * Validates that both tasks exist and that adding the dependency won't create a cycle.
+ */
+async addDependency(taskId: string, dependsOnId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_dependency", { taskId, dependsOnId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove a dependency relationship
+ * 
+ * Removes a dependency from the given task (the task is no longer blocked by this dependency).
+ */
+async removeDependency(taskId: string, dependsOnId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_dependency", { taskId, dependsOnId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Replace the full dependency set for a task
+ * 
+ * Saves picker changes atomically instead of issuing one mutation per add/remove.
+ */
+async syncDependencies(taskId: string, dependsOnIds: string[]) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sync_dependencies", { taskId, dependsOnIds }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Create a new task with the given title, optional description, level, and parent task
+ * 
+ * Returns the ID of the newly created task.
+ * Validates that parent task exists if specified.
+ */
+async createTask(title: string, description: string | null, level: string | null, parentId: string | null) : Promise<Result<string, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_task", { title, description, level, parentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update a task with multiple fields
+ * 
+ * Specify only the fields you want to update. Omitted fields remain unchanged.
+ */
+async updateTask(taskId: string, options: UpdateTaskOptions) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_task", { taskId, options }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Assign a workflow to a task
+ * 
+ * Associates the given workflow with the task for workflow state management.
+ */
+async assignWorkflow(taskId: string, workflowId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("assign_workflow", { taskId, workflowId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a task with optional cascade delete for child tasks
+ * 
+ * When cascade is true, deletes the task and all its descendants.
+ * When cascade is false, deletes the task but orphans its children (they lose their parent).
+ * 
+ * This operation is atomic - either fully succeeds or fully fails.
+ */
+async deleteTask(taskId: string, cascade: boolean) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_task", { taskId, cascade }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a section to a task
+ * 
+ * Creates a new section with the given type and content.
+ * For step and testing_criterion types, content can be optional.
+ * The order is assigned by Sacrum.
+ */
+async addSection(taskId: string, sectionType: string, content: string | null) : Promise<Result<Section, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_section", { taskId, sectionType, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Edit a section's content by its ordinal (position)
+ * 
+ * Updates the content of an existing section identified by its type and ordinal.
+ */
+async editSection(taskId: string, sectionType: string, ordinal: number, newContent: string) : Promise<Result<Section, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("edit_section", { taskId, sectionType, ordinal, newContent }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Toggle the completion status of a checklist item
+ * 
+ * Marks a checklist item as done or not done by toggling its done flag.
+ * For checklist item sections only (other types will return an error).
+ */
+async toggleChecklistItemDone(taskId: string, ordinal: number) : Promise<Result<Section, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("toggle_checklist_item_done", { taskId, ordinal }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove a section from a task by its ordinal (position)
+ * 
+ * Deletes a section identified by its type and ordinal.
+ * Remaining sections of the same type are renumbered.
+ */
+async removeSection(taskId: string, sectionType: string, ordinal: number) : Promise<Result<Section, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_section", { taskId, sectionType, ordinal }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a code reference to a testing criterion section
+ * 
+ * Appends a code reference to an existing testing criterion section.
+ */
+async addCriterionRef(taskId: string, sectionOrdinal: number, filePath: string, lineNumber: number | null, name: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_criterion_ref", { taskId, sectionOrdinal, filePath, lineNumber, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a code reference to a task
+ * 
+ * Appends a code reference with optional line numbers and description.
+ */
+async addCodeRef(taskId: string, path: string, lineStart: number | null, lineEnd: number | null, name: string | null, description: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_code_ref", { taskId, path, lineStart, lineEnd, name, description }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove code references from a task
+ * 
+ * Deletes one or more code references from the given task.
+ * 
+ * * `indices` - If provided, only these 0-based indices will be removed. Otherwise all are removed.
+ */
+async removeCodeRefs(taskId: string, indices: number[] | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_code_refs", { taskId, indices }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Replace all code references for a task
+ * 
+ * Removes all existing code references and adds the provided ones.
+ */
+async replaceCodeRefs(taskId: string, refs: CodeRef[]) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("replace_code_refs", { taskId, refs }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List all workflows
+ * 
+ * Returns a list of all workflows in the database.
+ */
+async listWorkflows() : Promise<Result<Workflow[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_workflows") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a single workflow by ID
+ * 
+ * Returns the full workflow details including steps.
+ */
+async getWorkflow(id: string) : Promise<Result<Workflow, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_workflow", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a workflow with its associated tasks
+ * 
+ * Returns the workflow along with all tasks that reference this workflow.
+ */
+async getWorkflowWithTasks(id: string) : Promise<Result<WorkflowWithTasks, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_workflow_with_tasks", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a workflow with its associated tasks including full details and relations
+ * 
+ * Returns the workflow along with all tasks that reference this workflow,
+ * including full task details (sections, refs) and relations (parent, children, dependencies).
+ * Uses optimized single-query database access via graph traversal.
+ */
+async getWorkflowWithTaskDetails(id: string) : Promise<Result<WorkflowWithTaskDetails, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_workflow_with_task_details", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Fetch the full pipeline summary in a single GraphQL round-trip.
+ * 
+ * Returns one entry per workflow with preloaded steps (each carrying
+ * `pipeline_counts`/`active_count` aggregates plus their outbound
+ * transitions) and inter-workflow transitions. The Sacrum resolver runs at
+ * most 4 SQL queries regardless of project size.
+ * 
+ * The frontend keeps these aggregates fresh by refetching this authoritative
+ * summary after Sacrum websocket events that can change pipeline counts. It
+ * does NOT issue a per-task execution query on mount.
+ */
+async getPipelineSummary() : Promise<Result<PipelineSummary, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_pipeline_summary") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List all workflow transitions
+ * 
+ * Returns all defined transitions between workflows, including workflow names
+ * from the same workflow fetch.
+ */
+async listWorkflowTransitions() : Promise<Result<WorkflowTransition[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_workflow_transitions") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Create a workflow-to-workflow transition. Sacrum broadcasts the change over the
+ * project channel; clients refresh from the broadcast rather than this command.
+ */
+async createWorkflowTransition(fromWorkflowId: string, toWorkflowId: string, label: string | null, targetStepId: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_workflow_transition", { fromWorkflowId, toWorkflowId, label, targetStepId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a workflow-to-workflow transition. Sacrum broadcasts the change.
+ */
+async deleteWorkflowTransition(fromWorkflowId: string, toWorkflowId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_workflow_transition", { fromWorkflowId, toWorkflowId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update an existing workflow. Only fields that are Some will be updated.
+ */
+async updateWorkflow(options: UpdateWorkflowOptions) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_workflow", { options }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get all step executions for a task
+ * 
+ * Returns a chronological list of all step executions for the given task.
+ * This shows how the task has progressed through workflow steps over time.
+ */
+async getTaskExecutions(taskId: string) : Promise<Result<StepExecution[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task_executions", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Fetch a single step execution by ID with full detail.
+ * 
+ * Returns the full StepExecution struct (including prompt, output, context,
+ * transition_result, model, tokens, cost, duration_ms, handoff, session_id)
+ * or `None` when no execution matches the given ID.
+ */
+async getExecution(executionId: string) : Promise<Result<StepExecution | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_execution", { executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get all session logs for a step execution
+ * 
+ * Returns a chronological list of all session logs for the given execution.
+ * This shows the content recorded during the step execution.
+ */
+async getExecutionLogs(executionId: string) : Promise<Result<SessionLog[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_execution_logs", { executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get the active TaskRun for a task, if one is currently active.
+ */
+async getActiveRun(taskId: string) : Promise<Result<TaskRun | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_active_run", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List durable TaskRuns for a task.
+ */
+async getTaskRuns(taskId: string) : Promise<Result<TaskRun[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task_runs", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get the trace for a single TaskRun.
+ * 
+ * `root_task_run_id` is a legacy parameter name; Sacrum accepts any TaskRun
+ * id and returns that run's scoped trace.
+ */
+async getTaskRunTrace(rootTaskRunId: string) : Promise<Result<TaskRunTrace, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task_run_trace", { rootTaskRunId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List all steps for a workflow
+ * 
+ * Returns all first-class Step entities associated with the given workflow ID.
+ */
+async listStepsForWorkflow(workflowId: string) : Promise<Result<Step[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_steps_for_workflow", { workflowId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a single step by ID
+ * 
+ * Returns the Step entity with the given ID.
+ */
+async getStep(stepId: string) : Promise<Result<Step | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_step", { stepId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Create a new step for a workflow
+ * 
+ * Creates a new first-class Step entity with the given properties.
+ */
+async createStep(options: CreateStepOptions) : Promise<Result<Step, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_step", { options }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update an existing step
+ * 
+ * Updates the step with the given ID. Only fields that are Some will be updated.
+ */
+async updateStep(options: UpdateStepOptions) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_step", { options }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a step
+ * 
+ * Deletes the step with the given ID.
+ */
+async deleteStep(stepId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_step", { stepId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Run a single workflow step for a task via Sacrum
+ * 
+ * Sacrum creates a StepExecution record and broadcasts a run_step event
+ * to connected daemon clients, which pick up and execute the step.
+ */
+async runStep(taskId: string, stepId: string) : Promise<Result<StepExecution, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("run_step", { taskId, stepId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Start or schedule a durable TaskRun workflow via Sacrum.
+ */
+async runWorkflow(taskId: string, maxConcurrency: number | null) : Promise<Result<TaskRun, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("run_workflow", { taskId, maxConcurrency }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stop a durable TaskRun by explicit run ID or by active task ID.
+ * 
+ * If both IDs are provided, `task_run_id` takes precedence.
+ */
+async stopRun(request: StopRunRequest) : Promise<Result<TaskRun | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_run", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Orchestrate a task through its entire workflow via the TaskRun path.
+ * 
+ * Compatibility shim for existing frontend call sites. New code should call
+ * `run_workflow`, which returns the durable TaskRun.
+ */
+async orchestrateTask(taskId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("orchestrate_task", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stop the running TaskRun for a task via Sacrum.
+ * 
+ * Idempotent: if no orchestrator is running for the task, the call still
+ * resolves successfully. The daemon receives the corresponding cancel_step
+ * event and terminates any in-flight child process.
+ */
+async stopOrchestrator(taskId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_orchestrator", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List supported local chat harnesses for provider-neutral local sessions.
+ */
+async getSupportedLocalChatHarnesses() : Promise<Result<LocalChatHarnessCatalog, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_supported_local_chat_harnesses") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Return applications and known editor commands that can open local files.
+ */
+async getLocalFileEditors() : Promise<Result<LocalFileEditor[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_local_file_editors") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Return the canonical project and Git worktree roots that local-chat file
+ * references may target.
+ */
+async getLocalFileRoots(projectRoot: string) : Promise<Result<string[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_local_file_roots", { projectRoot }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Open a validated local-chat file reference with the operating system's
+ * external file handler. The frontend supplies the captured project root and
+ * the raw reference path; canonicalization here closes symlink and traversal
+ * gaps before invoking the opener plugin.
+ */
+async openLocalFile(projectRoot: string, path: string, line: number | null, column: number | null, editor: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_local_file", { projectRoot, path, line, column, editor }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Create a provider-neutral local chat session.
+ */
+async createLocalChatSession(input: CreateLocalChatSessionInput) : Promise<Result<null, LocalChatSessionError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_local_chat_session", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Send a message to a provider-neutral local chat session.
+ */
+async sendLocalChatMessage(backendSessionId: string, content: string) : Promise<Result<null, LocalChatSessionError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("send_local_chat_message", { backendSessionId, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Close a provider-neutral local chat session.
+ */
+async closeLocalChatSession(backendSessionId: string) : Promise<Result<null, LocalChatSessionError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("close_local_chat_session", { backendSessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Infer a concise display title for a local chat from its initial prompt.
+ */
+async inferLocalChatSessionTitle(input: InferLocalChatSessionTitleInput) : Promise<Result<InferLocalChatSessionTitleOutput, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("infer_local_chat_session_title", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Load the app-managed local chat metadata index.
+ */
+async loadLocalChatSessionIndex() : Promise<Result<LocalChatSessionIndexEntry[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_local_chat_session_index") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Save the app-managed local chat metadata index atomically.
+ */
+async saveLocalChatSessionIndex(input: SaveLocalChatSessionIndexInput) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_local_chat_session_index", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Discover and replay a persisted provider transcript through the
+ * provider-owned harness adapter. The GUI receives only normalized V1 event
+ * JSON and never needs to know the Claude or Codex file layout.
+ */
+async loadLocalChatSessionReplay(input: LoadLocalChatSessionReplayInput) : Promise<Result<LoadLocalChatSessionReplayOutput, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_local_chat_session_replay", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Resolve a local chat permission request shown in the GUI.
+ */
+async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, ResolvePermissionRequestError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resolve_permission_request", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get the current WebSocket connection status
+ */
+async getWebsocketStatus() : Promise<Result<string, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_websocket_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Identity of the active backend/account connection, or `None` when the GUI
+ * has no Sacrum client. Account-scoped frontend caches (the daemon fleet)
+ * key on this identity instead of the selected project.
+ */
+async getSacrumConnectionIdentity() : Promise<Result<string | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_sacrum_connection_identity") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List the owner's active daemon fleet (removed tombstones excluded by the
+ * server; revoked daemons remain listed).
+ */
+async listDaemonFleet() : Promise<Result<DaemonFleetSnapshot, DaemonCommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_daemon_fleet") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Read one daemon. Unknown and foreign ids return `None` without disclosure.
+ */
+async getDaemon(daemonId: string) : Promise<Result<DaemonDetailSnapshot, DaemonCommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_daemon", { daemonId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Read safe enrollment metadata (credential audit without token material).
+ */
+async getDaemonEnrollmentMetadata(daemonId: string) : Promise<Result<DaemonEnrollmentSnapshot, DaemonCommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_daemon_enrollment_metadata", { daemonId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Provision a daemon and return its one-time bootstrap credential. The
+ * enrollment token is returned exactly once and never logged.
+ */
+async createDaemon(name: string | null) : Promise<Result<DaemonBootstrapResult, DaemonCommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_daemon", { name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Rename a daemon through the server's shared naming policy.
+ */
+async renameDaemon(daemonId: string, name: DaemonNameUpdate) : Promise<Result<DaemonMutationResult, DaemonCommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rename_daemon", { daemonId, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Revoke a daemon terminally and idempotently.
+ */
+async revokeDaemon(daemonId: string) : Promise<Result<DaemonMutationResult, DaemonCommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("revoke_daemon", { daemonId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Unregister a daemon (soft tombstone), refused conservatively while a
+ * session is connected or work ownership is unproven.
+ */
+async unregisterDaemon(daemonId: string) : Promise<Result<DaemonMutationResult, DaemonCommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("unregister_daemon", { daemonId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Invalidate prior credentials and issue a fresh one-time bootstrap. The new
+ * enrollment token is returned exactly once and never logged.
+ */
+async rotateDaemonCredentials(daemonId: string) : Promise<Result<DaemonBootstrapResult, DaemonCommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rotate_daemon_credentials", { daemonId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Quit the application.
+ * 
+ * Used by the first-run install screen's Cancel button so a user who does not
+ * want to install the bundled tools can exit cleanly rather than being routed
+ * into an app that can't function without them.
+ */
+async quitApplication() : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("quit_application") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Check the signed GUI release metadata for every supported channel.
+ * 
+ * The updater plugin normally reads the single endpoint configured for the
+ * current bundle. Channel selection needs independent availability, so each
+ * endpoint is checked through a separate native updater builder. This keeps
+ * signature and platform validation identical to the normal updater path.
+ */
+async checkGuiUpdateChannels() : Promise<GuiUpdateChannelStatus[]> {
     return await TAURI_INVOKE("check_gui_update_channels");
-  },
-  async checkLocalBackendUpdate(): Promise<
-    Result<LocalBackendUpdateStatus, CommandError>
-  > {
+},
+async checkLocalBackendUpdate() : Promise<Result<LocalBackendUpdateStatus, CommandError>> {
     try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("check_local_backend_update"),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  async applyApprovedLocalBackendUpdate(
-    approved: boolean,
-    channel: string,
-    version: string,
-    build: string,
-    imageRef: string
-  ): Promise<Result<LocalBackendUpdateResult, CommandError>> {
+    return { status: "ok", data: await TAURI_INVOKE("check_local_backend_update") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async applyApprovedLocalBackendUpdate(approved: boolean, channel: string, version: string, build: string, imageRef: string) : Promise<Result<LocalBackendUpdateResult, CommandError>> {
     try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("apply_approved_local_backend_update", {
-          approved,
-          channel,
-          version,
-          build,
-          imageRef,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Record useful native diagnostics after the updater plugin reports a failed
-   * check. The plugin currently logs only that the endpoint returned a
-   * non-success status, so this follow-up request captures the configured URL,
-   * HTTP status, content type, and a bounded response preview in the app log.
-   *
-   * This command is diagnostic-only: it never downloads, installs, or relaunches
-   * the application. It is called only after the signed updater check fails.
-   */
-  async diagnoseGuiUpdateCheck(
-    reason: string
-  ): Promise<Result<null, CommandError>> {
+    return { status: "ok", data: await TAURI_INVOKE("apply_approved_local_backend_update", { approved, channel, version, build, imageRef }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Record useful native diagnostics after the updater plugin reports a failed
+ * check. The plugin currently logs only that the endpoint returned a
+ * non-success status, so this follow-up request captures the configured URL,
+ * HTTP status, content type, and a bounded response preview in the app log.
+ * 
+ * This command is diagnostic-only: it never downloads, installs, or relaunches
+ * the application. It is called only after the signed updater check fails.
+ */
+async diagnoseGuiUpdateCheck(reason: string) : Promise<Result<null, CommandError>> {
     try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("diagnose_gui_update_check", { reason }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Probe the current install state without making any changes.
-   *
-   * Safe to call on every app launch — performs only filesystem lookups and a
-   * single OS service-manager status query (no `launchctl load`, no copy).
-   */
-  async installationStatus(): Promise<
-    Result<InstallationStatus, CommandError>
-  > {
+    return { status: "ok", data: await TAURI_INVOKE("diagnose_gui_update_check", { reason }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Probe the current install state without making any changes.
+ * 
+ * Safe to call on every app launch — performs only filesystem lookups and a
+ * single OS service-manager status query (no `launchctl load`, no copy).
+ */
+async installationStatus() : Promise<Result<InstallationStatus, CommandError>> {
     try {
-      return { status: "ok", data: await TAURI_INVOKE("installation_status") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * Install the selected components from the bundled sidecars.
-   *
-   * Steps for each component the caller asked for:
-   *
-   * 1. Resolve the sidecar binary path next to the GUI executable
-   * (`<exe_dir>/<name>-<target-triple>`).
-   * 2. Hand it to `vertebrae_installer::install_binary`, which copies it into
-   * the per-OS data dir, sets `0o755`, and creates a symlink in
-   * `~/.local/bin`.
-   *
-   * If the daemon was installed, we then call
-   * `vertebrae_installer::install_service` to register it with launchd /
-   * systemd `--user`. The CLI does not need a service.
-   *
-   * Returns the post-install [`InstallationStatus`] so the caller can refresh
-   * its UI without a follow-up `installation_status()` round-trip.
-   */
-  async installComponents(
-    installCli: boolean,
-    installDaemon: boolean,
-    installGate: boolean
-  ): Promise<Result<InstallationStatus, CommandError>> {
+    return { status: "ok", data: await TAURI_INVOKE("installation_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Install the selected components from the bundled sidecars.
+ * 
+ * Steps for each component the caller asked for:
+ * 
+ * 1. Resolve the sidecar binary path next to the GUI executable
+ * (`<exe_dir>/<name>-<target-triple>`).
+ * 2. Hand it to `vertebrae_installer::install_binary`, which copies it into
+ * the per-OS data dir, sets `0o755`, and creates a symlink in
+ * `~/.local/bin`.
+ * 
+ * If the daemon was installed, we then call
+ * `vertebrae_installer::install_service` to register it with launchd /
+ * systemd `--user`. The CLI does not need a service.
+ * 
+ * Returns the post-install [`InstallationStatus`] so the caller can refresh
+ * its UI without a follow-up `installation_status()` round-trip.
+ */
+async installComponents(installCli: boolean, installDaemon: boolean, installGate: boolean) : Promise<Result<InstallationStatus, CommandError>> {
     try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("install_components", {
-          installCli,
-          installDaemon,
-          installGate,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  /**
-   * The approval gate runs before any network or filesystem work.
-   */
-  async applyApprovedComponentUpdate(
-    approved: boolean,
-    channel: string,
-    version: string,
-    build: string | null
-  ): Promise<Result<UpdateTransactionResult, CommandError>> {
+    return { status: "ok", data: await TAURI_INVOKE("install_components", { installCli, installDaemon, installGate }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The approval gate runs before any network or filesystem work.
+ */
+async applyApprovedComponentUpdate(approved: boolean, channel: string, version: string, build: string | null) : Promise<Result<UpdateTransactionResult, CommandError>> {
     try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("apply_approved_component_update", {
-          approved,
-          channel,
-          version,
-          build,
-        }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  async relaunchApplication(): Promise<Result<null, CommandError>> {
+    return { status: "ok", data: await TAURI_INVOKE("apply_approved_component_update", { approved, channel, version, build }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async relaunchApplication() : Promise<Result<null, CommandError>> {
     try {
-      return { status: "ok", data: await TAURI_INVOKE("relaunch_application") };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-};
+    return { status: "ok", data: await TAURI_INVOKE("relaunch_application") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+}
+}
 
 /** user-defined events **/
 
+
 export const events = __makeEvents__<{
-  artifactChangedEvent: ArtifactChangedEvent;
-  localBackendProgressEvent: LocalBackendProgressEvent;
-  localChatCompactionEvent: LocalChatCompactionEvent;
-  localChatFileChangeEvent: LocalChatFileChangeEvent;
-  localChatSessionEndEvent: LocalChatSessionEndEvent;
-  localChatSessionErrorEvent: LocalChatSessionErrorEvent;
-  localChatSessionInitEvent: LocalChatSessionInitEvent;
-  localChatSessionUsageEvent: LocalChatSessionUsageEvent;
-  localChatSessionWarningEvent: LocalChatSessionWarningEvent;
-  localChatTextEvent: LocalChatTextEvent;
-  localChatToolCallEvent: LocalChatToolCallEvent;
-  localChatToolResultEvent: LocalChatToolResultEvent;
-  localChatTurnStartedEvent: LocalChatTurnStartedEvent;
-  permissionRequestEvent: PermissionRequestEvent;
-  sectionChangedEvent: SectionChangedEvent;
-  sessionLogCreatedEvent: SessionLogCreatedEvent;
-  sessionLogUpdatedEvent: SessionLogUpdatedEvent;
-  stepChangedEvent: StepChangedEvent;
-  stepExecutionChangedEvent: StepExecutionChangedEvent;
-  stepTransitionChangedEvent: StepTransitionChangedEvent;
-  taskChangedEvent: TaskChangedEvent;
-  taskRunChangedEvent: TaskRunChangedEvent;
-  taskRunStepChangedEvent: TaskRunStepChangedEvent;
-  taskStepChangedEvent: TaskStepChangedEvent;
-  workflowChangedEvent: WorkflowChangedEvent;
-  workflowTransitionChangedEvent: WorkflowTransitionChangedEvent;
+artifactChangedEvent: ArtifactChangedEvent,
+localBackendProgressEvent: LocalBackendProgressEvent,
+localChatCompactionEvent: LocalChatCompactionEvent,
+localChatFileChangeEvent: LocalChatFileChangeEvent,
+localChatSessionEndEvent: LocalChatSessionEndEvent,
+localChatSessionErrorEvent: LocalChatSessionErrorEvent,
+localChatSessionInitEvent: LocalChatSessionInitEvent,
+localChatSessionUsageEvent: LocalChatSessionUsageEvent,
+localChatSessionWarningEvent: LocalChatSessionWarningEvent,
+localChatTextEvent: LocalChatTextEvent,
+localChatToolCallEvent: LocalChatToolCallEvent,
+localChatToolResultEvent: LocalChatToolResultEvent,
+localChatTurnStartedEvent: LocalChatTurnStartedEvent,
+permissionRequestEvent: PermissionRequestEvent,
+sectionChangedEvent: SectionChangedEvent,
+sessionLogCreatedEvent: SessionLogCreatedEvent,
+sessionLogUpdatedEvent: SessionLogUpdatedEvent,
+stepChangedEvent: StepChangedEvent,
+stepExecutionChangedEvent: StepExecutionChangedEvent,
+stepTransitionChangedEvent: StepTransitionChangedEvent,
+taskChangedEvent: TaskChangedEvent,
+taskRunChangedEvent: TaskRunChangedEvent,
+taskRunStepChangedEvent: TaskRunStepChangedEvent,
+taskStepChangedEvent: TaskStepChangedEvent,
+workflowChangedEvent: WorkflowChangedEvent,
+workflowTransitionChangedEvent: WorkflowTransitionChangedEvent
 }>({
-  artifactChangedEvent: "artifact-changed-event",
-  localBackendProgressEvent: "local-backend-progress-event",
-  localChatCompactionEvent: "local-chat-compaction-event",
-  localChatFileChangeEvent: "local-chat-file-change-event",
-  localChatSessionEndEvent: "local-chat-session-end-event",
-  localChatSessionErrorEvent: "local-chat-session-error-event",
-  localChatSessionInitEvent: "local-chat-session-init-event",
-  localChatSessionUsageEvent: "local-chat-session-usage-event",
-  localChatSessionWarningEvent: "local-chat-session-warning-event",
-  localChatTextEvent: "local-chat-text-event",
-  localChatToolCallEvent: "local-chat-tool-call-event",
-  localChatToolResultEvent: "local-chat-tool-result-event",
-  localChatTurnStartedEvent: "local-chat-turn-started-event",
-  permissionRequestEvent: "permission-request-event",
-  sectionChangedEvent: "section-changed-event",
-  sessionLogCreatedEvent: "session-log-created-event",
-  sessionLogUpdatedEvent: "session-log-updated-event",
-  stepChangedEvent: "step-changed-event",
-  stepExecutionChangedEvent: "step-execution-changed-event",
-  stepTransitionChangedEvent: "step-transition-changed-event",
-  taskChangedEvent: "task-changed-event",
-  taskRunChangedEvent: "task-run-changed-event",
-  taskRunStepChangedEvent: "task-run-step-changed-event",
-  taskStepChangedEvent: "task-step-changed-event",
-  workflowChangedEvent: "workflow-changed-event",
-  workflowTransitionChangedEvent: "workflow-transition-changed-event",
-});
+artifactChangedEvent: "artifact-changed-event",
+localBackendProgressEvent: "local-backend-progress-event",
+localChatCompactionEvent: "local-chat-compaction-event",
+localChatFileChangeEvent: "local-chat-file-change-event",
+localChatSessionEndEvent: "local-chat-session-end-event",
+localChatSessionErrorEvent: "local-chat-session-error-event",
+localChatSessionInitEvent: "local-chat-session-init-event",
+localChatSessionUsageEvent: "local-chat-session-usage-event",
+localChatSessionWarningEvent: "local-chat-session-warning-event",
+localChatTextEvent: "local-chat-text-event",
+localChatToolCallEvent: "local-chat-tool-call-event",
+localChatToolResultEvent: "local-chat-tool-result-event",
+localChatTurnStartedEvent: "local-chat-turn-started-event",
+permissionRequestEvent: "permission-request-event",
+sectionChangedEvent: "section-changed-event",
+sessionLogCreatedEvent: "session-log-created-event",
+sessionLogUpdatedEvent: "session-log-updated-event",
+stepChangedEvent: "step-changed-event",
+stepExecutionChangedEvent: "step-execution-changed-event",
+stepTransitionChangedEvent: "step-transition-changed-event",
+taskChangedEvent: "task-changed-event",
+taskRunChangedEvent: "task-run-changed-event",
+taskRunStepChangedEvent: "task-run-step-changed-event",
+taskStepChangedEvent: "task-step-changed-event",
+workflowChangedEvent: "workflow-changed-event",
+workflowTransitionChangedEvent: "workflow-transition-changed-event"
+})
 
 /** user-defined constants **/
+
+
 
 /** user-defined types **/
 
 /**
  * Agent configuration for workflow steps - mirrors db::AgentConfig
  */
-export type AgentConfig = {
-  provider?: AgentProvider | null;
-  /**
-   * Model for the current session
-   */
-  model: string | null;
-  /**
-   * Codex upstream model provider configured in ~/.codex/config.toml
-   */
-  codex_model_provider: string | null;
-  /**
-   * Fallback model when default model is overloaded
-   */
-  fallback_model: string | null;
-  /**
-   * OpenAI/Codex reasoning effort for the configured model
-   */
-  reasoning_effort: string | null;
-  /**
-   * System prompt to use for the session
-   */
-  system_prompt: string | null;
-  /**
-   * Append a system prompt to the default system prompt
-   */
-  append_system_prompt: string | null;
-  /**
-   * JSON object defining custom agents (serialized as JSON string)
-   */
-  agents: string | null;
-  /**
-   * List of available tools from the built-in set
-   */
-  tools?: string[];
-  /**
-   * List of tool names to allow
-   */
-  allowed_tools?: string[];
-  /**
-   * List of tool names to deny
-   */
-  disallowed_tools?: string[];
-  /**
-   * Permission mode to use for the session
-   */
-  permission_mode: PermissionMode | null;
-  /**
-   * Maximum dollar amount to spend on API calls
-   */
-  max_budget_usd: number | null;
-  /**
-   * Paths to MCP server configuration files or JSON strings
-   */
-  mcp_config?: string[];
-  /**
-   * Directories to load plugins from
-   */
-  plugin_dirs?: string[];
-  /**
-   * JSON Schema for structured output validation (serialized as JSON string)
-   */
-  json_schema: string | null;
-};
-export type AgentProvider = "anthropic" | "openai";
+export type AgentConfig = { provider?: AgentProvider | null; 
+/**
+ * Model for the current session
+ */
+model: string | null; 
+/**
+ * Codex upstream model provider configured in ~/.codex/config.toml
+ */
+codex_model_provider: string | null; 
+/**
+ * Fallback model when default model is overloaded
+ */
+fallback_model: string | null; 
+/**
+ * OpenAI/Codex reasoning effort for the configured model
+ */
+reasoning_effort: string | null; 
+/**
+ * Provider serving speed preference.
+ */
+speed_tier: string | null; 
+/**
+ * Provider style identifier.
+ */
+personality: string | null; 
+/**
+ * Provider output detail level.
+ */
+verbosity: string | null; 
+/**
+ * System prompt to use for the session
+ */
+system_prompt: string | null; 
+/**
+ * Append a system prompt to the default system prompt
+ */
+append_system_prompt: string | null; 
+/**
+ * JSON object defining custom agents (serialized as JSON string)
+ */
+agents: string | null; 
+/**
+ * List of available tools from the built-in set
+ */
+tools?: string[]; 
+/**
+ * List of tool names to allow
+ */
+allowed_tools?: string[]; 
+/**
+ * List of tool names to deny
+ */
+disallowed_tools?: string[]; 
+/**
+ * Permission mode to use for the session
+ */
+permission_mode: PermissionMode | null; 
+/**
+ * Maximum dollar amount to spend on API calls
+ */
+max_budget_usd: number | null; 
+/**
+ * Paths to MCP server configuration files or JSON strings
+ */
+mcp_config?: string[]; 
+/**
+ * Directories to load plugins from
+ */
+plugin_dirs?: string[]; 
+/**
+ * JSON Schema for structured output validation (serialized as JSON string)
+ */
+json_schema: string | null }
+export type AgentProvider = "anthropic" | "openai"
 /**
  * A file projection returned from the project artifact list or Task.artifacts.
  */
-export type Artifact = {
-  id: string;
-  project_id: string | null;
-  filename: string;
-  body: string;
-  logical_name: string | null;
-  metadata: ArtifactLinkMetadata | null;
-  created_at: string | null;
-  updated_at: string | null;
-};
-export type ArtifactChangeType = "Created" | "Updated" | "Deleted";
+export type Artifact = { id: string; project_id: string | null; filename: string; body: string; logical_name: string | null; metadata: ArtifactLinkMetadata | null; created_at: string | null; updated_at: string | null }
+export type ArtifactChangeType = "Created" | "Updated" | "Deleted"
 /**
  * Complete artifact projection changed on the active Sacrum project.
  */
-export type ArtifactChangedEvent = {
-  artifact_id: string;
-  task_id: string | null;
-  change_type: ArtifactChangeType;
-  artifact: Artifact | null;
-};
+export type ArtifactChangedEvent = { artifact_id: string; task_id: string | null; change_type: ArtifactChangeType; artifact: Artifact | null }
 /**
  * Versioned provenance carried by an artifact attachment projection.
  */
-export type ArtifactLinkMetadata = {
-  version: number;
-  content_kind: string;
-  format: string;
-  origin: string;
-  presentation: string;
-  extensions: JsonValue;
-};
+export type ArtifactLinkMetadata = { version: number; content_kind: string; format: string; origin: string; presentation: string; extensions: JsonValue }
 /**
  * Code reference - file location reference
  */
-export type CodeRef = {
-  /**
-   * Path to the file (relative to repository root)
-   */
-  path: string;
-  /**
-   * Optional starting line number
-   */
-  line_start: number | null;
-  /**
-   * Optional ending line number
-   */
-  line_end: number | null;
-  /**
-   * Optional name/label for this reference
-   */
-  name: string | null;
-  /**
-   * Optional description
-   */
-  description: string | null;
-};
+export type CodeRef = { 
+/**
+ * Path to the file (relative to repository root)
+ */
+path: string; 
+/**
+ * Optional starting line number
+ */
+line_start: number | null; 
+/**
+ * Optional ending line number
+ */
+line_end: number | null; 
+/**
+ * Optional name/label for this reference
+ */
+name: string | null; 
+/**
+ * Optional description
+ */
+description: string | null }
 /**
  * Error response type for commands - simple string wrapper with specta support
  */
-export type CommandError = { message: string };
+export type CommandError = { message: string }
 /**
  * State of a single component (one of `vtb`, `vtb-daemon`, `vtb-gate`) on this machine.
- *
+ * 
  * The welcome screen renders different copy depending on whether the user
  * already has the binary available from a previous `cargo install`,
  * package-manager install, or GUI-managed install. We surface the managed
@@ -1685,1640 +1347,1197 @@ export type CommandError = { message: string };
  * checks while stale GUI-managed installs can be rewritten from the bundled
  * sidecars.
  */
-export type ComponentStatus = {
-  /**
-   * `true` if `<bin_dir>/<name>` exists (i.e. we previously staged this
-   * component, or another tool did). When this is `true` and
-   * `needs_refresh` is `false`, the installer can be skipped for this
-   * component.
-   */
-  installed_at_symlink: boolean;
-  /**
-   * `true` if this component has an installer-managed staged binary or
-   * managed symlink whose bytes differ from the bundled sidecar shipped
-   * with this GUI. Unrelated PATH-only binaries never set this flag.
-   */
-  needs_refresh: boolean;
-  /**
-   * Absolute path of the symlink we manage in `~/.local/bin`.
-   */
-  symlink_path: string;
-  /**
-   * `true` if some executable named `<name>` is resolvable on `$PATH`
-   * (anywhere — not necessarily the symlink we manage). Lets the UI
-   * avoid pestering users who already have `vtb` from `cargo install`.
-   */
-  on_path: boolean;
-};
-export type CreateLocalChatSessionInput = {
-  harness: LocalChatHarnessKind;
-  backend_session_id: string;
-  working_dir: string | null;
-  initial_prompt: string | null;
-  provider_resume_id: string | null;
-  model_id: string | null;
-  reasoning_effort: string | null;
-  speed_tier?: string | null;
-  permission_mode: PermissionMode | null;
-  personality: string | null;
-};
+export type ComponentStatus = { 
+/**
+ * `true` if `<bin_dir>/<name>` exists (i.e. we previously staged this
+ * component, or another tool did). When this is `true` and
+ * `needs_refresh` is `false`, the installer can be skipped for this
+ * component.
+ */
+installed_at_symlink: boolean; 
+/**
+ * `true` if this component has an installer-managed staged binary or
+ * managed symlink whose bytes differ from the bundled sidecar shipped
+ * with this GUI. Unrelated PATH-only binaries never set this flag.
+ */
+needs_refresh: boolean; 
+/**
+ * Absolute path of the symlink we manage in `~/.local/bin`.
+ */
+symlink_path: string; 
+/**
+ * `true` if some executable named `<name>` is resolvable on `$PATH`
+ * (anywhere — not necessarily the symlink we manage). Lets the UI
+ * avoid pestering users who already have `vtb` from `cargo install`.
+ */
+on_path: boolean }
+export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backend_session_id: string; working_dir: string | null; initial_prompt: string | null; provider_resume_id: string | null; model_id: string | null; reasoning_effort: string | null; speed_tier?: string | null; permission_mode: PermissionMode | null; personality: string | null }
 /**
  * Options for creating a workflow step.
  */
-export type CreateStepOptions = {
-  workflow_id: string;
-  name: string;
-  goal: string | null;
-  prompt?: string | null;
-  agents: string[];
-  skills: string[];
-  agent_config?: AgentConfig | null;
-  order: number;
-  transitions_to: string[];
-  step_type?: StepType;
-  output_schema: JsonValue | null;
-  persistence_options?: JsonValue | null;
-  route_config?: JsonValue | null;
-};
+export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; prompt?: string | null; agents: string[]; skills: string[]; agent_config?: AgentConfig | null; order: number; transitions_to: string[]; step_type?: StepType; output_schema: JsonValue | null; persistence_options?: JsonValue | null; route_config?: JsonValue | null }
+/**
+ * Safe daemon fleet metadata projection (no credential material).
+ * 
+ * Fleet management is account-scoped: these rows belong to the connected
+ * backend/account rather than the selected project.
+ */
+export type Daemon = { id: string; 
+/**
+ * Credential-enrollment lifecycle status exactly as reported. Unknown
+ * future statuses are preserved so the UI can present them truthfully.
+ */
+status: string; name: string | null; 
+/**
+ * Non-null display name: the stored name or a stable short-ID fallback.
+ */
+display_name: string; enrolled_at: string | null; removed_at: string | null; created_at: string | null; updated_at: string | null }
+/**
+ * One-time bootstrap issuance. The enrollment token is displayed once and
+ * never persisted or logged by the GUI.
+ */
+export type DaemonBootstrap = { daemon: Daemon; enrollment_token: string; expires_at: string }
+/**
+ * Result of create/rotate: a short-lived bootstrap tagged with the
+ * connection identity that issued it.
+ */
+export type DaemonBootstrapResult = { connection_id: string; bootstrap: DaemonBootstrap }
+/**
+ * Structured error for daemon management commands.
+ */
+export type DaemonCommandError = { kind: DaemonErrorKind; message: string }
+/**
+ * Safe credential audit projection for one daemon credential.
+ */
+export type DaemonCredentialMetadata = { id: string; credential_kind: string; 
+/**
+ * Credential lifecycle status as reported; unknown values preserved.
+ */
+status: string; expires_at: string; consumed_at: string | null; revoked_at: string | null; created_at: string | null; updated_at: string | null }
+/**
+ * Single-daemon read tagged with its connection identity. `daemon` is `None`
+ * for unknown ids (foreign ids are indistinguishable by design).
+ */
+export type DaemonDetailSnapshot = { connection_id: string; daemon: Daemon | null }
+/**
+ * Owner-scoped enrollment metadata for one daemon, without token material.
+ */
+export type DaemonEnrollmentMetadata = { daemon_id: string; status: string; enrolled_at: string | null; credentials: DaemonCredentialMetadata[] }
+/**
+ * Enrollment metadata read tagged with its connection identity.
+ */
+export type DaemonEnrollmentSnapshot = { connection_id: string; metadata: DaemonEnrollmentMetadata | null }
+/**
+ * Classification of a daemon command failure, adapted from the client
+ * service's typed errors. The kind drives recovery UX; `message` carries the
+ * stable, non-disclosing server text.
+ */
+export type DaemonErrorKind = 
+/**
+ * No Sacrum backend connection is active.
+ */
+"no_backend" | 
+/**
+ * The backend/account connection changed while the request was in
+ * flight; the response was discarded.
+ */
+"stale_connection" | 
+/**
+ * The operation may have been applied; do not retry automatically.
+ */
+"ambiguous_transport" | 
+/**
+ * The server response could not be decoded; treat like ambiguity.
+ */
+"malformed_response" | 
+/**
+ * Definitive failure without a server-side effect.
+ */
+"unavailable" | 
+/**
+ * Unknown or foreign daemon identity (indistinguishable by design).
+ */
+"not_found" | 
+/**
+ * The daemon is revoked or removed; terminal identities never requalify.
+ */
+"terminal_state" | 
+/**
+ * Unregister refused: a session is currently connected.
+ */
+"active_session" | 
+/**
+ * Unregister refused: enrollment history lacks proven work ownership.
+ */
+"ownership_unknown" | 
+/**
+ * Field-scoped naming policy violation.
+ */
+"invalid_name" | 
+/**
+ * Client-side input validation failed before any request was sent.
+ */
+"invalid_input" | 
+/**
+ * Any other server refusal.
+ */
+"unknown_refusal"
+/**
+ * Fleet snapshot tagged with the backend/account connection it was read
+ * under. Late responses from a retired connection are rejected before they
+ * reach the webview.
+ */
+export type DaemonFleetSnapshot = { connection_id: string; daemons: Daemon[] }
+/**
+ * Result of a daemon mutation that returns the daemon's safe metadata.
+ */
+export type DaemonMutationResult = { connection_id: string; daemon: Daemon }
+/**
+ * Rename intent that preserves the server's omitted-vs-null semantics:
+ * omitting the name leaves it unchanged, an explicit null clears it.
+ */
+export type DaemonNameUpdate = { kind: "unchanged" } | { kind: "clear" } | { kind: "set"; value: string }
 /**
  * Execution status - mirrors db::ExecutionStatus
  */
-export type ExecutionStatus = "in_progress" | "completed" | "failed";
-export type GuiUpdateChannelRelease = {
-  currentVersion: string;
-  version: string;
-  date: string | null;
-  body: string | null;
-  rawJson: JsonValue;
-  isUpdate: boolean;
-};
-export type GuiUpdateChannelStatus = {
-  channel: string;
-  endpoint: string;
-  available: boolean;
-  release: GuiUpdateChannelRelease | null;
-  error: string | null;
-};
-export type InferLocalChatSessionTitleInput = {
-  harness: LocalChatHarnessKind;
-  initial_prompts: string[];
-  working_dir: string | null;
-};
-export type InferLocalChatSessionTitleOutput = {
-  title: string | null;
-  confidence: number;
-  sufficient_signal: boolean;
-};
+export type ExecutionStatus = "in_progress" | "completed" | "failed"
+export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
+export type GuiUpdateChannelStatus = { channel: string; endpoint: string; available: boolean; release: GuiUpdateChannelRelease | null; error: string | null }
+export type InferLocalChatSessionTitleInput = { harness: LocalChatHarnessKind; initial_prompts: string[]; working_dir: string | null }
+export type InferLocalChatSessionTitleOutput = { title: string | null; confidence: number; sufficient_signal: boolean }
 /**
  * Result returned after GUI-native project initialization.
  */
-export type InitializeProjectResult = {
-  /**
-   * Project slug registered in config.toml.
-   */
-  slug: string;
-  /**
-   * Sacrum project ID.
-   */
-  project_id: string;
-  /**
-   * Display name used for the Sacrum project.
-   */
-  project_name: string;
-  /**
-   * Canonical local project path.
-   */
-  path: string;
-  /**
-   * Whether this call created the project on Sacrum.
-   */
-  project_created: boolean;
-};
+export type InitializeProjectResult = { 
+/**
+ * Project slug registered in config.toml.
+ */
+slug: string; 
+/**
+ * Sacrum project ID.
+ */
+project_id: string; 
+/**
+ * Display name used for the Sacrum project.
+ */
+project_name: string; 
+/**
+ * Canonical local project path.
+ */
+path: string; 
+/**
+ * Whether this call created the project on Sacrum.
+ */
+project_created: boolean }
 /**
  * Aggregate snapshot of installation state returned from both
  * `installation_status()` and `install_components()`.
  */
-export type InstallationStatus = {
-  cli: ComponentStatus;
-  daemon: ComponentStatus;
-  gate: ComponentStatus;
-  service: ServiceState;
-};
-export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | Partial<{ [key in string]: JsonValue }>;
-export type LoadLocalChatSessionReplayInput = {
-  session_id: string;
-  harness: LocalChatHarnessKind;
-  provider_resume_id: string | null;
-  project_path: string | null;
-  created_at: string | null;
-  /**
-   * Opaque cursor returned by the previous (newer) replay page.
-   */
-  cursor: string | null;
-  /**
-   * Requested normalized event count; the harness applies a safe maximum.
-   */
-  limit: number | null;
-};
-export type LoadLocalChatSessionReplayOutput = {
-  /**
-   * Each entry is one serialized, normalized HarnessEventV1 JSON object.
-   */
-  events: string[];
-  cache_key: string | null;
-  next_cursor: string | null;
-  has_more: boolean;
-};
-export type LocalBackendAdoptionResult = {
-  status: LocalBackendAdoptionStatus;
-  backend_url: string | null;
-  adoption_message: string | null;
-};
-export type LocalBackendAdoptionStatus = "ready" | "adoption_required";
-export type LocalBackendProgressEvent = {
-  stage: LocalBackendProgressStage;
-  message: string;
-};
-export type LocalBackendProgressStage =
-  | "pulling"
-  | "migrating"
-  | "health"
-  | "seeding";
-export type LocalBackendSetupResult = {
-  status: LocalBackendSetupStatus;
-  backend_url: string | null;
-  adoption_message: string | null;
-};
-export type LocalBackendSetupStatus = "ready" | "adoption_required";
-export type LocalBackendUpdateDiagnostic = {
-  code: string;
-  retryable: boolean;
-  message: string;
-};
-export type LocalBackendUpdateRelease = {
-  channel: string;
-  version: string;
-  build: string;
-  image_ref: string;
-  generated_at: string | null;
-};
-export type LocalBackendUpdateResult = {
-  channel: string;
-  version: string;
-  build: string;
-  image_ref: string;
-  generated_at: string | null;
-};
-export type LocalBackendUpdateStatus = {
-  management: string;
-  configured: boolean;
-  channel: string | null;
-  current_version: string | null;
-  current_build: string | null;
-  current_image_ref: string | null;
-  current_generated_at: string | null;
-  latest: LocalBackendUpdateRelease | null;
-  available: boolean;
-  adoption_message: string | null;
-  diagnostic: LocalBackendUpdateDiagnostic | null;
-};
-export type LocalChatCompactionEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  turn_id?: string | null;
-  thread_id?: string | null;
-  is_root?: boolean;
-  state: string;
-  trigger?: string | null;
-  pre_tokens?: number | null;
-};
-export type LocalChatFileChange = {
-  path: string;
-  kind: string;
-  diff: string | null;
-};
-export type LocalChatFileChangeEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  turn_id?: string | null;
-  thread_id?: string | null;
-  is_root?: boolean;
-  tool_id: string;
-  status: string;
-  changes: LocalChatFileChange[];
-  parent_tool_use_id: string | null;
-};
-export type LocalChatHarnessCatalog = {
-  default_harness: LocalChatHarnessKind;
-  harnesses: LocalChatHarnessInfo[];
-};
-export type LocalChatHarnessInfo = {
-  harness: LocalChatHarnessKind;
-  label: string;
-  available: boolean;
-  unavailable_reason: string | null;
-  default_model_id: string | null;
-  models: LocalChatModelOption[];
-  default_reasoning_effort: string | null;
-  reasoning_efforts: LocalChatReasoningEffortOption[];
-  speed_tiers?: LocalChatSpeedTierOption[];
-  permission_modes?: LocalChatPermissionModeOption[] | null;
-  personality_options?: LocalChatPersonalityOption[] | null;
-  supports_resume: boolean;
-};
-export type LocalChatHarnessKind = "claude" | "codex";
-export type LocalChatModelOption = {
-  id: string;
-  label: string;
-  supported_reasoning_effort_ids?: string[] | null;
-  supported_speed_tier_ids?: string[] | null;
-  supports_personality?: boolean | null;
-};
-export type LocalChatPermissionModeOption = {
-  id: PermissionMode;
-  label: string;
-  is_default?: boolean;
-};
-export type LocalChatPersonalityOption = {
-  id: string;
-  label: string;
-  is_default?: boolean;
-};
-export type LocalChatReasoningEffortOption = { id: string; label: string };
-export type LocalChatSessionEndEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  turn_id: string;
-  thread_id?: string | null;
-  is_root: boolean;
-  duration_ms: number;
-  cost_usd: number;
-  num_turns: number;
-  result: string;
-  is_error: boolean;
-  context_tokens: number;
-  context_window: number;
-  item_id?: string | null;
-  completion_status?: string | null;
-};
-export type LocalChatSessionError =
-  | { SessionExists: string }
-  | { SessionNotFound: string }
-  | { SendFailed: string }
-  | { SpawnFailed: string }
-  | { StartFailed: string }
-  | {
-      UnavailableHarness: {
-        harness: LocalChatHarnessKind;
-        reason: string | null;
-      };
-    }
-  | { UnsupportedHarness: LocalChatHarnessKind };
-export type LocalChatSessionErrorEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  turn_id?: string | null;
-  thread_id?: string | null;
-  is_root?: boolean;
-  error: string;
-  item_id?: string | null;
-};
-export type LocalChatSessionIndexEntry = {
-  id: string;
-  label: string;
-  title: string | null;
-  titleStatus: string | null;
-  titleConfidence: number | null;
-  titleUserMessageCount: number;
-  harness: LocalChatHarnessKind;
-  model: string | null;
-  selectedModelId: string | null;
-  selectedReasoningEffort: string | null;
-  selectedPersonality: string | null;
-  permissionMode: PermissionMode | null;
-  createdAt: string;
-  updatedAt: string;
-  projectPath: string | null;
-  providerResumeId: string | null;
-  threadTotalTokens: number | null;
-  messageCount: number;
-  lifecycle: string;
-  status: string;
-};
-export type LocalChatSessionInitEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  provider_resume_id: string | null;
-  model: string;
-  tools: string[];
-  speed_tier_status?: LocalChatSpeedTierStatus | null;
-};
-export type LocalChatSessionUsageEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  turn_id?: string | null;
-  thread_id?: string | null;
-  is_root?: boolean;
-  model: string;
-  context_tokens: number;
-  context_window: number;
-  /**
-   * Cumulative thread token total, distinct from the current request's
-   * context utilization above.
-   */
-  thread_total_tokens: number;
-};
-export type LocalChatSessionWarningEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  turn_id?: string | null;
-  thread_id?: string | null;
-  is_root?: boolean;
-  warning: string;
-};
-export type LocalChatSpeedTierOption = {
-  id: string;
-  label: string;
-  is_default?: boolean;
-};
-export type LocalChatSpeedTierStatus = {
-  requested: string | null;
-  active: string | null;
-  eligible: boolean;
-  available: boolean;
-  diagnostic: string | null;
-};
-export type LocalChatTextEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  turn_id?: string | null;
-  thread_id?: string | null;
-  is_root?: boolean;
-  text: string;
-  is_partial: boolean;
-  completion_status?: string | null;
-  parent_tool_use_id: string | null;
-  item_id?: string | null;
-};
-export type LocalChatToolCallEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  turn_id?: string | null;
-  thread_id?: string | null;
-  is_root?: boolean;
-  tool_id: string;
-  tool_name: string;
-  input: string;
-  parent_tool_use_id: string | null;
-};
-export type LocalChatToolResultEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  turn_id?: string | null;
-  thread_id?: string | null;
-  is_root?: boolean;
-  tool_id: string;
-  result: string;
-  is_error: boolean;
-  parent_tool_use_id: string | null;
-};
-export type LocalChatTurnStartedEvent = {
-  backend_session_id: string;
-  harness: LocalChatHarnessKind;
-  turn_id: string;
-  thread_id?: string | null;
-  is_root: boolean;
-};
+export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
+export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+export type LoadLocalChatSessionReplayInput = { session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; project_path: string | null; created_at: string | null; 
+/**
+ * Opaque cursor returned by the previous (newer) replay page.
+ */
+cursor: string | null; 
+/**
+ * Requested normalized event count; the harness applies a safe maximum.
+ */
+limit: number | null }
+export type LoadLocalChatSessionReplayOutput = { 
+/**
+ * Each entry is one serialized, normalized HarnessEventV1 JSON object.
+ */
+events: string[]; cache_key: string | null; next_cursor: string | null; has_more: boolean }
+export type LocalBackendAdoptionResult = { status: LocalBackendAdoptionStatus; backend_url: string | null; adoption_message: string | null }
+export type LocalBackendAdoptionStatus = "ready" | "adoption_required"
+export type LocalBackendProgressEvent = { stage: LocalBackendProgressStage; message: string }
+export type LocalBackendProgressStage = "pulling" | "migrating" | "health" | "seeding"
+export type LocalBackendSetupResult = { status: LocalBackendSetupStatus; backend_url: string | null; adoption_message: string | null }
+export type LocalBackendSetupStatus = "ready" | "adoption_required"
+export type LocalBackendUpdateDiagnostic = { code: string; retryable: boolean; message: string }
+export type LocalBackendUpdateRelease = { channel: string; version: string; build: string; image_ref: string; generated_at: string | null }
+export type LocalBackendUpdateResult = { channel: string; version: string; build: string; image_ref: string; generated_at: string | null }
+export type LocalBackendUpdateStatus = { management: string; configured: boolean; channel: string | null; current_version: string | null; current_build: string | null; current_image_ref: string | null; current_generated_at: string | null; latest: LocalBackendUpdateRelease | null; available: boolean; adoption_message: string | null; diagnostic: LocalBackendUpdateDiagnostic | null }
+export type LocalChatCompactionEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; state: string; trigger?: string | null; pre_tokens?: number | null }
+export type LocalChatFileChange = { path: string; kind: string; diff: string | null }
+export type LocalChatFileChangeEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; status: string; changes: LocalChatFileChange[]; parent_tool_use_id: string | null }
+export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[] }
+export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; default_reasoning_effort: string | null; reasoning_efforts: LocalChatReasoningEffortOption[]; speed_tiers?: LocalChatSpeedTierOption[]; permission_modes?: LocalChatPermissionModeOption[] | null; personality_options?: LocalChatPersonalityOption[] | null; supports_resume: boolean }
+export type LocalChatHarnessKind = "claude" | "codex"
+export type LocalChatModelOption = { id: string; label: string; supported_reasoning_effort_ids?: string[] | null; supported_speed_tier_ids?: string[] | null; supports_personality?: boolean | null }
+export type LocalChatPermissionModeOption = { id: PermissionMode; label: string; is_default?: boolean }
+export type LocalChatPersonalityOption = { id: string; label: string; is_default?: boolean }
+export type LocalChatReasoningEffortOption = { id: string; label: string }
+export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id: string; thread_id?: string | null; is_root: boolean; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number; item_id?: string | null; completion_status?: string | null }
+export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }
+export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; error: string; item_id?: string | null }
+export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; selectedPersonality: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; threadTotalTokens: number | null; messageCount: number; lifecycle: string; status: string }
+export type LocalChatSessionInitEvent = { backend_session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; model: string; tools: string[]; speed_tier_status?: LocalChatSpeedTierStatus | null }
+export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; model: string; context_tokens: number; context_window: number; 
+/**
+ * Cumulative thread token total, distinct from the current request's
+ * context utilization above.
+ */
+thread_total_tokens: number }
+export type LocalChatSessionWarningEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; warning: string }
+export type LocalChatSpeedTierOption = { id: string; label: string; is_default?: boolean }
+export type LocalChatSpeedTierStatus = { requested: string | null; active: string | null; eligible: boolean; available: boolean; diagnostic: string | null }
+export type LocalChatTextEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; text: string; is_partial: boolean; completion_status?: string | null; parent_tool_use_id: string | null; item_id?: string | null }
+export type LocalChatToolCallEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; tool_name: string; input: string; parent_tool_use_id: string | null }
+export type LocalChatToolResultEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; result: string; is_error: boolean; parent_tool_use_id: string | null }
+export type LocalChatTurnStartedEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id: string; thread_id?: string | null; is_root: boolean }
 /**
  * An application or editor command that can open local source/text files.
  */
-export type LocalFileEditor = { id: string; name: string; path: string };
-export type PermissionDecisionBehavior = "allow" | "deny";
+export type LocalFileEditor = { id: string; name: string; path: string }
+export type PermissionDecisionBehavior = "allow" | "deny"
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode
  */
-export type PermissionMode =
-  | "accept_edits"
-  | "auto"
-  | "bypass_permissions"
-  | "default"
-  | "dont_ask"
-  | "plan";
-export type PermissionRequestEvent = {
-  request_id: string;
-  session_id: string | null;
-  turn_id?: string | null;
-  thread_id?: string | null;
-  is_root?: boolean;
-  tool_name: string;
-  tool_use_id: string;
-  input: JsonValue;
-  message: string | null;
-  questions?: UserQuestion[] | null;
-  input_error?: string | null;
-};
+export type PermissionMode = "accept_edits" | "auto" | "bypass_permissions" | "default" | "dont_ask" | "plan"
+export type PermissionRequestEvent = { request_id: string; session_id: string | null; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_name: string; tool_use_id: string; input: JsonValue; message: string | null; questions?: UserQuestion[] | null; input_error?: string | null }
 /**
  * Workflow step entry in the pipeline summary payload, including the
  * resolver-computed `pipeline_counts`/`active_count` aggregates and the
  * preloaded list of intra-workflow `transitions_to` step IDs.
  */
-export type PipelineStep = {
-  id: string;
-  name: string;
-  workflow_id: string;
-  goal: string | null;
-  step_order: number;
-  step_type: string | null;
-  /**
-   * IDs of the steps that this step transitions into within the same workflow.
-   */
-  transitions_to: string[];
-  /**
-   * Per-level task counts for tasks currently parked at this step.
-   */
-  task_counts: PipelineTaskCounts;
-  /**
-   * Canonical per-step counts from Sacrum, including active TaskRun count.
-   */
-  pipeline_counts: PipelineStepCounts;
-  /**
-   * Number of active TaskRuns for tasks currently parked at this step.
-   */
-  active_count: number;
-};
+export type PipelineStep = { id: string; name: string; workflow_id: string; goal: string | null; step_order: number; step_type: string | null; 
+/**
+ * IDs of the steps that this step transitions into within the same workflow.
+ */
+transitions_to: string[]; 
+/**
+ * Per-level task counts for tasks currently parked at this step.
+ */
+task_counts: PipelineTaskCounts; 
+/**
+ * Canonical per-step counts from Sacrum, including active TaskRun count.
+ */
+pipeline_counts: PipelineStepCounts; 
+/**
+ * Number of active TaskRuns for tasks currently parked at this step.
+ */
+active_count: number }
 /**
  * Per-step pipeline counts grouped by hierarchy level plus active TaskRun
  * count.
  */
-export type PipelineStepCounts = {
-  epic: number;
-  ticket: number;
-  task: number;
-  active: number;
-};
+export type PipelineStepCounts = { epic: number; ticket: number; task: number; active: number }
 /**
  * Full pipeline summary payload returned by `get_pipeline_summary`.
- *
+ * 
  * One `PipelineWorkflow` per workflow in the project. There is intentionally
  * no top-level flat task index — the GUI refreshes this authoritative
  * aggregate payload from Sacrum websocket events.
  */
-export type PipelineSummary = { workflows: PipelineWorkflow[] };
+export type PipelineSummary = { workflows: PipelineWorkflow[] }
 /**
  * Per-step task counts grouped by hierarchy level — direct mirror of the
  * Sacrum `pipeline_summary.workflow_steps[].task_counts` field.
  */
-export type PipelineTaskCounts = { epic: number; ticket: number; task: number };
+export type PipelineTaskCounts = { epic: number; ticket: number; task: number }
 /**
  * Single workflow entry in the pipeline summary payload, with its preloaded
  * steps (carrying aggregates) and outbound inter-workflow transitions.
  */
-export type PipelineWorkflow = {
-  id: string;
-  name: string;
-  description: string | null;
-  initial_step_id: string | null;
-  kanban_column: string | null;
-  factory_name: string | null;
-  is_default: boolean;
-  display_order: number;
-  workflow_steps: PipelineStep[];
-  transitions: PipelineWorkflowTransition[];
-};
+export type PipelineWorkflow = { id: string; name: string; description: string | null; initial_step_id: string | null; kanban_column: string | null; factory_name: string | null; is_default: boolean; display_order: number; workflow_steps: PipelineStep[]; transitions: PipelineWorkflowTransition[] }
 /**
  * Inter-workflow transition entry returned by `pipeline_summary`.
  */
-export type PipelineWorkflowTransition = {
-  id: string;
-  from_workflow_id: string;
-  to_workflow_id: string;
-  target_step_id: string | null;
-  label: string;
-};
-export type ResolvePermissionRequestError = {
-  kind: ResolvePermissionRequestErrorKind;
-  message: string;
-};
-export type ResolvePermissionRequestErrorKind =
-  | "unavailable"
-  | "not_found"
-  | "invalid"
-  | "internal";
-export type ResolvePermissionRequestInput = {
-  request_id: string;
-  behavior: PermissionDecisionBehavior;
-  message: string | null;
-  updated_input: JsonValue | null;
-};
+export type PipelineWorkflowTransition = { id: string; from_workflow_id: string; to_workflow_id: string; target_step_id: string | null; label: string }
+export type ResolvePermissionRequestError = { kind: ResolvePermissionRequestErrorKind; message: string }
+export type ResolvePermissionRequestErrorKind = "unavailable" | "not_found" | "invalid" | "internal"
+export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
 /**
  * Current Sacrum settings state for GUI onboarding.
  */
-export type SacrumConfigStatus = {
-  /**
-   * Shared config.toml path, when the platform exposes a config directory.
-   */
-  config_path: string | null;
-  /**
-   * Whether config.toml exists on disk.
-   */
-  config_exists: boolean;
-  /**
-   * Sacrum URL used by GUI onboarding.
-   */
-  url: string;
-  /**
-   * Whether a non-empty API token is configured.
-   */
-  has_token: boolean;
-};
-export type SaveLocalChatSessionIndexInput = {
-  sessions: LocalChatSessionIndexEntry[];
-};
+export type SacrumConfigStatus = { 
+/**
+ * Shared config.toml path, when the platform exposes a config directory.
+ */
+config_path: string | null; 
+/**
+ * Whether config.toml exists on disk.
+ */
+config_exists: boolean; 
+/**
+ * Sacrum URL used by GUI onboarding.
+ */
+url: string; 
+/**
+ * Whether a non-empty API token is configured.
+ */
+has_token: boolean }
+export type SaveLocalChatSessionIndexInput = { sessions: LocalChatSessionIndexEntry[] }
 /**
  * A saved project in the project list
  */
-export type SavedProject = {
-  /**
-   * Project slug (from config.toml key)
-   */
-  slug: string;
-  /**
-   * Sacrum project ID (UUID)
-   */
-  project_id: string;
-  /**
-   * Git root path for the project
-   */
-  path: string;
-};
+export type SavedProject = { 
+/**
+ * Project slug (from config.toml key)
+ */
+slug: string; 
+/**
+ * Sacrum project ID (UUID)
+ */
+project_id: string; 
+/**
+ * Git root path for the project
+ */
+path: string }
 /**
  * Section content within a task
  */
-export type Section = {
-  /**
-   * The type of this section
-   */
-  type: SectionType;
-  /**
-   * The content of this section
-   */
-  content: string;
-  /**
-   * Optional ordering for sections of the same type
-   */
-  order: number | null;
-  /**
-   * Whether this section (typically a step) is done
-   */
-  done: boolean | null;
-  /**
-   * When this section was marked as done (ISO 8601 string)
-   */
-  done_at: string | null;
-  /**
-   * Code references attached to this section
-   */
-  refs?: CodeRef[];
-};
+export type Section = { 
+/**
+ * The type of this section
+ */
+type: SectionType; 
+/**
+ * The content of this section
+ */
+content: string; 
+/**
+ * Optional ordering for sections of the same type
+ */
+order: number | null; 
+/**
+ * Whether this section (typically a step) is done
+ */
+done: boolean | null; 
+/**
+ * When this section was marked as done (ISO 8601 string)
+ */
+done_at: string | null; 
+/**
+ * Code references attached to this section
+ */
+refs?: CodeRef[] }
 /**
  * The type of change that occurred on a section.
  */
-export type SectionChangeType = "Created" | "Updated" | "Deleted";
+export type SectionChangeType = "Created" | "Updated" | "Deleted"
 /**
  * Event payload for section changes.
  * Emitted when a section is created, updated, or deleted.
  * For create/update events, `section` carries the full deserialized entity.
  */
-export type SectionChangedEvent = {
-  section_id: string;
-  task_id: string;
-  change_type: SectionChangeType;
-  section: Section | null;
-};
+export type SectionChangedEvent = { section_id: string; task_id: string; change_type: SectionChangeType; section: Section | null }
 /**
  * Section type - mirrors db::SectionType
  */
-export type SectionType =
-  | "goal"
-  | "context"
-  | "current_behavior"
-  | "desired_behavior"
-  | "checklist_item"
-  | "testing_criterion"
-  | "anti_pattern"
-  | "failure_test"
-  | "constraint";
+export type SectionType = "goal" | "context" | "current_behavior" | "desired_behavior" | "checklist_item" | "testing_criterion" | "anti_pattern" | "failure_test" | "constraint"
 /**
  * State of the daemon's OS service registration (launchd on macOS, systemd
  * `--user` on Linux). Mirrors [`vertebrae_installer::ServiceStatus`] in a
  * shape that's friendlier to TypeScript.
  */
-export type ServiceState =
-  /**
-   * Service is registered and currently running.
-   */
-  | { kind: "running"; pid: number }
-  /**
-   * Service is registered but not currently running.
-   */
-  | { kind: "loaded"; last_exit_status: number }
-  /**
-   * Service is not registered with the OS service manager.
-   */
-  | { kind: "not_loaded" };
+export type ServiceState = 
+/**
+ * Service is registered and currently running.
+ */
+{ kind: "running"; pid: number } | 
+/**
+ * Service is registered but not currently running.
+ */
+{ kind: "loaded"; last_exit_status: number } | 
+/**
+ * Service is not registered with the OS service manager.
+ */
+{ kind: "not_loaded" }
 /**
  * Session log entry - mirrors db::SessionLog
  */
-export type SessionLog = {
-  /**
-   * Log ID (string form)
-   */
-  id: string | null;
-  /**
-   * Stable key for ephemeral logs that replace earlier snapshots
-   */
-  logical_key?: string | null;
-  /**
-   * Step execution ID this log belongs to
-   */
-  step_execution_id?: string;
-  /**
-   * The log content
-   */
-  content?: string;
-  /**
-   * Producer format used to select the compatible frontend parser.
-   */
-  format?: string | null;
-  /**
-   * When this log was created (ISO 8601 string)
-   */
-  created_at?: string;
-};
+export type SessionLog = { 
+/**
+ * Log ID (string form)
+ */
+id: string | null; 
+/**
+ * Stable key for ephemeral logs that replace earlier snapshots
+ */
+logical_key?: string | null; 
+/**
+ * Step execution ID this log belongs to
+ */
+step_execution_id?: string; 
+/**
+ * The log content
+ */
+content?: string; 
+/**
+ * Producer format used to select the compatible frontend parser.
+ */
+format?: string | null; 
+/**
+ * When this log was created (ISO 8601 string)
+ */
+created_at?: string }
 /**
  * Event payload for session log creation.
  * Emitted when a new session log is created during step execution.
  * `session_log` carries the full deserialized entity when available.
  */
-export type SessionLogCreatedEvent = {
-  log_id: string;
-  step_execution_id: string;
-  session_log: SessionLog | null;
-};
+export type SessionLogCreatedEvent = { log_id: string; step_execution_id: string; session_log: SessionLog | null }
 /**
  * Event payload for session log updates.
  * Emitted when an existing ephemeral session log snapshot is replaced.
  * `session_log` carries the full deserialized entity when available.
  */
-export type SessionLogUpdatedEvent = {
-  log_id: string;
-  step_execution_id: string;
-  session_log: SessionLog | null;
-};
+export type SessionLogUpdatedEvent = { log_id: string; step_execution_id: string; session_log: SessionLog | null }
 /**
  * Workflow step entity - mirrors db::Step
  */
-export type Step = {
-  /**
-   * Step ID (string form)
-   */
-  id: string | null;
-  /**
-   * Display name for this step
-   */
-  name: string;
-  /**
-   * Reference to the workflow this step belongs to
-   */
-  workflow_id: string;
-  /**
-   * What this step should accomplish
-   */
-  goal: string | null;
-  /**
-   * Prompt sent to the agent when executing this step
-   */
-  prompt: string | null;
-  /**
-   * Paths to .claude/agents/ files for this step
-   */
-  agents?: string[];
-  /**
-   * Skill names available for this step
-   */
-  skills?: string[];
-  /**
-   * Agent configuration for this step
-   */
-  agent_config?: AgentConfig;
-  /**
-   * Step type mirrored from core::StepType.
-   */
-  step_type?: StepType;
-  /**
-   * JSON Schema describing the expected output of this step
-   */
-  output_schema?: JsonValue | null;
-  /**
-   * Orchestrator-owned persistence configuration for this step
-   */
-  persistence_options?: JsonValue | null;
-  /**
-   * Opaque deterministic route configuration for route steps
-   */
-  route_config?: JsonValue | null;
-  /**
-   * List of step IDs this step can transition to
-   */
-  transitions_to?: string[];
-  /**
-   * Ordering index for sequential fallback (0-based, Sacrum: `step_order`).
-   */
-  order?: number;
-  /**
-   * Creation timestamp (ISO 8601 string)
-   */
-  created_at: string | null;
-  /**
-   * Last update timestamp (ISO 8601 string)
-   */
-  updated_at: string | null;
-};
+export type Step = { 
+/**
+ * Step ID (string form)
+ */
+id: string | null; 
+/**
+ * Display name for this step
+ */
+name: string; 
+/**
+ * Reference to the workflow this step belongs to
+ */
+workflow_id: string; 
+/**
+ * What this step should accomplish
+ */
+goal: string | null; 
+/**
+ * Prompt sent to the agent when executing this step
+ */
+prompt: string | null; 
+/**
+ * Paths to .claude/agents/ files for this step
+ */
+agents?: string[]; 
+/**
+ * Skill names available for this step
+ */
+skills?: string[]; 
+/**
+ * Agent configuration for this step
+ */
+agent_config?: AgentConfig; 
+/**
+ * Step type mirrored from core::StepType.
+ */
+step_type?: StepType; 
+/**
+ * JSON Schema describing the expected output of this step
+ */
+output_schema?: JsonValue | null; 
+/**
+ * Orchestrator-owned persistence configuration for this step
+ */
+persistence_options?: JsonValue | null; 
+/**
+ * Opaque deterministic route configuration for route steps
+ */
+route_config?: JsonValue | null; 
+/**
+ * List of step IDs this step can transition to
+ */
+transitions_to?: string[]; 
+/**
+ * Ordering index for sequential fallback (0-based, Sacrum: `step_order`).
+ */
+order?: number; 
+/**
+ * Creation timestamp (ISO 8601 string)
+ */
+created_at: string | null; 
+/**
+ * Last update timestamp (ISO 8601 string)
+ */
+updated_at: string | null }
 /**
  * The type of change that occurred on a step.
  */
-export type StepChangeType = "Created" | "Updated" | "Deleted";
+export type StepChangeType = "Created" | "Updated" | "Deleted"
 /**
  * Event payload for step changes.
  * Emitted when a step is created, updated, or deleted.
  * For create/update events, `step` carries the full deserialized entity.
  */
-export type StepChangedEvent = {
-  step_id: string;
-  workflow_id: string;
-  change_type: StepChangeType;
-  step: Step | null;
-};
+export type StepChangedEvent = { step_id: string; workflow_id: string; change_type: StepChangeType; step: Step | null }
 /**
  * Step execution record - mirrors db::StepExecution.
- *
+ * 
  * Carries the full sacrum field set so the traces UI can render prompt,
  * output, context, transition_result, model/provider, token usage, cost,
  * duration, handoff, and session_id. All extended fields are `Option`-typed
  * because historical executions and minimal payloads may not populate them.
  */
-export type StepExecution = {
-  /**
-   * Execution ID (string form)
-   */
-  id: string | null;
-  /**
-   * Task ID this execution belongs to
-   */
-  task_id?: string;
-  /**
-   * TaskRun ID this execution belongs to, when present
-   */
-  task_run_id?: string | null;
-  /**
-   * Workflow ID being executed
-   */
-  workflow_id?: string;
-  /**
-   * Name of the step being executed
-   */
-  step_name?: string;
-  /**
-   * Semantic workflow step type, when provided by Sacrum
-   */
-  step_type?: string | null;
-  /**
-   * When this step execution started (ISO 8601 string)
-   */
-  started_at?: string;
-  /**
-   * When this step execution completed (ISO 8601 string)
-   */
-  completed_at: string | null;
-  /**
-   * Current status of this step execution
-   */
-  status?: ExecutionStatus;
-  /**
-   * Prompt text/JSON that drove the execution
-   */
-  prompt?: string | null;
-  /**
-   * Final output of the execution
-   */
-  output?: string | null;
-  /**
-   * Execution context (arbitrary JSON serialized as string)
-   */
-  context?: string | null;
-  /**
-   * Transition decision payload (route/evaluate steps)
-   */
-  transition_result?: string | null;
-  /**
-   * Model identifier (e.g. "claude-opus-4")
-   */
-  model?: string | null;
-  /**
-   * Model provider (e.g. "anthropic")
-   */
-  model_provider?: string | null;
-  /**
-   * Input tokens consumed
-   */
-  input_tokens?: number | null;
-  /**
-   * Output tokens emitted
-   */
-  output_tokens?: number | null;
-  /**
-   * Cache-read ("cache hit") input tokens. Session-cumulative figure from
-   * Sacrum; aggregate per run by taking the latest execution's value.
-   */
-  cache_read_tokens?: number | null;
-  /**
-   * Cost in USD, serialized as a string to preserve Decimal precision
-   * across the Sacrum WS / GraphQL boundary.
-   */
-  cost?: string | null;
-  /**
-   * Wall-clock duration in milliseconds
-   */
-  duration_ms?: number | null;
-  /**
-   * Handoff payload from a route step (JSON encoded)
-   */
-  handoff?: string | null;
-  /**
-   * Provider session identifier (e.g. Claude session ID)
-   */
-  session_id?: string | null;
-};
+export type StepExecution = { 
+/**
+ * Execution ID (string form)
+ */
+id: string | null; 
+/**
+ * Task ID this execution belongs to
+ */
+task_id?: string; 
+/**
+ * TaskRun ID this execution belongs to, when present
+ */
+task_run_id?: string | null; 
+/**
+ * Workflow ID being executed
+ */
+workflow_id?: string; 
+/**
+ * Name of the step being executed
+ */
+step_name?: string; 
+/**
+ * Semantic workflow step type, when provided by Sacrum
+ */
+step_type?: string | null; 
+/**
+ * When this step execution started (ISO 8601 string)
+ */
+started_at?: string; 
+/**
+ * When this step execution completed (ISO 8601 string)
+ */
+completed_at: string | null; 
+/**
+ * Current status of this step execution
+ */
+status?: ExecutionStatus; 
+/**
+ * Prompt text/JSON that drove the execution
+ */
+prompt?: string | null; 
+/**
+ * Final output of the execution
+ */
+output?: string | null; 
+/**
+ * Execution context (arbitrary JSON serialized as string)
+ */
+context?: string | null; 
+/**
+ * Transition decision payload (route/evaluate steps)
+ */
+transition_result?: string | null; 
+/**
+ * Model identifier (e.g. "claude-opus-4")
+ */
+model?: string | null; 
+/**
+ * Model provider (e.g. "anthropic")
+ */
+model_provider?: string | null; 
+/**
+ * Input tokens consumed
+ */
+input_tokens?: number | null; 
+/**
+ * Output tokens emitted
+ */
+output_tokens?: number | null; 
+/**
+ * Cache-read ("cache hit") input tokens. Session-cumulative figure from
+ * Sacrum; aggregate per run by taking the latest execution's value.
+ */
+cache_read_tokens?: number | null; 
+/**
+ * Cost in USD, serialized as a string to preserve Decimal precision
+ * across the Sacrum WS / GraphQL boundary.
+ */
+cost?: string | null; 
+/**
+ * Wall-clock duration in milliseconds
+ */
+duration_ms?: number | null; 
+/**
+ * Handoff payload from a route step (JSON encoded)
+ */
+handoff?: string | null; 
+/**
+ * Provider session identifier (e.g. Claude session ID)
+ */
+session_id?: string | null }
 /**
  * The type of change that occurred on a step execution.
  */
-export type StepExecutionChangeType = "Created" | "StatusChanged";
+export type StepExecutionChangeType = "Created" | "StatusChanged"
 /**
  * Event payload for step execution changes.
  * Emitted when a step execution is created or its status changes.
  * For create/update events, `execution` carries the full deserialized entity.
  */
-export type StepExecutionChangedEvent = {
-  execution_id: string;
-  task_id: string;
-  task_run_id: string;
-  workflow_id: string;
-  step_name: string;
-  status: StepExecutionStatus;
-  change_type: StepExecutionChangeType;
-  execution: StepExecution | null;
-};
+export type StepExecutionChangedEvent = { execution_id: string; task_id: string; task_run_id: string; workflow_id: string; step_name: string; status: StepExecutionStatus; change_type: StepExecutionChangeType; execution: StepExecution | null }
 /**
  * Status of a step execution (mirrors db::ExecutionStatus for frontend)
  */
-export type StepExecutionStatus =
-  | "Pending"
-  | "Running"
-  | "Completed"
-  | "Failed";
+export type StepExecutionStatus = "Pending" | "Running" | "Completed" | "Failed"
 /**
  * The type of change that occurred on a step transition.
  */
-export type StepTransitionChangeType = "Created" | "Deleted";
+export type StepTransitionChangeType = "Created" | "Deleted"
 /**
  * Event payload for step transition changes.
  * Emitted when a step transition is created or deleted.
- *
+ * 
  * `from_step_id` / `to_step_id` are hoisted from the Sacrum payload so the
  * pipeline reducer can update each step's `transitions_to[]` without a
  * refetch. Sacrum sends the full edge on both `Created` and `Deleted`
  * (before-image tombstone), so these endpoints are always populated under
  * the v1 CDC contract.
  */
-export type StepTransitionChangedEvent = {
-  transition_id: string;
-  from_step_id: string | null;
-  to_step_id: string | null;
-  change_type: StepTransitionChangeType;
-};
+export type StepTransitionChangedEvent = { transition_id: string; from_step_id: string | null; to_step_id: string | null; change_type: StepTransitionChangeType }
 /**
  * Step type - mirrors core::StepType
  */
-export type StepType =
-  | "execute"
-  | "evaluate"
-  | "route"
-  | "wait_children"
-  | "human_input"
-  | "stop"
-  | "finish"
-  | { unsupported: string };
+export type StepType = "execute" | "evaluate" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
 /**
  * StopRun command input. Provide either `task_run_id` or `task_id`.
  */
-export type StopRunRequest = {
-  task_run_id: string | null;
-  task_id: string | null;
-};
+export type StopRunRequest = { task_run_id: string | null; task_id: string | null }
 /**
  * Full task details - mirrors core::Task with string IDs and dates
  */
-export type Task = {
-  /**
-   * Task ID (string form)
-   */
-  id: string;
-  /**
-   * Task title
-   */
-  title: string;
-  /**
-   * Optional description
-   */
-  description: string | null;
-  /**
-   * Hierarchy level (null when created without explicit level)
-   */
-  level: TaskLevel | null;
-  /**
-   * Optional priority
-   */
-  priority: TaskPriority | null;
-  /**
-   * Tags for categorization
-   */
-  tags?: string[];
-  /**
-   * Workflow ID (string form)
-   */
-  workflow_id: string | null;
-  /**
-   * Current step ID (string form) - used for positioning
-   */
-  current_step_id: string | null;
-  /**
-   * Workflow name (if task is assigned to a workflow)
-   */
-  workflow_name: string | null;
-  /**
-   * Current step name (if task has a current step in workflow)
-   */
-  step_name: string | null;
-  /**
-   * Current step type (if task has a current step in workflow)
-   */
-  step_type: StepType | null;
-  /**
-   * Server-derived TaskRun controls for Run/Stop surfaces
-   */
-  run_controls?: TaskRunControls | null;
-  /**
-   * Whether this task is archived
-   */
-  archived?: boolean;
-  /**
-   * Optional worktree path
-   */
-  worktree: string | null;
-  /**
-   * Reason why the task was rejected
-   */
-  rejection_reason: string | null;
-  /**
-   * Parent task ID (if any)
-   */
-  parent_id: string | null;
-  /**
-   * IDs of tasks this task depends on
-   */
-  dependency_ids?: string[];
-  /**
-   * IDs of tasks that depend on this task (populated by get_task)
-   */
-  dependent_ids?: string[];
-  /**
-   * IDs of child tasks (populated by get_task)
-   */
-  child_ids?: string[];
-  /**
-   * Embedded sections
-   */
-  sections?: Section[];
-  /**
-   * Embedded code references
-   */
-  code_refs?: CodeRef[];
-  /**
-   * Creation timestamp (ISO 8601 string)
-   */
-  created_at: string | null;
-  /**
-   * Last update timestamp (ISO 8601 string)
-   */
-  updated_at: string | null;
-  /**
-   * When this task was started (ISO 8601 string)
-   */
-  started_at: string | null;
-  /**
-   * When this task was completed (ISO 8601 string)
-   */
-  completed_at: string | null;
-};
+export type Task = { 
+/**
+ * Task ID (string form)
+ */
+id: string; 
+/**
+ * Task title
+ */
+title: string; 
+/**
+ * Optional description
+ */
+description: string | null; 
+/**
+ * Hierarchy level (null when created without explicit level)
+ */
+level: TaskLevel | null; 
+/**
+ * Optional priority
+ */
+priority: TaskPriority | null; 
+/**
+ * Tags for categorization
+ */
+tags?: string[]; 
+/**
+ * Workflow ID (string form)
+ */
+workflow_id: string | null; 
+/**
+ * Current step ID (string form) - used for positioning
+ */
+current_step_id: string | null; 
+/**
+ * Workflow name (if task is assigned to a workflow)
+ */
+workflow_name: string | null; 
+/**
+ * Current step name (if task has a current step in workflow)
+ */
+step_name: string | null; 
+/**
+ * Current step type (if task has a current step in workflow)
+ */
+step_type: StepType | null; 
+/**
+ * Server-derived TaskRun controls for Run/Stop surfaces
+ */
+run_controls?: TaskRunControls | null; 
+/**
+ * Whether this task is archived
+ */
+archived?: boolean; 
+/**
+ * Optional worktree path
+ */
+worktree: string | null; 
+/**
+ * Reason why the task was rejected
+ */
+rejection_reason: string | null; 
+/**
+ * Parent task ID (if any)
+ */
+parent_id: string | null; 
+/**
+ * IDs of tasks this task depends on
+ */
+dependency_ids?: string[]; 
+/**
+ * IDs of tasks that depend on this task (populated by get_task)
+ */
+dependent_ids?: string[]; 
+/**
+ * IDs of child tasks (populated by get_task)
+ */
+child_ids?: string[]; 
+/**
+ * Embedded sections
+ */
+sections?: Section[]; 
+/**
+ * Embedded code references
+ */
+code_refs?: CodeRef[]; 
+/**
+ * Creation timestamp (ISO 8601 string)
+ */
+created_at: string | null; 
+/**
+ * Last update timestamp (ISO 8601 string)
+ */
+updated_at: string | null; 
+/**
+ * When this task was started (ISO 8601 string)
+ */
+started_at: string | null; 
+/**
+ * When this task was completed (ISO 8601 string)
+ */
+completed_at: string | null }
 /**
  * The type of change that occurred on a task.
  */
-export type TaskChangeType =
-  | "Created"
-  | "Updated"
-  | "Deleted"
-  | "StatusChanged";
+export type TaskChangeType = "Created" | "Updated" | "Deleted" | "StatusChanged"
 /**
  * Event payload for task changes.
  * Emitted when a task is created, updated, deleted, or its status changes.
  * For create/update events, `task` carries the full deserialized entity.
- *
+ * 
  * `current_step_id`, `workflow_id`, `level`, and `archived` are hoisted from
  * the Sacrum CDC payload so the reducer can act on `Deleted` events (which
  * carry a before-image tombstone, not a full Task) without keeping a local
  * task-position cache. `previous` carries the sparse before-image bucket
  * identity published for `Updated` events.
  */
-export type TaskChangedEvent = {
-  task_id: string;
-  change_type: TaskChangeType;
-  task: Task | null;
-  current_step_id: string | null;
-  workflow_id: string | null;
-  level: TaskLevel | null;
-  archived: boolean | null;
-  previous?: TaskPreviousBucketIdentity | null;
-};
+export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType; task: Task | null; current_step_id: string | null; workflow_id: string | null; level: TaskLevel | null; archived: boolean | null; previous?: TaskPreviousBucketIdentity | null }
 /**
  * Filter options for listing tasks
  */
-export type TaskFilterOptions = {
-  /**
-   * Filter by step names (OR semantics) - workflow step names
-   */
-  step_names: string[] | null;
-  /**
-   * Filter by levels (OR semantics)
-   */
-  levels: TaskLevel[] | null;
-  /**
-   * Filter by tags (OR semantics)
-   */
-  tags: string[] | null;
-  /**
-   * Show only root items (no parent)
-   */
-  root_only: boolean | null;
-  /**
-   * Show only children of a specific task
-   */
-  children_of: string | null;
-  /**
-   * Search text in title and description
-   */
-  search: string | null;
-  /**
-   * Filter by workflow_id (tasks assigned to a specific workflow)
-   */
-  workflow_id: string | null;
-  /**
-   * Filter by current_step_id (tasks currently sitting at a specific step)
-   */
-  step_id: string | null;
-};
+export type TaskFilterOptions = { 
+/**
+ * Filter by step names (OR semantics) - workflow step names
+ */
+step_names: string[] | null; 
+/**
+ * Filter by levels (OR semantics)
+ */
+levels: TaskLevel[] | null; 
+/**
+ * Filter by tags (OR semantics)
+ */
+tags: string[] | null; 
+/**
+ * Show only root items (no parent)
+ */
+root_only: boolean | null; 
+/**
+ * Show only children of a specific task
+ */
+children_of: string | null; 
+/**
+ * Search text in title and description
+ */
+search: string | null; 
+/**
+ * Filter by workflow_id (tasks assigned to a specific workflow)
+ */
+workflow_id: string | null; 
+/**
+ * Filter by current_step_id (tasks currently sitting at a specific step)
+ */
+step_id: string | null }
 /**
  * Task hierarchy level - mirrors db::Level
  */
-export type TaskLevel = "epic" | "ticket" | "task";
+export type TaskLevel = "epic" | "ticket" | "task"
 /**
  * Sparse before-image values for fields that can change a task's Atlas bucket.
  */
-export type TaskPreviousBucketIdentity = {
-  archived?: boolean | null;
-  level?: TaskLevel | null;
-  current_step_id?: string | null;
-  workflow_id?: string | null;
-};
+export type TaskPreviousBucketIdentity = { archived?: boolean | null; level?: TaskLevel | null; current_step_id?: string | null; workflow_id?: string | null }
 /**
  * Task priority - mirrors db::Priority
  */
-export type TaskPriority = "low" | "medium" | "high" | "critical";
+export type TaskPriority = "low" | "medium" | "high" | "critical"
 /**
  * Durable workflow run for a task.
  */
-export type TaskRun = {
-  /**
-   * TaskRun ID
-   */
-  id: string;
-  /**
-   * Task ID this run belongs to
-   */
-  task_id: string;
-  /**
-   * Project ID this run belongs to
-   */
-  project_id: string;
-  /**
-   * User ID, when returned by the backend
-   */
-  user_id: string | null;
-  /**
-   * Durable run lifecycle status
-   */
-  status: TaskRunStatus;
-  /**
-   * Effective maximum concurrent step attempts for the root TaskRun tree
-   */
-  max_concurrency: number | null;
-  /**
-   * When this run started (ISO 8601 string)
-   */
-  started_at: string | null;
-  /**
-   * When this run ended (ISO 8601 string)
-   */
-  ended_at: string | null;
-  /**
-   * When stop was requested (ISO 8601 string)
-   */
-  stop_requested_at: string | null;
-  /**
-   * Latest step execution ID associated with this run
-   */
-  latest_step_execution_id: string | null;
-  /**
-   * Terminal outcome kind
-   */
-  outcome_kind: string | null;
-  /**
-   * Structured terminal outcome context
-   */
-  outcome_context: JsonValue | null;
-  /**
-   * Parent TaskRun ID for child workflow runs
-   */
-  parent_task_run_id: string | null;
-  /**
-   * Ancestor TaskRun ID recorded by Sacrum, when this run belongs to a run tree
-   */
-  root_task_run_id: string | null;
-  /**
-   * Step execution that triggered this child run
-   */
-  triggered_by_step_execution_id: string | null;
-  /**
-   * Creation timestamp from Sacrum (ISO 8601 string)
-   */
-  inserted_at: string | null;
-  /**
-   * Last update timestamp from Sacrum (ISO 8601 string)
-   */
-  updated_at: string | null;
-};
+export type TaskRun = { 
+/**
+ * TaskRun ID
+ */
+id: string; 
+/**
+ * Task ID this run belongs to
+ */
+task_id: string; 
+/**
+ * Project ID this run belongs to
+ */
+project_id: string; 
+/**
+ * User ID, when returned by the backend
+ */
+user_id: string | null; 
+/**
+ * Durable run lifecycle status
+ */
+status: TaskRunStatus; 
+/**
+ * Effective maximum concurrent step attempts for the root TaskRun tree
+ */
+max_concurrency: number | null; 
+/**
+ * When this run started (ISO 8601 string)
+ */
+started_at: string | null; 
+/**
+ * When this run ended (ISO 8601 string)
+ */
+ended_at: string | null; 
+/**
+ * When stop was requested (ISO 8601 string)
+ */
+stop_requested_at: string | null; 
+/**
+ * Latest step execution ID associated with this run
+ */
+latest_step_execution_id: string | null; 
+/**
+ * Terminal outcome kind
+ */
+outcome_kind: string | null; 
+/**
+ * Structured terminal outcome context
+ */
+outcome_context: JsonValue | null; 
+/**
+ * Parent TaskRun ID for child workflow runs
+ */
+parent_task_run_id: string | null; 
+/**
+ * Ancestor TaskRun ID recorded by Sacrum, when this run belongs to a run tree
+ */
+root_task_run_id: string | null; 
+/**
+ * Step execution that triggered this child run
+ */
+triggered_by_step_execution_id: string | null; 
+/**
+ * Creation timestamp from Sacrum (ISO 8601 string)
+ */
+inserted_at: string | null; 
+/**
+ * Last update timestamp from Sacrum (ISO 8601 string)
+ */
+updated_at: string | null }
 /**
  * The type of change that occurred on a TaskRun.
  */
-export type TaskRunChangeType = "Created" | "Updated";
+export type TaskRunChangeType = "Created" | "Updated"
 /**
  * Event payload for TaskRun changes.
  * Emitted when a TaskRun is created or updated.
  */
-export type TaskRunChangedEvent = {
-  task_run_id: string;
-  task_id: string;
-  status: TaskRunStatus;
-  change_type: TaskRunChangeType;
-  task_run: TaskRun | null;
-  run_controls: TaskRunControlsPayload;
-};
+export type TaskRunChangedEvent = { task_run_id: string; task_id: string; status: TaskRunStatus; change_type: TaskRunChangeType; task_run: TaskRun | null; run_controls: TaskRunControlsPayload }
 /**
  * Server-derived controls for Run/Stop task actions.
  */
-export type TaskRunControls = {
-  runnable?: boolean;
-  stoppable?: boolean;
-  disabled_reason_code: string | null;
-  disabled_reason: string | null;
-  active_run: TaskRun | null;
-};
+export type TaskRunControls = { runnable?: boolean; stoppable?: boolean; disabled_reason_code: string | null; disabled_reason: string | null; active_run: TaskRun | null }
 /**
  * Distinguishes a live controls payload from a deleted task and a malformed
  * controls payload. `Option<TaskRunControls>` cannot represent that contract:
  * both a JSON null and a failed deserialization otherwise become `None`.
  */
-export type TaskRunControlsPayload =
-  | { kind: "present"; controls: TaskRunControls }
-  | { kind: "deleted" }
-  | { kind: "malformed" };
+export type TaskRunControlsPayload = { kind: "present"; controls: TaskRunControls } | { kind: "deleted" } | { kind: "malformed" }
 /**
  * Durable lifecycle status for a task workflow run.
  */
-export type TaskRunStatus =
-  | "queued"
-  | "executing"
-  | "waiting"
-  | "stopping"
-  | "stopped"
-  | "completed"
-  | "failed";
+export type TaskRunStatus = "queued" | "executing" | "waiting" | "stopping" | "stopped" | "completed" | "failed"
 /**
  * Event payload for orchestrator-driven task workflow step changes.
- *
+ * 
  * Mirrors Sacrum's `task_run_step_changed` wire event. Fires whenever a
  * task's `current_step_id` changes while a TaskRun exists, and at run-end
  * paths (completion, retry exhaustion, stop) where `to_step_id` will be
  * `null` because the run has left active statuses.
- *
+ * 
  * Disjoint with `TaskStepChangedEvent`: manual moves are blocked while an
  * orchestrator is active, so clients never receive both for the same
  * transition.
  */
-export type TaskRunStepChangedEvent = {
-  task_run_id: string;
-  task_id: string;
-  from_step_id: string | null;
-  to_step_id: string | null;
-  status: TaskRunStatus;
-  level: TaskLevel;
-};
+export type TaskRunStepChangedEvent = { task_run_id: string; task_id: string; from_step_id: string | null; to_step_id: string | null; status: TaskRunStatus; level: TaskLevel }
 /**
  * Trace data scoped to a single TaskRun.
  */
-export type TaskRunTrace = {
-  root_task_run_id: string;
-  task_runs?: TaskRun[];
-  step_executions?: StepExecution[];
-  session_logs?: SessionLog[];
-};
+export type TaskRunTrace = { root_task_run_id: string; task_runs?: TaskRun[]; step_executions?: StepExecution[]; session_logs?: SessionLog[] }
 /**
  * Event payload for manual task workflow step changes (no TaskRun involved).
- *
+ * 
  * Mirrors Sacrum's `task_step_changed` wire event. Fires for manual moves
  * (`assign_workflow`, `advance_to_step`, `move_to_step`) when no orchestrator
  * run exists for the task. Only emitted when `from_step_id != to_step_id`.
- *
+ * 
  * `from_step_id` may be `null` on the first workflow assignment. `to_step_id`
  * is always present on this event — run-end paths are reported through
  * `TaskRunStepChangedEvent` instead.
  */
-export type TaskStepChangedEvent = {
-  task_id: string;
-  from_step_id: string | null;
-  to_step_id: string | null;
-  workflow_id: string;
-  level: TaskLevel;
-};
-export type UpdateComponentResult = {
-  component: string;
-  state: UpdateComponentState;
-  message: string;
-};
-export type UpdateComponentState =
-  | "pending"
-  | "downloaded"
-  | "verified"
-  | "staged"
-  | "activated"
-  | "health_checked"
-  | "pending_relaunch"
-  | "rolled_back"
-  | "failed";
+export type TaskStepChangedEvent = { task_id: string; from_step_id: string | null; to_step_id: string | null; workflow_id: string; level: TaskLevel }
+export type UpdateComponentResult = { component: string; state: UpdateComponentState; message: string }
+export type UpdateComponentState = "pending" | "downloaded" | "verified" | "staged" | "activated" | "health_checked" | "pending_relaunch" | "rolled_back" | "failed"
 /**
  * Options for updating a workflow step.
  * Only fields that are Some will be updated. The clear flags explicitly remove
  * an existing optional value when no replacement value is supplied.
  */
-export type UpdateStepOptions = {
-  step_id: string;
-  name: string | null;
-  goal: string | null;
-  prompt: string | null;
-  clear_prompt?: boolean;
-  agents: string[] | null;
-  skills: string[] | null;
-  agent_config?: AgentConfig | null;
-  step_type: StepType | null;
-  output_schema: JsonValue | null;
-  clear_output_schema?: boolean;
-  persistence_options?: JsonValue | null;
-  clear_persistence_options?: boolean;
-  route_config?: JsonValue | null;
-  clear_route_config?: boolean;
-  order: number | null;
-  transitions_to: string[] | null;
-};
+export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; prompt: string | null; clear_prompt?: boolean; agents: string[] | null; skills: string[] | null; agent_config?: AgentConfig | null; step_type: StepType | null; output_schema: JsonValue | null; clear_output_schema?: boolean; persistence_options?: JsonValue | null; clear_persistence_options?: boolean; route_config?: JsonValue | null; clear_route_config?: boolean; order: number | null; transitions_to: string[] | null }
 /**
  * Options for updating a task - allows updating multiple fields at once
  */
-export type UpdateTaskOptions = {
-  /**
-   * New title (if provided)
-   */
-  title: string | null;
-  /**
-   * New description (if provided, null clears it)
-   */
-  description: string | null;
-  /**
-   * New priority (if provided, null clears it)
-   */
-  priority: string | null;
-  /**
-   * Tags to add
-   */
-  add_tags?: string[];
-  /**
-   * Tags to remove
-   */
-  remove_tags?: string[];
-  /**
-   * New task level (epic, ticket, task)
-   */
-  level: string | null;
-  /**
-   * Whether the task is archived
-   */
-  archived: boolean | null;
-  /**
-   * Worktree path (if provided, null clears it)
-   */
-  worktree: string | null;
-};
-export type UpdateTransactionResult = {
-  transaction_id: string | null;
-  state: UpdateTransactionState;
-  channel: string;
-  version: string;
-  build: string;
-  progress: UpdateComponentResult[];
-  compatibility: string;
-  signature: string;
-  hash: string;
-  disk: string;
-  component_readiness: string;
-  daemon_service: string;
-  recovery_action: string | null;
-  restart_forced: boolean;
-};
-export type UpdateTransactionState =
-  | "preflight"
-  | "downloading"
-  | "verifying"
-  | "activating"
-  | "health_checked"
-  | "deferred_relaunch"
-  | "success"
-  | "partial_failure"
-  | "retryable_failure";
+export type UpdateTaskOptions = { 
+/**
+ * New title (if provided)
+ */
+title: string | null; 
+/**
+ * New description (if provided, null clears it)
+ */
+description: string | null; 
+/**
+ * New priority (if provided, null clears it)
+ */
+priority: string | null; 
+/**
+ * Tags to add
+ */
+add_tags?: string[]; 
+/**
+ * Tags to remove
+ */
+remove_tags?: string[]; 
+/**
+ * New task level (epic, ticket, task)
+ */
+level: string | null; 
+/**
+ * Whether the task is archived
+ */
+archived: boolean | null; 
+/**
+ * Worktree path (if provided, null clears it)
+ */
+worktree: string | null }
+export type UpdateTransactionResult = { transaction_id: string | null; state: UpdateTransactionState; channel: string; version: string; build: string; progress: UpdateComponentResult[]; compatibility: string; signature: string; hash: string; disk: string; component_readiness: string; daemon_service: string; recovery_action: string | null; restart_forced: boolean }
+export type UpdateTransactionState = "preflight" | "downloading" | "verifying" | "activating" | "health_checked" | "deferred_relaunch" | "success" | "partial_failure" | "retryable_failure"
 /**
  * Options for updating a workflow from the GUI.
- *
+ * 
  * Only fields that are Some will be updated.
  */
-export type UpdateWorkflowOptions = {
-  workflow_id: string;
-  name: string | null;
-  description: string | null;
-  order: number | null;
-  is_default: boolean | null;
-  kanban_column: string | null;
-  factory_name: string | null;
-  clear_factory_name: boolean;
-};
-export type UserQuestion = {
-  question: string;
-  header: string;
-  options: UserQuestionOption[];
-  multi_select: boolean;
-};
-export type UserQuestionOption = { label: string; description: string };
+export type UpdateWorkflowOptions = { workflow_id: string; name: string | null; description: string | null; order: number | null; is_default: boolean | null; kanban_column: string | null; factory_name: string | null; clear_factory_name: boolean }
+export type UserQuestion = { question: string; header: string; options: UserQuestionOption[]; multi_select: boolean }
+export type UserQuestionOption = { label: string; description: string }
 /**
  * Workflow - mirrors db::Workflow
  */
-export type Workflow = {
-  /**
-   * Workflow ID (string form)
-   */
-  id: string | null;
-  /**
-   * Workflow name
-   */
-  name: string;
-  /**
-   * Optional description of the workflow
-   */
-  description: string | null;
-  /**
-   * Reference to the initial step in the workflow
-   */
-  initial_step: string | null;
-  /**
-   * Optional kanban column
-   */
-  kanban_column: string | null;
-  /**
-   * Optional factory name used to group related workflows
-   */
-  factory_name: string | null;
-  /**
-   * Whether this is the default workflow for new tasks
-   */
-  is_default?: boolean;
-  /**
-   * Sort order for displaying workflows (Sacrum: `display_order`).
-   */
-  display_order?: number;
-  /**
-   * Additional metadata as key-value pairs
-   */
-  metadata?: Partial<{ [key in string]: string }>;
-  /**
-   * Creation timestamp (ISO 8601 string)
-   */
-  created_at: string | null;
-  /**
-   * Last update timestamp (ISO 8601 string)
-   */
-  updated_at: string | null;
-};
+export type Workflow = { 
+/**
+ * Workflow ID (string form)
+ */
+id: string | null; 
+/**
+ * Workflow name
+ */
+name: string; 
+/**
+ * Optional description of the workflow
+ */
+description: string | null; 
+/**
+ * Reference to the initial step in the workflow
+ */
+initial_step: string | null; 
+/**
+ * Optional kanban column
+ */
+kanban_column: string | null; 
+/**
+ * Optional factory name used to group related workflows
+ */
+factory_name: string | null; 
+/**
+ * Whether this is the default workflow for new tasks
+ */
+is_default?: boolean; 
+/**
+ * Sort order for displaying workflows (Sacrum: `display_order`).
+ */
+display_order?: number; 
+/**
+ * Additional metadata as key-value pairs
+ */
+metadata?: Partial<{ [key in string]: string }>; 
+/**
+ * Creation timestamp (ISO 8601 string)
+ */
+created_at: string | null; 
+/**
+ * Last update timestamp (ISO 8601 string)
+ */
+updated_at: string | null }
 /**
  * The type of change that occurred on a workflow.
  */
-export type WorkflowChangeType =
-  | "Created"
-  | "Updated"
-  | "Deleted"
-  /**
-   * A task was assigned to this workflow
-   */
-  | "TaskAssigned"
-  /**
-   * A task was unassigned from a workflow
-   */
-  | "TaskUnassigned";
+export type WorkflowChangeType = "Created" | "Updated" | "Deleted" | 
+/**
+ * A task was assigned to this workflow
+ */
+"TaskAssigned" | 
+/**
+ * A task was unassigned from a workflow
+ */
+"TaskUnassigned"
 /**
  * Event payload for workflow changes.
  * Emitted when a workflow is created, updated, or deleted.
  * For create/update events, `workflow` carries the full deserialized entity.
  */
-export type WorkflowChangedEvent = {
-  workflow_id: string;
-  change_type: WorkflowChangeType;
-  workflow: Workflow | null;
-};
+export type WorkflowChangedEvent = { workflow_id: string; change_type: WorkflowChangeType; workflow: Workflow | null }
 /**
  * Workflow transition - defines allowed transitions between workflows
  */
-export type WorkflowTransition = {
-  /**
-   * Transition ID (string form)
-   */
-  id: string | null;
-  /**
-   * Source workflow ID
-   */
-  from_workflow_id: string;
-  /**
-   * Source workflow name
-   */
-  from_workflow_name: string;
-  /**
-   * Target workflow ID
-   */
-  to_workflow_id: string;
-  /**
-   * Target workflow name
-   */
-  to_workflow_name: string;
-  /**
-   * Human-readable label for this transition
-   */
-  label: string;
-  /**
-   * Optional target step ID in the destination workflow
-   */
-  target_step_id: string | null;
-};
+export type WorkflowTransition = { 
+/**
+ * Transition ID (string form)
+ */
+id: string | null; 
+/**
+ * Source workflow ID
+ */
+from_workflow_id: string; 
+/**
+ * Source workflow name
+ */
+from_workflow_name: string; 
+/**
+ * Target workflow ID
+ */
+to_workflow_id: string; 
+/**
+ * Target workflow name
+ */
+to_workflow_name: string; 
+/**
+ * Human-readable label for this transition
+ */
+label: string; 
+/**
+ * Optional target step ID in the destination workflow
+ */
+target_step_id: string | null }
 /**
  * The type of change that occurred on a workflow transition.
  */
-export type WorkflowTransitionChangeType = "Created" | "Deleted";
+export type WorkflowTransitionChangeType = "Created" | "Deleted"
 /**
  * Event payload for workflow transition changes.
  * Emitted when a workflow-to-workflow transition is created or deleted.
- *
+ * 
  * `target_step_id` and `label` are hoisted from the Sacrum payload so the
  * pipeline reducer can construct a complete `PipelineWorkflowTransition`
  * on `Created` without a refetch.
  */
-export type WorkflowTransitionChangedEvent = {
-  transition_id: string;
-  from_workflow_id: string | null;
-  to_workflow_id: string | null;
-  target_step_id: string | null;
-  label: string | null;
-  change_type: WorkflowTransitionChangeType;
-};
+export type WorkflowTransitionChangedEvent = { transition_id: string; from_workflow_id: string | null; to_workflow_id: string | null; target_step_id: string | null; label: string | null; change_type: WorkflowTransitionChangeType }
 /**
  * Workflow with its associated tasks including full details
  */
-export type WorkflowWithTaskDetails = {
-  /**
-   * The workflow itself
-   */
-  workflow: Workflow;
-  /**
-   * Tasks associated with this workflow
-   */
-  tasks: Task[];
-};
+export type WorkflowWithTaskDetails = { 
+/**
+ * The workflow itself
+ */
+workflow: Workflow; 
+/**
+ * Tasks associated with this workflow
+ */
+tasks: Task[] }
 /**
  * Workflow with its associated tasks
  */
-export type WorkflowWithTasks = {
-  /**
-   * The workflow itself
-   */
-  workflow: Workflow;
-  /**
-   * Tasks associated with this workflow
-   */
-  tasks: Task[];
-};
+export type WorkflowWithTasks = { 
+/**
+ * The workflow itself
+ */
+workflow: Workflow; 
+/**
+ * Tasks associated with this workflow
+ */
+tasks: Task[] }
 
 /** tauri-specta globals **/
 
 import {
-  invoke as TAURI_INVOKE,
-  Channel as TAURI_CHANNEL,
+	invoke as TAURI_INVOKE,
+	Channel as TAURI_CHANNEL,
 } from "@tauri-apps/api/core";
 import * as TAURI_API_EVENT from "@tauri-apps/api/event";
 import { type WebviewWindow as __WebviewWindow__ } from "@tauri-apps/api/webviewWindow";
 
 type __EventObj__<T> = {
-  listen: (
-    cb: TAURI_API_EVENT.EventCallback<T>
-  ) => ReturnType<typeof TAURI_API_EVENT.listen<T>>;
-  once: (
-    cb: TAURI_API_EVENT.EventCallback<T>
-  ) => ReturnType<typeof TAURI_API_EVENT.once<T>>;
-  emit: null extends T
-    ? (payload?: T) => ReturnType<typeof TAURI_API_EVENT.emit>
-    : (payload: T) => ReturnType<typeof TAURI_API_EVENT.emit>;
+	listen: (
+		cb: TAURI_API_EVENT.EventCallback<T>,
+	) => ReturnType<typeof TAURI_API_EVENT.listen<T>>;
+	once: (
+		cb: TAURI_API_EVENT.EventCallback<T>,
+	) => ReturnType<typeof TAURI_API_EVENT.once<T>>;
+	emit: null extends T
+		? (payload?: T) => ReturnType<typeof TAURI_API_EVENT.emit>
+		: (payload: T) => ReturnType<typeof TAURI_API_EVENT.emit>;
 };
 
 export type Result<T, E> =
-  | { status: "ok"; data: T }
-  | { status: "error"; error: E };
+	| { status: "ok"; data: T }
+	| { status: "error"; error: E };
 
 function __makeEvents__<T extends Record<string, any>>(
-  mappings: Record<keyof T, string>
+	mappings: Record<keyof T, string>,
 ) {
-  return new Proxy(
-    {} as unknown as {
-      [K in keyof T]: __EventObj__<T[K]> & {
-        (handle: __WebviewWindow__): __EventObj__<T[K]>;
-      };
-    },
-    {
-      get: (_, event) => {
-        const name = mappings[event as keyof T];
+	return new Proxy(
+		{} as unknown as {
+			[K in keyof T]: __EventObj__<T[K]> & {
+				(handle: __WebviewWindow__): __EventObj__<T[K]>;
+			};
+		},
+		{
+			get: (_, event) => {
+				const name = mappings[event as keyof T];
 
-        return new Proxy((() => {}) as any, {
-          apply: (_, __, [window]: [__WebviewWindow__]) => ({
-            listen: (arg: any) => window.listen(name, arg),
-            once: (arg: any) => window.once(name, arg),
-            emit: (arg: any) => window.emit(name, arg),
-          }),
-          get: (_, command: keyof __EventObj__<any>) => {
-            switch (command) {
-              case "listen":
-                return (arg: any) => TAURI_API_EVENT.listen(name, arg);
-              case "once":
-                return (arg: any) => TAURI_API_EVENT.once(name, arg);
-              case "emit":
-                return (arg: any) => TAURI_API_EVENT.emit(name, arg);
-            }
-          },
-        });
-      },
-    }
-  );
+				return new Proxy((() => {}) as any, {
+					apply: (_, __, [window]: [__WebviewWindow__]) => ({
+						listen: (arg: any) => window.listen(name, arg),
+						once: (arg: any) => window.once(name, arg),
+						emit: (arg: any) => window.emit(name, arg),
+					}),
+					get: (_, command: keyof __EventObj__<any>) => {
+						switch (command) {
+							case "listen":
+								return (arg: any) => TAURI_API_EVENT.listen(name, arg);
+							case "once":
+								return (arg: any) => TAURI_API_EVENT.once(name, arg);
+							case "emit":
+								return (arg: any) => TAURI_API_EVENT.emit(name, arg);
+						}
+					},
+				});
+			},
+		},
+	);
 }

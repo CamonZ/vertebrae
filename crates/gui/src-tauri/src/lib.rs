@@ -151,6 +151,17 @@ fn create_builder() -> Builder {
             commands::resolve_permission_request,
             // WebSocket status command
             commands::get_websocket_status,
+            // Daemon fleet management (account-scoped, project-independent;
+            // distinct from local service installation in the installer flow)
+            commands::get_sacrum_connection_identity,
+            commands::list_daemon_fleet,
+            commands::get_daemon,
+            commands::get_daemon_enrollment_metadata,
+            commands::create_daemon,
+            commands::rename_daemon,
+            commands::revoke_daemon,
+            commands::unregister_daemon,
+            commands::rotate_daemon_credentials,
             // Application lifecycle
             commands::quit_application,
             // Update diagnostics
@@ -417,10 +428,38 @@ mod tests {
             "export type LocalBackendUpdateDiagnostic",
             "export type LocalBackendUpdateStatus",
             "export type LocalBackendUpdateResult",
+            "export type Daemon",
+            "export type DaemonCredentialMetadata",
+            "export type DaemonEnrollmentMetadata",
+            "export type DaemonBootstrap",
+            "export type DaemonNameUpdate",
+            "export type DaemonFleetSnapshot",
+            "export type DaemonDetailSnapshot",
+            "export type DaemonEnrollmentSnapshot",
+            "export type DaemonMutationResult",
+            "export type DaemonBootstrapResult",
+            "export type DaemonCommandError",
+            "export type DaemonErrorKind",
         ] {
             assert!(
                 bindings.contains(ty),
                 "generated bindings should include {ty}"
+            );
+        }
+        for command in [
+            "async getSacrumConnectionIdentity(",
+            "async listDaemonFleet(",
+            "async getDaemon(",
+            "async getDaemonEnrollmentMetadata(",
+            "async createDaemon(",
+            "async renameDaemon(",
+            "async revokeDaemon(",
+            "async unregisterDaemon(",
+            "async rotateDaemonCredentials(",
+        ] {
+            assert!(
+                bindings.contains(command),
+                "generated bindings should include {command}"
             );
         }
     }
