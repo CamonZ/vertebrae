@@ -13,6 +13,7 @@ export {
 export {
   hasTaskInQueryCache,
   invalidateArtifactQuery,
+  invalidateDaemonQueries,
   mergeFetchedStepExecutions,
   mergeFetchedTaskRuns,
   mergeFetchedTaskRunTrace,
@@ -33,3 +34,4 @@ export {
   upsertWorkflowInQueryCache,
   upsertWorkflowTransitionInQueryCache,
 } from "./serverCache";
+export type { DaemonInvalidationScope } from "./serverCache";

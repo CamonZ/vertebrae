@@ -7,7 +7,7 @@
 //! - Fragment concatenation for reusable query parts
 
 use crate::config::SacrumConfig;
-use crate::error::{SacrumClientError, SacrumClientResult};
+use crate::error::{GraphqlErrorItem, SacrumClientError, SacrumClientResult};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -18,14 +18,6 @@ use serde_json::Value;
 struct GraphqlResponse<T> {
     data: Option<T>,
     errors: Option<Vec<GraphqlErrorItem>>,
-}
-
-/// Individual GraphQL error
-#[derive(Debug, Deserialize)]
-struct GraphqlErrorItem {
-    message: String,
-    path: Option<Vec<String>>,
-    extensions: Option<Value>,
 }
 
 fn format_graphql_error(error: &GraphqlErrorItem) -> String {
@@ -59,6 +51,7 @@ pub struct GraphqlClient {
     client: Client,
     endpoint: String,
     pub(crate) project_id: String,
+    connection_identity: String,
 }
 
 impl GraphqlClient {
@@ -82,17 +75,23 @@ impl GraphqlClient {
             .expect("Failed to build reqwest client");
 
         let endpoint = format!("{}/graphql", config.base_url);
+        let connection_identity = connection_identity(&config.base_url, &config.api_token);
 
         GraphqlClient {
             client,
             endpoint,
             project_id: config.project_id,
+            connection_identity,
         }
     }
 
     /// Get the project ID this client is configured for
     pub fn project_id(&self) -> &str {
         &self.project_id
+    }
+
+    pub fn connection_identity(&self) -> &str {
+        &self.connection_identity
     }
 
     async fn send_request<T: DeserializeOwned>(
@@ -145,7 +144,11 @@ impl GraphqlClient {
         {
             let messages: Vec<String> = errors.iter().map(format_graphql_error).collect();
             let message = messages.join("; ");
-            return Err(SacrumClientError::GraphqlError { messages, message });
+            return Err(SacrumClientError::GraphqlError {
+                items: errors.clone(),
+                messages,
+                message,
+            });
         }
 
         Ok(gql_response)
@@ -174,6 +177,7 @@ impl GraphqlClient {
         let data = gql_response
             .data
             .ok_or_else(|| SacrumClientError::GraphqlError {
+                items: Vec::new(),
                 messages: vec!["No data in response".to_string()],
                 message: "No data in response".to_string(),
             })?;
@@ -183,6 +187,7 @@ impl GraphqlClient {
             .ok_or_else(|| {
                 let msg = format!("Field '{}' not found in response", field);
                 SacrumClientError::GraphqlError {
+                    items: Vec::new(),
                     messages: vec![msg.clone()],
                     message: msg,
                 }
@@ -208,6 +213,7 @@ impl GraphqlClient {
         gql_response
             .data
             .ok_or_else(|| SacrumClientError::GraphqlError {
+                items: Vec::new(),
                 messages: vec!["No data in response".to_string()],
                 message: "No data in response".to_string(),
             })
@@ -243,6 +249,21 @@ pub fn with_fragments(query: &str, fragments: &[&str]) -> String {
     let mut parts: Vec<&str> = fragments.to_vec();
     parts.push(query);
     parts.join("\n")
+}
+
+/// First 8 bytes of `SHA-256(url || 0x00 || token)` in hex; a cache key,
+/// not a security boundary — hashing keeps the token unrecoverable.
+fn connection_identity(base_url: &str, api_token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(base_url.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(api_token.as_bytes());
+    let digest = hasher.finalize();
+    digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Extract the operation name from a GraphQL query string.
@@ -566,5 +587,66 @@ mod tests {
     fn test_extract_operation_name_unknown() {
         let query = "{ tasks { id } }";
         assert_eq!(extract_operation_name(query), "unknown operation");
+    }
+
+    #[test]
+    fn test_connection_identity_is_stable_for_same_backend_and_account() {
+        let config1 = SacrumConfig::new(
+            "https://vertebrae.dev".to_string(),
+            "same-account-token".to_string(),
+            "project-a".to_string(),
+        );
+        let config2 = SacrumConfig::new(
+            "https://vertebrae.dev".to_string(),
+            "same-account-token".to_string(),
+            "project-b".to_string(),
+        );
+        assert_eq!(
+            GraphqlClient::new(config1).connection_identity(),
+            GraphqlClient::new(config2).connection_identity()
+        );
+    }
+
+    #[test]
+    fn test_connection_identity_separates_accounts_and_backends() {
+        let base = SacrumConfig::new(
+            "https://vertebrae.dev".to_string(),
+            "account-one-token".to_string(),
+            "project".to_string(),
+        );
+        let other_account = SacrumConfig::new(
+            "https://vertebrae.dev".to_string(),
+            "account-two-token".to_string(),
+            "project".to_string(),
+        );
+        let other_backend = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "account-one-token".to_string(),
+            "project".to_string(),
+        );
+        let base_identity = GraphqlClient::new(base).connection_identity().to_string();
+        assert_ne!(
+            base_identity,
+            GraphqlClient::new(other_account).connection_identity()
+        );
+        assert_ne!(
+            base_identity,
+            GraphqlClient::new(other_backend).connection_identity()
+        );
+    }
+
+    #[test]
+    fn test_connection_identity_is_a_short_hex_digest_without_the_token() {
+        let token = "sac_super_secret_account_token";
+        let identity = GraphqlClient::new(SacrumConfig::new(
+            "https://vertebrae.dev".into(),
+            token.into(),
+            "p".into(),
+        ))
+        .connection_identity()
+        .to_string();
+        assert_eq!(identity.len(), 16);
+        assert!(identity.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(!identity.contains(token));
     }
 }

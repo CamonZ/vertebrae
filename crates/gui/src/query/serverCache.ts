@@ -186,6 +186,45 @@ export function invalidateArtifactQuery(
   });
 }
 
+export type DaemonInvalidationScope =
+  | "fleet"
+  | "daemon"
+  | "daemonEnrollment"
+  | "all";
+
+export function invalidateDaemonQueries(
+  connectionId: string,
+  scope: DaemonInvalidationScope = "all",
+  daemonId?: string
+) {
+  const scopesFor: readonly (readonly unknown[])[] = (() => {
+    switch (scope) {
+      case "fleet":
+        return [queryKeys.daemons.fleet(connectionId)];
+      case "daemon":
+        return daemonId
+          ? [
+              queryKeys.daemons.fleet(connectionId),
+              queryKeys.daemons.detail(connectionId, daemonId),
+            ]
+          : [queryKeys.daemons.fleet(connectionId)];
+      case "daemonEnrollment":
+        return daemonId
+          ? [
+              queryKeys.daemons.fleet(connectionId),
+              queryKeys.daemons.detail(connectionId, daemonId),
+              queryKeys.daemons.enrollment(connectionId, daemonId),
+            ]
+          : [queryKeys.daemons.fleet(connectionId)];
+      case "all":
+        return [queryKeys.daemons.all(connectionId)];
+    }
+  })();
+  for (const queryKey of scopesFor) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
+}
+
 export function upsertStepExecutionInList(
   executions: readonly StepExecution[],
   execution: StepExecution

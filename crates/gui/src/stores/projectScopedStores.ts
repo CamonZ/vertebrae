@@ -4,6 +4,7 @@ import { useEntityPanelStore } from "./entityPanelStore";
 import { useFactoryFilterStore } from "./factoryFilterStore";
 import { useSessionLogStore } from "./sessionLogStore";
 import { queryClient } from "../query/queryClient";
+import { queryKeys } from "../query/queryKeys";
 
 interface ProjectScopeState {
   generation: number;
@@ -29,12 +30,19 @@ export function useProjectScopeGeneration() {
 
 /**
  * Drop client-side state whose entity IDs are scoped to the selected Sacrum
- * project. Server-state queries are cleared here; realtime listeners and
- * normal query fetches repopulate state for the active project.
+ * project. Project-scoped server queries are removed here; realtime
+ * listeners and normal query fetches repopulate state for the active project.
+ * Connection-scoped (account/backend) caches intentionally survive project
+ * resets; only project-scoped queries are cleared.
  */
 export function resetProjectScopedStores() {
   useProjectScopeStore.getState().bumpGeneration();
-  queryClient.clear();
+  queryClient.removeQueries({
+    queryKey: queryKeys.projectRoot(),
+  });
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.sacrumConnection(),
+  });
   useEntityPanelStore.getState().reset();
   useFactoryFilterStore.getState().reset();
   useSessionLogStore.getState().reset();
