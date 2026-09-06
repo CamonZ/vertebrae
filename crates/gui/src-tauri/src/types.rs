@@ -1478,18 +1478,11 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
     }
 }
 
-/// Safe daemon fleet metadata projection (no credential material).
-///
-/// Fleet management is account-scoped: these rows belong to the connected
-/// backend/account rather than the selected project.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct Daemon {
     pub id: String,
-    /// Credential-enrollment lifecycle status exactly as reported. Unknown
-    /// future statuses are preserved so the UI can present them truthfully.
     pub status: String,
     pub name: Option<String>,
-    /// Non-null display name: the stored name or a stable short-ID fallback.
     pub display_name: String,
     pub enrolled_at: Option<String>,
     pub removed_at: Option<String>,
@@ -1512,12 +1505,10 @@ impl From<vertebrae_sacrum_client::daemon_service::DaemonSummary> for Daemon {
     }
 }
 
-/// Safe credential audit projection for one daemon credential.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DaemonCredentialMetadata {
     pub id: String,
     pub credential_kind: String,
-    /// Credential lifecycle status as reported; unknown values preserved.
     pub status: String,
     pub expires_at: String,
     pub consumed_at: Option<String>,
@@ -1543,7 +1534,6 @@ impl From<vertebrae_sacrum_client::daemon_service::DaemonCredentialMetadata>
     }
 }
 
-/// Owner-scoped enrollment metadata for one daemon, without token material.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DaemonEnrollmentMetadata {
     pub daemon_id: String,
@@ -1565,8 +1555,6 @@ impl From<vertebrae_sacrum_client::daemon_service::DaemonEnrollmentMetadata>
     }
 }
 
-/// One-time bootstrap issuance. The enrollment token is displayed once and
-/// never persisted or logged by the GUI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DaemonBootstrap {
     pub daemon: Daemon,
@@ -1584,8 +1572,6 @@ impl From<vertebrae_sacrum_client::daemon_service::DaemonBootstrap> for DaemonBo
     }
 }
 
-/// Rename intent that preserves the server's omitted-vs-null semantics:
-/// omitting the name leaves it unchanged, an explicit null clears it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum DaemonNameUpdate {
@@ -1604,39 +1590,30 @@ impl From<DaemonNameUpdate> for vertebrae_sacrum_client::daemon_service::DaemonR
     }
 }
 
-/// Fleet snapshot tagged with the backend/account connection it was read
-/// under. Late responses from a retired connection are rejected before they
-/// reach the webview.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DaemonFleetSnapshot {
     pub connection_id: String,
     pub daemons: Vec<Daemon>,
 }
 
-/// Single-daemon read tagged with its connection identity. `daemon` is `None`
-/// for unknown ids (foreign ids are indistinguishable by design).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DaemonDetailSnapshot {
     pub connection_id: String,
     pub daemon: Option<Daemon>,
 }
 
-/// Enrollment metadata read tagged with its connection identity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DaemonEnrollmentSnapshot {
     pub connection_id: String,
     pub metadata: Option<DaemonEnrollmentMetadata>,
 }
 
-/// Result of a daemon mutation that returns the daemon's safe metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DaemonMutationResult {
     pub connection_id: String,
     pub daemon: Daemon,
 }
 
-/// Result of create/rotate: a short-lived bootstrap tagged with the
-/// connection identity that issued it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DaemonBootstrapResult {
     pub connection_id: String,

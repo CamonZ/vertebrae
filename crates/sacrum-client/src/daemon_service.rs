@@ -1,20 +1,8 @@
-//! Owner-scoped daemon fleet management service.
-//!
-//! Daemon management is account-authenticated and project-independent: every
-//! operation rides the shared [`GraphqlClient`] bearer token and never
-//! references the client's configured project. Safe fleet metadata (status,
-//! names, timestamps) is deliberately separated from the short-lived
-//! [`DaemonBootstrap`] payloads that carry a one-time enrollment token.
-//!
-//! Error handling follows two rules:
-//!
-//! 1. Transport failures that cannot prove the server did not apply the
-//!    request are reported as [`DaemonServiceError::AmbiguousTransport`].
-//!    Callers must not automatically retry an ambiguous mutation; they
-//!    refresh safe fleet metadata and offer explicit recovery instead.
-//! 2. Sacrum's refusal messages are stable and non-disclosing; they are
-//!    mapped onto [`DaemonRefusal`] variants without embedding credential
-//!    material anywhere in diagnostics.
+//! Account-authenticated, project-independent daemon fleet management.
+//! Safe fleet metadata is kept separate from the one-time-token
+//! [`DaemonBootstrap`] payloads; ambiguous transport must never be
+//! auto-retried (refresh safe metadata, offer explicit recovery), and
+//! refusal mapping never embeds credential material.
 
 use crate::api_types::{
     DaemonBootstrapResponse, DaemonCredentialMetadataResponse, DaemonEnrollmentMetadataResponse,
@@ -29,24 +17,18 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use thiserror::Error;
 
-/// Known daemon credential-enrollment lifecycle statuses.
-///
-/// The wire contract is an open string set: statuses published by newer
-/// Sacrum servers deserialize into [`DaemonStatus::Unknown`] and are
-/// preserved verbatim rather than rejected, so a fleet view stays truthful
-/// across server upgrades.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DaemonStatus {
     Pending,
     Active,
     Revoked,
     Removed,
+    /// Open string set: unknown statuses are preserved verbatim.
     #[serde(untagged)]
     Unknown(String),
 }
 
 impl DaemonStatus {
-    /// The exact wire spelling of this status.
     pub fn as_str(&self) -> &str {
         match self {
             DaemonStatus::Pending => "pending",
@@ -57,14 +39,10 @@ impl DaemonStatus {
         }
     }
 
-    /// Whether the status is one of the currently documented values.
     pub fn is_known(&self) -> bool {
         !matches!(self, DaemonStatus::Unknown(_))
     }
 
-    /// Whether this is a documented terminal status. Unknown future statuses
-    /// are conservatively reported as non-terminal; the server remains the
-    /// authority and refuses operations regardless of the local view.
     pub fn is_terminal(&self) -> bool {
         matches!(self, DaemonStatus::Revoked | DaemonStatus::Removed)
     }
@@ -90,29 +68,22 @@ impl FromStr for DaemonStatus {
     }
 }
 
-/// Safe daemon fleet metadata. Never carries credential material.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DaemonSummary {
     pub id: String,
     pub status: DaemonStatus,
     pub name: Option<String>,
-    /// Non-null display name: the stored name or a stable short-ID fallback.
     pub display_name: String,
-    /// First successful bootstrap exchange; `None` when never enrolled.
     pub enrolled_at: Option<DateTime<Utc>>,
-    /// Tombstone time, set only on successful unregister.
     pub removed_at: Option<DateTime<Utc>>,
     pub inserted_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }
 
-/// Safe credential audit metadata for one daemon credential.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DaemonCredentialMetadata {
     pub id: String,
-    /// `bootstrap` or `reconnect`.
     pub credential_kind: String,
-    /// Credential lifecycle status as reported; unknown values preserved.
     pub status: String,
     pub expires_at: DateTime<Utc>,
     pub consumed_at: Option<DateTime<Utc>>,
@@ -121,7 +92,6 @@ pub struct DaemonCredentialMetadata {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
-/// Owner-scoped enrollment metadata for one daemon, without token material.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DaemonEnrollmentMetadata {
     pub daemon_id: String,
@@ -130,9 +100,7 @@ pub struct DaemonEnrollmentMetadata {
     pub credentials: Vec<DaemonCredentialMetadata>,
 }
 
-/// Short-lived bootstrap issuance returned by create and rotate. The
-/// enrollment token is one-time, displayed exactly once by the owner, and
-/// must never be logged or persisted in diagnostics.
+/// One-time enrollment token: shown once, never logged or persisted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DaemonBootstrap {
     pub daemon: DaemonSummary,
@@ -140,25 +108,16 @@ pub struct DaemonBootstrap {
     pub expires_at: DateTime<Utc>,
 }
 
-/// Rename intent that preserves GraphQL's omitted-vs-null distinction.
-///
-/// Sacrum's `renameDaemon` treats an omitted `name` argument as "leave the
-/// current value unchanged" and `name: null` as "clear the name"; collapsing
-/// the two would silently destroy data.
+/// Omitted `name` = unchanged, `name: null` = clear; collapsing destroys data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DaemonRename {
-    /// Omit the `name` argument; the current name is unchanged.
     Unchanged,
-    /// Send `name: null`; the name is cleared.
     Clear,
-    /// Send `name: <value>`.
     Set(String),
 }
 
-/// Stable, non-disclosing server refusals from the daemon management surface.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DaemonRefusal {
-    /// Unknown or foreign identity; the two are intentionally indistinguishable.
     #[error("daemon not found")]
     NotFound,
     #[error("daemon is in a terminal state (revoked or removed)")]
@@ -173,35 +132,26 @@ pub enum DaemonRefusal {
     Other(String),
 }
 
-/// Errors from daemon fleet management operations.
 #[derive(Debug, Error)]
 pub enum DaemonServiceError {
-    /// Transport or decode failure where the request may still have been
-    /// applied server-side. Never retry the same mutation automatically;
-    /// refresh safe fleet metadata and offer explicit recovery.
+    /// The request may have been applied; never auto-retry.
     #[error(
         "network ambiguity: the daemon operation may have been applied; refresh the fleet before retrying ({0})"
     )]
     AmbiguousTransport(#[source] SacrumClientError),
 
-    /// Definitive failure where the server did not apply the request.
     #[error("backend unavailable: {0}")]
     Unavailable(#[source] SacrumClientError),
 
-    /// The server refused the operation with a stable, non-disclosing message.
     #[error("{0}")]
     Refused(DaemonRefusal),
 
-    /// Field-scoped naming policy violation reported on the `name` field.
     #[error("invalid daemon name: {0}")]
     InvalidName(String),
 
-    /// The server response could not be decoded into the proven contract.
-    /// Treated like ambiguity at the boundary: the operation may have applied.
     #[error("malformed daemon response: {0}")]
     MalformedResponse(String),
 
-    /// Client-side input validation failed before any request was sent.
     #[error("invalid {field}: {message}")]
     InvalidInput {
         field: &'static str,
@@ -224,9 +174,6 @@ impl From<SacrumClientError> for DaemonServiceError {
             return refusal;
         }
         match &error {
-            // Any transport failure after the request left the client may
-            // have been applied, including pooled-connection resets; err on
-            // the side of never duplicating a mutation.
             SacrumClientError::HttpError(_)
             | SacrumClientError::SerializationError(_)
             | SacrumClientError::ApiError {
@@ -239,11 +186,6 @@ impl From<SacrumClientError> for DaemonServiceError {
     }
 }
 
-/// Map stable GraphQL refusal messages onto typed refusals.
-///
-/// Returns `None` for decode-level anomalies (`No data in response`, missing
-/// fields) so the caller falls through to the transport classification; the
-/// original error text never contains credential material.
 fn classify_graphql_error(messages: &[String], display: &str) -> Option<DaemonServiceError> {
     if messages.iter().any(|message| is_name_field_error(message)) {
         return Some(DaemonServiceError::InvalidName(display.to_string()));
@@ -266,9 +208,6 @@ fn classify_graphql_error(messages: &[String], display: &str) -> Option<DaemonSe
     )))
 }
 
-/// Recognize the changeset middleware's field-scoped `name` errors. The
-/// formatted client message carries both the `name: <reason>` prefix and an
-/// `extensions` object naming the field.
 fn is_name_field_error(message: &str) -> bool {
     message.contains(r#""field":"name""#)
         || message.contains(r#""field": "name""#)
@@ -365,10 +304,6 @@ impl DaemonBootstrapResponse {
     }
 }
 
-/// Account-authenticated daemon fleet management service.
-///
-/// All operations are owner-scoped by the bearer token on the underlying
-/// [`GraphqlClient`] and independent of the client's configured project.
 pub struct SacrumDaemonService {
     client: GraphqlClient,
 }
@@ -387,8 +322,6 @@ impl SacrumDaemonService {
             })
     }
 
-    /// List the owner's active fleet. Removed tombstones are excluded by the
-    /// server; revoked daemons remain listed.
     pub async fn list_fleet(&self) -> Result<Vec<DaemonSummary>, DaemonServiceError> {
         let query = with_daemon_fields(daemons::LIST_FLEET);
         let response: Vec<DaemonResponse> = self
@@ -401,8 +334,6 @@ impl SacrumDaemonService {
             .collect()
     }
 
-    /// Read one daemon. Tombstones stay readable; unknown and foreign ids
-    /// resolve to `None` without disclosure.
     pub async fn get_daemon(&self, id: &str) -> Result<Option<DaemonSummary>, DaemonServiceError> {
         let id = Self::daemon_id(id)?;
         let query = with_daemon_fields(daemons::GET_DAEMON);
@@ -413,8 +344,6 @@ impl SacrumDaemonService {
         response.map(DaemonResponse::into_summary).transpose()
     }
 
-    /// Read safe enrollment metadata (credential audit without token
-    /// material). Unknown and foreign ids resolve to `None`.
     pub async fn get_enrollment_metadata(
         &self,
         id: &str,
@@ -437,9 +366,6 @@ impl SacrumDaemonService {
             .transpose()
     }
 
-    /// Provision a daemon and return its one-time bootstrap credential.
-    /// `name: None` omits the argument entirely, matching the documented
-    /// compatibility behavior for unnamed provisioning.
     pub async fn create_daemon(
         &self,
         name: Option<&str>,
@@ -456,7 +382,6 @@ impl SacrumDaemonService {
         response.into_bootstrap()
     }
 
-    /// Rename through the server's shared naming policy.
     pub async fn rename_daemon(
         &self,
         id: &str,
@@ -467,8 +392,6 @@ impl SacrumDaemonService {
         let mut variables = serde_json::Map::new();
         variables.insert("id".to_string(), serde_json::json!(id));
         match name {
-            // Omitted argument leaves the current name unchanged; an explicit
-            // null clears it. The distinction is part of the wire contract.
             DaemonRename::Unchanged => {}
             DaemonRename::Clear => {
                 variables.insert("name".to_string(), serde_json::Value::Null);
@@ -487,19 +410,14 @@ impl SacrumDaemonService {
             .ok_or(DaemonServiceError::Refused(DaemonRefusal::NotFound))
     }
 
-    /// Terminal, idempotent revocation of every credential the daemon holds.
     pub async fn revoke_daemon(&self, id: &str) -> Result<DaemonSummary, DaemonServiceError> {
         Self::daemon_mutation(self, id, daemons::REVOKE_DAEMON, "revokeDaemon").await
     }
 
-    /// Soft-tombstone unregister, refused conservatively while work safety
-    /// cannot be established.
     pub async fn unregister_daemon(&self, id: &str) -> Result<DaemonSummary, DaemonServiceError> {
         Self::daemon_mutation(self, id, daemons::UNREGISTER_DAEMON, "unregisterDaemon").await
     }
 
-    /// Invalidate prior credentials and issue a fresh one-time bootstrap on
-    /// the same identity.
     pub async fn rotate_credentials(
         &self,
         id: &str,
@@ -536,7 +454,6 @@ impl SacrumDaemonService {
     }
 }
 
-/// Attach the safe daemon metadata fragment to a document.
 fn with_daemon_fields(document: &str) -> String {
     crate::client::with_fragments(document, &[daemons::DAEMON_FIELDS])
 }
@@ -604,7 +521,6 @@ mod tests {
         assert!(DaemonStatus::Removed.is_terminal());
         assert!(!DaemonStatus::Active.is_terminal());
         assert_eq!(unknown.to_string(), "quarantined_by_future_policy");
-        // Round-trips through serde keep the exact wire spelling.
         assert_eq!(
             serde_json::to_value(&unknown).unwrap(),
             json!("quarantined_by_future_policy")
@@ -697,7 +613,6 @@ mod tests {
                 ..
             })
         ));
-        // No request was sent for an invalid id.
         let hits = server.received_requests().await.unwrap();
         assert!(hits.is_empty());
     }
@@ -751,7 +666,6 @@ mod tests {
         assert_eq!(metadata.credentials[0].credential_kind, "bootstrap");
         assert!(metadata.credentials[0].consumed_at.is_some());
         assert_eq!(metadata.credentials[1].credential_kind, "reconnect");
-        // The projection has no token/hash field to populate.
         let body = serde_json::to_value(&metadata).unwrap().to_string();
         assert!(!body.contains(ONE_TIME_TOKEN));
         assert!(!body.contains("token"));
@@ -939,7 +853,6 @@ mod tests {
 
     #[tokio::test]
     async fn transport_failures_classify_conservatively_for_mutations() {
-        // A refused TCP connection is a reqwest transport error.
         let unreachable = GraphqlClient::new(SacrumConfig::new(
             "http://127.0.0.1:1".into(),
             "test-account-token".into(),
@@ -948,10 +861,6 @@ mod tests {
         let result = SacrumDaemonService::new(unreachable)
             .create_daemon(None)
             .await;
-        // The request never reached a server: classification is either
-        // ambiguous (conservative default) or unavailable; both forbid
-        // automatic duplicate mutations at the boundary. HttpError maps to
-        // AmbiguousTransport.
         assert!(
             matches!(result, Err(DaemonServiceError::AmbiguousTransport(_))),
             "transport failures after dispatch must classify as ambiguous, got: {result:?}"

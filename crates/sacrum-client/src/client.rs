@@ -98,14 +98,6 @@ impl GraphqlClient {
         &self.project_id
     }
 
-    /// Stable, non-reversible identity of this client's backend URL and
-    /// account token.
-    ///
-    /// Account-scoped caches (such as the daemon fleet) are keyed by this
-    /// identity instead of the selected project, so switching projects on one
-    /// backend reuses the same scope while switching backend or account can
-    /// never read the previous account's data. The digest never exposes the
-    /// token itself.
     pub fn connection_identity(&self) -> &str {
         &self.connection_identity
     }
@@ -260,14 +252,8 @@ pub fn with_fragments(query: &str, fragments: &[&str]) -> String {
     parts.join("\n")
 }
 
-/// Derive a stable, non-reversible identity for a backend URL and account
-/// token.
-///
-/// The identity is the first 8 bytes of `SHA-256(url || 0x00 || token)` in
-/// lowercase hex. It exists to scope account-owned client caches: identical
-/// backend and account produce the same identity, while any change to either
-/// produces an unrelated one. It is a cache key, not a security boundary, but
-/// the truncation and hashing keep the token unrecoverable from it.
+/// First 8 bytes of `SHA-256(url || 0x00 || token)` in hex; a cache key,
+/// not a security boundary — hashing keeps the token unrecoverable.
 fn connection_identity(base_url: &str, api_token: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
@@ -611,7 +597,6 @@ mod tests {
             "same-account-token".to_string(),
             "project-a".to_string(),
         );
-        // A different project on the same backend/account keeps the identity.
         let config2 = SacrumConfig::new(
             "https://vertebrae.dev".to_string(),
             "same-account-token".to_string(),

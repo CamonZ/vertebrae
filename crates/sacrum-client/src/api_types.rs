@@ -835,19 +835,9 @@ pub struct ProjectListResponse {
     pub projects: Vec<ProjectResponse>,
 }
 
-/// Safe daemon fleet metadata from Sacrum's GraphQL API.
-///
-/// This projection never carries credential material; one-time bootstrap
-/// tokens live only in [`DaemonBootstrapResponse`]. Timestamps stay raw
-/// strings on the wire and are validated when converted into the service's
-/// domain types. Response keys mirror this crate's snake_case GraphQL
-/// selections verbatim; `display_name` is non-null in the Sacrum schema, so
-/// its absence fails decoding instead of defaulting silently.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonResponse {
     pub id: String,
-    /// Credential-enrollment lifecycle status. Unknown future statuses are
-    /// preserved verbatim; classification happens in the service layer.
     pub status: String,
     #[serde(default)]
     pub name: Option<String>,
@@ -862,8 +852,6 @@ pub struct DaemonResponse {
     pub updated_at: Option<String>,
 }
 
-/// Safe credential audit projection for one daemon credential. Token hashes
-/// are not selectable on this type; only kind, status and timestamps exist.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonCredentialMetadataResponse {
     pub id: String,
@@ -880,7 +868,6 @@ pub struct DaemonCredentialMetadataResponse {
     pub updated_at: Option<String>,
 }
 
-/// Owner-scoped enrollment metadata for one daemon, without token material.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonEnrollmentMetadataResponse {
     pub daemon_id: String,
@@ -891,8 +878,6 @@ pub struct DaemonEnrollmentMetadataResponse {
     pub credentials: Vec<DaemonCredentialMetadataResponse>,
 }
 
-/// Short-lived bootstrap payload returned by create and rotate. The
-/// enrollment token is shown once and never appears in any other projection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonBootstrapResponse {
     pub daemon: DaemonResponse,
@@ -949,9 +934,6 @@ mod daemon_dto_tests {
 
     #[test]
     fn daemon_response_requires_a_display_name() {
-        // `display_name` is non-null in the Sacrum schema; a response without
-        // it must fail decoding (surfacing as a malformed/ambiguous response
-        // at the service boundary) rather than silently defaulting.
         let error = serde_json::from_str::<DaemonResponse>(
             r#"{
                 "id": "33333333-3333-3333-3333-333333333333",
@@ -973,8 +955,6 @@ mod daemon_dto_tests {
             }"#,
         )
         .unwrap();
-        // Unknown statuses are preserved verbatim and unknown fields are
-        // ignored, so newer servers do not break older clients.
         assert_eq!(daemon.status, "quarantined_by_future_policy");
     }
 
@@ -1031,7 +1011,6 @@ mod daemon_dto_tests {
         .unwrap();
         assert_eq!(bootstrap.enrollment_token, "dtoken_dummy_one_time_value");
         assert_eq!(bootstrap.daemon.status, "pending");
-        // The safe daemon projection itself serializes without any token field.
         let safe = serde_json::to_value(&bootstrap.daemon).unwrap();
         assert!(!safe.to_string().contains("token"));
     }

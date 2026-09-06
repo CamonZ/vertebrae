@@ -64,8 +64,6 @@ describe("useDaemonFleet", () => {
   });
 
   it("rejects a late response from a retired connection instead of caching it", async () => {
-    // The request starts under identity-a, but the account switches to
-    // identity-b before the response lands.
     mockListDaemonFleet.mockImplementation(async () => {
       useSacrumConnectionStore.getState().setIdentity("identity-b");
       return { status: "ok", data: snapshot("identity-a", [daemon]) };
@@ -76,7 +74,6 @@ describe("useDaemonFleet", () => {
     await waitFor(() => expect(result.current.error).toBeTruthy());
     expect(result.current.daemons).toEqual([]);
     expect(result.current.error).toContain("retired connection");
-    // The old account's fleet was never cached under either identity.
     expect(
       queryClient.getQueryData(["sacrum", "identity-a", "daemons", "fleet"])
     ).toBeUndefined();

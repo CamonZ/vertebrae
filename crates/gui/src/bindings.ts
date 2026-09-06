@@ -929,11 +929,6 @@ async getWebsocketStatus() : Promise<Result<string, CommandError>> {
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Identity of the active backend/account connection, or `None` when the GUI
- * has no Sacrum client. Account-scoped frontend caches (the daemon fleet)
- * key on this identity instead of the selected project.
- */
 async getSacrumConnectionIdentity() : Promise<Result<string | null, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_sacrum_connection_identity") };
@@ -942,10 +937,6 @@ async getSacrumConnectionIdentity() : Promise<Result<string | null, CommandError
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * List the owner's active daemon fleet (removed tombstones excluded by the
- * server; revoked daemons remain listed).
- */
 async listDaemonFleet() : Promise<Result<DaemonFleetSnapshot, DaemonCommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_daemon_fleet") };
@@ -954,9 +945,6 @@ async listDaemonFleet() : Promise<Result<DaemonFleetSnapshot, DaemonCommandError
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Read one daemon. Unknown and foreign ids return `None` without disclosure.
- */
 async getDaemon(daemonId: string) : Promise<Result<DaemonDetailSnapshot, DaemonCommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_daemon", { daemonId }) };
@@ -965,9 +953,6 @@ async getDaemon(daemonId: string) : Promise<Result<DaemonDetailSnapshot, DaemonC
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Read safe enrollment metadata (credential audit without token material).
- */
 async getDaemonEnrollmentMetadata(daemonId: string) : Promise<Result<DaemonEnrollmentSnapshot, DaemonCommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_daemon_enrollment_metadata", { daemonId }) };
@@ -976,10 +961,6 @@ async getDaemonEnrollmentMetadata(daemonId: string) : Promise<Result<DaemonEnrol
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Provision a daemon and return its one-time bootstrap credential. The
- * enrollment token is returned exactly once and never logged.
- */
 async createDaemon(name: string | null) : Promise<Result<DaemonBootstrapResult, DaemonCommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("create_daemon", { name }) };
@@ -988,9 +969,6 @@ async createDaemon(name: string | null) : Promise<Result<DaemonBootstrapResult, 
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Rename a daemon through the server's shared naming policy.
- */
 async renameDaemon(daemonId: string, name: DaemonNameUpdate) : Promise<Result<DaemonMutationResult, DaemonCommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("rename_daemon", { daemonId, name }) };
@@ -999,9 +977,6 @@ async renameDaemon(daemonId: string, name: DaemonNameUpdate) : Promise<Result<Da
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Revoke a daemon terminally and idempotently.
- */
 async revokeDaemon(daemonId: string) : Promise<Result<DaemonMutationResult, DaemonCommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("revoke_daemon", { daemonId }) };
@@ -1010,10 +985,6 @@ async revokeDaemon(daemonId: string) : Promise<Result<DaemonMutationResult, Daem
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Unregister a daemon (soft tombstone), refused conservatively while a
- * session is connected or work ownership is unproven.
- */
 async unregisterDaemon(daemonId: string) : Promise<Result<DaemonMutationResult, DaemonCommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("unregister_daemon", { daemonId }) };
@@ -1022,10 +993,6 @@ async unregisterDaemon(daemonId: string) : Promise<Result<DaemonMutationResult, 
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Invalidate prior credentials and issue a fresh one-time bootstrap. The new
- * enrollment token is returned exactly once and never logged.
- */
 async rotateDaemonCredentials(daemonId: string) : Promise<Result<DaemonBootstrapResult, DaemonCommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("rotate_daemon_credentials", { daemonId }) };
@@ -1376,126 +1343,17 @@ export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backe
  * Options for creating a workflow step.
  */
 export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; prompt?: string | null; agents: string[]; skills: string[]; agent_config?: AgentConfig | null; order: number; transitions_to: string[]; step_type?: StepType; output_schema: JsonValue | null; persistence_options?: JsonValue | null; route_config?: JsonValue | null }
-/**
- * Safe daemon fleet metadata projection (no credential material).
- * 
- * Fleet management is account-scoped: these rows belong to the connected
- * backend/account rather than the selected project.
- */
-export type Daemon = { id: string; 
-/**
- * Credential-enrollment lifecycle status exactly as reported. Unknown
- * future statuses are preserved so the UI can present them truthfully.
- */
-status: string; name: string | null; 
-/**
- * Non-null display name: the stored name or a stable short-ID fallback.
- */
-display_name: string; enrolled_at: string | null; removed_at: string | null; created_at: string | null; updated_at: string | null }
-/**
- * One-time bootstrap issuance. The enrollment token is displayed once and
- * never persisted or logged by the GUI.
- */
+export type Daemon = { id: string; status: string; name: string | null; display_name: string; enrolled_at: string | null; removed_at: string | null; created_at: string | null; updated_at: string | null }
 export type DaemonBootstrap = { daemon: Daemon; enrollment_token: string; expires_at: string }
-/**
- * Result of create/rotate: a short-lived bootstrap tagged with the
- * connection identity that issued it.
- */
 export type DaemonBootstrapResult = { connection_id: string; bootstrap: DaemonBootstrap }
-/**
- * Structured error for daemon management commands.
- */
 export type DaemonCommandError = { kind: DaemonErrorKind; message: string }
-/**
- * Safe credential audit projection for one daemon credential.
- */
-export type DaemonCredentialMetadata = { id: string; credential_kind: string; 
-/**
- * Credential lifecycle status as reported; unknown values preserved.
- */
-status: string; expires_at: string; consumed_at: string | null; revoked_at: string | null; created_at: string | null; updated_at: string | null }
-/**
- * Single-daemon read tagged with its connection identity. `daemon` is `None`
- * for unknown ids (foreign ids are indistinguishable by design).
- */
+export type DaemonCredentialMetadata = { id: string; credential_kind: string; status: string; expires_at: string; consumed_at: string | null; revoked_at: string | null; created_at: string | null; updated_at: string | null }
 export type DaemonDetailSnapshot = { connection_id: string; daemon: Daemon | null }
-/**
- * Owner-scoped enrollment metadata for one daemon, without token material.
- */
 export type DaemonEnrollmentMetadata = { daemon_id: string; status: string; enrolled_at: string | null; credentials: DaemonCredentialMetadata[] }
-/**
- * Enrollment metadata read tagged with its connection identity.
- */
 export type DaemonEnrollmentSnapshot = { connection_id: string; metadata: DaemonEnrollmentMetadata | null }
-/**
- * Classification of a daemon command failure, adapted from the client
- * service's typed errors. The kind drives recovery UX; `message` carries the
- * stable, non-disclosing server text.
- */
-export type DaemonErrorKind = 
-/**
- * No Sacrum backend connection is active.
- */
-"no_backend" | 
-/**
- * The backend/account connection changed while the request was in
- * flight; the response was discarded.
- */
-"stale_connection" | 
-/**
- * The operation may have been applied; do not retry automatically.
- */
-"ambiguous_transport" | 
-/**
- * The server response could not be decoded; treat like ambiguity.
- */
-"malformed_response" | 
-/**
- * Definitive failure without a server-side effect.
- */
-"unavailable" | 
-/**
- * Unknown or foreign daemon identity (indistinguishable by design).
- */
-"not_found" | 
-/**
- * The daemon is revoked or removed; terminal identities never requalify.
- */
-"terminal_state" | 
-/**
- * Unregister refused: a session is currently connected.
- */
-"active_session" | 
-/**
- * Unregister refused: enrollment history lacks proven work ownership.
- */
-"ownership_unknown" | 
-/**
- * Field-scoped naming policy violation.
- */
-"invalid_name" | 
-/**
- * Client-side input validation failed before any request was sent.
- */
-"invalid_input" | 
-/**
- * Any other server refusal.
- */
-"unknown_refusal"
-/**
- * Fleet snapshot tagged with the backend/account connection it was read
- * under. Late responses from a retired connection are rejected before they
- * reach the webview.
- */
+export type DaemonErrorKind = "no_backend" | "stale_connection" | "ambiguous_transport" | "malformed_response" | "unavailable" | "not_found" | "terminal_state" | "active_session" | "ownership_unknown" | "invalid_name" | "invalid_input" | "unknown_refusal"
 export type DaemonFleetSnapshot = { connection_id: string; daemons: Daemon[] }
-/**
- * Result of a daemon mutation that returns the daemon's safe metadata.
- */
 export type DaemonMutationResult = { connection_id: string; daemon: Daemon }
-/**
- * Rename intent that preserves the server's omitted-vs-null semantics:
- * omitting the name leaves it unchanged, an explicit null clears it.
- */
 export type DaemonNameUpdate = { kind: "unchanged" } | { kind: "clear" } | { kind: "set"; value: string }
 /**
  * Execution status - mirrors db::ExecutionStatus

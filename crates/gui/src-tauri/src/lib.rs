@@ -151,8 +151,6 @@ fn create_builder() -> Builder {
             commands::resolve_permission_request,
             // WebSocket status command
             commands::get_websocket_status,
-            // Daemon fleet management (account-scoped, project-independent;
-            // distinct from local service installation in the installer flow)
             commands::get_sacrum_connection_identity,
             commands::list_daemon_fleet,
             commands::get_daemon,

@@ -9,19 +9,10 @@ interface DaemonFleet {
   isLoading: boolean;
   error: string | null;
   errorKind: DaemonErrorKind | null;
-  /** Connection identity the current fleet cache is scoped to. */
   connectionId: string | null;
   refetch: () => void;
 }
 
-/**
- * Owner's active daemon fleet, scoped to the backend/account connection
- * identity rather than the selected project.
- *
- * A late response from a retired connection is rejected before it can be
- * cached or displayed (the Tauri command performs the same check
- * authoritatively; this is the frontend guard).
- */
 export function useDaemonFleet(): DaemonFleet {
   const read = useDaemonQuery({
     queryKey: queryKeys.daemons.fleet,

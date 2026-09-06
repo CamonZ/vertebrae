@@ -1,24 +1,8 @@
-//! Tauri commands for owner-scoped daemon fleet management.
-//!
-//! Fleet management is account-authenticated and project-independent: the
-//! commands reuse the shared Sacrum GraphQL client and never touch the
-//! project-scoped service traits. Local daemon *service installation*
-//! (staging the `vtb-daemon` sidecar and registering its launchd/systemd
-//! unit) is a separate responsibility owned by the installer flow in
-//! [`crate::install`].
-//!
-//! Two lifecycle guarantees are enforced here rather than in the webview:
-//!
-//! * **Late-response rejection** — every command captures the connection
-//!   identity (backend URL + account digest) of the client it dispatches on
-//!   and re-checks it after the response arrives. If the backend connection
-//!   changed while the request was in flight, the payload (which may include
-//!   a one-time enrollment token belonging to the previous account) is
-//!   discarded and a `stale_connection` error is returned instead.
-//! * **Ambiguity classification** — transport failures that cannot prove the
-//!   server did not apply a mutation surface as `ambiguous_transport`. The
-//!   frontend must not auto-retry these; it refreshes safe fleet metadata and
-//!   offers explicit recovery.
+//! Local daemon service install/update is a separate responsibility owned by
+//! [`crate::install`]. Every command captures the connection identity before
+//! dispatch and re-checks it after the response, so stale payloads (possibly
+//! carrying the previous account's one-time token) are discarded as
+//! `stale_connection`; `ambiguous_transport` must not be auto-retried.
 
 use super::*;
 use crate::types::{
@@ -28,40 +12,23 @@ use crate::types::{
 use vertebrae_sacrum_client::daemon_service::{DaemonRefusal, DaemonRename, DaemonServiceError};
 use vertebrae_sacrum_client::SacrumDaemonService;
 
-/// Classification of a daemon command failure, adapted from the client
-/// service's typed errors. The kind drives recovery UX; `message` carries the
-/// stable, non-disclosing server text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonErrorKind {
-    /// No Sacrum backend connection is active.
     NoBackend,
-    /// The backend/account connection changed while the request was in
-    /// flight; the response was discarded.
     StaleConnection,
-    /// The operation may have been applied; do not retry automatically.
     AmbiguousTransport,
-    /// The server response could not be decoded; treat like ambiguity.
     MalformedResponse,
-    /// Definitive failure without a server-side effect.
     Unavailable,
-    /// Unknown or foreign daemon identity (indistinguishable by design).
     NotFound,
-    /// The daemon is revoked or removed; terminal identities never requalify.
     TerminalState,
-    /// Unregister refused: a session is currently connected.
     ActiveSession,
-    /// Unregister refused: enrollment history lacks proven work ownership.
     OwnershipUnknown,
-    /// Field-scoped naming policy violation.
     InvalidName,
-    /// Client-side input validation failed before any request was sent.
     InvalidInput,
-    /// Any other server refusal.
     UnknownRefusal,
 }
 
-/// Structured error for daemon management commands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DaemonCommandError {
     pub kind: DaemonErrorKind,
@@ -133,9 +100,6 @@ impl From<DaemonServiceError> for DaemonCommandError {
     }
 }
 
-/// Identity of the active backend/account connection, or `None` when the GUI
-/// has no Sacrum client. Account-scoped frontend caches (the daemon fleet)
-/// key on this identity instead of the selected project.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_sacrum_connection_identity(
@@ -147,10 +111,6 @@ pub async fn get_sacrum_connection_identity(
         .map(|client| client.connection_identity().to_string()))
 }
 
-/// Capture the service and its connection identity for one request.
-///
-/// The lock is released before any await on the network, so a concurrent
-/// project/backend switch can replace the client while the request flies.
 async fn connection_for_service(
     state: &State<'_, AppState>,
 ) -> Result<(SacrumDaemonService, String), DaemonCommandError> {
@@ -162,10 +122,6 @@ async fn connection_for_service(
     ))
 }
 
-/// Reject a response that arrived after the backend connection changed.
-///
-/// This is the authoritative late-response guard: the previous account's
-/// fleet data or one-time token never reaches the webview.
 async fn reject_stale_connection(
     state: &State<'_, AppState>,
     captured: &str,
@@ -181,8 +137,6 @@ async fn reject_stale_connection(
     }
 }
 
-/// List the owner's active daemon fleet (removed tombstones excluded by the
-/// server; revoked daemons remain listed).
 #[tauri::command]
 #[specta::specta]
 pub async fn list_daemon_fleet(
@@ -201,7 +155,6 @@ pub async fn list_daemon_fleet(
     })
 }
 
-/// Read one daemon. Unknown and foreign ids return `None` without disclosure.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_daemon(
@@ -217,7 +170,6 @@ pub async fn get_daemon(
     })
 }
 
-/// Read safe enrollment metadata (credential audit without token material).
 #[tauri::command]
 #[specta::specta]
 pub async fn get_daemon_enrollment_metadata(
@@ -236,8 +188,6 @@ pub async fn get_daemon_enrollment_metadata(
     })
 }
 
-/// Provision a daemon and return its one-time bootstrap credential. The
-/// enrollment token is returned exactly once and never logged.
 #[tauri::command]
 #[specta::specta]
 pub async fn create_daemon(
@@ -259,7 +209,6 @@ pub async fn create_daemon(
     })
 }
 
-/// Rename a daemon through the server's shared naming policy.
 #[tauri::command]
 #[specta::specta]
 pub async fn rename_daemon(
@@ -277,7 +226,6 @@ pub async fn rename_daemon(
     })
 }
 
-/// Revoke a daemon terminally and idempotently.
 #[tauri::command]
 #[specta::specta]
 pub async fn revoke_daemon(
@@ -294,8 +242,6 @@ pub async fn revoke_daemon(
     })
 }
 
-/// Unregister a daemon (soft tombstone), refused conservatively while a
-/// session is connected or work ownership is unproven.
 #[tauri::command]
 #[specta::specta]
 pub async fn unregister_daemon(
@@ -312,8 +258,6 @@ pub async fn unregister_daemon(
     })
 }
 
-/// Invalidate prior credentials and issue a fresh one-time bootstrap. The new
-/// enrollment token is returned exactly once and never logged.
 #[tauri::command]
 #[specta::specta]
 pub async fn rotate_daemon_credentials(
@@ -494,7 +438,6 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.kind, DaemonErrorKind::TerminalState);
         assert!(error.message.contains("terminal state"));
-        // Adapted errors never leak the account token.
         assert!(!error.message.contains("account-token"));
     }
 
@@ -556,9 +499,6 @@ mod tests {
 
         let state = app.state::<AppState>();
         let mut command = Box::pin(create_daemon(app.state(), None));
-        // Start the request and let it fly while the account switches. The
-        // mock holds its response for 250ms; select! polls the command so the
-        // HTTP request is actually dispatched before the swap below.
         tokio::select! {
             result = &mut command => {
                 panic!("command completed before the connection swap: {result:?}");
@@ -572,7 +512,6 @@ mod tests {
 
         let error = command.await.unwrap_err();
         assert_eq!(error.kind, DaemonErrorKind::StaleConnection);
-        // The previous account's one-time token never reaches the caller.
         assert!(!error.message.contains(ONE_TIME_TOKEN));
         server.verify().await;
     }

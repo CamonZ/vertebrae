@@ -10,18 +10,8 @@ export function normalizeTaskFilter(
 
 export const queryKeys = {
   project: (generation: number) => ["project", generation] as const,
-  /**
-   * Backend/account connection identity resolution. Account-scoped server
-   * state keys off this identity, never off the selected project.
-   */
   sacrumConnection: () => ["sacrumConnection"] as const,
   daemons: {
-    /**
-     * Sentinel connection-id segment for daemon queries whose backend/account
-     * identity has not resolved yet. Those queries stay disabled until the
-     * identity resolves; the sentinel keeps their keys stable in the
-     * meantime. Defined here so the hooks never spell the literal twice.
-     */
     unresolved: "unresolved",
     all: (connectionId: string) => ["sacrum", connectionId, "daemons"] as const,
     fleet: (connectionId: string) =>
@@ -98,16 +88,6 @@ export const queryKeys = {
   },
 };
 
-/**
- * Whether a query key belongs to the account-scoped Sacrum namespace — the
- * connection-identity query and the identity-scoped daemon subtree — rather
- * than to the selected project.
- *
- * Project-scope resets preserve these entries (their scope is the
- * backend/account identity, not the project) and re-validate the connection
- * query instead, so account-scoped caches survive a project switch on the
- * same backend/account.
- */
 export function isSacrumQueryKey(queryKey: readonly unknown[]): boolean {
   return queryKey[0] === "sacrumConnection" || queryKey[0] === "sacrum";
 }

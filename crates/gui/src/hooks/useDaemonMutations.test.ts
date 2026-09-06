@@ -84,8 +84,7 @@ describe("useDaemonMutations", () => {
     expect(mockCreateDaemon).toHaveBeenCalledTimes(1);
     expect(bootstrap?.enrollment_token).toBe("dtoken_dummy");
     expect(result.current.error).toBeNull();
-    // Creating a daemon only appends to the fleet; the invalidation is
-    // scoped to the fleet list rather than the whole daemon subtree.
+    // Creating only appends to the fleet, so invalidation is scoped to the fleet list.
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["sacrum", "identity-a", "daemons", "fleet"],
     });
@@ -107,12 +106,10 @@ describe("useDaemonMutations", () => {
       bootstrap = await result.current.createDaemon(null);
     });
 
-    // Exactly one mutation attempt; recovery is explicit, never automatic.
     expect(mockCreateDaemon).toHaveBeenCalledTimes(1);
     expect(bootstrap).toBeNull();
     expect(result.current.errorKind).toBe("ambiguous_transport");
     expect(result.current.error).toContain("may have been applied");
-    // Safe metadata was refreshed for the UI to reconcile.
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["sacrum", "identity-a", "daemons"],
     });
@@ -120,7 +117,6 @@ describe("useDaemonMutations", () => {
 
   it("discards a late result from a retired connection without invalidating anything", async () => {
     mockRotateDaemonCredentials.mockImplementation(async () => {
-      // The account switches while the rotation is in flight.
       useSacrumConnectionStore.getState().setIdentity("identity-b");
       return {
         status: "ok",
@@ -137,10 +133,8 @@ describe("useDaemonMutations", () => {
     });
 
     expect(mockRotateDaemonCredentials).toHaveBeenCalledTimes(1);
-    // The old account's one-time token never reaches the caller.
     expect(bootstrap).toBeNull();
     expect(result.current.error).toContain("retired connection");
-    // Neither connection's cache was touched by the retired result.
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
@@ -162,7 +156,6 @@ describe("useDaemonMutations", () => {
     expect(revoked).toBeNull();
     expect(result.current.errorKind).toBe("terminal_state");
     expect(result.current.error).toContain("terminal state");
-    // Definitive refusals do not refresh anything.
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
