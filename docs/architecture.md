@@ -263,7 +263,9 @@ DaemonSupervisor
         └── StepExecutor (one per active step execution)
 ```
 
-- Connects to Sacrum via Phoenix WebSocket (`client_type: "daemon"`)
+- Connects to Sacrum via Phoenix WebSocket. Legacy account-token mode joins
+  project channels with `client_type: "daemon"`; standalone mode authenticates
+  the stable identity from protected `daemon.toml` and joins `daemon:<id>`.
 - Receives `run_step` events for daemon-executed steps with prompt + agent config + output schema
 - Passes `AgentConfig` and portable request options to the shared
   `HarnessRuntimeFactory`, which resolves the step's provider to a built-in
@@ -281,7 +283,9 @@ DaemonSupervisor
   (assess output for branching). `route` is a Sacrum-local deterministic
   control step and is never dispatched to a daemon or evaluated from prompt/
   `output_schema` output.
-- Runs as a macOS launchd or Linux systemd user service installed by the GUI onboarding flow
+- Runs as a macOS launchd or Linux systemd user service installed by the GUI onboarding flow.
+  Service installation only writes the service definition; it never rewrites
+  standalone enrollment state.
 
 At daemon boot, shell PATH, provider executable discovery, managed skill roots,
 and Claude installed-skill compatibility are captured in one immutable,

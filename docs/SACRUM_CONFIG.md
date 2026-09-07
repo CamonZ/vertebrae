@@ -46,9 +46,54 @@ path = "/Users/example/Code/vertebrae"
 
 ## Backend ownership
 
-Remote and local backends use exactly the same `[sacrum].url` and
-`[sacrum].token` fields. The CLI, GUI, `sacrum-client`, and `vtb-daemon` remain
-transparent consumers of those fields.
+Remote and local account-authenticated clients use exactly the same
+`[sacrum].url` and `[sacrum].token` fields. The CLI, GUI, and `sacrum-client`
+remain transparent consumers of those fields. An enrolled standalone daemon
+uses its protected `daemon.toml` endpoint and reconnect credential instead.
+
+## Standalone daemon enrollment
+
+The GUI issues a one-time bootstrap credential for a daemon identity. On the
+machine that will run the daemon, exchange it without installing an account
+API token:
+
+```bash
+vtb-daemon enroll --endpoint 'https://sacrum.example.com' \
+  --daemon-id '<daemon-uuid>' --token-stdin < /path/to/protected-bootstrap-token
+```
+
+The input must be a pipe or redirected file; terminal input is rejected to avoid
+echoing the secret. Protect any input file with owner-only permissions.
+
+The command calls `/api/daemon/exchange`, then stores the server-issued stable
+ID and reconnect credential in the protected sibling file
+`daemon.toml` (0600 on Unix), beside the shared configuration. On macOS this
+is `~/Library/Application Support/vertebrae/daemon.toml`; on Linux it is normally
+`~/.config/vertebrae/daemon.toml`. The credential is never
+printed. Re-enrollment for the same identity requires `--replace-existing`;
+an attempt to replace a different configured identity is rejected. A corrupt
+or partial file is reported without its contents and is never replaced automatically.
+Enrollment holds a process lock across the exchange and local write, so a competing
+enrollment fails before consuming its bootstrap credential. The persistent
+`daemon.lock` file is not a credential and must not be deleted to release the lock;
+the operating system releases the lock when the enrollment process exits.
+
+On restart, `vtb-daemon` authenticates the Phoenix socket with the stored
+`daemon_id` and `reconnect_token`, then joins `daemon:<daemon_id>`. Network
+disconnects and channel interruptions retry indefinitely with capped exponential
+backoff and jitter. Each WebSocket connection attempt has a 15-second timeout.
+A duplicate registration retries because a previous connection can take time to
+disappear from the backend. Explicitly rejected credentials stop with an actionable
+re-enrollment error. Unexpected supervisor termination exits the executable with
+a failure status so the existing service manager can restart it. Initial connection
+failures also exit unsuccessfully. Restart always reuses the saved identity; it does
+not repeat the bootstrap exchange. Reconnect credentials are not automatically
+refreshed; expiry or revocation requires explicit re-enrollment.
+The current Sacrum backend grants this standalone channel registration only; it
+does not yet authorize project execution/reporting for a daemon principal. The
+existing account-token daemon path remains unchanged for project execution,
+and the daemon does not silently fall back to it when standalone identity mode
+is configured.
 
 When the GUI manages a local Docker backend, its private application-data directory
 also contains `local-backend/compose.yaml`, `runtime.env`, `api-token`, and
