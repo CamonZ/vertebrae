@@ -70,6 +70,7 @@ impl CommandError {
 
 mod artifact;
 mod backend;
+mod daemon;
 mod execution;
 mod external_editor;
 mod local_chat;
@@ -82,6 +83,7 @@ mod workflow;
 
 pub use artifact::*;
 pub use backend::*;
+pub use daemon::*;
 pub use execution::*;
 pub use external_editor::*;
 pub use local_chat::*;

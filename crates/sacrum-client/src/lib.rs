@@ -49,6 +49,7 @@ pub mod api_types;
 pub mod artifact_service;
 pub mod client;
 pub mod config;
+pub mod daemon_service;
 pub mod error;
 pub mod execution_service;
 pub mod queries;
@@ -57,18 +58,24 @@ pub mod task_service;
 pub mod workflow_service;
 
 pub use api_types::{
-    ArtifactResponse, CodeRefResponse, CreateProjectRequest, ErrorResponse, PipelineStepResponse,
-    PipelineStepTransitionResponse, PipelineTaskCountsResponse, PipelineWorkflowResponse,
-    PipelineWorkflowTransitionResponse, ProjectListResponse, ProjectResponse, SectionResponse,
-    SessionLogResponse, StepExecutionResponse, StepTransitionResponse, TaskResponse,
-    TaskRunControlsResponse, TaskRunResponse, TaskRunTraceResponse, WorkflowResponse,
-    WorkflowStepResponse, WorkflowTransitionResponse,
+    ArtifactResponse, CodeRefResponse, CreateProjectRequest, DaemonBootstrapResponse,
+    DaemonCredentialMetadataResponse, DaemonEnrollmentMetadataResponse, DaemonResponse,
+    ErrorResponse, PipelineStepResponse, PipelineStepTransitionResponse,
+    PipelineTaskCountsResponse, PipelineWorkflowResponse, PipelineWorkflowTransitionResponse,
+    ProjectListResponse, ProjectResponse, SectionResponse, SessionLogResponse,
+    StepExecutionResponse, StepTransitionResponse, TaskResponse, TaskRunControlsResponse,
+    TaskRunResponse, TaskRunTraceResponse, WorkflowResponse, WorkflowStepResponse,
+    WorkflowTransitionResponse,
 };
 pub use artifact_service::SacrumArtifactService;
 pub use client::{GraphqlClient, with_fragments};
 pub use config::{
     GlobalSacrumSection, ProjectSection, SacrumConfig, VertebraeConfigFile, config_path,
     load_config_file, register_project, save_config_file, unregister_project,
+};
+pub use daemon_service::{
+    DaemonBootstrap, DaemonCredentialMetadata, DaemonEnrollmentMetadata, DaemonRename,
+    DaemonServiceError, DaemonStatus, DaemonSummary, SacrumDaemonService,
 };
 pub use error::{SacrumClientError, SacrumClientResult};
 pub use execution_service::SacrumExecutionService;
