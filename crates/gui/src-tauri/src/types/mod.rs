@@ -5,6 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod daemon;
+pub use daemon::*;
+
 /// Current Sacrum settings state for GUI onboarding.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SacrumConfigStatus {

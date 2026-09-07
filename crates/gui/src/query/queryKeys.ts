@@ -9,7 +9,21 @@ export function normalizeTaskFilter(
 }
 
 export const queryKeys = {
+  projectRoot: () => ["project"] as const,
   project: (generation: number) => ["project", generation] as const,
+  sacrumConnection: () => ["sacrumConnection"] as const,
+  daemons: {
+    unresolved: "unresolved",
+    all: (connectionId: string) => ["sacrum", connectionId, "daemons"] as const,
+    fleet: (connectionId: string) =>
+      [...queryKeys.daemons.all(connectionId), "fleet"] as const,
+    details: (connectionId: string) =>
+      [...queryKeys.daemons.all(connectionId), "detail"] as const,
+    detail: (connectionId: string, daemonId: string) =>
+      [...queryKeys.daemons.details(connectionId), daemonId] as const,
+    enrollment: (connectionId: string, daemonId: string) =>
+      [...queryKeys.daemons.all(connectionId), "enrollment", daemonId] as const,
+  },
   tasks: {
     all: (generation: number) =>
       [...queryKeys.project(generation), "tasks"] as const,

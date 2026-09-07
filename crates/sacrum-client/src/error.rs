@@ -3,11 +3,23 @@
 //! Defines error types for HTTP communication with the Sacrum API
 //! and provides conversion to ServiceError for service layer integration.
 
+use serde::Deserialize;
 use thiserror::Error;
 use vertebrae_core::error::ServiceError;
 
 /// Sacrum client result type
 pub type SacrumClientResult<T> = Result<T, SacrumClientError>;
+
+/// One structured error item from a GraphQL `errors` array.
+///
+/// `extensions` is kept verbatim so callers can classify errors by
+/// structured fields instead of parsing formatted message strings.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GraphqlErrorItem {
+    pub message: String,
+    pub path: Option<Vec<String>>,
+    pub extensions: Option<serde_json::Value>,
+}
 
 /// Errors that can occur when communicating with the Sacrum API
 #[derive(Debug, Error)]
@@ -23,6 +35,7 @@ pub enum SacrumClientError {
     /// GraphQL error response
     #[error("GraphQL error: {message}")]
     GraphqlError {
+        items: Vec<GraphqlErrorItem>,
         messages: Vec<String>,
         message: String,
     },
@@ -138,6 +151,7 @@ mod tests {
     #[test]
     fn test_graphql_error_creation_and_display() {
         let error = SacrumClientError::GraphqlError {
+            items: Vec::new(),
             messages: vec!["field is required".to_string()],
             message: "field is required".to_string(),
         };
@@ -147,8 +161,32 @@ mod tests {
     }
 
     #[test]
+    fn test_graphql_error_retains_structured_items() {
+        let error = SacrumClientError::GraphqlError {
+            items: vec![GraphqlErrorItem {
+                message: "has already been taken".to_string(),
+                path: Some(vec!["createDaemon".to_string()]),
+                extensions: Some(serde_json::json!({ "field": "name" })),
+            }],
+            messages: vec!["has already been taken".to_string()],
+            message: "has already been taken".to_string(),
+        };
+        let SacrumClientError::GraphqlError { items, .. } = &error else {
+            panic!("expected GraphqlError");
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].message, "has already been taken");
+        assert_eq!(items[0].path, Some(vec!["createDaemon".to_string()]));
+        assert_eq!(
+            items[0].extensions,
+            Some(serde_json::json!({ "field": "name" }))
+        );
+    }
+
+    #[test]
     fn test_graphql_error_not_found_converts_to_task_not_found() {
         let error = SacrumClientError::GraphqlError {
+            items: Vec::new(),
             messages: vec!["not_found".to_string()],
             message: "not_found".to_string(),
         };
@@ -159,6 +197,7 @@ mod tests {
     #[test]
     fn test_graphql_error_not_found_variant_converts_to_task_not_found() {
         let error = SacrumClientError::GraphqlError {
+            items: Vec::new(),
             messages: vec!["Not Found".to_string()],
             message: "Not Found".to_string(),
         };
@@ -169,6 +208,7 @@ mod tests {
     #[test]
     fn test_graphql_error_other_converts_to_invalid_input() {
         let error = SacrumClientError::GraphqlError {
+            items: Vec::new(),
             messages: vec!["validation failed".to_string()],
             message: "validation failed".to_string(),
         };
