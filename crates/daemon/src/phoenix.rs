@@ -73,6 +73,10 @@ impl PhoenixMessage {
     pub fn project_id(&self) -> Option<&str> {
         self.topic.strip_prefix("project:")
     }
+
+    pub fn daemon_id(&self) -> Option<&str> {
+        self.topic.strip_prefix("daemon:")
+    }
 }
 
 /// Errors from the Phoenix WebSocket layer.
@@ -84,11 +88,17 @@ pub enum PhoenixError {
     #[error("Protocol error: {0}")]
     Protocol(String),
 
+    #[error("WebSocket connection timed out")]
+    ConnectionTimeout,
+
     #[error("Connection closed")]
     ConnectionClosed,
 
     #[error("URL error: {0}")]
     Url(#[from] url::ParseError),
+
+    #[error("Phoenix authentication was rejected")]
+    AuthenticationRejected,
 }
 
 impl From<tokio_tungstenite::tungstenite::Error> for PhoenixError {
@@ -121,20 +131,51 @@ impl PhoenixSocket {
     /// Connect to a Sacrum WebSocket endpoint.
     ///
     /// Builds the URL from `base_url` (http/https) and appends the Phoenix
-    /// socket path with token and version parameters.
+    /// socket path with token and version parameters. The token is URL-encoded
+    /// and never included in diagnostics.
     pub async fn connect(base_url: &str, api_token: &str) -> Result<Self, PhoenixError> {
-        let ws_url = format!(
-            "{}{}?token={}&vsn=2.0.0",
-            base_url
-                .replace("https://", "wss://")
-                .replace("http://", "ws://"),
-            "/socket/websocket",
-            api_token
-        );
+        let ws_url = socket_url(base_url, [("token", api_token)])?;
+        Self::connect_url(ws_url).await
+    }
 
-        tracing::info!("Connecting to Phoenix WebSocket at {}", ws_url);
+    /// Connect using Sacrum's stable daemon identity and reconnect credential.
+    ///
+    /// This path deliberately does not send an account token. The daemon must
+    /// join its own `daemon:{id}` channel before any project work is considered.
+    pub async fn connect_daemon(
+        base_url: &str,
+        daemon_id: &str,
+        reconnect_token: &str,
+    ) -> Result<Self, PhoenixError> {
+        let ws_url = socket_url(
+            base_url,
+            [
+                ("daemon_id", daemon_id),
+                ("reconnect_token", reconnect_token),
+            ],
+        )?;
+        Self::connect_url(ws_url).await
+    }
 
-        let (socket, _response) = tokio_tungstenite::connect_async(&ws_url).await?;
+    async fn connect_url(ws_url: url::Url) -> Result<Self, PhoenixError> {
+        let mut safe_url = ws_url.clone();
+        safe_url.set_query(None);
+        tracing::info!("Connecting to Phoenix WebSocket at {}", safe_url);
+
+        let (socket, _response) = tokio::time::timeout(
+            Duration::from_secs(15),
+            tokio_tungstenite::connect_async(ws_url.as_str()),
+        )
+        .await
+        .map_err(|_| PhoenixError::ConnectionTimeout)?
+        .map_err(|error| match error {
+            tokio_tungstenite::tungstenite::Error::Http(response)
+                if matches!(response.status().as_u16(), 401 | 403) =>
+            {
+                PhoenixError::AuthenticationRejected
+            }
+            error => PhoenixError::from(error),
+        })?;
         let (write, read) = socket.split();
 
         let writer = Arc::new(AsyncMutex::new(write));
@@ -177,10 +218,28 @@ impl PhoenixSocket {
         token: &str,
         client_type: &str,
     ) -> Result<(), PhoenixError> {
+        self.send_join(
+            topic,
+            serde_json::json!({ "token": token, "client_type": client_type }),
+        )
+        .await
+    }
+
+    /// Join the standalone identity channel without sending a broad account
+    /// token. Authentication was established at socket connect time.
+    pub async fn join_daemon(&self, daemon_id: &str) -> Result<(), PhoenixError> {
+        self.send_join(&format!("daemon:{daemon_id}"), serde_json::json!({}))
+            .await
+    }
+
+    async fn send_join(
+        &self,
+        topic: &str,
+        join_payload: serde_json::Value,
+    ) -> Result<(), PhoenixError> {
         let join_ref = self.next_ref();
         let msg_ref = self.next_ref();
 
-        let join_payload = serde_json::json!({ "token": token, "client_type": client_type });
         let join_msg = serde_json::json!([join_ref, msg_ref, topic, "phx_join", join_payload]);
 
         tracing::info!("Joining channel: {}", topic);
@@ -245,6 +304,52 @@ impl PhoenixSocket {
         self.ref_counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             .to_string()
+    }
+}
+
+fn socket_url<'a, I>(base_url: &str, query: I) -> Result<url::Url, PhoenixError>
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
+    let mut url = url::Url::parse(base_url)?;
+    if url.scheme() == "http" && !endpoint_allows_cleartext(&url) {
+        return Err(PhoenixError::Protocol(
+            "unencrypted WebSocket endpoints are permitted only for loopback hosts".to_string(),
+        ));
+    }
+    let scheme = match url.scheme() {
+        "https" => "wss",
+        "http" => "ws",
+        other => {
+            return Err(PhoenixError::Protocol(format!(
+                "unsupported WebSocket endpoint scheme: {other}"
+            )));
+        }
+    };
+    url.set_scheme(scheme).map_err(|_| {
+        PhoenixError::Protocol("failed to set WebSocket endpoint scheme".to_string())
+    })?;
+    let path = url.path().trim_end_matches('/');
+    url.set_path(&format!("{path}/socket/websocket"));
+    {
+        let mut pairs = url.query_pairs_mut();
+        pairs.append_pair("vsn", "2.0.0");
+        for (key, value) in query {
+            pairs.append_pair(key, value);
+        }
+    }
+    Ok(url)
+}
+
+pub(crate) fn endpoint_allows_cleartext(url: &url::Url) -> bool {
+    if url.scheme() != "http" {
+        return true;
+    }
+    match url.host() {
+        Some(url::Host::Ipv4(host)) => host.is_loopback(),
+        Some(url::Host::Ipv6(host)) => host.is_loopback(),
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        None => false,
     }
 }
 
@@ -393,5 +498,24 @@ mod tests {
     fn phoenix_error_display_connection_closed() {
         let err = PhoenixError::ConnectionClosed;
         assert_eq!(err.to_string(), "Connection closed");
+    }
+
+    #[test]
+    fn socket_urls_encode_credentials_and_preserve_proxy_paths() {
+        let account =
+            socket_url("https://sacrum.example.test/proxy", [("token", "a/b?c")]).unwrap();
+        assert_eq!(
+            account.as_str(),
+            "wss://sacrum.example.test/proxy/socket/websocket?vsn=2.0.0&token=a%2Fb%3Fc"
+        );
+
+        let daemon = socket_url(
+            "http://127.0.0.1:4000",
+            [("daemon_id", "id"), ("reconnect_token", "secret")],
+        )
+        .unwrap();
+        let mut safe = daemon.clone();
+        safe.set_query(None);
+        assert_eq!(safe.as_str(), "ws://127.0.0.1:4000/socket/websocket");
     }
 }

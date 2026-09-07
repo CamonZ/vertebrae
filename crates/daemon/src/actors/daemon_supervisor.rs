@@ -18,6 +18,9 @@ use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use crate::actors::project_supervisor::{ProjectConfig, ProjectMessage, ProjectSupervisor};
 use crate::capabilities::SharedDaemonCapabilities;
+use crate::connection::{
+    INITIAL_RECONNECT_DELAY, MAX_RECONNECT_DELAY, connect_with_auth, next_backoff, reconnect,
+};
 use crate::phoenix::{PhoenixMessage, PhoenixSocket};
 
 /// Result of classifying an incoming channel message.
@@ -31,6 +34,9 @@ pub enum ChannelAction {
     JoinFailed(String, Option<String>),
     /// A phx_error on a project channel.
     ChannelError(String),
+    DaemonJoinConfirmed(String),
+    DaemonJoinFailed(String, Option<String>),
+    DaemonChannelInterrupted,
     /// Message is for a non-project topic (e.g. "phoenix") — skip.
     NonProjectTopic,
     /// Message is for a project we don't track — skip.
@@ -45,6 +51,25 @@ fn classify_channel_message<V>(
     msg: &PhoenixMessage,
     known_projects: &HashMap<String, V>,
 ) -> ChannelAction {
+    if let Some(daemon_id) = msg.daemon_id() {
+        let daemon_id = daemon_id.to_string();
+        return match msg.event.as_str() {
+            "phx_reply" if msg.payload.get("status").and_then(|v| v.as_str()) == Some("ok") => {
+                ChannelAction::DaemonJoinConfirmed(daemon_id)
+            }
+            "phx_reply" => ChannelAction::DaemonJoinFailed(
+                daemon_id,
+                msg.payload
+                    .get("response")
+                    .and_then(|response| response.get("reason"))
+                    .and_then(|reason| reason.as_str())
+                    .map(str::to_string),
+            ),
+            "phx_error" | "phx_close" => ChannelAction::DaemonChannelInterrupted,
+            _ => ChannelAction::NonProjectTopic,
+        };
+    }
+
     let Some(project_id) = msg.project_id() else {
         return ChannelAction::NonProjectTopic;
     };
@@ -78,15 +103,51 @@ fn classify_channel_message<V>(
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum ChannelRecovery {
+    Reconnect,
+    Stop(String),
+}
+
+fn daemon_join_recovery(reason: Option<&str>) -> ChannelRecovery {
+    match reason {
+        Some("invalid_credentials") => ChannelRecovery::Stop(
+            "daemon credentials rejected; re-enrollment is required".to_string(),
+        ),
+        Some("identity_mismatch" | "invalid_registration" | "unsupported_operation") => {
+            ChannelRecovery::Stop(
+                "daemon registration configuration is incompatible with the backend".to_string(),
+            )
+        }
+        // Includes already_connected: an old connection can remain registered
+        // until the backend notices a network interruption. Rotation cannot fix that.
+        _ => ChannelRecovery::Reconnect,
+    }
+}
+
+#[derive(Clone)]
+pub enum DaemonAuthentication {
+    AccountToken(String),
+    Standalone(crate::config::DaemonIdentity),
+}
+
+impl std::fmt::Debug for DaemonAuthentication {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AccountToken(_) => f.write_str("AccountToken(<redacted>)"),
+            Self::Standalone(identity) => f.debug_tuple("Standalone").field(identity).finish(),
+        }
+    }
+}
+
 /// Configuration needed to start the DaemonSupervisor.
 #[derive(Clone)]
 pub struct DaemonConfig {
     /// Sacrum base URL (e.g. "http://localhost:4000").
     pub base_url: String,
-    /// API token for Sacrum authentication. Redacted by the manual [`Debug`]
-    /// impl below so accidental `tracing` of the config or its wrapping error
-    /// chain cannot leak the token to logs.
-    pub api_token: String,
+    /// Authentication used for the Phoenix socket. Credentials are redacted
+    /// by the manual [`Debug`] impl below.
+    pub authentication: DaemonAuthentication,
     /// Immutable provider, path, skill, and Claude compatibility discovery
     /// captured before this actor starts.
     pub capabilities: SharedDaemonCapabilities,
@@ -96,14 +157,12 @@ impl std::fmt::Debug for DaemonConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DaemonConfig")
             .field("base_url", &self.base_url)
-            .field("api_token", &"<redacted>")
+            .field("authentication", &self.authentication)
             .field("capabilities", &self.capabilities)
             .finish()
     }
 }
 
-/// Maximum delay between reconnection attempts (30 seconds).
-const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 const PROJECT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
 async fn stop_projects(
@@ -130,12 +189,6 @@ async fn stop_projects(
     }
 }
 
-/// Compute the next backoff delay by doubling `current`, capped at `max`.
-fn next_backoff(current: Duration, max: Duration) -> Duration {
-    // Saturating mul avoids overflow; min caps at the ceiling.
-    current.saturating_mul(2).min(max)
-}
-
 /// Messages the DaemonSupervisor can receive.
 pub enum DaemonMessage {
     /// Register a project and join its Phoenix channel.
@@ -156,6 +209,7 @@ pub enum DaemonMessage {
     ConnectionLost,
     /// A reconnection attempt succeeded — carries the new socket.
     Reconnected(Box<PhoenixSocket>),
+    ReconnectFailed(String),
     /// Initiate graceful shutdown: leave all channels, stop children, then self.
     Shutdown,
 }
@@ -178,6 +232,9 @@ impl std::fmt::Debug for DaemonMessage {
             Self::ChannelMessage(msg) => f.debug_tuple("ChannelMessage").field(msg).finish(),
             Self::ConnectionLost => write!(f, "ConnectionLost"),
             Self::Reconnected(_) => write!(f, "Reconnected(<PhoenixSocket>)"),
+            Self::ReconnectFailed(reason) => {
+                f.debug_tuple("ReconnectFailed").field(reason).finish()
+            }
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }
@@ -195,6 +252,8 @@ pub struct DaemonState {
     reader_handle: Option<tokio::task::JoinHandle<()>>,
     /// Handle to an in-flight reconnection task, if any.
     reconnect_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Reset only after registration is confirmed, not merely after TCP connects.
+    reconnect_delay: Duration,
     /// Set to true once shutdown is initiated so we don't attempt reconnection.
     shutting_down: bool,
 }
@@ -220,9 +279,16 @@ impl Actor for DaemonSupervisor {
             args.base_url
         );
 
-        let socket = PhoenixSocket::connect(&args.base_url, &args.api_token)
+        let socket = connect_with_auth(&args.base_url, &args.authentication)
             .await
             .map_err(|e| format!("Failed to connect to Sacrum WebSocket: {e}"))?;
+
+        if let DaemonAuthentication::Standalone(identity) = &args.authentication {
+            socket
+                .join_daemon(&identity.daemon_id)
+                .await
+                .map_err(|e| format!("Failed to register daemon identity: {e}"))?;
+        }
 
         // Take the reader half and spawn a pump task that forwards messages to our actor.
         let reader = socket
@@ -239,6 +305,7 @@ impl Actor for DaemonSupervisor {
             projects: HashMap::new(),
             reader_handle: Some(reader_handle),
             reconnect_handle: None,
+            reconnect_delay: INITIAL_RECONNECT_DELAY,
             shutting_down: false,
         })
     }
@@ -260,14 +327,25 @@ impl Actor for DaemonSupervisor {
             DaemonMessage::RemoveProject { project_id } => {
                 self.handle_remove_project(&project_id, state).await?;
             }
-            DaemonMessage::ChannelMessage(msg) => {
-                self.handle_channel_message(msg, state);
-            }
+            DaemonMessage::ChannelMessage(msg) => match self.handle_channel_message(msg, state) {
+                Some(ChannelRecovery::Stop(reason)) => {
+                    tracing::error!(%reason, "Daemon registration rejected");
+                    myself.stop(Some(reason));
+                }
+                Some(ChannelRecovery::Reconnect) => {
+                    self.handle_connection_lost(myself, state).await
+                }
+                None => {}
+            },
             DaemonMessage::ConnectionLost => {
-                self.handle_connection_lost(myself, state);
+                self.handle_connection_lost(myself, state).await;
             }
             DaemonMessage::Reconnected(new_socket) => {
                 self.handle_reconnected(*new_socket, myself, state).await?;
+            }
+            DaemonMessage::ReconnectFailed(reason) => {
+                tracing::error!(%reason, "Daemon cannot reconnect");
+                myself.stop(Some(reason));
             }
             DaemonMessage::Shutdown => {
                 self.handle_shutdown(myself, state).await?;
@@ -425,9 +503,15 @@ impl DaemonSupervisor {
         }
 
         let topic = format!("project:{}", project_id);
+        let account_token = match &state.config.authentication {
+            DaemonAuthentication::AccountToken(token) => token,
+            DaemonAuthentication::Standalone(_) => {
+                return Err("standalone daemon identity has no project execution channel".into());
+            }
+        };
         state
             .socket
-            .join(&topic, &state.config.api_token, "daemon")
+            .join(&topic, account_token, "daemon")
             .await
             .map_err(|e| format!("Failed to join channel {topic}: {e}"))?;
 
@@ -435,7 +519,7 @@ impl DaemonSupervisor {
 
         let sacrum_config = SacrumConfig::new(
             state.config.base_url.clone(),
-            state.config.api_token.clone(),
+            account_token.clone(),
             project_id.to_string(),
         );
         let client = Arc::new(GraphqlClient::new(sacrum_config));
@@ -485,7 +569,11 @@ impl DaemonSupervisor {
     }
 
     /// Demux an incoming channel message by topic and route to the correct project.
-    fn handle_channel_message(&self, msg: PhoenixMessage, state: &mut DaemonState) {
+    fn handle_channel_message(
+        &self,
+        msg: PhoenixMessage,
+        state: &mut DaemonState,
+    ) -> Option<ChannelRecovery> {
         match classify_channel_message(&msg, &state.projects) {
             ChannelAction::RouteToProject(project_id) => {
                 if let Some(actor_ref) = state.projects.get(&project_id) {
@@ -528,49 +616,64 @@ impl DaemonSupervisor {
                     msg.event
                 );
             }
+            ChannelAction::DaemonJoinConfirmed(daemon_id) => {
+                state.reconnect_delay = INITIAL_RECONNECT_DELAY;
+                tracing::info!(daemon_id = %daemon_id, "Standalone daemon identity registered");
+            }
+            ChannelAction::DaemonJoinFailed(_, reason) => {
+                return Some(daemon_join_recovery(reason.as_deref()));
+            }
+            ChannelAction::DaemonChannelInterrupted => return Some(ChannelRecovery::Reconnect),
         }
+        None
     }
 
     /// Handle connection loss: abort old reader pump, spawn a reconnection task.
-    fn handle_connection_lost(&self, myself: ActorRef<DaemonMessage>, state: &mut DaemonState) {
+    async fn handle_connection_lost(
+        &self,
+        myself: ActorRef<DaemonMessage>,
+        state: &mut DaemonState,
+    ) {
         if state.shutting_down {
             tracing::debug!("Ignoring ConnectionLost during shutdown");
             return;
         }
 
-        // Abort old reader pump (it may already be done, but be safe).
+        // One reconnect owner also absorbs duplicate close/error notifications.
+        if state.reconnect_handle.is_some() {
+            return;
+        }
         if let Some(handle) = state.reader_handle.take() {
             handle.abort();
         }
-
-        // Abort any previous reconnect attempt.
-        if let Some(handle) = state.reconnect_handle.take() {
-            handle.abort();
-        }
-
+        // Release the previous registration before opening another socket.
+        let _ = tokio::time::timeout(Duration::from_secs(5), state.socket.close()).await;
         tracing::warn!("Connection lost, starting reconnection with exponential backoff");
-
+        let initial_delay = state.reconnect_delay;
+        state.reconnect_delay = next_backoff(initial_delay, MAX_RECONNECT_DELAY);
         let config = state.config.clone();
         let actor_ref = myself;
 
         let handle = tokio::spawn(async move {
-            let mut delay = Duration::from_millis(100);
-
-            loop {
-                tokio::time::sleep(delay).await;
-
-                tracing::info!("Attempting reconnection (delay was {:?})", delay);
-
-                match PhoenixSocket::connect(&config.base_url, &config.api_token).await {
-                    Ok(socket) => {
-                        tracing::info!("Reconnection succeeded");
-                        let _ = actor_ref.cast(DaemonMessage::Reconnected(Box::new(socket)));
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Reconnection failed: {e}");
-                        delay = next_backoff(delay, MAX_RECONNECT_DELAY);
-                    }
+            match reconnect(
+                &config.base_url,
+                &config.authentication,
+                initial_delay,
+                MAX_RECONNECT_DELAY,
+            )
+            .await
+            {
+                Ok(socket) => {
+                    let _ = actor_ref.cast(DaemonMessage::Reconnected(Box::new(socket)));
+                }
+                Err(error) => {
+                    let reason = match error {
+                        crate::phoenix::PhoenixError::AuthenticationRejected => {
+                            "daemon authentication was rejected; re-enrollment is required"
+                        }
+                        _ => "invalid daemon connection configuration",
+                    };
+                    let _ = actor_ref.cast(DaemonMessage::ReconnectFailed(reason.to_string()));
                 }
             }
         });
@@ -585,9 +688,8 @@ impl DaemonSupervisor {
         myself: ActorRef<DaemonMessage>,
         state: &mut DaemonState,
     ) -> Result<(), ActorProcessingErr> {
-        // Close the old socket (heartbeat, writer).
-        state.socket.close().await;
-
+        state.reconnect_handle = None;
+        // The reconnect owner has already closed the old socket.
         // Replace with the new socket.
         state.socket = new_socket;
 
@@ -601,23 +703,29 @@ impl DaemonSupervisor {
         let myself_clone = myself.clone();
         state.reader_handle = Some(tokio::spawn(Self::ws_reader_pump(reader, myself_clone)));
 
-        // Rejoin all project channels.
-        let project_ids: Vec<String> = state.projects.keys().cloned().collect();
-        for project_id in &project_ids {
-            let topic = format!("project:{}", project_id);
-            if let Err(e) = state
-                .socket
-                .join(&topic, &state.config.api_token, "daemon")
-                .await
-            {
-                tracing::error!("Failed to rejoin channel {topic} after reconnect: {e}");
+        if let DaemonAuthentication::Standalone(identity) = &state.config.authentication {
+            if let Err(error) = state.socket.join_daemon(&identity.daemon_id).await {
+                tracing::warn!(%error, "Registration send failed; reconnecting");
+                self.handle_connection_lost(myself, state).await;
             }
+        } else {
+            state.reconnect_delay = INITIAL_RECONNECT_DELAY;
+            let project_ids: Vec<String> = state.projects.keys().cloned().collect();
+            let account_token = match &state.config.authentication {
+                DaemonAuthentication::AccountToken(token) => token,
+                DaemonAuthentication::Standalone(_) => unreachable!("handled above"),
+            };
+            for project_id in &project_ids {
+                let topic = format!("project:{}", project_id);
+                if let Err(e) = state.socket.join(&topic, account_token, "daemon").await {
+                    tracing::error!("Failed to rejoin channel {topic} after reconnect: {e}");
+                }
+            }
+            tracing::info!(
+                "Reconnection complete, rejoined {} project channels",
+                project_ids.len()
+            );
         }
-
-        tracing::info!(
-            "Reconnection complete, rejoined {} project channels",
-            project_ids.len()
-        );
 
         Ok(())
     }
@@ -658,205 +766,4 @@ impl DaemonSupervisor {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ===== Test helpers =====
-
-    /// Build a PhoenixMessage for testing.
-    fn msg(topic: &str, event: &str, payload: serde_json::Value) -> PhoenixMessage {
-        PhoenixMessage {
-            join_ref: None,
-            msg_ref: None,
-            topic: topic.to_string(),
-            event: event.to_string(),
-            payload,
-        }
-    }
-
-    /// Build a known-projects map containing the given project IDs.
-    /// Uses () as value since classify_channel_message is generic over the value type.
-    fn known_projects(ids: &[&str]) -> HashMap<String, ()> {
-        ids.iter().map(|id| (id.to_string(), ())).collect()
-    }
-
-    // ===== classify_channel_message tests =====
-
-    #[test]
-    fn classify_routes_app_event_to_project() {
-        let projects = known_projects(&["proj-1"]);
-        let m = msg("project:proj-1", "task_created", serde_json::json!({}));
-        assert_eq!(
-            classify_channel_message(&m, &projects),
-            ChannelAction::RouteToProject("proj-1".to_string())
-        );
-    }
-
-    #[test]
-    fn classify_join_ok() {
-        let projects = known_projects(&["proj-1"]);
-        let m = msg(
-            "project:proj-1",
-            "phx_reply",
-            serde_json::json!({"status": "ok", "response": {}}),
-        );
-        assert_eq!(
-            classify_channel_message(&m, &projects),
-            ChannelAction::JoinConfirmed("proj-1".to_string())
-        );
-    }
-
-    #[test]
-    fn classify_join_error_with_reason() {
-        let projects = known_projects(&["proj-1"]);
-        let m = msg(
-            "project:proj-1",
-            "phx_reply",
-            serde_json::json!({"status": "error", "response": {"reason": "unauthorized"}}),
-        );
-        assert_eq!(
-            classify_channel_message(&m, &projects),
-            ChannelAction::JoinFailed("proj-1".to_string(), Some("unauthorized".to_string()))
-        );
-    }
-
-    #[test]
-    fn classify_join_error_missing_reason() {
-        let projects = known_projects(&["proj-1"]);
-        let m = msg(
-            "project:proj-1",
-            "phx_reply",
-            serde_json::json!({"status": "error", "response": {}}),
-        );
-        assert_eq!(
-            classify_channel_message(&m, &projects),
-            ChannelAction::JoinFailed("proj-1".to_string(), None)
-        );
-    }
-
-    #[test]
-    fn classify_join_error_missing_status() {
-        let projects = known_projects(&["proj-1"]);
-        let m = msg(
-            "project:proj-1",
-            "phx_reply",
-            serde_json::json!({"response": {}}),
-        );
-        assert_eq!(
-            classify_channel_message(&m, &projects),
-            ChannelAction::JoinFailed("proj-1".to_string(), Some("missing status".to_string()))
-        );
-    }
-
-    #[test]
-    fn classify_phx_error() {
-        let projects = known_projects(&["proj-1"]);
-        let m = msg("project:proj-1", "phx_error", serde_json::json!({}));
-        assert_eq!(
-            classify_channel_message(&m, &projects),
-            ChannelAction::ChannelError("proj-1".to_string())
-        );
-    }
-
-    #[test]
-    fn classify_phx_close() {
-        let projects = known_projects(&["proj-1"]);
-        let m = msg("project:proj-1", "phx_close", serde_json::json!({}));
-        assert_eq!(
-            classify_channel_message(&m, &projects),
-            ChannelAction::ChannelError("proj-1".to_string())
-        );
-    }
-
-    #[test]
-    fn classify_non_project_topic() {
-        let projects = known_projects(&["proj-1"]);
-        let m = msg("phoenix", "heartbeat", serde_json::json!({}));
-        assert_eq!(
-            classify_channel_message(&m, &projects),
-            ChannelAction::NonProjectTopic
-        );
-    }
-
-    #[test]
-    fn classify_unknown_project() {
-        let projects = known_projects(&["proj-1"]);
-        let m = msg("project:unknown", "task_created", serde_json::json!({}));
-        assert_eq!(
-            classify_channel_message(&m, &projects),
-            ChannelAction::UnknownProject("unknown".to_string())
-        );
-    }
-
-    // ===== next_backoff tests =====
-
-    #[test]
-    fn next_backoff_doubles_delay() {
-        let max = Duration::from_secs(30);
-        assert_eq!(
-            next_backoff(Duration::from_millis(100), max),
-            Duration::from_millis(200)
-        );
-    }
-
-    #[test]
-    fn next_backoff_caps_at_max() {
-        let max = Duration::from_secs(30);
-        assert_eq!(next_backoff(Duration::from_secs(20), max), max);
-    }
-
-    #[test]
-    fn next_backoff_stays_at_max() {
-        let max = Duration::from_secs(30);
-        assert_eq!(next_backoff(max, max), max);
-    }
-
-    // ===== DaemonConfig tests =====
-
-    fn sample_daemon_config() -> DaemonConfig {
-        let provider_binaries = crate::helpers::ProviderBinaries {
-            anthropic: Some(std::path::PathBuf::from("/usr/local/bin/claude")),
-            openai: Some(std::path::PathBuf::from("/usr/local/bin/codex")),
-        };
-        DaemonConfig {
-            base_url: "http://localhost:4000".to_string(),
-            api_token: "sac_super_secret_token".to_string(),
-            capabilities: Arc::new(crate::capabilities::DaemonCapabilities {
-                harnesses: HashMap::new(),
-                provider_binaries,
-                shell_path: "/usr/bin:/bin".to_string(),
-                installed_skills_roots: Vec::new(),
-                installed_skills_diagnostic: None,
-                claude_plugin_dir: vertebrae_installer::ClaudePluginDirResolution {
-                    plugin_root: None,
-                    warning: None,
-                },
-            }),
-        }
-    }
-
-    #[test]
-    fn daemon_config_debug_redacts_api_token() {
-        let cfg = sample_daemon_config();
-        let dbg = format!("{:?}", cfg);
-        assert!(
-            !dbg.contains("sac_super_secret_token"),
-            "API token leaked in Debug: {dbg}"
-        );
-        assert!(
-            dbg.contains("<redacted>"),
-            "expected redaction marker: {dbg}"
-        );
-        // Other useful fields are still visible for diagnostics.
-        assert!(dbg.contains("http://localhost:4000"));
-        // Both resolved binaries are reflected in the debug output.
-        assert!(dbg.contains("capabilities"));
-    }
-
-    #[test]
-    fn daemon_config_carries_both_provider_binaries() {
-        let cfg = sample_daemon_config();
-        assert!(cfg.capabilities.provider_binaries.anthropic.is_some());
-        assert!(cfg.capabilities.provider_binaries.openai.is_some());
-    }
-}
+mod tests;

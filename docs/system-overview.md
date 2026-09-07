@@ -322,7 +322,12 @@ Client type "daemon" receives ONLY:
   cancel_step
 ```
 
-The daemon registers itself with `client_type: "daemon"` on channel join. This is how Sacrum selectively delivers step execution commands only to the daemon, while all other events go to human-facing clients.
+The legacy account-authenticated daemon registers project channels with
+`client_type: "daemon"`; Sacrum selectively delivers step execution commands
+only to that channel. An enrolled standalone daemon instead authenticates its
+stable identity and joins `daemon:<id>`. The current backend intentionally
+limits that standalone channel to registration/reconnect, so it does not
+silently claim project execution authority or fall back to an account token.
 
 The GUI maintains a WebSocket connection with 30-second heartbeats and exponential backoff reconnection (100ms → 30s). Every mutation — whether from CLI, GUI, or daemon — triggers a broadcast, keeping all views consistent.
 

@@ -9,7 +9,7 @@ pub mod daemon_supervisor;
 pub mod project_supervisor;
 pub mod step_executor;
 
-pub use daemon_supervisor::{DaemonConfig, DaemonMessage, DaemonSupervisor};
+pub use daemon_supervisor::{DaemonAuthentication, DaemonConfig, DaemonMessage, DaemonSupervisor};
 pub use project_supervisor::{ProjectConfig, ProjectMessage, ProjectSupervisor};
 pub use step_executor::{
     StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepMetrics, StepResult,
