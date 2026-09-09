@@ -1182,6 +1182,35 @@ fn configured_decoder(context: ClaudeDecodeContext) -> ClaudeStreamDecoder {
 }
 
 #[test]
+fn interleaved_telemetry_does_not_orphan_an_in_progress_text_blocks_item_id() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("run-interleaved"),
+        StreamId::from("stream-interleaved"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"session"}"#)
+        .unwrap();
+    decoder
+        .decode_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg"}}}"#,
+        )
+        .unwrap();
+    let before = decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello "}}}"#).unwrap();
+    // Telemetry records (status pings, tool progress, rate limit info) can
+    // legitimately arrive mid-block, between deltas of the same still-open
+    // content block. They must not sever the block's correlation identity.
+    assert!(
+        decoder
+            .decode_line(r#"{"type":"system","subtype":"status","status":"requesting"}"#)
+            .unwrap()
+            .is_empty()
+    );
+    let after = decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"world"}}}"#).unwrap();
+    assert!(before[0].correlation.item_id.is_some());
+    assert_eq!(before[0].correlation.item_id, after[0].correlation.item_id);
+}
+
+#[test]
 fn text_blocks_keep_identity_from_deltas_to_snapshot() {
     let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
         RunId::from("run"),

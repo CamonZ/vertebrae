@@ -24,6 +24,12 @@ impl ClaudeStreamDecoder {
         self.provider_sequence = provider_sequence;
         let object = value.as_object().expect("validated Claude record object");
         let record_type = string(object, "type").expect("validated Claude record type");
+        // Only `assistant`/nested `message_start`/`message_stop` (below) own
+        // current_item_id's lifecycle. Do not null it here on other top-level
+        // record types (system, tool_progress, rate_limit_event, ...): those
+        // can legitimately interleave mid-block with an in-progress text
+        // stream, and nulling would strip item_id from later deltas in that
+        // same block, orphaning the GUI's streaming overlay for it.
         if record_type == "assistant" {
             self.current_item_id = object
                 .get("message")
@@ -32,8 +38,6 @@ impl ClaudeStreamDecoder {
                 .or_else(|| string(object, "uuid"))
                 .or_else(|| string(object, "id"))
                 .map(ItemId::new);
-        } else if !matches!(record_type, "stream_event" | "content_block_delta") {
-            self.current_item_id = None;
         }
         let parent_tool_call = string(object, "parent_tool_use_id").map(ToolCallId::new);
         let agent_id = string(object, "agent_id")
