@@ -139,6 +139,81 @@ async fn register_unique_daemon(world: &mut GuiWorld) {
         .await;
 }
 
+#[when("I rename the registered daemon to a new unique name")]
+async fn rename_registered_daemon(world: &mut GuiWorld) {
+    let new_name = format!("gui-acceptance-renamed-{}", uuid::Uuid::new_v4());
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let editor = client
+        .wait()
+        .at_most(Duration::from_secs(10))
+        .for_element(Locator::Css("[data-testid='daemon-inspector-name-editor']"))
+        .await
+        .expect("daemon name editor was not rendered");
+    gui_acceptance::wait_actionable(&editor).await;
+    editor
+        .click()
+        .await
+        .expect("failed to open the daemon name editor");
+
+    let input = client
+        .wait()
+        .at_most(Duration::from_secs(5))
+        .for_element(Locator::Css(
+            "[data-testid='daemon-inspector-name-editor'] input",
+        ))
+        .await
+        .expect("daemon name input was not rendered");
+    gui_acceptance::wait_actionable(&input).await;
+    input
+        .send_keys(&format!("{new_name}\u{E007}"))
+        .await
+        .expect("failed to submit the daemon rename");
+    world.daemon_name = Some(new_name.clone());
+    world.screenshot(&client, "daemon-rename-submitted").await;
+}
+
+#[then(expr = "the renamed daemon row should be visible within {int} seconds")]
+async fn renamed_daemon_row_is_visible(world: &mut GuiWorld, timeout: u64) {
+    wait_for_registered_daemon_row(world, timeout).await;
+}
+
+#[then(expr = "the GUI should show the renamed daemon in the inspector within {int} seconds")]
+async fn renamed_daemon_is_in_inspector(world: &mut GuiWorld, timeout: u64) {
+    let name = registered_daemon_name(world).to_string();
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
+    loop {
+        if let Ok(title) = client
+            .find(Locator::Css("[data-testid='daemon-inspector-title']"))
+            .await
+            && title
+                .text()
+                .await
+                .map(|text| text.trim() == name)
+                .unwrap_or(false)
+        {
+            world.screenshot(&client, "renamed-daemon-inspector").await;
+            return;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!(
+                "renamed daemon '{name}' was not shown in the inspector within {timeout} seconds"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
 #[then(expr = "the registered daemon row should be visible within {int} seconds")]
 async fn registered_daemon_row_is_visible(world: &mut GuiWorld, timeout: u64) {
     wait_for_registered_daemon_row(world, timeout).await;

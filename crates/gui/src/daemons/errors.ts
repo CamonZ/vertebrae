@@ -91,3 +91,33 @@ export function daemonErrorKind(error: unknown): DaemonErrorKind | null {
 export function isAmbiguousDaemonError(kind: DaemonErrorKind | null): boolean {
   return kind === "ambiguous_transport" || kind === "malformed_response";
 }
+
+/**
+ * Translate server refusal kinds into recovery guidance without moving policy
+ * into the UI. The server remains authoritative; these messages only explain
+ * why the requested control did not take effect.
+ */
+export function daemonActionErrorMessage(
+  kind: DaemonErrorKind | null,
+  message: string
+): string {
+  if (kind === "not_found") {
+    return "This daemon is no longer available to this account. Refresh the fleet before trying again.";
+  }
+  if (kind === "stale_connection") {
+    return STALE_CONNECTION_MESSAGE;
+  }
+  if (kind === "active_session") {
+    return "The server refused to unregister this daemon because active work or a live session is still present. Drain the daemon first; no work was orphaned.";
+  }
+  if (kind === "ownership_unknown") {
+    return "The server could not prove that this daemon has no active work, so it remains registered. Drain the daemon and try again; no work was orphaned.";
+  }
+  if (
+    kind === "unknown_refusal" &&
+    /unauthori[sz]ed|forbidden|permission|access denied/i.test(message)
+  ) {
+    return "The server denied this daemon operation. Your authorization may have changed; refresh the fleet and try again.";
+  }
+  return message;
+}

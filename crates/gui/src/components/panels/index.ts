@@ -7,7 +7,7 @@
 
 export { FloatingDetailPanel } from "./FloatingDetailPanel";
 export { IconButton } from "./IconButton";
-export { CloseIcon, PlayIcon, StopIcon } from "./PanelIcons";
+export { CloseIcon, PlayIcon, StopIcon, TrashIcon } from "./PanelIcons";
 export { PanelHeader } from "./PanelHeader";
 export { ReviewGateBanner } from "./ReviewGateBanner";
 export { ContextMeter } from "./ContextMeter";

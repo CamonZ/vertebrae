@@ -38,6 +38,8 @@ export interface InlineEditFieldProps {
   isDeleting?: boolean;
   /** Render the input/textarea (and display text) with a monospace font */
   monospace?: boolean;
+  /** Disable entering or submitting the editor while another action is busy. */
+  disabled?: boolean;
   /** Custom renderer for non-empty display mode (e.g. syntax-highlighted prompts).
    *  Empty values still fall back to the muted placeholder. */
   renderDisplay?: (value: string) => React.ReactNode;
@@ -66,6 +68,7 @@ export function InlineEditField({
   onDelete,
   isDeleting = false,
   monospace = false,
+  disabled = false,
   renderDisplay,
 }: InlineEditFieldProps) {
   const [isEditing, setIsEditing] = useState(startInEditMode);
@@ -93,10 +96,11 @@ export function InlineEditField({
   }, [isEditing, startInEditMode]);
 
   const handleEdit = useCallback(() => {
+    if (disabled) return;
     setEditValue(value);
     setIsEditing(true);
     setError(null);
-  }, [value]);
+  }, [disabled, value]);
 
   const handleCancel = useCallback(() => {
     setIsEditing(false);
@@ -148,6 +152,7 @@ export function InlineEditField({
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (e.key === 'Escape') {
+      e.stopPropagation();
       handleCancel();
     } else if (e.key === 'Enter') {
       // For textarea, require Ctrl+Enter to save
@@ -195,7 +200,7 @@ export function InlineEditField({
               value={editValue}
               onChange={handleChange}
               onKeyDown={handleKeyDown}
-              disabled={isSubmitting || isDeleting}
+              disabled={disabled || isSubmitting || isDeleting}
               placeholder={placeholder}
               rows={rows}
               className={`flex-1 min-h-0 bg-bg-1 border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 disabled:opacity-50 ${resizeClasses[resize]}`}
@@ -207,7 +212,7 @@ export function InlineEditField({
               value={editValue}
               onChange={handleChange}
               onKeyDown={handleKeyDown}
-              disabled={isSubmitting || isDeleting}
+              disabled={disabled || isSubmitting || isDeleting}
               placeholder={placeholder}
               className={`flex-1 bg-bg-1 border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 disabled:opacity-50`}
             />
@@ -218,7 +223,7 @@ export function InlineEditField({
             <button
               type="button"
               onClick={handleSave}
-              disabled={isSubmitting || isDeleting}
+              disabled={disabled || isSubmitting || isDeleting}
               className={`${buttonPadding} rounded text-warn hover:bg-warn/10 transition-colors disabled:opacity-50 cursor-pointer`}
               title={multiline ? 'Save (Ctrl+Enter)' : 'Save (Enter)'}
               aria-label="Save"
@@ -250,7 +255,7 @@ export function InlineEditField({
               <button
                 type="button"
                 onClick={onDelete}
-                disabled={isSubmitting || isDeleting}
+                disabled={disabled || isSubmitting || isDeleting}
                 className={`${buttonPadding} rounded text-fg-mute hover:bg-err/10 hover:text-err transition-colors disabled:opacity-50 cursor-pointer`}
                 title="Delete"
                 aria-label="Delete"

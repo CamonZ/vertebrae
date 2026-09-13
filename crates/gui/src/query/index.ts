@@ -23,6 +23,7 @@ export {
   removeStepFromQueryCache,
   removeWorkflowFromQueryCache,
   removeWorkflowTransitionFromQueryCache,
+  removeDaemonFromQueryCache,
   replaceTaskRunControlsInQueryCache,
   updateTaskSectionsInQueryCache,
   upsertStepExecutionInQueryCache,
@@ -31,6 +32,7 @@ export {
   upsertTaskInQueryCache,
   upsertArtifactInQueryCache,
   updateTaskLocationInQueryCache,
+  updateDaemonInQueryCache,
   upsertWorkflowInQueryCache,
   upsertWorkflowTransitionInQueryCache,
 } from "./serverCache";

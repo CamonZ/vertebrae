@@ -5,6 +5,7 @@ import { Input } from "../atoms/Input";
 import { Modal } from "../molecules/Modal";
 import { useDaemonMutations } from "../../hooks/useDaemonMutations";
 import { unwrapCommand } from "../../query";
+import { validateDaemonName } from "../../daemons/name";
 
 interface DaemonEnrollmentModalProps {
   open: boolean;
@@ -66,6 +67,7 @@ export function DaemonEnrollmentModal({
     initialBootstrap ? "enroll" : "name"
   );
   const [name, setName] = useState("");
+  const [nameError, setNameError] = useState<string | null>(null);
   const [bootstrap, setBootstrap] = useState<DaemonBootstrap | null>(
     initialBootstrap
   );
@@ -82,6 +84,7 @@ export function DaemonEnrollmentModal({
     if (!open) {
       setStep("name");
       setName("");
+      setNameError(null);
       setBootstrap(null);
       setTokenVisible(false);
       setCopied(null);
@@ -133,6 +136,12 @@ export function DaemonEnrollmentModal({
   };
 
   const handleCreate = async () => {
+    if (isBusy) return;
+    const validationError = validateDaemonName(name);
+    if (validationError) {
+      setNameError(validationError);
+      return;
+    }
     const created = await createDaemon(name.trim() || null);
     if (!created) return;
     setBootstrap(created);
@@ -176,7 +185,10 @@ export function DaemonEnrollmentModal({
               id="daemon-enrollment-name"
               autoFocus
               value={name}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => {
+                setName(event.target.value);
+                if (nameError) setNameError(null);
+              }}
               placeholder="rack-03"
               aria-label="Daemon name"
               data-testid="daemon-enrollment-name"
@@ -186,13 +198,13 @@ export function DaemonEnrollmentModal({
             <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
               How you will recognise this machine in run logs. Renameable later.
             </p>
-            {error && (
+            {(nameError || error) && (
               <p
                 className="mt-3 text-xs text-[var(--color-err)]"
                 role="alert"
                 data-testid="daemon-enrollment-error"
               >
-                {error}
+                {nameError ?? error}
               </p>
             )}
           </div>

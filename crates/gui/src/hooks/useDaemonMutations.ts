@@ -11,12 +11,15 @@ import {
   assertCurrentDaemonSnapshot,
   daemonErrorKind,
   isAmbiguousDaemonError,
+  daemonActionErrorMessage,
 } from "../daemons/errors";
 import {
   errorMessage,
   invalidateDaemonQueries,
   queryClient,
   queryKeys,
+  removeDaemonFromQueryCache,
+  updateDaemonInQueryCache,
   unwrapCommand,
   type DaemonInvalidationScope,
 } from "../query";
@@ -39,7 +42,6 @@ interface DaemonMutations extends DaemonMutationState {
     daemonId: string,
     name: DaemonNameUpdate
   ) => Promise<Daemon | null>;
-  revokeDaemon: (daemonId: string) => Promise<Daemon | null>;
   unregisterDaemon: (daemonId: string) => Promise<Daemon | null>;
   rotateDaemonCredentials: (
     daemonId: string
@@ -55,7 +57,8 @@ export function useDaemonMutations(): DaemonMutations {
     async <T extends { connection_id: string }>(
       invoke: (connectionId: string) => Promise<T>,
       scope: DaemonInvalidationScope,
-      daemonId?: string
+      daemonId?: string,
+      onSuccess?: (result: T) => void
     ): Promise<T | null> => {
       const connectionId =
         queryClient.getQueryData<string | null>(queryKeys.sacrumConnection()) ??
@@ -73,6 +76,7 @@ export function useDaemonMutations(): DaemonMutations {
       try {
         const result = await invoke(connectionId);
         assertCurrentDaemonSnapshot(connectionId, result.connection_id);
+        onSuccess?.(result);
         invalidateDaemonQueries(connectionId, scope, daemonId);
         inFlight.current -= 1;
         setState({
@@ -86,11 +90,20 @@ export function useDaemonMutations(): DaemonMutations {
         if (isAmbiguousDaemonError(kind)) {
           // Never auto-retry: refresh safe metadata and surface explicit recovery.
           invalidateDaemonQueries(connectionId);
+        } else if (
+          kind === "not_found" ||
+          kind === "terminal_state" ||
+          kind === "active_session" ||
+          kind === "ownership_unknown"
+        ) {
+          // A refusal can confirm that the cached lifecycle snapshot is stale,
+          // but it is never a reason to make the row disappear optimistically.
+          invalidateDaemonQueries(connectionId);
         }
         inFlight.current -= 1;
         setState({
           isBusy: inFlight.current > 0,
-          error: errorMessage(error),
+          error: daemonActionErrorMessage(kind, errorMessage(error)),
           errorKind: kind,
         });
         return null;
@@ -120,20 +133,9 @@ export function useDaemonMutations(): DaemonMutations {
         (connectionId) =>
           unwrapCommand(commands.renameDaemon(connectionId, daemonId, name)),
         "daemon",
-        daemonId
-      );
-      return result?.daemon ?? null;
-    },
-    [runMutation]
-  );
-
-  const revokeDaemon = useCallback(
-    async (daemonId: string): Promise<Daemon | null> => {
-      const result = await runMutation(
-        (connectionId) =>
-          unwrapCommand(commands.revokeDaemon(connectionId, daemonId)),
-        "daemonEnrollment",
-        daemonId
+        daemonId,
+        (mutation) =>
+          updateDaemonInQueryCache(mutation.connection_id, mutation.daemon)
       );
       return result?.daemon ?? null;
     },
@@ -146,7 +148,9 @@ export function useDaemonMutations(): DaemonMutations {
         (connectionId) =>
           unwrapCommand(commands.unregisterDaemon(connectionId, daemonId)),
         "daemonEnrollment",
-        daemonId
+        daemonId,
+        (mutation) =>
+          removeDaemonFromQueryCache(mutation.connection_id, daemonId)
       );
       return result?.daemon ?? null;
     },
@@ -174,7 +178,6 @@ export function useDaemonMutations(): DaemonMutations {
     ...state,
     createDaemon,
     renameDaemon,
-    revokeDaemon,
     unregisterDaemon,
     rotateDaemonCredentials,
     reset,

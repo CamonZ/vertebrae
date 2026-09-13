@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Daemon } from "../bindings";
 
@@ -8,6 +8,7 @@ const mockUseDaemonDetail = vi.fn();
 const mockUseWebSocketStatus = vi.fn();
 const mockUseDaemonMutations = vi.fn();
 const mockCreateDaemon = vi.fn();
+const mockRenameDaemon = vi.fn();
 const mockRotateDaemonCredentials = vi.fn();
 const mockUnregisterDaemon = vi.fn();
 const mockSacrumConfigStatus = vi.fn();
@@ -90,6 +91,7 @@ describe("DaemonsPage", () => {
     mockUseWebSocketStatus.mockReturnValue("connected");
     mockUseDaemonMutations.mockReturnValue({
       createDaemon: mockCreateDaemon,
+      renameDaemon: mockRenameDaemon,
       rotateDaemonCredentials: mockRotateDaemonCredentials,
       unregisterDaemon: mockUnregisterDaemon,
       isBusy: false,
@@ -100,6 +102,9 @@ describe("DaemonsPage", () => {
       enrollment_token: "sacrum_enrollment_token",
       expires_at: "2026-09-12T09:35:00Z",
     });
+    mockRenameDaemon.mockResolvedValue(
+      daemon(active.id, "active", { name: "renamed", display_name: "renamed" })
+    );
     mockRotateDaemonCredentials.mockResolvedValue({
       daemon: active,
       enrollment_token: "rotated_enrollment_token",
@@ -294,6 +299,49 @@ describe("DaemonsPage", () => {
     expect(screen.getByText("rotated_enrollment_token")).toBeInTheDocument();
   });
 
+  it("renames through the server and refreshes the selected detail projection", async () => {
+    const user = userEvent.setup();
+    let selected = active;
+    const renamed = daemon(active.id, "active", {
+      name: "rack-04",
+      display_name: "rack-04",
+    });
+    mockUseDaemonDetail.mockImplementation((id: string | null) => ({
+      data: id === active.id ? selected : null,
+      isLoading: false,
+      isRefreshing: false,
+      error: null,
+      errorKind: null,
+      connectionId: "identity-a",
+      refetch: vi.fn(),
+    }));
+    mockRenameDaemon.mockImplementation(async () => {
+      selected = renamed;
+      return renamed;
+    });
+    const view = renderPage();
+
+    await user.click(screen.getByTestId("daemon-row-active-1"));
+    await user.click(
+      within(screen.getByTestId("daemon-inspector-name-editor")).getByText(
+        "active-1"
+      )
+    );
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "rack-04{Enter}");
+
+    await waitFor(() =>
+      expect(mockRenameDaemon).toHaveBeenCalledWith(active.id, {
+        kind: "set",
+        value: "rack-04",
+      })
+    );
+    view.rerender(<DaemonsPage />);
+    expect(screen.getByTestId("daemon-inspector-title")).toHaveTextContent(
+      "rack-04"
+    );
+  });
+
   it("confirms unregistering a daemon before closing its inspector", async () => {
     const user = userEvent.setup();
     mockUseDaemonDetail.mockImplementation((id: string | null) => ({
@@ -308,13 +356,13 @@ describe("DaemonsPage", () => {
     renderPage();
 
     await user.click(screen.getByTestId("daemon-row-active-1"));
-    await user.click(screen.getByTestId("daemon-inspector-unregister"));
+    await user.click(screen.getByTestId("daemon-inspector-delete-button"));
     expect(
-      screen.getByRole("button", { name: "Unregister?" })
+      screen.getByTestId("daemon-lifecycle-confirmation")
     ).toBeInTheDocument();
     expect(mockUnregisterDaemon).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Unregister?" }));
+    await user.click(screen.getByTestId("daemon-lifecycle-confirm-unregister"));
     await waitFor(() =>
       expect(mockUnregisterDaemon).toHaveBeenCalledWith(active.id)
     );
