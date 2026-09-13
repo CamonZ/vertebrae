@@ -21,6 +21,16 @@ vi.mock("./bindings", () => ({
     getWebsocketStatus: vi.fn(() =>
       Promise.resolve({ status: "ok", data: "connected" })
     ),
+    getSacrumConnectionIdentity: vi.fn(() =>
+      Promise.resolve({ status: "ok", data: "identity-a" })
+    ),
+    listDaemonFleet: vi.fn(() =>
+      Promise.resolve({
+        status: "ok",
+        data: { connection_id: "identity-a", daemons: [] },
+      })
+    ),
+    getDaemon: vi.fn(),
     listTasks: vi.fn(),
     getTask: vi.fn(),
     listStepsForWorkflow: vi.fn(),
@@ -67,6 +77,7 @@ import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { TasksPage } from "./pages/TasksPage";
 import { BoardPage } from "./pages/BoardPage";
 import { TracesPage } from "./pages/TracesPage";
+import { DaemonsPage } from "./pages/DaemonsPage";
 import { hasAllRequiredBinaries } from "./utils/installation";
 
 /**
@@ -98,6 +109,10 @@ function createTestRouter(initialEntries: string[]) {
       {
         path: "/traces",
         element: <TracesPage />,
+      },
+      {
+        path: "/daemons",
+        element: <DaemonsPage />,
       },
     ],
     { initialEntries }
@@ -538,6 +553,23 @@ describe("Router Acceptance Tests", () => {
           screen.getByRole("heading", { name: "Tasks" })
         ).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("Daemons route", () => {
+    it("renders the account-scoped fleet directly without a selected project", async () => {
+      const router = createTestRouter(["/daemons"]);
+
+      render(
+        <TestWrapper>
+          <RouterProvider router={router} />
+        </TestWrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("daemon-fleet-empty")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("daemons-page")).toBeInTheDocument();
     });
   });
 

@@ -11,7 +11,7 @@ use cucumber::writer::Stats;
 use fantoccini::Client;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
-use vertebrae_sacrum_client::GraphqlClient;
+use vertebrae_sacrum_client::{GraphqlClient, SacrumDaemonService};
 
 #[derive(World)]
 #[world(init = Self::new)]
@@ -89,6 +89,12 @@ pub struct GuiWorld {
     /// Running vtb-daemon process for the current scenario, if any.
     pub daemon: Option<Child>,
 
+    /// Daemon created through the GUI during this scenario.
+    pub daemon_id: Option<String>,
+
+    /// Display name generated for the GUI-created daemon.
+    pub daemon_name: Option<String>,
+
     /// Slugified feature name, used to namespace mock fixtures.
     pub feature_slug: String,
 
@@ -138,6 +144,8 @@ impl GuiWorld {
             scenario_timing: None,
             screenshot_seq: 0,
             daemon: None,
+            daemon_id: None,
+            daemon_name: None,
             feature_slug: String::new(),
             scenario_slug: String::new(),
             mock_output_dir: PathBuf::from(
@@ -402,6 +410,11 @@ async fn main() {
                     world.stop_daemon().await;
                     // Clean up tasks created during the scenario
                     if let Some(client) = &world.graphql_client {
+                        if let Some(daemon_id) = &world.daemon_id {
+                            let daemon_service = SacrumDaemonService::new(client.clone());
+                            let _ = daemon_service.unregister_daemon(daemon_id).await;
+                        }
+
                         let task_service =
                             vertebrae_sacrum_client::SacrumTaskService::new(client.clone());
                         for task_id in world.created_task_ids.iter().rev() {

@@ -433,6 +433,18 @@ const RAIL_NAV_ITEMS = [
     ),
   },
   {
+    id: "daemons",
+    to: "/daemons",
+    label: "Daemons",
+    icon: (
+      <Icon size="sm" strokeWidth={2}>
+        <rect x="4" y="4" width="16" height="16" rx="2" />
+        <path d="M8 9h8M8 13h8M8 17h4" />
+        <path d="M12 1v3M12 20v3M1 12h3M20 12h3" />
+      </Icon>
+    ),
+  },
+  {
     id: "design",
     to: "/design",
     label: "Atlas",

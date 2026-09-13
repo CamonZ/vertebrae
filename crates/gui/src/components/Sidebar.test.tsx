@@ -72,6 +72,7 @@ describe("Sidebar Traces nav", () => {
       "sidebar-nav-tasks",
       "sidebar-nav-board",
       "sidebar-nav-artifacts",
+      "sidebar-nav-daemons",
       "sidebar-nav-design",
       "sidebar-nav-traces",
     ]);
@@ -101,6 +102,18 @@ describe("Sidebar Traces nav", () => {
     const link = screen.getByTestId("sidebar-nav-traces");
     expect(link).toBeInTheDocument();
     expect(link.getAttribute("href")).toBe("/traces");
+  });
+
+  it("renders a Daemons nav link pointing at the account-scoped fleet route", () => {
+    render(
+      <MemoryRouter initialEntries={["/tasks"]}>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    const link = screen.getByTestId("sidebar-nav-daemons");
+    expect(link).toHaveAttribute("href", "/daemons");
+    expect(link).toHaveAttribute("aria-label", "Daemons");
   });
 
   it("clicking the Traces nav navigates to /traces", async () => {
