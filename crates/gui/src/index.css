@@ -1956,14 +1956,16 @@ html.light ::selection {
 }
 
 .tasks-v2 .scope-row,
-.tasks-v2 .scope-primary {
+.tasks-v2 .scope-primary,
+.daemons-page .daemons-status-filters {
   display: flex;
   align-items: center;
   gap: 2px;
   flex-wrap: wrap;
 }
 
-.tasks-v2 .scope-chip {
+.tasks-v2 .scope-chip,
+.daemons-page .scope-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1983,12 +1985,14 @@ html.light ::selection {
     border-color var(--t-fast) var(--ease);
 }
 
-.tasks-v2 .scope-chip:hover {
+.tasks-v2 .scope-chip:hover,
+.daemons-page .scope-chip:hover {
   background: var(--bg-1);
   color: var(--fg-soft);
 }
 
-.tasks-v2 .scope-chip.active {
+.tasks-v2 .scope-chip.active,
+.daemons-page .scope-chip.active {
   background: var(--accent-wash);
   color: var(--accent);
   border-color: color-mix(in oklch, var(--accent) 30%, transparent);
@@ -2028,7 +2032,8 @@ html.light ::selection {
 
 .tasks-v2 .scope-secondary .hide-done,
 .scope-level select,
-.tasks-v2 .scope-expand button {
+.tasks-v2 .scope-expand button,
+.daemons-page .daemon-register-button {
   height: 26px;
   padding: 0 var(--s-2);
   gap: var(--s-1);
@@ -2053,6 +2058,13 @@ html.light ::selection {
   white-space: nowrap;
 }
 
+.daemons-page .daemon-register-button {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 /* Native <select> sizes to content and needs right room for the caret overlay. */
 .scope-level select {
   width: auto;
@@ -2061,7 +2073,8 @@ html.light ::selection {
 
 .tasks-v2 .scope-secondary .hide-done:hover,
 .scope-level select:hover,
-.tasks-v2 .scope-expand button:hover {
+.tasks-v2 .scope-expand button:hover,
+.daemons-page .daemon-register-button:hover {
   color: var(--fg);
   border-color: var(--fg-faint);
 }
@@ -3711,7 +3724,7 @@ html.light ::selection {
       )
     )
   );
-  z-index: 50;
+  z-index: 65;
   display: flex;
   flex-direction: column;
   min-height: 0;

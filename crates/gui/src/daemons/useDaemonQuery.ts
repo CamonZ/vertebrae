@@ -12,6 +12,7 @@ import {
 export interface DaemonReadResult<T> {
   data: T | null;
   isLoading: boolean;
+  isRefreshing: boolean;
   error: string | null;
   errorKind: DaemonErrorKind | null;
   connectionId: string | null;
@@ -24,6 +25,7 @@ interface DaemonQueryOptions<
 > {
   queryKey: (connectionId: string) => readonly unknown[];
   enabled?: boolean;
+  refetchInterval?: number | false;
   invoke: (captured: string) => Promise<TSnapshot>;
   project: (snapshot: TSnapshot) => TData;
 }
@@ -37,6 +39,8 @@ export function useDaemonQuery<
   const query = useQuery({
     queryKey: options.queryKey(identity ?? queryKeys.daemons.unresolved),
     enabled: identity !== null && (options.enabled ?? true),
+    refetchInterval: options.refetchInterval ?? false,
+    refetchIntervalInBackground: false,
     queryFn: async () => {
       const captured = identity;
       if (!captured) {
@@ -53,6 +57,7 @@ export function useDaemonQuery<
   return {
     data: query.data ?? null,
     isLoading: !noBackend && (connectionLoading || query.isLoading),
+    isRefreshing: query.isFetching && !query.isLoading,
     error: noBackend
       ? NO_BACKEND_ERROR
       : query.error

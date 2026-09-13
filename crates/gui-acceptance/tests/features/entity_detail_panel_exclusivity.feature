@@ -33,6 +33,7 @@ Feature: Exclusive entity detail panels
     And I create a task "Existing board task panel" via the CLI
     Then the GUI should show "Existing board task panel" within 10 seconds
     When I click on the element containing text "Existing board task panel"
+    And I press the "Escape" key
     And I click on the element with test id "local-chat-launcher"
     And I type "open the linked task" into the element with test id "local-chat-composer"
     And I press the "Enter" key
@@ -49,6 +50,7 @@ Feature: Exclusive entity detail panels
     And I select factory "No Factory"
     When I click on the element containing text "Existing workflow panel"
     Then the GUI should show "Workflow Details" within 10 seconds
+    When I press the "Escape" key
     When I click on the element with test id "local-chat-launcher"
     And I type "open the linked workflow" into the element with test id "local-chat-composer"
     And I press the "Enter" key
@@ -67,6 +69,7 @@ Feature: Exclusive entity detail panels
     And I select factory "No Factory"
     When I click on the element with test id "step-node-Existing step panel"
     Then the GUI should show "Existing step panel" within 10 seconds
+    When I press the "Escape" key
     When I click on the element with test id "local-chat-launcher"
     And I type "open the linked step" into the element with test id "local-chat-composer"
     And I press the "Enter" key

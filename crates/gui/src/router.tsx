@@ -16,6 +16,7 @@ import {
   TracesPage,
   ArtifactsPage,
   SettingsPage,
+  DaemonsPage,
 } from "./pages";
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
@@ -230,6 +231,14 @@ const appRoutes: RouteObject[] = [
           <GuardedRoute>
             <SettingsPage />
           </GuardedRoute>
+        ),
+      },
+      {
+        path: "daemons",
+        element: (
+          <InstallationGuard>
+            <DaemonsPage />
+          </InstallationGuard>
         ),
       },
     ],
