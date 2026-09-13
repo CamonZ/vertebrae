@@ -11,6 +11,7 @@ import type {
   Workflow,
   WorkflowTransition,
   WorkflowWithTasks,
+  Daemon,
 } from "../bindings";
 import {
   mergeTask,
@@ -223,6 +224,39 @@ export function invalidateDaemonQueries(
   for (const queryKey of scopesFor) {
     void queryClient.invalidateQueries({ queryKey });
   }
+}
+
+/** Reconcile a server-confirmed daemon mutation without making it optimistic. */
+export function updateDaemonInQueryCache(
+  connectionId: string,
+  daemon: Daemon
+): void {
+  queryClient.setQueryData<Daemon[] | undefined>(
+    queryKeys.daemons.fleet(connectionId),
+    (current) =>
+      current?.map((candidate) =>
+        candidate.id === daemon.id ? daemon : candidate
+      )
+  );
+  queryClient.setQueryData<Daemon | null | undefined>(
+    queryKeys.daemons.detail(connectionId, daemon.id),
+    (current) => (current === undefined ? current : daemon)
+  );
+}
+
+/** Remove a daemon only after the server has confirmed terminal unregister. */
+export function removeDaemonFromQueryCache(
+  connectionId: string,
+  daemonId: string
+): void {
+  queryClient.setQueryData<Daemon[] | undefined>(
+    queryKeys.daemons.fleet(connectionId),
+    (current) => current?.filter((daemon) => daemon.id !== daemonId)
+  );
+  queryClient.removeQueries({
+    queryKey: queryKeys.daemons.detail(connectionId, daemonId),
+    exact: true,
+  });
 }
 
 export function upsertStepExecutionInList(

@@ -4,7 +4,6 @@ import { queryClient, queryKeys } from "../query";
 
 const mockCreateDaemon = vi.fn();
 const mockRenameDaemon = vi.fn();
-const mockRevokeDaemon = vi.fn();
 const mockUnregisterDaemon = vi.fn();
 const mockRotateDaemonCredentials = vi.fn();
 
@@ -12,7 +11,6 @@ vi.mock("../bindings", () => ({
   commands: {
     createDaemon: (...args: unknown[]) => mockCreateDaemon(...args),
     renameDaemon: (...args: unknown[]) => mockRenameDaemon(...args),
-    revokeDaemon: (...args: unknown[]) => mockRevokeDaemon(...args),
     unregisterDaemon: (...args: unknown[]) => mockUnregisterDaemon(...args),
     rotateDaemonCredentials: (...args: unknown[]) =>
       mockRotateDaemonCredentials(...args),
@@ -142,27 +140,6 @@ describe("useDaemonMutations", () => {
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
-  it("surfaces structured refusal kinds for terminal errors", async () => {
-    mockRevokeDaemon.mockResolvedValue({
-      status: "error",
-      error: {
-        kind: "terminal_state",
-        message: "daemon is in a terminal state (revoked or removed)",
-      },
-    });
-
-    const { result } = renderHook(() => useDaemonMutations());
-    let revoked: Awaited<ReturnType<typeof result.current.revokeDaemon>> = null;
-    await act(async () => {
-      revoked = await result.current.revokeDaemon(daemon.id);
-    });
-
-    expect(revoked).toBeNull();
-    expect(result.current.errorKind).toBe("terminal_state");
-    expect(result.current.error).toContain("terminal state");
-    expect(invalidateSpy).not.toHaveBeenCalled();
-  });
-
   it("forwards the rename intent that preserves omitted-vs-null semantics", async () => {
     mockRenameDaemon.mockResolvedValue({
       status: "ok",
@@ -179,42 +156,90 @@ describe("useDaemonMutations", () => {
     });
   });
 
+  it("reconciles confirmed rename results, but never removes on failure", async () => {
+    const renamed = { ...daemon, name: "renamed", display_name: "renamed" };
+    queryClient.setQueryData(queryKeys.daemons.fleet("identity-a"), [daemon]);
+    queryClient.setQueryData(
+      queryKeys.daemons.detail("identity-a", daemon.id),
+      daemon
+    );
+    mockRenameDaemon.mockResolvedValue({
+      status: "ok",
+      data: { connection_id: "identity-a", daemon: renamed },
+    });
+
+    const { result } = renderHook(() => useDaemonMutations());
+    await act(async () => {
+      await result.current.renameDaemon(daemon.id, {
+        kind: "set",
+        value: "renamed",
+      });
+    });
+    expect(
+      queryClient.getQueryData(queryKeys.daemons.fleet("identity-a"))
+    ).toEqual([renamed]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.daemons.detail("identity-a", daemon.id)
+      )
+    ).toEqual(renamed);
+
+    mockUnregisterDaemon.mockResolvedValue({
+      status: "error",
+      error: {
+        kind: "active_session",
+        message: "active session",
+      },
+    });
+    await act(async () => {
+      await result.current.unregisterDaemon(daemon.id);
+    });
+    expect(
+      queryClient.getQueryData(queryKeys.daemons.fleet("identity-a"))
+    ).toEqual([renamed]);
+  });
+
   it("refuses to mutate without a backend connection", async () => {
     queryClient.setQueryData(queryKeys.sacrumConnection(), null);
 
     const { result } = renderHook(() => useDaemonMutations());
-    let revoked: Awaited<ReturnType<typeof result.current.revokeDaemon>> = null;
+    let unregistered: Awaited<
+      ReturnType<typeof result.current.unregisterDaemon>
+    > = null;
     await act(async () => {
-      revoked = await result.current.revokeDaemon(daemon.id);
+      unregistered = await result.current.unregisterDaemon(daemon.id);
     });
 
-    expect(mockRevokeDaemon).not.toHaveBeenCalled();
-    expect(revoked).toBeNull();
+    expect(mockUnregisterDaemon).not.toHaveBeenCalled();
+    expect(unregistered).toBeNull();
     expect(result.current.errorKind).toBe("no_backend");
   });
 
   it("stays busy until every in-flight mutation has settled", async () => {
     let resolveCreate: (value: unknown) => void = () => {};
-    let resolveRevoke: (value: unknown) => void = () => {};
+    let resolveRename: (value: unknown) => void = () => {};
     mockCreateDaemon.mockImplementation(
       () =>
         new Promise((resolve) => {
           resolveCreate = resolve;
         })
     );
-    mockRevokeDaemon.mockImplementation(
+    mockRenameDaemon.mockImplementation(
       () =>
         new Promise((resolve) => {
-          resolveRevoke = resolve;
+          resolveRename = resolve;
         })
     );
 
     const { result } = renderHook(() => useDaemonMutations());
     let createPromise: Promise<DaemonBootstrap | null> = Promise.resolve(null);
-    let revokePromise: Promise<Daemon | null> = Promise.resolve(null);
+    let renamePromise: Promise<Daemon | null> = Promise.resolve(null);
     act(() => {
       createPromise = result.current.createDaemon(null);
-      revokePromise = result.current.revokeDaemon(daemon.id);
+      renamePromise = result.current.renameDaemon(daemon.id, {
+        kind: "set",
+        value: "renamed",
+      });
     });
     expect(result.current.isBusy).toBe(true);
 
@@ -229,8 +254,8 @@ describe("useDaemonMutations", () => {
     expect(result.current.isBusy).toBe(true);
 
     await act(async () => {
-      resolveRevoke({ status: "ok", data: mutationResult("identity-a") });
-      await revokePromise;
+      resolveRename({ status: "ok", data: mutationResult("identity-a") });
+      await renamePromise;
     });
     expect(result.current.isBusy).toBe(false);
     expect(result.current.error).toBeNull();

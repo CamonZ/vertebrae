@@ -136,4 +136,20 @@ describe("DaemonEnrollmentModal", () => {
     ).not.toBeInTheDocument();
     await waitFor(() => expect(mockSacrumConfigStatus).toHaveBeenCalledOnce());
   });
+
+  it("rejects a name that violates the shared registration policy before calling the server", async () => {
+    const user = userEvent.setup();
+    render(<DaemonEnrollmentModal open onClose={vi.fn()} />);
+
+    await user.type(
+      screen.getByTestId("daemon-enrollment-name"),
+      "x".repeat(101)
+    );
+    await user.click(screen.getByTestId("daemon-enrollment-create"));
+
+    expect(screen.getByTestId("daemon-enrollment-error")).toHaveTextContent(
+      "100 characters or fewer"
+    );
+    expect(mockCreateDaemon).not.toHaveBeenCalled();
+  });
 });

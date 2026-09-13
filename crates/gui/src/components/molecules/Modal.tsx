@@ -13,14 +13,22 @@ interface BaseModalProps {
   hideClose?: boolean;
   children?: ReactNode;
   className?: string;
+  /** Prevent dismissal while a server mutation is in flight. */
+  preventClose?: boolean;
 }
 
-interface ConfirmModalProps extends Omit<BaseModalProps, "variant" | "children"> {
+interface ConfirmModalProps extends Omit<
+  BaseModalProps,
+  "variant" | "children"
+> {
   variant: "confirm";
   description?: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   confirmIntent?: "primary" | "danger";
+  confirmLoading?: boolean;
+  confirmDisabled?: boolean;
+  cancelDisabled?: boolean;
   onConfirm: () => void;
 }
 
@@ -43,16 +51,17 @@ function isConfirm(p: ModalProps): p is ConfirmModalProps {
 export function Modal(props: ModalProps) {
   const { open, onClose, title, className } = props;
   const variant = props.variant ?? "dialog";
+  const preventClose = props.preventClose ?? false;
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !preventClose) onClose();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, preventClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -68,7 +77,7 @@ export function Modal(props: ModalProps) {
       role="presentation"
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 animate-fade-in-up"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !preventClose) onClose();
       }}
     >
       <div
@@ -95,6 +104,7 @@ export function Modal(props: ModalProps) {
               <button
                 type="button"
                 onClick={onClose}
+                disabled={preventClose}
                 aria-label="Close"
                 className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
               >
@@ -119,6 +129,8 @@ export function Modal(props: ModalProps) {
             </Button>
             <Button
               variant={props.confirmIntent === "danger" ? "danger" : "primary"}
+              loading={props.confirmLoading}
+              disabled={props.confirmDisabled}
               onClick={() => {
                 props.onConfirm();
               }}

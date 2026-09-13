@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Daemon, DaemonBootstrap } from "../bindings";
+import type { Daemon, DaemonBootstrap, DaemonNameUpdate } from "../bindings";
 import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
 import { Input } from "../components/atoms/Input";
@@ -22,6 +22,7 @@ import { useDaemonMutations } from "../hooks/useDaemonMutations";
 import { useShellHeader } from "../hooks/useShellHeader";
 import { useWebSocketStatus } from "../hooks/useWebSocketStatus";
 import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
+import type { DaemonLifecycleAction } from "../components/Daemons/DaemonLifecycleStatus";
 
 const FILTER_ORDER: DaemonStatusFilter[] = [
   "active",
@@ -29,6 +30,8 @@ const FILTER_ORDER: DaemonStatusFilter[] = [
   "revoked",
   "removed",
 ];
+
+const NOOP_RESET = () => {};
 
 function daemonLabel(daemon: Daemon): string {
   return daemon.display_name || daemon.name || daemon.id;
@@ -44,8 +47,10 @@ export function DaemonsPage() {
   const [enrollmentBootstrap, setEnrollmentBootstrap] =
     useState<DaemonBootstrap | null>(null);
   const [daemonAction, setDaemonAction] = useState<
-    "reissue" | "unregister" | null
+    "rename" | "reissue" | "unregister" | null
   >(null);
+  const [lastLifecycleAction, setLastLifecycleAction] =
+    useState<DaemonLifecycleAction | null>(null);
   const previousWebsocketStatus = useRef<string | null>(null);
   const previousConnectionId = useRef<string | null | undefined>(undefined);
   const rowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -69,9 +74,13 @@ export function DaemonsPage() {
   );
   const detail = useDaemonDetail(selectedDaemonId);
   const {
+    renameDaemon,
     rotateDaemonCredentials,
     unregisterDaemon,
+    isBusy: isDaemonMutationBusy,
     error: daemonActionError,
+    errorKind: daemonActionErrorKind,
+    reset: resetDaemonMutations = NOOP_RESET,
   } = useDaemonMutations();
   const { connectionId, refetch } = fleet;
   const selectedDetailDaemon =
@@ -117,14 +126,34 @@ export function DaemonsPage() {
     }
   }, [connectionId]);
 
+  useEffect(() => {
+    setLastLifecycleAction(null);
+    resetDaemonMutations();
+  }, [resetDaemonMutations, selectedDaemonId]);
+
   const closeInspector = useCallback(() => {
     setSelectedDaemonId(null);
+    setLastLifecycleAction(null);
+    resetDaemonMutations();
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
-  }, []);
+  }, [resetDaemonMutations]);
+  const handleRename = useCallback(
+    async (daemonId: string, name: DaemonNameUpdate): Promise<boolean> => {
+      setLastLifecycleAction("rename");
+      setDaemonAction("rename");
+      try {
+        return Boolean(await renameDaemon(daemonId, name));
+      } finally {
+        setDaemonAction(null);
+      }
+    },
+    [renameDaemon]
+  );
   const handleReissue = useCallback(
     async (daemonId: string) => {
+      setLastLifecycleAction(null);
       setDaemonAction("reissue");
       try {
         const bootstrap = await rotateDaemonCredentials(daemonId);
@@ -139,11 +168,13 @@ export function DaemonsPage() {
     [rotateDaemonCredentials]
   );
   const handleUnregister = useCallback(
-    async (daemonId: string) => {
+    async (daemonId: string): Promise<boolean> => {
+      setLastLifecycleAction("unregister");
       setDaemonAction("unregister");
       try {
         const removed = await unregisterDaemon(daemonId);
         if (removed) closeInspector();
+        return Boolean(removed);
       } finally {
         setDaemonAction(null);
       }
@@ -436,11 +467,17 @@ export function DaemonsPage() {
           daemon={selectedDetailDaemon}
           isLoading={detail.isLoading}
           error={detail.error}
+          errorKind={detail.errorKind}
           actionError={daemonActionError}
+          actionErrorKind={daemonActionErrorKind}
+          lifecycleAction={lastLifecycleAction}
+          isBusy={isDaemonMutationBusy}
+          isRenaming={daemonAction === "rename"}
           isReissuing={daemonAction === "reissue"}
           isUnregistering={daemonAction === "unregister"}
           closing={inspector.closing}
           onClose={closeInspector}
+          onRename={handleRename}
           onReissue={handleReissue}
           onUnregister={handleUnregister}
           onExitAnimationEnd={inspector.onAnimationEnd}
