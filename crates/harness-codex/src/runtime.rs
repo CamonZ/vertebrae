@@ -22,10 +22,10 @@ use vertebrae_harness_core::{
     ItemId, OutcomeMetrics, OutputVerbosity, ProviderResumeId, ProviderThreadRef,
     QuestionCapabilities, RunHandle, RunId, RunOutcome, RunRequest, SendTurnRequest,
     SequencedEventSink, SessionCloseOutcome, SessionCloseStatus, SessionHandle, SessionId,
-    SessionStarted, SessionUsage, SpeedTier, StartSessionRequest, StreamId, TextEvent,
-    ThreadDeclared, ThreadId, ThreadKind, TokenUsage, ToolCallEvent, ToolCallId, ToolOutputEvent,
-    ToolStatus, TurnHandle, TurnId, TurnInput, TurnInputProvenance, TurnOutcome, TurnStarted,
-    TurnUsage, UpdateSemantics, UsageEvent,
+    SessionStarted, SessionTitle, SessionUsage, SpeedTier, StartSessionRequest, StreamId,
+    TextEvent, ThreadDeclared, ThreadId, ThreadKind, TokenUsage, ToolCallEvent, ToolCallId,
+    ToolOutputEvent, ToolStatus, TurnHandle, TurnId, TurnInput, TurnInputProvenance, TurnOutcome,
+    TurnStarted, TurnUsage, UpdateSemantics, UsageEvent,
 };
 
 use crate::{
@@ -1000,8 +1000,26 @@ impl SessionState {
                 )
                 .await?;
             }
-            CodexNotification::ThreadStarted(_) | CodexNotification::ThreadStatusChanged(_) => {
-                let _ = self.declare_child(&params).await?;
+            CodexNotification::ThreadStarted(_)
+            | CodexNotification::ThreadStatusChanged(_)
+            | CodexNotification::ThreadNameUpdated(_)
+            | CodexNotification::ThreadUpdated(_) => {
+                if !is_child {
+                    if let Some(title) =
+                        optional_string(&params, &["/threadName", "/thread/name", "/name"])
+                            .filter(|title| !title.trim().is_empty())
+                    {
+                        self.emit(
+                            stream,
+                            correlation,
+                            HarnessEventPayloadV1::SessionTitle(SessionTitle { title }),
+                            UpdateSemantics::Snapshot,
+                        )
+                        .await?;
+                    }
+                } else {
+                    let _ = self.declare_child(&params).await?;
+                }
             }
             CodexNotification::Unknown { .. } => {
                 // App Server notifications are an extensible provider

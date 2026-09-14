@@ -187,6 +187,7 @@ fn run_stdin_stream_json() -> ExitCode {
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let mut initialized = false;
+    let mut title_emitted = false;
 
     // Claude's stream-json process is persistent: it reads one user turn,
     // emits that turn's events, and waits for the next line. Keeping the mock
@@ -286,6 +287,13 @@ fn run_stdin_stream_json() -> ExitCode {
                 }
             }
         }));
+        if !title_emitted {
+            write_json_line(serde_json::json!({
+                "type": "ai-title",
+                "aiTitle": "Local Chat Acceptance"
+            }));
+            title_emitted = true;
+        }
     }
 
     ExitCode::from(0)

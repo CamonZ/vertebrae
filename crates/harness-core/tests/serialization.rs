@@ -134,6 +134,9 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
             speed_tier_status: None,
             tools: vec!["Read".into(), "Bash".into()],
         }),
+        HarnessEventPayloadV1::SessionTitle(SessionTitle {
+            title: "Native title".into(),
+        }),
         HarnessEventPayloadV1::ThreadDeclared(ThreadDeclared {
             thread_id: ThreadId::from("thread-s"),
             parent_thread_id: None,

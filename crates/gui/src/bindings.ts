@@ -1132,6 +1132,7 @@ localChatFileChangeEvent: LocalChatFileChangeEvent,
 localChatSessionEndEvent: LocalChatSessionEndEvent,
 localChatSessionErrorEvent: LocalChatSessionErrorEvent,
 localChatSessionInitEvent: LocalChatSessionInitEvent,
+localChatSessionTitleEvent: LocalChatSessionTitleEvent,
 localChatSessionUsageEvent: LocalChatSessionUsageEvent,
 localChatSessionWarningEvent: LocalChatSessionWarningEvent,
 localChatTextEvent: LocalChatTextEvent,
@@ -1159,6 +1160,7 @@ localChatFileChangeEvent: "local-chat-file-change-event",
 localChatSessionEndEvent: "local-chat-session-end-event",
 localChatSessionErrorEvent: "local-chat-session-error-event",
 localChatSessionInitEvent: "local-chat-session-init-event",
+localChatSessionTitleEvent: "local-chat-session-title-event",
 localChatSessionUsageEvent: "local-chat-session-usage-event",
 localChatSessionWarningEvent: "local-chat-session-warning-event",
 localChatTextEvent: "local-chat-text-event",
@@ -1432,6 +1434,7 @@ export type LocalChatSessionError = { SessionExists: string } | { SessionNotFoun
 export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; error: string; item_id?: string | null }
 export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; selectedPersonality: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; threadTotalTokens: number | null; messageCount: number; lifecycle: string; status: string }
 export type LocalChatSessionInitEvent = { backend_session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; model: string; tools: string[]; speed_tier_status?: LocalChatSpeedTierStatus | null }
+export type LocalChatSessionTitleEvent = { backend_session_id: string; harness: LocalChatHarnessKind; title: string }
 export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; model: string; context_tokens: number; context_window: number; 
 /**
  * Cumulative thread token total, distinct from the current request's

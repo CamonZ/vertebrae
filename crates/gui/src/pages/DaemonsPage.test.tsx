@@ -433,8 +433,10 @@ describe("DaemonsPage", () => {
       await screen.findByTestId("daemon-enrollment-token-step")
     ).toBeInTheDocument();
     expect(mockCreateDaemon).toHaveBeenCalledWith("rack-03");
-    expect(screen.getByText(/vtb-daemon enroll/)).toHaveTextContent(
-      "https://sacrum.example.com"
+    await waitFor(() =>
+      expect(screen.getByText(/vtb-daemon enroll/)).toHaveTextContent(
+        "https://sacrum.example.com"
+      )
     );
     expect(
       screen.queryByText(/sacrum_enrollment_token/)

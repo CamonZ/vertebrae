@@ -1557,15 +1557,7 @@ describe("doStartSession", () => {
     );
   });
 
-  it("passes an insufficient first-message candidate without freezing a title", async () => {
-    mockedCommands.inferLocalChatSessionTitle.mockResolvedValueOnce({
-      status: "ok",
-      data: {
-        title: null,
-        confidence: 0.12,
-        sufficient_signal: false,
-      },
-    });
+  it("does not invoke inference for automatic Claude naming", async () => {
     const deps = {
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
@@ -1581,22 +1573,11 @@ describe("doStartSession", () => {
       "Hello"
     );
 
-    expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
-      harness: "claude",
-      initial_prompts: ["Hello"],
-      working_dir: "/test/project",
-    });
-    await vi.waitFor(() =>
-      expect(deps.setSessionTitleCandidate).toHaveBeenCalledWith(SESSION_ID, {
-        title: null,
-        confidence: 0.12,
-        sufficientSignal: false,
-        userMessageCount: 1,
-      })
-    );
+    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
+    expect(deps.setSessionTitleCandidate).not.toHaveBeenCalled();
   });
 
-  it("retries title inference with the first two user messages after low confidence", async () => {
+  it("does not retry inference for automatic Claude naming", async () => {
     const deps = {
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
@@ -1624,20 +1605,8 @@ describe("doStartSession", () => {
       "Implement session title confidence"
     );
 
-    expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
-      harness: "claude",
-      initial_prompts: ["Hello", "Implement session title confidence"],
-      working_dir: "/test/project",
-    });
-    await vi.waitFor(() =>
-      expect(deps.setSessionTitleCandidate).toHaveBeenCalledWith(
-        SESSION_ID,
-        expect.objectContaining({
-          title: "Inferred Title",
-          userMessageCount: 2,
-        })
-      )
-    );
+    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
+    expect(deps.setSessionTitleCandidate).not.toHaveBeenCalled();
   });
 
   it("does not infer a title for custom-labeled sessions", async () => {

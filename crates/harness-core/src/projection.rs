@@ -690,6 +690,7 @@ impl HarnessProjection {
                 stream.provider_resume_id = started.provider_resume_id.clone();
                 stream.session = Some(started);
             }
+            HarnessEventPayloadV1::SessionTitle(_) => {}
             HarnessEventPayloadV1::ThreadDeclared(_) => {}
             HarnessEventPayloadV1::TurnStarted(started) => {
                 if let Some(turn_id) = turn_id {

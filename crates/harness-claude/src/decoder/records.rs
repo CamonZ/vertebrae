@@ -2,9 +2,9 @@ use serde_json::{Map, Value};
 use vertebrae_harness_core::{
     CompactionEvent, CompactionState, ControlDecision, ControlResolution, DiagnosticEvent,
     HarnessEventDraftV1, HarnessEventPayloadV1, ItemId, PlanEntry, PlanEvent, ProviderResumeId,
-    ResolutionSource, SessionId, SessionStarted, SpeedTier, SpeedTierStatus, StreamId, TextEvent,
-    ThreadDeclared, ThreadId, ThreadKind, ToolCallId, ToolOutputEvent, ToolStatus, TurnId,
-    TurnInput, TurnInputProvenance, UpdateSemantics,
+    ResolutionSource, SessionId, SessionStarted, SessionTitle, SpeedTier, SpeedTierStatus,
+    StreamId, TextEvent, ThreadDeclared, ThreadId, ThreadKind, ToolCallId, ToolOutputEvent,
+    ToolStatus, TurnId, TurnInput, TurnInputProvenance, UpdateSemantics,
 };
 
 use super::controls::decode_control_request;
@@ -46,6 +46,29 @@ impl ClaudeStreamDecoder {
         let (thread_id, stream_id, declaration) =
             self.resolve_thread(object, agent_id.as_deref(), parent_tool_call.as_ref());
         let mut drafts = Vec::new();
+        if matches!(record_type, "ai-title" | "custom-title") {
+            let title = object
+                .get(if record_type == "ai-title" {
+                    "aiTitle"
+                } else {
+                    "customTitle"
+                })
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|title| !title.is_empty());
+            if let Some(title) = title {
+                drafts.push(self.draft(
+                    stream_id,
+                    &thread_id,
+                    parent_tool_call,
+                    UpdateSemantics::Snapshot,
+                    HarnessEventPayloadV1::SessionTitle(SessionTitle {
+                        title: title.into(),
+                    }),
+                ));
+            }
+            return Ok(drafts);
+        }
         if let Some(declaration) = declaration {
             let spawn = declaration
                 .caused_by_tool_call_id

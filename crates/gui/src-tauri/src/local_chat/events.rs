@@ -28,6 +28,13 @@ pub struct LocalChatSessionInitEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
+pub struct LocalChatSessionTitleEvent {
+    pub backend_session_id: String,
+    pub harness: LocalChatHarnessKind,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
 pub struct LocalChatTextEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
@@ -231,6 +238,7 @@ pub struct LocalChatCompactionEvent {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LocalChatEvent {
     Init(LocalChatSessionInitEvent),
+    Title(LocalChatSessionTitleEvent),
     TurnStarted(LocalChatTurnStartedEvent),
     Text(LocalChatTextEvent),
     ToolCall(LocalChatToolCallEvent),
@@ -248,6 +256,7 @@ impl LocalChatEvent {
     pub(crate) fn tauri_event_name(&self) -> &'static str {
         match self {
             LocalChatEvent::Init(_) => "local-chat-session-init-event",
+            LocalChatEvent::Title(_) => "local-chat-session-title-event",
             LocalChatEvent::TurnStarted(_) => "local-chat-turn-started-event",
             LocalChatEvent::Text(_) => "local-chat-text-event",
             LocalChatEvent::ToolCall(_) => "local-chat-tool-call-event",
@@ -337,6 +346,7 @@ impl LocalChatEventSink {
 
         let result = match &event {
             LocalChatEvent::Init(payload) => payload.emit(app_handle),
+            LocalChatEvent::Title(payload) => payload.emit(app_handle),
             LocalChatEvent::TurnStarted(payload) => payload.emit(app_handle),
             LocalChatEvent::Text(payload) => payload.emit(app_handle),
             LocalChatEvent::ToolCall(payload) => payload.emit(app_handle),

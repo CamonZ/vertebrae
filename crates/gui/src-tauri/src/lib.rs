@@ -34,9 +34,9 @@ use events::{
 use local_chat::{
     ClaudeStartupCapabilities, LocalChatCompactionEvent, LocalChatFileChangeEvent,
     LocalChatSessionEndEvent, LocalChatSessionErrorEvent, LocalChatSessionInitEvent,
-    LocalChatSessionManager, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
-    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
-    LocalChatTurnStartedEvent,
+    LocalChatSessionManager, LocalChatSessionTitleEvent, LocalChatSessionUsageEvent,
+    LocalChatSessionWarningEvent, LocalChatTextEvent, LocalChatToolCallEvent,
+    LocalChatToolResultEvent, LocalChatTurnStartedEvent,
 };
 use project_config::ProjectConfig;
 
@@ -196,6 +196,7 @@ fn create_builder() -> Builder {
             LocalChatToolCallEvent,
             LocalChatToolResultEvent,
             LocalChatFileChangeEvent,
+            LocalChatSessionTitleEvent,
             LocalChatSessionUsageEvent,
             LocalChatSessionEndEvent,
             LocalChatSessionErrorEvent,
