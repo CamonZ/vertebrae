@@ -843,6 +843,8 @@ pub struct DaemonResponse {
     pub name: Option<String>,
     pub display_name: String,
     #[serde(default)]
+    pub max_concurrency: Option<i32>,
+    #[serde(default)]
     pub enrolled_at: Option<String>,
     #[serde(default)]
     pub removed_at: Option<String>,

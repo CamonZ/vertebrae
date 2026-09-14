@@ -96,6 +96,7 @@ fn daemon_summary_serializes_without_secret_fields() {
         status: DaemonStatus::Active,
         name: Some("Farm bot".into()),
         display_name: "Farm bot".into(),
+        max_concurrency: Some(3),
         enrolled_at: None,
         removed_at: None,
         inserted_at: None,
@@ -317,6 +318,87 @@ async fn rename_daemon_distinguishes_omitted_null_and_set() {
         assert_eq!(renamed.id, DAEMON_ID);
         server.verify().await;
     }
+}
+
+#[tokio::test]
+async fn set_max_concurrency_sends_the_limit_and_maps_the_projection() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .and(body_string_contains("SetDaemonMaxConcurrency"))
+        .and(VariablesExactly(json!({
+            "id": DAEMON_ID,
+            "maxConcurrency": 4
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": { "setDaemonMaxConcurrency": {
+                "id": DAEMON_ID,
+                "status": "active",
+                "name": "Farm bot",
+                "display_name": "Farm bot",
+                "max_concurrency": 4,
+                "enrolled_at": null,
+                "removed_at": null,
+                "inserted_at": null,
+                "updated_at": null
+            }}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let daemon = service(&server)
+        .set_max_concurrency(DAEMON_ID, 4)
+        .await
+        .unwrap();
+    assert_eq!(daemon.max_concurrency, Some(4));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn clear_max_concurrency_sends_only_the_daemon_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .and(body_string_contains("ClearDaemonMaxConcurrency"))
+        .and(VariablesExactly(json!({ "id": DAEMON_ID })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": { "clearDaemonMaxConcurrency": {
+                "id": DAEMON_ID,
+                "status": "active",
+                "name": "Farm bot",
+                "display_name": "Farm bot",
+                "max_concurrency": null,
+                "enrolled_at": null,
+                "removed_at": null,
+                "inserted_at": null,
+                "updated_at": null
+            }}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let daemon = service(&server)
+        .clear_max_concurrency(DAEMON_ID)
+        .await
+        .unwrap();
+    assert_eq!(daemon.max_concurrency, None);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn set_max_concurrency_rejects_non_positive_values_without_sending() {
+    let server = MockServer::start().await;
+    let result = service(&server).set_max_concurrency(DAEMON_ID, 0).await;
+    assert!(matches!(
+        result,
+        Err(DaemonServiceError::InvalidInput {
+            field: "max concurrency",
+            ..
+        })
+    ));
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]

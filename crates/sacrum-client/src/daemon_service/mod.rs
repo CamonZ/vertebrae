@@ -144,6 +144,40 @@ impl SacrumDaemonService {
             .ok_or(DaemonServiceError::Refused(DaemonRefusal::NotFound))
     }
 
+    pub async fn set_max_concurrency(
+        &self,
+        id: &str,
+        max_concurrency: i32,
+    ) -> Result<DaemonSummary, DaemonServiceError> {
+        if max_concurrency <= 0 {
+            return Err(DaemonServiceError::InvalidInput {
+                field: "max concurrency",
+                message: "must be greater than zero".to_string(),
+            });
+        }
+
+        let id = Self::daemon_id(id)?;
+        self.daemon_mutation_with_variables(
+            daemons::SET_DAEMON_MAX_CONCURRENCY,
+            "setDaemonMaxConcurrency",
+            serde_json::json!({ "id": id, "maxConcurrency": max_concurrency }),
+        )
+        .await
+    }
+
+    pub async fn clear_max_concurrency(
+        &self,
+        id: &str,
+    ) -> Result<DaemonSummary, DaemonServiceError> {
+        let id = Self::daemon_id(id)?;
+        self.daemon_mutation_with_variables(
+            daemons::CLEAR_DAEMON_MAX_CONCURRENCY,
+            "clearDaemonMaxConcurrency",
+            serde_json::json!({ "id": id }),
+        )
+        .await
+    }
+
     pub async fn revoke_daemon(&self, id: &str) -> Result<DaemonSummary, DaemonServiceError> {
         Self::daemon_mutation(self, id, daemons::REVOKE_DAEMON, "revokeDaemon").await
     }
@@ -175,10 +209,18 @@ impl SacrumDaemonService {
         field: &'static str,
     ) -> Result<DaemonSummary, DaemonServiceError> {
         let id = Self::daemon_id(id)?;
+        self.daemon_mutation_with_variables(document, field, serde_json::json!({ "id": id }))
+            .await
+    }
+
+    async fn daemon_mutation_with_variables(
+        &self,
+        document: &str,
+        field: &'static str,
+        variables: Value,
+    ) -> Result<DaemonSummary, DaemonServiceError> {
         let query = with_daemon_fields(document);
-        let response: Option<DaemonResponse> = self
-            .execute_write(&query, serde_json::json!({ "id": id }), field)
-            .await?;
+        let response: Option<DaemonResponse> = self.execute_write(&query, variables, field).await?;
         response
             .map(DaemonResponse::into_summary)
             .transpose()?
