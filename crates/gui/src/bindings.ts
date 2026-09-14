@@ -977,6 +977,22 @@ async renameDaemon(connectionId: string, daemonId: string, name: DaemonNameUpdat
     else return { status: "error", error: e  as any };
 }
 },
+async setDaemonMaxConcurrency(connectionId: string, daemonId: string, maxConcurrency: number) : Promise<Result<DaemonMutationResult, DaemonCommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_daemon_max_concurrency", { connectionId, daemonId, maxConcurrency }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async clearDaemonMaxConcurrency(connectionId: string, daemonId: string) : Promise<Result<DaemonMutationResult, DaemonCommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_daemon_max_concurrency", { connectionId, daemonId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async revokeDaemon(connectionId: string, daemonId: string) : Promise<Result<DaemonMutationResult, DaemonCommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("revoke_daemon", { connectionId, daemonId }) };
@@ -1345,7 +1361,7 @@ export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backe
  * Options for creating a workflow step.
  */
 export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; prompt?: string | null; agents: string[]; skills: string[]; agent_config?: AgentConfig | null; order: number; transitions_to: string[]; step_type?: StepType; output_schema: JsonValue | null; persistence_options?: JsonValue | null; route_config?: JsonValue | null }
-export type Daemon = { id: string; status: string; name: string | null; display_name: string; enrolled_at: string | null; removed_at: string | null; inserted_at: string | null; updated_at: string | null }
+export type Daemon = { id: string; status: string; name: string | null; display_name: string; max_concurrency: number | null; enrolled_at: string | null; removed_at: string | null; inserted_at: string | null; updated_at: string | null }
 export type DaemonBootstrap = { daemon: Daemon; enrollment_token: string; expires_at: string }
 export type DaemonBootstrapResult = { connection_id: string; bootstrap: DaemonBootstrap }
 export type DaemonCommandError = { kind: DaemonErrorKind; message: string }

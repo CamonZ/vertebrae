@@ -4,6 +4,7 @@ pub const DAEMON_FIELDS: &str = r#"
         status
         name
         display_name
+        max_concurrency
         enrolled_at
         inserted_at
         updated_at
@@ -65,6 +66,18 @@ pub const RENAME_DAEMON: &str = r#"
     }
 "#;
 
+pub const SET_DAEMON_MAX_CONCURRENCY: &str = r#"
+    mutation SetDaemonMaxConcurrency($id: Uuid4!, $maxConcurrency: Int!) {
+        setDaemonMaxConcurrency(id: $id, maxConcurrency: $maxConcurrency) { ...DaemonFields }
+    }
+"#;
+
+pub const CLEAR_DAEMON_MAX_CONCURRENCY: &str = r#"
+    mutation ClearDaemonMaxConcurrency($id: Uuid4!) {
+        clearDaemonMaxConcurrency(id: $id) { ...DaemonFields }
+    }
+"#;
+
 pub const REVOKE_DAEMON: &str = r#"
     mutation RevokeDaemon($id: Uuid4!) {
         revokeDaemon(id: $id) { ...DaemonFields }
@@ -99,6 +112,8 @@ mod tests {
             GET_DAEMON_ENROLLMENT_METADATA,
             CREATE_DAEMON,
             RENAME_DAEMON,
+            SET_DAEMON_MAX_CONCURRENCY,
+            CLEAR_DAEMON_MAX_CONCURRENCY,
             REVOKE_DAEMON,
             UNREGISTER_DAEMON,
             ROTATE_DAEMON_CREDENTIALS,
@@ -127,6 +142,8 @@ mod tests {
         assert!(CREATE_DAEMON.contains("enrollment_token"));
         assert!(RENAME_DAEMON.contains("mutation RenameDaemon($id: Uuid4!, $name: String)"));
         assert!(RENAME_DAEMON.contains("renameDaemon(id: $id, name: $name)"));
+        assert!(SET_DAEMON_MAX_CONCURRENCY.contains("setDaemonMaxConcurrency"));
+        assert!(CLEAR_DAEMON_MAX_CONCURRENCY.contains("clearDaemonMaxConcurrency"));
         assert!(REVOKE_DAEMON.contains("revokeDaemon(id: $id)"));
         assert!(UNREGISTER_DAEMON.contains("unregisterDaemon(id: $id)"));
         assert!(ROTATE_DAEMON_CREDENTIALS.contains("rotateDaemonCredentials(id: $id)"));

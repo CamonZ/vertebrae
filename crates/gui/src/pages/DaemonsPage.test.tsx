@@ -9,6 +9,8 @@ const mockUseWebSocketStatus = vi.fn();
 const mockUseDaemonMutations = vi.fn();
 const mockCreateDaemon = vi.fn();
 const mockRenameDaemon = vi.fn();
+const mockSetDaemonMaxConcurrency = vi.fn();
+const mockClearDaemonMaxConcurrency = vi.fn();
 const mockRotateDaemonCredentials = vi.fn();
 const mockUnregisterDaemon = vi.fn();
 const mockSacrumConfigStatus = vi.fn();
@@ -47,6 +49,7 @@ const daemon = (
     status,
     name: id,
     display_name: id,
+    max_concurrency: null,
     enrolled_at: null,
     removed_at: null,
     inserted_at: null,
@@ -92,6 +95,8 @@ describe("DaemonsPage", () => {
     mockUseDaemonMutations.mockReturnValue({
       createDaemon: mockCreateDaemon,
       renameDaemon: mockRenameDaemon,
+      setDaemonMaxConcurrency: mockSetDaemonMaxConcurrency,
+      clearDaemonMaxConcurrency: mockClearDaemonMaxConcurrency,
       rotateDaemonCredentials: mockRotateDaemonCredentials,
       unregisterDaemon: mockUnregisterDaemon,
       isBusy: false,

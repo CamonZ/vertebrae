@@ -47,7 +47,7 @@ export function DaemonsPage() {
   const [enrollmentBootstrap, setEnrollmentBootstrap] =
     useState<DaemonBootstrap | null>(null);
   const [daemonAction, setDaemonAction] = useState<
-    "rename" | "reissue" | "unregister" | null
+    "rename" | "max_concurrency" | "reissue" | "unregister" | null
   >(null);
   const [lastLifecycleAction, setLastLifecycleAction] =
     useState<DaemonLifecycleAction | null>(null);
@@ -75,6 +75,8 @@ export function DaemonsPage() {
   const detail = useDaemonDetail(selectedDaemonId);
   const {
     renameDaemon,
+    setDaemonMaxConcurrency,
+    clearDaemonMaxConcurrency,
     rotateDaemonCredentials,
     unregisterDaemon,
     isBusy: isDaemonMutationBusy,
@@ -166,6 +168,21 @@ export function DaemonsPage() {
       }
     },
     [rotateDaemonCredentials]
+  );
+  const handleMaxConcurrencyChange = useCallback(
+    async (daemonId: string, maxConcurrency: number | null): Promise<boolean> => {
+      setDaemonAction("max_concurrency");
+      try {
+        const updated =
+          maxConcurrency === null
+            ? await clearDaemonMaxConcurrency(daemonId)
+            : await setDaemonMaxConcurrency(daemonId, maxConcurrency);
+        return Boolean(updated);
+      } finally {
+        setDaemonAction(null);
+      }
+    },
+    [clearDaemonMaxConcurrency, setDaemonMaxConcurrency]
   );
   const handleUnregister = useCallback(
     async (daemonId: string): Promise<boolean> => {
@@ -473,11 +490,13 @@ export function DaemonsPage() {
           lifecycleAction={lastLifecycleAction}
           isBusy={isDaemonMutationBusy}
           isRenaming={daemonAction === "rename"}
+          isUpdatingMaxConcurrency={daemonAction === "max_concurrency"}
           isReissuing={daemonAction === "reissue"}
           isUnregistering={daemonAction === "unregister"}
           closing={inspector.closing}
           onClose={closeInspector}
           onRename={handleRename}
+          onMaxConcurrencyChange={handleMaxConcurrencyChange}
           onReissue={handleReissue}
           onUnregister={handleUnregister}
           onExitAnimationEnd={inspector.onAnimationEnd}

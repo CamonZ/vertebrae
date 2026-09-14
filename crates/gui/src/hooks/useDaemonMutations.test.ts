@@ -4,6 +4,8 @@ import { queryClient, queryKeys } from "../query";
 
 const mockCreateDaemon = vi.fn();
 const mockRenameDaemon = vi.fn();
+const mockSetDaemonMaxConcurrency = vi.fn();
+const mockClearDaemonMaxConcurrency = vi.fn();
 const mockUnregisterDaemon = vi.fn();
 const mockRotateDaemonCredentials = vi.fn();
 
@@ -11,6 +13,10 @@ vi.mock("../bindings", () => ({
   commands: {
     createDaemon: (...args: unknown[]) => mockCreateDaemon(...args),
     renameDaemon: (...args: unknown[]) => mockRenameDaemon(...args),
+    setDaemonMaxConcurrency: (...args: unknown[]) =>
+      mockSetDaemonMaxConcurrency(...args),
+    clearDaemonMaxConcurrency: (...args: unknown[]) =>
+      mockClearDaemonMaxConcurrency(...args),
     unregisterDaemon: (...args: unknown[]) => mockUnregisterDaemon(...args),
     rotateDaemonCredentials: (...args: unknown[]) =>
       mockRotateDaemonCredentials(...args),
@@ -30,6 +36,7 @@ const daemon: Daemon = {
   status: "pending",
   name: null,
   display_name: "33333333",
+  max_concurrency: null,
   enrolled_at: null,
   removed_at: null,
   inserted_at: "2026-09-05T10:00:00+00:00",
@@ -197,6 +204,48 @@ describe("useDaemonMutations", () => {
     expect(
       queryClient.getQueryData(queryKeys.daemons.fleet("identity-a"))
     ).toEqual([renamed]);
+  });
+
+  it("reconciles confirmed max concurrency changes in both caches", async () => {
+    const updated = { ...daemon, max_concurrency: 6 };
+    queryClient.setQueryData(queryKeys.daemons.fleet("identity-a"), [daemon]);
+    queryClient.setQueryData(
+      queryKeys.daemons.detail("identity-a", daemon.id),
+      daemon
+    );
+    mockSetDaemonMaxConcurrency.mockResolvedValue({
+      status: "ok",
+      data: { connection_id: "identity-a", daemon: updated },
+    });
+
+    const { result } = renderHook(() => useDaemonMutations());
+    await act(async () => {
+      await result.current.setDaemonMaxConcurrency(daemon.id, 6);
+    });
+
+    expect(mockSetDaemonMaxConcurrency).toHaveBeenCalledWith(
+      "identity-a",
+      daemon.id,
+      6
+    );
+    expect(
+      queryClient.getQueryData(queryKeys.daemons.fleet("identity-a"))
+    ).toEqual([updated]);
+    expect(
+      queryClient.getQueryData(queryKeys.daemons.detail("identity-a", daemon.id))
+    ).toEqual(updated);
+
+    mockClearDaemonMaxConcurrency.mockResolvedValue({
+      status: "ok",
+      data: { connection_id: "identity-a", daemon },
+    });
+    await act(async () => {
+      await result.current.clearDaemonMaxConcurrency(daemon.id);
+    });
+    expect(mockClearDaemonMaxConcurrency).toHaveBeenCalledWith(
+      "identity-a",
+      daemon.id
+    );
   });
 
   it("refuses to mutate without a backend connection", async () => {
