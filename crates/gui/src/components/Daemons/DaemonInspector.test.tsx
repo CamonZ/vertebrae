@@ -9,6 +9,7 @@ const daemon: Daemon = {
   status: "active",
   name: "rack-03",
   display_name: "rack-03",
+  max_concurrency: 4,
   enrolled_at: "2026-09-12T09:00:00Z",
   removed_at: null,
   inserted_at: "2026-09-12T08:00:00Z",
@@ -188,6 +189,46 @@ describe("DaemonInspector", () => {
           status.textContent?.includes("Drain the daemon first")
         )
     ).toBe(true);
+  });
+
+  it("sets and clears max concurrency from the inline control", async () => {
+    const user = userEvent.setup();
+    const onMaxConcurrencyChange = vi.fn().mockResolvedValue(true);
+    renderInspector({ onMaxConcurrencyChange });
+    const editor = within(
+      screen.getByTestId("daemon-inspector-max-concurrency-editor")
+    );
+
+    await user.click(editor.getByText("4"));
+    const input = screen.getByRole("textbox");
+    await user.clear(input);
+    await user.type(input, "8{Enter}");
+    await waitFor(() =>
+      expect(onMaxConcurrencyChange).toHaveBeenCalledWith(daemon.id, 8)
+    );
+
+    await user.click(editor.getByText("4"));
+    await user.clear(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(onMaxConcurrencyChange).toHaveBeenLastCalledWith(daemon.id, null)
+    );
+  });
+
+  it("rejects zero max concurrency before calling the server", async () => {
+    const user = userEvent.setup();
+    const onMaxConcurrencyChange = vi.fn().mockResolvedValue(true);
+    renderInspector({ onMaxConcurrencyChange });
+    const editor = within(
+      screen.getByTestId("daemon-inspector-max-concurrency-editor")
+    );
+
+    await user.click(editor.getByText("4"));
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "0{Enter}");
+
+    expect(onMaxConcurrencyChange).not.toHaveBeenCalled();
+    expect(editor.getByText("Enter a whole number greater than zero.")).toBeInTheDocument();
   });
 
   it("shows revoked state without offering credential controls", () => {

@@ -35,11 +35,16 @@ interface DaemonInspectorProps {
   lifecycleAction?: DaemonLifecycleAction | null;
   isBusy?: boolean;
   isRenaming?: boolean;
+  isUpdatingMaxConcurrency?: boolean;
   isReissuing?: boolean;
   isUnregistering?: boolean;
   closing?: boolean;
   onClose: () => void;
   onRename?: (daemonId: string, name: DaemonNameUpdate) => Promise<boolean>;
+  onMaxConcurrencyChange?: (
+    daemonId: string,
+    maxConcurrency: number | null
+  ) => Promise<boolean>;
   onReissue: (daemonId: string) => void;
   onUnregister: (daemonId: string) => Promise<boolean>;
   onExitAnimationEnd: (event: {
@@ -76,6 +81,17 @@ function DetailEditorRow({
   );
 }
 
+function validateMaxConcurrency(value: string): string | null {
+  if (!value) return null;
+  if (!/^\d+$/.test(value)) {
+    return "Enter a whole number greater than zero.";
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0
+    ? null
+    : "Enter a whole number greater than zero.";
+}
+
 export function DaemonInspector({
   daemon,
   isLoading,
@@ -86,11 +102,13 @@ export function DaemonInspector({
   lifecycleAction = null,
   isBusy = false,
   isRenaming = false,
+  isUpdatingMaxConcurrency = false,
   isReissuing = false,
   isUnregistering = false,
   closing = false,
   onClose,
   onRename = async () => false,
+  onMaxConcurrencyChange = async () => false,
   onReissue,
   onUnregister,
   onExitAnimationEnd,
@@ -100,7 +118,12 @@ export function DaemonInspector({
     DaemonLifecycleAction,
     "rename"
   > | null>(null);
-  const actionBusy = isBusy || isRenaming || isReissuing || isUnregistering;
+  const actionBusy =
+    isBusy ||
+    isRenaming ||
+    isUpdatingMaxConcurrency ||
+    isReissuing ||
+    isUnregistering;
   const terminal = daemon?.status === "removed";
   const revoked = daemon?.status === "revoked";
 
@@ -232,6 +255,34 @@ export function DaemonInspector({
                           if (!renamed) {
                             throw new Error(
                               "The daemon name was not saved on the server."
+                            );
+                          }
+                        }}
+                      />
+                    </div>
+                  </DetailEditorRow>
+                  <DetailEditorRow label="Max concurrency">
+                    <div data-testid="daemon-inspector-max-concurrency-editor">
+                      <InlineEditField
+                        value={
+                          daemon.max_concurrency == null
+                            ? ""
+                            : String(daemon.max_concurrency)
+                        }
+                        placeholder="Unlimited"
+                        compact
+                        allowEmpty
+                        monospace
+                        disabled={actionBusy}
+                        validate={validateMaxConcurrency}
+                        onSave={async (value) => {
+                          const updated = await onMaxConcurrencyChange(
+                            daemon.id,
+                            value ? Number(value) : null
+                          );
+                          if (!updated) {
+                            throw new Error(
+                              "The daemon concurrency limit was not saved on the server."
                             );
                           }
                         }}

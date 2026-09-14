@@ -26,6 +26,7 @@ const daemon: Daemon = {
   status: "active",
   name: "Farm bot",
   display_name: "Farm bot",
+  max_concurrency: null,
   enrolled_at: "2026-09-05T11:00:00+00:00",
   removed_at: null,
   inserted_at: "2026-09-05T10:00:00+00:00",

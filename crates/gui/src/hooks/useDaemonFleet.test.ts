@@ -26,6 +26,7 @@ const daemon: Daemon = {
   status: "pending",
   name: null,
   display_name: "33333333",
+  max_concurrency: null,
   enrolled_at: null,
   removed_at: null,
   inserted_at: "2026-09-05T10:00:00+00:00",

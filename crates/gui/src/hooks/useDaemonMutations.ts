@@ -42,6 +42,11 @@ interface DaemonMutations extends DaemonMutationState {
     daemonId: string,
     name: DaemonNameUpdate
   ) => Promise<Daemon | null>;
+  setDaemonMaxConcurrency: (
+    daemonId: string,
+    maxConcurrency: number
+  ) => Promise<Daemon | null>;
+  clearDaemonMaxConcurrency: (daemonId: string) => Promise<Daemon | null>;
   unregisterDaemon: (daemonId: string) => Promise<Daemon | null>;
   rotateDaemonCredentials: (
     daemonId: string
@@ -157,6 +162,47 @@ export function useDaemonMutations(): DaemonMutations {
     [runMutation]
   );
 
+  const setDaemonMaxConcurrency = useCallback(
+    async (
+      daemonId: string,
+      maxConcurrency: number
+    ): Promise<Daemon | null> => {
+      const result = await runMutation(
+        (connectionId) =>
+          unwrapCommand(
+            commands.setDaemonMaxConcurrency(
+              connectionId,
+              daemonId,
+              maxConcurrency
+            )
+          ),
+        "daemon",
+        daemonId,
+        (mutation) =>
+          updateDaemonInQueryCache(mutation.connection_id, mutation.daemon)
+      );
+      return result?.daemon ?? null;
+    },
+    [runMutation]
+  );
+
+  const clearDaemonMaxConcurrency = useCallback(
+    async (daemonId: string): Promise<Daemon | null> => {
+      const result = await runMutation(
+        (connectionId) =>
+          unwrapCommand(
+            commands.clearDaemonMaxConcurrency(connectionId, daemonId)
+          ),
+        "daemon",
+        daemonId,
+        (mutation) =>
+          updateDaemonInQueryCache(mutation.connection_id, mutation.daemon)
+      );
+      return result?.daemon ?? null;
+    },
+    [runMutation]
+  );
+
   const rotateDaemonCredentials = useCallback(
     async (daemonId: string): Promise<DaemonBootstrap | null> => {
       const result = await runMutation(
@@ -178,6 +224,8 @@ export function useDaemonMutations(): DaemonMutations {
     ...state,
     createDaemon,
     renameDaemon,
+    setDaemonMaxConcurrency,
+    clearDaemonMaxConcurrency,
     unregisterDaemon,
     rotateDaemonCredentials,
     reset,

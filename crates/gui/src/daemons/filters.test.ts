@@ -15,6 +15,7 @@ const daemon = (
     status: "active",
     name: "Alpha",
     display_name: "Alpha",
+    max_concurrency: null,
     enrolled_at: null,
     removed_at: null,
     inserted_at: null,

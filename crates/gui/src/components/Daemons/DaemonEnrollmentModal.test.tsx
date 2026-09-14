@@ -28,6 +28,7 @@ const bootstrap: DaemonBootstrap = {
     status: "pending",
     name: "rack-03",
     display_name: "rack-03",
+    max_concurrency: null,
     enrolled_at: null,
     removed_at: null,
     inserted_at: "2026-09-12T09:00:00Z",

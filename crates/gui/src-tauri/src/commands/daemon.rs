@@ -259,6 +259,45 @@ pub async fn rename_daemon(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn set_daemon_max_concurrency(
+    state: State<'_, AppState>,
+    connection_id: String,
+    daemon_id: String,
+    max_concurrency: i32,
+) -> Result<DaemonMutationResult, DaemonCommandError> {
+    let (connection_id, daemon) =
+        with_daemon_connection(&state, connection_id, |service| async move {
+            service
+                .set_max_concurrency(&daemon_id, max_concurrency)
+                .await
+        })
+        .await?;
+    Ok(DaemonMutationResult {
+        connection_id,
+        daemon: daemon.into(),
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn clear_daemon_max_concurrency(
+    state: State<'_, AppState>,
+    connection_id: String,
+    daemon_id: String,
+) -> Result<DaemonMutationResult, DaemonCommandError> {
+    let (connection_id, daemon) =
+        with_daemon_connection(&state, connection_id, |service| async move {
+            service.clear_max_concurrency(&daemon_id).await
+        })
+        .await?;
+    Ok(DaemonMutationResult {
+        connection_id,
+        daemon: daemon.into(),
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn revoke_daemon(
     state: State<'_, AppState>,
     connection_id: String,

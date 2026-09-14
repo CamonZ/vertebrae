@@ -157,6 +157,8 @@ fn create_builder() -> Builder {
             commands::get_daemon_enrollment_metadata,
             commands::create_daemon,
             commands::rename_daemon,
+            commands::set_daemon_max_concurrency,
+            commands::clear_daemon_max_concurrency,
             commands::revoke_daemon,
             commands::unregister_daemon,
             commands::rotate_daemon_credentials,
