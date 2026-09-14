@@ -30,6 +30,8 @@ pub enum CodexNotification {
     ItemCompleted(Value),
     ThreadStarted(Value),
     ThreadStatusChanged(Value),
+    ThreadNameUpdated(Value),
+    ThreadUpdated(Value),
     TokenUsageUpdated(Value),
     TurnCompleted(Value),
     Error(Value),
@@ -44,6 +46,8 @@ impl CodexNotification {
             Self::ItemCompleted(_) => "item/completed",
             Self::ThreadStarted(_) => "thread/started",
             Self::ThreadStatusChanged(_) => "thread/status/changed",
+            Self::ThreadNameUpdated(_) => "thread/name/updated",
+            Self::ThreadUpdated(_) => "thread/updated",
             Self::TokenUsageUpdated(_) => "thread/tokenUsage/updated",
             Self::TurnCompleted(_) => "turn/completed",
             Self::Error(_) => "error",
@@ -58,6 +62,8 @@ impl CodexNotification {
             | Self::ItemCompleted(value)
             | Self::ThreadStarted(value)
             | Self::ThreadStatusChanged(value)
+            | Self::ThreadNameUpdated(value)
+            | Self::ThreadUpdated(value)
             | Self::TokenUsageUpdated(value)
             | Self::TurnCompleted(value)
             | Self::Error(value) => value,
@@ -80,6 +86,8 @@ pub fn decode_notification(
         "item/completed" => CodexNotification::ItemCompleted(params),
         "thread/started" => CodexNotification::ThreadStarted(params),
         "thread/status/changed" => CodexNotification::ThreadStatusChanged(params),
+        "thread/name/updated" => CodexNotification::ThreadNameUpdated(params),
+        "thread/updated" => CodexNotification::ThreadUpdated(params),
         "thread/tokenUsage/updated" => CodexNotification::TokenUsageUpdated(params),
         "turn/completed" => CodexNotification::TurnCompleted(params),
         "error" => CodexNotification::Error(params),
@@ -141,5 +149,17 @@ mod tests {
     fn malformed_known_notifications_are_rejected_at_the_boundary() {
         let error = decode_notification("item/agentMessage/delta", Value::Null).unwrap_err();
         assert!(error.contains("requires object params"));
+    }
+
+    #[test]
+    fn decodes_native_thread_name_update() {
+        let notification = decode_notification(
+            "thread/name/updated",
+            serde_json::json!({"threadId":"root-thread","threadName":"Native title"}),
+        )
+        .unwrap();
+        assert!(
+            matches!(notification, CodexNotification::ThreadNameUpdated(params) if params["threadName"] == "Native title")
+        );
     }
 }

@@ -4,6 +4,7 @@ import type {
   LocalChatSessionEndEvent,
   LocalChatSessionErrorEvent,
   LocalChatSessionInitEvent,
+  LocalChatSessionTitleEvent,
   LocalChatSessionUsageEvent,
   LocalChatSessionWarningEvent,
   LocalChatCompactionEvent,
@@ -157,6 +158,21 @@ export function routeLocalChatSessionInitEvent(
     store.setProviderResumeId,
     store.setSessionModel
   );
+  return true;
+}
+
+export function routeLocalChatSessionTitleEvent(
+  payload: LocalChatSessionTitleEvent
+): boolean {
+  const sessionId = resolveSessionId(payload.backend_session_id);
+  if (!sessionId || !payload.title.trim()) return false;
+  const store = useChatStore.getState();
+  store.setSessionTitleCandidate(sessionId, {
+    title: payload.title,
+    confidence: 1,
+    sufficientSignal: true,
+    userMessageCount: store.sessions[sessionId]?.titleUserMessageCount ?? 0,
+  });
   return true;
 }
 
@@ -507,6 +523,13 @@ function subscribeLocalChatEvents(): Unlisten {
       routeLocalChatSessionInitEvent(event.payload);
     })
   );
+  if (events.localChatSessionTitleEvent) {
+    void register(
+      events.localChatSessionTitleEvent.listen((event) => {
+        routeLocalChatSessionTitleEvent(event.payload);
+      })
+    );
+  }
   void register(
     events.localChatTurnStartedEvent.listen((event) => {
       routeLocalChatTurnStartedEvent(event.payload);

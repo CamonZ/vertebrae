@@ -120,6 +120,12 @@ pub struct SessionStarted {
     pub tools: Vec<String>,
 }
 
+/// Provider-generated display title, when the harness exposes one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionTitle {
+    pub title: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnStarted {
     /// Optional display summary for a turn accepted by the adapter. Exactly
@@ -319,6 +325,7 @@ pub struct CompactionEvent {
 #[derive(Debug, Clone, PartialEq)]
 pub enum HarnessEventPayloadV1 {
     SessionStarted(SessionStarted),
+    SessionTitle(SessionTitle),
     ThreadDeclared(ThreadDeclared),
     TurnStarted(TurnStarted),
     TurnInput(TurnInput),
@@ -355,6 +362,7 @@ impl HarnessEventPayloadV1 {
     pub fn event_type(&self) -> &str {
         match self {
             Self::SessionStarted(_) => "session_started",
+            Self::SessionTitle(_) => "session_title",
             Self::ThreadDeclared(_) => "thread_declared",
             Self::TurnStarted(_) => "turn_started",
             Self::TurnInput(_) => "turn_input",
@@ -387,6 +395,7 @@ impl HarnessEventPayloadV1 {
     fn to_data(&self) -> Result<Value, serde_json::Error> {
         match self {
             Self::SessionStarted(value) => serde_json::to_value(value),
+            Self::SessionTitle(value) => serde_json::to_value(value),
             Self::ThreadDeclared(value) => serde_json::to_value(value),
             Self::TurnStarted(value) => serde_json::to_value(value),
             Self::TurnInput(value) => serde_json::to_value(value),
@@ -418,6 +427,7 @@ impl HarnessEventPayloadV1 {
 
         match event_type.as_str() {
             "session_started" => decode!(SessionStarted, SessionStarted),
+            "session_title" => decode!(SessionTitle, SessionTitle),
             "thread_declared" => decode!(ThreadDeclared, ThreadDeclared),
             "turn_started" => decode!(TurnStarted, TurnStarted),
             "turn_input" => decode!(TurnInput, TurnInput),

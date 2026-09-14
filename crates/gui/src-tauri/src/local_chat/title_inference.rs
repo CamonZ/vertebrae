@@ -11,7 +11,7 @@ use crate::helpers::{build_augmented_path, find_claude_binary, find_codex_binary
 use crate::local_chat::LocalChatHarnessKind;
 
 const CLAUDE_TITLE_MODEL: &str = "haiku";
-const CODEX_TITLE_MODEL: &str = "gpt-5.4-mini";
+const CODEX_TITLE_MODEL: &str = "gpt-5.6-luna";
 const TITLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -205,6 +205,11 @@ fn codex_title_args(schema_path: &Path, output_path: &Path) -> Vec<String> {
         "exec".to_string(),
         "--model".to_string(),
         CODEX_TITLE_MODEL.to_string(),
+        // `codex exec --help` exposes config overrides, but no standalone
+        // reasoning flag. `none` is the lowest effort supported by the
+        // gpt-5.6-luna model.
+        "-c".to_string(),
+        "model_reasoning_effort=\"none\"".to_string(),
         "--output-schema".to_string(),
         schema_path.to_string_lossy().into_owned(),
         "--output-last-message".to_string(),
@@ -300,6 +305,27 @@ fn parse_title_from_text(text: &str) -> Result<InferLocalChatSessionTitleOutput,
 }
 
 fn title_from_value(value: &Value) -> Result<InferLocalChatSessionTitleOutput, String> {
+    // Claude's harness can persist these native title records alongside the
+    // normal transcript. Prefer them whenever they reach this boundary.
+    if matches!(
+        value.get("type").and_then(Value::as_str),
+        Some("ai-title" | "custom-title")
+    ) {
+        let title = value
+            .get(
+                if value.get("type").and_then(Value::as_str) == Some("ai-title") {
+                    "aiTitle"
+                } else {
+                    "customTitle"
+                },
+            )
+            .or_else(|| value.get("title"))
+            .or_else(|| value.get("name"))
+            .and_then(Value::as_str)
+            .and_then(sanitize_title)
+            .ok_or_else(|| "Native title record was empty.".to_string())?;
+        return Ok(confident_title(title));
+    }
     if value.get("is_error").and_then(Value::as_bool) == Some(true) {
         return Err(format!(
             "Title inference command returned an error: {}",
@@ -456,6 +482,20 @@ mod tests {
                 + 1],
             output_path.to_string_lossy()
         );
+        assert!(args
+            .iter()
+            .any(|arg| arg == "model_reasoning_effort=\"none\""));
+    }
+
+    #[test]
+    fn parses_claude_native_title_records() {
+        let ai = parse_title_from_text(r#"{"type":"ai-title","aiTitle":"Native Claude Title"}"#)
+            .unwrap();
+        assert_eq!(ai.title.as_deref(), Some("Native Claude Title"));
+        let custom =
+            parse_title_from_text(r#"{"type":"custom-title","customTitle":"Custom Claude Title"}"#)
+                .unwrap();
+        assert_eq!(custom.title.as_deref(), Some("Custom Claude Title"));
     }
 
     #[test]

@@ -160,6 +160,7 @@ function inferSessionTitleInBackground(
 ) {
   if (
     !setSessionTitleCandidate ||
+    session.harness === "claude" ||
     !shouldInferSessionTitle(session, userMessages)
   ) {
     return;

@@ -119,6 +119,7 @@ async fn mock_server() -> (String, tokio::task::JoinHandle<()>, Arc<Mutex<Vec<St
                     socket.send(Message::Text(json!({"method":"turn/started","params":{"threadId":"root-thread","turn":{"id":"turn-1","status":"inProgress"}}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"mcpServer/startupStatus/updated","params":{"threadId":"root-thread","name":"node_repl","status":"ready"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":21}}}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"method":"thread/name/updated","params":{"threadId":"root-thread","threadName":"Native Codex Title"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"id":"approval-1","method":"item/commandExecution/requestApproval","params":{"requestId":"approval-1","threadId":"root-thread","turnId":"turn-1","command":"pwd"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"id":"child-approval","method":"item/commandExecution/requestApproval","params":{"requestId":"child-approval","threadId":"child-thread","turnId":"child-turn","command":"pwd"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"item/agentMessage/delta","params":{"threadId":"root-thread","turnId":"turn-1","delta":"hello"}}).to_string())).await.unwrap();
@@ -422,6 +423,7 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
     .unwrap();
     let events = events.events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::SessionStarted(started) if started.provider == "openai")));
+    assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::SessionTitle(title) if title.title == "Native Codex Title" && event.correlation.thread_id.as_ref() == Some(&vertebrae_harness_core::ThreadId::from("root-thread")))));
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::TurnInput(input) if input.content == "hello" && input.provenance == TurnInputProvenance::Human)));
     assert!(events.iter().any(
         |event| matches!(&event.payload, HarnessEventPayloadV1::Text(text) if text.text == "hello")

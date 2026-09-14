@@ -7,11 +7,13 @@ import {
   type LocalChatToolCallEvent,
   type LocalChatTurnStartedEvent,
   type LocalChatCompactionEvent,
+  type LocalChatSessionTitleEvent,
 } from "../bindings";
 import { useChatStore, type ChatSession } from "../stores/chatStore";
 import translationSequence from "../test/fixtures/localChatTurnTranslation.json";
 import {
   routeLocalChatSessionEndEvent,
+  routeLocalChatSessionTitleEvent,
   routeLocalChatSessionErrorEvent,
   routeLocalChatCompactionEvent,
   routeLocalChatTextEvent,
@@ -55,6 +57,7 @@ vi.mock("../bindings", () => {
     },
     events: {
       localChatSessionInitEvent: { listen },
+      localChatSessionTitleEvent: { listen },
       localChatTurnStartedEvent: { listen },
       localChatSessionUsageEvent: { listen },
       localChatTextEvent: { listen },
@@ -128,14 +131,49 @@ describe("useLocalChatEventRouter route functions", () => {
     resetChatStore({});
   });
 
+  it("routes a native session title into the store", () => {
+    resetChatStore({
+      session: makeSession({ backendSessionId: "backend", label: "New Chat" }),
+    });
+    const payload: LocalChatSessionTitleEvent = {
+      backend_session_id: "backend",
+      harness: "claude",
+      title: "Native Claude Title",
+    };
+
+    expect(routeLocalChatSessionTitleEvent(payload)).toBe(true);
+    expect(useChatStore.getState().sessions.session.title).toBe(
+      "Native Claude Title"
+    );
+  });
+
+  it("does not replace a manual title with a native title", () => {
+    resetChatStore({
+      session: makeSession({
+        backendSessionId: "backend",
+        title: "Keep My Title",
+        titleStatus: "manual",
+      }),
+    });
+
+    expect(
+      routeLocalChatSessionTitleEvent({
+        backend_session_id: "backend",
+        harness: "claude",
+        title: "Provider Title",
+      })
+    ).toBe(true);
+    expect(useChatStore.getState().sessions.session.title).toBe("Keep My Title");
+  });
+
   it("subscribes only once when the router is mounted multiple times in a webview", async () => {
     const first = renderHook(() => useLocalChatEventRouter());
     const second = renderHook(() => useLocalChatEventRouter());
 
     await waitFor(() => {
-      expect(listen).toHaveBeenCalledTimes(11);
+      expect(listen).toHaveBeenCalledTimes(12);
     });
-    expect(unlisteners).toHaveLength(11);
+    expect(unlisteners).toHaveLength(12);
 
     first.unmount();
     for (const unlisten of unlisteners) {

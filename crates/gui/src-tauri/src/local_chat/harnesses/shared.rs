@@ -14,9 +14,10 @@ use vertebrae_harness_core::{
 use crate::local_chat::{
     LocalChatCompactionEvent, LocalChatEvent, LocalChatEventSink, LocalChatFileChange,
     LocalChatFileChangeEvent, LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionEndEvent,
-    LocalChatSessionErrorEvent, LocalChatSessionInitEvent, LocalChatSessionUsageEvent,
-    LocalChatSessionWarningEvent, LocalChatSpeedTierStatus, LocalChatTextEvent,
-    LocalChatToolCallEvent, LocalChatToolResultEvent, LocalChatTurnStartedEvent,
+    LocalChatSessionErrorEvent, LocalChatSessionInitEvent, LocalChatSessionTitleEvent,
+    LocalChatSessionUsageEvent, LocalChatSessionWarningEvent, LocalChatSpeedTierStatus,
+    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
+    LocalChatTurnStartedEvent,
 };
 
 #[derive(Default)]
@@ -231,6 +232,16 @@ impl EventSink for LocalChatHarnessEventSink {
                             diagnostic: status.diagnostic,
                         }
                     }),
+                }))?;
+            }
+            HarnessEventPayloadV1::SessionTitle(value) => {
+                if !is_root_stream {
+                    return Ok(());
+                }
+                self.emit_local(LocalChatEvent::Title(LocalChatSessionTitleEvent {
+                    backend_session_id,
+                    harness,
+                    title: value.title,
                 }))?;
             }
             HarnessEventPayloadV1::TurnStarted(_) => {

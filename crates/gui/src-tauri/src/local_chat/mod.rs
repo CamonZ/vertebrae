@@ -14,9 +14,9 @@ When referring to local files, put the exact path inside inline code, optionally
 pub(crate) use events::{
     LocalChatCompactionEvent, LocalChatEvent, LocalChatEventSink, LocalChatFileChange,
     LocalChatFileChangeEvent, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,
-    LocalChatSessionInitEvent, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
-    LocalChatSpeedTierStatus, LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
-    LocalChatTurnStartedEvent,
+    LocalChatSessionInitEvent, LocalChatSessionTitleEvent, LocalChatSessionUsageEvent,
+    LocalChatSessionWarningEvent, LocalChatSpeedTierStatus, LocalChatTextEvent,
+    LocalChatToolCallEvent, LocalChatToolResultEvent, LocalChatTurnStartedEvent,
 };
 pub(crate) use harness::{
     CreateLocalChatSessionInput, HarnessCreateSessionInput, LocalChatHarness,

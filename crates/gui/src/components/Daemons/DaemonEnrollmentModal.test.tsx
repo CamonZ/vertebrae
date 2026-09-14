@@ -67,8 +67,10 @@ describe("DaemonEnrollmentModal", () => {
       await screen.findByTestId("daemon-enrollment-token-step")
     ).toBeInTheDocument();
     expect(mockSacrumConfigStatus).toHaveBeenCalledOnce();
-    expect(screen.getByText(/vtb-daemon enroll/)).toHaveTextContent(
-      "https://sacrum.example.com"
+    await waitFor(() =>
+      expect(screen.getByText(/vtb-daemon enroll/)).toHaveTextContent(
+        "https://sacrum.example.com"
+      )
     );
     expect(
       screen.getByLabelText("Hidden enrollment token")

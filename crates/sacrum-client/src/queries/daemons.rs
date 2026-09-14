@@ -5,7 +5,6 @@ pub const DAEMON_FIELDS: &str = r#"
         name
         display_name
         enrolled_at
-        removed_at
         inserted_at
         updated_at
     }
@@ -122,6 +121,7 @@ mod tests {
             GET_DAEMON_ENROLLMENT_METADATA
                 .contains("credentials { ...DaemonCredentialMetadataFields }")
         );
+        assert!(!DAEMON_FIELDS.contains("removed_at"));
         assert!(CREATE_DAEMON.contains("mutation CreateDaemon($name: String)"));
         assert!(CREATE_DAEMON.contains("createDaemon(name: $name)"));
         assert!(CREATE_DAEMON.contains("enrollment_token"));
