@@ -320,6 +320,11 @@ Client type "default" receives:
 Client type "daemon" receives ONLY:
   run_step  (with prompt + agent_config payload)
   cancel_step
+
+The GUI also joins the authenticated `accounts:me` channel for account-scoped
+`daemon_created`, `daemon_updated`, and `daemon_deleted` CDC broadcasts. The
+daemon fleet takes an initial snapshot and explicitly recovers with a snapshot
+after reconnect; it does not poll periodically between broadcasts.
 ```
 
 The legacy account-authenticated daemon registers project channels with

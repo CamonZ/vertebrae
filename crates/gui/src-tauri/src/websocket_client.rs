@@ -5,6 +5,7 @@
 
 use futures::{stream::SplitSink, stream::SplitStream, SinkExt, StreamExt};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{async_runtime::JoinHandle as ActorJoinHandle, Emitter, Runtime};
@@ -16,13 +17,14 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::events::{
-    ArtifactChangeType, ArtifactChangedEvent, PermissionRequestEvent, SectionChangeType,
-    SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent, StepChangeType,
-    StepChangedEvent, StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
-    StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent,
-    TaskPreviousBucketIdentity, TaskRunChangeType, TaskRunChangedEvent, TaskRunControlsPayload,
-    TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent,
-    WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
+    ArtifactChangeType, ArtifactChangedEvent, DaemonChangeType, DaemonChangedEvent,
+    PermissionRequestEvent, SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent,
+    SessionLogUpdatedEvent, StepChangeType, StepChangedEvent, StepExecutionChangeType,
+    StepExecutionChangedEvent, StepExecutionStatus, StepTransitionChangeType,
+    StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent, TaskPreviousBucketIdentity,
+    TaskRunChangeType, TaskRunChangedEvent, TaskRunControlsPayload, TaskRunStepChangedEvent,
+    TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
+    WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -96,6 +98,22 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Maximum reconnection delay (30 seconds)
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
+const ACCOUNTS_TOPIC: &str = "accounts:me";
+
+/// Match the cache identity used by `GraphqlClient` without retaining the
+/// bearer token in websocket events or frontend state.
+fn connection_identity(base_url: &str, api_token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(base_url.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(api_token.as_bytes());
+    let digest = hasher.finalize();
+    digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// WebSocket connection state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -123,8 +141,9 @@ type SacrumWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 struct ActiveConnection {
     write: SplitSink<SacrumWebSocket, Message>,
     read: SplitStream<SacrumWebSocket>,
-    joined_topic: Option<String>,
-    join_ref: Option<String>,
+    connection_id: String,
+    joined_account_ref: Option<String>,
+    joined_project: Option<(String, String)>,
     next_ref: u64,
 }
 
@@ -135,15 +154,15 @@ impl ActiveConnection {
         ref_id
     }
 
-    async fn join_project<R: Runtime>(
+    async fn join_topic<R: Runtime>(
         &mut self,
         api_token: &str,
-        project_slug: &str,
+        topic: String,
+        account_joined: bool,
         app_handle: &tauri::AppHandle<R>,
-    ) -> Result<(), String> {
+    ) -> Result<String, String> {
         let join_ref = Uuid::new_v4().to_string();
         let ref_id = self.next_ref();
-        let topic = Self::project_topic(project_slug);
         let join_payload = serde_json::json!({
             "token": api_token
         });
@@ -155,15 +174,46 @@ impl ActiveConnection {
             .await
             .map_err(|e| format!("Failed to send join message: {}", e))?;
 
-        self.wait_for_join_reply(&join_ref, app_handle).await?;
-        self.joined_topic = Some(topic);
-        self.join_ref = Some(join_ref);
+        self.wait_for_join_reply(&join_ref, account_joined, app_handle)
+            .await?;
+        Ok(join_ref)
+    }
+
+    async fn join_account<R: Runtime>(
+        &mut self,
+        api_token: &str,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let join_ref = self
+            .join_topic(api_token, ACCOUNTS_TOPIC.to_string(), false, app_handle)
+            .await?;
+        self.joined_account_ref = Some(join_ref);
+        Ok(())
+    }
+
+    async fn join_project<R: Runtime>(
+        &mut self,
+        api_token: &str,
+        project_slug: &str,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let topic = Self::project_topic(project_slug);
+        let join_ref = self
+            .join_topic(
+                api_token,
+                topic.clone(),
+                self.joined_account_ref.is_some(),
+                app_handle,
+            )
+            .await?;
+        self.joined_project = Some((topic, join_ref));
         Ok(())
     }
 
     async fn wait_for_join_reply<R: Runtime>(
         &mut self,
         join_ref: &str,
+        account_joined: bool,
         app_handle: &tauri::AppHandle<R>,
     ) -> Result<(), String> {
         tokio::time::timeout(JOIN_REPLY_TIMEOUT, async {
@@ -185,7 +235,11 @@ impl ActiveConnection {
                         if let Err(e) = SacrumSocket::handle_phoenix_message_for_topic(
                             &text,
                             app_handle,
-                            self.joined_topic.as_deref(),
+                            self.joined_project
+                                .as_ref()
+                                .map(|(topic, _)| topic.as_str()),
+                            account_joined,
+                            &self.connection_id,
                         ) {
                             log::warn!("[WebSocket] Failed to handle message before join: {}", e);
                         }
@@ -253,16 +307,11 @@ impl ActiveConnection {
         }
     }
 
-    async fn leave_current(&mut self) -> Result<(), String> {
-        let Some(topic) = self.joined_topic.take() else {
-            self.join_ref = None;
+    async fn leave_project(&mut self) -> Result<(), String> {
+        let Some((topic, join_ref)) = self.joined_project.take() else {
             return Ok(());
         };
 
-        let join_ref = self
-            .join_ref
-            .take()
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let ref_id = self.next_ref();
         let leave_msg = serde_json::json!([join_ref, ref_id, topic, "phx_leave", {}]);
         log::info!("[WebSocket] Sending leave for topic '{}'", topic);
@@ -273,8 +322,23 @@ impl ActiveConnection {
         Ok(())
     }
 
+    async fn leave_account(&mut self) -> Result<(), String> {
+        let Some(join_ref) = self.joined_account_ref.take() else {
+            return Ok(());
+        };
+        let ref_id = self.next_ref();
+        let leave_msg = serde_json::json!([join_ref, ref_id, ACCOUNTS_TOPIC, "phx_leave", {}]);
+        log::info!("[WebSocket] Sending leave for topic '{}'", ACCOUNTS_TOPIC);
+        self.write
+            .send(Message::Text(leave_msg.to_string()))
+            .await
+            .map_err(|e| format!("Failed to send leave message: {}", e))?;
+        Ok(())
+    }
+
     async fn close(mut self) {
-        let _ = self.leave_current().await;
+        let _ = self.leave_project().await;
+        let _ = self.leave_account().await;
         let _ = self.write.send(Message::Close(None)).await;
         let _ = self.write.close().await;
     }
@@ -439,28 +503,6 @@ impl SacrumSocket {
         let mut has_connected = false;
 
         loop {
-            if desired_project.is_none() {
-                Self::set_state(
-                    &state,
-                    ConnectionState::Disconnected,
-                    Some("disconnected"),
-                    Some(&app_handle),
-                )
-                .await;
-
-                match commands.recv().await {
-                    Some(SocketCommand::SwitchProject {
-                        project_slug,
-                        reply,
-                    }) => {
-                        desired_project = project_slug;
-                        let _ = reply.send(Ok(()));
-                        continue;
-                    }
-                    Some(SocketCommand::Shutdown) | None => break,
-                }
-            }
-
             let connecting_state = if has_connected {
                 ConnectionState::Reconnecting
             } else {
@@ -492,27 +534,28 @@ impl SacrumSocket {
                     has_connected = true;
                     reconnect_delay = Duration::from_millis(100);
 
-                    let initial_join = match desired_project.as_deref() {
-                        Some(project_slug) => {
-                            tokio::select! {
-                                biased;
-                                result = connection.join_project(&api_token, project_slug, &app_handle) => result,
-                                command = commands.recv() => {
-                                    match command {
-                                        Some(SocketCommand::SwitchProject { project_slug, reply }) => {
-                                            desired_project = project_slug;
-                                            let _ = reply.send(Ok(()));
-                                            Err("join interrupted by project switch".to_string())
-                                        }
-                                        Some(SocketCommand::Shutdown) | None => {
-                                            connection.close().await;
-                                            break;
-                                        }
-                                    }
+                    let initial_join = tokio::select! {
+                        biased;
+                        result = async {
+                            connection.join_account(&api_token, &app_handle).await?;
+                            if let Some(project_slug) = desired_project.as_deref() {
+                                connection.join_project(&api_token, project_slug, &app_handle).await?;
+                            }
+                            Ok::<(), String>(())
+                        } => result,
+                        command = commands.recv() => {
+                            match command {
+                                Some(SocketCommand::SwitchProject { project_slug, reply }) => {
+                                    desired_project = project_slug;
+                                    let _ = reply.send(Ok(()));
+                                    Err("join interrupted by project switch".to_string())
+                                }
+                                Some(SocketCommand::Shutdown) | None => {
+                                    connection.close().await;
+                                    break;
                                 }
                             }
                         }
-                        None => Ok(()),
                     };
 
                     if let Err(e) = initial_join {
@@ -653,8 +696,9 @@ impl SacrumSocket {
         Ok(ActiveConnection {
             write,
             read,
-            joined_topic: None,
-            join_ref: None,
+            connection_id: connection_identity(base_url, api_token),
+            joined_account_ref: None,
+            joined_project: None,
             next_ref: 1,
         })
     }
@@ -684,7 +728,12 @@ impl SacrumSocket {
                             let switch_result = match project_slug {
                                 Some(project_slug) => {
                                     let next_topic = ActiveConnection::project_topic(&project_slug);
-                                    if connection.joined_topic.as_deref() == Some(next_topic.as_str()) {
+                                    if connection
+                                        .joined_project
+                                        .as_ref()
+                                        .map(|(topic, _)| topic.as_str())
+                                        == Some(next_topic.as_str())
+                                    {
                                         log::debug!(
                                             "[WebSocket] Already joined to '{}', switch is a no-op",
                                             next_topic
@@ -693,7 +742,7 @@ impl SacrumSocket {
                                         continue;
                                     }
 
-                                    if let Err(e) = connection.leave_current().await {
+                                    if let Err(e) = connection.leave_project().await {
                                         Err(e)
                                     } else {
                                         tokio::select! {
@@ -722,7 +771,7 @@ impl SacrumSocket {
                                         }
                                     }
                                 }
-                                None => connection.leave_current().await,
+                                None => connection.leave_project().await,
                             };
 
                             if let Err(e) = switch_result {
@@ -758,7 +807,12 @@ impl SacrumSocket {
                             if let Err(e) = Self::handle_phoenix_message_for_topic(
                                 &text,
                                 app_handle,
-                                connection.joined_topic.as_deref(),
+                                connection
+                                    .joined_project
+                                    .as_ref()
+                                    .map(|(topic, _)| topic.as_str()),
+                                true,
+                                &connection.connection_id,
                             ) {
                                 log::warn!("[WebSocket] Failed to handle message: {}", e);
                             }
@@ -789,13 +843,21 @@ impl SacrumSocket {
         project_slug: &str,
     ) -> Result<(), String> {
         let current_topic = ActiveConnection::project_topic(project_slug);
-        Self::handle_phoenix_message_for_topic(text, app_handle, Some(current_topic.as_str()))
+        Self::handle_phoenix_message_for_topic(
+            text,
+            app_handle,
+            Some(current_topic.as_str()),
+            true,
+            "test-connection",
+        )
     }
 
     fn handle_phoenix_message_for_topic<R: Runtime>(
         text: &str,
         app_handle: &tauri::AppHandle<R>,
         current_topic: Option<&str>,
+        account_joined: bool,
+        connection_id: &str,
     ) -> Result<(), String> {
         // Parse as JSON array: [join_ref, ref, topic, event, payload]
         let msg: serde_json::Value =
@@ -821,6 +883,10 @@ impl SacrumSocket {
                     topic,
                     current_topic
                 );
+                return Ok(());
+            }
+
+            if topic == ACCOUNTS_TOPIC && !account_joined {
                 return Ok(());
             }
 
@@ -868,6 +934,11 @@ impl SacrumSocket {
                 }
                 "session_log_created" | "session_log_updated" => {
                     Self::handle_session_log_event(event, payload, app_handle)?;
+                }
+                "daemon_created" | "daemon_updated" | "daemon_deleted" => {
+                    if topic == ACCOUNTS_TOPIC {
+                        Self::handle_daemon_event(event, payload, connection_id, app_handle)?;
+                    }
                 }
                 "section_created" | "section_updated" | "section_deleted" => {
                     Self::handle_section_event(event, payload, app_handle)?;
@@ -983,6 +1054,53 @@ impl SacrumSocket {
                 },
             )
             .map_err(|error| format!("Failed to emit artifact link event: {error}"))
+    }
+
+    fn handle_daemon_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        connection_id: &str,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let daemon_payload = payload
+            .get("daemon")
+            .or_else(|| payload.get("record"))
+            .unwrap_or(payload);
+        let daemon_id = payload
+            .get("id")
+            .or_else(|| payload.get("daemon_id"))
+            .or_else(|| daemon_payload.get("id"))
+            .and_then(|value| value.as_str())
+            .ok_or("Missing daemon_id in payload")?
+            .to_string();
+
+        let change_type = match event {
+            "daemon_created" => DaemonChangeType::Created,
+            "daemon_deleted" => DaemonChangeType::Deleted,
+            "daemon_updated" => DaemonChangeType::Updated,
+            _ => return Err(format!("Unhandled daemon event: {event}")),
+        };
+
+        let daemon = if matches!(change_type, DaemonChangeType::Deleted) {
+            None
+        } else {
+            Some(
+                try_deserialize::<types::Daemon>(daemon_payload, "Daemon")
+                    .ok_or("Invalid daemon payload")?,
+            )
+        };
+
+        app_handle
+            .emit(
+                "daemon-changed-event",
+                &DaemonChangedEvent {
+                    connection_id: connection_id.to_string(),
+                    daemon_id,
+                    change_type,
+                    daemon,
+                },
+            )
+            .map_err(|error| format!("Failed to emit daemon event: {error}"))
     }
 
     /// Handle task events and emit to Tauri
@@ -1841,6 +1959,22 @@ mod tests {
     ) -> (usize, serde_json::Value) {
         loop {
             if let TestServerEvent::Text(id, value) = next_server_event(events).await {
+                let topic = value
+                    .as_array()
+                    .and_then(|message| message.get(2))
+                    .and_then(|value| value.as_str());
+                if topic != Some(ACCOUNTS_TOPIC) {
+                    return (id, value);
+                }
+            }
+        }
+    }
+
+    async fn next_raw_text_event(
+        events: &mut tokio_mpsc::UnboundedReceiver<TestServerEvent>,
+    ) -> (usize, serde_json::Value) {
+        loop {
+            if let TestServerEvent::Text(id, value) = next_server_event(events).await {
                 return (id, value);
             }
         }
@@ -2372,6 +2506,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn socket_joins_account_channel_before_project_channel() {
+        let (base_url, mut events, server) = start_recording_ws_server().await;
+        let app = build_test_app();
+        let mut socket =
+            SacrumSocket::new(base_url, "sac_test".to_string(), "project-a".to_string());
+
+        socket.connect(app.handle());
+
+        assert!(matches!(
+            next_server_event(&mut events).await,
+            TestServerEvent::Connected(1)
+        ));
+
+        let (connection_id, account_join) = next_raw_text_event(&mut events).await;
+        assert_eq!(connection_id, 1);
+        assert_channel_message(&account_join, ACCOUNTS_TOPIC, "phx_join");
+
+        let (connection_id, project_join) = next_text_event(&mut events).await;
+        assert_eq!(connection_id, 1);
+        assert_channel_message(&project_join, "project:project-a", "phx_join");
+
+        socket.shutdown().await;
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn socket_switch_join_rejection_is_best_effort_and_retries_desired_project() {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -2388,13 +2548,15 @@ mod tests {
                 .send(TestServerEvent::Connected(1))
                 .expect("record first connection");
 
-            if let Some(Ok(Message::Text(text))) = socket.next().await {
-                let value = serde_json::from_str::<serde_json::Value>(&text)
-                    .expect("initial join should be JSON");
-                send_join_reply(&mut socket, &value).await;
-                events_tx
-                    .send(TestServerEvent::Text(1, value))
-                    .expect("record initial join");
+            for _ in 0..2 {
+                if let Some(Ok(Message::Text(text))) = socket.next().await {
+                    let value = serde_json::from_str::<serde_json::Value>(&text)
+                        .expect("initial join should be JSON");
+                    send_join_reply(&mut socket, &value).await;
+                    events_tx
+                        .send(TestServerEvent::Text(1, value))
+                        .expect("record initial join");
+                }
             }
 
             if let Some(Ok(Message::Text(text))) = socket.next().await {
@@ -2422,13 +2584,15 @@ mod tests {
                 .send(TestServerEvent::Connected(2))
                 .expect("record retry connection");
 
-            if let Some(Ok(Message::Text(text))) = socket.next().await {
-                let value = serde_json::from_str::<serde_json::Value>(&text)
-                    .expect("retry join should be JSON");
-                send_join_reply(&mut socket, &value).await;
-                events_tx
-                    .send(TestServerEvent::Text(2, value))
-                    .expect("record retry join");
+            for _ in 0..2 {
+                if let Some(Ok(Message::Text(text))) = socket.next().await {
+                    let value = serde_json::from_str::<serde_json::Value>(&text)
+                        .expect("retry join should be JSON");
+                    send_join_reply(&mut socket, &value).await;
+                    events_tx
+                        .send(TestServerEvent::Text(2, value))
+                        .expect("record retry join");
+                }
             }
         });
 
@@ -2493,7 +2657,16 @@ mod tests {
 
             if let Some(Ok(Message::Text(text))) = socket.next().await {
                 let value = serde_json::from_str::<serde_json::Value>(&text)
-                    .expect("initial join should be JSON");
+                    .expect("account join should be JSON");
+                send_join_reply(&mut socket, &value).await;
+                events_tx
+                    .send(TestServerEvent::Text(1, value))
+                    .expect("record account join");
+            }
+
+            if let Some(Ok(Message::Text(text))) = socket.next().await {
+                let value = serde_json::from_str::<serde_json::Value>(&text)
+                    .expect("initial project join should be JSON");
                 events_tx
                     .send(TestServerEvent::Text(1, value))
                     .expect("record slow initial join");
@@ -2513,13 +2686,15 @@ mod tests {
                 .send(TestServerEvent::Connected(2))
                 .expect("record retry connection");
 
-            if let Some(Ok(Message::Text(text))) = socket.next().await {
-                let value = serde_json::from_str::<serde_json::Value>(&text)
-                    .expect("retry join should be JSON");
-                send_join_reply(&mut socket, &value).await;
-                events_tx
-                    .send(TestServerEvent::Text(2, value))
-                    .expect("record retry join");
+            for _ in 0..2 {
+                if let Some(Ok(Message::Text(text))) = socket.next().await {
+                    let value = serde_json::from_str::<serde_json::Value>(&text)
+                        .expect("retry join should be JSON");
+                    send_join_reply(&mut socket, &value).await;
+                    events_tx
+                        .send(TestServerEvent::Text(2, value))
+                        .expect("record retry join");
+                }
             }
         });
 
@@ -2617,15 +2792,17 @@ mod tests {
                     .send(TestServerEvent::Connected(id))
                     .expect("record connection");
 
-                if let Some(Ok(Message::Text(text))) = socket.next().await {
-                    let value = serde_json::from_str::<serde_json::Value>(&text)
-                        .expect("join message should be JSON");
-                    if is_phx_join(&value) {
-                        send_join_reply(&mut socket, &value).await;
+                for _ in 0..2 {
+                    if let Some(Ok(Message::Text(text))) = socket.next().await {
+                        let value = serde_json::from_str::<serde_json::Value>(&text)
+                            .expect("join message should be JSON");
+                        if is_phx_join(&value) {
+                            send_join_reply(&mut socket, &value).await;
+                        }
+                        events_tx
+                            .send(TestServerEvent::Text(id, value))
+                            .expect("record join");
                     }
-                    events_tx
-                        .send(TestServerEvent::Text(id, value))
-                        .expect("record join");
                 }
 
                 if id == 1 {
@@ -3216,6 +3393,80 @@ mod tests {
     }
 
     #[test]
+    fn daemon_account_cdc_update_emits_full_projection_with_connection_identity() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let (tx, rx) = mpsc::channel();
+        app.listen_any("daemon-changed-event", move |event| {
+            tx.send(event.payload().to_string()).unwrap();
+        });
+
+        let payload = serde_json::json!({
+            "id": "daemon-1",
+            "status": "active",
+            "name": null,
+            "display_name": "daemon-1",
+            "max_concurrency": 2,
+            "enrolled_at": null,
+            "removed_at": null,
+            "inserted_at": "2026-09-14T10:00:00Z",
+            "updated_at": "2026-09-14T10:01:00Z"
+        });
+        let message =
+            serde_json::json!(["join-ref", "1", ACCOUNTS_TOPIC, "daemon_updated", payload])
+                .to_string();
+
+        SacrumSocket::handle_phoenix_message_for_topic(&message, handle, None, true, "identity-a")
+            .expect("daemon account event should be forwarded");
+
+        let emitted = rx
+            .recv_timeout(StdDuration::from_secs(1))
+            .expect("daemon update should emit a webview event");
+        let event: DaemonChangedEvent =
+            serde_json::from_str(&emitted).expect("event payload should deserialize");
+        assert_eq!(event.connection_id, "identity-a");
+        assert_eq!(event.daemon_id, "daemon-1");
+        assert!(matches!(event.change_type, DaemonChangeType::Updated));
+        assert_eq!(
+            event.daemon.expect("updated daemon"),
+            types::Daemon {
+                id: "daemon-1".to_string(),
+                status: "active".to_string(),
+                name: None,
+                display_name: "daemon-1".to_string(),
+                max_concurrency: Some(2),
+                enrolled_at: None,
+                removed_at: None,
+                inserted_at: Some("2026-09-14T10:00:00Z".to_string()),
+                updated_at: Some("2026-09-14T10:01:00Z".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn daemon_account_cdc_delete_emits_tombstone_without_projection() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let (tx, rx) = mpsc::channel();
+        app.listen_any("daemon-changed-event", move |event| {
+            tx.send(event.payload().to_string()).unwrap();
+        });
+
+        let message = r#"["join-ref","1","accounts:me","daemon_deleted",{"id":"daemon-1"}]"#;
+        SacrumSocket::handle_phoenix_message_for_topic(message, handle, None, true, "identity-a")
+            .expect("daemon delete should be forwarded");
+
+        let emitted = rx
+            .recv_timeout(StdDuration::from_secs(1))
+            .expect("daemon delete should emit a webview event");
+        let event: DaemonChangedEvent =
+            serde_json::from_str(&emitted).expect("event payload should deserialize");
+        assert_eq!(event.daemon_id, "daemon-1");
+        assert!(matches!(event.change_type, DaemonChangeType::Deleted));
+        assert!(event.daemon.is_none());
+    }
+
+    #[test]
     fn test_handle_task_event_created() {
         let app = build_test_app();
         let handle = app.handle();
@@ -3612,8 +3863,13 @@ mod tests {
         });
 
         let msg = r#"["ref1", "1", "project:old", "session_log_created", {"id": "log-old", "step_execution_id": "exec123"}]"#;
-        let result =
-            SacrumSocket::handle_phoenix_message_for_topic(msg, handle, Some("project:new"));
+        let result = SacrumSocket::handle_phoenix_message_for_topic(
+            msg,
+            handle,
+            Some("project:new"),
+            true,
+            "test-connection",
+        );
 
         assert!(result.is_ok());
         assert!(
@@ -3632,8 +3888,13 @@ mod tests {
         });
 
         let msg = r#"["ref1", "1", "project:project-a", "session_log_created", {"id": "log-a", "step_execution_id": "exec-a"}]"#;
-        let result =
-            SacrumSocket::handle_phoenix_message_for_topic(msg, handle, Some("project:project-a"));
+        let result = SacrumSocket::handle_phoenix_message_for_topic(
+            msg,
+            handle,
+            Some("project:project-a"),
+            true,
+            "test-connection",
+        );
 
         assert!(result.is_ok());
         let emitted = rx

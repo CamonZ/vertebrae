@@ -4,6 +4,24 @@ use tauri_specta::Event;
 
 use crate::types;
 
+/// Complete account-scoped daemon projection changed by the Sacrum CDC
+/// stream. The connection identity prevents a late event from a retired
+/// backend/account socket from mutating the active GUI cache.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct DaemonChangedEvent {
+    pub connection_id: String,
+    pub daemon_id: String,
+    pub change_type: DaemonChangeType,
+    pub daemon: Option<types::Daemon>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub enum DaemonChangeType {
+    Created,
+    Updated,
+    Deleted,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct LocalBackendProgressEvent {
     pub stage: LocalBackendProgressStage,

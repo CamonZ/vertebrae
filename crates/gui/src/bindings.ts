@@ -1136,12 +1136,12 @@ async relaunchApplication() : Promise<Result<null, CommandError>> {
 }
 }
 }
-
 /** user-defined events **/
 
 
 export const events = __makeEvents__<{
 artifactChangedEvent: ArtifactChangedEvent,
+daemonChangedEvent: DaemonChangedEvent,
 localBackendProgressEvent: LocalBackendProgressEvent,
 localChatCompactionEvent: LocalChatCompactionEvent,
 localChatFileChangeEvent: LocalChatFileChangeEvent,
@@ -1170,6 +1170,7 @@ workflowChangedEvent: WorkflowChangedEvent,
 workflowTransitionChangedEvent: WorkflowTransitionChangedEvent
 }>({
 artifactChangedEvent: "artifact-changed-event",
+daemonChangedEvent: "daemon-changed-event",
 localBackendProgressEvent: "local-backend-progress-event",
 localChatCompactionEvent: "local-chat-compaction-event",
 localChatFileChangeEvent: "local-chat-file-change-event",
@@ -1364,6 +1365,8 @@ export type CreateStepOptions = { workflow_id: string; name: string; goal: strin
 export type Daemon = { id: string; status: string; name: string | null; display_name: string; max_concurrency: number | null; enrolled_at: string | null; removed_at: string | null; inserted_at: string | null; updated_at: string | null }
 export type DaemonBootstrap = { daemon: Daemon; enrollment_token: string; expires_at: string }
 export type DaemonBootstrapResult = { connection_id: string; bootstrap: DaemonBootstrap }
+export type DaemonChangeType = "Created" | "Updated" | "Deleted"
+export type DaemonChangedEvent = { connection_id: string; daemon_id: string; change_type: DaemonChangeType; daemon: Daemon | null }
 export type DaemonCommandError = { kind: DaemonErrorKind; message: string }
 export type DaemonCredentialMetadata = { id: string; credential_kind: string; status: string; expires_at: string; consumed_at: string | null; revoked_at: string | null; inserted_at: string | null; updated_at: string | null }
 export type DaemonDetailSnapshot = { connection_id: string; daemon: Daemon | null }

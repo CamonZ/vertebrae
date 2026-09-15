@@ -26,10 +26,11 @@ use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use commands::AppState;
 use events::{
-    ArtifactChangedEvent, LocalBackendProgressEvent, PermissionRequestEvent, SectionChangedEvent,
-    SessionLogCreatedEvent, SessionLogUpdatedEvent, StepChangedEvent, StepExecutionChangedEvent,
-    StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskRunStepChangedEvent,
-    TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
+    ArtifactChangedEvent, DaemonChangedEvent, LocalBackendProgressEvent, PermissionRequestEvent,
+    SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent, StepChangedEvent,
+    StepExecutionChangedEvent, StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent,
+    TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
+    WorkflowTransitionChangedEvent,
 };
 use local_chat::{
     ClaudeStartupCapabilities, LocalChatCompactionEvent, LocalChatFileChangeEvent,
@@ -177,6 +178,7 @@ fn create_builder() -> Builder {
         ])
         .events(collect_events![
             ArtifactChangedEvent,
+            DaemonChangedEvent,
             LocalBackendProgressEvent,
             TaskChangedEvent,
             TaskRunChangedEvent,
@@ -354,6 +356,13 @@ pub fn run() {
                 log::info!("[SHUTDOWN] Closing active local chat harness sessions");
                 let local_chat_manager = app_handle.state::<LocalChatSessionManager>();
                 tauri::async_runtime::block_on(local_chat_manager.shutdown());
+
+                log::info!("[SHUTDOWN] Closing Sacrum websocket");
+                let socket = app_handle
+                    .state::<tokio::sync::Mutex<websocket_client::SacrumSocket>>();
+                tauri::async_runtime::block_on(async {
+                    socket.lock().await.shutdown().await;
+                });
             }
         })
 }

@@ -390,10 +390,18 @@ There is no GUI uninstall flow. Undo an install from the terminal:
 The GUI maintains a WebSocket connection to Sacrum via Phoenix channels:
 
 - Connects to `ws://host:port/socket/websocket?token=api_token`
-- Joins `project:{project_id}` channel
+- Joins the authenticated `accounts:me` channel for account-scoped daemon
+  create/update/delete events and `project:{project_id}` for project events
 - 30-second heartbeat, exponential backoff reconnection (100ms -> 30s)
-- Receives broadcasts for task/workflow/execution changes from all clients
-- Emits Tauri events: `TaskChangedEvent`, `WorkflowChangedEvent`, `StepExecutionChangedEvent`
+- Receives broadcasts for task/workflow/execution changes from all clients and
+  daemon CDC updates from the account channel
+- Emits Tauri events including `TaskChangedEvent`, `WorkflowChangedEvent`,
+  `StepExecutionChangedEvent`, and `DaemonChangedEvent`
+
+The daemon fleet performs one account-scoped snapshot on initial load and after
+reconnect recovery. Between snapshots, `DaemonChangedEvent` updates the
+initialized fleet and detail projections directly; it does not use a periodic
+list poller.
 
 ## Data Flow
 
@@ -403,4 +411,7 @@ CLI mutation -> Sacrum GraphQL API -> Sacrum broadcasts on WebSocket
 
 GUI mutation -> Tauri command -> VertebraeServices -> Sacrum GraphQL API
             -> Sacrum broadcasts on WebSocket -> React hooks -> Update state
+
+Daemon mutation -> Sacrum GraphQL API -> `accounts:me` CDC broadcast
+              -> GUI WebSocket -> `DaemonChangedEvent` -> daemon cache projections
 ```

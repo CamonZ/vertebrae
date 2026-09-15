@@ -3,6 +3,7 @@ import { render } from "../test/test-utils";
 
 const mockUseTaskChangeListener = vi.fn();
 const mockUseArtifactChangeListener = vi.fn();
+const mockUseDaemonChangeListener = vi.fn();
 const mockUseTaskRunChangeListener = vi.fn();
 const mockUseWorkflowChangeListener = vi.fn();
 const mockUseStepChangeListener = vi.fn();
@@ -16,6 +17,8 @@ const mockUseLocalChatEventRouter = vi.fn();
 vi.mock("../hooks", () => ({
   useArtifactChangeListener: (...args: unknown[]) =>
     mockUseArtifactChangeListener(...args),
+  useDaemonChangeListener: (...args: unknown[]) =>
+    mockUseDaemonChangeListener(...args),
   useTaskChangeListener: (...args: unknown[]) =>
     mockUseTaskChangeListener(...args),
   useTaskRunChangeListener: (...args: unknown[]) =>
@@ -54,6 +57,7 @@ describe("GlobalListeners", () => {
 
     expect(mockUseTaskChangeListener).toHaveBeenCalled();
     expect(mockUseArtifactChangeListener).toHaveBeenCalled();
+    expect(mockUseDaemonChangeListener).toHaveBeenCalled();
     expect(mockUseTaskRunChangeListener).toHaveBeenCalled();
     expect(mockUseWorkflowChangeListener).toHaveBeenCalled();
     expect(mockUseStepChangeListener).toHaveBeenCalled();
@@ -70,6 +74,7 @@ describe("GlobalListeners", () => {
 
     expect(mockUseTaskChangeListener).toHaveBeenCalledWith();
     expect(mockUseArtifactChangeListener).toHaveBeenCalledWith();
+    expect(mockUseDaemonChangeListener).toHaveBeenCalledWith();
     expect(mockUseTaskRunChangeListener).toHaveBeenCalledWith();
     expect(mockUseWorkflowChangeListener).toHaveBeenCalledWith();
     expect(mockUseStepChangeListener).toHaveBeenCalledWith();
