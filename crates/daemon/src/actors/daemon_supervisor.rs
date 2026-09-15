@@ -21,7 +21,7 @@ use crate::capabilities::SharedDaemonCapabilities;
 use crate::connection::{
     INITIAL_RECONNECT_DELAY, MAX_RECONNECT_DELAY, connect_with_auth, next_backoff, reconnect,
 };
-use crate::phoenix::{PhoenixMessage, PhoenixSocket};
+use crate::phoenix::{PhoenixMessage, PhoenixSocket, is_terminal_daemon_reason};
 
 /// Result of classifying an incoming channel message.
 #[derive(Debug, PartialEq)]
@@ -107,10 +107,14 @@ fn classify_channel_message<V>(
 enum ChannelRecovery {
     Reconnect,
     Stop(String),
+    RetireAndStop(String),
 }
 
 fn daemon_join_recovery(reason: Option<&str>) -> ChannelRecovery {
     match reason {
+        Some(reason) if is_terminal_daemon_reason(reason) => ChannelRecovery::RetireAndStop(
+            "daemon identity was not found or deregistered; re-enrollment is required".to_string(),
+        ),
         Some("invalid_credentials") => ChannelRecovery::Stop(
             "daemon credentials rejected; re-enrollment is required".to_string(),
         ),
@@ -279,9 +283,18 @@ impl Actor for DaemonSupervisor {
             args.base_url
         );
 
-        let socket = connect_with_auth(&args.base_url, &args.authentication)
-            .await
-            .map_err(|e| format!("Failed to connect to Sacrum WebSocket: {e}"))?;
+        let socket = match connect_with_auth(&args.base_url, &args.authentication).await {
+            Ok(socket) => socket,
+            Err(error) => {
+                if matches!(
+                    error,
+                    crate::phoenix::PhoenixError::StandaloneDaemonNotFound
+                ) {
+                    retire_standalone_identity(&args.authentication);
+                }
+                return Err(format!("Failed to connect to Sacrum WebSocket: {error}").into());
+            }
+        };
 
         if let DaemonAuthentication::Standalone(identity) = &args.authentication {
             socket
@@ -329,6 +342,11 @@ impl Actor for DaemonSupervisor {
             }
             DaemonMessage::ChannelMessage(msg) => match self.handle_channel_message(msg, state) {
                 Some(ChannelRecovery::Stop(reason)) => {
+                    tracing::error!(%reason, "Daemon registration rejected");
+                    myself.stop(Some(reason));
+                }
+                Some(ChannelRecovery::RetireAndStop(reason)) => {
+                    retire_standalone_identity(&state.config.authentication);
                     tracing::error!(%reason, "Daemon registration rejected");
                     myself.stop(Some(reason));
                 }
@@ -668,6 +686,10 @@ impl DaemonSupervisor {
                 }
                 Err(error) => {
                     let reason = match error {
+                        crate::phoenix::PhoenixError::StandaloneDaemonNotFound => {
+                            retire_standalone_identity(&config.authentication);
+                            "daemon identity was not found or deregistered; re-enrollment is required"
+                        }
                         crate::phoenix::PhoenixError::AuthenticationRejected => {
                             "daemon authentication was rejected; re-enrollment is required"
                         }
@@ -762,6 +784,19 @@ impl DaemonSupervisor {
         myself.stop(Some("shutdown requested".to_string()));
 
         Ok(())
+    }
+}
+
+fn retire_standalone_identity(authentication: &DaemonAuthentication) {
+    let DaemonAuthentication::Standalone(identity) = authentication else {
+        return;
+    };
+    if let Err(error) = crate::config::retire_daemon_identity(&identity.daemon_id) {
+        tracing::error!(
+            daemon_id = %identity.daemon_id,
+            %error,
+            "Failed to persist retired standalone daemon state"
+        );
     }
 }
 

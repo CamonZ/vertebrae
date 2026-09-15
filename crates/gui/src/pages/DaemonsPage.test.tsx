@@ -298,7 +298,7 @@ describe("DaemonsPage", () => {
       expect(mockRotateDaemonCredentials).toHaveBeenCalledWith(active.id)
     );
     expect(
-      screen.getByTestId("daemon-enrollment-token-step")
+      await screen.findByTestId("daemon-enrollment-token-step")
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Reveal" }));
     expect(screen.getByText("rotated_enrollment_token")).toBeInTheDocument();

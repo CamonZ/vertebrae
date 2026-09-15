@@ -115,3 +115,39 @@ async fn corrupt_config_is_reported_without_secret_contents() {
     assert!(!stderr.contains("PRIVATE-CREDENTIAL"));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE-CREDENTIAL"));
 }
+
+#[tokio::test]
+async fn retired_identity_blocks_account_token_fallback() {
+    let home = tempfile::tempdir().unwrap();
+    let directory = config_dir(home.path());
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join("config.toml"),
+        "[sacrum]\nurl = \"https://sacrum.example.com\"\ntoken = \"account-token\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.join("daemon.toml"),
+        format!(
+            "endpoint = \"https://sacrum.example.com\"\ndaemon_id = \"{FIRST_ID}\"\nretired = true\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(directory.join("daemon.lock"), "").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vtb-daemon"))
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join("config"))
+        .output()
+        .await
+        .unwrap();
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Connecting to Phoenix WebSocket"));
+    assert!(
+        std::fs::read_to_string(directory.join("config.toml"))
+            .unwrap()
+            .contains("account-token")
+    );
+    assert!(directory.join("daemon.lock").exists());
+}

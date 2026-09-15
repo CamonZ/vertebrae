@@ -99,6 +99,9 @@ pub enum PhoenixError {
 
     #[error("Phoenix authentication was rejected")]
     AuthenticationRejected,
+
+    #[error("standalone daemon identity was not found or deregistered")]
+    StandaloneDaemonNotFound,
 }
 
 impl From<tokio_tungstenite::tungstenite::Error> for PhoenixError {
@@ -135,7 +138,7 @@ impl PhoenixSocket {
     /// and never included in diagnostics.
     pub async fn connect(base_url: &str, api_token: &str) -> Result<Self, PhoenixError> {
         let ws_url = socket_url(base_url, [("token", api_token)])?;
-        Self::connect_url(ws_url).await
+        Self::connect_url(ws_url, false).await
     }
 
     /// Connect using Sacrum's stable daemon identity and reconnect credential.
@@ -154,10 +157,10 @@ impl PhoenixSocket {
                 ("reconnect_token", reconnect_token),
             ],
         )?;
-        Self::connect_url(ws_url).await
+        Self::connect_url(ws_url, true).await
     }
 
-    async fn connect_url(ws_url: url::Url) -> Result<Self, PhoenixError> {
+    async fn connect_url(ws_url: url::Url, standalone: bool) -> Result<Self, PhoenixError> {
         let mut safe_url = ws_url.clone();
         safe_url.set_query(None);
         tracing::info!("Connecting to Phoenix WebSocket at {}", safe_url);
@@ -169,6 +172,13 @@ impl PhoenixSocket {
         .await
         .map_err(|_| PhoenixError::ConnectionTimeout)?
         .map_err(|error| match error {
+            tokio_tungstenite::tungstenite::Error::Http(response)
+                if standalone
+                    && (response.status().as_u16() == 404
+                        || response_has_terminal_daemon_reason(response.body().as_deref())) =>
+            {
+                PhoenixError::StandaloneDaemonNotFound
+            }
             tokio_tungstenite::tungstenite::Error::Http(response)
                 if matches!(response.status().as_u16(), 401 | 403) =>
             {
@@ -341,6 +351,48 @@ where
     Ok(url)
 }
 
+pub(crate) fn is_terminal_daemon_reason(reason: &str) -> bool {
+    matches!(
+        reason,
+        "not_found"
+            | "daemon_not_found"
+            | "deregistered"
+            | "daemon_deregistered"
+            | "revoked"
+            | "removed"
+            | "retired"
+            | "disabled"
+    )
+}
+
+fn response_has_terminal_daemon_reason(body: Option<&[u8]>) -> bool {
+    let Some(body) = body else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    machine_reason(&value).is_some_and(is_terminal_daemon_reason)
+}
+
+fn machine_reason(value: &serde_json::Value) -> Option<&str> {
+    if let Some(reason) = value.as_str() {
+        return Some(reason);
+    }
+    let object = value.as_object()?;
+    for key in ["reason", "code", "status"] {
+        if let Some(reason) = object.get(key).and_then(serde_json::Value::as_str) {
+            return Some(reason);
+        }
+    }
+    for key in ["error", "response"] {
+        if let Some(reason) = object.get(key).and_then(machine_reason) {
+            return Some(reason);
+        }
+    }
+    None
+}
+
 pub(crate) fn endpoint_allows_cleartext(url: &url::Url) -> bool {
     if url.scheme() != "http" {
         return true;
@@ -498,6 +550,23 @@ mod tests {
     fn phoenix_error_display_connection_closed() {
         let err = PhoenixError::ConnectionClosed;
         assert_eq!(err.to_string(), "Connection closed");
+    }
+
+    #[test]
+    fn handshake_only_classifies_machine_readable_terminal_daemon_rejections() {
+        assert!(response_has_terminal_daemon_reason(Some(
+            br#"{"reason":"not_found"}"#
+        )));
+        assert!(response_has_terminal_daemon_reason(Some(
+            br#"{"error":{"code":"deregistered"}}"#
+        )));
+        assert!(!response_has_terminal_daemon_reason(Some(
+            br#"{"reason":"temporarily_unavailable"}"#
+        )));
+        assert!(!response_has_terminal_daemon_reason(Some(
+            br#"{"message":"daemon not found"}"#
+        )));
+        assert!(!response_has_terminal_daemon_reason(None));
     }
 
     #[test]

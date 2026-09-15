@@ -144,7 +144,7 @@ impl DaemonWorld {
             .collect()
     }
 
-    /// Spawn `vtb-daemon` and wait for it to log `Joined channel for project <id>`.
+    /// Spawn `vtb-daemon` and wait for Sacrum to confirm the project channel.
     /// Uses a temp HOME so the daemon sees a scenario-specific config.toml.
     pub async fn start_daemon_for_project(&mut self, project_id: &str, project_path: &str) {
         assert!(self.daemon.is_none(), "daemon already running for scenario");
@@ -197,7 +197,7 @@ impl DaemonWorld {
 
         let mut child = cmd.spawn().expect("spawn vtb-daemon");
 
-        let expected = format!("Joined channel for project {project_id}");
+        let expected = format!("Channel join confirmed for project {project_id}");
 
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
