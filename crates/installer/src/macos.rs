@@ -61,7 +61,10 @@ pub fn generate_plist(binary_path: &str) -> String {
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
     <key>StandardOutPath</key>
     <string>{stdout}</string>
     <key>StandardErrorPath</key>
@@ -398,6 +401,8 @@ mod tests {
         let plist = generate_plist(SAMPLE_BINARY);
         assert!(plist.contains("<key>RunAtLoad</key>"));
         assert!(plist.contains("<key>KeepAlive</key>"));
+        assert!(plist.contains("<key>SuccessfulExit</key>"));
+        assert!(plist.contains("<false/>"));
     }
 
     #[test]

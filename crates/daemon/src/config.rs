@@ -19,6 +19,8 @@ pub enum ConfigError {
     LoadFailed(String),
     #[error("Missing required configuration: {0}")]
     Missing(String),
+    #[error("Standalone daemon identity is retired; re-enrollment is required")]
+    Retired,
     #[error("Daemon is already enrolled as {daemon_id}; use explicit credential re-enrollment")]
     AlreadyEnrolled { daemon_id: String },
     #[error("Cannot replace enrolled daemon {existing_id} with a different identity")]
@@ -39,18 +41,58 @@ pub struct DaemonIdentity {
 struct PersistedDaemonIdentity {
     endpoint: String,
     daemon_id: String,
-    reconnect_token: String,
-    expires_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reconnect_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    retired: bool,
 }
 
-impl From<PersistedDaemonIdentity> for DaemonIdentity {
-    fn from(value: PersistedDaemonIdentity) -> Self {
-        Self {
-            endpoint: value.endpoint,
-            daemon_id: value.daemon_id,
-            reconnect_token: value.reconnect_token,
-            expires_at: value.expires_at,
+#[derive(Debug)]
+struct RetiredDaemonIdentity {
+    endpoint: String,
+    daemon_id: String,
+}
+
+#[derive(Debug)]
+enum PersistedDaemonState {
+    Active(DaemonIdentity),
+    Retired(RetiredDaemonIdentity),
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+impl PersistedDaemonIdentity {
+    fn into_state(self) -> Result<PersistedDaemonState, ConfigError> {
+        if self.retired {
+            if self.reconnect_token.is_some() || self.expires_at.is_some() {
+                return Err(ConfigError::LoadFailed(
+                    "retired daemon config must not contain active credentials".to_string(),
+                ));
+            }
+            return Ok(PersistedDaemonState::Retired(RetiredDaemonIdentity {
+                endpoint: self.endpoint,
+                daemon_id: self.daemon_id,
+            }));
         }
+
+        let reconnect_token = self.reconnect_token.ok_or_else(|| {
+            ConfigError::LoadFailed(
+                "active daemon config is missing its reconnect credential".to_string(),
+            )
+        })?;
+        let expires_at = self.expires_at.ok_or_else(|| {
+            ConfigError::LoadFailed("active daemon config is missing its expiry".to_string())
+        })?;
+        Ok(PersistedDaemonState::Active(DaemonIdentity {
+            endpoint: self.endpoint,
+            daemon_id: self.daemon_id,
+            reconnect_token,
+            expires_at,
+        }))
     }
 }
 
@@ -59,8 +101,9 @@ impl From<&DaemonIdentity> for PersistedDaemonIdentity {
         Self {
             endpoint: value.endpoint.clone(),
             daemon_id: value.daemon_id.clone(),
-            reconnect_token: value.reconnect_token.clone(),
-            expires_at: value.expires_at.clone(),
+            reconnect_token: Some(value.reconnect_token.clone()),
+            expires_at: Some(value.expires_at.clone()),
+            retired: false,
         }
     }
 }
@@ -120,6 +163,14 @@ pub fn load_daemon_identity() -> Result<Option<DaemonIdentity>, ConfigError> {
 }
 
 fn load_daemon_identity_at(path: &Path) -> Result<Option<DaemonIdentity>, ConfigError> {
+    match load_daemon_state_at(path)? {
+        Some(PersistedDaemonState::Active(identity)) => Ok(Some(identity)),
+        Some(PersistedDaemonState::Retired(_)) => Err(ConfigError::Retired),
+        None => Ok(None),
+    }
+}
+
+fn load_daemon_state_at(path: &Path) -> Result<Option<PersistedDaemonState>, ConfigError> {
     if !path.exists() {
         return Ok(None);
     }
@@ -127,7 +178,7 @@ fn load_daemon_identity_at(path: &Path) -> Result<Option<DaemonIdentity>, Config
     let content = std::fs::read_to_string(path).map_err(|error| {
         ConfigError::LoadFailed(format!("failed to read daemon config: {error}"))
     })?;
-    let identity: DaemonIdentity = toml::from_str::<PersistedDaemonIdentity>(&content)
+    let state = toml::from_str::<PersistedDaemonIdentity>(&content)
         .map_err(|error| {
             // Parser messages and source excerpts can both contain credentials.
             let location = error
@@ -136,8 +187,12 @@ fn load_daemon_identity_at(path: &Path) -> Result<Option<DaemonIdentity>, Config
                 .unwrap_or_default();
             ConfigError::LoadFailed(format!("failed to parse daemon config{location}"))
         })?
-        .into();
-    let endpoint = url::Url::parse(&identity.endpoint)
+        .into_state()?;
+    let endpoint = match &state {
+        PersistedDaemonState::Active(identity) => &identity.endpoint,
+        PersistedDaemonState::Retired(identity) => &identity.endpoint,
+    };
+    let endpoint = url::Url::parse(endpoint)
         .map_err(|error| ConfigError::LoadFailed(format!("invalid daemon endpoint: {error}")))?;
     if !matches!(endpoint.scheme(), "http" | "https")
         || !crate::phoenix::endpoint_allows_cleartext(&endpoint)
@@ -146,7 +201,7 @@ fn load_daemon_identity_at(path: &Path) -> Result<Option<DaemonIdentity>, Config
             "daemon endpoint must use HTTPS, except for loopback HTTP".to_string(),
         ));
     }
-    Ok(Some(identity))
+    Ok(Some(state))
 }
 
 /// Owns the enrollment transaction, including the remote one-time exchange.
@@ -207,16 +262,18 @@ impl DaemonEnrollmentStorage {
             replace_existing,
             lock,
         };
-        if let Some(existing) = load_daemon_identity_at(path)? {
+        if let Some(existing) = load_daemon_state_at(path)? {
+            let existing_id = match existing {
+                PersistedDaemonState::Active(identity) => identity.daemon_id,
+                PersistedDaemonState::Retired(identity) => identity.daemon_id,
+            };
             if !replace_existing {
                 return Err(ConfigError::AlreadyEnrolled {
-                    daemon_id: existing.daemon_id,
+                    daemon_id: existing_id,
                 });
             }
-            if existing.daemon_id != daemon_id {
-                return Err(ConfigError::IdentityMismatch {
-                    existing_id: existing.daemon_id,
-                });
+            if existing_id != daemon_id {
+                return Err(ConfigError::IdentityMismatch { existing_id });
             }
         }
         Ok(storage)
@@ -230,6 +287,22 @@ impl DaemonEnrollmentStorage {
         }
         write_daemon_identity(&self.path, identity, self.replace_existing)
     }
+
+    fn retire(self) -> Result<(), ConfigError> {
+        let existing = load_daemon_state_at(&self.path)?.ok_or_else(|| {
+            ConfigError::Missing("daemon identity disappeared before retirement".to_string())
+        })?;
+        let (endpoint, daemon_id) = match existing {
+            PersistedDaemonState::Active(identity) => (identity.endpoint, identity.daemon_id),
+            PersistedDaemonState::Retired(identity) => (identity.endpoint, identity.daemon_id),
+        };
+        if daemon_id != self.daemon_id {
+            return Err(ConfigError::IdentityMismatch {
+                existing_id: daemon_id,
+            });
+        }
+        write_retired_daemon_identity(&self.path, &endpoint, &self.daemon_id)
+    }
 }
 
 pub fn save_daemon_identity(
@@ -237,6 +310,15 @@ pub fn save_daemon_identity(
     replace_existing: bool,
 ) -> Result<(), ConfigError> {
     DaemonEnrollmentStorage::begin(&identity.daemon_id, replace_existing)?.save(identity)
+}
+
+/// Remove the reconnect credential while leaving a retired marker in place.
+///
+/// The marker prevents startup from treating the missing identity as permission
+/// to use the account token. The enrollment lock file is deliberately retained
+/// so a later explicit re-enrollment uses the same synchronization boundary.
+pub fn retire_daemon_identity(daemon_id: &str) -> Result<(), ConfigError> {
+    DaemonEnrollmentStorage::begin(daemon_id, true)?.retire()
 }
 
 #[cfg(test)]
@@ -253,10 +335,40 @@ fn write_daemon_identity(
     identity: &DaemonIdentity,
     replace_existing: bool,
 ) -> Result<(), ConfigError> {
+    write_daemon_config(
+        path,
+        &PersistedDaemonIdentity::from(identity),
+        replace_existing,
+    )
+}
+
+fn write_retired_daemon_identity(
+    path: &Path,
+    endpoint: &str,
+    daemon_id: &str,
+) -> Result<(), ConfigError> {
+    write_daemon_config(
+        path,
+        &PersistedDaemonIdentity {
+            endpoint: endpoint.to_string(),
+            daemon_id: daemon_id.to_string(),
+            reconnect_token: None,
+            expires_at: None,
+            retired: true,
+        },
+        true,
+    )
+}
+
+fn write_daemon_config(
+    path: &Path,
+    persisted: &PersistedDaemonIdentity,
+    replace_existing: bool,
+) -> Result<(), ConfigError> {
     let parent = path.parent().ok_or_else(|| {
         ConfigError::PersistFailed("daemon config has no parent directory".to_string())
     })?;
-    let content = toml::to_string_pretty(&PersistedDaemonIdentity::from(identity))
+    let content = toml::to_string_pretty(persisted)
         .map_err(|error| ConfigError::PersistFailed(format!("serialize daemon config: {error}")))?;
     let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|error| {
         ConfigError::PersistFailed(format!("create temporary daemon config: {error}"))
@@ -447,6 +559,39 @@ mod tests {
             save_daemon_identity_at(&path, &identity("daemon-1", "secret"), true).unwrap_err();
         assert!(error.to_string().contains("failed to parse daemon config"));
     }
+
+    #[test]
+    fn retirement_removes_credential_preserves_lock_and_allows_reenrollment() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("daemon.toml");
+        let original = identity("daemon-1", "retired-secret");
+        save_daemon_identity_at(&path, &original, false).unwrap();
+        let lock_path = dir.path().join("daemon.lock");
+        assert!(lock_path.exists());
+
+        DaemonEnrollmentStorage::begin_at(&path, &original.daemon_id, true)
+            .unwrap()
+            .retire()
+            .unwrap();
+
+        let retired = std::fs::read_to_string(&path).unwrap();
+        assert!(retired.contains("retired = true"));
+        assert!(!retired.contains("reconnect_token"));
+        assert!(matches!(
+            load_daemon_identity_at(&path),
+            Err(ConfigError::Retired)
+        ));
+        assert!(lock_path.exists());
+
+        let replacement = identity("daemon-1", "fresh-secret");
+        save_daemon_identity_at(&path, &replacement, true).unwrap();
+        assert_eq!(load_daemon_identity_at(&path).unwrap(), Some(replacement));
+        let reenrolled = std::fs::read_to_string(&path).unwrap();
+        assert!(!reenrolled.contains("retired = true"));
+        assert!(reenrolled.contains("reconnect_token"));
+        assert!(lock_path.exists());
+    }
+
     #[test]
     fn malformed_secret_diagnostics_never_echo_input() {
         let dir = tempdir().unwrap();
