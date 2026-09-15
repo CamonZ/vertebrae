@@ -33,6 +33,7 @@ export {
   upsertArtifactInQueryCache,
   updateTaskLocationInQueryCache,
   updateDaemonInQueryCache,
+  upsertDaemonInQueryCache,
   upsertWorkflowInQueryCache,
   upsertWorkflowTransitionInQueryCache,
 } from "./serverCache";

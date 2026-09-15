@@ -227,21 +227,35 @@ export function invalidateDaemonQueries(
 }
 
 /** Reconcile a server-confirmed daemon mutation without making it optimistic. */
-export function updateDaemonInQueryCache(
+export function upsertDaemonInQueryCache(
   connectionId: string,
   daemon: Daemon
 ): void {
   queryClient.setQueryData<Daemon[] | undefined>(
     queryKeys.daemons.fleet(connectionId),
-    (current) =>
-      current?.map((candidate) =>
-        candidate.id === daemon.id ? daemon : candidate
-      )
+    (current) => {
+      if (!current) return current;
+      const index = current.findIndex(
+        (candidate) => candidate.id === daemon.id
+      );
+      if (index === -1) return [...current, daemon];
+      const next = current.slice();
+      next[index] = daemon;
+      return next;
+    }
   );
   queryClient.setQueryData<Daemon | null | undefined>(
     queryKeys.daemons.detail(connectionId, daemon.id),
     (current) => (current === undefined ? current : daemon)
   );
+}
+
+/** Reconcile a server-confirmed daemon mutation without making it optimistic. */
+export function updateDaemonInQueryCache(
+  connectionId: string,
+  daemon: Daemon
+): void {
+  upsertDaemonInQueryCache(connectionId, daemon);
 }
 
 /** Remove a daemon only after the server has confirmed terminal unregister. */

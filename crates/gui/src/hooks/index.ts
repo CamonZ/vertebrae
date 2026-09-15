@@ -21,6 +21,7 @@ export { useRunTrace } from "./useRunTrace";
 export type { UseRunTraceResult } from "./useRunTrace";
 export { useTaskChangeListener } from "./useTaskChangeListener";
 export { useArtifactChangeListener } from "./useArtifactChangeListener";
+export { useDaemonChangeListener } from "./useDaemonChangeListener";
 export { useTaskLocation } from "./useTaskLocation";
 export { useTaskRunChangeListener } from "./useTaskRunChangeListener";
 export { useWorkflows } from "./useWorkflows";

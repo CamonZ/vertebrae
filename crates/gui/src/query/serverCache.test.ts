@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
+  Daemon,
   Section,
   Step,
   TaskRunTrace,
@@ -33,6 +34,8 @@ import {
   upsertWorkflowTransitionInQueryCache,
   upsertArtifactInQueryCache,
   removeArtifactFromQueryCache,
+  removeDaemonFromQueryCache,
+  upsertDaemonInQueryCache,
 } from "./serverCache";
 
 describe("server cache helpers", () => {
@@ -75,6 +78,48 @@ describe("server cache helpers", () => {
     expect(
       queryClient.getQueryData(queryKeys.artifacts.task(generation, "task-1"))
     ).toEqual([]);
+  });
+
+  it("applies daemon CDC updates to initialized fleet and detail projections", () => {
+    const daemon: Daemon = {
+      id: "daemon-1",
+      status: "pending",
+      name: null,
+      display_name: "daemon-1",
+      max_concurrency: null,
+      enrolled_at: null,
+      removed_at: null,
+      inserted_at: "2026-09-14T10:00:00Z",
+      updated_at: "2026-09-14T10:00:00Z",
+    };
+    const updated = { ...daemon, status: "active" };
+    const connectionId = "identity-a";
+
+    queryClient.setQueryData(queryKeys.daemons.fleet(connectionId), [daemon]);
+    queryClient.setQueryData(
+      queryKeys.daemons.detail(connectionId, daemon.id),
+      daemon
+    );
+
+    upsertDaemonInQueryCache(connectionId, updated);
+    expect(
+      queryClient.getQueryData<Daemon[]>(queryKeys.daemons.fleet(connectionId))
+    ).toEqual([updated]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.daemons.detail(connectionId, daemon.id)
+      )
+    ).toEqual(updated);
+
+    removeDaemonFromQueryCache(connectionId, daemon.id);
+    expect(
+      queryClient.getQueryData(queryKeys.daemons.fleet(connectionId))
+    ).toEqual([]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.daemons.detail(connectionId, daemon.id)
+      )
+    ).toBeUndefined();
   });
 
   it("keeps a websocket TaskRun update received while a fetch was in flight", () => {
