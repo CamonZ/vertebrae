@@ -20,7 +20,7 @@ use vertebrae_daemon::helpers::{
     resolve_all_provider_binaries_with_diagnostics, resolve_shell_path,
 };
 use vertebrae_daemon::{
-    DaemonAuthentication, DaemonCapabilities, DaemonConfig, DaemonEnrollmentClient,
+    ConfigError, DaemonAuthentication, DaemonCapabilities, DaemonConfig, DaemonEnrollmentClient,
     DaemonEnrollmentStorage, DaemonIdentity, DaemonMessage, DaemonSupervisor, ProjectEntry,
     ResolvedConfig,
 };
@@ -84,7 +84,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         api_token,
         daemon_identity,
         projects,
-    } = ResolvedConfig::load()?;
+    } = match ResolvedConfig::load() {
+        Ok(config) => config,
+        Err(ConfigError::Retired) => {
+            tracing::info!(
+                "Standalone daemon identity is retired; re-enrollment is required before startup"
+            );
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
 
     tracing::info!(
         sacrum_url = %sacrum_url,
