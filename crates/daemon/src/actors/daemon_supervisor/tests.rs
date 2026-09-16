@@ -94,6 +94,32 @@ fn classify_standalone_credential_rejection_as_permanent() {
 }
 
 #[test]
+fn classify_standalone_not_found_and_deregistered_as_terminal_retirement() {
+    let projects = known_projects(&[]);
+    for reason in ["not_found", "deregistered"] {
+        let m = msg(
+            "daemon:33333333-3333-3333-3333-333333333333",
+            "phx_reply",
+            serde_json::json!({
+                "status": "error",
+                "response": {"reason": reason}
+            }),
+        );
+        assert_eq!(
+            classify_channel_message(&m, &projects),
+            ChannelAction::DaemonJoinFailed(
+                "33333333-3333-3333-3333-333333333333".to_string(),
+                Some(reason.to_string())
+            )
+        );
+        assert!(matches!(
+            daemon_join_recovery(Some(reason)),
+            ChannelRecovery::RetireAndStop(_)
+        ));
+    }
+}
+
+#[test]
 fn classify_join_error_missing_reason() {
     let projects = known_projects(&["proj-1"]);
     let m = msg(
@@ -182,6 +208,10 @@ fn channel_interruptions_and_duplicate_connections_are_recoverable() {
     assert!(matches!(
         daemon_join_recovery(Some("invalid_credentials")),
         ChannelRecovery::Stop(_)
+    ));
+    assert!(matches!(
+        daemon_join_recovery(Some("not_found")),
+        ChannelRecovery::RetireAndStop(_)
     ));
     assert!(matches!(
         daemon_join_recovery(Some("identity_mismatch")),

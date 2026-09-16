@@ -84,11 +84,19 @@ disconnects and channel interruptions retry indefinitely with capped exponential
 backoff and jitter. Each WebSocket connection attempt has a 15-second timeout.
 A duplicate registration retries because a previous connection can take time to
 disappear from the backend. Explicitly rejected credentials stop with an actionable
-re-enrollment error. Unexpected supervisor termination exits the executable with
-a failure status so the existing service manager can restart it. Initial connection
-failures also exit unsuccessfully. Restart always reuses the saved identity; it does
-not repeat the bootstrap exchange. Reconnect credentials are not automatically
-refreshed; expiry or revocation requires explicit re-enrollment.
+re-enrollment error. A machine-readable `not_found`, `deregistered`, or equivalent
+terminal response means the standalone identity was retired while offline: the
+daemon atomically removes `reconnect_token` from `daemon.toml`, writes a retired
+marker, preserves `daemon.lock`, and stops without entering another retry loop.
+Transient and ambiguous responses do not clear credentials and remain retryable.
+On restart, a retired marker fails before account-token resolution, so the daemon
+cannot silently fall back to `[sacrum].token`. Re-enrollment with
+`--replace-existing` clears the marker and writes a fresh reconnect credential.
+Unexpected supervisor termination exits the executable with a failure status so the
+existing service manager can restart it. Initial connection failures also exit
+unsuccessfully. Restart always reuses the saved identity; it does not repeat the
+bootstrap exchange. Reconnect credentials are not automatically refreshed; expiry
+or revocation requires explicit re-enrollment.
 The current Sacrum backend grants this standalone channel registration only; it
 does not yet authorize project execution/reporting for a daemon principal. The
 existing account-token daemon path remains unchanged for project execution,
