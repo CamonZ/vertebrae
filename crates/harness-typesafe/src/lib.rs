@@ -5,6 +5,7 @@ mod client;
 mod config;
 mod error;
 mod models;
+mod runtime;
 mod validation;
 
 pub use client::TypeSafeClient;
@@ -17,4 +18,5 @@ pub use models::{
     NoulQuestion, Question, QuestionContent, ScoreAnswer, ScoreCriteria, ScoreQuestion,
     SystemOneRequest, SystemOneResponse, SystemOneState, Usage,
 };
+pub use runtime::TypeSafeRuntime;
 pub use validation::validate_response;
