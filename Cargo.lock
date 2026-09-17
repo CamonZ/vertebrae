@@ -7489,6 +7489,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vertebrae-harness-typesafe"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
 name = "vertebrae-installer"
 version = "0.1.0"
 dependencies = [
