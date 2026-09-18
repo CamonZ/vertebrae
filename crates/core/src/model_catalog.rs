@@ -8,18 +8,22 @@
 //! and we reject everything else with a clear error so users update the catalog
 //! before depending on a new model name.
 //!
-//! MVP providers:
+//! Built-in providers:
 //! - `anthropic` (Claude Code): `claude-*` prefix and the bare aliases
 //!   `opus`, `sonnet`, `haiku`, `fable`.
 //! - `openai` (Codex / GPT): `gpt-*` prefix, `o*` reasoning models
 //!   (e.g. `o1`, `o3`, `o4-mini`), and `codex-*`.
+//! - `typesafe` (TypeSafe System One): `jev-*` models, including the
+//!   documented `jev-latest` default.
 
-use crate::OutputVerbosity;
+use crate::{AgentConfig, OutputVerbosity};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Codex reasoning efforts currently accepted by the OpenAI provider path.
 pub const SUPPORTED_OPENAI_REASONING_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh"];
+
+pub const DEFAULT_TYPESAFE_MODEL: &str = "jev-latest";
 
 /// Built-in execution providers recognized by Vertebrae.
 ///
@@ -29,6 +33,7 @@ pub const SUPPORTED_OPENAI_REASONING_EFFORTS: &[&str] = &["low", "medium", "high
 pub enum Provider {
     Anthropic,
     Openai,
+    Typesafe,
 }
 
 impl Provider {
@@ -37,20 +42,31 @@ impl Provider {
         match self {
             Provider::Anthropic => "anthropic",
             Provider::Openai => "openai",
+            Provider::Typesafe => "typesafe",
         }
     }
 
     /// Parse a provider name (case-insensitive). Accepts the canonical names
-    /// (`anthropic`, `openai`) plus a couple of common aliases.
+    /// (`anthropic`, `openai`, `typesafe`) plus common aliases.
     pub fn parse(input: &str) -> Result<Self, String> {
         let normalized = input.trim().to_ascii_lowercase();
         match normalized.as_str() {
             "anthropic" | "claude" => Ok(Provider::Anthropic),
             "openai" | "codex" => Ok(Provider::Openai),
+            "typesafe" | "type-safe" | "type_safe" | "systemone" | "system-one" | "system_one" => {
+                Ok(Provider::Typesafe)
+            }
             other => Err(format!(
-                "Unknown provider '{}'. Supported providers: anthropic, openai",
+                "Unknown provider '{}'. Supported providers: anthropic, openai, typesafe",
                 other
             )),
+        }
+    }
+
+    pub const fn default_model(self) -> Option<&'static str> {
+        match self {
+            Provider::Typesafe => Some(DEFAULT_TYPESAFE_MODEL),
+            Provider::Anthropic | Provider::Openai => None,
         }
     }
 }
@@ -93,6 +109,12 @@ pub fn classify_model(model: &str) -> Option<Provider> {
         || is_openai_reasoning_alias(&normalized)
     {
         return Some(Provider::Openai);
+    }
+
+    // TypeSafe System One: keep the catalog intentionally narrow while
+    // accepting future documented JEV model revisions.
+    if normalized == "jev" || normalized.starts_with("jev-") {
+        return Some(Provider::Typesafe);
     }
 
     None
@@ -221,6 +243,48 @@ pub fn validate_provider_reasoning_effort(
     normalize_provider_reasoning_effort(provider, reasoning_effort).map(|_| ())
 }
 
+/// Validate agent-only settings before a provider runtime is constructed.
+/// TypeSafe accepts only its provider and model selection; chat-oriented agent
+/// options must fail instead of being silently ignored by the one-shot adapter.
+pub fn validate_provider_agent_config(
+    provider: Provider,
+    config: &AgentConfig,
+) -> Result<(), ProviderAgentOptionMismatch> {
+    if provider != Provider::Typesafe {
+        return Ok(());
+    }
+
+    let unsupported = [
+        (
+            "codex_model_provider",
+            config.codex_model_provider.is_some(),
+        ),
+        ("reasoning_effort", config.reasoning_effort.is_some()),
+        ("speed_tier", config.speed_tier.is_some()),
+        ("personality", config.personality.is_some()),
+        ("verbosity", config.verbosity.is_some()),
+        ("fallback_model", config.fallback_model.is_some()),
+        ("system_prompt", config.system_prompt.is_some()),
+        (
+            "append_system_prompt",
+            config.append_system_prompt.is_some(),
+        ),
+        ("agents", config.agents.is_some()),
+        ("tools", !config.tools.is_empty()),
+        ("allowed_tools", !config.allowed_tools.is_empty()),
+        ("disallowed_tools", !config.disallowed_tools.is_empty()),
+        ("permission_mode", config.permission_mode.is_some()),
+        ("max_budget_usd", config.max_budget_usd.is_some()),
+        ("mcp_config", !config.mcp_config.is_empty()),
+        ("plugin_dirs", !config.plugin_dirs.is_empty()),
+        ("json_schema", config.json_schema.is_some()),
+    ];
+    if let Some((option, true)) = unsupported.into_iter().find(|(_, present)| *present) {
+        return Err(ProviderAgentOptionMismatch { provider, option });
+    }
+    Ok(())
+}
+
 /// Normalize the opaque provider style identifier carried by the shared
 /// request contract.
 pub fn normalize_personality(
@@ -244,6 +308,9 @@ pub fn normalize_provider_personality(
     personality: Option<&str>,
 ) -> Result<Option<String>, ProviderPersonalityMismatch> {
     let personality = normalize_personality(personality)?;
+    if provider == Provider::Typesafe && personality.is_some() {
+        return Err(ProviderPersonalityMismatch::UnsupportedProvider { provider });
+    }
     if provider == Provider::Openai
         && let Some(personality) = personality.as_deref()
         && !matches!(personality, "none" | "friendly" | "pragmatic")
@@ -335,6 +402,9 @@ pub enum ProviderReasoningEffortMismatch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderPersonalityMismatch {
     Empty,
+    UnsupportedProvider {
+        provider: Provider,
+    },
     UnsupportedValue {
         provider: Provider,
         personality: String,
@@ -345,6 +415,13 @@ impl fmt::Display for ProviderPersonalityMismatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => f.write_str("personality must not be empty"),
+            Self::UnsupportedProvider { provider } => {
+                write!(
+                    f,
+                    "personality is not supported by the {} provider",
+                    provider
+                )
+            }
             Self::UnsupportedValue {
                 provider,
                 personality,
@@ -358,6 +435,24 @@ impl fmt::Display for ProviderPersonalityMismatch {
 }
 
 impl std::error::Error for ProviderPersonalityMismatch {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderAgentOptionMismatch {
+    pub provider: Provider,
+    pub option: &'static str,
+}
+
+impl fmt::Display for ProviderAgentOptionMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "AgentConfig.{} is not supported by the {} provider",
+            self.option, self.provider
+        )
+    }
+}
+
+impl std::error::Error for ProviderAgentOptionMismatch {}
 
 /// Reasons an output verbosity value can fail provider validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -450,6 +545,20 @@ mod tests {
     }
 
     #[test]
+    fn classify_typesafe_models_and_default() {
+        assert_eq!(
+            classify_model(DEFAULT_TYPESAFE_MODEL),
+            Some(Provider::Typesafe)
+        );
+        assert_eq!(classify_model("jev"), Some(Provider::Typesafe));
+        assert_eq!(classify_model("JEV-preview"), Some(Provider::Typesafe));
+        assert_eq!(
+            Provider::Typesafe.default_model(),
+            Some(DEFAULT_TYPESAFE_MODEL)
+        );
+    }
+
+    #[test]
     fn classify_unknown_returns_none() {
         assert_eq!(classify_model("kimi2.6"), None);
         assert_eq!(classify_model("llama-3"), None);
@@ -478,6 +587,8 @@ mod tests {
     fn provider_parse_aliases() {
         assert_eq!(Provider::parse("claude"), Ok(Provider::Anthropic));
         assert_eq!(Provider::parse("codex"), Ok(Provider::Openai));
+        assert_eq!(Provider::parse("type-safe"), Ok(Provider::Typesafe));
+        assert_eq!(Provider::parse("system_one"), Ok(Provider::Typesafe));
     }
 
     #[test]
@@ -486,6 +597,7 @@ mod tests {
         assert!(err.contains("bedrock"));
         assert!(err.contains("anthropic"));
         assert!(err.contains("openai"));
+        assert!(err.contains("typesafe"));
     }
 
     #[test]
@@ -495,6 +607,7 @@ mod tests {
         assert!(validate_provider_model(Provider::Anthropic, Some("fable")).is_ok());
         assert!(validate_provider_model(Provider::Openai, Some("gpt-4o")).is_ok());
         assert!(validate_provider_model(Provider::Openai, Some("o3-mini")).is_ok());
+        assert!(validate_provider_model(Provider::Typesafe, Some(DEFAULT_TYPESAFE_MODEL)).is_ok());
     }
 
     #[test]
@@ -690,6 +803,30 @@ mod tests {
         let error = normalize_provider_verbosity(Provider::Anthropic, Some(OutputVerbosity::Low))
             .expect_err("Claude must reject unsupported verbosity");
         assert!(error.to_string().contains("anthropic"));
+        let error = normalize_provider_personality(Provider::Typesafe, Some("friendly"))
+            .expect_err("TypeSafe must reject chat personality");
+        assert!(error.to_string().contains("typesafe"));
+    }
+
+    #[test]
+    fn validate_typesafe_agent_options_without_affecting_chat_providers() {
+        assert!(
+            validate_provider_agent_config(Provider::Anthropic, &AgentConfig::default()).is_ok()
+        );
+        assert!(validate_provider_agent_config(Provider::Openai, &AgentConfig::default()).is_ok());
+
+        let config = AgentConfig::new()
+            .with_provider(Provider::Typesafe)
+            .with_model(DEFAULT_TYPESAFE_MODEL);
+        assert!(validate_provider_agent_config(Provider::Typesafe, &config).is_ok());
+
+        let config = AgentConfig::new()
+            .with_provider(Provider::Typesafe)
+            .with_tools(vec!["Bash".into()]);
+        let error = validate_provider_agent_config(Provider::Typesafe, &config)
+            .expect_err("TypeSafe must reject tools");
+        assert_eq!(error.option, "tools");
+        assert!(error.to_string().contains("typesafe"));
     }
 
     #[test]
@@ -698,6 +835,8 @@ mod tests {
         assert_eq!(json, "\"anthropic\"");
         let json = serde_json::to_string(&Provider::Openai).unwrap();
         assert_eq!(json, "\"openai\"");
+        let json = serde_json::to_string(&Provider::Typesafe).unwrap();
+        assert_eq!(json, "\"typesafe\"");
         let parsed: Provider = serde_json::from_str("\"openai\"").unwrap();
         assert_eq!(parsed, Provider::Openai);
     }

@@ -7436,6 +7436,7 @@ dependencies = [
  "vertebrae-harness-claude",
  "vertebrae-harness-codex",
  "vertebrae-harness-core",
+ "vertebrae-harness-typesafe",
 ]
 
 [[package]]

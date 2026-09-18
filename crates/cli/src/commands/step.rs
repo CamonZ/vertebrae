@@ -6,8 +6,8 @@ use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
     AgentConfig, OutputVerbosity, Provider, ServiceError, SpeedTier, Step, StepService, StepType,
     StepUpdate, VertebraeServices, normalize_provider_personality,
-    normalize_provider_reasoning_effort, validate_provider_model_with_codex_provider,
-    validate_route_fields, validate_route_update,
+    normalize_provider_reasoning_effort, validate_provider_agent_config,
+    validate_provider_model_with_codex_provider, validate_route_fields, validate_route_update,
 };
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -300,6 +300,8 @@ fn build_overlayed_agent_config(
             "verbosity is currently supported only by the openai / Codex provider",
         ));
     }
+    validate_provider_agent_config(provider, &config)
+        .map_err(|error| ServiceError::validation_failed(error.to_string()))?;
     Ok(config)
 }
 

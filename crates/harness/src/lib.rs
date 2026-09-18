@@ -9,6 +9,7 @@ use std::{
     collections::BTreeMap,
     env,
     ffi::OsString,
+    fmt,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -26,6 +27,7 @@ use vertebrae_harness_core::{
     HarnessError, HarnessRuntime, ProviderThreadRef, RequestConfig, SessionId, TranscriptReplay,
     TranscriptReplayPage, TranscriptReplayPageRequest, TranscriptReplayRequest,
 };
+use vertebrae_harness_typesafe::{TypeSafeClientConfig, TypeSafeError, TypeSafeRuntime};
 
 /// Construction inputs owned by the surface or deployment environment.
 ///
@@ -58,6 +60,78 @@ pub struct HarnessFactoryConfig {
     /// Runtime launch still uses the process environment as before.
     pub transcript_home_dir: Option<PathBuf>,
     pub default_permission_mode: Option<PermissionMode>,
+    /// Server-owned TypeSafe API credential. It is never copied into an
+    /// `AgentConfig` or provider-neutral `RequestConfig`.
+    pub typesafe_api_key: Option<String>,
+    /// Optional server-owned TypeSafe endpoint override.
+    pub typesafe_base_url: Option<String>,
+}
+
+impl fmt::Debug for HarnessFactoryConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HarnessFactoryConfig")
+            .field("anthropic_executable", &self.anthropic_executable)
+            .field("openai_executable", &self.openai_executable)
+            .field(
+                "anthropic_executable_diagnostic",
+                &self.anthropic_executable_diagnostic,
+            )
+            .field(
+                "openai_executable_diagnostic",
+                &self.openai_executable_diagnostic,
+            )
+            .field(
+                "provider_resolution_cached",
+                &self.provider_resolution_cached,
+            )
+            .field("search_path", &self.search_path)
+            .field("environment", &redacted_environment(&self.environment))
+            .field("installed_skills_roots", &self.installed_skills_roots)
+            .field("claude_settings_path", &self.claude_settings_path)
+            .field("claude_agent_paths", &self.claude_agent_paths)
+            .field(
+                "claude_permission_prompt_tool",
+                &self.claude_permission_prompt_tool,
+            )
+            .field("claude_mcp_config", &self.claude_mcp_config)
+            .field(
+                "claude_root_locator_resolver",
+                &self
+                    .claude_root_locator_resolver
+                    .as_ref()
+                    .map(|_| "<configured>"),
+            )
+            .field("claude_plugin_roots", &self.claude_plugin_roots)
+            .field(
+                "claude_managed_plugin_root",
+                &self.claude_managed_plugin_root,
+            )
+            .field("transcript_home_dir", &self.transcript_home_dir)
+            .field("default_permission_mode", &self.default_permission_mode)
+            .field(
+                "typesafe_api_key",
+                &self.typesafe_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "typesafe_base_url",
+                &redacted_base_url(&self.typesafe_base_url),
+            )
+            .finish()
+    }
+}
+
+impl HarnessFactoryConfig {
+    /// Capture server startup configuration once. Explicit struct fields may
+    /// still be supplied by an embedding server and take precedence when the
+    /// factory constructs a TypeSafe client.
+    pub fn from_environment() -> Self {
+        Self {
+            typesafe_api_key: env::var("TYPESAFE_API_KEY").ok(),
+            typesafe_base_url: env::var("TYPESAFE_BASE_URL").ok(),
+            ..Self::default()
+        }
+    }
 }
 
 /// Options supplied for one runtime construction. `AgentConfig` is the
@@ -96,6 +170,8 @@ impl HarnessRuntimeFactory {
         options: HarnessRuntimeOptions,
     ) -> Result<HarnessRuntimeInstance, HarnessError> {
         let provider = Self::provider_for(&options.agent_config);
+        vertebrae_core::validate_provider_agent_config(provider, &options.agent_config)
+            .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
         let request_config =
             normalized_request_config(provider, &options.agent_config, options.request_config)?;
         let runtime: Arc<dyn HarnessRuntime> = match provider {
@@ -103,6 +179,9 @@ impl HarnessRuntimeFactory {
                 Arc::new(self.build_claude(&options.agent_config, &request_config)?)
             }
             Provider::Openai => Arc::new(self.build_codex(&options.agent_config, &request_config)?),
+            Provider::Typesafe => {
+                Arc::new(self.build_typesafe(&options.agent_config, &request_config)?)
+            }
         };
         Ok(HarnessRuntimeInstance {
             provider,
@@ -125,6 +204,7 @@ impl HarnessRuntimeFactory {
             Provider::Openai => {
                 CodexTranscriptReplay::new(self.config.transcript_home_dir.clone()).replay(request)
             }
+            Provider::Typesafe => Ok(None),
         }
     }
 
@@ -143,6 +223,7 @@ impl HarnessRuntimeFactory {
             }
             Provider::Openai => CodexTranscriptReplay::new(self.config.transcript_home_dir.clone())
                 .replay_page(request, page),
+            Provider::Typesafe => Ok(None),
         }
     }
 
@@ -261,6 +342,26 @@ impl HarnessRuntimeFactory {
         }
         Ok(CodexRuntime::new(provider))
     }
+
+    fn build_typesafe(
+        &self,
+        _agent_config: &AgentConfig,
+        request_config: &RequestConfig,
+    ) -> Result<TypeSafeRuntime, HarnessError> {
+        vertebrae_core::validate_provider_model(
+            Provider::Typesafe,
+            request_config.model.as_deref(),
+        )
+        .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+        validate_typesafe_request_config(request_config)?;
+
+        let mut config =
+            TypeSafeClientConfig::new(self.config.typesafe_api_key.clone().unwrap_or_default());
+        if let Some(base_url) = &self.config.typesafe_base_url {
+            config = config.with_base_url(base_url.clone());
+        }
+        TypeSafeRuntime::from_config(config).map_err(map_typesafe_configuration_error)
+    }
 }
 
 fn normalized_request_config(
@@ -270,6 +371,9 @@ fn normalized_request_config(
 ) -> Result<RequestConfig, HarnessError> {
     if request_config.model.is_none() {
         request_config.model = agent_config.model.clone();
+    }
+    if request_config.model.is_none() {
+        request_config.model = provider.default_model().map(str::to_owned);
     }
     if request_config.reasoning_effort.is_none() {
         request_config.reasoning_effort = agent_config.reasoning_effort.clone();
@@ -300,7 +404,69 @@ fn normalized_request_config(
     request_config.verbosity =
         vertebrae_core::normalize_provider_verbosity(provider, request_config.verbosity)
             .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+    if provider == Provider::Typesafe {
+        validate_typesafe_request_config(&request_config)?;
+    }
     Ok(request_config)
+}
+
+fn validate_typesafe_request_config(config: &RequestConfig) -> Result<(), HarnessError> {
+    let unsupported = [
+        ("working_directory", config.working_directory.is_some()),
+        ("speed_tier", config.speed_tier.is_some()),
+        ("output_schema", config.output_schema.is_some()),
+        (
+            "developer_instructions",
+            config.developer_instructions.is_some(),
+        ),
+        ("environment", !config.environment.is_empty()),
+    ];
+    if let Some((option, true)) = unsupported.into_iter().find(|(_, present)| *present) {
+        return Err(HarnessError::Unsupported(format!(
+            "TypeSafe does not support RequestConfig.{option}"
+        )));
+    }
+    Ok(())
+}
+
+fn redacted_environment(environment: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    environment
+        .iter()
+        .map(|(key, value)| {
+            let value = if key == "TYPESAFE_API_KEY"
+                || key.ends_with("_API_KEY")
+                || key.ends_with("_TOKEN")
+                || key.ends_with("_SECRET")
+                || key.ends_with("_PASSWORD")
+            {
+                "<redacted>".to_string()
+            } else {
+                value.clone()
+            };
+            (key.clone(), value)
+        })
+        .collect()
+}
+
+fn redacted_base_url(base_url: &Option<String>) -> Option<String> {
+    base_url.as_ref().map(|value| {
+        if value.contains('@') || value.contains('?') || value.contains('#') {
+            "<redacted>".to_string()
+        } else {
+            value.clone()
+        }
+    })
+}
+
+fn map_typesafe_configuration_error(error: TypeSafeError) -> HarnessError {
+    match error {
+        TypeSafeError::MissingApiKey => HarnessError::Unavailable(
+            "TypeSafe provider API key is not configured; set TYPESAFE_API_KEY on the server"
+                .into(),
+        ),
+        TypeSafeError::InvalidConfiguration(message) => HarnessError::InvalidRequest(message),
+        error => HarnessError::Unavailable(format!("TypeSafe provider is unavailable: {error}")),
+    }
 }
 
 fn merge_plugin_root(agent_config: &mut AgentConfig, plugin_root: &Path) {
@@ -544,5 +710,87 @@ mod tests {
             result.is_ok(),
             "cached construction must not re-probe the path"
         );
+    }
+
+    #[test]
+    fn selects_typesafe_with_server_configuration_and_default_model() {
+        let config = HarnessFactoryConfig {
+            typesafe_api_key: Some("typesafe-secret".into()),
+            typesafe_base_url: Some("https://typesafe.example.test".into()),
+            ..HarnessFactoryConfig::default()
+        };
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("typesafe-secret"));
+        assert!(debug.contains("<redacted>"));
+
+        let instance = HarnessRuntimeFactory::new(config).create(HarnessRuntimeOptions {
+            agent_config: AgentConfig::new().with_provider(Provider::Typesafe),
+            request_config: RequestConfig::default(),
+        });
+        let instance = instance.expect("TypeSafe runtime should be selected");
+        assert_eq!(instance.provider, Provider::Typesafe);
+        assert_eq!(
+            instance.request_config.model.as_deref(),
+            Some(vertebrae_core::DEFAULT_TYPESAFE_MODEL)
+        );
+    }
+
+    #[test]
+    fn missing_typesafe_api_key_is_unavailable_without_cli_lookup() {
+        let result = HarnessRuntimeFactory::new(HarnessFactoryConfig::default()).create(
+            HarnessRuntimeOptions {
+                agent_config: AgentConfig::new().with_provider(Provider::Typesafe),
+                request_config: RequestConfig::default(),
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(HarnessError::Unavailable(message))
+                if message.contains("TYPESAFE_API_KEY") && !message.contains("executable")
+        ));
+    }
+
+    #[test]
+    fn rejects_typesafe_agent_and_request_options_before_runtime_creation() {
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            typesafe_api_key: Some("typesafe-secret".into()),
+            ..HarnessFactoryConfig::default()
+        });
+
+        let result = factory.create(HarnessRuntimeOptions {
+            agent_config: AgentConfig::new()
+                .with_provider(Provider::Typesafe)
+                .with_tools(vec!["Bash".into()]),
+            request_config: RequestConfig::default(),
+        });
+        assert!(matches!(
+            result,
+            Err(HarnessError::InvalidRequest(message)) if message.contains("AgentConfig.tools")
+        ));
+
+        let result = factory.create(HarnessRuntimeOptions {
+            agent_config: AgentConfig::new().with_provider(Provider::Typesafe),
+            request_config: RequestConfig {
+                environment: BTreeMap::from([(String::from("SECRET"), String::from("value"))]),
+                ..RequestConfig::default()
+            },
+        });
+        assert!(matches!(
+            result,
+            Err(HarnessError::Unsupported(message)) if message.contains("RequestConfig.environment")
+        ));
+
+        let result = factory.create(HarnessRuntimeOptions {
+            agent_config: AgentConfig::new().with_provider(Provider::Typesafe),
+            request_config: RequestConfig {
+                model: Some("gpt-5.5".into()),
+                ..RequestConfig::default()
+            },
+        });
+        assert!(matches!(
+            result,
+            Err(HarnessError::InvalidRequest(message)) if message.contains("gpt-5.5")
+        ));
     }
 }

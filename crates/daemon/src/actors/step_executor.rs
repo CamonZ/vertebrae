@@ -578,18 +578,20 @@ impl StepExecutor {
         if provider == Provider::Anthropic && agent_config.model.is_none() {
             agent_config.model = Some(DEFAULT_MODEL.into());
         }
-        for skill in &state.config.step_config.skills {
-            if !agent_config.allowed_tools.contains(skill) {
-                agent_config.allowed_tools.push(skill.clone());
+        if provider != Provider::Typesafe {
+            for skill in &state.config.step_config.skills {
+                if !agent_config.allowed_tools.contains(skill) {
+                    agent_config.allowed_tools.push(skill.clone());
+                }
             }
-        }
-        for tool in crate::settings_synthesis::SELF_TRANSITION_DENY_TOOLS {
-            if !agent_config
-                .disallowed_tools
-                .iter()
-                .any(|configured| configured == tool)
-            {
-                agent_config.disallowed_tools.push((*tool).into());
+            for tool in crate::settings_synthesis::SELF_TRANSITION_DENY_TOOLS {
+                if !agent_config
+                    .disallowed_tools
+                    .iter()
+                    .any(|configured| configured == tool)
+                {
+                    agent_config.disallowed_tools.push((*tool).into());
+                }
             }
         }
 
@@ -632,6 +634,8 @@ impl StepExecutor {
                 .iter()
                 .map(PathBuf::from)
                 .collect(),
+            typesafe_api_key: state.config.capabilities.typesafe_api_key.clone(),
+            typesafe_base_url: state.config.capabilities.typesafe_base_url.clone(),
             claude_root_locator_resolver: Some(Arc::new(
                 vertebrae_harness::daemon_opaque_claude_locator,
             )),
@@ -639,7 +643,8 @@ impl StepExecutor {
             ..HarnessFactoryConfig::default()
         };
         let request_config = RequestConfig {
-            working_directory: Some(state.config.working_dir().to_path_buf()),
+            working_directory: (provider != Provider::Typesafe)
+                .then(|| state.config.working_dir().to_path_buf()),
             model: agent_config.model.clone(),
             reasoning_effort: agent_config.reasoning_effort.clone(),
             speed_tier: agent_config.speed_tier,
@@ -647,11 +652,12 @@ impl StepExecutor {
             verbosity: agent_config.verbosity,
             output_schema: agent_config.json_schema.clone(),
             developer_instructions: None,
-            environment: std::iter::once((
-                "PATH".into(),
-                state.config.capabilities.shell_path.clone(),
-            ))
-            .collect(),
+            environment: if provider == Provider::Typesafe {
+                Default::default()
+            } else {
+                std::iter::once(("PATH".into(), state.config.capabilities.shell_path.clone()))
+                    .collect()
+            },
         };
         let instance =
             match HarnessRuntimeFactory::new(factory_config).create(HarnessRuntimeOptions {

@@ -7,6 +7,7 @@
 
 use std::{
     collections::HashMap,
+    fmt,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -25,27 +26,51 @@ pub struct HarnessCapability {
     pub discovery_diagnostic: Option<String>,
 }
 
-/// Immutable daemon-wide discovery results shared by every project and step.
-///
-/// This snapshot is intentionally not a capability gate. It records what was
-/// found at startup; provider selection and per-step error behavior remain
-/// unchanged. Installing or updating Claude Code, providers, or skills while
-/// the daemon is running takes effect after the next daemon restart.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DaemonCapabilities {
-    /// Provider-keyed harness discovery, including failed discoveries.
     pub harnesses: HashMap<Provider, HarnessCapability>,
-    /// The legacy provider map consumed by the shared harness factory.
     pub provider_binaries: ProviderBinaries,
-    /// The login-shell PATH captured at startup.
     pub shell_path: String,
-    /// Resolved managed skill roots. This remains empty when path resolution
-    /// failed; the failure is retained in [`installed_skills_diagnostic`].
     pub installed_skills_roots: Vec<PathBuf>,
-    /// Failure resolving the managed skill root, if any.
     pub installed_skills_diagnostic: Option<String>,
-    /// The one startup-time Claude compatibility result.
     pub claude_plugin_dir: ClaudePluginDirResolution,
+    pub typesafe_api_key: Option<String>,
+    pub typesafe_base_url: Option<String>,
+}
+
+impl fmt::Debug for DaemonCapabilities {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DaemonCapabilities")
+            .field("harnesses", &self.harnesses)
+            .field("provider_binaries", &self.provider_binaries)
+            .field("shell_path", &self.shell_path)
+            .field("installed_skills_roots", &self.installed_skills_roots)
+            .field(
+                "installed_skills_diagnostic",
+                &self.installed_skills_diagnostic,
+            )
+            .field("claude_plugin_dir", &self.claude_plugin_dir)
+            .field(
+                "typesafe_api_key",
+                &self.typesafe_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "typesafe_base_url",
+                &redacted_base_url(&self.typesafe_base_url),
+            )
+            .finish()
+    }
+}
+
+fn redacted_base_url(base_url: &Option<String>) -> Option<String> {
+    base_url.as_ref().map(|value| {
+        if value.contains('@') || value.contains('?') || value.contains('#') {
+            "<redacted>".to_string()
+        } else {
+            value.clone()
+        }
+    })
 }
 
 impl DaemonCapabilities {
@@ -56,6 +81,8 @@ impl DaemonCapabilities {
         provider_binaries: ProviderBinaries,
         provider_diagnostics: ProviderDiscoveryDiagnostics,
         working_dir: &Path,
+        typesafe_api_key: Option<String>,
+        typesafe_base_url: Option<String>,
     ) -> Self {
         let installed_skills = vertebrae_installer::installed_skills_dir();
         let (installed_skills_roots, installed_skills_diagnostic) = match installed_skills {
@@ -76,6 +103,19 @@ impl DaemonCapabilities {
                 HarnessCapability {
                     executable: provider_binaries.openai.clone(),
                     discovery_diagnostic: provider_diagnostics.openai.clone(),
+                },
+            ),
+            (
+                Provider::Typesafe,
+                HarnessCapability {
+                    executable: None,
+                    discovery_diagnostic: (!typesafe_api_key
+                        .as_deref()
+                        .is_some_and(|key| !key.trim().is_empty()))
+                    .then(|| {
+                        "TypeSafe provider API key is not configured; set TYPESAFE_API_KEY"
+                            .to_string()
+                    }),
                 },
             ),
         ]
@@ -103,6 +143,8 @@ impl DaemonCapabilities {
             installed_skills_roots,
             installed_skills_diagnostic,
             claude_plugin_dir,
+            typesafe_api_key,
+            typesafe_base_url,
         }
     }
 
@@ -163,9 +205,11 @@ mod tests {
                 openai: Some("Codex CLI not found".to_string()),
             },
             Path::new("/tmp/project"),
+            None,
+            None,
         );
 
-        assert_eq!(capabilities.harnesses.len(), 2);
+        assert_eq!(capabilities.harnesses.len(), 3);
         assert_eq!(
             capabilities
                 .harnesses
@@ -179,5 +223,29 @@ mod tests {
                 .get(&Provider::Openai)
                 .is_some_and(|capability| capability.executable.is_none())
         );
+        assert_eq!(
+            capabilities
+                .harnesses
+                .get(&Provider::Typesafe)
+                .and_then(|capability| capability.discovery_diagnostic.as_deref()),
+            Some("TypeSafe provider API key is not configured; set TYPESAFE_API_KEY")
+        );
+    }
+
+    #[test]
+    fn typesafe_startup_credentials_are_redacted_from_capability_debug() {
+        let capabilities = DaemonCapabilities::new(
+            "/usr/bin:/bin".to_string(),
+            ProviderBinaries::default(),
+            ProviderDiscoveryDiagnostics::default(),
+            Path::new("/tmp/project"),
+            Some("typesafe-secret".into()),
+            Some("https://typesafe.example.test".into()),
+        );
+
+        let debug = format!("{capabilities:?}");
+        assert!(!debug.contains("typesafe-secret"));
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("TYPESAFE_API_KEY"));
     }
 }

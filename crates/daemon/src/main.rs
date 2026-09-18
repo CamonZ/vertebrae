@@ -24,6 +24,7 @@ use vertebrae_daemon::{
     DaemonEnrollmentStorage, DaemonIdentity, DaemonMessage, DaemonSupervisor, ProjectEntry,
     ResolvedConfig,
 };
+use vertebrae_harness::HarnessFactoryConfig;
 
 #[derive(Debug, Parser)]
 #[command(name = "vtb-daemon", about = "Vertebrae workflow execution daemon")]
@@ -109,6 +110,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // request that provider; the daemon stays up for the others.
     let (provider_binaries, provider_diagnostics) =
         resolve_all_provider_binaries_with_diagnostics(&shell_path);
+    let typesafe_factory_config = HarnessFactoryConfig::from_environment();
     tracing::info!(
         anthropic_binary = ?provider_binaries.anthropic,
         openai_binary = ?provider_binaries.openai,
@@ -125,6 +127,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         provider_binaries,
         provider_diagnostics,
         &compatibility_working_dir,
+        typesafe_factory_config.typesafe_api_key,
+        typesafe_factory_config.typesafe_base_url,
     ));
     capabilities.log_startup_diagnostics();
 

@@ -28,6 +28,7 @@ impl ProviderBinaries {
         match provider {
             Provider::Anthropic => self.anthropic.as_deref(),
             Provider::Openai => self.openai.as_deref(),
+            Provider::Typesafe => None,
         }
     }
 }
@@ -212,6 +213,10 @@ pub fn find_provider_binary(provider: Provider, shell_path: &str) -> Result<Path
     match provider {
         Provider::Anthropic => find_claude_binary(shell_path),
         Provider::Openai => find_codex_binary(shell_path),
+        Provider::Typesafe => Err(
+            "TypeSafe provider does not use a CLI executable; configure TYPESAFE_API_KEY"
+                .to_string(),
+        ),
     }
 }
 
