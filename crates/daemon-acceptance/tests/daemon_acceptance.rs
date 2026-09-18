@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cucumber::World;
+use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig, StepExecutionResponse};
 
@@ -29,6 +30,9 @@ pub struct DaemonWorld {
     pub created_task_ids: Vec<String>,
     pub created_workflow_ids: Vec<String>,
     pub created_project_ids: Vec<String>,
+    pub created_daemon_ids: Vec<String>,
+
+    pub daemon_id: Option<String>,
 
     // Parent/child orchestration scenario state.
     pub parent_workflow_id: Option<String>,
@@ -53,6 +57,7 @@ pub struct DaemonWorld {
     pub daemon: Option<Child>,
     pub capture_dir: PathBuf,
     pub managed_plugin_root: Option<PathBuf>,
+    pub standalone_home: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for DaemonWorld {
@@ -97,6 +102,8 @@ impl DaemonWorld {
             created_task_ids: Vec::new(),
             created_workflow_ids: Vec::new(),
             created_project_ids: Vec::new(),
+            created_daemon_ids: Vec::new(),
+            daemon_id: None,
             parent_workflow_id: None,
             child_workflow_id: None,
             parent_task_id: None,
@@ -117,6 +124,7 @@ impl DaemonWorld {
                 uuid::Uuid::new_v4().simple()
             )),
             managed_plugin_root: None,
+            standalone_home: None,
         }
     }
 
@@ -221,6 +229,98 @@ impl DaemonWorld {
         if let Some(mut child) = self.daemon.take() {
             let _ = child.kill().await;
             let _ = child.wait().await;
+        }
+        if let Some(home) = self.standalone_home.take() {
+            let _ = std::fs::remove_dir_all(home);
+        }
+    }
+
+    pub async fn start_standalone_daemon(&mut self, daemon_id: &str, enrollment_token: &str) {
+        assert!(self.daemon.is_none(), "daemon already running for scenario");
+
+        let home = PathBuf::from(format!(
+            "/tmp/daemon-acc-standalone-home-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let cfg_dir = home.join(".config").join("vertebrae");
+        std::fs::create_dir_all(&cfg_dir).expect("create standalone daemon home");
+        std::fs::write(
+            cfg_dir.join("config.toml"),
+            format!("[sacrum]\nurl = \"{}\"\n", self.sacrum_url),
+        )
+        .expect("write standalone daemon config");
+
+        let mut enroll = Command::new(&self.vtb_daemon_binary);
+        enroll
+            .args([
+                "enroll",
+                "--endpoint",
+                &self.sacrum_url,
+                "--daemon-id",
+                daemon_id,
+                "--token-stdin",
+            ])
+            .env("HOME", &home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut enroll = enroll.spawn().expect("spawn standalone enrollment");
+        enroll
+            .stdin
+            .take()
+            .expect("standalone enrollment stdin")
+            .write_all(enrollment_token.as_bytes())
+            .await
+            .expect("write standalone enrollment token");
+        let enrollment_output = enroll
+            .wait_with_output()
+            .await
+            .expect("wait for standalone enrollment");
+        assert!(
+            enrollment_output.status.success(),
+            "standalone enrollment failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&enrollment_output.stdout),
+            String::from_utf8_lossy(&enrollment_output.stderr)
+        );
+
+        let log_path = PathBuf::from(format!(
+            "/tmp/daemon-acc-standalone-{}.log",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let log_stderr = std::fs::File::create(&log_path).expect("create standalone daemon log");
+        let log_stderr_dup = log_stderr.try_clone().expect("dup standalone daemon log");
+        let mut cmd = Command::new(&self.vtb_daemon_binary);
+        cmd.env("HOME", &home)
+            .env(
+                "CLAUDE_CODE_PATH",
+                std::env::var("CLAUDE_CODE_PATH").unwrap_or_default(),
+            )
+            .env(
+                "CODEX_PATH",
+                std::env::var("CODEX_PATH").unwrap_or_default(),
+            )
+            .env("RUST_LOG", "info")
+            .stdout(Stdio::from(log_stderr_dup))
+            .stderr(Stdio::from(log_stderr))
+            .kill_on_drop(true);
+        let child = cmd.spawn().expect("spawn standalone daemon");
+        self.daemon = Some(child);
+        self.standalone_home = Some(home);
+
+        let expected = "Standalone daemon identity registered";
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if Instant::now() >= deadline {
+                self.stop_daemon().await;
+                let tail = std::fs::read_to_string(&log_path).unwrap_or_default();
+                panic!("daemon did not log {expected:?} within 30s. log:\n{tail}");
+            }
+            if let Ok(text) = std::fs::read_to_string(&log_path)
+                && text.contains(expected)
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 
@@ -387,6 +487,10 @@ async fn cleanup(world: &mut DaemonWorld) {
     for id in world.created_workflow_ids.drain(..).rev() {
         let svc = vertebrae_sacrum_client::SacrumWorkflowService::new((*client).clone());
         let _ = vertebrae_core::workflow_service::WorkflowService::delete_workflow(&svc, &id).await;
+    }
+    for id in world.created_daemon_ids.drain(..).rev() {
+        let svc = vertebrae_sacrum_client::SacrumDaemonService::new((*client).clone());
+        let _ = svc.unregister_daemon(&id).await;
     }
     // Sacrum exposes no delete-project mutation in the client queries module;
     // projects survive until the test container is torn down — same pattern

@@ -14,6 +14,39 @@ pub struct Daemon {
     pub removed_at: Option<String>,
     pub inserted_at: Option<String>,
     pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub daemon_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub os: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub architecture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub last_seen_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub report_version: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub capabilities: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub connection_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub health: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub health_reason: Option<String>,
 }
 
 impl From<vertebrae_sacrum_client::daemon_service::DaemonSummary> for Daemon {
@@ -28,8 +61,58 @@ impl From<vertebrae_sacrum_client::daemon_service::DaemonSummary> for Daemon {
             removed_at: summary.removed_at.map(|dt| dt.to_rfc3339()),
             inserted_at: summary.inserted_at.map(|dt| dt.to_rfc3339()),
             updated_at: summary.updated_at.map(|dt| dt.to_rfc3339()),
+            daemon_version: summary.daemon_version,
+            os: summary.os,
+            architecture: summary.architecture,
+            host: summary.host,
+            started_at: summary.started_at.map(|dt| dt.to_rfc3339()),
+            last_seen_at: summary.last_seen_at.map(|dt| dt.to_rfc3339()),
+            report_version: summary.report_version,
+            capabilities: summary.capabilities,
+            connection_status: summary.connection_status,
+            health: summary.health,
+            health_reason: summary.health_reason,
         }
     }
+}
+
+/// Live, ephemeral fields published by Sacrum's daemon telemetry registry.
+/// Durable identity and management fields remain on [`Daemon`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+pub struct DaemonMetrics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub daemon_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub os: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub architecture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub last_seen_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub report_version: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub capabilities: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub connection_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub health: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub health_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]

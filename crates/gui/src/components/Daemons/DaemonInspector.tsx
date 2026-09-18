@@ -14,6 +14,8 @@ import {
 } from "../panels";
 import {
   daemonFieldValue,
+  formatDaemonCapabilityReadiness,
+  formatDaemonHeartbeatAge,
   daemonStatusIntent,
   daemonStatusLabel,
   formatDaemonTimestamp,
@@ -317,9 +319,32 @@ export function DaemonInspector({
                   Readiness
                 </h2>
                 <dl className="border-t border-[var(--color-line)]">
-                  <DetailRow label="Heartbeat age" value="Unavailable" />
-                  <DetailRow label="Binary version" value="Unavailable" />
-                  <DetailRow label="Capability readiness" value="Unavailable" />
+                  <DetailRow
+                    label="Heartbeat age"
+                    value={formatDaemonHeartbeatAge(daemon.last_seen_at)}
+                  />
+                  <DetailRow
+                    label="Binary version"
+                    value={daemon.daemon_version ?? "Unavailable"}
+                  />
+                  <DetailRow
+                    label="Capability readiness"
+                    value={formatDaemonCapabilityReadiness(daemon.capabilities)}
+                  />
+                  <DetailRow
+                    label="Connection"
+                    value={daemon.connection_status ?? "Unavailable"}
+                  />
+                  <DetailRow
+                    label="Health"
+                    value={daemon.health ?? "Unavailable"}
+                  />
+                  {daemon.health_reason && (
+                    <DetailRow
+                      label="Health reason"
+                      value={daemon.health_reason}
+                    />
+                  )}
                   <DetailRow
                     label="Enrolled"
                     value={formatDaemonTimestamp(daemon.enrolled_at)}
@@ -330,9 +355,9 @@ export function DaemonInspector({
                   />
                 </dl>
                 <p className="mt-3 text-xs leading-relaxed text-[var(--color-fg-mute)]">
-                  Fleet telemetry is pending its backend publication. These
-                  values are not inferred from shell connectivity or local
-                  installation state.
+                  Values come from Sacrum&apos;s live in-memory snapshot.
+                  Missing fields are not inferred from shell connectivity or
+                  local installation state.
                 </p>
               </section>
               {lifecycleAction && actionError && (

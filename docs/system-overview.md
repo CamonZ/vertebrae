@@ -324,7 +324,11 @@ Client type "daemon" receives ONLY:
 The GUI also joins the authenticated `accounts:me` channel for account-scoped
 `daemon_created`, `daemon_updated`, and `daemon_deleted` CDC broadcasts. The
 daemon fleet takes an initial snapshot and explicitly recovers with a snapshot
-after reconnect; it does not poll periodically between broadcasts.
+after reconnect; it does not poll periodically between broadcasts. The same
+account channel carries ephemeral `daemon_metrics` events from accepted
+daemon reports and application heartbeats. These events update live health,
+freshness, version, host, and capability fields but never replace durable
+identity or create a daemon absent from the current snapshot.
 ```
 
 The legacy account-authenticated daemon registers project channels with
@@ -333,6 +337,13 @@ only to that channel. An enrolled standalone daemon instead authenticates its
 stable identity and joins `daemon:<id>`. The current backend intentionally
 limits that standalone channel to registration/reconnect, so it does not
 silently claim project execution authority or fall back to an account token.
+
+After a standalone join, `vtb-daemon` publishes the versioned, bounded report
+and sends application heartbeats every 30 seconds. The report is limited to
+sanitized daemon metadata and readiness booleans; credentials, executable
+paths, diagnostics, project data, and capacity/queue counts are excluded.
+Sacrum keeps the normalized live report in connection memory only and derives
+the `online`/`stale`/`offline` health state and capability readiness.
 
 The GUI maintains a WebSocket connection with 30-second heartbeats and exponential backoff reconnection (100ms → 30s). Every mutation — whether from CLI, GUI, or daemon — triggers a broadcast, keeping all views consistent.
 

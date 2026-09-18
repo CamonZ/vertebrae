@@ -35,6 +35,7 @@ import {
   upsertArtifactInQueryCache,
   removeArtifactFromQueryCache,
   removeDaemonFromQueryCache,
+  mergeDaemonMetricsInQueryCache,
   upsertDaemonInQueryCache,
 } from "./serverCache";
 
@@ -120,6 +121,47 @@ describe("server cache helpers", () => {
         queryKeys.daemons.detail(connectionId, daemon.id)
       )
     ).toBeUndefined();
+  });
+
+  it("merges live daemon metrics into initialized projections only", () => {
+    const daemon: Daemon = {
+      id: "daemon-1",
+      status: "active",
+      name: null,
+      display_name: "daemon-1",
+      max_concurrency: null,
+      enrolled_at: null,
+      removed_at: null,
+      inserted_at: null,
+      updated_at: null,
+    };
+    const connectionId = "identity-a";
+    const metrics = {
+      host: "worker-1",
+      health: "healthy",
+      last_seen_at: "2026-09-18T10:00:00Z",
+    };
+    queryClient.setQueryData(queryKeys.daemons.fleet(connectionId), [daemon]);
+    queryClient.setQueryData(
+      queryKeys.daemons.detail(connectionId, daemon.id),
+      daemon
+    );
+
+    mergeDaemonMetricsInQueryCache(connectionId, daemon.id, metrics);
+
+    expect(
+      queryClient.getQueryData<Daemon[]>(queryKeys.daemons.fleet(connectionId))
+    ).toEqual([{ ...daemon, ...metrics }]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.daemons.detail(connectionId, daemon.id)
+      )
+    ).toEqual({ ...daemon, ...metrics });
+
+    mergeDaemonMetricsInQueryCache(connectionId, "missing-daemon", metrics);
+    expect(
+      queryClient.getQueryData(queryKeys.daemons.fleet(connectionId))
+    ).toHaveLength(1);
   });
 
   it("keeps a websocket TaskRun update received while a fetch was in flight", () => {

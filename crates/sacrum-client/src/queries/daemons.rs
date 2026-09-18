@@ -8,6 +8,17 @@ pub const DAEMON_FIELDS: &str = r#"
         enrolled_at
         inserted_at
         updated_at
+        daemon_version
+        os
+        architecture
+        host
+        started_at
+        last_seen_at
+        report_version
+        capabilities
+        connection_status
+        health
+        health_reason
     }
 "#;
 
@@ -137,6 +148,24 @@ mod tests {
                 .contains("credentials { ...DaemonCredentialMetadataFields }")
         );
         assert!(!DAEMON_FIELDS.contains("removed_at"));
+        for field in [
+            "daemon_version",
+            "os",
+            "architecture",
+            "host",
+            "started_at",
+            "last_seen_at",
+            "report_version",
+            "capabilities",
+            "connection_status",
+            "health",
+            "health_reason",
+        ] {
+            assert!(
+                DAEMON_FIELDS.contains(field),
+                "missing daemon field {field}"
+            );
+        }
         assert!(CREATE_DAEMON.contains("mutation CreateDaemon($name: String)"));
         assert!(CREATE_DAEMON.contains("createDaemon(name: $name)"));
         assert!(CREATE_DAEMON.contains("enrollment_token"));

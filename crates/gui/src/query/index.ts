@@ -14,6 +14,7 @@ export {
   hasTaskInQueryCache,
   invalidateArtifactQuery,
   invalidateDaemonQueries,
+  mergeDaemonMetricsInQueryCache,
   mergeFetchedStepExecutions,
   mergeFetchedTaskRuns,
   mergeFetchedTaskRunTrace,

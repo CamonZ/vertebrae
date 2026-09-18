@@ -15,6 +15,17 @@ pub struct DaemonChangedEvent {
     pub daemon: Option<types::Daemon>,
 }
 
+/// Ephemeral live telemetry for a durable daemon. Sacrum emits this on the
+/// account topic; it updates existing GUI projections without creating a
+/// daemon that was not present in a snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct DaemonMetricsEvent {
+    pub connection_id: String,
+    pub daemon_id: String,
+    pub schema_version: i32,
+    pub metrics: types::DaemonMetrics,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub enum DaemonChangeType {
     Created,

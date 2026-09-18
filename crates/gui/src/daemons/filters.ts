@@ -141,7 +141,7 @@ export function groupDaemonsByStatus(
 }
 
 export function formatDaemonTimestamp(
-  timestamp: string | null,
+  timestamp: string | null | undefined,
   fallback = "Unavailable"
 ): string {
   if (!timestamp) return fallback;
@@ -151,4 +151,41 @@ export function formatDaemonTimestamp(
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+export function formatDaemonHeartbeatAge(
+  timestamp: string | null | undefined,
+  now = Date.now()
+): string {
+  if (!timestamp) return "Unavailable";
+  const parsed = Date.parse(timestamp);
+  if (Number.isNaN(parsed)) return "Unknown";
+  const seconds = Math.max(0, Math.floor((now - parsed) / 1000));
+  if (seconds < 60) return seconds === 0 ? "Just now" : `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** Summarize only boolean capability entries supplied by Sacrum. */
+export function formatDaemonCapabilityReadiness(capabilities: unknown): string {
+  if (!capabilities || typeof capabilities !== "object") return "Unknown";
+
+  const groups = ["providers", "harnesses"];
+  const values = groups.flatMap((group) => {
+    const entries = (capabilities as Record<string, unknown>)[group];
+    if (!entries || typeof entries !== "object") return [];
+    return Object.values(entries as Record<string, unknown>);
+  });
+  const known = values.filter(
+    (value): value is boolean => typeof value === "boolean"
+  );
+  if (known.length === 0) return "Unknown";
+  const ready = known.filter(Boolean).length;
+  const unavailable = known.length - ready;
+  return unavailable === 0
+    ? `${ready}/${known.length} ready`
+    : `${ready}/${known.length} ready (${unavailable} unavailable)`;
 }

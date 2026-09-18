@@ -26,10 +26,10 @@ use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use commands::AppState;
 use events::{
-    ArtifactChangedEvent, DaemonChangedEvent, LocalBackendProgressEvent, PermissionRequestEvent,
-    SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent, StepChangedEvent,
-    StepExecutionChangedEvent, StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent,
-    TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
+    ArtifactChangedEvent, DaemonChangedEvent, DaemonMetricsEvent, LocalBackendProgressEvent,
+    PermissionRequestEvent, SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent,
+    StepChangedEvent, StepExecutionChangedEvent, StepTransitionChangedEvent, TaskChangedEvent,
+    TaskRunChangedEvent, TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
     WorkflowTransitionChangedEvent,
 };
 use local_chat::{
@@ -179,6 +179,7 @@ fn create_builder() -> Builder {
         .events(collect_events![
             ArtifactChangedEvent,
             DaemonChangedEvent,
+            DaemonMetricsEvent,
             LocalBackendProgressEvent,
             TaskChangedEvent,
             TaskRunChangedEvent,
