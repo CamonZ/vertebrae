@@ -16,6 +16,9 @@ vi.mock("../bindings", () => ({
     daemonChangedEvent: {
       listen: (...args: unknown[]) => mockListen(...args),
     },
+    daemonMetricsEvent: {
+      listen: (...args: unknown[]) => mockListen(...args),
+    },
   },
 }));
 
@@ -57,7 +60,7 @@ describe("useDaemonChangeListener", () => {
       )
     );
     const handleChanged = mockListen.mock.calls[
-      mockListen.mock.calls.length - 1
+      mockListen.mock.calls.length - 2
     ][0] as (event: {
       payload: {
         connection_id: string;
@@ -87,7 +90,9 @@ describe("useDaemonChangeListener", () => {
     renderHook(() => useDaemonChangeListener(), { wrapper });
     await waitFor(() => expect(mockListen).toHaveBeenCalled());
 
-    const handleChanged = mockListen.mock.calls[0][0] as (event: {
+    const handleChanged = mockListen.mock.calls[
+      mockListen.mock.calls.length - 2
+    ][0] as (event: {
       payload: {
         connection_id: string;
         daemon_id: string;
@@ -108,5 +113,75 @@ describe("useDaemonChangeListener", () => {
     expect(
       queryClient.getQueryData(queryKeys.daemons.fleet("identity-a"))
     ).toEqual([]);
+  });
+
+  it("merges matching live metrics without creating phantom daemons", async () => {
+    renderHook(() => useDaemonChangeListener(), { wrapper });
+    await waitFor(() =>
+      expect(queryClient.getQueryData(queryKeys.sacrumConnection())).toBe(
+        "identity-a"
+      )
+    );
+
+    const handleMetrics = mockListen.mock.calls[
+      mockListen.mock.calls.length - 1
+    ][0] as (event: {
+      payload: {
+        connection_id: string;
+        daemon_id: string;
+        schema_version: number;
+        metrics: {
+          host?: string | null;
+          health?: string | null;
+          last_seen_at?: string | null;
+        };
+      };
+    }) => void;
+    queryClient.setQueryData(queryKeys.daemons.fleet("identity-a"), [daemon]);
+    queryClient.setQueryData(
+      queryKeys.daemons.detail("identity-a", daemon.id),
+      daemon
+    );
+
+    handleMetrics({
+      payload: {
+        connection_id: "identity-a",
+        daemon_id: daemon.id,
+        schema_version: 1,
+        metrics: {
+          host: "worker-1",
+          health: "healthy",
+          last_seen_at: "2026-09-18T10:00:00Z",
+        },
+      },
+    });
+
+    expect(
+      queryClient.getQueryData(queryKeys.daemons.fleet("identity-a"))
+    ).toEqual([
+      {
+        ...daemon,
+        host: "worker-1",
+        health: "healthy",
+        last_seen_at: "2026-09-18T10:00:00Z",
+      },
+    ]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.daemons.detail("identity-a", daemon.id)
+      )
+    ).toMatchObject({ display_name: "daemon-1", health: "healthy" });
+
+    handleMetrics({
+      payload: {
+        connection_id: "identity-a",
+        daemon_id: "missing-daemon",
+        schema_version: 1,
+        metrics: { health: "healthy" },
+      },
+    });
+    expect(
+      queryClient.getQueryData(queryKeys.daemons.fleet("identity-a"))
+    ).toHaveLength(1);
   });
 });

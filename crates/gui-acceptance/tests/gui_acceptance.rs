@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use cucumber::World;
 use cucumber::writer::Stats;
 use fantoccini::Client;
+use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use vertebrae_sacrum_client::{GraphqlClient, SacrumDaemonService};
@@ -92,6 +93,8 @@ pub struct GuiWorld {
     /// Daemon created through the GUI during this scenario.
     pub daemon_id: Option<String>,
 
+    pub daemon_enrollment_token: Option<String>,
+
     /// Display name generated for the GUI-created daemon.
     pub daemon_name: Option<String>,
 
@@ -103,6 +106,8 @@ pub struct GuiWorld {
 
     /// Output dir for mock-claude fixtures (matches MOCK_OUTPUT_DIR env).
     pub mock_output_dir: PathBuf,
+
+    pub standalone_home: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for GuiWorld {
@@ -145,12 +150,14 @@ impl GuiWorld {
             screenshot_seq: 0,
             daemon: None,
             daemon_id: None,
+            daemon_enrollment_token: None,
             daemon_name: None,
             feature_slug: String::new(),
             scenario_slug: String::new(),
             mock_output_dir: PathBuf::from(
                 std::env::var("MOCK_OUTPUT_DIR").unwrap_or_else(|_| "/mocks".to_string()),
             ),
+            standalone_home: None,
         }
     }
 
@@ -234,6 +241,111 @@ impl GuiWorld {
         if let Some(mut child) = self.daemon.take() {
             let _ = child.kill().await;
             let _ = child.wait().await;
+        }
+        if let Some(home) = self.standalone_home.take() {
+            let _ = std::fs::remove_dir_all(home);
+        }
+    }
+
+    pub async fn start_standalone_daemon(&mut self) {
+        assert!(self.daemon.is_none(), "daemon already running");
+        let daemon_id = self
+            .daemon_id
+            .as_ref()
+            .expect("registered daemon ID not captured")
+            .clone();
+        let enrollment_token = self
+            .daemon_enrollment_token
+            .as_ref()
+            .expect("daemon enrollment token not captured")
+            .clone();
+        let endpoint =
+            std::env::var("VTB_URL").unwrap_or_else(|_| "http://localhost:4000".to_string());
+        let home = PathBuf::from(format!(
+            "/tmp/gui-acc-standalone-home-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let cfg_dir = home.join(".config").join("vertebrae");
+        std::fs::create_dir_all(&cfg_dir).expect("create standalone daemon home");
+        std::fs::write(
+            cfg_dir.join("config.toml"),
+            format!("[sacrum]\nurl = \"{endpoint}\"\n"),
+        )
+        .expect("write standalone daemon config");
+
+        let daemon_binary = std::env::var("VTB_DAEMON_BINARY")
+            .unwrap_or_else(|_| "/app/target/debug/vtb-daemon".to_string());
+        let mut enroll = Command::new(&daemon_binary);
+        enroll
+            .args([
+                "enroll",
+                "--endpoint",
+                &endpoint,
+                "--daemon-id",
+                &daemon_id,
+                "--token-stdin",
+            ])
+            .env("HOME", &home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut enroll = enroll.spawn().expect("spawn standalone enrollment");
+        enroll
+            .stdin
+            .take()
+            .expect("standalone enrollment stdin")
+            .write_all(enrollment_token.as_bytes())
+            .await
+            .expect("write standalone enrollment token");
+        let enrollment_output = enroll
+            .wait_with_output()
+            .await
+            .expect("wait for standalone enrollment");
+        assert!(
+            enrollment_output.status.success(),
+            "standalone enrollment failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&enrollment_output.stdout),
+            String::from_utf8_lossy(&enrollment_output.stderr)
+        );
+
+        let log_path = PathBuf::from(format!(
+            "/tmp/gui-acc-standalone-{}.log",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let log = std::fs::File::create(&log_path).expect("create standalone daemon log");
+        let log_dup = log.try_clone().expect("dup standalone daemon log");
+        let mut cmd = Command::new(&daemon_binary);
+        cmd.env("HOME", &home)
+            .env(
+                "CLAUDE_CODE_PATH",
+                std::env::var("CLAUDE_CODE_PATH").unwrap_or_default(),
+            )
+            .env(
+                "CODEX_PATH",
+                std::env::var("CODEX_PATH").unwrap_or_default(),
+            )
+            .env("MOCK_OUTPUT_DIR", &self.mock_output_dir)
+            .env("RUST_LOG", "info")
+            .stdout(Stdio::from(log_dup))
+            .stderr(Stdio::from(log))
+            .kill_on_drop(true);
+        self.daemon = Some(cmd.spawn().expect("spawn standalone daemon"));
+        self.standalone_home = Some(home);
+
+        let expected = "Standalone daemon identity registered";
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if Instant::now() >= deadline {
+                self.stop_daemon().await;
+                let tail = std::fs::read_to_string(&log_path).unwrap_or_default();
+                panic!("daemon did not log {expected:?} within 30s. log:\n{tail}");
+            }
+            if let Ok(text) = std::fs::read_to_string(&log_path)
+                && text.contains(expected)
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 

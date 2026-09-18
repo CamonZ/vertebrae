@@ -18,13 +18,13 @@ use uuid::Uuid;
 
 use crate::events::{
     ArtifactChangeType, ArtifactChangedEvent, DaemonChangeType, DaemonChangedEvent,
-    PermissionRequestEvent, SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent,
-    SessionLogUpdatedEvent, StepChangeType, StepChangedEvent, StepExecutionChangeType,
-    StepExecutionChangedEvent, StepExecutionStatus, StepTransitionChangeType,
-    StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent, TaskPreviousBucketIdentity,
-    TaskRunChangeType, TaskRunChangedEvent, TaskRunControlsPayload, TaskRunStepChangedEvent,
-    TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
-    WorkflowTransitionChangedEvent,
+    DaemonMetricsEvent, PermissionRequestEvent, SectionChangeType, SectionChangedEvent,
+    SessionLogCreatedEvent, SessionLogUpdatedEvent, StepChangeType, StepChangedEvent,
+    StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
+    StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent,
+    TaskPreviousBucketIdentity, TaskRunChangeType, TaskRunChangedEvent, TaskRunControlsPayload,
+    TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent,
+    WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -940,6 +940,11 @@ impl SacrumSocket {
                         Self::handle_daemon_event(event, payload, connection_id, app_handle)?;
                     }
                 }
+                "daemon_metrics" => {
+                    if topic == ACCOUNTS_TOPIC {
+                        Self::handle_daemon_metrics_event(payload, connection_id, app_handle)?;
+                    }
+                }
                 "section_created" | "section_updated" | "section_deleted" => {
                     Self::handle_section_event(event, payload, app_handle)?;
                 }
@@ -1101,6 +1106,45 @@ impl SacrumSocket {
                 },
             )
             .map_err(|error| format!("Failed to emit daemon event: {error}"))
+    }
+
+    fn handle_daemon_metrics_event<R: Runtime>(
+        payload: &serde_json::Value,
+        connection_id: &str,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let schema_version = payload
+            .get("schema_version")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or("Missing daemon metrics schema_version")?;
+        if schema_version != 1 {
+            log::warn!(
+                "[WebSocket] Ignoring unsupported daemon metrics schema version {}",
+                schema_version
+            );
+            return Ok(());
+        }
+
+        let daemon_id = payload
+            .get("id")
+            .or_else(|| payload.get("daemon_id"))
+            .and_then(|value| value.as_str())
+            .ok_or("Missing daemon_id in metrics payload")?
+            .to_string();
+        let metrics = try_deserialize::<types::DaemonMetrics>(payload, "DaemonMetrics")
+            .ok_or("Invalid daemon metrics payload")?;
+
+        app_handle
+            .emit(
+                "daemon-metrics-event",
+                &DaemonMetricsEvent {
+                    connection_id: connection_id.to_string(),
+                    daemon_id,
+                    schema_version: schema_version as i32,
+                    metrics,
+                },
+            )
+            .map_err(|error| format!("Failed to emit daemon metrics event: {error}"))
     }
 
     /// Handle task events and emit to Tauri
@@ -3439,8 +3483,62 @@ mod tests {
                 removed_at: None,
                 inserted_at: Some("2026-09-14T10:00:00Z".to_string()),
                 updated_at: Some("2026-09-14T10:01:00Z".to_string()),
+                daemon_version: None,
+                os: None,
+                architecture: None,
+                host: None,
+                started_at: None,
+                last_seen_at: None,
+                report_version: None,
+                capabilities: None,
+                connection_status: None,
+                health: None,
+                health_reason: None,
             }
         );
+    }
+
+    #[test]
+    fn daemon_metrics_event_emits_sanitized_live_snapshot() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let (tx, rx) = mpsc::channel();
+        app.listen_any("daemon-metrics-event", move |event| {
+            tx.send(event.payload().to_string()).unwrap();
+        });
+
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "id": "daemon-1",
+            "report_version": 1,
+            "daemon_version": "0.1.0",
+            "os": "linux",
+            "architecture": "x86_64",
+            "host": "worker-1",
+            "started_at": "2026-09-18T09:00:00Z",
+            "last_seen_at": "2026-09-18T10:00:00Z",
+            "capabilities": {"providers": {"openai": true}},
+            "connection_status": "online",
+            "health": "healthy",
+            "health_reason": null
+        });
+        let message =
+            serde_json::json!(["join-ref", "1", ACCOUNTS_TOPIC, "daemon_metrics", payload])
+                .to_string();
+
+        SacrumSocket::handle_phoenix_message_for_topic(&message, handle, None, true, "identity-a")
+            .expect("daemon metrics should be forwarded");
+
+        let emitted = rx
+            .recv_timeout(StdDuration::from_secs(1))
+            .expect("daemon metrics should emit a webview event");
+        let event: DaemonMetricsEvent =
+            serde_json::from_str(&emitted).expect("metrics event should deserialize");
+        assert_eq!(event.connection_id, "identity-a");
+        assert_eq!(event.daemon_id, "daemon-1");
+        assert_eq!(event.schema_version, 1);
+        assert_eq!(event.metrics.health.as_deref(), Some("healthy"));
+        assert_eq!(event.metrics.host.as_deref(), Some("worker-1"));
     }
 
     #[test]

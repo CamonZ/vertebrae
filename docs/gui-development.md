@@ -394,13 +394,19 @@ The GUI maintains a WebSocket connection to Sacrum via Phoenix channels:
   create/update/delete events and `project:{project_id}` for project events
 - 30-second heartbeat, exponential backoff reconnection (100ms -> 30s)
 - Receives broadcasts for task/workflow/execution changes from all clients and
-  daemon CDC updates from the account channel
+  daemon CDC updates and ephemeral `daemon_metrics` telemetry from the account
+  channel
 - Emits Tauri events including `TaskChangedEvent`, `WorkflowChangedEvent`,
-  `StepExecutionChangedEvent`, and `DaemonChangedEvent`
+  `StepExecutionChangedEvent`, `DaemonChangedEvent`, and
+  `DaemonMetricsEvent`
 
 The daemon fleet performs one account-scoped snapshot on initial load and after
-reconnect recovery. Between snapshots, `DaemonChangedEvent` updates the
-initialized fleet and detail projections directly; it does not use a periodic
+reconnect recovery. Sacrum's GraphQL fleet/detail response is authoritative for
+the durable identity and the current live snapshot. Between snapshots,
+`DaemonChangedEvent` replaces durable projections and `DaemonMetricsEvent`
+merges only live fields into already initialized fleet/detail projections; a
+metrics event never creates a phantom daemon. Metrics are ephemeral, so a
+missed event is recovered by the next fleet/detail query rather than a periodic
 list poller.
 
 ## Data Flow
@@ -414,4 +420,8 @@ GUI mutation -> Tauri command -> VertebraeServices -> Sacrum GraphQL API
 
 Daemon mutation -> Sacrum GraphQL API -> `accounts:me` CDC broadcast
               -> GUI WebSocket -> `DaemonChangedEvent` -> daemon cache projections
+
+Enrolled daemon -> `daemon:<id>` report/heartbeat -> Sacrum live registry
+                -> `accounts:me` `daemon_metrics` -> `DaemonMetricsEvent`
+                -> live fields merged into initialized daemon projections
 ```

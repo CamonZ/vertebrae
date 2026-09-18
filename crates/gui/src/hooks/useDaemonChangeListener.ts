@@ -1,7 +1,15 @@
 import { useCallback, useEffect } from "react";
-import { events, type DaemonChangedEvent } from "../bindings";
+import {
+  events,
+  type DaemonChangedEvent,
+  type DaemonMetricsEvent,
+} from "../bindings";
 import { useSacrumConnection } from "./useSacrumConnection";
-import { removeDaemonFromQueryCache, upsertDaemonInQueryCache } from "../query";
+import {
+  mergeDaemonMetricsInQueryCache,
+  removeDaemonFromQueryCache,
+  upsertDaemonInQueryCache,
+} from "../query";
 
 /** Applies account-scoped daemon CDC events to the existing fleet projections. */
 export function useDaemonChangeListener() {
@@ -20,8 +28,25 @@ export function useDaemonChangeListener() {
     [identity]
   );
 
+  const handleMetrics = useCallback(
+    ({ payload }: { payload: DaemonMetricsEvent }) => {
+      if (!identity || payload.connection_id !== identity) return;
+      mergeDaemonMetricsInQueryCache(
+        identity,
+        payload.daemon_id,
+        payload.metrics
+      );
+    },
+    [identity]
+  );
+
   useEffect(() => {
-    const unlisten = events.daemonChangedEvent.listen(handleChanged);
-    return () => void unlisten.then((stop) => stop());
-  }, [handleChanged]);
+    const changed = events.daemonChangedEvent.listen(handleChanged);
+    const metrics = events.daemonMetricsEvent.listen(handleMetrics);
+    return () => {
+      void Promise.all([changed, metrics]).then((stops) =>
+        stops.forEach((stop) => stop())
+      );
+    };
+  }, [handleChanged, handleMetrics]);
 }

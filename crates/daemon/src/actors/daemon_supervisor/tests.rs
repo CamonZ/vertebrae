@@ -74,6 +74,21 @@ fn classify_standalone_join_success() {
 }
 
 #[test]
+fn classify_daemon_report_ack_without_restarting_the_publisher() {
+    let projects = known_projects(&[]);
+    let mut report_ack = msg(
+        "daemon:33333333-3333-3333-3333-333333333333",
+        "phx_reply",
+        serde_json::json!({"status": "ok", "response": {"accepted": true}}),
+    );
+    report_ack.msg_ref = Some("report-ref".to_string());
+    assert_eq!(
+        classify_channel_message_with_join_ref(&report_ack, &projects, Some("join-ref")),
+        ChannelAction::DaemonMessageAcknowledged
+    );
+}
+
+#[test]
 fn classify_standalone_credential_rejection_as_permanent() {
     let projects = known_projects(&[]);
     let m = msg(
@@ -237,6 +252,23 @@ async fn standalone_channel_interruption_reconnects_with_the_same_identity() {
             joins.push(join[2].clone());
             if connection == 0 {
                 socket.send(Message::Text(serde_json::json!([join[0], join[1], join[2], "phx_reply", {"status":"ok"}]).to_string().into())).await.unwrap();
+                let report = tokio::time::timeout(Duration::from_secs(1), socket.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                let report: serde_json::Value =
+                    serde_json::from_str(report.to_text().unwrap()).unwrap();
+                assert_eq!(report[3], "report");
+                assert_eq!(report[4]["version"], 1);
+                socket.send(Message::Text(serde_json::json!([join[0], join[1], join[2], "phx_reply", {"status":"ok"}]).to_string().into())).await.unwrap();
+                if let Ok(Some(Ok(extra))) =
+                    tokio::time::timeout(Duration::from_millis(100), socket.next()).await
+                {
+                    let extra: serde_json::Value =
+                        serde_json::from_str(extra.to_text().unwrap()).unwrap();
+                    assert_ne!(extra[3], "report");
+                }
                 socket
                     .send(Message::Text(
                         serde_json::json!([join[0], null, join[2], "phx_error", {}])

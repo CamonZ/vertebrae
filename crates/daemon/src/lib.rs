@@ -9,6 +9,7 @@ pub mod phoenix;
 pub mod provider;
 pub mod session_log_event_sink;
 pub mod settings_synthesis;
+pub mod telemetry;
 
 pub use actors::project_supervisor::{
     CancelStepPayload, RunStepPayload, build_step_config_from_payload, parse_cancel_step_payload,
@@ -25,3 +26,4 @@ pub use config::{
 pub use enrollment::{DaemonEnrollmentClient, EnrollmentError, EnrollmentResult};
 pub use provider::{ProviderResolutionError, resolve_provider, resolve_provider_from_agent_config};
 pub use session_log_event_sink::SessionLogEventSink;
+pub use telemetry::{CapabilityReport, DaemonReport, HEARTBEAT_INTERVAL, REPORT_VERSION};

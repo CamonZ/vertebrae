@@ -12,6 +12,7 @@ import type {
   WorkflowTransition,
   WorkflowWithTasks,
   Daemon,
+  DaemonMetrics,
 } from "../bindings";
 import {
   mergeTask,
@@ -256,6 +257,28 @@ export function updateDaemonInQueryCache(
   daemon: Daemon
 ): void {
   upsertDaemonInQueryCache(connectionId, daemon);
+}
+
+export function mergeDaemonMetricsInQueryCache(
+  connectionId: string,
+  daemonId: string,
+  metrics: DaemonMetrics
+): void {
+  setExistingQueryData<Daemon[]>(
+    queryKeys.daemons.fleet(connectionId),
+    (current) => {
+      if (!current) return current;
+      const index = current.findIndex((daemon) => daemon.id === daemonId);
+      if (index === -1) return current;
+      const next = current.slice();
+      next[index] = { ...next[index], ...metrics };
+      return next;
+    }
+  );
+  setExistingQueryData<Daemon | null>(
+    queryKeys.daemons.detail(connectionId, daemonId),
+    (current) => (current ? { ...current, ...metrics } : current)
+  );
 }
 
 /** Remove a daemon only after the server has confirmed terminal unregister. */

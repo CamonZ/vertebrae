@@ -852,6 +852,28 @@ pub struct DaemonResponse {
     pub inserted_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+    #[serde(default)]
+    pub daemon_version: Option<String>,
+    #[serde(default)]
+    pub os: Option<String>,
+    #[serde(default)]
+    pub architecture: Option<String>,
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub last_seen_at: Option<String>,
+    #[serde(default)]
+    pub report_version: Option<i32>,
+    #[serde(default)]
+    pub capabilities: Option<serde_json::Value>,
+    #[serde(default)]
+    pub connection_status: Option<String>,
+    #[serde(default)]
+    pub health: Option<String>,
+    #[serde(default)]
+    pub health_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

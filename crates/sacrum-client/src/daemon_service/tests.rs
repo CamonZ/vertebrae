@@ -43,7 +43,18 @@ fn daemon_json(status: &str, name: Option<&str>) -> Value {
         "enrolled_at": if status == "pending" { Value::Null } else { json!("2026-09-05T11:00:00Z") },
         "removed_at": Value::Null,
         "inserted_at": "2026-09-05T10:00:00Z",
-        "updated_at": "2026-09-05T10:00:00Z"
+        "updated_at": "2026-09-05T10:00:00Z",
+        "daemon_version": "0.1.0",
+        "os": "linux",
+        "architecture": "x86_64",
+        "host": "worker-1",
+        "started_at": "2026-09-05T10:01:00Z",
+        "last_seen_at": "2026-09-05T11:01:00Z",
+        "report_version": 1,
+        "capabilities": {"providers": {"openai": true}},
+        "connection_status": "online",
+        "health": "healthy",
+        "health_reason": Value::Null
     })
 }
 
@@ -101,6 +112,17 @@ fn daemon_summary_serializes_without_secret_fields() {
         removed_at: None,
         inserted_at: None,
         updated_at: None,
+        daemon_version: None,
+        os: None,
+        architecture: None,
+        host: None,
+        started_at: None,
+        last_seen_at: None,
+        report_version: None,
+        capabilities: None,
+        connection_status: None,
+        health: None,
+        health_reason: None,
     };
     let body = serde_json::to_value(&summary).unwrap().to_string();
     assert!(!body.contains("token"));
@@ -133,6 +155,14 @@ async fn list_fleet_maps_the_active_fleet_and_preserves_unknown_statuses() {
     assert_eq!(
         fleet[1].enrolled_at.map(|dt| dt.to_rfc3339()),
         Some("2026-09-05T11:00:00+00:00".into())
+    );
+    assert_eq!(fleet[1].daemon_version.as_deref(), Some("0.1.0"));
+    assert_eq!(fleet[1].host.as_deref(), Some("worker-1"));
+    assert_eq!(fleet[1].report_version, Some(1));
+    assert_eq!(fleet[1].health.as_deref(), Some("healthy"));
+    assert_eq!(
+        fleet[1].capabilities,
+        Some(json!({"providers": {"openai": true}}))
     );
     assert_eq!(
         fleet[2].status,

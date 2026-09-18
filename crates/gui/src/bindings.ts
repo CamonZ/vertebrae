@@ -1136,12 +1136,14 @@ async relaunchApplication() : Promise<Result<null, CommandError>> {
 }
 }
 }
+
 /** user-defined events **/
 
 
 export const events = __makeEvents__<{
 artifactChangedEvent: ArtifactChangedEvent,
 daemonChangedEvent: DaemonChangedEvent,
+daemonMetricsEvent: DaemonMetricsEvent,
 localBackendProgressEvent: LocalBackendProgressEvent,
 localChatCompactionEvent: LocalChatCompactionEvent,
 localChatFileChangeEvent: LocalChatFileChangeEvent,
@@ -1171,6 +1173,7 @@ workflowTransitionChangedEvent: WorkflowTransitionChangedEvent
 }>({
 artifactChangedEvent: "artifact-changed-event",
 daemonChangedEvent: "daemon-changed-event",
+daemonMetricsEvent: "daemon-metrics-event",
 localBackendProgressEvent: "local-backend-progress-event",
 localChatCompactionEvent: "local-chat-compaction-event",
 localChatFileChangeEvent: "local-chat-file-change-event",
@@ -1362,10 +1365,15 @@ export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backe
  * Options for creating a workflow step.
  */
 export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; prompt?: string | null; agents: string[]; skills: string[]; agent_config?: AgentConfig | null; order: number; transitions_to: string[]; step_type?: StepType; output_schema: JsonValue | null; persistence_options?: JsonValue | null; route_config?: JsonValue | null }
-export type Daemon = { id: string; status: string; name: string | null; display_name: string; max_concurrency: number | null; enrolled_at: string | null; removed_at: string | null; inserted_at: string | null; updated_at: string | null }
+export type Daemon = { id: string; status: string; name: string | null; display_name: string; max_concurrency: number | null; enrolled_at: string | null; removed_at: string | null; inserted_at: string | null; updated_at: string | null; daemon_version?: string | null; os?: string | null; architecture?: string | null; host?: string | null; started_at?: string | null; last_seen_at?: string | null; report_version?: number | null; capabilities?: JsonValue | null; connection_status?: string | null; health?: string | null; health_reason?: string | null }
 export type DaemonBootstrap = { daemon: Daemon; enrollment_token: string; expires_at: string }
 export type DaemonBootstrapResult = { connection_id: string; bootstrap: DaemonBootstrap }
 export type DaemonChangeType = "Created" | "Updated" | "Deleted"
+/**
+ * Complete account-scoped daemon projection changed by the Sacrum CDC
+ * stream. The connection identity prevents a late event from a retired
+ * backend/account socket from mutating the active GUI cache.
+ */
 export type DaemonChangedEvent = { connection_id: string; daemon_id: string; change_type: DaemonChangeType; daemon: Daemon | null }
 export type DaemonCommandError = { kind: DaemonErrorKind; message: string }
 export type DaemonCredentialMetadata = { id: string; credential_kind: string; status: string; expires_at: string; consumed_at: string | null; revoked_at: string | null; inserted_at: string | null; updated_at: string | null }
@@ -1374,6 +1382,17 @@ export type DaemonEnrollmentMetadata = { daemon_id: string; status: string; enro
 export type DaemonEnrollmentSnapshot = { connection_id: string; metadata: DaemonEnrollmentMetadata | null }
 export type DaemonErrorKind = "no_backend" | "stale_connection" | "ambiguous_transport" | "malformed_response" | "unavailable" | "not_found" | "terminal_state" | "active_session" | "ownership_unknown" | "invalid_name" | "invalid_input" | "unknown_refusal"
 export type DaemonFleetSnapshot = { connection_id: string; daemons: Daemon[] }
+/**
+ * Live, ephemeral fields published by Sacrum's daemon telemetry registry.
+ * Durable identity and management fields remain on [`Daemon`].
+ */
+export type DaemonMetrics = { daemon_version?: string | null; os?: string | null; architecture?: string | null; host?: string | null; started_at?: string | null; last_seen_at?: string | null; report_version?: number | null; capabilities?: JsonValue | null; connection_status?: string | null; health?: string | null; health_reason?: string | null }
+/**
+ * Ephemeral live telemetry for a durable daemon. Sacrum emits this on the
+ * account topic; it updates existing GUI projections without creating a
+ * daemon that was not present in a snapshot.
+ */
+export type DaemonMetricsEvent = { connection_id: string; daemon_id: string; schema_version: number; metrics: DaemonMetrics }
 export type DaemonMutationResult = { connection_id: string; daemon: Daemon }
 export type DaemonNameUpdate = { kind: "unchanged" } | { kind: "clear" } | { kind: "set"; value: string }
 /**

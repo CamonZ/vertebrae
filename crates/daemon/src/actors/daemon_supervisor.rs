@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
 use tokio_tungstenite::tungstenite::Message;
@@ -22,6 +23,7 @@ use crate::connection::{
     INITIAL_RECONNECT_DELAY, MAX_RECONNECT_DELAY, connect_with_auth, next_backoff, reconnect,
 };
 use crate::phoenix::{PhoenixMessage, PhoenixSocket, is_terminal_daemon_reason};
+use crate::telemetry::{DaemonReport, HEARTBEAT_INTERVAL};
 
 /// Result of classifying an incoming channel message.
 #[derive(Debug, PartialEq)]
@@ -36,6 +38,7 @@ pub enum ChannelAction {
     ChannelError(String),
     DaemonJoinConfirmed(String),
     DaemonJoinFailed(String, Option<String>),
+    DaemonMessageAcknowledged,
     DaemonChannelInterrupted,
     /// Message is for a non-project topic (e.g. "phoenix") — skip.
     NonProjectTopic,
@@ -47,13 +50,28 @@ pub enum ChannelAction {
 ///
 /// This is a pure function so it can be tested without an actor or socket.
 /// Accepts any `HashMap<String, V>` so tests can use a lightweight value type.
+#[cfg(test)]
 fn classify_channel_message<V>(
     msg: &PhoenixMessage,
     known_projects: &HashMap<String, V>,
 ) -> ChannelAction {
+    classify_channel_message_with_join_ref(msg, known_projects, None)
+}
+
+fn classify_channel_message_with_join_ref<V>(
+    msg: &PhoenixMessage,
+    known_projects: &HashMap<String, V>,
+    daemon_join_message_ref: Option<&str>,
+) -> ChannelAction {
     if let Some(daemon_id) = msg.daemon_id() {
         let daemon_id = daemon_id.to_string();
         return match msg.event.as_str() {
+            "phx_reply"
+                if daemon_join_message_ref.is_some()
+                    && msg.msg_ref.as_deref() != daemon_join_message_ref =>
+            {
+                ChannelAction::DaemonMessageAcknowledged
+            }
             "phx_reply" if msg.payload.get("status").and_then(|v| v.as_str()) == Some("ok") => {
                 ChannelAction::DaemonJoinConfirmed(daemon_id)
             }
@@ -214,6 +232,10 @@ pub enum DaemonMessage {
     /// A reconnection attempt succeeded — carries the new socket.
     Reconnected(Box<PhoenixSocket>),
     ReconnectFailed(String),
+    /// Publish the application-level liveness heartbeat on a standalone
+    /// daemon channel. Phoenix protocol heartbeats are not sufficient for
+    /// Sacrum's daemon metrics.
+    PublishHeartbeat,
     /// Initiate graceful shutdown: leave all channels, stop children, then self.
     Shutdown,
 }
@@ -239,6 +261,7 @@ impl std::fmt::Debug for DaemonMessage {
             Self::ReconnectFailed(reason) => {
                 f.debug_tuple("ReconnectFailed").field(reason).finish()
             }
+            Self::PublishHeartbeat => write!(f, "PublishHeartbeat"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }
@@ -260,6 +283,10 @@ pub struct DaemonState {
     reconnect_delay: Duration,
     /// Set to true once shutdown is initiated so we don't attempt reconnection.
     shutting_down: bool,
+    daemon_join_message_ref: Option<String>,
+    telemetry_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Process start time reused in every report, including reconnects.
+    started_at: DateTime<Utc>,
 }
 
 /// The root supervisor actor.
@@ -296,12 +323,17 @@ impl Actor for DaemonSupervisor {
             }
         };
 
-        if let DaemonAuthentication::Standalone(identity) = &args.authentication {
-            socket
-                .join_daemon(&identity.daemon_id)
-                .await
-                .map_err(|e| format!("Failed to register daemon identity: {e}"))?;
-        }
+        let daemon_join_message_ref =
+            if let DaemonAuthentication::Standalone(identity) = &args.authentication {
+                Some(
+                    socket
+                        .join_daemon(&identity.daemon_id)
+                        .await
+                        .map_err(|e| format!("Failed to register daemon identity: {e}"))?,
+                )
+            } else {
+                None
+            };
 
         // Take the reader half and spawn a pump task that forwards messages to our actor.
         let reader = socket
@@ -320,6 +352,9 @@ impl Actor for DaemonSupervisor {
             reconnect_handle: None,
             reconnect_delay: INITIAL_RECONNECT_DELAY,
             shutting_down: false,
+            daemon_join_message_ref,
+            telemetry_handle: None,
+            started_at: Utc::now(),
         })
     }
 
@@ -340,7 +375,10 @@ impl Actor for DaemonSupervisor {
             DaemonMessage::RemoveProject { project_id } => {
                 self.handle_remove_project(&project_id, state).await?;
             }
-            DaemonMessage::ChannelMessage(msg) => match self.handle_channel_message(msg, state) {
+            DaemonMessage::ChannelMessage(msg) => match self
+                .handle_channel_message(msg, myself.clone(), state)
+                .await
+            {
                 Some(ChannelRecovery::Stop(reason)) => {
                     tracing::error!(%reason, "Daemon registration rejected");
                     myself.stop(Some(reason));
@@ -364,6 +402,18 @@ impl Actor for DaemonSupervisor {
             DaemonMessage::ReconnectFailed(reason) => {
                 tracing::error!(%reason, "Daemon cannot reconnect");
                 myself.stop(Some(reason));
+            }
+            DaemonMessage::PublishHeartbeat => {
+                if state.telemetry_handle.is_some()
+                    && matches!(
+                        &state.config.authentication,
+                        DaemonAuthentication::Standalone(_)
+                    )
+                    && let Err(error) = state.socket.send_daemon_heartbeat().await
+                {
+                    tracing::warn!(%error, "Daemon telemetry heartbeat send failed");
+                    self.handle_connection_lost(myself, state).await;
+                }
             }
             DaemonMessage::Shutdown => {
                 self.handle_shutdown(myself, state).await?;
@@ -425,6 +475,8 @@ impl Actor for DaemonSupervisor {
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         tracing::info!("DaemonSupervisor stopping, cleaning up");
+
+        stop_telemetry(state);
 
         stop_projects(
             std::mem::take(&mut state.projects),
@@ -587,12 +639,17 @@ impl DaemonSupervisor {
     }
 
     /// Demux an incoming channel message by topic and route to the correct project.
-    fn handle_channel_message(
+    async fn handle_channel_message(
         &self,
         msg: PhoenixMessage,
+        myself: ActorRef<DaemonMessage>,
         state: &mut DaemonState,
     ) -> Option<ChannelRecovery> {
-        match classify_channel_message(&msg, &state.projects) {
+        match classify_channel_message_with_join_ref(
+            &msg,
+            &state.projects,
+            state.daemon_join_message_ref.as_deref(),
+        ) {
             ChannelAction::RouteToProject(project_id) => {
                 if let Some(actor_ref) = state.projects.get(&project_id) {
                     if let Err(e) = actor_ref.cast(ProjectMessage::ChannelEvent(msg)) {
@@ -637,9 +694,13 @@ impl DaemonSupervisor {
             ChannelAction::DaemonJoinConfirmed(daemon_id) => {
                 state.reconnect_delay = INITIAL_RECONNECT_DELAY;
                 tracing::info!(daemon_id = %daemon_id, "Standalone daemon identity registered");
+                self.start_daemon_telemetry(myself, state).await;
             }
             ChannelAction::DaemonJoinFailed(_, reason) => {
                 return Some(daemon_join_recovery(reason.as_deref()));
+            }
+            ChannelAction::DaemonMessageAcknowledged => {
+                tracing::debug!("Daemon telemetry message acknowledged");
             }
             ChannelAction::DaemonChannelInterrupted => return Some(ChannelRecovery::Reconnect),
         }
@@ -656,6 +717,9 @@ impl DaemonSupervisor {
             tracing::debug!("Ignoring ConnectionLost during shutdown");
             return;
         }
+
+        stop_telemetry(state);
+        state.daemon_join_message_ref = None;
 
         // One reconnect owner also absorbs duplicate close/error notifications.
         if state.reconnect_handle.is_some() {
@@ -726,9 +790,12 @@ impl DaemonSupervisor {
         state.reader_handle = Some(tokio::spawn(Self::ws_reader_pump(reader, myself_clone)));
 
         if let DaemonAuthentication::Standalone(identity) = &state.config.authentication {
-            if let Err(error) = state.socket.join_daemon(&identity.daemon_id).await {
-                tracing::warn!(%error, "Registration send failed; reconnecting");
-                self.handle_connection_lost(myself, state).await;
+            match state.socket.join_daemon(&identity.daemon_id).await {
+                Ok(message_ref) => state.daemon_join_message_ref = Some(message_ref),
+                Err(error) => {
+                    tracing::warn!(%error, "Registration send failed; reconnecting");
+                    self.handle_connection_lost(myself, state).await;
+                }
             }
         } else {
             state.reconnect_delay = INITIAL_RECONNECT_DELAY;
@@ -761,6 +828,7 @@ impl DaemonSupervisor {
         tracing::info!("Graceful shutdown initiated");
 
         state.shutting_down = true;
+        stop_telemetry(state);
 
         // Abort any in-flight reconnection attempt.
         if let Some(handle) = state.reconnect_handle.take() {
@@ -784,6 +852,59 @@ impl DaemonSupervisor {
         myself.stop(Some("shutdown requested".to_string()));
 
         Ok(())
+    }
+}
+
+fn stop_telemetry(state: &mut DaemonState) {
+    if let Some(handle) = state.telemetry_handle.take() {
+        handle.abort();
+    }
+}
+
+impl DaemonSupervisor {
+    async fn start_daemon_telemetry(
+        &self,
+        myself: ActorRef<DaemonMessage>,
+        state: &mut DaemonState,
+    ) {
+        let DaemonAuthentication::Standalone(identity) = &state.config.authentication else {
+            return;
+        };
+        if state.telemetry_handle.is_some() {
+            return;
+        }
+
+        let report = DaemonReport::from_capabilities(
+            &identity.daemon_id,
+            &state.config.capabilities,
+            state.started_at,
+        );
+        let payload = match report.payload() {
+            Ok(payload) => payload,
+            Err(error) => {
+                tracing::error!(%error, "Failed to serialize daemon telemetry report");
+                return;
+            }
+        };
+        if let Err(error) = state.socket.send_daemon_report(payload).await {
+            tracing::warn!(%error, "Daemon telemetry report send failed; reconnecting");
+            self.handle_connection_lost(myself, state).await;
+            return;
+        }
+
+        let actor_ref = myself;
+        let mut interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + HEARTBEAT_INTERVAL,
+            HEARTBEAT_INTERVAL,
+        );
+        state.telemetry_handle = Some(tokio::spawn(async move {
+            loop {
+                interval.tick().await;
+                if actor_ref.cast(DaemonMessage::PublishHeartbeat).is_err() {
+                    break;
+                }
+            }
+        }));
     }
 }
 

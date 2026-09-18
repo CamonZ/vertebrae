@@ -3,6 +3,8 @@ import type { Daemon } from "../bindings";
 import {
   countDaemonsByStatus,
   filterDaemons,
+  formatDaemonCapabilityReadiness,
+  formatDaemonHeartbeatAge,
   groupDaemonsByStatus,
   normalizedDaemonStatus,
 } from "./filters";
@@ -78,5 +80,20 @@ describe("daemon fleet projections", () => {
     expect(filterDaemons([alpha, pending], "aarch64", "active")).toEqual([
       alpha,
     ]);
+  });
+
+  it("formats only server-provided telemetry values", () => {
+    const now = Date.parse("2026-09-18T10:00:00Z");
+    expect(formatDaemonHeartbeatAge("2026-09-18T09:58:30Z", now)).toBe(
+      "1m ago"
+    );
+    expect(formatDaemonHeartbeatAge(null, now)).toBe("Unavailable");
+    expect(
+      formatDaemonCapabilityReadiness({
+        providers: { openai: true, anthropic: false },
+        harnesses: { codex: true },
+      })
+    ).toBe("2/3 ready (1 unavailable)");
+    expect(formatDaemonCapabilityReadiness({})).toBe("Unknown");
   });
 });

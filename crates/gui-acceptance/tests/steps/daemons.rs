@@ -122,17 +122,27 @@ async fn register_unique_daemon(world: &mut GuiWorld) {
     // Capture the ID while the bootstrap modal is still open so the after
     // hook can clean up even if a later UI step fails before the fleet row is
     // rendered.
-    let daemon_id = client
+    let daemon_id_element = client
         .wait()
         .at_most(Duration::from_secs(5))
         .for_element(Locator::Css(
             "[data-testid='daemon-enrollment-token-step'] code",
         ))
         .await
-        .expect("daemon ID was not rendered in the enrollment modal")
-        .text()
+        .expect("daemon ID was not rendered in the enrollment modal");
+    let daemon_id_json =
+        serde_json::to_value(&daemon_id_element).expect("serialize daemon ID element");
+    let daemon_id = client
+        .execute(
+            "return arguments[0].textContent || '';",
+            vec![daemon_id_json],
+        )
         .await
-        .expect("failed to read daemon ID from the enrollment modal");
+        .expect("failed to read daemon ID from the enrollment modal")
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
     world.daemon_id = Some(daemon_id);
     world
         .screenshot(&client, "daemon-enrollment-token-step-visible")
@@ -175,6 +185,55 @@ async fn rename_registered_daemon(world: &mut GuiWorld) {
         .expect("failed to submit the daemon rename");
     world.daemon_name = Some(new_name.clone());
     world.screenshot(&client, "daemon-rename-submitted").await;
+}
+
+#[when("I reveal the registered daemon enrollment token")]
+async fn reveal_registered_daemon_enrollment_token(world: &mut GuiWorld) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let reveal = client
+        .wait()
+        .at_most(Duration::from_secs(10))
+        .for_element(Locator::XPath(
+            "//div[@data-testid='daemon-enrollment-token-step']//button[normalize-space()='Reveal']",
+        ))
+        .await
+        .expect("daemon enrollment token reveal button was not rendered");
+    gui_acceptance::wait_actionable(&reveal).await;
+    reveal
+        .click()
+        .await
+        .expect("failed to reveal daemon enrollment token");
+    let token_element = client
+        .wait()
+        .at_most(Duration::from_secs(5))
+        .for_element(Locator::Css(
+            "[data-testid='daemon-enrollment-token-step'] [aria-label='Enrollment token']",
+        ))
+        .await
+        .expect("revealed daemon enrollment token was not rendered");
+    let token_json = serde_json::to_value(&token_element).expect("serialize enrollment token");
+    let token = client
+        .execute("return arguments[0].textContent || '';", vec![token_json])
+        .await
+        .expect("failed to read daemon enrollment token")
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        !token.trim().is_empty(),
+        "daemon enrollment token was empty"
+    );
+    world.daemon_enrollment_token = Some(token);
+}
+
+#[when("I start the registered daemon")]
+async fn start_registered_daemon(world: &mut GuiWorld) {
+    world.start_standalone_daemon().await;
 }
 
 #[then(expr = "the renamed daemon row should be visible within {int} seconds")]

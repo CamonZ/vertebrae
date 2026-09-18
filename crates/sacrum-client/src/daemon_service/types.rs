@@ -76,6 +76,17 @@ pub struct DaemonSummary {
     pub removed_at: Option<DateTime<Utc>>,
     pub inserted_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
+    pub daemon_version: Option<String>,
+    pub os: Option<String>,
+    pub architecture: Option<String>,
+    pub host: Option<String>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub report_version: Option<i32>,
+    pub capabilities: Option<Value>,
+    pub connection_status: Option<String>,
+    pub health: Option<String>,
+    pub health_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -303,6 +314,17 @@ impl DaemonResponse {
             removed_at: parse_timestamp(self.removed_at, "removed_at")?,
             inserted_at: parse_timestamp(self.inserted_at, "inserted_at")?,
             updated_at: parse_timestamp(self.updated_at, "updated_at")?,
+            daemon_version: self.daemon_version,
+            os: self.os,
+            architecture: self.architecture,
+            host: self.host,
+            started_at: parse_timestamp(self.started_at, "started_at")?,
+            last_seen_at: parse_timestamp(self.last_seen_at, "last_seen_at")?,
+            report_version: self.report_version,
+            capabilities: self.capabilities,
+            connection_status: self.connection_status,
+            health: self.health,
+            health_reason: self.health_reason,
         })
     }
 }

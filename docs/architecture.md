@@ -287,6 +287,14 @@ DaemonSupervisor
   Service installation only writes the service definition; it never rewrites
   standalone enrollment state.
 
+Standalone daemons publish a bounded, sanitized v1 report after the enrolled
+`daemon:<id>` channel join and restart a single 30-second application heartbeat
+publisher after reconnect. The report contains daemon version, host/platform
+metadata, startup time, and discovered provider/harness readiness booleans.
+Credentials, executable paths, diagnostics, project identifiers, and capacity
+or queue counts are never sent. Phoenix protocol heartbeats keep the socket
+alive but do not update Sacrum daemon liveness; application heartbeats do.
+
 At daemon boot, shell PATH, provider executable discovery, managed skill roots,
 and Claude installed-skill compatibility are captured in one immutable,
 process-local capability snapshot shared by all project and step actors. The
@@ -303,6 +311,13 @@ See [GUI Development](gui-development.md) for dev setup and frontend details.
 
 - **~34 Tauri commands** wrapping `VertebraeServices`
 - **WebSocket real-time sync** via Phoenix channels
+
+The GUI reads the account-scoped daemon fleet/detail GraphQL snapshots and
+consumes the account-channel `daemon_metrics` event. Tauri maps the durable
+snapshot to `Daemon` and the ephemeral event to `DaemonMetrics`; the frontend
+merges metrics only into existing connection-scoped cache entries. Live health,
+freshness, and capability values shown by the inspector therefore remain
+server-derived and unavailable values are not inferred locally.
 - **Provider-neutral local chat harnesses** for Claude and Codex sessions,
   built through the shared `HarnessRuntimeFactory` (see [Harness Crates](#harness-crates))
 - Workflow execution commands delegate to Sacrum; daemon clients pick up execution events

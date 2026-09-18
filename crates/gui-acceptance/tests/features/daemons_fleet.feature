@@ -42,3 +42,17 @@ Feature: Daemon fleet management
     And I rename the registered daemon to a new unique name
     Then the renamed daemon row should be visible within 15 seconds
     And the GUI should show the renamed daemon in the inspector within 10 seconds
+
+  Scenario: Consume live telemetry from an enrolled daemon
+    Given the GUI is showing the daemon fleet
+    When I register a uniquely named daemon
+    And I reveal the registered daemon enrollment token
+    And I click on the element with test id "daemon-enrollment-done"
+    And I start the registered daemon
+    Then the GUI should show "Active" within 15 seconds
+    When I open the registered daemon inspector
+    Then the GUI should show "0.1.0" within 15 seconds
+    And the GUI should show "linux" within 5 seconds
+    And the GUI should show "online" within 5 seconds
+    And the GUI should show "healthy" within 5 seconds
+    And the GUI should show "4/4 ready" within 5 seconds

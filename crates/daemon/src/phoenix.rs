@@ -102,6 +102,9 @@ pub enum PhoenixError {
 
     #[error("standalone daemon identity was not found or deregistered")]
     StandaloneDaemonNotFound,
+
+    #[error("standalone daemon channel is not joined")]
+    DaemonChannelNotJoined,
 }
 
 impl From<tokio_tungstenite::tungstenite::Error> for PhoenixError {
@@ -117,9 +120,12 @@ type WsReader = SplitStream<WsStream>;
 /// Default heartbeat interval (30 seconds, matching Phoenix protocol).
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
-/// A reference counter tracking which channels are joined.
-/// Key: topic string, Value: join_ref used when joining.
-type JoinedChannels = Arc<AsyncMutex<HashMap<String, String>>>;
+#[derive(Debug, Clone)]
+struct JoinedChannel {
+    join_ref: String,
+}
+
+type JoinedChannels = Arc<AsyncMutex<HashMap<String, JoinedChannel>>>;
 
 /// A connected Phoenix WebSocket that can join/leave channels and read messages.
 pub struct PhoenixSocket {
@@ -227,7 +233,7 @@ impl PhoenixSocket {
         topic: &str,
         token: &str,
         client_type: &str,
-    ) -> Result<(), PhoenixError> {
+    ) -> Result<String, PhoenixError> {
         self.send_join(
             topic,
             serde_json::json!({ "token": token, "client_type": client_type }),
@@ -237,7 +243,7 @@ impl PhoenixSocket {
 
     /// Join the standalone identity channel without sending a broad account
     /// token. Authentication was established at socket connect time.
-    pub async fn join_daemon(&self, daemon_id: &str) -> Result<(), PhoenixError> {
+    pub async fn join_daemon(&self, daemon_id: &str) -> Result<String, PhoenixError> {
         self.send_join(&format!("daemon:{daemon_id}"), serde_json::json!({}))
             .await
     }
@@ -246,7 +252,7 @@ impl PhoenixSocket {
         &self,
         topic: &str,
         join_payload: serde_json::Value,
-    ) -> Result<(), PhoenixError> {
+    ) -> Result<String, PhoenixError> {
         let join_ref = self.next_ref();
         let msg_ref = self.next_ref();
 
@@ -263,9 +269,9 @@ impl PhoenixSocket {
         self.joined_channels
             .lock()
             .await
-            .insert(topic.to_string(), join_ref);
+            .insert(topic.to_string(), JoinedChannel { join_ref });
 
-        Ok(())
+        Ok(msg_ref)
     }
 
     /// Leave a Phoenix channel topic.
@@ -276,6 +282,7 @@ impl PhoenixSocket {
             .lock()
             .await
             .remove(topic)
+            .map(|channel| channel.join_ref)
             .unwrap_or_default();
 
         let leave_msg = serde_json::json!([join_ref, msg_ref, topic, "phx_leave", {}]);
@@ -289,6 +296,50 @@ impl PhoenixSocket {
             .await?;
 
         Ok(())
+    }
+
+    /// Publish telemetry without logging its potentially sensitive payload.
+    pub async fn send_daemon_event(
+        &self,
+        event: &str,
+        payload: serde_json::Value,
+    ) -> Result<String, PhoenixError> {
+        if !matches!(event, "report" | "heartbeat") {
+            return Err(PhoenixError::Protocol(format!(
+                "unsupported daemon event: {event}"
+            )));
+        }
+
+        let (topic, join_ref) = self
+            .joined_channels
+            .lock()
+            .await
+            .iter()
+            .find(|(topic, _)| topic.starts_with("daemon:"))
+            .map(|(topic, channel)| (topic.clone(), channel.join_ref.clone()))
+            .ok_or(PhoenixError::DaemonChannelNotJoined)?;
+        let msg_ref = self.next_ref();
+        let message = serde_json::json!([join_ref, msg_ref, topic, event, payload]);
+
+        self.writer
+            .lock()
+            .await
+            .send(Message::Text(message.to_string().into()))
+            .await?;
+
+        Ok(msg_ref)
+    }
+
+    pub async fn send_daemon_report(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<String, PhoenixError> {
+        self.send_daemon_event("report", payload).await
+    }
+
+    pub async fn send_daemon_heartbeat(&self) -> Result<String, PhoenixError> {
+        self.send_daemon_event("heartbeat", serde_json::json!({}))
+            .await
     }
 
     /// Take the reader half of the WebSocket stream for the message pump loop.
