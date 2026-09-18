@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use async_trait::async_trait;
@@ -346,6 +349,7 @@ fn provider_config_preserves_every_gui_claude_process_setting() {
         gate_binary.clone(),
         "backend-config",
         locator_root.clone(),
+        &BTreeMap::new(),
         Some(&permission_socket),
     );
 

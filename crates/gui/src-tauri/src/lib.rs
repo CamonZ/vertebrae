@@ -8,6 +8,7 @@ pub mod install;
 pub(crate) mod local_backend;
 pub(crate) mod local_chat;
 pub mod project_config;
+pub(crate) mod shell_environment;
 pub mod types;
 pub mod update;
 pub mod websocket_client;
@@ -257,6 +258,9 @@ pub fn run() {
                 .unwrap_or_else(|| PathBuf::from("."));
             let claude_startup_capabilities =
                 ClaudeStartupCapabilities::resolve(&compatibility_working_dir);
+            if let Some(diagnostic) = &claude_startup_capabilities.shell_environment.diagnostic {
+                log::warn!("[STARTUP] Using the GUI environment after shell startup failure: {diagnostic}");
+            }
             match (
                 &claude_startup_capabilities.plugin_resolution.plugin_root,
                 &claude_startup_capabilities.plugin_resolution.warning,

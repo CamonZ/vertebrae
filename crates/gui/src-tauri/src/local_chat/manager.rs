@@ -48,9 +48,11 @@ impl LocalChatSessionManager {
         Self::with_harnesses_and_permission_bridge(
             vec![
                 Arc::new(ClaudeLocalChatHarness::with_startup_capabilities(
-                    startup_capabilities,
+                    startup_capabilities.clone(),
                 )),
-                Arc::new(CodexLocalChatHarness::new()),
+                Arc::new(CodexLocalChatHarness::with_shell_environment(
+                    startup_capabilities.shell_environment.clone(),
+                )),
             ],
             PermissionBridge::new(),
         )

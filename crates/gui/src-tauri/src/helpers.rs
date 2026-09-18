@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, ffi::OsStr, path::PathBuf};
+
+use crate::shell_environment::{user_shell_environment, ShellEnvironment};
 
 struct BinarySpec {
     display_name: &'static str,
@@ -26,16 +28,50 @@ const CODEX_SPEC: BinarySpec = BinarySpec {
 
 /// Find the Claude Code CLI binary
 pub fn find_claude_binary() -> Result<PathBuf, String> {
-    find_binary(&CLAUDE_SPEC)
+    let shell_environment = user_shell_environment();
+    find_binary(
+        &CLAUDE_SPEC,
+        &shell_environment.path,
+        Some(&shell_environment.variables),
+    )
 }
 
 /// Find the Codex CLI binary.
 pub fn find_codex_binary() -> Result<PathBuf, String> {
-    find_binary(&CODEX_SPEC)
+    let shell_environment = user_shell_environment();
+    find_binary(
+        &CODEX_SPEC,
+        &shell_environment.path,
+        Some(&shell_environment.variables),
+    )
+}
+
+pub(crate) fn find_claude_binary_with_shell_environment(
+    shell_environment: &ShellEnvironment,
+) -> Result<PathBuf, String> {
+    find_binary(
+        &CLAUDE_SPEC,
+        &shell_environment.path,
+        Some(&shell_environment.variables),
+    )
+}
+
+pub(crate) fn find_codex_binary_with_shell_environment(
+    shell_environment: &ShellEnvironment,
+) -> Result<PathBuf, String> {
+    find_binary(
+        &CODEX_SPEC,
+        &shell_environment.path,
+        Some(&shell_environment.variables),
+    )
 }
 
 /// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
 pub fn build_augmented_path() -> String {
+    build_augmented_path_from(&user_shell_environment().path)
+}
+
+pub(crate) fn build_augmented_path_from(current_path: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     if let Some(home) = dirs::home_dir() {
@@ -46,16 +82,22 @@ pub fn build_augmented_path() -> String {
     parts.push("/opt/homebrew/bin".to_string());
     parts.push("/usr/local/bin".to_string());
 
-    let current_path = std::env::var("PATH").unwrap_or_default();
     if !current_path.is_empty() {
-        parts.push(current_path);
+        parts.push(current_path.to_string());
     }
 
     parts.join(":")
 }
 
-fn find_binary(spec: &BinarySpec) -> Result<PathBuf, String> {
-    if let Ok(raw_path) = std::env::var(spec.env_override) {
+fn find_binary(
+    spec: &BinarySpec,
+    search_path: &str,
+    environment: Option<&BTreeMap<String, String>>,
+) -> Result<PathBuf, String> {
+    if let Some(raw_path) = std::env::var(spec.env_override)
+        .ok()
+        .or_else(|| environment.and_then(|environment| environment.get(spec.env_override).cloned()))
+    {
         let trimmed = raw_path.trim();
         let path = PathBuf::from(trimmed);
         if path.exists() {
@@ -69,16 +111,10 @@ fn find_binary(spec: &BinarySpec) -> Result<PathBuf, String> {
         ));
     }
 
-    if let Ok(output) = std::process::Command::new("which")
-        .arg(spec.binary_name)
-        .output()
-    {
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout);
-            let path = PathBuf::from(path_str.trim());
-            if path.exists() {
-                return Ok(path);
-            }
+    for directory in std::env::split_paths(OsStr::new(search_path)) {
+        let path = directory.join(spec.binary_name);
+        if path.is_file() {
+            return Ok(path);
         }
     }
 
@@ -101,7 +137,16 @@ fn find_binary(spec: &BinarySpec) -> Result<PathBuf, String> {
 }
 
 pub fn find_vtb_gate_binary() -> Result<PathBuf, String> {
-    if let Ok(path) = std::env::var("VTB_GATE_PATH") {
+    find_vtb_gate_binary_with_shell_environment(&user_shell_environment())
+}
+
+pub(crate) fn find_vtb_gate_binary_with_shell_environment(
+    shell_environment: &ShellEnvironment,
+) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var("VTB_GATE_PATH")
+        .ok()
+        .or_else(|| shell_environment.variables.get("VTB_GATE_PATH").cloned())
+    {
         let path = PathBuf::from(path);
         if path.exists() {
             return Ok(path);
@@ -135,12 +180,10 @@ pub fn find_vtb_gate_binary() -> Result<PathBuf, String> {
         }
     }
 
-    if let Ok(output) = std::process::Command::new("which").arg("vtb-gate").output() {
-        if output.status.success() {
-            let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-            if path.exists() {
-                return Ok(path);
-            }
+    for directory in std::env::split_paths(OsStr::new(&shell_environment.path)) {
+        let path = directory.join("vtb-gate");
+        if path.is_file() {
+            return Ok(path);
         }
     }
 
