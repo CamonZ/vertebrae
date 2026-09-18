@@ -1284,7 +1284,7 @@ plugin_dirs?: string[];
  * JSON Schema for structured output validation (serialized as JSON string)
  */
 json_schema: string | null }
-export type AgentProvider = "anthropic" | "openai"
+export type AgentProvider = "anthropic" | "openai" | "typesafe"
 /**
  * A file projection returned from the project artifact list or Task.artifacts.
  */

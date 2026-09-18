@@ -161,6 +161,8 @@ mod tests {
                 plugin_root: Some(PathBuf::from("/secret/plugin")),
                 warning: Some("secret warning".into()),
             },
+            typesafe_api_key: None,
+            typesafe_base_url: None,
         }
     }
 

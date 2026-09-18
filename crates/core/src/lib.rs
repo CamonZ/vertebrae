@@ -55,10 +55,11 @@ pub use execution_service::{
 };
 pub use execution_settings::{OutputVerbosity, SpeedTier};
 pub use model_catalog::{
-    Provider, ProviderModelMismatch, ProviderPersonalityMismatch, ProviderReasoningEffortMismatch,
-    ProviderVerbosityMismatch, SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model,
-    normalize_personality, normalize_provider_personality, normalize_provider_reasoning_effort,
-    normalize_provider_verbosity, validate_provider_model,
+    DEFAULT_TYPESAFE_MODEL, Provider, ProviderAgentOptionMismatch, ProviderModelMismatch,
+    ProviderPersonalityMismatch, ProviderReasoningEffortMismatch, ProviderVerbosityMismatch,
+    SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model, normalize_personality,
+    normalize_provider_personality, normalize_provider_reasoning_effort,
+    normalize_provider_verbosity, validate_provider_agent_config, validate_provider_model,
     validate_provider_model_with_codex_provider, validate_provider_reasoning_effort,
 };
 pub use orchestrator::{

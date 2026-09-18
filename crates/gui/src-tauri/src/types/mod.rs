@@ -454,6 +454,7 @@ pub enum PermissionMode {
 pub enum AgentProvider {
     Anthropic,
     Openai,
+    Typesafe,
 }
 
 impl PermissionMode {
@@ -549,6 +550,7 @@ impl From<vertebrae_core::AgentConfig> for AgentConfig {
             provider: config.provider.map(|provider| match provider {
                 vertebrae_core::Provider::Anthropic => AgentProvider::Anthropic,
                 vertebrae_core::Provider::Openai => AgentProvider::Openai,
+                vertebrae_core::Provider::Typesafe => AgentProvider::Typesafe,
             }),
             model: config.model,
             codex_model_provider: config.codex_model_provider,
@@ -578,6 +580,7 @@ impl From<AgentConfig> for vertebrae_core::AgentConfig {
             provider: config.provider.map(|provider| match provider {
                 AgentProvider::Anthropic => vertebrae_core::Provider::Anthropic,
                 AgentProvider::Openai => vertebrae_core::Provider::Openai,
+                AgentProvider::Typesafe => vertebrae_core::Provider::Typesafe,
             }),
             model: config.model,
             codex_model_provider: config.codex_model_provider,

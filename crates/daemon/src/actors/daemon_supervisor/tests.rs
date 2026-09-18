@@ -332,6 +332,8 @@ fn sample_daemon_config() -> DaemonConfig {
                 plugin_root: None,
                 warning: None,
             },
+            typesafe_api_key: None,
+            typesafe_base_url: None,
         }),
     }
 }

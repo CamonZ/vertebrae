@@ -1104,6 +1104,8 @@ mod tests {
                     plugin_root: None,
                     warning: None,
                 },
+                typesafe_api_key: None,
+                typesafe_base_url: None,
             }),
         };
         let debug = format!("{:?}", config);
