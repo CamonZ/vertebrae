@@ -7,8 +7,12 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use crate::helpers::{build_augmented_path, find_claude_binary, find_codex_binary};
+use crate::helpers::{
+    build_augmented_path_from, find_claude_binary_with_shell_environment,
+    find_codex_binary_with_shell_environment,
+};
 use crate::local_chat::LocalChatHarnessKind;
+use crate::shell_environment::user_shell_environment;
 
 const CLAUDE_TITLE_MODEL: &str = "haiku";
 const CODEX_TITLE_MODEL: &str = "gpt-5.6-luna";
@@ -112,11 +116,14 @@ async fn infer_with_claude(
     initial_prompts: &[String],
     working_dir: Option<String>,
 ) -> Result<InferLocalChatSessionTitleOutput, String> {
-    let binary = find_claude_binary()?;
+    let shell_environment = user_shell_environment();
+    let binary = find_claude_binary_with_shell_environment(&shell_environment)?;
     let schema = title_schema().to_string();
     let prompt = title_prompt(initial_prompts);
     let mut command = Command::new(binary);
-    command.env("PATH", build_augmented_path());
+    command
+        .envs(&shell_environment.variables)
+        .env("PATH", build_augmented_path_from(&shell_environment.path));
     command
         .args(claude_title_args(&schema))
         .stdin(Stdio::piped())
@@ -152,7 +159,8 @@ async fn infer_with_codex(
     initial_prompts: &[String],
     working_dir: Option<String>,
 ) -> Result<InferLocalChatSessionTitleOutput, String> {
-    let binary = find_codex_binary()?;
+    let shell_environment = user_shell_environment();
+    let binary = find_codex_binary_with_shell_environment(&shell_environment)?;
     let schema_path = temp_json_path("vertebrae-local-chat-title-schema");
     let output_path = temp_json_path("vertebrae-local-chat-title-output");
     tokio::fs::write(&schema_path, title_schema().to_string())
@@ -161,6 +169,8 @@ async fn infer_with_codex(
 
     let mut command = Command::new(binary);
     command
+        .envs(&shell_environment.variables)
+        .env("PATH", build_augmented_path_from(&shell_environment.path))
         .args(codex_title_args(&schema_path, &output_path))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

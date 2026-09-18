@@ -9,11 +9,13 @@ use vertebrae_harness_core::{
     SpeedTier, StartSessionRequest, StreamId, TurnHandle, TurnId,
 };
 
+use crate::helpers::{build_augmented_path_from, find_codex_binary_with_shell_environment};
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatEvent, LocalChatHarness, LocalChatHarnessInfo,
     LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionError, LocalChatSessionErrorEvent,
     CHAT_REFERENCE_INSTRUCTIONS,
 };
+use crate::shell_environment::{user_shell_environment, ShellEnvironment};
 
 use crate::local_chat::harnesses::shared::{LocalChatControlSink, LocalChatHarnessEventSink};
 use crate::local_chat::permissions::PermissionBridge;
@@ -26,14 +28,20 @@ use super::models::{
 pub(crate) struct CodexLocalChatHarness {
     sessions: Arc<RwLock<HashMap<String, Arc<CodexLocalChatSession>>>>,
     installed_skills_root_override: Option<PathBuf>,
+    shell_environment: ShellEnvironment,
     catalog: Arc<OnceCell<LocalChatHarnessInfo>>,
 }
 
 impl CodexLocalChatHarness {
     pub(crate) fn new() -> Self {
+        Self::with_shell_environment(user_shell_environment())
+    }
+
+    pub(crate) fn with_shell_environment(shell_environment: ShellEnvironment) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             installed_skills_root_override: None,
+            shell_environment,
             catalog: Arc::new(OnceCell::new()),
         }
     }
@@ -56,11 +64,15 @@ impl CodexLocalChatHarness {
     }
 
     async fn discover_info(&self) -> LocalChatHarnessInfo {
-        let binary = match crate::helpers::find_codex_binary() {
+        let binary = match find_codex_binary_with_shell_environment(&self.shell_environment) {
             Ok(binary) => binary,
             Err(error) => return unavailable_codex_info(error),
         };
-        let factory = HarnessRuntimeFactory::new(codex_factory_config(binary, Vec::new()));
+        let factory = HarnessRuntimeFactory::new(codex_factory_config(
+            binary,
+            Vec::new(),
+            &self.shell_environment,
+        ));
         let instance = match factory.create(HarnessRuntimeOptions {
             agent_config: AgentConfig::new().with_provider(Provider::Openai),
             request_config: Default::default(),
@@ -163,20 +175,25 @@ impl LocalChatHarness for CodexLocalChatHarness {
         let control_sink: Arc<dyn vertebrae_harness_core::ControlSink> = Arc::new(
             LocalChatControlSink::new(backend_session_id.clone(), runtime.clone()),
         );
-        let binary = crate::helpers::find_codex_binary().map_err(|error| {
-            emit_error(&runtime, &backend_session_id, error.clone());
-            LocalChatSessionError::StartFailed(error)
-        })?;
-        let instance = HarnessRuntimeFactory::new(codex_factory_config(binary, vec![skills_root]))
-            .create(HarnessRuntimeOptions {
-                agent_config,
-                request_config: request.config.clone(),
-            })
-            .map_err(|error| {
-                let error = error.to_string();
+        let binary =
+            find_codex_binary_with_shell_environment(&self.shell_environment).map_err(|error| {
                 emit_error(&runtime, &backend_session_id, error.clone());
                 LocalChatSessionError::StartFailed(error)
             })?;
+        let instance = HarnessRuntimeFactory::new(codex_factory_config(
+            binary,
+            vec![skills_root],
+            &self.shell_environment,
+        ))
+        .create(HarnessRuntimeOptions {
+            agent_config,
+            request_config: request.config.clone(),
+        })
+        .map_err(|error| {
+            let error = error.to_string();
+            emit_error(&runtime, &backend_session_id, error.clone());
+            LocalChatSessionError::StartFailed(error)
+        })?;
         request.config = instance.request_config;
         let session = instance
             .runtime
@@ -249,10 +266,12 @@ impl LocalChatHarness for CodexLocalChatHarness {
 fn codex_factory_config(
     binary: PathBuf,
     installed_skills_roots: Vec<PathBuf>,
+    shell_environment: &ShellEnvironment,
 ) -> HarnessFactoryConfig {
     HarnessFactoryConfig {
         openai_executable: Some(binary),
-        search_path: Some(crate::helpers::build_augmented_path().into()),
+        search_path: Some(build_augmented_path_from(&shell_environment.path).into()),
+        environment: shell_environment.variables.clone(),
         installed_skills_roots,
         ..HarnessFactoryConfig::default()
     }
@@ -409,7 +428,12 @@ mod tests {
         let binary = PathBuf::from("/tmp/codex");
         let skills_root = PathBuf::from("/tmp/skills");
 
-        let config = codex_factory_config(binary.clone(), vec![skills_root.clone()]);
+        let shell_environment = user_shell_environment();
+        let config = codex_factory_config(
+            binary.clone(),
+            vec![skills_root.clone()],
+            &shell_environment,
+        );
 
         assert_eq!(config.openai_executable, Some(binary));
         assert_eq!(config.installed_skills_roots, vec![skills_root]);

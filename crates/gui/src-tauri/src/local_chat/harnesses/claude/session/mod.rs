@@ -21,7 +21,10 @@ use vertebrae_harness_core::{
 };
 
 use crate::commands::AppState;
-use crate::helpers::{build_augmented_path, find_claude_binary, find_vtb_gate_binary};
+use crate::helpers::{
+    build_augmented_path_from, find_claude_binary_with_shell_environment,
+    find_vtb_gate_binary_with_shell_environment,
+};
 use crate::local_chat::harnesses::claude::args::builtin_claude_output_styles;
 use crate::local_chat::harnesses::claude::args::resolve_requested_claude_model;
 use crate::local_chat::{
@@ -29,6 +32,7 @@ use crate::local_chat::{
     LocalChatPersonalityOption, LocalChatRuntime, LocalChatSessionError,
     LocalChatSessionErrorEvent, LocalChatSessionWarningEvent, CHAT_REFERENCE_INSTRUCTIONS,
 };
+use crate::shell_environment::{user_shell_environment, ShellEnvironment};
 use crate::types::PermissionMode;
 use vertebrae_installer::{resolve_claude_plugin_dir, ClaudePluginDirResolution};
 
@@ -48,6 +52,7 @@ pub(crate) struct ClaudeStartupCapabilities {
     pub(crate) binary: Option<PathBuf>,
     pub(crate) binary_diagnostic: Option<String>,
     pub(crate) augmented_path: String,
+    pub(crate) shell_environment: ShellEnvironment,
     pub(crate) plugin_resolution: ClaudePluginDirResolution,
     pub(crate) output_styles: Vec<LocalChatPersonalityOption>,
 }
@@ -57,11 +62,13 @@ impl ClaudeStartupCapabilities {
     /// setup hook. A missing executable is retained as a diagnostic without
     /// preventing the GUI from launching.
     pub(crate) fn resolve(working_dir: &Path) -> Self {
-        let augmented_path = build_augmented_path();
-        let (binary, binary_diagnostic) = match find_claude_binary() {
-            Ok(binary) => (Some(binary), None),
-            Err(error) => (None, Some(error)),
-        };
+        let shell_environment = user_shell_environment();
+        let augmented_path = build_augmented_path_from(&shell_environment.path);
+        let (binary, binary_diagnostic) =
+            match find_claude_binary_with_shell_environment(&shell_environment) {
+                Ok(binary) => (Some(binary), None),
+                Err(error) => (None, Some(error)),
+            };
         let plugin_resolution = binary.as_deref().map_or(
             ClaudePluginDirResolution {
                 plugin_root: None,
@@ -76,6 +83,7 @@ impl ClaudeStartupCapabilities {
             binary,
             binary_diagnostic,
             augmented_path,
+            shell_environment,
             plugin_resolution,
             output_styles,
         }
@@ -84,15 +92,18 @@ impl ClaudeStartupCapabilities {
     /// Build the compatibility-free default used by unit-test adapters. The
     /// production Tauri path always uses [`Self::resolve`] during setup.
     fn without_compatibility_probe() -> Self {
-        let augmented_path = build_augmented_path();
-        let (binary, binary_diagnostic) = match find_claude_binary() {
-            Ok(binary) => (Some(binary), None),
-            Err(error) => (None, Some(error)),
-        };
+        let shell_environment = user_shell_environment();
+        let augmented_path = build_augmented_path_from(&shell_environment.path);
+        let (binary, binary_diagnostic) =
+            match find_claude_binary_with_shell_environment(&shell_environment) {
+                Ok(binary) => (Some(binary), None),
+                Err(error) => (None, Some(error)),
+            };
         Self {
             binary,
             binary_diagnostic,
             augmented_path,
+            shell_environment,
             plugin_resolution: ClaudePluginDirResolution {
                 plugin_root: None,
                 warning: None,
@@ -969,8 +980,10 @@ impl PreparedSession {
             )
         })?;
         let augmented_path = startup_capabilities.augmented_path.clone();
+        let shell_environment = startup_capabilities.shell_environment.clone();
         let plugin_resolution = startup_capabilities.plugin_resolution.clone();
-        let gate = find_vtb_gate_binary().map_err(LocalChatSessionError::StartFailed)?;
+        let gate = find_vtb_gate_binary_with_shell_environment(&shell_environment)
+            .map_err(LocalChatSessionError::StartFailed)?;
         #[cfg(unix)]
         let permission_socket = runtime
             .permission_bridge()
@@ -996,6 +1009,7 @@ impl PreparedSession {
             gate,
             &input.backend_session_id,
             root_locator_dir,
+            &shell_environment.variables,
             #[cfg(unix)]
             Some(permission_socket.path()),
             #[cfg(not(unix))]
@@ -1024,12 +1038,14 @@ fn build_factory_config(
     gate: PathBuf,
     backend_session_id: &str,
     root_locator_dir: PathBuf,
+    shell_environment: &BTreeMap<String, String>,
     permission_socket: Option<&Path>,
 ) -> HarnessFactoryConfig {
-    let mut environment = BTreeMap::from([(
+    let mut environment = shell_environment.clone();
+    environment.insert(
         "VTB_CLAUDE_SESSION_ID".to_string(),
         backend_session_id.to_string(),
-    )]);
+    );
     if let Some(permission_socket) = permission_socket {
         environment.insert(
             "VTB_GATE_SOCKET".to_string(),
