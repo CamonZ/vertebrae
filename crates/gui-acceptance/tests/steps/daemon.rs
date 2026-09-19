@@ -104,7 +104,23 @@ pub async fn wait_for_completed_execution(world: &mut GuiWorld, timeout_secs: u6
             return;
         }
         if Instant::now() >= deadline {
-            panic!("no completed execution for task {task_id} within {timeout_secs}s: {resp}");
+            let daemon_log = world
+                .daemon_log_path
+                .as_ref()
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .unwrap_or_else(|| "<daemon log unavailable>".to_string());
+            let tail = daemon_log
+                .lines()
+                .rev()
+                .take(80)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n");
+            panic!(
+                "no completed execution for task {task_id} within {timeout_secs}s: {resp}\ndaemon log:\n{tail}"
+            );
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }

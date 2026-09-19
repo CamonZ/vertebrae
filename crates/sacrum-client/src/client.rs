@@ -61,6 +61,14 @@ impl GraphqlClient {
     /// the underlying reqwest::Client. Builds the endpoint as
     /// `{base_url}/graphql`.
     pub fn new(config: SacrumConfig) -> Self {
+        Self::new_with_daemon_id(config, None)
+    }
+
+    /// Create a client authenticated with a daemon reconnect credential.
+    ///
+    /// Sacrum requires the daemon identity header when the bearer token is a
+    /// reconnect credential rather than an account API token.
+    pub fn new_with_daemon_id(config: SacrumConfig, daemon_id: Option<&str>) -> Self {
         use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 
         let mut default_headers = HeaderMap::new();
@@ -68,6 +76,11 @@ impl GraphqlClient {
             default_headers.insert(AUTHORIZATION, val);
         }
         default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        if let Some(daemon_id) = daemon_id
+            && let Ok(value) = HeaderValue::from_str(daemon_id)
+        {
+            default_headers.insert("x-daemon-id", value);
+        }
 
         let client = Client::builder()
             .default_headers(default_headers)

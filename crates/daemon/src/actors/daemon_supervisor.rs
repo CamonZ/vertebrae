@@ -17,7 +17,10 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
 use tokio_tungstenite::tungstenite::Message;
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
-use crate::actors::project_supervisor::{ProjectConfig, ProjectMessage, ProjectSupervisor};
+use crate::actors::project_supervisor::{
+    ProjectConfig, ProjectMessage, ProjectSupervisor, parse_cancel_step_payload,
+    parse_run_step_payload,
+};
 use crate::capabilities::SharedDaemonCapabilities;
 use crate::connection::{
     INITIAL_RECONNECT_DELAY, MAX_RECONNECT_DELAY, connect_with_auth, next_backoff, reconnect,
@@ -42,6 +45,10 @@ pub enum ChannelAction {
     DaemonChannelInterrupted,
     /// Message is for a non-project topic (e.g. "phoenix") — skip.
     NonProjectTopic,
+    /// A daemon-channel execution command addressed to a configured project.
+    RouteDaemonToProject(String),
+    /// A daemon-channel execution command could not be safely routed.
+    RejectedDaemonMessage(String),
     /// Message is for a project we don't track — skip.
     UnknownProject(String),
 }
@@ -55,16 +62,22 @@ fn classify_channel_message<V>(
     msg: &PhoenixMessage,
     known_projects: &HashMap<String, V>,
 ) -> ChannelAction {
-    classify_channel_message_with_join_ref(msg, known_projects, None)
+    classify_channel_message_with_join_ref(msg, known_projects, None, None)
 }
 
 fn classify_channel_message_with_join_ref<V>(
     msg: &PhoenixMessage,
     known_projects: &HashMap<String, V>,
     daemon_join_message_ref: Option<&str>,
+    authenticated_daemon_id: Option<&str>,
 ) -> ChannelAction {
     if let Some(daemon_id) = msg.daemon_id() {
         let daemon_id = daemon_id.to_string();
+        if authenticated_daemon_id.is_some_and(|expected| expected != daemon_id) {
+            return ChannelAction::RejectedDaemonMessage(format!(
+                "message received for unauthenticated daemon {daemon_id}"
+            ));
+        }
         return match msg.event.as_str() {
             "phx_reply"
                 if daemon_join_message_ref.is_some()
@@ -84,6 +97,32 @@ fn classify_channel_message_with_join_ref<V>(
                     .map(str::to_string),
             ),
             "phx_error" | "phx_close" => ChannelAction::DaemonChannelInterrupted,
+            "run_step" => match parse_run_step_payload(&msg.payload) {
+                Ok(payload) if !payload.project_id.is_empty() => {
+                    if known_projects.contains_key(&payload.project_id) {
+                        ChannelAction::RouteDaemonToProject(payload.project_id)
+                    } else {
+                        ChannelAction::UnknownProject(payload.project_id)
+                    }
+                }
+                Ok(_) => ChannelAction::RejectedDaemonMessage(
+                    "run_step payload is missing project_id".to_string(),
+                ),
+                Err(error) => ChannelAction::RejectedDaemonMessage(error),
+            },
+            "cancel_step" => match parse_cancel_step_payload(&msg.payload) {
+                Ok(payload) if !payload.project_id.is_empty() => {
+                    if known_projects.contains_key(&payload.project_id) {
+                        ChannelAction::RouteDaemonToProject(payload.project_id)
+                    } else {
+                        ChannelAction::UnknownProject(payload.project_id)
+                    }
+                }
+                Ok(_) => ChannelAction::RejectedDaemonMessage(
+                    "cancel_step payload is missing project_id".to_string(),
+                ),
+                Err(error) => ChannelAction::RejectedDaemonMessage(error),
+            },
             _ => ChannelAction::NonProjectTopic,
         };
     }
@@ -572,27 +611,37 @@ impl DaemonSupervisor {
             return Ok(());
         }
 
-        let topic = format!("project:{}", project_id);
-        let account_token = match &state.config.authentication {
-            DaemonAuthentication::AccountToken(token) => token,
-            DaemonAuthentication::Standalone(_) => {
-                return Err("standalone daemon identity has no project execution channel".into());
-            }
+        let (api_token, join_project_channel) = match &state.config.authentication {
+            DaemonAuthentication::AccountToken(token) => (token.clone(), true),
+            // The enrolled reconnect credential is also the daemon's scoped
+            // reporting credential. Standalone execution is multiplexed over
+            // daemon:{id}, so it must not join project:{id}.
+            DaemonAuthentication::Standalone(identity) => (identity.reconnect_token.clone(), false),
         };
-        state
-            .socket
-            .join(&topic, account_token, "daemon")
-            .await
-            .map_err(|e| format!("Failed to join channel {topic}: {e}"))?;
 
-        tracing::info!("Joined channel for project {}", project_id);
+        if join_project_channel {
+            let topic = format!("project:{}", project_id);
+            state
+                .socket
+                .join(&topic, &api_token, "daemon")
+                .await
+                .map_err(|e| format!("Failed to join channel {topic}: {e}"))?;
+            tracing::info!("Joined channel for project {}", project_id);
+        } else {
+            tracing::info!("Registered standalone project mapping {}", project_id);
+        }
 
         let sacrum_config = SacrumConfig::new(
             state.config.base_url.clone(),
-            account_token.clone(),
+            api_token,
             project_id.to_string(),
         );
-        let client = Arc::new(GraphqlClient::new(sacrum_config));
+        let client = Arc::new(match &state.config.authentication {
+            DaemonAuthentication::Standalone(identity) => {
+                GraphqlClient::new_with_daemon_id(sacrum_config, Some(&identity.daemon_id))
+            }
+            DaemonAuthentication::AccountToken(_) => GraphqlClient::new(sacrum_config),
+        });
         let services = Arc::new(vertebrae_sacrum_client::from_sacrum(client));
 
         let project_config = ProjectConfig {
@@ -629,9 +678,14 @@ impl DaemonSupervisor {
 
         stop_projects(vec![(project_id.to_string(), actor_ref)], "project removed").await;
 
-        let topic = format!("project:{}", project_id);
-        if let Err(e) = state.socket.leave(&topic).await {
-            tracing::warn!("Failed to leave channel {topic}: {e}");
+        if matches!(
+            &state.config.authentication,
+            DaemonAuthentication::AccountToken(_)
+        ) {
+            let topic = format!("project:{}", project_id);
+            if let Err(e) = state.socket.leave(&topic).await {
+                tracing::warn!("Failed to leave channel {topic}: {e}");
+            }
         }
 
         tracing::info!("Removed project {}", project_id);
@@ -649,6 +703,10 @@ impl DaemonSupervisor {
             &msg,
             &state.projects,
             state.daemon_join_message_ref.as_deref(),
+            match &state.config.authentication {
+                DaemonAuthentication::Standalone(identity) => Some(identity.daemon_id.as_str()),
+                DaemonAuthentication::AccountToken(_) => Some(""),
+            },
         ) {
             ChannelAction::RouteToProject(project_id) => {
                 if let Some(actor_ref) = state.projects.get(&project_id) {
@@ -660,6 +718,19 @@ impl DaemonSupervisor {
                         "No ProjectSupervisor found for project {} (race condition?)",
                         project_id,
                     );
+                }
+            }
+            ChannelAction::RouteDaemonToProject(project_id) => {
+                if let Some(actor_ref) = state.projects.get(&project_id) {
+                    if let Err(error) = actor_ref.cast(ProjectMessage::ChannelEvent(msg)) {
+                        tracing::error!(
+                            "Failed to route daemon message to project {}: {}",
+                            project_id,
+                            error
+                        );
+                    }
+                } else {
+                    tracing::warn!("No local supervisor for daemon project {}", project_id);
                 }
             }
             ChannelAction::JoinConfirmed(project_id) => {
@@ -703,6 +774,9 @@ impl DaemonSupervisor {
                 tracing::debug!("Daemon telemetry message acknowledged");
             }
             ChannelAction::DaemonChannelInterrupted => return Some(ChannelRecovery::Reconnect),
+            ChannelAction::RejectedDaemonMessage(reason) => {
+                tracing::warn!(%reason, "Rejecting daemon-channel execution message");
+            }
         }
         None
     }

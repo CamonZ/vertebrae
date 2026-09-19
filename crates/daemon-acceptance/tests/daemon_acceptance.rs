@@ -236,6 +236,16 @@ impl DaemonWorld {
     }
 
     pub async fn start_standalone_daemon(&mut self, daemon_id: &str, enrollment_token: &str) {
+        self.start_standalone_daemon_with_projects(daemon_id, enrollment_token, &[])
+            .await;
+    }
+
+    pub async fn start_standalone_daemon_with_projects(
+        &mut self,
+        daemon_id: &str,
+        enrollment_token: &str,
+        projects: &[(&str, &str)],
+    ) {
         assert!(self.daemon.is_none(), "daemon already running for scenario");
 
         let home = PathBuf::from(format!(
@@ -244,11 +254,22 @@ impl DaemonWorld {
         ));
         let cfg_dir = home.join(".config").join("vertebrae");
         std::fs::create_dir_all(&cfg_dir).expect("create standalone daemon home");
-        std::fs::write(
-            cfg_dir.join("config.toml"),
-            format!("[sacrum]\nurl = \"{}\"\n", self.sacrum_url),
-        )
-        .expect("write standalone daemon config");
+        let mut config = format!("[sacrum]\nurl = \"{}\"\n", self.sacrum_url);
+        for (index, (project_id, project_path)) in projects.iter().enumerate() {
+            config.push_str(&format!(
+                "\n[projects.\"project-{index}\"]\nid = \"{project_id}\"\npath = \"{project_path}\"\n"
+            ));
+        }
+        std::fs::write(cfg_dir.join("config.toml"), config)
+            .expect("write standalone daemon config");
+
+        let managed_plugin_root = home.join(".local/share/vertebrae");
+        let installed_skill = managed_plugin_root.join("skills/acceptance-proof/SKILL.md");
+        std::fs::create_dir_all(installed_skill.parent().expect("skill has parent"))
+            .expect("create installed skill directory");
+        std::fs::write(&installed_skill, "# Acceptance proof\n")
+            .expect("write installed manifestless skill");
+        self.managed_plugin_root = Some(managed_plugin_root);
 
         let mut enroll = Command::new(&self.vtb_daemon_binary);
         enroll
@@ -299,6 +320,8 @@ impl DaemonWorld {
                 "CODEX_PATH",
                 std::env::var("CODEX_PATH").unwrap_or_default(),
             )
+            .env("MOCK_OUTPUT_DIR", &self.mock_output_dir)
+            .env("MOCK_CAPTURE_DIR", &self.capture_dir)
             .env("RUST_LOG", "info")
             .stdout(Stdio::from(log_stderr_dup))
             .stderr(Stdio::from(log_stderr))
@@ -307,7 +330,13 @@ impl DaemonWorld {
         self.daemon = Some(child);
         self.standalone_home = Some(home);
 
-        let expected = "Standalone daemon identity registered";
+        let mut expected = vec!["Standalone daemon identity registered".to_string()];
+        expected.extend(projects.iter().flat_map(|(project_id, _)| {
+            [
+                format!("Registered standalone project mapping {project_id}"),
+                format!("ProjectSupervisor starting for project {project_id}"),
+            ]
+        }));
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if Instant::now() >= deadline {
@@ -316,8 +345,56 @@ impl DaemonWorld {
                 panic!("daemon did not log {expected:?} within 30s. log:\n{tail}");
             }
             if let Ok(text) = std::fs::read_to_string(&log_path)
-                && text.contains(expected)
+                && expected.iter().all(|entry| text.contains(entry))
             {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    pub async fn wait_for_daemon_online(&self, daemon_id: &str) {
+        let client = self
+            .graphql_client
+            .as_ref()
+            .expect("graphql client configured")
+            .clone();
+        let service = vertebrae_sacrum_client::SacrumDaemonService::new((*client).clone());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut last_observation = String::from("no daemon snapshot");
+
+        loop {
+            if let Ok(Some(daemon)) = service.get_daemon(daemon_id).await {
+                last_observation = format!("{daemon:?}");
+                if daemon.connection_status.as_deref() == Some("online") {
+                    return;
+                }
+            }
+            if Instant::now() >= deadline {
+                panic!("daemon {daemon_id} did not become online within 30s: {last_observation}");
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    pub async fn wait_for_daemon_offline(&self, daemon_id: &str) {
+        let client = self
+            .graphql_client
+            .as_ref()
+            .expect("graphql client configured")
+            .clone();
+        let service = vertebrae_sacrum_client::SacrumDaemonService::new((*client).clone());
+        let deadline = Instant::now() + Duration::from_secs(30);
+
+        loop {
+            let online = service
+                .get_daemon(daemon_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|daemon| daemon.connection_status)
+                .is_some_and(|status| status == "online");
+            if !online || Instant::now() >= deadline {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -452,6 +529,7 @@ impl DaemonWorld {
 #[tokio::main]
 async fn main() {
     DaemonWorld::cucumber()
+        .max_concurrent_scenarios(1)
         .before(|feature, _rule, scenario, world| {
             let feature_name = feature.name.clone();
             let scenario_name = scenario.name.clone();
@@ -475,6 +553,9 @@ async fn cleanup(world: &mut DaemonWorld) {
     // Stop the daemon first so it can't hold DB locks while we delete tasks
     // and workflows underneath it.
     world.stop_daemon().await;
+    for daemon_id in world.created_daemon_ids.iter() {
+        world.wait_for_daemon_offline(daemon_id).await;
+    }
     let _ = std::fs::remove_dir_all(&world.capture_dir);
 
     let Some(client) = world.graphql_client.clone() else {

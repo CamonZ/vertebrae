@@ -47,5 +47,26 @@ pub async fn configured_daemon_environment(world: &mut DaemonWorld) {
         .env
         .insert("VTB_PROJECT_ID".into(), project_id.clone());
 
-    world.start_daemon_for_project(&project_id, "/app").await;
+    let name = format!("daemon-acc-{}", uuid::Uuid::new_v4());
+    let bootstrap = vertebrae_sacrum_client::SacrumDaemonService::new(
+        (**world
+            .graphql_client
+            .as_ref()
+            .expect("graphql client configured"))
+        .clone(),
+    )
+    .create_daemon(Some(&name))
+    .await
+    .expect("failed to create daemon enrollment");
+    let daemon_id = bootstrap.daemon.id.clone();
+    world.daemon_id = Some(daemon_id.clone());
+    world.created_daemon_ids.push(daemon_id.clone());
+    world
+        .start_standalone_daemon_with_projects(
+            &daemon_id,
+            &bootstrap.enrollment_token,
+            &[(&project_id, "/app")],
+        )
+        .await;
+    world.wait_for_daemon_online(&daemon_id).await;
 }

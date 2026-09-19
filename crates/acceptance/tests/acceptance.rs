@@ -4,6 +4,9 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Child;
+use tokio::time::{Duration, Instant, sleep};
 
 use cucumber::World;
 use vertebrae_sacrum_client::GraphqlClient;
@@ -32,6 +35,11 @@ pub struct SmokeWorld {
     graphql_client: Option<GraphqlClient>,
 
     worktree: Option<WorktreeFixture>,
+
+    daemon: Option<Child>,
+    daemon_id: Option<String>,
+    daemon_home: Option<PathBuf>,
+    daemon_project_path: Option<PathBuf>,
 }
 
 pub struct WorktreeFixture {
@@ -71,6 +79,132 @@ impl SmokeWorld {
             last_exit_code: 0,
             graphql_client: None,
             worktree: None,
+            daemon: None,
+            daemon_id: None,
+            daemon_home: None,
+            daemon_project_path: None,
+        }
+    }
+
+    async fn start_daemon(&mut self, project_id: &str) {
+        let url = self.env.get("VTB_URL").expect("VTB_URL must be set");
+        let daemon_id = uuid::Uuid::new_v4().simple().to_string();
+        let home = PathBuf::from(format!("/tmp/vtb-acceptance-daemon-home-{daemon_id}"));
+        let config_dir = home.join(".config/vertebrae");
+        let project_path = PathBuf::from(format!("/tmp/vtb-acceptance-project-{daemon_id}"));
+        std::fs::create_dir_all(&config_dir).expect("create daemon config directory");
+        std::fs::create_dir_all(&project_path).expect("create daemon project directory");
+        let client = self
+            .graphql_client
+            .as_ref()
+            .expect("configured Sacrum client")
+            .clone();
+        let bootstrap = vertebrae_sacrum_client::SacrumDaemonService::new(client)
+            .create_daemon(Some(&format!("acceptance-{daemon_id}")))
+            .await
+            .expect("create daemon enrollment");
+        let daemon_id = bootstrap.daemon.id.clone();
+        std::fs::write(
+            config_dir.join("config.toml"),
+            format!(
+                "[sacrum]\nurl = \"{url}\"\n\n[projects.acceptance]\nid = \"{project_id}\"\npath = \"{}\"\n",
+                project_path.display()
+            ),
+        )
+        .expect("write daemon config");
+
+        let daemon_binary = std::env::var("VTB_DAEMON_BINARY")
+            .unwrap_or_else(|_| "/app/target/debug/vtb-daemon".to_string());
+        let log_path = PathBuf::from(format!("/tmp/vtb-acceptance-daemon-{daemon_id}.log"));
+        let mut command = tokio::process::Command::new(daemon_binary);
+        command
+            .args([
+                "enroll",
+                "--endpoint",
+                url,
+                "--daemon-id",
+                &daemon_id,
+                "--token-stdin",
+            ])
+            .env("HOME", &home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut enroll = command.spawn().expect("spawn daemon enrollment");
+        enroll
+            .stdin
+            .take()
+            .expect("daemon enrollment stdin")
+            .write_all(bootstrap.enrollment_token.as_bytes())
+            .await
+            .expect("write daemon enrollment token");
+        let output = enroll
+            .wait_with_output()
+            .await
+            .expect("wait for daemon enrollment");
+        assert!(
+            output.status.success(),
+            "daemon enrollment failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let log = std::fs::File::create(&log_path).expect("create daemon log");
+        let log_dup = log.try_clone().expect("duplicate daemon log");
+        let mut command = tokio::process::Command::new(
+            std::env::var("VTB_DAEMON_BINARY")
+                .unwrap_or_else(|_| "/app/target/debug/vtb-daemon".to_string()),
+        );
+        command
+            .env("HOME", &home)
+            .env(
+                "CLAUDE_CODE_PATH",
+                std::env::var("CLAUDE_CODE_PATH")
+                    .unwrap_or_else(|_| "/usr/local/bin/mock-claude".to_string()),
+            )
+            .env("RUST_LOG", "info")
+            .stdout(Stdio::from(log_dup))
+            .stderr(Stdio::from(log))
+            .kill_on_drop(true);
+        self.daemon = Some(command.spawn().expect("spawn acceptance daemon"));
+        self.daemon_id = Some(daemon_id);
+        self.daemon_home = Some(home);
+        self.daemon_project_path = Some(project_path);
+
+        let expected = "Standalone daemon identity registered";
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if Instant::now() >= deadline {
+                let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+                self.stop_daemon().await;
+                panic!("daemon did not log {expected:?} within 30s. log:\n{log}");
+            }
+            if let Ok(log) = std::fs::read_to_string(&log_path)
+                && log.contains(&expected)
+            {
+                return;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    async fn stop_daemon(&mut self) {
+        if let Some(mut daemon) = self.daemon.take() {
+            let _ = daemon.kill().await;
+            let _ = daemon.wait().await;
+        }
+        if let Some(daemon_id) = self.daemon_id.take()
+            && let Some(client) = &self.graphql_client
+        {
+            let _ = vertebrae_sacrum_client::SacrumDaemonService::new(client.clone())
+                .unregister_daemon(&daemon_id)
+                .await;
+        }
+        if let Some(home) = self.daemon_home.take() {
+            let _ = std::fs::remove_dir_all(home);
+        }
+        if let Some(project_path) = self.daemon_project_path.take() {
+            let _ = std::fs::remove_dir_all(project_path);
         }
     }
 
@@ -250,6 +384,7 @@ async fn main() {
         .after(|_feature, _rule, _scenario, _ev, world| {
             Box::pin(async move {
                 if let Some(world) = world {
+                    world.stop_daemon().await;
                     // Cleanup created artifacts before their attached tasks/projects.
                     if let Some(client) = &world.graphql_client {
                         let artifact_service =

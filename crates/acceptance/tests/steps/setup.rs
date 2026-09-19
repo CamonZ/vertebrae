@@ -183,6 +183,11 @@ async fn given_assign_workflow_to_task(world: &mut SmokeWorld) {
         "failed to assign workflow: {}{}",
         world.last_stdout, world.last_stderr
     );
+    // Workflow execution requires a daemon joined to this scenario's project.
+    // Start it after assignment so ordinary CLI scenarios do not pay for a
+    // daemon, while concurrent execution scenarios remain isolated.
+    let project_id = world.env["VTB_PROJECT_ID"].clone();
+    world.start_daemon(&project_id).await;
     world.lifecycle_task_id = Some(task_id);
 }
 
