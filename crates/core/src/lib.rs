@@ -44,6 +44,7 @@ pub mod service;
 pub mod services;
 pub mod step_constraints;
 pub mod step_service;
+pub mod workflow_bundle;
 pub mod workflow_service;
 
 // Re-export main types for convenience
@@ -72,6 +73,11 @@ pub use service::{
 pub use services::VertebraeServices;
 pub use step_constraints::{resulting_option, validate_route_fields, validate_route_update};
 pub use step_service::StepService;
+pub use workflow_bundle::{
+    ManifestError, ManifestValidationError, RouteTargetRefs, StepAddress, StepEdge, StepManifest,
+    StepRef, WORKFLOW_BUNDLE_SCHEMA_VERSION, WorkflowBundle, WorkflowBundleManifest, WorkflowEdge,
+    WorkflowManifest, WorkflowRef, parse_manifest, symbolize_route_config,
+};
 pub use workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo,
     WorkflowMutationCallback, WorkflowMutationEvent, WorkflowService, WorkflowStepInput,
