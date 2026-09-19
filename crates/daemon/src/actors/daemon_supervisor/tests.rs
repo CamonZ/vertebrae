@@ -246,22 +246,35 @@ async fn standalone_channel_interruption_reconnects_with_the_same_identity() {
         for connection in 0..2 {
             let (stream, _) = listener.accept().await.unwrap();
             let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
-            let frame = socket.next().await.unwrap().unwrap();
-            let join: serde_json::Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+            let join = loop {
+                let frame = socket.next().await.unwrap().unwrap();
+                let message: serde_json::Value =
+                    serde_json::from_str(frame.to_text().unwrap()).unwrap();
+                if message[2] == "phoenix" && message[3] == "heartbeat" {
+                    continue;
+                }
+                break message;
+            };
             assert_eq!(join[3], "phx_join");
             joins.push(join[2].clone());
             if connection == 0 {
                 socket.send(Message::Text(serde_json::json!([join[0], join[1], join[2], "phx_reply", {"status":"ok"}]).to_string().into())).await.unwrap();
-                let report = tokio::time::timeout(Duration::from_secs(1), socket.next())
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .unwrap();
-                let report: serde_json::Value =
-                    serde_json::from_str(report.to_text().unwrap()).unwrap();
+                let report = loop {
+                    let frame = tokio::time::timeout(Duration::from_secs(1), socket.next())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .unwrap();
+                    let message: serde_json::Value =
+                        serde_json::from_str(frame.to_text().unwrap()).unwrap();
+                    if message[2] == "phoenix" && message[3] == "heartbeat" {
+                        continue;
+                    }
+                    break message;
+                };
                 assert_eq!(report[3], "report");
                 assert_eq!(report[4]["version"], 1);
-                socket.send(Message::Text(serde_json::json!([join[0], join[1], join[2], "phx_reply", {"status":"ok"}]).to_string().into())).await.unwrap();
+                socket.send(Message::Text(serde_json::json!([report[0], report[1], report[2], "phx_reply", {"status":"ok"}]).to_string().into())).await.unwrap();
                 if let Ok(Some(Ok(extra))) =
                     tokio::time::timeout(Duration::from_millis(100), socket.next()).await
                 {
