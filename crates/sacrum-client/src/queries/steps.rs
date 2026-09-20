@@ -24,6 +24,35 @@ pub const STEP_FIELDS: &str = r#"
     }
 "#;
 
+/// Complete step fields for workflow export. This is separate from the
+/// presentation fragments so an export cannot accidentally lose JSON-backed
+/// configuration or nullable prompts.
+pub const WORKFLOW_EXPORT_STEP_FIELDS: &str = r#"
+    fragment WorkflowExportStepFields on WorkflowStep {
+        id
+        name
+        goal
+        prompt
+        agents
+        skills
+        agent_config
+        step_type
+        output_schema
+        persistence_options
+        route_config
+        step_order
+        workflow_id
+        project_id
+        inserted_at
+        updated_at
+        transitions {
+            id
+            to_step_id
+            label
+        }
+    }
+"#;
+
 /// List all steps for a workflow.
 /// NOTE: Prepend STEP_FIELDS when sending.
 pub const LIST_STEPS: &str = r#"

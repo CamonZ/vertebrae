@@ -395,6 +395,81 @@ pub struct WorkflowResponse {
     pub updated_at: Option<String>,
 }
 
+/// A complete workflow graph returned by the workflow export queries.
+///
+/// This is intentionally separate from [`WorkflowResponse`]. The latter is a
+/// presentation-oriented response whose nested steps are summaries and whose
+/// metadata is converted by the service layer into a string map. Export data
+/// must retain the Sacrum wire representation, including arbitrary JSON and
+/// nullable fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowExport {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_default: Option<bool>,
+    pub display_order: Option<i32>,
+    pub metadata: Option<serde_json::Value>,
+    pub initial_step_id: Option<String>,
+    pub kanban_column: Option<String>,
+    pub factory_name: Option<String>,
+    pub project_id: String,
+    pub workflow_steps: Vec<WorkflowExportStep>,
+    pub transitions: Vec<WorkflowExportTransition>,
+    pub inserted_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+/// A full workflow step returned by a workflow export query.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowExportStep {
+    pub id: String,
+    pub name: String,
+    pub goal: Option<String>,
+    pub prompt: Option<String>,
+    pub agents: Vec<String>,
+    pub skills: Vec<String>,
+    pub agent_config: Option<serde_json::Value>,
+    pub step_type: Option<String>,
+    pub output_schema: Option<serde_json::Value>,
+    pub persistence_options: Option<serde_json::Value>,
+    pub route_config: Option<serde_json::Value>,
+    pub step_order: i32,
+    pub workflow_id: String,
+    pub project_id: String,
+    pub transitions: Vec<WorkflowExportStepTransition>,
+    pub inserted_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+/// An intra-workflow edge in an exported workflow graph.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowExportStepTransition {
+    pub id: String,
+    pub to_step_id: String,
+    pub label: Option<String>,
+}
+
+/// An inter-workflow edge in an exported workflow graph.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowExportTransition {
+    pub id: String,
+    pub to_workflow_id: String,
+    pub target_step_id: Option<String>,
+    pub label: Option<String>,
+}
+
+/// A lossless workflow graph snapshot for one workflow or an entire project.
+///
+/// The server's workflow/step order is retained as received. Canonical
+/// ordering and portable reference assignment belong to the bundle boundary,
+/// not this Sacrum wire snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowExportSnapshot {
+    pub project_id: String,
+    pub workflows: Vec<WorkflowExport>,
+}
+
 /// Workflow transition response (cross-workflow transitions)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowTransitionResponse {
