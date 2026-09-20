@@ -11,8 +11,8 @@ use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{Workflow, WorkflowTransition};
 use vertebrae_core::service::TaskService;
 use vertebrae_core::workflow_service::{
-    AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo, WorkflowService,
-    WorkflowTasksBundle,
+    AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowBundleImportInput,
+    WorkflowBundleImportResult, WorkflowInfo, WorkflowService, WorkflowTasksBundle,
 };
 
 use crate::api_types::ShortIdResponse;
@@ -32,6 +32,7 @@ use crate::queries::workflows::{
 use crate::task_service::SacrumTaskService;
 
 mod export;
+mod import;
 
 /// Intermediate type for deserializing GET_WORKFLOW responses that include workflow_steps.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -186,6 +187,13 @@ impl WorkflowService for SacrumWorkflowService {
         workflow_id: Option<&str>,
     ) -> ServiceResult<vertebrae_core::WorkflowBundleManifest> {
         SacrumWorkflowService::export_workflow_bundle(self, workflow_id).await
+    }
+
+    async fn import_workflow_bundle(
+        &self,
+        bundle: WorkflowBundleImportInput,
+    ) -> ServiceResult<WorkflowBundleImportResult> {
+        SacrumWorkflowService::import_workflow_bundle(self, bundle).await
     }
 
     async fn create_workflow(&self, options: CreateWorkflowOptions) -> ServiceResult<String> {

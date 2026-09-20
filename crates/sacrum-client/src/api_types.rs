@@ -470,6 +470,25 @@ pub struct WorkflowExportSnapshot {
     pub workflows: Vec<WorkflowExport>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowBundleImportResponse {
+    #[serde(default, rename = "workflowMappings", alias = "workflow_mappings")]
+    pub workflow_mappings: std::collections::BTreeMap<String, String>,
+    #[serde(default, rename = "stepMappings", alias = "step_mappings")]
+    pub step_mappings:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    #[serde(default, rename = "idMappings", alias = "id_mappings")]
+    pub id_mappings: Option<Value>,
+    #[serde(default, rename = "workflowCount", alias = "workflow_count")]
+    pub workflow_count: Option<usize>,
+    #[serde(default, rename = "stepCount", alias = "step_count")]
+    pub step_count: Option<usize>,
+    #[serde(default, rename = "stepEdgeCount", alias = "step_edge_count")]
+    pub step_edge_count: Option<usize>,
+    #[serde(default, rename = "workflowEdgeCount", alias = "workflow_edge_count")]
+    pub workflow_edge_count: Option<usize>,
+}
+
 /// Workflow transition response (cross-workflow transitions)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowTransitionResponse {

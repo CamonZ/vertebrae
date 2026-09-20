@@ -4,11 +4,12 @@
 //! defines the interface for all workflow management operations, including CRUD operations,
 //! task-workflow assignments, and workflow transitions.
 
-use crate::error::ServiceResult;
+use crate::error::{ServiceError, ServiceResult};
 use crate::models::{Task, TaskFilter, Workflow, WorkflowTransition};
 use crate::service::TaskService;
-use crate::workflow_bundle::WorkflowBundleManifest;
+use crate::workflow_bundle::{StepAddress, WorkflowBundleManifest, WorkflowRef};
 use async_trait::async_trait;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// Event representing a workflow mutation for cache invalidation
@@ -257,6 +258,29 @@ pub struct WorkflowTasksBundle {
     pub tasks: Vec<Task>,
 }
 
+/// The alias keeps the service boundary on the validated portable manifest
+/// rather than exposing Sacrum's GraphQL input types.
+pub type WorkflowBundleImportInput = WorkflowBundleManifest;
+
+/// Step mappings use fully-qualified [`StepAddress`] keys so identical local
+/// step references in different workflows remain unambiguous.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowBundleImportResult {
+    pub workflow_mappings: BTreeMap<WorkflowRef, String>,
+    pub step_mappings: BTreeMap<StepAddress, String>,
+    pub warnings: Vec<String>,
+}
+
+impl WorkflowBundleImportResult {
+    pub fn workflow_ids(&self) -> &BTreeMap<WorkflowRef, String> {
+        &self.workflow_mappings
+    }
+
+    pub fn step_ids(&self) -> &BTreeMap<StepAddress, String> {
+        &self.step_mappings
+    }
+}
+
 /// Service trait for workflow management operations
 ///
 /// This trait defines the interface for all workflow-related business logic.
@@ -325,6 +349,15 @@ pub trait WorkflowService: Send + Sync {
         &self,
         workflow_id: Option<&str>,
     ) -> ServiceResult<WorkflowBundleManifest>;
+
+    async fn import_workflow_bundle(
+        &self,
+        _bundle: WorkflowBundleImportInput,
+    ) -> ServiceResult<WorkflowBundleImportResult> {
+        Err(ServiceError::invalid_input(
+            "workflow bundle import is not supported by this service",
+        ))
+    }
 
     /// Update a workflow
     ///
