@@ -247,7 +247,8 @@ This is the core loop: a task moves through a workflow, and each step is execute
 4. ExecutionDispatcher creates StepExecution
    ├── Status: "entered"
    ├── Renders prompt (interpolates {{task.id}})
-   └── Broadcasts "run_step" on Phoenix Channel project:{project_id}
+   └── Broadcasts "run_step" on the assigned daemon channel daemon:{daemon_id}
+       with project_id in the payload
 
 5. Daemon (vtb-daemon) receives "run_step"
    ├── DaemonSupervisor → ProjectSupervisor → StepExecutor (actor)
@@ -331,12 +332,12 @@ freshness, version, host, and capability fields but never replace durable
 identity or create a daemon absent from the current snapshot.
 ```
 
-The legacy account-authenticated daemon registers project channels with
-`client_type: "daemon"`; Sacrum selectively delivers step execution commands
-only to that channel. An enrolled standalone daemon instead authenticates its
-stable identity and joins `daemon:<id>`. The current backend intentionally
-limits that standalone channel to registration/reconnect, so it does not
-silently claim project execution authority or fall back to an account token.
+An enrolled daemon authenticates its stable identity and joins `daemon:<id>`.
+Sacrum delivers `run_step` and `cancel_step` commands on that channel, with the
+project ID included in each payload. The daemon uses its configured local
+project mappings to route each command to the matching `ProjectSupervisor`;
+it does not subscribe to project channels. Legacy account-token daemon
+configuration must be enrolled before the daemon can execute work.
 
 After a standalone join, `vtb-daemon` publishes the versioned, bounded report
 and sends application heartbeats every 30 seconds. The report is limited to

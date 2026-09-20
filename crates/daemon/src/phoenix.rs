@@ -1,9 +1,8 @@
 //! Phoenix WebSocket channel protocol for Sacrum.
 //!
-//! Provides a standalone Phoenix channel client that connects to Sacrum's
-//! WebSocket endpoint, joins project channels, and delivers incoming messages
-//! via a callback. Adapted from the GUI's websocket_client.rs but decoupled
-//! from Tauri so it can be driven by the actor system.
+//! Provides the daemon's Phoenix channel client. It connects to Sacrum's
+//! WebSocket endpoint, joins the enrolled daemon channel, and delivers
+//! incoming messages to the actor system.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,9 +21,9 @@ pub struct PhoenixMessage {
     pub join_ref: Option<String>,
     /// The ref field (may be null).
     pub msg_ref: Option<String>,
-    /// The channel topic (e.g. "project:my-project-id").
+    /// The channel topic (normally `daemon:<id>` for daemon traffic).
     pub topic: String,
-    /// The event name (e.g. "task_created", "phx_reply").
+    /// The event name (e.g. "run_step", "phx_reply").
     pub event: String,
     /// The JSON payload.
     pub payload: serde_json::Value,
@@ -67,11 +66,6 @@ impl PhoenixMessage {
     /// Returns true if this is a Phoenix internal event (phx_reply, phx_error, phx_close).
     pub fn is_phoenix_internal(&self) -> bool {
         matches!(self.event.as_str(), "phx_reply" | "phx_error" | "phx_close")
-    }
-
-    /// Extract the project ID from a "project:{id}" topic.
-    pub fn project_id(&self) -> Option<&str> {
-        self.topic.strip_prefix("project:")
     }
 
     pub fn daemon_id(&self) -> Option<&str> {
@@ -137,16 +131,6 @@ pub struct PhoenixSocket {
 }
 
 impl PhoenixSocket {
-    /// Connect to a Sacrum WebSocket endpoint.
-    ///
-    /// Builds the URL from `base_url` (http/https) and appends the Phoenix
-    /// socket path with token and version parameters. The token is URL-encoded
-    /// and never included in diagnostics.
-    pub async fn connect(base_url: &str, api_token: &str) -> Result<Self, PhoenixError> {
-        let ws_url = socket_url(base_url, [("token", api_token)])?;
-        Self::connect_url(ws_url, false).await
-    }
-
     /// Connect using Sacrum's stable daemon identity and reconnect credential.
     ///
     /// This path deliberately does not send an account token. The daemon must
@@ -163,10 +147,10 @@ impl PhoenixSocket {
                 ("reconnect_token", reconnect_token),
             ],
         )?;
-        Self::connect_url(ws_url, true).await
+        Self::connect_url(ws_url).await
     }
 
-    async fn connect_url(ws_url: url::Url, standalone: bool) -> Result<Self, PhoenixError> {
+    async fn connect_url(ws_url: url::Url) -> Result<Self, PhoenixError> {
         let mut safe_url = ws_url.clone();
         safe_url.set_query(None);
         tracing::info!("Connecting to Phoenix WebSocket at {}", safe_url);
@@ -179,9 +163,8 @@ impl PhoenixSocket {
         .map_err(|_| PhoenixError::ConnectionTimeout)?
         .map_err(|error| match error {
             tokio_tungstenite::tungstenite::Error::Http(response)
-                if standalone
-                    && (response.status().as_u16() == 404
-                        || response_has_terminal_daemon_reason(response.body().as_deref())) =>
+                if response.status().as_u16() == 404
+                    || response_has_terminal_daemon_reason(response.body().as_deref()) =>
             {
                 PhoenixError::StandaloneDaemonNotFound
             }
@@ -223,24 +206,6 @@ impl PhoenixSocket {
         })
     }
 
-    /// Join a Phoenix channel topic (e.g. "project:{project_id}").
-    ///
-    /// The `client_type` parameter is included in the phx_join payload so Sacrum
-    /// can route events appropriately. Daemon connections should pass `"daemon"` to
-    /// receive only `run_step` and `cancel_step` events.
-    pub async fn join(
-        &self,
-        topic: &str,
-        token: &str,
-        client_type: &str,
-    ) -> Result<String, PhoenixError> {
-        self.send_join(
-            topic,
-            serde_json::json!({ "token": token, "client_type": client_type }),
-        )
-        .await
-    }
-
     /// Join the standalone identity channel without sending a broad account
     /// token. Authentication was established at socket connect time.
     pub async fn join_daemon(&self, daemon_id: &str) -> Result<String, PhoenixError> {
@@ -272,30 +237,6 @@ impl PhoenixSocket {
             .insert(topic.to_string(), JoinedChannel { join_ref });
 
         Ok(msg_ref)
-    }
-
-    /// Leave a Phoenix channel topic.
-    pub async fn leave(&self, topic: &str) -> Result<(), PhoenixError> {
-        let msg_ref = self.next_ref();
-        let join_ref = self
-            .joined_channels
-            .lock()
-            .await
-            .remove(topic)
-            .map(|channel| channel.join_ref)
-            .unwrap_or_default();
-
-        let leave_msg = serde_json::json!([join_ref, msg_ref, topic, "phx_leave", {}]);
-
-        tracing::info!("Leaving channel: {}", topic);
-
-        self.writer
-            .lock()
-            .await
-            .send(Message::Text(leave_msg.to_string().into()))
-            .await?;
-
-        Ok(())
     }
 
     /// Publish telemetry without logging its potentially sensitive payload.
@@ -472,13 +413,13 @@ mod tests {
 
     #[test]
     fn parse_valid_message() {
-        let raw = r#"["join1", "1", "project:abc", "task_created", {"id": "t1"}]"#;
+        let raw = r#"["join1", "1", "daemon:abc", "run_step", {"id": "t1"}]"#;
         let msg = PhoenixMessage::parse(raw).unwrap();
 
         assert_eq!(msg.join_ref.as_deref(), Some("join1"));
         assert_eq!(msg.msg_ref.as_deref(), Some("1"));
-        assert_eq!(msg.topic, "project:abc");
-        assert_eq!(msg.event, "task_created");
+        assert_eq!(msg.topic, "daemon:abc");
+        assert_eq!(msg.event, "run_step");
         assert_eq!(msg.payload["id"].as_str().unwrap(), "t1");
     }
 
@@ -563,30 +504,6 @@ mod tests {
                 event
             );
         }
-    }
-
-    #[test]
-    fn project_id_extracts_from_topic() {
-        let msg = PhoenixMessage {
-            join_ref: None,
-            msg_ref: None,
-            topic: "project:abc-123".to_string(),
-            event: "test".to_string(),
-            payload: serde_json::Value::Null,
-        };
-        assert_eq!(msg.project_id(), Some("abc-123"));
-    }
-
-    #[test]
-    fn project_id_returns_none_for_non_project_topic() {
-        let msg = PhoenixMessage {
-            join_ref: None,
-            msg_ref: None,
-            topic: "phoenix".to_string(),
-            event: "heartbeat".to_string(),
-            payload: serde_json::Value::Null,
-        };
-        assert!(msg.project_id().is_none());
     }
 
     // ===== PhoenixError tests =====

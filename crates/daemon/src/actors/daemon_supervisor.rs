@@ -2,8 +2,8 @@
 //!
 //! Manages the daemon lifecycle:
 //! - Maintains a single Phoenix WebSocket connection to Sacrum
-//! - Joins `project:{id}` channels for each registered project
-//! - Demuxes incoming channel messages by topic
+//! - Joins the enrolled `daemon:{id}` channel
+//! - Demuxes daemon-channel messages by their payload project ID
 //! - Routes messages to the corresponding ProjectSupervisor actor
 //! - Uses OneForOne supervision: project failures are isolated
 
@@ -23,7 +23,7 @@ use crate::actors::project_supervisor::{
 };
 use crate::capabilities::SharedDaemonCapabilities;
 use crate::connection::{
-    INITIAL_RECONNECT_DELAY, MAX_RECONNECT_DELAY, connect_with_auth, next_backoff, reconnect,
+    INITIAL_RECONNECT_DELAY, MAX_RECONNECT_DELAY, connect_with_identity, next_backoff, reconnect,
 };
 use crate::phoenix::{PhoenixMessage, PhoenixSocket, is_terminal_daemon_reason};
 use crate::telemetry::{DaemonReport, HEARTBEAT_INTERVAL};
@@ -31,19 +31,12 @@ use crate::telemetry::{DaemonReport, HEARTBEAT_INTERVAL};
 /// Result of classifying an incoming channel message.
 #[derive(Debug, PartialEq)]
 pub enum ChannelAction {
-    /// A normal app event for a known project — route it.
-    RouteToProject(String),
-    /// The server confirmed our channel join.
-    JoinConfirmed(String),
-    /// The server rejected our channel join (with optional reason).
-    JoinFailed(String, Option<String>),
-    /// A phx_error on a project channel.
-    ChannelError(String),
     DaemonJoinConfirmed(String),
     DaemonJoinFailed(String, Option<String>),
     DaemonMessageAcknowledged,
     DaemonChannelInterrupted,
-    /// Message is for a non-project topic (e.g. "phoenix") — skip.
+    /// Message is for a topic the daemon does not own (for example `phoenix`) —
+    /// skip.
     NonProjectTopic,
     /// A daemon-channel execution command addressed to a configured project.
     RouteDaemonToProject(String),
@@ -127,37 +120,7 @@ fn classify_channel_message_with_join_ref<V>(
         };
     }
 
-    let Some(project_id) = msg.project_id() else {
-        return ChannelAction::NonProjectTopic;
-    };
-
-    if !known_projects.contains_key(project_id) {
-        return ChannelAction::UnknownProject(project_id.to_string());
-    }
-
-    let pid = project_id.to_string();
-
-    match msg.event.as_str() {
-        "phx_reply" => {
-            let status = msg.payload.get("status").and_then(|v| v.as_str());
-            match status {
-                Some("ok") => ChannelAction::JoinConfirmed(pid),
-                Some("error") => {
-                    let reason = msg
-                        .payload
-                        .get("response")
-                        .and_then(|r| r.get("reason"))
-                        .and_then(|r| r.as_str())
-                        .map(String::from);
-                    ChannelAction::JoinFailed(pid, reason)
-                }
-                _ => ChannelAction::JoinFailed(pid, Some("missing status".to_string())),
-            }
-        }
-        "phx_error" => ChannelAction::ChannelError(pid),
-        "phx_close" => ChannelAction::ChannelError(pid),
-        _ => ChannelAction::RouteToProject(pid),
-    }
+    ChannelAction::NonProjectTopic
 }
 
 #[derive(Debug, PartialEq)]
@@ -186,29 +149,14 @@ fn daemon_join_recovery(reason: Option<&str>) -> ChannelRecovery {
     }
 }
 
-#[derive(Clone)]
-pub enum DaemonAuthentication {
-    AccountToken(String),
-    Standalone(crate::config::DaemonIdentity),
-}
-
-impl std::fmt::Debug for DaemonAuthentication {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::AccountToken(_) => f.write_str("AccountToken(<redacted>)"),
-            Self::Standalone(identity) => f.debug_tuple("Standalone").field(identity).finish(),
-        }
-    }
-}
-
 /// Configuration needed to start the DaemonSupervisor.
 #[derive(Clone)]
 pub struct DaemonConfig {
     /// Sacrum base URL (e.g. "http://localhost:4000").
     pub base_url: String,
-    /// Authentication used for the Phoenix socket. Credentials are redacted
-    /// by the manual [`Debug`] impl below.
-    pub authentication: DaemonAuthentication,
+    /// Enrolled daemon identity used for the Phoenix socket and GraphQL
+    /// reporting. Its reconnect credential is redacted by `Debug`.
+    pub identity: crate::config::DaemonIdentity,
     /// Immutable provider, path, skill, and Claude compatibility discovery
     /// captured before this actor starts.
     pub capabilities: SharedDaemonCapabilities,
@@ -218,7 +166,7 @@ impl std::fmt::Debug for DaemonConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DaemonConfig")
             .field("base_url", &self.base_url)
-            .field("authentication", &self.authentication)
+            .field("identity", &self.identity)
             .field("capabilities", &self.capabilities)
             .finish()
     }
@@ -252,14 +200,14 @@ async fn stop_projects(
 
 /// Messages the DaemonSupervisor can receive.
 pub enum DaemonMessage {
-    /// Register a project and join its Phoenix channel.
+    /// Register a configured local project mapping.
     AddProject {
         /// The Sacrum project ID (UUID string).
         project_id: String,
         /// The project root directory (for running Claude Code CLI).
         project_root: std::path::PathBuf,
     },
-    /// Unregister a project, leave its channel, and stop its ProjectSupervisor.
+    /// Unregister a project mapping and stop its ProjectSupervisor.
     RemoveProject {
         /// The Sacrum project ID (UUID string).
         project_id: String,
@@ -275,7 +223,7 @@ pub enum DaemonMessage {
     /// daemon channel. Phoenix protocol heartbeats are not sufficient for
     /// Sacrum's daemon metrics.
     PublishHeartbeat,
-    /// Initiate graceful shutdown: leave all channels, stop children, then self.
+    /// Initiate graceful shutdown: stop children, close the daemon channel, then self.
     Shutdown,
 }
 
@@ -349,30 +297,25 @@ impl Actor for DaemonSupervisor {
             args.base_url
         );
 
-        let socket = match connect_with_auth(&args.base_url, &args.authentication).await {
+        let socket = match connect_with_identity(&args.base_url, &args.identity).await {
             Ok(socket) => socket,
             Err(error) => {
                 if matches!(
                     error,
                     crate::phoenix::PhoenixError::StandaloneDaemonNotFound
                 ) {
-                    retire_standalone_identity(&args.authentication);
+                    retire_standalone_identity(&args.identity);
                 }
                 return Err(format!("Failed to connect to Sacrum WebSocket: {error}").into());
             }
         };
 
-        let daemon_join_message_ref =
-            if let DaemonAuthentication::Standalone(identity) = &args.authentication {
-                Some(
-                    socket
-                        .join_daemon(&identity.daemon_id)
-                        .await
-                        .map_err(|e| format!("Failed to register daemon identity: {e}"))?,
-                )
-            } else {
-                None
-            };
+        let daemon_join_message_ref = Some(
+            socket
+                .join_daemon(&args.identity.daemon_id)
+                .await
+                .map_err(|e| format!("Failed to register daemon identity: {e}"))?,
+        );
 
         // Take the reader half and spawn a pump task that forwards messages to our actor.
         let reader = socket
@@ -423,7 +366,7 @@ impl Actor for DaemonSupervisor {
                     myself.stop(Some(reason));
                 }
                 Some(ChannelRecovery::RetireAndStop(reason)) => {
-                    retire_standalone_identity(&state.config.authentication);
+                    retire_standalone_identity(&state.config.identity);
                     tracing::error!(%reason, "Daemon registration rejected");
                     myself.stop(Some(reason));
                 }
@@ -444,10 +387,6 @@ impl Actor for DaemonSupervisor {
             }
             DaemonMessage::PublishHeartbeat => {
                 if state.telemetry_handle.is_some()
-                    && matches!(
-                        &state.config.authentication,
-                        DaemonAuthentication::Standalone(_)
-                    )
                     && let Err(error) = state.socket.send_daemon_heartbeat().await
                 {
                     tracing::warn!(%error, "Daemon telemetry heartbeat send failed");
@@ -559,8 +498,8 @@ impl DaemonSupervisor {
                 Ok(Message::Text(text)) => match PhoenixMessage::parse(&text) {
                     Ok(msg) => {
                         // Only skip messages on the "phoenix" topic (heartbeat replies).
-                        // Project-topic phx_reply / phx_error need to reach the actor
-                        // so it can confirm joins or handle failures.
+                        // Daemon-channel replies and execution commands must reach
+                        // the actor so it can confirm registration and route work.
                         if msg.topic == "phoenix" {
                             tracing::debug!(
                                 "Phoenix internal: event={}, topic={}",
@@ -598,7 +537,7 @@ impl DaemonSupervisor {
         let _ = myself.cast(DaemonMessage::ConnectionLost);
     }
 
-    /// Handle AddProject: join the project channel and spawn a ProjectSupervisor.
+    /// Handle AddProject: preserve the local mapping and spawn a ProjectSupervisor.
     async fn handle_add_project(
         &self,
         myself: &ActorRef<DaemonMessage>,
@@ -611,37 +550,19 @@ impl DaemonSupervisor {
             return Ok(());
         }
 
-        let (api_token, join_project_channel) = match &state.config.authentication {
-            DaemonAuthentication::AccountToken(token) => (token.clone(), true),
-            // The enrolled reconnect credential is also the daemon's scoped
-            // reporting credential. Standalone execution is multiplexed over
-            // daemon:{id}, so it must not join project:{id}.
-            DaemonAuthentication::Standalone(identity) => (identity.reconnect_token.clone(), false),
-        };
-
-        if join_project_channel {
-            let topic = format!("project:{}", project_id);
-            state
-                .socket
-                .join(&topic, &api_token, "daemon")
-                .await
-                .map_err(|e| format!("Failed to join channel {topic}: {e}"))?;
-            tracing::info!("Joined channel for project {}", project_id);
-        } else {
-            tracing::info!("Registered standalone project mapping {}", project_id);
-        }
+        let identity = &state.config.identity;
+        let api_token = identity.reconnect_token.clone();
+        tracing::info!("Registered daemon project mapping {}", project_id);
 
         let sacrum_config = SacrumConfig::new(
             state.config.base_url.clone(),
             api_token,
             project_id.to_string(),
         );
-        let client = Arc::new(match &state.config.authentication {
-            DaemonAuthentication::Standalone(identity) => {
-                GraphqlClient::new_with_daemon_id(sacrum_config, Some(&identity.daemon_id))
-            }
-            DaemonAuthentication::AccountToken(_) => GraphqlClient::new(sacrum_config),
-        });
+        let client = Arc::new(GraphqlClient::new_with_daemon_id(
+            sacrum_config,
+            Some(&identity.daemon_id),
+        ));
         let services = Arc::new(vertebrae_sacrum_client::from_sacrum(client));
 
         let project_config = ProjectConfig {
@@ -665,7 +586,7 @@ impl DaemonSupervisor {
         Ok(())
     }
 
-    /// Handle RemoveProject: stop the child actor, leave the channel, and clean up.
+    /// Handle RemoveProject: stop the child actor and clean up the local mapping.
     async fn handle_remove_project(
         &self,
         project_id: &str,
@@ -678,21 +599,11 @@ impl DaemonSupervisor {
 
         stop_projects(vec![(project_id.to_string(), actor_ref)], "project removed").await;
 
-        if matches!(
-            &state.config.authentication,
-            DaemonAuthentication::AccountToken(_)
-        ) {
-            let topic = format!("project:{}", project_id);
-            if let Err(e) = state.socket.leave(&topic).await {
-                tracing::warn!("Failed to leave channel {topic}: {e}");
-            }
-        }
-
         tracing::info!("Removed project {}", project_id);
         Ok(())
     }
 
-    /// Demux an incoming channel message by topic and route to the correct project.
+    /// Demux an incoming daemon-channel message by payload project ID.
     async fn handle_channel_message(
         &self,
         msg: PhoenixMessage,
@@ -703,23 +614,8 @@ impl DaemonSupervisor {
             &msg,
             &state.projects,
             state.daemon_join_message_ref.as_deref(),
-            match &state.config.authentication {
-                DaemonAuthentication::Standalone(identity) => Some(identity.daemon_id.as_str()),
-                DaemonAuthentication::AccountToken(_) => Some(""),
-            },
+            Some(state.config.identity.daemon_id.as_str()),
         ) {
-            ChannelAction::RouteToProject(project_id) => {
-                if let Some(actor_ref) = state.projects.get(&project_id) {
-                    if let Err(e) = actor_ref.cast(ProjectMessage::ChannelEvent(msg)) {
-                        tracing::error!("Failed to route message to project {}: {}", project_id, e);
-                    }
-                } else {
-                    tracing::warn!(
-                        "No ProjectSupervisor found for project {} (race condition?)",
-                        project_id,
-                    );
-                }
-            }
             ChannelAction::RouteDaemonToProject(project_id) => {
                 if let Some(actor_ref) = state.projects.get(&project_id) {
                     if let Err(error) = actor_ref.cast(ProjectMessage::ChannelEvent(msg)) {
@@ -733,27 +629,8 @@ impl DaemonSupervisor {
                     tracing::warn!("No local supervisor for daemon project {}", project_id);
                 }
             }
-            ChannelAction::JoinConfirmed(project_id) => {
-                tracing::info!("Channel join confirmed for project {}", project_id);
-            }
-            ChannelAction::JoinFailed(project_id, reason) => {
-                tracing::error!(
-                    "Channel join failed for project {}: {}",
-                    project_id,
-                    reason.as_deref().unwrap_or("unknown reason")
-                );
-                if let Some(actor_ref) = state.projects.remove(&project_id) {
-                    actor_ref.stop(Some("channel join failed".to_string()));
-                }
-            }
-            ChannelAction::ChannelError(project_id) => {
-                tracing::error!("Channel error for project {}, removing", project_id);
-                if let Some(actor_ref) = state.projects.remove(&project_id) {
-                    actor_ref.stop(Some("channel error".to_string()));
-                }
-            }
             ChannelAction::NonProjectTopic => {
-                tracing::debug!("Ignoring message for non-project topic: {}", msg.topic);
+                tracing::debug!("Ignoring message for non-daemon topic: {}", msg.topic);
             }
             ChannelAction::UnknownProject(project_id) => {
                 tracing::warn!(
@@ -813,7 +690,7 @@ impl DaemonSupervisor {
         let handle = tokio::spawn(async move {
             match reconnect(
                 &config.base_url,
-                &config.authentication,
+                &config.identity,
                 initial_delay,
                 MAX_RECONNECT_DELAY,
             )
@@ -825,7 +702,7 @@ impl DaemonSupervisor {
                 Err(error) => {
                     let reason = match error {
                         crate::phoenix::PhoenixError::StandaloneDaemonNotFound => {
-                            retire_standalone_identity(&config.authentication);
+                            retire_standalone_identity(&config.identity);
                             "daemon identity was not found or deregistered; re-enrollment is required"
                         }
                         crate::phoenix::PhoenixError::AuthenticationRejected => {
@@ -841,7 +718,7 @@ impl DaemonSupervisor {
         state.reconnect_handle = Some(handle);
     }
 
-    /// Handle successful reconnection: replace socket, start new reader pump, rejoin channels.
+    /// Handle successful reconnection: replace socket, start a reader pump, and rejoin the daemon channel.
     async fn handle_reconnected(
         &self,
         new_socket: PhoenixSocket,
@@ -863,37 +740,22 @@ impl DaemonSupervisor {
         let myself_clone = myself.clone();
         state.reader_handle = Some(tokio::spawn(Self::ws_reader_pump(reader, myself_clone)));
 
-        if let DaemonAuthentication::Standalone(identity) = &state.config.authentication {
-            match state.socket.join_daemon(&identity.daemon_id).await {
-                Ok(message_ref) => state.daemon_join_message_ref = Some(message_ref),
-                Err(error) => {
-                    tracing::warn!(%error, "Registration send failed; reconnecting");
-                    self.handle_connection_lost(myself, state).await;
-                }
+        match state
+            .socket
+            .join_daemon(&state.config.identity.daemon_id)
+            .await
+        {
+            Ok(message_ref) => state.daemon_join_message_ref = Some(message_ref),
+            Err(error) => {
+                tracing::warn!(%error, "Registration send failed; reconnecting");
+                self.handle_connection_lost(myself, state).await;
             }
-        } else {
-            state.reconnect_delay = INITIAL_RECONNECT_DELAY;
-            let project_ids: Vec<String> = state.projects.keys().cloned().collect();
-            let account_token = match &state.config.authentication {
-                DaemonAuthentication::AccountToken(token) => token,
-                DaemonAuthentication::Standalone(_) => unreachable!("handled above"),
-            };
-            for project_id in &project_ids {
-                let topic = format!("project:{}", project_id);
-                if let Err(e) = state.socket.join(&topic, account_token, "daemon").await {
-                    tracing::error!("Failed to rejoin channel {topic} after reconnect: {e}");
-                }
-            }
-            tracing::info!(
-                "Reconnection complete, rejoined {} project channels",
-                project_ids.len()
-            );
         }
 
         Ok(())
     }
 
-    /// Handle graceful shutdown: leave all channels, stop all children, then stop self.
+    /// Handle graceful shutdown: stop all children, close the daemon channel, then stop self.
     async fn handle_shutdown(
         &self,
         myself: ActorRef<DaemonMessage>,
@@ -910,17 +772,7 @@ impl DaemonSupervisor {
         }
 
         let entries: Vec<(String, ActorRef<ProjectMessage>)> = state.projects.drain().collect();
-        let project_ids = entries
-            .iter()
-            .map(|(project_id, _)| project_id.clone())
-            .collect::<Vec<_>>();
         stop_projects(entries, "daemon shutdown").await;
-        for project_id in project_ids {
-            let topic = format!("project:{project_id}");
-            if let Err(e) = state.socket.leave(&topic).await {
-                tracing::warn!("Failed to leave channel {topic} during shutdown: {e}");
-            }
-        }
 
         // Stop self — this triggers post_stop which cleans up the WebSocket.
         myself.stop(Some("shutdown requested".to_string()));
@@ -941,15 +793,12 @@ impl DaemonSupervisor {
         myself: ActorRef<DaemonMessage>,
         state: &mut DaemonState,
     ) {
-        let DaemonAuthentication::Standalone(identity) = &state.config.authentication else {
-            return;
-        };
         if state.telemetry_handle.is_some() {
             return;
         }
 
         let report = DaemonReport::from_capabilities(
-            &identity.daemon_id,
+            &state.config.identity.daemon_id,
             &state.config.capabilities,
             state.started_at,
         );
@@ -982,10 +831,7 @@ impl DaemonSupervisor {
     }
 }
 
-fn retire_standalone_identity(authentication: &DaemonAuthentication) {
-    let DaemonAuthentication::Standalone(identity) = authentication else {
-        return;
-    };
+fn retire_standalone_identity(identity: &crate::config::DaemonIdentity) {
     if let Err(error) = crate::config::retire_daemon_identity(&identity.daemon_id) {
         tracing::error!(
             daemon_id = %identity.daemon_id,

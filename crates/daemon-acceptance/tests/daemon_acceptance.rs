@@ -152,79 +152,6 @@ impl DaemonWorld {
             .collect()
     }
 
-    /// Spawn `vtb-daemon` and wait for Sacrum to confirm the project channel.
-    /// Uses a temp HOME so the daemon sees a scenario-specific config.toml.
-    pub async fn start_daemon_for_project(&mut self, project_id: &str, project_path: &str) {
-        assert!(self.daemon.is_none(), "daemon already running for scenario");
-
-        let home = PathBuf::from(format!(
-            "/tmp/daemon-acc-home-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let cfg_dir = home.join(".config").join("vertebrae");
-        std::fs::create_dir_all(&cfg_dir).expect("create scenario home");
-        let cfg = format!(
-            "[sacrum]\nurl = \"{}\"\ntoken = \"{}\"\n\n[projects.\"test\"]\nid = \"{}\"\npath = \"{}\"\n",
-            self.sacrum_url, self.sacrum_token, project_id, project_path,
-        );
-        std::fs::write(cfg_dir.join("config.toml"), cfg).expect("write config.toml");
-
-        // The daemon acceptance container is Linux, where the installer-owned
-        // manifestless Claude plugin root is `$HOME/.local/share/vertebrae`.
-        let managed_plugin_root = home.join(".local/share/vertebrae");
-        let installed_skill = managed_plugin_root.join("skills/acceptance-proof/SKILL.md");
-        std::fs::create_dir_all(installed_skill.parent().expect("skill has parent"))
-            .expect("create installed skill directory");
-        std::fs::write(&installed_skill, "# Acceptance proof\n")
-            .expect("write installed manifestless skill");
-        self.managed_plugin_root = Some(managed_plugin_root);
-
-        let log_path = PathBuf::from(format!("/tmp/daemon-acc-{project_id}.log"));
-        let log_stderr = std::fs::File::create(&log_path).expect("create daemon debug log");
-        let log_stderr_dup = log_stderr.try_clone().expect("dup log");
-
-        let mut cmd = Command::new(&self.vtb_daemon_binary);
-        cmd.env("HOME", &home)
-            .env(
-                "CLAUDE_CODE_PATH",
-                std::env::var("CLAUDE_CODE_PATH").unwrap_or_default(),
-            )
-            .env(
-                "CODEX_PATH",
-                std::env::var("CODEX_PATH").unwrap_or_default(),
-            )
-            .env(
-                "MOCK_OUTPUT_DIR",
-                self.mock_output_dir.to_string_lossy().to_string(),
-            )
-            .env("MOCK_CAPTURE_DIR", &self.capture_dir)
-            .env("RUST_LOG", "info")
-            .stdout(Stdio::from(log_stderr_dup))
-            .stderr(Stdio::from(log_stderr))
-            .kill_on_drop(true);
-
-        let mut child = cmd.spawn().expect("spawn vtb-daemon");
-
-        let expected = format!("Channel join confirmed for project {project_id}");
-
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            if Instant::now() >= deadline {
-                let _ = child.kill().await;
-                let tail = std::fs::read_to_string(&log_path).unwrap_or_default();
-                panic!("daemon did not log {expected:?} within 30s. log:\n{tail}");
-            }
-            if let Ok(text) = std::fs::read_to_string(&log_path)
-                && text.contains(&expected)
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-
-        self.daemon = Some(child);
-    }
-
     pub async fn stop_daemon(&mut self) {
         if let Some(mut child) = self.daemon.take() {
             let _ = child.kill().await;
@@ -333,7 +260,7 @@ impl DaemonWorld {
         let mut expected = vec!["Standalone daemon identity registered".to_string()];
         expected.extend(projects.iter().flat_map(|(project_id, _)| {
             [
-                format!("Registered standalone project mapping {project_id}"),
+                format!("Registered daemon project mapping {project_id}"),
                 format!("ProjectSupervisor starting for project {project_id}"),
             ]
         }));

@@ -1,8 +1,8 @@
 //! Daemon configuration and protected standalone identity storage.
 //!
-//! The account-authenticated daemon continues to use the shared
-//! `config.toml`. Standalone enrollment is kept in a separate `daemon.toml`
-//! so GUI/CLI account configuration writes cannot replace its stable identity.
+//! Project mappings continue to use the shared `config.toml`. Standalone
+//! enrollment is kept in a separate `daemon.toml` so GUI/CLI account
+//! configuration writes cannot replace the daemon's stable identity.
 
 use std::fmt;
 use std::io::Write;
