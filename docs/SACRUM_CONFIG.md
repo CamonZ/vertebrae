@@ -89,19 +89,18 @@ terminal response means the standalone identity was retired while offline: the
 daemon atomically removes `reconnect_token` from `daemon.toml`, writes a retired
 marker, preserves `daemon.lock`, and stops without entering another retry loop.
 Transient and ambiguous responses do not clear credentials and remain retryable.
-On restart, a retired marker fails before account-token resolution, so the daemon
-cannot silently fall back to `[sacrum].token`. Re-enrollment with
+On restart, a retired marker fails before startup, so the daemon cannot silently
+fall back to `[sacrum].token`. Re-enrollment with
 `--replace-existing` clears the marker and writes a fresh reconnect credential.
 Unexpected supervisor termination exits the executable with a failure status so the
 existing service manager can restart it. Initial connection failures also exit
 unsuccessfully. Restart always reuses the saved identity; it does not repeat the
 bootstrap exchange. Reconnect credentials are not automatically refreshed; expiry
 or revocation requires explicit re-enrollment.
-The current Sacrum backend grants this standalone channel registration only; it
-does not yet authorize project execution/reporting for a daemon principal. The
-existing account-token daemon path remains unchanged for project execution,
-and the daemon does not silently fall back to it when standalone identity mode
-is configured.
+The daemon uses the enrolled identity for both daemon-channel command delivery
+and project-scoped GraphQL reporting. It does not join project channels or use
+`[sacrum].token` for execution. Existing account-token daemon installations
+must be enrolled before they can continue executing work.
 
 When the GUI manages a local Docker backend, its private application-data directory
 also contains `local-backend/compose.yaml`, `runtime.env`, `api-token`, and

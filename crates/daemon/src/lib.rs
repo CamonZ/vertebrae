@@ -15,7 +15,7 @@ pub use actors::project_supervisor::{
     CancelStepPayload, RunStepPayload, build_step_config_from_payload, parse_cancel_step_payload,
     parse_run_step_payload, should_dispatch_run_step,
 };
-pub use actors::{DaemonAuthentication, DaemonConfig, DaemonMessage, DaemonSupervisor};
+pub use actors::{DaemonConfig, DaemonMessage, DaemonSupervisor};
 pub use actors::{ProjectConfig, ProjectMessage, ProjectSupervisor};
 pub use actors::{StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult};
 pub use capabilities::{DaemonCapabilities, HarnessCapability, SharedDaemonCapabilities};

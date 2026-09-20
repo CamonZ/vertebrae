@@ -20,9 +20,8 @@ use vertebrae_daemon::helpers::{
     resolve_all_provider_binaries_with_diagnostics, resolve_shell_path,
 };
 use vertebrae_daemon::{
-    ConfigError, DaemonAuthentication, DaemonCapabilities, DaemonConfig, DaemonEnrollmentClient,
-    DaemonEnrollmentStorage, DaemonIdentity, DaemonMessage, DaemonSupervisor, ProjectEntry,
-    ResolvedConfig,
+    ConfigError, DaemonCapabilities, DaemonConfig, DaemonEnrollmentClient, DaemonEnrollmentStorage,
+    DaemonIdentity, DaemonMessage, DaemonSupervisor, ProjectEntry, ResolvedConfig,
 };
 use vertebrae_harness::HarnessFactoryConfig;
 
@@ -82,9 +81,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let ResolvedConfig {
         sacrum_url,
-        api_token,
         daemon_identity,
         projects,
+        ..
     } = match ResolvedConfig::load() {
         Ok(config) => config,
         Err(ConfigError::Retired) => {
@@ -132,18 +131,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     ));
     capabilities.log_startup_diagnostics();
 
-    let authentication = match daemon_identity {
-        Some(identity) => DaemonAuthentication::Standalone(identity),
-        None => DaemonAuthentication::AccountToken(
-            api_token
-                .ok_or("account authentication disappeared while resolving daemon configuration")?,
-        ),
-    };
-    let standalone = matches!(authentication, DaemonAuthentication::Standalone(_));
+    let identity = daemon_identity.ok_or(
+        "vtb-daemon requires standalone enrollment; run `vtb-daemon enroll` before starting it",
+    )?;
 
     let daemon_config = DaemonConfig {
         base_url: sacrum_url,
-        authentication,
+        identity,
         capabilities,
     };
 
@@ -165,7 +159,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             project_id = %project_id,
             slug = %slug,
             path = %path,
-            standalone,
             "Registering project"
         );
         actor_ref.cast(DaemonMessage::AddProject {

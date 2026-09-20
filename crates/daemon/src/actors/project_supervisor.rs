@@ -133,7 +133,7 @@ impl std::fmt::Debug for ProjectMessage {
     }
 }
 
-/// Result of classifying an incoming project channel event.
+/// Result of classifying an incoming daemon-channel event routed to a project.
 #[derive(Debug, PartialEq)]
 pub enum ProjectAction {
     /// Sacrum is requesting the daemon to run a workflow step.
@@ -150,11 +150,11 @@ pub enum ProjectAction {
     Unknown { event: String },
 }
 
-/// Classify an incoming project channel event into a domain action.
+/// Classify an incoming daemon-channel event into a domain action.
 ///
 /// This is a pure function so it can be tested without an actor.
-/// Daemon clients only receive `run_step` and `cancel_step` events from Sacrum,
-/// but we classify all event types for completeness.
+/// Daemon-channel clients only receive `run_step` and `cancel_step` events
+/// from Sacrum, but we classify all event types for completeness.
 pub fn classify_project_event(msg: &PhoenixMessage) -> ProjectAction {
     let event = &msg.event;
     match event.as_str() {

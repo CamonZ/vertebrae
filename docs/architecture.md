@@ -263,10 +263,11 @@ DaemonSupervisor
         └── StepExecutor (one per active step execution)
 ```
 
-- Connects to Sacrum via Phoenix WebSocket. Legacy account-token mode joins
-  project channels with `client_type: "daemon"`; standalone mode authenticates
-  the stable identity from protected `daemon.toml` and joins `daemon:<id>`.
-- Receives `run_step` events for daemon-executed steps with prompt + agent config + output schema
+- Connects to Sacrum via Phoenix WebSocket using the stable identity from
+  protected `daemon.toml` and joins only `daemon:<id>`.
+- Receives `run_step` and `cancel_step` events on the daemon channel. Each
+  payload includes a project ID, which selects the configured local project
+  mapping and its `ProjectSupervisor`.
 - Passes `AgentConfig` and portable request options to the shared
   `HarnessRuntimeFactory`, which resolves the step's provider to a built-in
   harness: `anthropic` (default) → the Claude streaming harness,

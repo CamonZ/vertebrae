@@ -22,17 +22,17 @@ fn known_projects(ids: &[&str]) -> HashMap<String, ()> {
 // ===== classify_channel_message tests =====
 
 #[test]
-fn classify_routes_app_event_to_project() {
+fn classify_project_channel_event_is_ignored() {
     let projects = known_projects(&["proj-1"]);
     let m = msg("project:proj-1", "task_created", serde_json::json!({}));
     assert_eq!(
         classify_channel_message(&m, &projects),
-        ChannelAction::RouteToProject("proj-1".to_string())
+        ChannelAction::NonProjectTopic
     );
 }
 
 #[test]
-fn classify_join_ok() {
+fn classify_project_channel_join_reply_is_ignored() {
     let projects = known_projects(&["proj-1"]);
     let m = msg(
         "project:proj-1",
@@ -41,21 +41,61 @@ fn classify_join_ok() {
     );
     assert_eq!(
         classify_channel_message(&m, &projects),
-        ChannelAction::JoinConfirmed("proj-1".to_string())
+        ChannelAction::NonProjectTopic
     );
 }
 
 #[test]
-fn classify_join_error_with_reason() {
+fn classify_daemon_run_step_routes_by_payload_project() {
     let projects = known_projects(&["proj-1"]);
     let m = msg(
-        "project:proj-1",
-        "phx_reply",
-        serde_json::json!({"status": "error", "response": {"reason": "unauthorized"}}),
+        "daemon:33333333-3333-3333-3333-333333333333",
+        "run_step",
+        serde_json::json!({"project_id": "proj-1", "id": "execution-1", "task_id": "task-1"}),
     );
     assert_eq!(
         classify_channel_message(&m, &projects),
-        ChannelAction::JoinFailed("proj-1".to_string(), Some("unauthorized".to_string()))
+        ChannelAction::RouteDaemonToProject("proj-1".to_string())
+    );
+}
+
+#[test]
+fn classify_daemon_cancel_step_routes_by_payload_project() {
+    let projects = known_projects(&["proj-1"]);
+    let m = msg(
+        "daemon:33333333-3333-3333-3333-333333333333",
+        "cancel_step",
+        serde_json::json!({
+            "project_id": "proj-1",
+            "step_execution_id": "execution-1",
+            "task_id": "task-1"
+        }),
+    );
+    assert_eq!(
+        classify_channel_message(&m, &projects),
+        ChannelAction::RouteDaemonToProject("proj-1".to_string())
+    );
+}
+
+#[test]
+fn classify_rejects_messages_for_a_different_daemon() {
+    let projects = known_projects(&["proj-1"]);
+    let m = msg(
+        "daemon:44444444-4444-4444-4444-444444444444",
+        "run_step",
+        serde_json::json!({"project_id": "proj-1", "id": "execution-1", "task_id": "task-1"}),
+    );
+    assert_eq!(
+        classify_channel_message_with_join_ref(
+            &m,
+            &projects,
+            None,
+            Some("33333333-3333-3333-3333-333333333333"),
+        ),
+        ChannelAction::RejectedDaemonMessage(
+            "message received for unauthenticated daemon 44444444-4444-4444-4444-444444444444"
+                .to_string(),
+        )
     );
 }
 
@@ -135,54 +175,6 @@ fn classify_standalone_not_found_and_deregistered_as_terminal_retirement() {
 }
 
 #[test]
-fn classify_join_error_missing_reason() {
-    let projects = known_projects(&["proj-1"]);
-    let m = msg(
-        "project:proj-1",
-        "phx_reply",
-        serde_json::json!({"status": "error", "response": {}}),
-    );
-    assert_eq!(
-        classify_channel_message(&m, &projects),
-        ChannelAction::JoinFailed("proj-1".to_string(), None)
-    );
-}
-
-#[test]
-fn classify_join_error_missing_status() {
-    let projects = known_projects(&["proj-1"]);
-    let m = msg(
-        "project:proj-1",
-        "phx_reply",
-        serde_json::json!({"response": {}}),
-    );
-    assert_eq!(
-        classify_channel_message(&m, &projects),
-        ChannelAction::JoinFailed("proj-1".to_string(), Some("missing status".to_string()))
-    );
-}
-
-#[test]
-fn classify_phx_error() {
-    let projects = known_projects(&["proj-1"]);
-    let m = msg("project:proj-1", "phx_error", serde_json::json!({}));
-    assert_eq!(
-        classify_channel_message(&m, &projects),
-        ChannelAction::ChannelError("proj-1".to_string())
-    );
-}
-
-#[test]
-fn classify_phx_close() {
-    let projects = known_projects(&["proj-1"]);
-    let m = msg("project:proj-1", "phx_close", serde_json::json!({}));
-    assert_eq!(
-        classify_channel_message(&m, &projects),
-        ChannelAction::ChannelError("proj-1".to_string())
-    );
-}
-
-#[test]
 fn classify_non_project_topic() {
     let projects = known_projects(&["proj-1"]);
     let m = msg("phoenix", "heartbeat", serde_json::json!({}));
@@ -193,12 +185,12 @@ fn classify_non_project_topic() {
 }
 
 #[test]
-fn classify_unknown_project() {
+fn classify_project_topic_with_unknown_project_is_ignored() {
     let projects = known_projects(&["proj-1"]);
     let m = msg("project:unknown", "task_created", serde_json::json!({}));
     assert_eq!(
         classify_channel_message(&m, &projects),
-        ChannelAction::UnknownProject("unknown".to_string())
+        ChannelAction::NonProjectTopic
     );
 }
 
@@ -256,6 +248,7 @@ async fn standalone_channel_interruption_reconnects_with_the_same_identity() {
                 break message;
             };
             assert_eq!(join[3], "phx_join");
+            assert_eq!(join[2], "daemon:33333333-3333-3333-3333-333333333333");
             joins.push(join[2].clone());
             if connection == 0 {
                 socket.send(Message::Text(serde_json::json!([join[0], join[1], join[2], "phx_reply", {"status":"ok"}]).to_string().into())).await.unwrap();
@@ -304,12 +297,12 @@ async fn standalone_channel_interruption_reconnects_with_the_same_identity() {
     });
     let mut config = sample_daemon_config();
     config.base_url = endpoint.clone();
-    config.authentication = DaemonAuthentication::Standalone(crate::config::DaemonIdentity {
+    config.identity = crate::config::DaemonIdentity {
         endpoint,
         daemon_id: "33333333-3333-3333-3333-333333333333".to_string(),
         reconnect_token: "test-reconnect-token".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
-    });
+    };
     let (actor, mut handle) = Actor::spawn(None, DaemonSupervisor, config).await.unwrap();
     tokio::time::timeout(Duration::from_secs(3), rejoined_rx)
         .await
@@ -334,7 +327,12 @@ fn sample_daemon_config() -> DaemonConfig {
     };
     DaemonConfig {
         base_url: "http://localhost:4000".to_string(),
-        authentication: DaemonAuthentication::AccountToken("sac_super_secret_token".to_string()),
+        identity: crate::config::DaemonIdentity {
+            endpoint: "http://localhost:4000".to_string(),
+            daemon_id: "33333333-3333-3333-3333-333333333333".to_string(),
+            reconnect_token: "sac_super_secret_token".to_string(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        },
         capabilities: Arc::new(crate::capabilities::DaemonCapabilities {
             harnesses: HashMap::new(),
             provider_binaries,
@@ -352,12 +350,12 @@ fn sample_daemon_config() -> DaemonConfig {
 }
 
 #[test]
-fn daemon_config_debug_redacts_api_token() {
+fn daemon_config_debug_redacts_reconnect_token() {
     let cfg = sample_daemon_config();
     let dbg = format!("{:?}", cfg);
     assert!(
         !dbg.contains("sac_super_secret_token"),
-        "API token leaked in Debug: {dbg}"
+        "reconnect token leaked in Debug: {dbg}"
     );
     assert!(
         dbg.contains("<redacted>"),
