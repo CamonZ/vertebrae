@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "workflows": [
+    {
+      "workflow_ref": "build",
+      "name": "Bñild ✨",
+      "description": "Portable build pipeline",
+      "display_order": 2,
+      "is_default": true,
+      "kanban_column": "in_progress",
+      "factory_name": "release",
+      "metadata": {
+        "notes": "keep 00000000-0000-0000-0000-000000000099 unchanged",
+        "nested": {
+          "enabled": true,
+          "labels": [
+            "one",
+            "two"
+          ]
+        }
+      },
+      "initial_step": {
+        "workflow_ref": "build",
+        "step_ref": "start"
+      },
+      "steps": [
+        {
+          "step_ref": "finish",
+          "name": "Finish",
+          "goal": "Close the build",
+          "prompt": "",
+          "step_type": "finish",
+          "step_order": 2
+        },
+        {
+          "step_ref": "route",
+          "name": "Route",
+          "goal": "Choose the next workflow",
+          "prompt": null,
+          "agents": [
+            "router-agent"
+          ],
+          "skills": [
+            "routing"
+          ],
+          "agent_config": {
+            "model": "gpt-5.5",
+            "nested": {
+              "unicode": "café"
+            }
+          },
+          "step_type": "route",
+          "step_order": 1,
+          "persistence_options": {
+            "artifact": {
+              "logical_name": "route-decision"
+            }
+          },
+          "route_config": {
+            "version": 1,
+            "match_policy": "exactly_one",
+            "rules": [
+              {
+                "id": "approved",
+                "when": {
+                  "ref": "previous_output.route.result",
+                  "op": "eq",
+                  "value": "approved"
+                },
+                "transition": {
+                  "type": "intra_workflow",
+                  "step_ref": "finish"
+                },
+                "handoff": {
+                  "decision": "{{ previous_output.route.result }}"
+                }
+              },
+              {
+                "id": "review",
+                "when": {
+                  "all": [
+                    {
+                      "ref": "task.tags",
+                      "op": "contains",
+                      "value": "review"
+                    }
+                  ]
+                },
+                "transition": {
+                  "type": "inter_workflow",
+                  "workflow_ref": "review"
+                },
+                "handoff": {
+                  "source": "route"
+                }
+              }
+            ],
+            "default": {
+              "transition": {
+                "type": "intra_workflow",
+                "step_ref": "finish"
+              },
+              "handoff": {}
+            }
+          }
+        },
+        {
+          "step_ref": "start",
+          "name": "Start",
+          "goal": "Start the build",
+          "prompt": null,
+          "agents": [
+            "agent-a",
+            "agent-b"
+          ],
+          "skills": [
+            "build",
+            "verify"
+          ],
+          "agent_config": {
+            "provider": "openai",
+            "allowed_tools": [
+              "Read",
+              "Write"
+            ],
+            "json_schema": {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "step_type": "execute",
+          "step_order": 0,
+          "output_schema": {
+            "type": "object",
+            "required": [
+              "ok"
+            ],
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "workflow_ref": "review",
+      "name": "Review",
+      "description": null,
+      "display_order": 3,
+      "kanban_column": "review",
+      "metadata": {
+        "owner": "qa"
+      },
+      "initial_step": {
+        "workflow_ref": "review",
+        "step_ref": "review"
+      },
+      "steps": [
+        {
+          "step_ref": "done",
+          "name": "Done",
+          "step_type": "finish",
+          "step_order": 1
+        },
+        {
+          "step_ref": "review",
+          "name": "Review",
+          "prompt": "Review output",
+          "agents": [
+            "reviewer"
+          ],
+          "skills": [
+            "review"
+          ],
+          "step_type": "evaluate",
+          "step_order": 0,
+          "output_schema": {
+            "type": "object"
+          }
+        }
+      ]
+    }
+  ],
+  "step_edges": [
+    {
+      "from": {
+        "workflow_ref": "build",
+        "step_ref": "route"
+      },
+      "to": {
+        "workflow_ref": "build",
+        "step_ref": "finish"
+      },
+      "label": "approved"
+    },
+    {
+      "from": {
+        "workflow_ref": "build",
+        "step_ref": "start"
+      },
+      "to": {
+        "workflow_ref": "build",
+        "step_ref": "route"
+      },
+      "label": "next"
+    },
+    {
+      "from": {
+        "workflow_ref": "review",
+        "step_ref": "done"
+      },
+      "to": {
+        "workflow_ref": "review",
+        "step_ref": "review"
+      },
+      "label": "retry"
+    },
+    {
+      "from": {
+        "workflow_ref": "review",
+        "step_ref": "review"
+      },
+      "to": {
+        "workflow_ref": "review",
+        "step_ref": "done"
+      },
+      "label": "complete"
+    }
+  ],
+  "workflow_edges": [
+    {
+      "from_workflow_ref": "build",
+      "to_workflow_ref": "review",
+      "destination_step": {
+        "workflow_ref": "review",
+        "step_ref": "review"
+      },
+      "label": "needs_review"
+    },
+    {
+      "from_workflow_ref": "review",
+      "to_workflow_ref": "build",
+      "destination_step": {
+        "workflow_ref": "build",
+        "step_ref": "start"
+      },
+      "label": "rebuild"
+    }
+  ]
+}
