@@ -181,6 +181,13 @@ impl SacrumWorkflowService {
 
 #[async_trait]
 impl WorkflowService for SacrumWorkflowService {
+    async fn export_workflow_bundle(
+        &self,
+        workflow_id: Option<&str>,
+    ) -> ServiceResult<vertebrae_core::WorkflowBundleManifest> {
+        SacrumWorkflowService::export_workflow_bundle(self, workflow_id).await
+    }
+
     async fn create_workflow(&self, options: CreateWorkflowOptions) -> ServiceResult<String> {
         if options.name.trim().is_empty() {
             return Err(ServiceError::validation_failed("Name cannot be empty"));
@@ -998,8 +1005,8 @@ mod tests {
             "transitions": [
                 {
                     "id": "workflow-edge",
-                    "to_workflow_id": "wf-external",
-                    "target_step_id": "external-step",
+                    "to_workflow_id": id,
+                    "target_step_id": second_step_id,
                     "label": "on_done"
                 }
             ]
@@ -1073,7 +1080,7 @@ mod tests {
         );
         assert_eq!(
             workflow.transitions[0].target_step_id.as_deref(),
-            Some("external-step")
+            Some("wf-1-step-2")
         );
 
         let requests = server.received_requests().await.unwrap();

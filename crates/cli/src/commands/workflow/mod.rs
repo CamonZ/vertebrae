@@ -5,6 +5,7 @@
 mod add;
 mod assign;
 mod delete;
+mod export;
 mod list;
 mod show;
 pub mod transition;
@@ -19,6 +20,7 @@ mod update;
 pub use add::{ParsedStep, WorkflowAddCommand, parse_step};
 pub use assign::WorkflowAssignCommand;
 pub use delete::WorkflowDeleteCommand;
+pub use export::WorkflowExportCommand;
 pub use list::WorkflowListCommand;
 pub use show::WorkflowShowCommand;
 pub use transition::TransitionCommand;
@@ -42,6 +44,8 @@ pub enum WorkflowCommand {
     Update(WorkflowUpdateCommand),
     /// Delete a workflow
     Delete(WorkflowDeleteCommand),
+    /// Export one workflow or all workflows as a portable JSON bundle
+    Export(WorkflowExportCommand),
     /// Assign a task to a workflow
     Assign(WorkflowAssignCommand),
     /// Remove workflow assignment from a task
@@ -69,6 +73,9 @@ impl WorkflowCommand {
             WorkflowCommand::Show(cmd) => cmd.execute(services).await,
             WorkflowCommand::Update(cmd) => cmd.execute(workflow_service).await,
             WorkflowCommand::Delete(cmd) => cmd.execute(workflow_service).await,
+            WorkflowCommand::Export(cmd) => {
+                Ok(cmd.execute(workflow_service).await?.unwrap_or_default())
+            }
             WorkflowCommand::Assign(cmd) => cmd.execute(workflow_service).await,
             WorkflowCommand::Unassign(cmd) => cmd.execute(workflow_service).await,
             WorkflowCommand::Transition(cmd) => cmd.execute(workflow_service).await,

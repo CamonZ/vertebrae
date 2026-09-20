@@ -214,6 +214,11 @@ pub enum CommandResult {
     Table(String),
     /// A JSON value to display (used when --json flag is set)
     Json(serde_json::Value),
+    /// Bytes that are already the complete output contract, such as a JSON
+    /// export. These are printed without a wrapper or an added newline.
+    Raw(String),
+    /// A successful command whose output was written to a file.
+    NoOutput,
 }
 
 fn json_value<T: serde::Serialize>(value: T) -> Result<serde_json::Value, ServiceError> {
@@ -248,6 +253,8 @@ impl std::fmt::Display for CommandResult {
                     serde_json::to_string_pretty(value).unwrap_or_default()
                 )
             }
+            CommandResult::Raw(value) => write!(f, "{value}"),
+            CommandResult::NoOutput => Ok(()),
         }
     }
 }
@@ -535,6 +542,12 @@ impl Command {
             },
             Command::Workflow(cmd) => match cmd {
                 workflow::WorkflowCommand::Add(_) | workflow::WorkflowCommand::List(_) => {}
+                workflow::WorkflowCommand::Export(c) => {
+                    if let Some(workflow) = &mut c.workflow {
+                        let resolved = resolve_workflow_id(workflow, services).await?;
+                        *workflow = resolved;
+                    }
+                }
                 workflow::WorkflowCommand::Unassign(c) => {
                     c.task_id = resolve_id(&c.task_id, services).await?;
                 }
@@ -726,6 +739,12 @@ impl Command {
                 let id = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("Updated task: {}", id)))
             }
+            Command::Workflow(workflow::WorkflowCommand::Export(cmd)) => {
+                match cmd.execute(services.workflows()).await? {
+                    Some(bytes) => Ok(CommandResult::Raw(bytes)),
+                    None => Ok(CommandResult::NoOutput),
+                }
+            }
             Command::Workflow(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
@@ -876,6 +895,12 @@ impl Command {
             Command::Update(cmd) => {
                 let task_id = cmd.execute(services).await?;
                 operation_result("update", "updated", json!({ "task_id": task_id }))
+            }
+            Command::Workflow(workflow::WorkflowCommand::Export(cmd)) => {
+                match cmd.execute(services.workflows()).await? {
+                    Some(bytes) => return Ok(CommandResult::Raw(bytes)),
+                    None => return Ok(CommandResult::NoOutput),
+                }
             }
             Command::Workflow(workflow::WorkflowCommand::List(_cmd)) => {
                 let workflows = services.workflows().list_workflows().await?;
