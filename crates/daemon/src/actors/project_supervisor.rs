@@ -181,6 +181,11 @@ pub fn classify_project_event(msg: &PhoenixMessage) -> ProjectAction {
 /// The daemon creates a StepExecution record and spawns a StepExecutor to run it.
 #[derive(Debug, Clone, serde::Deserialize, PartialEq)]
 pub struct RunStepPayload {
+    /// The project whose configured local checkout should execute this step.
+    /// Daemon-channel deliveries must carry this explicitly because the topic
+    /// is shared by all projects assigned to a daemon.
+    #[serde(default)]
+    pub project_id: String,
     /// The StepExecution ID (pre-created by Sacrum).
     pub id: String,
     /// The task this step belongs to.
@@ -223,6 +228,9 @@ pub struct RunStepPayload {
 /// Parsed payload for a `cancel_step` channel event from Sacrum.
 #[derive(Debug, Clone, serde::Deserialize, PartialEq)]
 pub struct CancelStepPayload {
+    /// The project owning the execution.
+    #[serde(default)]
+    pub project_id: String,
     /// The StepExecution ID to cancel.
     pub step_execution_id: String,
     /// The task this step belongs to.
@@ -261,10 +269,12 @@ pub fn parse_cancel_step_payload(payload: &serde_json::Value) -> Result<CancelSt
 /// - Parses `agent_config` JSON into an `AgentConfig` struct.
 /// - Carries `agents` and `skills` from the payload into the config.
 pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
-    let prompt = match payload.prompt.as_deref().filter(|s| !s.is_empty()) {
-        Some(p) => p.to_string(),
-        None => "Execute step".to_string(),
-    };
+    // An explicitly empty prompt is meaningful to providers and must not be
+    // rewritten. Only an omitted prompt gets the compatibility fallback.
+    let prompt = payload
+        .prompt
+        .clone()
+        .unwrap_or_else(|| "Execute step".to_string());
 
     let mut agent_config: AgentConfig =
         serde_json::from_value(payload.agent_config.clone()).unwrap_or_default();
@@ -1451,7 +1461,7 @@ mod tests {
     }
 
     #[test]
-    fn build_step_config_falls_back_when_prompt_is_empty() {
+    fn build_step_config_preserves_when_prompt_is_empty() {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-3",
             "task_id": "task-3",
@@ -1460,7 +1470,7 @@ mod tests {
         .unwrap();
 
         let config = build_step_config_from_payload(&payload);
-        assert_eq!(config.prompt, "Execute step");
+        assert_eq!(config.prompt, "");
     }
 
     #[test]
@@ -1669,6 +1679,7 @@ mod tests {
     #[test]
     fn build_step_config_ignores_null_output_schema() {
         let payload = RunStepPayload {
+            project_id: String::new(),
             id: "exec-os-null".to_string(),
             task_id: "task-os-null".to_string(),
             prompt: None,

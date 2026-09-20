@@ -155,31 +155,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     .await
     .map_err(|e| format!("Failed to start DaemonSupervisor: {e}"))?;
 
-    if standalone {
-        if !projects.is_empty() {
-            tracing::warn!(
-                project_count = projects.len(),
-                "Standalone daemon identity is authenticated, but Sacrum does not yet authorize project execution for daemon principals; preserving projects without opening an unauthorized account channel"
-            );
-        }
-    } else {
-        for ProjectEntry {
-            slug,
+    for ProjectEntry {
+        slug,
+        project_id,
+        path,
+    } in projects
+    {
+        tracing::info!(
+            project_id = %project_id,
+            slug = %slug,
+            path = %path,
+            standalone,
+            "Registering project"
+        );
+        actor_ref.cast(DaemonMessage::AddProject {
             project_id,
-            path,
-        } in projects
-        {
-            tracing::info!(
-                project_id = %project_id,
-                slug = %slug,
-                path = %path,
-                "Registering project"
-            );
-            actor_ref.cast(DaemonMessage::AddProject {
-                project_id,
-                project_root: std::path::PathBuf::from(path),
-            })?;
-        }
+            project_root: std::path::PathBuf::from(path),
+        })?;
     }
 
     tracing::info!("vtb-daemon is running. Press Ctrl+C to stop.");

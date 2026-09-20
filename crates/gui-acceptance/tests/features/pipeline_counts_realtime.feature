@@ -3,6 +3,7 @@ Feature: Real-time pipeline aggregate counts
   when task positions and TaskRun lifecycle state change.
 
   Scenario: TaskRun lifecycle updates pipeline active counts
+    Given the daemon is running for the project
     Given I create a workflow with:
       | name | Pipeline Active Workflow |
     And I create a step "Run Count" in the workflow "Pipeline Active Workflow" via the CLI

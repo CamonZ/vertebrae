@@ -3,6 +3,7 @@ Feature: Real-time TaskRun updates on task detail
   payload run_controls without requiring a full task refetch.
 
   Scenario: TaskRun websocket update changes task detail run controls
+    Given the daemon is running for the project
     Given I create a workflow with:
       | name | TaskRun Detail Workflow |
     And I create a step "run" in the workflow "TaskRun Detail Workflow" via the CLI

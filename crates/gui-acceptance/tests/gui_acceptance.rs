@@ -108,6 +108,8 @@ pub struct GuiWorld {
     pub mock_output_dir: PathBuf,
 
     pub standalone_home: Option<PathBuf>,
+
+    pub daemon_log_path: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for GuiWorld {
@@ -158,6 +160,7 @@ impl GuiWorld {
                 std::env::var("MOCK_OUTPUT_DIR").unwrap_or_else(|_| "/mocks".to_string()),
             ),
             standalone_home: None,
+            daemon_log_path: None,
         }
     }
 
@@ -199,17 +202,84 @@ impl GuiWorld {
             .expect("project_id not set — setup hook must run first")
             .clone();
 
+        let client = self
+            .graphql_client
+            .as_ref()
+            .expect("graphql_client not initialized")
+            .clone();
+        let bootstrap = vertebrae_sacrum_client::SacrumDaemonService::new(client)
+            .create_daemon(Some(&format!("gui-acceptance-{}", uuid::Uuid::new_v4())))
+            .await
+            .expect("create standalone daemon enrollment");
+        let daemon_id = bootstrap.daemon.id.clone();
+        self.daemon_id = Some(daemon_id.clone());
+        self.daemon_enrollment_token = Some(bootstrap.enrollment_token.clone());
+        let endpoint =
+            std::env::var("VTB_URL").unwrap_or_else(|_| "http://localhost:4000".to_string());
+        let home = PathBuf::from(format!(
+            "/tmp/gui-acc-standalone-home-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let config_dir = home.join(".config/vertebrae");
+        std::fs::create_dir_all(&config_dir).expect("create standalone daemon home");
+        let project_path = self
+            .temp_dir
+            .as_ref()
+            .expect("primary project path not provisioned")
+            .to_string_lossy();
+        std::fs::write(
+            config_dir.join("config.toml"),
+            format!(
+                "[sacrum]\nurl = \"{endpoint}\"\n\n[projects.acceptance]\nid = \"{project_id}\"\npath = \"{project_path}\"\n"
+            ),
+        )
+        .expect("write standalone daemon config");
+
         let daemon_binary = std::env::var("VTB_DAEMON_BINARY")
             .unwrap_or_else(|_| "/app/target/debug/vtb-daemon".to_string());
         let claude_path = std::env::var("CLAUDE_CODE_PATH")
             .unwrap_or_else(|_| "/usr/local/bin/mock-claude".to_string());
         let mock_dir = self.mock_output_dir.clone();
         let log_path = PathBuf::from(format!("/tmp/gui-acc-daemon-{project_id}.log"));
+        self.daemon_log_path = Some(log_path.clone());
         let log = std::fs::File::create(&log_path).expect("create daemon log");
         let log_dup = log.try_clone().expect("dup daemon log");
 
+        let mut enroll = Command::new(&daemon_binary);
+        enroll
+            .args([
+                "enroll",
+                "--endpoint",
+                &endpoint,
+                "--daemon-id",
+                &daemon_id,
+                "--token-stdin",
+            ])
+            .env("HOME", &home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut enroll = enroll.spawn().expect("spawn standalone enrollment");
+        enroll
+            .stdin
+            .take()
+            .expect("standalone enrollment stdin")
+            .write_all(bootstrap.enrollment_token.as_bytes())
+            .await
+            .expect("write standalone enrollment token");
+        let enrollment_output = enroll
+            .wait_with_output()
+            .await
+            .expect("wait for standalone enrollment");
+        assert!(
+            enrollment_output.status.success(),
+            "standalone enrollment failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&enrollment_output.stdout),
+            String::from_utf8_lossy(&enrollment_output.stderr)
+        );
+
         let mut cmd = Command::new(&daemon_binary);
-        cmd.env("HOME", "/root")
+        cmd.env("HOME", &home)
             .env("CLAUDE_CODE_PATH", claude_path)
             .env("MOCK_OUTPUT_DIR", &mock_dir)
             .env("RUST_LOG", "info")
@@ -219,8 +289,9 @@ impl GuiWorld {
 
         let child = cmd.spawn().expect("spawn vtb-daemon");
         self.daemon = Some(child);
+        self.standalone_home = Some(home);
 
-        let expected = format!("Joined channel for project {project_id}");
+        let expected = "Standalone daemon identity registered";
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if Instant::now() >= deadline {

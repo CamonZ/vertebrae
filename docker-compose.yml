@@ -136,6 +136,7 @@ services:
       - .:/app
       - cargo-cache:/cargo
       - target-cache:/app/target
+      - ./crates/daemon-acceptance/mocks:/mocks
       - ./docker/gui-config.toml:/root/.config/vertebrae/config.toml.base:ro
     working_dir: /app
     command: ["/app/docker/gui-test-entrypoint.sh"]
