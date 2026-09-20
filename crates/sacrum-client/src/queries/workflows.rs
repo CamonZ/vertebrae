@@ -54,6 +54,54 @@ pub const GET_WORKFLOW: &str = r#"
     }
 "#;
 
+/// Full workflow graph fields for export. Unlike `WORKFLOW_FIELDS`, this
+/// fragment does not select presentation-only step summaries.
+pub const WORKFLOW_EXPORT_FIELDS: &str = r#"
+    fragment WorkflowExportFields on Workflow {
+        id
+        name
+        description
+        is_default
+        display_order
+        metadata
+        initial_step_id
+        kanban_column
+        factory_name
+        project_id
+        inserted_at
+        updated_at
+    }
+"#;
+
+/// Fetch one complete workflow graph for export.
+pub const EXPORT_WORKFLOW: &str = r#"
+    query ExportWorkflow($id: Uuid4!) {
+        workflow(id: $id) {
+            ...WorkflowExportFields
+            workflow_steps {
+                ...WorkflowExportStepFields
+            }
+            transitions {
+                id
+                to_workflow_id
+                target_step_id
+                label
+            }
+        }
+    }
+"#;
+
+/// List workflow identities before reading each complete graph for export.
+/// Keeping identity discovery separate makes a failed later graph read fail
+/// the whole snapshot instead of producing a successful partial export.
+pub const LIST_WORKFLOW_EXPORT_IDS: &str = r#"
+    query ListWorkflowExportIds($project_id: Uuid4!) {
+        workflows(project_id: $project_id) {
+            id
+        }
+    }
+"#;
+
 /// Fetch one workflow plus tasks assigned to it.
 /// NOTE: Prepend WORKFLOW_FIELDS and TASK_FIELDS.
 pub const GET_WORKFLOW_WITH_TASKS: &str = r#"

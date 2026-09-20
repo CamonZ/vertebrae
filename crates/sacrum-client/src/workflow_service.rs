@@ -31,6 +31,8 @@ use crate::queries::workflows::{
 };
 use crate::task_service::SacrumTaskService;
 
+mod export;
+
 /// Intermediate type for deserializing GET_WORKFLOW responses that include workflow_steps.
 #[derive(Debug, Clone, serde::Deserialize)]
 struct WorkflowWithSteps {
@@ -930,6 +932,279 @@ mod tests {
             "dependents": [],
             "children": []
         })
+    }
+
+    fn gql_export_workflow(id: &str, name: &str) -> serde_json::Value {
+        let first_step_id = format!("{id}-step-1");
+        let second_step_id = format!("{id}-step-2");
+        json!({
+            "id": id,
+            "name": name,
+            "description": "Portable workflow",
+            "is_default": true,
+            "display_order": 4,
+            "metadata": {
+                "nested": {"owner": "workflow-export", "id": "not-a-reference"},
+                "empty": []
+            },
+            "initial_step_id": first_step_id,
+            "kanban_column": "In Progress",
+            "factory_name": "factory-a",
+            "project_id": "test-proj",
+            "inserted_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-02T00:00:00Z",
+            "workflow_steps": [
+                {
+                    "id": first_step_id,
+                    "name": "implement",
+                    "goal": "make the change",
+                    "prompt": null,
+                    "agents": ["agent-a"],
+                    "skills": ["rust"],
+                    "agent_config": {"model": "sonnet"},
+                    "step_type": "execute",
+                    "output_schema": null,
+                    "persistence_options": null,
+                    "route_config": null,
+                    "step_order": 0,
+                    "workflow_id": id,
+                    "project_id": "test-proj",
+                    "inserted_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-02T00:00:00Z",
+                    "transitions": [
+                        {"id": "step-edge", "to_step_id": second_step_id, "label": "done"}
+                    ]
+                },
+                {
+                    "id": second_step_id,
+                    "name": "review",
+                    "goal": null,
+                    "prompt": "",
+                    "agents": [],
+                    "skills": [],
+                    "agent_config": {"model": "haiku"},
+                    "step_type": "evaluate",
+                    "output_schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+                    "persistence_options": {"artifact": {"logical_name": "review"}},
+                    "route_config": {"rules": [{"transition": {"step_id": "opaque-id"}}]},
+                    "step_order": 1,
+                    "workflow_id": id,
+                    "project_id": "test-proj",
+                    "inserted_at": null,
+                    "updated_at": null,
+                    "transitions": []
+                }
+            ],
+            "transitions": [
+                {
+                    "id": "workflow-edge",
+                    "to_workflow_id": "wf-external",
+                    "target_step_id": "external-step",
+                    "label": "on_done"
+                }
+            ]
+        })
+    }
+
+    fn gql_empty_export_workflow(id: &str, name: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "name": name,
+            "description": null,
+            "is_default": false,
+            "display_order": 0,
+            "metadata": {},
+            "initial_step_id": null,
+            "kanban_column": null,
+            "factory_name": null,
+            "project_id": "test-proj",
+            "inserted_at": null,
+            "updated_at": null,
+            "workflow_steps": [],
+            "transitions": []
+        })
+    }
+
+    #[tokio::test]
+    async fn test_export_workflow_snapshot_preserves_complete_wire_graph() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ExportWorkflow"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"data": {"workflow": gql_export_workflow("wf-1", "Exported")}}),
+            ))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let snapshot = service
+            .export_workflow_snapshot(Some("wf-1"))
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot.project_id, "test-proj");
+        assert_eq!(snapshot.workflows.len(), 1);
+        let workflow = &snapshot.workflows[0];
+        assert_eq!(
+            workflow.metadata.as_ref().unwrap()["nested"]["owner"],
+            "workflow-export"
+        );
+        assert_eq!(workflow.workflow_steps[0].prompt, None);
+        assert_eq!(workflow.workflow_steps[1].prompt, Some(String::new()));
+        assert_eq!(
+            workflow.workflow_steps[1].output_schema.as_ref().unwrap()["type"],
+            "object"
+        );
+        assert_eq!(
+            workflow.workflow_steps[1]
+                .persistence_options
+                .as_ref()
+                .unwrap()["artifact"]["logical_name"],
+            "review"
+        );
+        assert_eq!(
+            workflow.workflow_steps[1].route_config.as_ref().unwrap()["rules"][0]["transition"]["step_id"],
+            "opaque-id"
+        );
+        assert_eq!(
+            workflow.workflow_steps[0].transitions[0].label,
+            Some("done".into())
+        );
+        assert_eq!(
+            workflow.transitions[0].target_step_id.as_deref(),
+            Some("external-step")
+        );
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let query = String::from_utf8_lossy(&requests[0].body);
+        assert!(query.contains("prompt"));
+        assert!(query.contains("output_schema"));
+        assert!(query.contains("persistence_options"));
+        assert!(query.contains("route_config"));
+        assert!(query.contains("target_step_id"));
+        assert!(query.contains("query ExportWorkflow"));
+        assert!(!query.contains("mutation"));
+    }
+
+    #[tokio::test]
+    async fn test_export_project_snapshot_reads_each_workflow_and_preserves_order() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListWorkflowExportIds"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflows": [{"id": "wf-2"}, {"id": "wf-1"}]}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ExportWorkflow"))
+            .and(body_string_contains("wf-2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflow": gql_empty_export_workflow("wf-2", "Second")}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ExportWorkflow"))
+            .and(body_string_contains("wf-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflow": gql_empty_export_workflow("wf-1", "First")}
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let snapshot = service.export_workflow_snapshot(None).await.unwrap();
+
+        assert_eq!(
+            snapshot
+                .workflows
+                .iter()
+                .map(|workflow| workflow.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["wf-2", "wf-1"]
+        );
+        assert_eq!(snapshot.workflows[0].workflow_steps.len(), 0);
+        assert_eq!(server.received_requests().await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_export_snapshot_rejects_missing_workflow_and_graph_references() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ExportWorkflow"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflow": null}
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let missing = service.export_workflow_snapshot(Some("missing")).await;
+        assert!(matches!(
+            missing,
+            Err(ServiceError::WorkflowNotFound { workflow_id }) if workflow_id == "missing"
+        ));
+
+        let server = MockServer::start().await;
+        let mut workflow = gql_empty_export_workflow("wf-1", "Incomplete");
+        workflow["initial_step_id"] = json!("missing-step");
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflow": workflow}
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let incomplete = service.export_workflow_snapshot(Some("wf-1")).await;
+        assert!(
+            matches!(incomplete, Err(ServiceError::InvalidInput(message)) if message.contains("missing initial step"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_export_project_snapshot_fails_on_later_graph_read() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListWorkflowExportIds"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflows": [{"id": "wf-1"}, {"id": "wf-2"}]}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ExportWorkflow"))
+            .and(body_string_contains("wf-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflow": gql_empty_export_workflow("wf-1", "First")}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ExportWorkflow"))
+            .and(body_string_contains("wf-2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "errors": [{"message": "permission denied"}]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.export_workflow_snapshot(None).await;
+        assert!(
+            matches!(result, Err(ServiceError::InvalidInput(message)) if message.contains("permission denied"))
+        );
     }
 
     #[tokio::test]
