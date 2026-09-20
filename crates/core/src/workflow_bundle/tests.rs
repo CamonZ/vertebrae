@@ -48,6 +48,43 @@ fn shuffled_unordered_collections_have_identical_canonical_bytes() {
 }
 
 #[test]
+fn canonicalization_uses_display_and_step_order_without_reordering_config_arrays() {
+    let canonical = golden().canonicalize();
+    assert_eq!(
+        canonical
+            .workflows
+            .iter()
+            .map(|workflow| workflow.workflow_ref.as_str())
+            .collect::<Vec<_>>(),
+        vec!["build", "review"]
+    );
+    assert_eq!(
+        canonical.workflows[0]
+            .steps
+            .iter()
+            .map(|step| step.step_ref.as_str())
+            .collect::<Vec<_>>(),
+        vec!["start", "route", "finish"]
+    );
+    assert_eq!(
+        canonical.workflows[0].steps[0].agents,
+        vec!["agent-a", "agent-b"]
+    );
+    assert_eq!(
+        canonical.workflows[0].steps[0].skills,
+        vec!["build", "verify"]
+    );
+    let rules = canonical.workflows[0].steps[1]
+        .route_config
+        .as_ref()
+        .unwrap()["rules"]
+        .as_array()
+        .unwrap();
+    assert_eq!(rules[0]["id"], "approved");
+    assert_eq!(rules[1]["id"], "review");
+}
+
+#[test]
 fn empty_bundle_and_empty_workflow_are_valid() {
     assert!(WorkflowBundleManifest::empty().validate().is_ok());
     let mut bundle = WorkflowBundleManifest::empty();

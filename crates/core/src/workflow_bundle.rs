@@ -175,13 +175,14 @@ impl WorkflowBundleManifest {
     pub fn canonicalize(&self) -> Self {
         let mut canonical = self.clone();
         for workflow in &mut canonical.workflows {
-            workflow
-                .steps
-                .sort_by(|left, right| left.step_ref.cmp(&right.step_ref));
+            workflow.steps.sort_by(|left, right| {
+                (left.step_order, &left.step_ref).cmp(&(right.step_order, &right.step_ref))
+            });
         }
-        canonical
-            .workflows
-            .sort_by(|left, right| left.workflow_ref.cmp(&right.workflow_ref));
+        canonical.workflows.sort_by(|left, right| {
+            (left.display_order, &left.workflow_ref)
+                .cmp(&(right.display_order, &right.workflow_ref))
+        });
         canonical.step_edges.sort_by(|left, right| {
             (&left.from, &left.to, &left.label).cmp(&(&right.from, &right.to, &right.label))
         });

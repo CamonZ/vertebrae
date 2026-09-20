@@ -7,6 +7,7 @@
 use crate::error::ServiceResult;
 use crate::models::{Task, TaskFilter, Workflow, WorkflowTransition};
 use crate::service::TaskService;
+use crate::workflow_bundle::WorkflowBundleManifest;
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -315,6 +316,15 @@ pub trait WorkflowService: Send + Sync {
     /// Returns complete Workflow objects instead of summaries.
     /// Useful when the caller needs all workflow fields without N+1 queries.
     async fn list_workflows_full(&self) -> ServiceResult<Vec<Workflow>>;
+
+    /// Export one workflow or the complete active project as a portable bundle.
+    ///
+    /// `Some(workflow_id)` selects a closed single-workflow bundle. `None`
+    /// selects every workflow in the active project.
+    async fn export_workflow_bundle(
+        &self,
+        workflow_id: Option<&str>,
+    ) -> ServiceResult<WorkflowBundleManifest>;
 
     /// Update a workflow
     ///

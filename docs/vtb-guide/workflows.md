@@ -69,6 +69,23 @@ vtb workflow delete <workflow-id>                  # Delete workflow
 vtb workflow delete <workflow-id> --json           # Emit delete envelope
 ```
 
+### Exporting Workflow Bundles
+
+```bash
+vtb workflow export --workflow <workflow-id>       # Export one closed workflow
+vtb workflow export --all                           # Export every workflow
+vtb workflow export --all --output workflows.json  # Write the same JSON bytes to a file
+```
+
+Exactly one of `--workflow` and `--all` is required. Successful stdout mode
+contains only the deterministic versioned workflow-bundle JSON; `--output`
+writes those same bytes atomically and leaves stdout empty. Diagnostics go to
+stderr. A single-workflow export is closed: outgoing workflow transitions or
+route targets outside that workflow fail with the missing destination and
+advise exporting the required set or using `--all`. Export is read-only and
+does not include persistence IDs, timestamps, task assignments, or execution
+history.
+
 `vtb workflow list` takes no positional arguments and has no command-specific
 options. Its human-readable output is one workflow per line:
 

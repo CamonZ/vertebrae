@@ -619,6 +619,13 @@ impl MockWorkflowService {
 
 #[async_trait]
 impl WorkflowService for MockWorkflowService {
+    async fn export_workflow_bundle(
+        &self,
+        _workflow_id: Option<&str>,
+    ) -> ServiceResult<vertebrae_core::WorkflowBundleManifest> {
+        Ok(vertebrae_core::WorkflowBundleManifest::empty())
+    }
+
     async fn create_workflow(&self, options: CreateWorkflowOptions) -> ServiceResult<String> {
         let mut s = self.state.lock().unwrap();
         let id = s.gen_id();

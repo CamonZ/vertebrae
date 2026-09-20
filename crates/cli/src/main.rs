@@ -83,7 +83,7 @@ async fn run_with_args(args: CliArgs) -> Result<(), ServiceError> {
             } else {
                 cmd.execute(&services).await?
             };
-            println!("{}", result);
+            print_command_result(result);
         }
         None => {
             println!("Welcome to Vertebrae!");
@@ -99,6 +99,14 @@ fn print_json<T: Serialize>(value: &T) -> Result<(), ServiceError> {
         serde_json::to_value(value).map_err(|e| ServiceError::validation_failed(e.to_string()))?;
     println!("{}", CommandResult::Json(value));
     Ok(())
+}
+
+fn print_command_result(result: CommandResult) {
+    match result {
+        CommandResult::Raw(value) => print!("{value}"),
+        CommandResult::NoOutput => {}
+        other => println!("{other}"),
+    }
 }
 
 #[cfg(test)]

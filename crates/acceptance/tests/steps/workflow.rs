@@ -11,6 +11,108 @@ fn extract_workflow_id(stdout: &str) -> String {
         .to_string()
 }
 
+#[when(expr = "I remember the workflow export stdout for {string}")]
+async fn remember_workflow_export_stdout(world: &mut SmokeWorld, workflow_id: String) {
+    let workflow_id = world.resolve_vars(&workflow_id);
+    world
+        .run_vtb(&["workflow", "export", "--workflow", &workflow_id])
+        .await;
+    if world.last_exit_code == 0 {
+        world.stored_ids.insert(
+            "workflow_export_stdout".to_string(),
+            world.last_stdout.clone(),
+        );
+    }
+}
+
+#[when("I export the workflow to a file")]
+async fn export_workflow_to_file(world: &mut SmokeWorld) {
+    let path = world.write_temp_file("");
+    world.stored_ids.insert(
+        "workflow_export_path".to_string(),
+        path.display().to_string(),
+    );
+    let workflow_id = world
+        .workflow_id
+        .clone()
+        .expect("no workflow ID stored for export");
+    let path = path.to_string_lossy().to_string();
+    world
+        .run_vtb(&[
+            "workflow",
+            "export",
+            "--workflow",
+            &workflow_id,
+            "--output",
+            &path,
+        ])
+        .await;
+}
+
+#[then("the workflow export stdout should be a valid versioned bundle")]
+async fn workflow_export_stdout_should_be_valid(world: &mut SmokeWorld) {
+    let bundle: serde_json::Value = serde_json::from_str(&world.last_stdout).unwrap_or_else(|e| {
+        panic!(
+            "workflow export stdout was not JSON: {e}\nstdout: {}\nstderr: {}",
+            world.last_stdout, world.last_stderr
+        )
+    });
+    assert_eq!(bundle["schema_version"], 1);
+    assert!(bundle["workflows"].is_array());
+}
+
+#[then("the workflow export stdout should not contain persistence fields")]
+async fn workflow_export_stdout_should_not_contain_persistence_fields(world: &mut SmokeWorld) {
+    for field in [
+        "id",
+        "project_id",
+        "inserted_at",
+        "updated_at",
+        "task_id",
+        "execution_history",
+    ] {
+        assert!(
+            !world.last_stdout.contains(&format!("\"{field}\"")),
+            "workflow export unexpectedly contains structural field {field}: {}",
+            world.last_stdout
+        );
+    }
+}
+
+#[then("the workflow export file should equal the remembered stdout")]
+async fn workflow_export_file_should_equal_stdout(world: &mut SmokeWorld) {
+    assert!(
+        world.last_stdout.is_empty(),
+        "file export should leave stdout empty, got: {}",
+        world.last_stdout
+    );
+    let path = world
+        .stored_ids
+        .get("workflow_export_path")
+        .expect("no workflow export path stored");
+    let bytes = std::fs::read_to_string(path).expect("read workflow export file");
+    let expected = world
+        .stored_ids
+        .get("workflow_export_stdout")
+        .expect("no workflow export stdout stored");
+    assert_eq!(
+        &bytes, expected,
+        "file export bytes differ from stdout export"
+    );
+}
+
+#[then("the workflow export stdout should equal the remembered stdout")]
+async fn workflow_export_stdout_should_equal_stdout(world: &mut SmokeWorld) {
+    let expected = world
+        .stored_ids
+        .get("workflow_export_stdout")
+        .expect("no workflow export stdout stored");
+    assert_eq!(
+        &world.last_stdout, expected,
+        "repeated workflow export bytes differ"
+    );
+}
+
 #[given(expr = "a second workflow {string} with steps {string}")]
 async fn given_second_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_str: String) {
     let mut args: Vec<String> = vec!["workflow".to_string(), "add".to_string(), name];
