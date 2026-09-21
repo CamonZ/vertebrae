@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use vertebrae_core::StepAddress;
 use vertebrae_core::VertebraeServices;
 use vertebrae_core::artifact_service::ArtifactService;
 use vertebrae_core::error::{ServiceError, ServiceResult};
@@ -670,6 +671,67 @@ impl WorkflowService for MockWorkflowService {
         _workflow_id: Option<&str>,
     ) -> ServiceResult<vertebrae_core::WorkflowBundleManifest> {
         Ok(vertebrae_core::WorkflowBundleManifest::empty())
+    }
+
+    async fn import_workflow_bundle(
+        &self,
+        bundle: WorkflowBundleImportInput,
+    ) -> ServiceResult<WorkflowBundleImportResult> {
+        bundle.validate().map_err(|error| {
+            ServiceError::invalid_input(format!("workflow bundle validation failed: {error}"))
+        })?;
+
+        let mut state = self.state.lock().unwrap();
+        let mut workflow_mappings = std::collections::BTreeMap::new();
+        let mut step_mappings = std::collections::BTreeMap::new();
+
+        for workflow in &bundle.workflows {
+            let workflow_id = state.gen_id();
+            state.workflows.insert(
+                workflow_id.clone(),
+                Workflow {
+                    id: Some(workflow_id.clone()),
+                    name: workflow.name.clone(),
+                    description: workflow.description.clone(),
+                    initial_step: None,
+                    metadata: Default::default(),
+                    order: workflow.display_order,
+                    is_default: workflow.is_default,
+                    kanban_column: workflow.kanban_column.clone(),
+                    factory_name: workflow.factory_name.clone(),
+                    transitions: Vec::new(),
+                    created_at: Some(Utc::now()),
+                    updated_at: Some(Utc::now()),
+                },
+            );
+            workflow_mappings.insert(workflow.workflow_ref.clone(), workflow_id.clone());
+
+            for step in &workflow.steps {
+                let step_id = state.gen_id();
+                let mut imported_step = Step::new(step.name.clone(), workflow_id.clone());
+                imported_step.id = Some(step_id.clone());
+                imported_step.goal = step.goal.clone();
+                imported_step.prompt = step.prompt.clone();
+                imported_step.agents = step.agents.clone();
+                imported_step.skills = step.skills.clone();
+                imported_step.step_type = step.step_type.clone();
+                imported_step.order = step.step_order;
+                imported_step.output_schema = step.output_schema.clone();
+                imported_step.route_config = step.route_config.clone();
+                imported_step.persistence_options = step.persistence_options.clone();
+                state.steps.insert(step_id.clone(), imported_step);
+                step_mappings.insert(
+                    StepAddress::new(workflow.workflow_ref.clone(), step.step_ref.clone()),
+                    step_id,
+                );
+            }
+        }
+
+        Ok(WorkflowBundleImportResult {
+            workflow_mappings,
+            step_mappings,
+            warnings: Vec::new(),
+        })
     }
 
     async fn create_workflow(&self, options: CreateWorkflowOptions) -> ServiceResult<String> {

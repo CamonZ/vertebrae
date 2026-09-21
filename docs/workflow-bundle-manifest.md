@@ -52,3 +52,25 @@ values unchanged.
 Canonical serialization sorts workflows, steps, and graph edges while retaining
 the order of agents, skills, route rules, and handoff arrays. JSON object keys
 are emitted deterministically by `serde_json`.
+
+## Import contract
+
+`vtb workflow import <path>` uses the same V1 manifest contract. The CLI reads
+the file and runs `parse_manifest` before any backend mutation, then performs a
+read-only list of destination workflows for create-only name conflict checks.
+Names are compared case-insensitively; duplicate names within the bundle are
+also conflicts. The importer never overwrites, merges, assigns tasks, or
+deletes an existing workflow implicitly.
+
+`--dry-run` stops after local validation and the read-only destination check. It
+reports the active-project destination, all workflow/step/edge counts, the
+create plan, conflicts, proposed default status, and contract warnings. It does
+not reserve names, guarantee a later commit, or invent persistence IDs. A
+successful commit submits exactly one bulk mutation through the Sacrum client;
+Sacrum remains authoritative for access, graph constraints, default effects,
+and races after preflight. Generated workflow and fully-qualified step mappings
+are reported only after the mutation response passes protocol validation.
+
+Backend rejection and transport loss are surfaced as failures. The CLI does not
+retry an uncertain non-idempotent submission or fall back to incremental
+creation, so an uncertain outcome must be reconciled from Sacrum before retrying.

@@ -75,8 +75,9 @@ pub use step_constraints::{resulting_option, validate_route_fields, validate_rou
 pub use step_service::StepService;
 pub use workflow_bundle::{
     ManifestError, ManifestValidationError, RouteTargetRefs, StepAddress, StepEdge, StepManifest,
-    StepRef, WORKFLOW_BUNDLE_SCHEMA_VERSION, WorkflowBundle, WorkflowBundleManifest, WorkflowEdge,
-    WorkflowManifest, WorkflowRef, parse_manifest, symbolize_route_config,
+    StepRef, WORKFLOW_BUNDLE_SCHEMA_VERSION, WorkflowBundle, WorkflowBundleManifest,
+    WorkflowBundleNameConflict, WorkflowEdge, WorkflowManifest, WorkflowRef, parse_manifest,
+    symbolize_route_config,
 };
 pub use workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowBundleImportInput,

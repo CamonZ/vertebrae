@@ -51,9 +51,12 @@ pub enum SacrumClientError {
 
 impl From<SacrumClientError> for ServiceError {
     fn from(err: SacrumClientError) -> Self {
-        match &err {
-            SacrumClientError::ApiError { status: 404, .. } => ServiceError::TaskNotFound {
-                task_id: err.to_string(),
+        match err {
+            SacrumClientError::ApiError {
+                status: 404,
+                message,
+            } => ServiceError::TaskNotFound {
+                task_id: format!("API error (404): {message}"),
             },
             SacrumClientError::GraphqlError { messages, .. } => {
                 let msg = messages.join("; ");
@@ -63,7 +66,14 @@ impl From<SacrumClientError> for ServiceError {
                     ServiceError::InvalidInput(msg)
                 }
             }
-            _ => ServiceError::InvalidInput(err.to_string()),
+            SacrumClientError::HttpError(error) => ServiceError::network_error(error.to_string()),
+            SacrumClientError::ApiError { status, message } => {
+                ServiceError::api_error(status, message)
+            }
+            SacrumClientError::ConfigError(message) => ServiceError::config_error(message),
+            SacrumClientError::SerializationError(error) => {
+                ServiceError::invalid_input(error.to_string())
+            }
         }
     }
 }
@@ -133,7 +143,7 @@ mod tests {
         let service_error: ServiceError = sacrum_error.into();
         let error_msg = service_error.to_string();
         assert!(error_msg.contains("Test error"));
-        assert!(matches!(service_error, ServiceError::InvalidInput(_)));
+        assert!(matches!(service_error, ServiceError::ConfigError(_)));
     }
 
     #[test]
@@ -145,7 +155,20 @@ mod tests {
         let service_error: ServiceError = sacrum_error.into();
         let error_msg = service_error.to_string();
         assert!(error_msg.contains("Rate limited"));
-        assert!(matches!(service_error, ServiceError::InvalidInput(_)));
+        assert!(matches!(
+            service_error,
+            ServiceError::ApiError { status: 429, .. }
+        ));
+    }
+
+    #[test]
+    fn test_http_error_conversion_to_network_error() {
+        let request_error = reqwest::Client::new()
+            .get("not a URL")
+            .build()
+            .expect_err("invalid URL should fail before any request");
+        let service_error: ServiceError = SacrumClientError::HttpError(request_error).into();
+        assert!(matches!(service_error, ServiceError::NetworkError(_)));
     }
 
     #[test]

@@ -541,7 +541,9 @@ impl Command {
                 }
             },
             Command::Workflow(cmd) => match cmd {
-                workflow::WorkflowCommand::Add(_) | workflow::WorkflowCommand::List(_) => {}
+                workflow::WorkflowCommand::Add(_)
+                | workflow::WorkflowCommand::List(_)
+                | workflow::WorkflowCommand::Import(_) => {}
                 workflow::WorkflowCommand::Export(c) => {
                     if let Some(workflow) = &mut c.workflow {
                         let resolved = resolve_workflow_id(workflow, services).await?;
@@ -901,6 +903,9 @@ impl Command {
                     Some(bytes) => return Ok(CommandResult::Raw(bytes)),
                     None => return Ok(CommandResult::NoOutput),
                 }
+            }
+            Command::Workflow(workflow::WorkflowCommand::Import(cmd)) => {
+                json_value(cmd.execute_json(services.workflows()).await?)?
             }
             Command::Workflow(workflow::WorkflowCommand::List(_cmd)) => {
                 let workflows = services.workflows().list_workflows().await?;

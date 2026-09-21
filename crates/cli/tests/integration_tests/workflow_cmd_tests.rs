@@ -5,8 +5,13 @@
 //! with strong assertions on actual data values.
 
 use super::mock::mock_services;
+use std::sync::atomic::{AtomicU64, Ordering};
 use vertebrae_cli::commands::workflow::*;
-use vertebrae_core::{CreateWorkflowOptions, Step, StepType, VertebraeServices};
+use vertebrae_core::{
+    CreateWorkflowOptions, Step, StepType, VertebraeServices, WorkflowBundleManifest,
+};
+
+static IMPORT_TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // ============================================================================
 // Helper functions
@@ -398,6 +403,81 @@ async fn test_workflow_list_after_multiple_creates() {
     assert!(output.contains("Workflow 2"));
     assert!(output.contains("Workflow 3"));
     assert!(output.contains("With description"));
+}
+
+#[tokio::test]
+async fn test_workflow_import_commits_and_reports_mappings() {
+    let services = mock_services();
+    let mut bundle = WorkflowBundleManifest::empty();
+    let mut workflow = vertebrae_core::WorkflowManifest::new("build", "Build");
+    workflow
+        .steps
+        .push(vertebrae_core::StepManifest::new("compile", "Compile"));
+    bundle.workflows.push(workflow);
+
+    let path = std::env::temp_dir().join(format!(
+        "vertebrae-workflow-import-test-{}-{}.json",
+        std::process::id(),
+        IMPORT_TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(&path, serde_json::to_vec(&bundle).unwrap()).unwrap();
+
+    let output = WorkflowImportCommand {
+        input: path.clone(),
+        dry_run: false,
+    }
+    .execute(services.workflows())
+    .await
+    .unwrap();
+
+    assert!(output.contains("Workflow bundle import committed"));
+    assert!(output.contains("build -> mock"));
+    assert!(output.contains("build/compile -> mock"));
+    assert!(
+        services
+            .workflows()
+            .list_workflows_full()
+            .await
+            .unwrap()
+            .iter()
+            .any(|workflow| workflow.name == "Build")
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
+async fn test_workflow_import_dry_run_does_not_create_workflows() {
+    let services = mock_services();
+    let mut bundle = WorkflowBundleManifest::empty();
+    bundle
+        .workflows
+        .push(vertebrae_core::WorkflowManifest::new("build", "Build"));
+    let path = std::env::temp_dir().join(format!(
+        "vertebrae-workflow-dry-run-test-{}-{}.json",
+        std::process::id(),
+        IMPORT_TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(&path, serde_json::to_vec(&bundle).unwrap()).unwrap();
+
+    let output = WorkflowImportCommand {
+        input: path.clone(),
+        dry_run: true,
+    }
+    .execute(services.workflows())
+    .await
+    .unwrap();
+
+    assert!(output.contains("Workflow bundle import dry-run"));
+    assert!(output.contains("does not reserve workflow names"));
+    assert!(
+        services
+            .workflows()
+            .list_workflows_full()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    std::fs::remove_file(path).unwrap();
 }
 
 // ============================================================================

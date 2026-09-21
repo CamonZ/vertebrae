@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::models::StepType;
+use crate::models::{StepType, Workflow};
 
 mod route;
 #[cfg(test)]
@@ -156,6 +157,15 @@ pub struct WorkflowBundleManifest {
     pub workflow_edges: Vec<WorkflowEdge>,
 }
 
+/// A destination workflow name that violates create-only import semantics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkflowBundleNameConflict {
+    pub workflow_ref: WorkflowRef,
+    pub name: String,
+    pub reason: String,
+    pub existing_workflow_id: Option<String>,
+}
+
 pub type WorkflowBundle = WorkflowBundleManifest;
 
 impl WorkflowBundleManifest {
@@ -170,6 +180,46 @@ impl WorkflowBundleManifest {
 
     pub fn validate(&self) -> Result<(), ManifestValidationError> {
         validation::validate_bundle(self)
+    }
+
+    /// Find case-insensitive name conflicts for a create-only import.
+    pub fn name_conflicts(
+        &self,
+        existing_workflows: &[Workflow],
+    ) -> Vec<WorkflowBundleNameConflict> {
+        let mut seen_names = HashMap::new();
+        let mut conflicts = Vec::new();
+
+        for workflow in &self.workflows {
+            let normalized_name = workflow.name.to_lowercase();
+            if let Some(previous_ref) =
+                seen_names.insert(normalized_name.clone(), workflow.workflow_ref.clone())
+            {
+                conflicts.push(WorkflowBundleNameConflict {
+                    workflow_ref: workflow.workflow_ref.clone(),
+                    name: workflow.name.clone(),
+                    reason: format!(
+                        "duplicate workflow name in bundle (already requested by ref {:?})",
+                        previous_ref
+                    ),
+                    existing_workflow_id: None,
+                });
+            }
+
+            if let Some(existing) = existing_workflows
+                .iter()
+                .find(|existing| existing.name.to_lowercase() == normalized_name)
+            {
+                conflicts.push(WorkflowBundleNameConflict {
+                    workflow_ref: workflow.workflow_ref.clone(),
+                    name: workflow.name.clone(),
+                    reason: "workflow name already exists in destination".to_string(),
+                    existing_workflow_id: existing.id.clone(),
+                });
+            }
+        }
+
+        conflicts
     }
 
     pub fn canonicalize(&self) -> Self {
