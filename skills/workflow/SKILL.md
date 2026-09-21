@@ -36,6 +36,20 @@ vtb workflow show <workflow-id>      # See steps within a workflow
 
 ---
 
+## workflow export
+
+```bash
+vtb workflow export --workflow <workflow-id> --output workflow.json
+vtb workflow export --all --output workflows.json
+```
+
+Export selection is explicit: choose exactly one workflow UUID with
+`--workflow <workflow-id>` or choose the complete project graph with `--all`.
+The selector does not accept workflow names, and exporting a named subset is
+not currently supported. A single-workflow export is a closed bundle: it fails
+when outgoing workflow transitions or route targets refer to another workflow;
+use `--all` when the selected graph has cross-workflow references.
+
 ## workflow import
 
 Import a versioned JSON bundle into the active project:
@@ -62,6 +76,33 @@ Malformed/unreadable files, unsupported versions, duplicate or dangling refs,
 conflicting names, backend rejection, and transport loss return nonzero. The
 CLI does not retry an uncertain non-idempotent import or fall back to
 incremental creation.
+
+## Export/import round trips
+
+For a portable graph migration, export the complete source graph, preflight the
+bundle in the destination, commit it, and export the destination again:
+
+```bash
+vtb workflow export --all --output source-workflows.json
+vtb workflow import source-workflows.json --dry-run --json
+vtb workflow import source-workflows.json --json
+vtb workflow export --all --output destination-workflows.json
+```
+
+The V1 bundle preserves workflow and step order, initial steps, step and
+workflow edges, edge labels, route rules and defaults, workflow metadata,
+agent configuration, prompts, output schemas, persistence options, and other
+opaque JSON values. Import remaps persistence IDs; compare canonical semantic
+content rather than raw IDs or timestamps. Use the returned workflow and
+`workflow_ref/step_ref` mappings to inspect the destination graph independently
+so matching exporter and importer omissions cannot make a round-trip test pass.
+
+The rich-graph acceptance fixture includes multiple workflows, every supported
+step type, distinct goal and prompt values including valid null and empty
+prompts, nested metadata/configuration, strict schemas, persistence options,
+route rule/default targets, labels, and explicit cross-workflow entry steps.
+Run this coverage only against the isolated Docker Sacrum environment; do not
+use the local task-management database as the acceptance backend.
 
 ---
 

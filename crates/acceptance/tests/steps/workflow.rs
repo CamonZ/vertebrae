@@ -1,5 +1,9 @@
+use std::collections::BTreeSet;
+
 use cucumber::{given, then, when};
-use serde_json::json;
+use serde_json::{Map, Value, json};
+use vertebrae_core::WorkflowBundleManifest;
+use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig, WorkflowExport, with_fragments};
 
 use crate::SmokeWorld;
 
@@ -119,6 +123,368 @@ async fn import_exported_workflow_dry_run(world: &mut SmokeWorld) {
         .await;
 }
 
+async fn export_all_workflows_to(world: &mut SmokeWorld, key: &str) {
+    let path = world.write_temp_file("");
+    world
+        .stored_ids
+        .insert(key.to_string(), path.display().to_string());
+    let path = path.to_string_lossy().to_string();
+    world
+        .run_vtb(&["workflow", "export", "--all", "--output", &path])
+        .await;
+}
+
+#[when("I export all workflows to the source bundle file")]
+async fn export_all_workflows_to_source_file(world: &mut SmokeWorld) {
+    export_all_workflows_to(world, "source_workflow_bundle_path").await;
+}
+
+#[when("I switch the acceptance client to a fresh project")]
+async fn switch_acceptance_client_to_fresh_project(world: &mut SmokeWorld) {
+    let api_token = world.env["VTB_TOKEN"].clone();
+    let base_url = world.env["VTB_URL"].clone();
+    let slug = format!("round-trip-{}", uuid::Uuid::new_v4());
+    let client = GraphqlClient::new(SacrumConfig::new(
+        base_url.clone(),
+        api_token.clone(),
+        String::new(),
+    ));
+    let project: vertebrae_sacrum_client::ProjectResponse = client
+        .execute(
+            vertebrae_sacrum_client::queries::projects::CREATE_PROJECT,
+            json!({ "name": slug, "slug": slug }),
+            "create_project",
+        )
+        .await
+        .expect("failed to create destination project");
+
+    world.track_project(project.id.clone());
+    world
+        .stored_ids
+        .insert("destination_project_id".to_string(), project.id.clone());
+    world
+        .stored_ids
+        .insert("project_id".to_string(), project.id.clone());
+    world
+        .env
+        .insert("VTB_PROJECT_ID".to_string(), project.id.clone());
+    world.graphql_client = Some(GraphqlClient::new(SacrumConfig::new(
+        base_url, api_token, project.id,
+    )));
+
+    clear_acceptance_project_workflows(world).await;
+}
+
+#[when("I clear the acceptance project's existing workflows")]
+async fn clear_acceptance_project_existing_workflows(world: &mut SmokeWorld) {
+    clear_acceptance_project_workflows(world).await;
+}
+
+async fn clear_acceptance_project_workflows(world: &mut SmokeWorld) {
+    let workflows = world
+        .run_vtb_json(&["workflow", "list"])
+        .await
+        .expect("list destination workflows");
+    for workflow_id in workflows
+        .as_array()
+        .expect("workflow list should return an array")
+        .iter()
+        .filter_map(|workflow| workflow["id"].as_str())
+        .collect::<Vec<_>>()
+    {
+        world.run_vtb(&["workflow", "delete", workflow_id]).await;
+        assert_eq!(
+            world.last_exit_code, 0,
+            "failed to clear destination workflow {}: {}{}",
+            workflow_id, world.last_stdout, world.last_stderr
+        );
+    }
+}
+
+#[when("I import the source workflow bundle")]
+async fn import_source_workflow_bundle(world: &mut SmokeWorld) {
+    world
+        .run_vtb_json(&["workflow", "import", "<source_workflow_bundle_path>"])
+        .await;
+    if world.last_exit_code == 0 {
+        world.stored_ids.insert(
+            "destination_import_json".to_string(),
+            world.last_stdout.clone(),
+        );
+    }
+}
+
+#[when("I export all workflows to the destination bundle file")]
+async fn export_all_workflows_to_destination_file(world: &mut SmokeWorld) {
+    export_all_workflows_to(world, "destination_workflow_bundle_path").await;
+}
+
+fn read_workflow_bundle(world: &SmokeWorld, key: &str) -> WorkflowBundleManifest {
+    let path = world
+        .stored_ids
+        .get(key)
+        .unwrap_or_else(|| panic!("no workflow bundle path stored under {key}"));
+    let contents = std::fs::read_to_string(path).expect("read workflow bundle");
+    serde_json::from_str(&contents).expect("workflow export should be a valid bundle")
+}
+
+#[then("the source and destination workflow bundles should have matching canonical semantics")]
+async fn workflow_bundles_should_match_canonical_semantics(world: &mut SmokeWorld) {
+    let source = read_workflow_bundle(world, "source_workflow_bundle_path");
+    let destination = read_workflow_bundle(world, "destination_workflow_bundle_path");
+    assert_eq!(
+        source.canonical_json().expect("canonicalize source bundle"),
+        destination
+            .canonical_json()
+            .expect("canonicalize destination bundle")
+    );
+}
+
+fn mapped_id<'a>(mappings: &'a Map<String, Value>, reference: &str) -> &'a str {
+    mappings
+        .get(reference)
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("missing mapping for {reference}"))
+}
+
+fn mapped_step_id<'a>(
+    step_mappings: &'a Map<String, Value>,
+    workflow_ref: &str,
+    step_ref: &str,
+) -> &'a str {
+    let mappings = step_mappings
+        .get(workflow_ref)
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("missing step mappings for workflow {workflow_ref}"));
+    mapped_id(mappings, step_ref)
+}
+
+fn materialize_route_refs(
+    value: &Value,
+    workflow_mappings: &Map<String, Value>,
+    step_mappings: &Map<String, Value>,
+    workflow_ref: &str,
+) -> Value {
+    match value {
+        Value::Object(object) => {
+            let mut materialized = Map::new();
+            for (key, value) in object {
+                match key.as_str() {
+                    "step_ref" => {
+                        materialized.insert(
+                            "step_id".to_string(),
+                            json!(mapped_step_id(
+                                step_mappings,
+                                workflow_ref,
+                                value.as_str().expect("route step_ref should be a string")
+                            )),
+                        );
+                    }
+                    "workflow_ref" => {
+                        materialized.insert(
+                            "workflow_id".to_string(),
+                            json!(mapped_id(
+                                workflow_mappings,
+                                value
+                                    .as_str()
+                                    .expect("route workflow_ref should be a string")
+                            )),
+                        );
+                    }
+                    _ => {
+                        materialized.insert(
+                            key.clone(),
+                            materialize_route_refs(
+                                value,
+                                workflow_mappings,
+                                step_mappings,
+                                workflow_ref,
+                            ),
+                        );
+                    }
+                }
+            }
+            Value::Object(materialized)
+        }
+        Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .map(|value| {
+                    materialize_route_refs(value, workflow_mappings, step_mappings, workflow_ref)
+                })
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
+async fn fetch_workflow_export(world: &SmokeWorld, workflow_id: &str) -> WorkflowExport {
+    let query = with_fragments(
+        vertebrae_sacrum_client::queries::workflows::EXPORT_WORKFLOW,
+        &[
+            vertebrae_sacrum_client::queries::workflows::WORKFLOW_EXPORT_FIELDS,
+            vertebrae_sacrum_client::queries::steps::WORKFLOW_EXPORT_STEP_FIELDS,
+        ],
+    );
+    world
+        .graphql_client
+        .as_ref()
+        .expect("configured Sacrum client")
+        .execute(&query, json!({ "id": workflow_id }), "workflow")
+        .await
+        .unwrap_or_else(|error| panic!("query destination workflow {workflow_id}: {error}"))
+}
+
+#[then("the destination workflow graph should match the import mappings")]
+async fn destination_workflow_graph_should_match_import_mappings(world: &mut SmokeWorld) {
+    let source = read_workflow_bundle(world, "source_workflow_bundle_path");
+    let import: Value = serde_json::from_str(
+        world
+            .stored_ids
+            .get("destination_import_json")
+            .expect("destination import JSON was not stored"),
+    )
+    .expect("destination import result should be JSON");
+    let workflow_mappings = import["workflow_mappings"]
+        .as_object()
+        .expect("destination import should contain workflow mappings");
+    let step_mappings = import["step_mappings"]
+        .as_object()
+        .expect("destination import should contain step mappings");
+    assert_eq!(workflow_mappings.len(), source.workflows.len());
+
+    let mut destination_workflows = Vec::new();
+    for workflow in &source.workflows {
+        let workflow_id = mapped_id(workflow_mappings, &workflow.workflow_ref);
+        let destination = fetch_workflow_export(world, workflow_id).await;
+        assert_eq!(destination.id, workflow_id);
+        assert_eq!(destination.name, workflow.name);
+        assert_eq!(destination.description, workflow.description);
+        assert_eq!(
+            destination.display_order.unwrap_or_default(),
+            workflow.display_order
+        );
+        assert_eq!(
+            destination.is_default.unwrap_or_default(),
+            workflow.is_default
+        );
+        assert_eq!(destination.kanban_column, workflow.kanban_column);
+        assert_eq!(destination.factory_name, workflow.factory_name);
+        assert_eq!(destination.metadata, workflow.metadata);
+
+        let expected_initial = workflow.initial_step.as_ref().map(|initial| {
+            mapped_step_id(step_mappings, &initial.workflow_ref, &initial.step_ref).to_string()
+        });
+        assert_eq!(destination.initial_step_id, expected_initial);
+        assert_eq!(destination.workflow_steps.len(), workflow.steps.len());
+
+        for step in &workflow.steps {
+            let step_id = mapped_step_id(step_mappings, &workflow.workflow_ref, &step.step_ref);
+            let actual = destination
+                .workflow_steps
+                .iter()
+                .find(|candidate| candidate.id == step_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing destination step {}/{}",
+                        workflow.workflow_ref, step.step_ref
+                    )
+                });
+            assert_eq!(actual.workflow_id, workflow_id);
+            assert_eq!(actual.name, step.name);
+            assert_eq!(actual.goal, step.goal);
+            assert_eq!(actual.prompt, step.prompt);
+            assert_eq!(actual.agents, step.agents);
+            assert_eq!(actual.skills, step.skills);
+            assert_eq!(actual.agent_config, step.agent_config);
+            assert_eq!(
+                actual.step_type.as_deref().unwrap_or("execute"),
+                step.step_type.as_str()
+            );
+            assert_eq!(actual.step_order, step.step_order);
+            assert_eq!(actual.output_schema, step.output_schema);
+            assert_eq!(actual.persistence_options, step.persistence_options);
+            assert_eq!(
+                actual.route_config,
+                step.route_config.as_ref().map(|route_config| {
+                    materialize_route_refs(
+                        route_config,
+                        workflow_mappings,
+                        step_mappings,
+                        &workflow.workflow_ref,
+                    )
+                })
+            );
+        }
+        destination_workflows.push((workflow.workflow_ref.clone(), destination));
+    }
+
+    let actual_step_edges: BTreeSet<(String, String, Option<String>)> = destination_workflows
+        .iter()
+        .flat_map(|(_, workflow)| {
+            workflow.workflow_steps.iter().flat_map(|step| {
+                step.transitions.iter().map(|transition| {
+                    (
+                        step.id.clone(),
+                        transition.to_step_id.clone(),
+                        transition.label.clone(),
+                    )
+                })
+            })
+        })
+        .collect();
+    let expected_step_edges: BTreeSet<(String, String, Option<String>)> = source
+        .step_edges
+        .iter()
+        .map(|edge| {
+            (
+                mapped_step_id(step_mappings, &edge.from.workflow_ref, &edge.from.step_ref)
+                    .to_string(),
+                mapped_step_id(step_mappings, &edge.to.workflow_ref, &edge.to.step_ref).to_string(),
+                edge.label.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(actual_step_edges, expected_step_edges);
+
+    let actual_workflow_edges: BTreeSet<(String, String, Option<String>, Option<String>)> =
+        destination_workflows
+            .iter()
+            .flat_map(|(_, workflow)| {
+                let from_workflow_id = workflow.id.clone();
+                workflow.transitions.iter().map(move |transition| {
+                    (
+                        from_workflow_id.clone(),
+                        transition.to_workflow_id.clone(),
+                        transition.target_step_id.clone(),
+                        transition.label.clone(),
+                    )
+                })
+            })
+            .collect();
+    let expected_workflow_edges: BTreeSet<(String, String, Option<String>, Option<String>)> =
+        source
+            .workflow_edges
+            .iter()
+            .map(|edge| {
+                (
+                    mapped_id(workflow_mappings, &edge.from_workflow_ref).to_string(),
+                    mapped_id(workflow_mappings, &edge.to_workflow_ref).to_string(),
+                    edge.destination_step.as_ref().map(|destination| {
+                        mapped_step_id(
+                            step_mappings,
+                            &destination.workflow_ref,
+                            &destination.step_ref,
+                        )
+                        .to_string()
+                    }),
+                    edge.label.clone(),
+                )
+            })
+            .collect();
+    assert_eq!(actual_workflow_edges, expected_workflow_edges);
+}
+
 #[then(expr = "the workflow import JSON status should be {string}")]
 async fn workflow_import_json_status_should_be(world: &mut SmokeWorld, expected: String) {
     assert_eq!(
@@ -138,8 +504,8 @@ async fn workflow_import_json_should_contain_complete_mappings(world: &mut Smoke
     assert_eq!(value["workflow_mappings"].as_object().unwrap().len(), 2);
     assert_eq!(value["step_mappings"].as_object().unwrap().len(), 2);
     assert_eq!(value["workflow_count"], 2);
-    assert_eq!(value["step_count"], 5);
-    assert_eq!(value["step_edge_count"], 4);
+    assert_eq!(value["step_count"], 8);
+    assert_eq!(value["step_edge_count"], 8);
     assert_eq!(value["workflow_edge_count"], 2);
 }
 

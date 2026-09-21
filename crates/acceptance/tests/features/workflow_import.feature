@@ -19,6 +19,24 @@ Feature: Workflow bundle import
     And the workflow import JSON status should be "committed"
     And the workflow import JSON should contain complete mappings
 
+  @workflow_round_trip
+  Scenario: Rich workflow graph survives export, import, and re-export
+    When I clear the acceptance project's existing workflows
+    And I stage the built-in workflow bundle fixture
+    And I import the staged workflow bundle
+    Then the command should succeed
+    And the workflow import JSON status should be "committed"
+    When I export all workflows to the source bundle file
+    Then the command should succeed
+    When I switch the acceptance client to a fresh project
+    And I import the source workflow bundle
+    Then the command should succeed
+    And the workflow import JSON status should be "committed"
+    When I export all workflows to the destination bundle file
+    Then the command should succeed
+    And the source and destination workflow bundles should have matching canonical semantics
+    And the destination workflow graph should match the import mappings
+
   Scenario: Create-only preflight rejects an existing workflow name
     Given I create a workflow "Conflict WF" with:
       | steps | only |

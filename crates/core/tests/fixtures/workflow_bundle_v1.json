@@ -93,12 +93,31 @@
                 "handoff": {
                   "source": "route"
                 }
+              },
+              {
+                "id": "pause",
+                "when": {
+                  "all": [
+                    {
+                      "ref": "task.tags",
+                      "op": "contains",
+                      "value": "pause"
+                    }
+                  ]
+                },
+                "transition": {
+                  "type": "intra_workflow",
+                  "step_ref": "wait"
+                },
+                "handoff": {
+                  "source": "route"
+                }
               }
             ],
             "default": {
               "transition": {
                 "type": "intra_workflow",
-                "step_ref": "finish"
+                "step_ref": "wait"
               },
               "handoff": {}
             }
@@ -145,6 +164,40 @@
               }
             }
           }
+        },
+        {
+          "step_ref": "wait",
+          "name": "Wait for Children",
+          "goal": "Wait for child tasks",
+          "prompt": null,
+          "step_type": "wait_children",
+          "step_order": 3
+        },
+        {
+          "step_ref": "input",
+          "name": "Human Approval",
+          "goal": "Collect approval",
+          "prompt": "Approve the build",
+          "step_type": "human_input",
+          "step_order": 4,
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "approved": {
+                "type": "boolean"
+              }
+            },
+            "required": ["approved"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "step_ref": "pause",
+          "name": "Pause Run",
+          "goal": "Pause the current run",
+          "prompt": null,
+          "step_type": "stop",
+          "step_order": 5
         }
       ]
     },
@@ -209,6 +262,50 @@
         "step_ref": "route"
       },
       "label": "next"
+    },
+    {
+      "from": {
+        "workflow_ref": "build",
+        "step_ref": "route"
+      },
+      "to": {
+        "workflow_ref": "build",
+        "step_ref": "wait"
+      },
+      "label": "pause"
+    },
+    {
+      "from": {
+        "workflow_ref": "build",
+        "step_ref": "wait"
+      },
+      "to": {
+        "workflow_ref": "build",
+        "step_ref": "input"
+      },
+      "label": "children_done"
+    },
+    {
+      "from": {
+        "workflow_ref": "build",
+        "step_ref": "input"
+      },
+      "to": {
+        "workflow_ref": "build",
+        "step_ref": "pause"
+      },
+      "label": "needs_pause"
+    },
+    {
+      "from": {
+        "workflow_ref": "build",
+        "step_ref": "pause"
+      },
+      "to": {
+        "workflow_ref": "build",
+        "step_ref": "finish"
+      },
+      "label": "continue"
     },
     {
       "from": {
