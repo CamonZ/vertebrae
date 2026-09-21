@@ -8,6 +8,7 @@ use vertebrae_core::{
 };
 
 use crate::api_types::WorkflowBundleImportResponse;
+use crate::error::SacrumClientError;
 use crate::queries::workflows::IMPORT_WORKFLOW_BUNDLE;
 
 use super::SacrumWorkflowService;
@@ -37,9 +38,30 @@ impl SacrumWorkflowService {
                 }),
                 "importWorkflowBundle",
             )
-            .await?;
+            .await
+            .map_err(map_import_client_error)?;
 
         validate_import_response(&bundle, response)
+    }
+}
+
+fn map_import_client_error(error: SacrumClientError) -> ServiceError {
+    match error {
+        SacrumClientError::HttpError(error) => ServiceError::network_error(format!(
+            "workflow bundle import transport failed; outcome is uncertain: {error}"
+        )),
+        SacrumClientError::ApiError { status, message } => ServiceError::api_error(
+            status,
+            format!("workflow bundle import rejected by Sacrum: {message}"),
+        ),
+        SacrumClientError::GraphqlError { messages, .. } => ServiceError::invalid_input(format!(
+            "workflow bundle import rejected by Sacrum: {}",
+            messages.join("; ")
+        )),
+        SacrumClientError::ConfigError(message) => ServiceError::config_error(message),
+        SacrumClientError::SerializationError(error) => ServiceError::invalid_input(format!(
+            "workflow bundle import response could not be decoded: {error}"
+        )),
     }
 }
 
@@ -481,6 +503,20 @@ mod tests {
             .await
             .expect_err("transport failures must be returned");
         assert!(error.to_string().contains("503"));
+        assert!(matches!(error, ServiceError::ApiError { status: 503, .. }));
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn classifies_transport_errors_as_uncertain_network_failures() {
+        let request_error = reqwest::Client::new()
+            .get("not a URL")
+            .build()
+            .expect_err("invalid URL should fail before any request");
+        let error = map_import_client_error(SacrumClientError::HttpError(request_error));
+
+        assert!(
+            matches!(error, ServiceError::NetworkError(message) if message.contains("uncertain"))
+        );
     }
 }

@@ -26,11 +26,42 @@ vtb workflow show <workflow-id>      # See steps within a workflow
 | `workflow show` | Show workflow details |
 | `workflow update` | Update workflow properties |
 | `workflow delete` | Delete a workflow |
+| `workflow export` | Export a portable workflow bundle |
+| `workflow import` | Preflight and import a portable workflow bundle |
 | `workflow assign` | Assign a task to a workflow |
 | `workflow unassign` | Remove workflow from a task |
 | `workflow transition add` | Create a transition between workflows |
 | `workflow transition list` | List workflow transitions |
 | `workflow transition delete` | Delete a workflow transition |
+
+---
+
+## workflow import
+
+Import a versioned JSON bundle into the active project:
+
+```bash
+vtb workflow import workflows.json
+vtb workflow import workflows.json --dry-run
+vtb workflow import workflows.json --json
+```
+
+The command validates the manifest locally, checks destination workflow names
+using create-only semantics, and submits one Sacrum bulk mutation only after a
+clean preflight. Existing or duplicate workflow names fail; imports never
+overwrite, merge, assign tasks, or delete rows implicitly. `--dry-run` performs
+only read-only checks and reports counts, the create plan, conflicts, proposed
+default status, warnings, and no generated IDs. It does not reserve names or
+guarantee a later commit. Sacrum remains authoritative for project access,
+graph validation, defaults, and races after preflight.
+
+Committed output reports `status: committed` and complete workflow and
+`workflow_ref/step_ref` mappings. JSON output reports `status: dry-run` or
+`committed`; mappings are included only after a successful bulk response.
+Malformed/unreadable files, unsupported versions, duplicate or dangling refs,
+conflicting names, backend rejection, and transport loss return nonzero. The
+CLI does not retry an uncertain non-idempotent import or fall back to
+incremental creation.
 
 ---
 

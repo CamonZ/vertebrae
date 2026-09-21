@@ -95,6 +95,32 @@ fn empty_bundle_and_empty_workflow_are_valid() {
 }
 
 #[test]
+fn name_conflicts_are_case_insensitive_and_create_only() {
+    let mut bundle = WorkflowBundleManifest::empty();
+    bundle
+        .workflows
+        .push(WorkflowManifest::new("first", "Same"));
+    bundle
+        .workflows
+        .push(WorkflowManifest::new("second", "same"));
+
+    let mut existing = Workflow::new("Existing");
+    existing.id = Some("existing-id".to_string());
+    bundle
+        .workflows
+        .push(WorkflowManifest::new("third", "existing"));
+
+    let conflicts = bundle.name_conflicts(&[existing]);
+    assert_eq!(conflicts.len(), 2);
+    assert_eq!(conflicts[0].workflow_ref, "second");
+    assert_eq!(conflicts[1].workflow_ref, "third");
+    assert_eq!(
+        conflicts[1].existing_workflow_id.as_deref(),
+        Some("existing-id")
+    );
+}
+
+#[test]
 fn validation_failures_are_table_driven_and_actionable() {
     let cases: &[ValidationCase] = &[
         (

@@ -1,4 +1,5 @@
 use cucumber::{given, then, when};
+use serde_json::json;
 
 use crate::SmokeWorld;
 
@@ -9,6 +10,145 @@ fn extract_workflow_id(stdout: &str) -> String {
         .unwrap_or_else(|| panic!("unexpected workflow create output: {}", stdout))
         .trim()
         .to_string()
+}
+
+#[when("I stage the built-in workflow bundle fixture")]
+async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
+    let mut fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../core/tests/fixtures/workflow_bundle_v1.json"
+    ))
+    .expect("built-in workflow bundle fixture should be valid JSON");
+    // Sacrum applies stricter graph, persistence, and routing-schema rules.
+    // Keep the shared fixture unchanged for round-trip tests, while making
+    // this live import fixture valid for the backend's import contract.
+    fixture["workflows"][0]["steps"][0]["prompt"] = serde_json::Value::Null;
+    fixture["workflows"][0]["steps"][1]["output_schema"] = json!({
+        "type": "object",
+        "properties": {
+            "transition_to": {"type": "string"},
+            "transition_type": {
+                "type": "string",
+                "enum": ["intra_workflow", "inter_workflow"]
+            },
+            "handoff": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }
+        },
+        "required": ["transition_to", "transition_type", "handoff"],
+        "additionalProperties": false
+    });
+    fixture["workflows"][0]["steps"][2]["output_schema"] = json!({
+        "type": "object",
+        "properties": {
+            "route": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "type": "string",
+                        "enum": ["approved", "rejected"]
+                    },
+                    "handoff": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["result", "handoff"],
+                "additionalProperties": false
+            }
+        },
+        "required": ["route"],
+        "additionalProperties": false
+    });
+    fixture["workflows"][1]["steps"][1]["output_schema"] = json!({
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+    });
+    fixture["workflows"][1]["steps"][0]["step_type"] = json!("execute");
+    let contents = serde_json::to_string(&fixture).expect("workflow fixture should serialize");
+    let path = world.write_temp_file(&contents);
+    world.stored_ids.insert(
+        "workflow_import_path".to_string(),
+        path.display().to_string(),
+    );
+}
+
+#[when("I stage a malformed workflow bundle")]
+async fn stage_malformed_workflow_bundle(world: &mut SmokeWorld) {
+    let path = world.write_temp_file(
+        r#"{"schema_version":1,"workflows":[{"workflow_ref":"broken","name":7}]}"#,
+    );
+    world.stored_ids.insert(
+        "workflow_import_path".to_string(),
+        path.display().to_string(),
+    );
+}
+
+#[when("I import the staged workflow bundle")]
+async fn import_staged_workflow_bundle(world: &mut SmokeWorld) {
+    world
+        .run_vtb_json(&["workflow", "import", "<workflow_import_path>"])
+        .await;
+}
+
+#[when("I import the staged workflow bundle with --dry-run")]
+async fn import_staged_workflow_bundle_dry_run(world: &mut SmokeWorld) {
+    world
+        .run_vtb_json(&["workflow", "import", "<workflow_import_path>", "--dry-run"])
+        .await;
+}
+
+#[when("I import the exported workflow with --dry-run")]
+async fn import_exported_workflow_dry_run(world: &mut SmokeWorld) {
+    let path = world
+        .stored_ids
+        .get("workflow_export_path")
+        .expect("no workflow export path stored")
+        .clone();
+    world
+        .stored_ids
+        .insert("workflow_import_path".to_string(), path);
+    world
+        .run_vtb_json(&["workflow", "import", "<workflow_import_path>", "--dry-run"])
+        .await;
+}
+
+#[then(expr = "the workflow import JSON status should be {string}")]
+async fn workflow_import_json_status_should_be(world: &mut SmokeWorld, expected: String) {
+    assert_eq!(
+        world.last_exit_code, 0,
+        "workflow import failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&world.last_stdout).expect("workflow import should produce JSON");
+    assert_eq!(value["status"], expected);
+}
+
+#[then("the workflow import JSON should contain complete mappings")]
+async fn workflow_import_json_should_contain_complete_mappings(world: &mut SmokeWorld) {
+    let value: serde_json::Value =
+        serde_json::from_str(&world.last_stdout).expect("workflow import should produce JSON");
+    assert_eq!(value["workflow_mappings"].as_object().unwrap().len(), 2);
+    assert_eq!(value["step_mappings"].as_object().unwrap().len(), 2);
+    assert_eq!(value["workflow_count"], 2);
+    assert_eq!(value["step_count"], 5);
+    assert_eq!(value["step_edge_count"], 4);
+    assert_eq!(value["workflow_edge_count"], 2);
+}
+
+#[then("the workflow import JSON should contain no generated mappings")]
+async fn workflow_import_json_should_contain_no_generated_mappings(world: &mut SmokeWorld) {
+    let value: serde_json::Value =
+        serde_json::from_str(&world.last_stdout).expect("workflow import should produce JSON");
+    assert!(value.get("workflow_mappings").is_none());
+    assert!(value.get("step_mappings").is_none());
 }
 
 #[when(expr = "I remember the workflow export stdout for {string}")]

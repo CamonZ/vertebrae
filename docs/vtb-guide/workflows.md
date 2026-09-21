@@ -98,6 +98,39 @@ The default workflow includes ` [default]`; workflows with descriptions append
 `No workflows found`. The global `--json` flag returns the raw workflow-summary
 array, with `id`, `name`, `description`, `step_count`, and `is_default` fields.
 
+### Importing Workflow Bundles
+
+```bash
+vtb workflow import workflows.json
+vtb workflow import workflows.json --dry-run
+vtb workflow import workflows.json --json
+vtb workflow import workflows.json --dry-run --json
+```
+
+Import reads and validates the complete versioned bundle before contacting the
+backend. The destination is always the active project. Imports use create-only
+semantics: workflow names are compared case-insensitively with the destination
+and an existing name, or duplicate name in the bundle, fails preflight. No
+workflow is overwritten or merged implicitly. Invalid JSON, unsupported schema
+versions, duplicate or dangling references, and route targets that do not have
+the required graph edge are rejected before any mutation.
+
+`--dry-run` performs the read-only destination check and reports the destination,
+workflow/step/edge counts, workflow create plan, conflicts, proposed default
+effect, and warnings. It makes zero mutation calls. A dry-run does not reserve
+names or guarantee that a later commit will succeed; Sacrum rechecks project
+access, graph constraints, default behavior, and races during the commit.
+Conflicts return a nonzero exit status in both modes.
+
+Successful commit output distinguishes the committed result and includes every
+generated workflow and fully-qualified `workflow_ref/step_ref` mapping. The
+`--json` result has `status` of `dry-run` or `committed`, plus `create_plan`,
+`conflicts`, `warnings`, and (only after a committed mutation) mapping objects.
+The import is submitted through one Sacrum bulk mutation; the CLI never falls
+back to incremental creation, retries an uncertain non-idempotent submission,
+or deletes destination rows. A backend rejection or transport loss is reported
+as a failed/uncertain import without success mappings.
+
 `vtb workflow show` takes one required positional argument, `<ID>`, which is
 the workflow ID to show. It accepts a case-insensitive full UUID or 8-character
 short ID and has no command-specific flags, short flags, aliases, defaults, or
