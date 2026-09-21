@@ -187,6 +187,20 @@ pub const DELETE_WORKFLOW: &str = r#"
     }
 "#;
 
+pub const IMPORT_WORKFLOW_BUNDLE: &str = r#"
+    mutation ImportWorkflowBundle($project_id: Uuid4!, $bundle: Json!) {
+        importWorkflowBundle(projectId: $project_id, bundle: $bundle) {
+            workflowMappings
+            stepMappings
+            idMappings
+            workflowCount
+            stepCount
+            stepEdgeCount
+            workflowEdgeCount
+        }
+    }
+"#;
+
 pub const CREATE_WORKFLOW_TRANSITION: &str = r#"
     mutation CreateWorkflowTransition(
         $from_workflow_id: Uuid4!,

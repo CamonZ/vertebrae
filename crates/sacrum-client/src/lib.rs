@@ -64,9 +64,9 @@ pub use api_types::{
     PipelineTaskCountsResponse, PipelineWorkflowResponse, PipelineWorkflowTransitionResponse,
     ProjectListResponse, ProjectResponse, SectionResponse, SessionLogResponse,
     StepExecutionResponse, StepTransitionResponse, TaskResponse, TaskRunControlsResponse,
-    TaskRunResponse, TaskRunTraceResponse, WorkflowExport, WorkflowExportSnapshot,
-    WorkflowExportStep, WorkflowExportStepTransition, WorkflowExportTransition, WorkflowResponse,
-    WorkflowStepResponse, WorkflowTransitionResponse,
+    TaskRunResponse, TaskRunTraceResponse, WorkflowBundleImportResponse, WorkflowExport,
+    WorkflowExportSnapshot, WorkflowExportStep, WorkflowExportStepTransition,
+    WorkflowExportTransition, WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse,
 };
 pub use artifact_service::SacrumArtifactService;
 pub use client::{GraphqlClient, with_fragments};

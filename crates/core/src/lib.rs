@@ -79,9 +79,9 @@ pub use workflow_bundle::{
     WorkflowManifest, WorkflowRef, parse_manifest, symbolize_route_config,
 };
 pub use workflow_service::{
-    AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo,
-    WorkflowMutationCallback, WorkflowMutationEvent, WorkflowService, WorkflowStepInput,
-    WorkflowSummary,
+    AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowBundleImportInput,
+    WorkflowBundleImportResult, WorkflowInfo, WorkflowMutationCallback, WorkflowMutationEvent,
+    WorkflowService, WorkflowStepInput, WorkflowSummary,
 };
 
 // Re-export domain models for convenience
