@@ -299,7 +299,10 @@ mod tests {
                 "build": {
                     "finish": STEP_A_ID,
                     "route": "55555555-5555-5555-5555-555555555555",
-                    "start": "66666666-6666-6666-6666-666666666666"
+                    "start": "66666666-6666-6666-6666-666666666666",
+                    "wait": "99999999-9999-9999-9999-999999999999",
+                    "input": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    "pause": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
                 },
                 "review": {
                     "done": "77777777-7777-7777-7777-777777777777",
@@ -307,8 +310,8 @@ mod tests {
                 }
             },
             "workflowCount": 2,
-            "stepCount": 5,
-            "stepEdgeCount": 4,
+            "stepCount": 8,
+            "stepEdgeCount": 8,
             "workflowEdgeCount": 2
         })
     }

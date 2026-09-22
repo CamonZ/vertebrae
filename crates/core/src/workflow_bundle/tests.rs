@@ -64,7 +64,7 @@ fn canonicalization_uses_display_and_step_order_without_reordering_config_arrays
             .iter()
             .map(|step| step.step_ref.as_str())
             .collect::<Vec<_>>(),
-        vec!["start", "route", "finish"]
+        vec!["start", "route", "finish", "wait", "input", "pause"]
     );
     assert_eq!(
         canonical.workflows[0].steps[0].agents,
@@ -142,7 +142,7 @@ fn validation_failures_are_table_driven_and_actionable() {
                 let step = bundle.workflows[0].steps[0].clone();
                 bundle.workflows[0].steps.push(step);
             },
-            "steps[3].step_ref",
+            "steps[6].step_ref",
         ),
         (
             "foreign initial step",
@@ -157,7 +157,7 @@ fn validation_failures_are_table_driven_and_actionable() {
                 let edge = bundle.step_edges[0].clone();
                 bundle.step_edges.push(edge);
             },
-            "step_edges[4]",
+            "step_edges[8]",
         ),
         (
             "cross-workflow step edge",
