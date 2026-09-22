@@ -244,6 +244,13 @@ mod tests {
                     supports_personality: None,
                 },
                 LocalChatModelOption {
+                    id: "claude-opus-5-5".to_string(),
+                    label: "Claude Opus 5.5".to_string(),
+                    supported_reasoning_effort_ids: None,
+                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                    supports_personality: None,
+                },
+                LocalChatModelOption {
                     id: "claude-opus-4-8".to_string(),
                     label: "Claude Opus 4.8".to_string(),
                     supported_reasoning_effort_ids: None,
@@ -280,6 +287,11 @@ mod tests {
                     ClaudeModelOption {
                         id: "claude-opus-5".to_string(),
                         label: "Claude Opus 5".to_string(),
+                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                    },
+                    ClaudeModelOption {
+                        id: "claude-opus-5-5".to_string(),
+                        label: "Claude Opus 5.5".to_string(),
                         supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                     },
                     ClaudeModelOption {

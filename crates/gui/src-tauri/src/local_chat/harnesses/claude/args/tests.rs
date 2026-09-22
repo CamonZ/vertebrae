@@ -35,6 +35,11 @@ fn supported_claude_model_catalog_uses_expected_aliases_and_default() {
                     supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                 },
                 ClaudeModelOption {
+                    id: "claude-opus-5-5".to_string(),
+                    label: "Claude Opus 5.5".to_string(),
+                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                },
+                ClaudeModelOption {
                     id: "claude-opus-4-8".to_string(),
                     label: "Claude Opus 4.8".to_string(),
                     supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
@@ -51,6 +56,7 @@ fn resolve_requested_claude_model_accepts_supported_ids() {
         (" Opus ", "opus"),
         ("HAIKU", "haiku"),
         ("fable", "fable"),
+        (" CLAUDE-OPUS-5-5 ", "claude-opus-5-5"),
     ] {
         assert_eq!(
             resolve_requested_claude_model(Some(requested.to_string()), false),

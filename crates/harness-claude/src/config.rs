@@ -20,6 +20,7 @@ pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
     ("haiku", "Haiku"),
     ("fable", "Fable"),
     ("claude-opus-5", "Claude Opus 5"),
+    ("claude-opus-5-5", "Claude Opus 5.5"),
     ("claude-opus-4-8", "Claude Opus 4.8"),
 ];
 
@@ -355,13 +356,22 @@ mod tests {
     use tempfile::tempdir;
     use vertebrae_harness_core::RequestConfig;
 
-    use super::{ClaudeLaunchMode, ClaudeProviderConfig, claude_model_supports_fast_mode};
+    use super::{
+        ClaudeLaunchMode, ClaudeProviderConfig, DEFAULT_CLAUDE_MODELS,
+        claude_model_supports_fast_mode,
+    };
+
+    #[test]
+    fn default_model_catalog_includes_opus_5_5() {
+        assert!(DEFAULT_CLAUDE_MODELS.contains(&("claude-opus-5-5", "Claude Opus 5.5")));
+    }
 
     #[test]
     fn fast_mode_only_matches_current_supported_opus_models() {
         for model in [
             "opus",
             "claude-opus-5",
+            "claude-opus-5-5",
             "claude-opus-5-20260101",
             "claude-opus-4-8",
             "claude-opus-4-8-20260101",
@@ -399,5 +409,36 @@ mod tests {
             .expect("append-system-prompt flag");
         assert_eq!(spec.args[flag + 1], "reference contract");
         assert!(spec.args.iter().any(|arg| arg == "--output-format"));
+    }
+
+    #[test]
+    fn command_spec_forwards_opus_5_5_for_one_shot_execution() {
+        let directory = tempdir().expect("temporary directory");
+        let executable = directory.path().join("claude");
+        File::create(&executable).expect("placeholder executable");
+        let config = ClaudeProviderConfig {
+            executable: Some(executable),
+            ..Default::default()
+        };
+        let request = RequestConfig {
+            model: Some("claude-opus-5-5".into()),
+            ..Default::default()
+        };
+
+        let spec = config
+            .command_spec(
+                ClaudeLaunchMode::OneShot {
+                    prompt: "do work".into(),
+                },
+                &request,
+            )
+            .expect("command spec");
+
+        let model_flag = spec
+            .args
+            .iter()
+            .position(|arg| arg == "--model")
+            .expect("model flag");
+        assert_eq!(spec.args[model_flag + 1], "claude-opus-5-5");
     }
 }
