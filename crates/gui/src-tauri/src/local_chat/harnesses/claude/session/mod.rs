@@ -12,12 +12,14 @@ use std::{
 use async_trait::async_trait;
 use tauri::Manager;
 use tokio::sync::RwLock;
+use tracing::Instrument;
 use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
-    interrupt_close_and_await, EventSink, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
-    ProviderResumeId, ProviderThreadRef, RequestConfig, SendTurnRequest, SessionCloseStatus,
-    SessionHandle, SessionId, SpeedTier, StartSessionRequest, StreamId, TurnId,
+    interrupt_close_and_await, CompletionStatus, EventSink, HarnessError, HarnessEventPayloadV1,
+    HarnessEventV1, ProviderResumeId, ProviderThreadRef, RequestConfig, SendTurnRequest,
+    SessionCloseStatus, SessionHandle, SessionId, SpeedTier, StartSessionRequest, StreamId, TurnId,
+    TurnInputProvenance,
 };
 
 use crate::commands::AppState;
@@ -33,8 +35,10 @@ use crate::local_chat::{
     LocalChatSessionErrorEvent, LocalChatSessionWarningEvent, CHAT_REFERENCE_INSTRUCTIONS,
 };
 use crate::shell_environment::{user_shell_environment, ShellEnvironment};
+use crate::telemetry;
 use crate::types::PermissionMode;
 use vertebrae_installer::{resolve_claude_plugin_dir, ClaudePluginDirResolution};
+use vertebrae_sacrum_client::ObservabilitySubsystem;
 
 type RuntimeFactory = dyn Fn(
         HarnessFactoryConfig,
@@ -449,6 +453,26 @@ impl EventSink for ClaudeGuiEventSink {
             provider_sequence,
             payload,
         } = event;
+        if let HarnessEventPayloadV1::TurnInput(input) = &payload {
+            if input.provenance == TurnInputProvenance::Human {
+                let session_id = correlation
+                    .session_id
+                    .as_ref()
+                    .map(SessionId::as_str)
+                    .unwrap_or(&self.backend_session_id);
+                let turn_id = correlation.turn_id.as_ref().map(TurnId::as_str);
+                let timestamp = timestamp.to_rfc3339();
+                telemetry::record_message_received(
+                    "live_connection",
+                    session_id,
+                    input.thread_id.as_str(),
+                    turn_id,
+                    provider_sequence.or(Some(sequence)),
+                    Some(&timestamp),
+                    &input.content,
+                );
+            }
+        }
         match payload {
             HarnessEventPayloadV1::SessionClosed(outcome) => {
                 let _lifecycle = self.lifecycle_gate.lock().await;
@@ -810,7 +834,8 @@ impl ClaudeSessionRuntime {
             .initial_prompt
             .filter(|prompt| !prompt.trim().is_empty())
         {
-            if let Err(error) = send_turn(&handle, &active_turn, prompt).await {
+            if let Err(error) = send_turn(&backend_session_id, &handle, &active_turn, prompt).await
+            {
                 let closing_session = self.sessions.write().await.begin_close(&backend_session_id);
                 if let Some(session) = closing_session {
                     let closing_session = ClosingSession {
@@ -853,7 +878,7 @@ impl ClaudeSessionRuntime {
             .get(session_id)
             .map(|session| (session.handle.clone(), session.active_turn.clone()))
             .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
-        send_turn(&handle, &active_turn, content.to_string())
+        send_turn(session_id, &handle, &active_turn, content.to_string())
             .await
             .map_err(send_error)
     }
@@ -1195,36 +1220,116 @@ fn output_style_name(contents: &str) -> Option<String> {
 }
 
 async fn send_turn(
+    session_id: &str,
     handle: &Arc<dyn SessionHandle>,
     active_turn: &Arc<Mutex<Option<Arc<dyn vertebrae_harness_core::TurnHandle>>>>,
     content: String,
 ) -> Result<(), HarnessError> {
-    let turn = handle
+    let requested_turn_id = TurnId::new(uuid::Uuid::new_v4().to_string());
+    let span = if telemetry::traces_enabled(ObservabilitySubsystem::ClaudeCode) {
+        let span = tracing::info_span!(
+            target: "vertebrae.claude_code.local_chat",
+            "local_chat.send_message",
+            session.id = session_id,
+            turn.id = %requested_turn_id,
+            message.content_len = content.len(),
+            send.outcome = tracing::field::Empty,
+            turn.outcome = tracing::field::Empty,
+        );
+        span
+    } else {
+        tracing::Span::none()
+    };
+    let turn = match handle
         .send(SendTurnRequest {
-            turn_id: TurnId::new(uuid::Uuid::new_v4().to_string()),
+            turn_id: requested_turn_id.clone(),
             content,
             output_schema: None,
         })
-        .await?;
+        .instrument(span.clone())
+        .await
+    {
+        Ok(turn) => {
+            span.record("send.outcome", "accepted");
+            tracing::info!(
+                target: "vertebrae.claude_code",
+                session_id,
+                turn_id = %turn.turn_id(),
+                event_name = "turn.submitted",
+                outcome = "accepted",
+                "Claude local chat message accepted by the harness"
+            );
+            telemetry::record_message_outcome("live_submission", "accepted");
+            turn
+        }
+        Err(error) => {
+            span.record("send.outcome", "rejected");
+            tracing::warn!(
+                target: "vertebrae.claude_code",
+                session_id,
+                turn_id = %requested_turn_id,
+                event_name = "turn.submitted",
+                outcome = "rejected",
+                "Claude local chat message was not accepted by the harness"
+            );
+            telemetry::record_message_outcome("live_submission", "rejected");
+            return Err(error);
+        }
+    };
     active_turn
         .lock()
         .map_err(|_| HarnessError::Operation("Claude turn state is poisoned".into()))?
         .replace(turn.clone());
     let active_turn = active_turn.clone();
     let turn_id = turn.turn_id().clone();
-    tokio::spawn(async move {
-        if let Err(error) = turn.await_outcome().await {
-            log::warn!("Claude harness turn ended without an outcome: {}", error);
-        }
-        if let Ok(mut active) = active_turn.lock() {
-            if active
-                .as_ref()
-                .is_some_and(|candidate| candidate.turn_id() == &turn_id)
-            {
-                active.take();
+    let metric_session_id = session_id.to_string();
+    let outcome_span = span.clone();
+    tokio::spawn(
+        async move {
+            match turn.await_outcome().await {
+                Ok(outcome) => {
+                    let status = match outcome.status {
+                        CompletionStatus::Completed => "completed",
+                        CompletionStatus::Failed => "failed",
+                        CompletionStatus::Interrupted => "interrupted",
+                        CompletionStatus::Cancelled => "cancelled",
+                    };
+                    outcome_span.record("turn.outcome", status);
+                    tracing::info!(
+                        target: "vertebrae.claude_code",
+                        session_id = %metric_session_id,
+                        turn_id = %turn_id,
+                        event_name = "turn.finished",
+                        outcome = status,
+                        "Claude local chat turn finished"
+                    );
+                    telemetry::record_message_outcome("live_turn", status);
+                }
+                Err(error) => {
+                    outcome_span.record("turn.outcome", "error");
+                    tracing::warn!(
+                        target: "vertebrae.claude_code",
+                        session_id = %metric_session_id,
+                        turn_id = %turn_id,
+                        event_name = "turn.finished",
+                        outcome = "error",
+                        "Claude local chat turn ended without an outcome"
+                    );
+                    telemetry::record_message_outcome("live_turn", "error");
+                    log::warn!("Claude harness turn ended without an outcome: {}", error);
+                }
+            }
+            if let Ok(mut active) = active_turn.lock() {
+                if active
+                    .as_ref()
+                    .is_some_and(|candidate| candidate.turn_id() == &turn_id)
+                {
+                    active.take();
+                }
             }
         }
-    });
+        .instrument(span),
+    );
     Ok(())
 }
 

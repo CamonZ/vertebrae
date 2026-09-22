@@ -71,8 +71,9 @@ pub use api_types::{
 pub use artifact_service::SacrumArtifactService;
 pub use client::{GraphqlClient, with_fragments};
 pub use config::{
-    GlobalSacrumSection, ProjectSection, SacrumConfig, VertebraeConfigFile, config_path,
-    load_config_file, register_project, save_config_file, unregister_project,
+    GlobalSacrumSection, ObservabilityConfig, ObservabilityLevel, ObservabilityProtocol,
+    ObservabilitySignal, ObservabilitySubsystem, ProjectSection, SacrumConfig, VertebraeConfigFile,
+    config_path, load_config_file, register_project, save_config_file, unregister_project,
 };
 pub use daemon_service::{
     DaemonBootstrap, DaemonCredentialMetadata, DaemonEnrollmentMetadata, DaemonRename,

@@ -9,6 +9,7 @@ pub(crate) mod local_backend;
 pub(crate) mod local_chat;
 pub mod project_config;
 pub(crate) mod shell_environment;
+pub(crate) mod telemetry;
 pub mod types;
 pub mod update;
 pub mod websocket_client;
@@ -231,6 +232,18 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
 
+            let observability_config = match vertebrae_sacrum_client::load_config_file() {
+                Ok(config) => config.observability,
+                Err(error) => {
+                    log::warn!("Failed to load OpenTelemetry settings; collection is disabled: {error}");
+                    vertebrae_sacrum_client::ObservabilityConfig::default()
+                }
+            };
+            let telemetry_guard = tauri::async_runtime::block_on(async move {
+                telemetry::TelemetryGuard::initialize(observability_config)
+            });
+            app.manage(telemetry_guard);
+
             // Keep the provider-neutral managed skill bundle outside project
             // initialization. Provider integrations discover this app-data
             // root directly and never need project-local skill links.
@@ -368,6 +381,11 @@ pub fn run() {
                 tauri::async_runtime::block_on(async {
                     socket.lock().await.shutdown().await;
                 });
+
+                if let Some(telemetry) = app_handle.try_state::<telemetry::TelemetryGuard>() {
+                    log::info!("[SHUTDOWN] Flushing configured OpenTelemetry exporters");
+                    telemetry.shutdown();
+                }
             }
         })
 }

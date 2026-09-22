@@ -469,6 +469,8 @@ mod tests {
                     path: "/home/user/vertebrae".to_string(),
                 },
             )]),
+
+            observability: Default::default(),
         }
     }
 
