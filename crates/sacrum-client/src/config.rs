@@ -33,6 +33,73 @@ pub struct VertebraeConfigFile {
     /// Per-project configuration keyed by slug
     #[serde(default)]
     pub projects: BTreeMap<String, ProjectSection>,
+    #[serde(default, skip_serializing_if = "ObservabilityConfig::is_default")]
+    pub observability: ObservabilityConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ObservabilityConfig {
+    pub enabled: bool,
+    pub endpoint: String,
+    pub protocol: ObservabilityProtocol,
+    pub signals: Vec<ObservabilitySignal>,
+    pub subsystems: Vec<ObservabilitySubsystem>,
+    pub level: ObservabilityLevel,
+    pub capture_message_content: bool,
+}
+
+impl Default for ObservabilityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: "http://localhost:4318".to_string(),
+            protocol: ObservabilityProtocol::HttpProtobuf,
+            signals: Vec::new(),
+            subsystems: Vec::new(),
+            level: ObservabilityLevel::Info,
+            capture_message_content: false,
+        }
+    }
+}
+
+impl ObservabilityConfig {
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ObservabilityProtocol {
+    #[serde(rename = "http/protobuf")]
+    HttpProtobuf,
+    Grpc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservabilitySignal {
+    Traces,
+    Metrics,
+    Logs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservabilitySubsystem {
+    LocalChat,
+    ClaudeCode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservabilityLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
 }
 
 /// Global sacrum settings
@@ -535,6 +602,8 @@ mod tests {
                     },
                 ),
             ]),
+
+            observability: Default::default(),
         };
 
         // CWD inside child-project should match the child (longer prefix)
@@ -561,6 +630,8 @@ mod tests {
                     path: "/home/user/code/myproject".to_string(),
                 },
             )]),
+
+            observability: Default::default(),
         };
 
         let cwd = std::path::Path::new("/tmp/unrelated");
@@ -585,6 +656,8 @@ mod tests {
                     path: "/home/user/code/myproject".to_string(),
                 },
             )]),
+
+            observability: Default::default(),
         };
 
         let cwd = std::path::Path::new("/home/user/code/myproject");
@@ -639,6 +712,8 @@ path = "/Users/test/vertebrae"
                     path: "/Users/test/code/vertebrae".to_string(),
                 },
             )]),
+
+            observability: Default::default(),
         };
 
         let serialized = toml::to_string_pretty(&config).unwrap();
@@ -735,6 +810,8 @@ path = "/Users/test/other"
                     path: cwd,
                 },
             )]),
+
+            observability: Default::default(),
         }
     }
 
@@ -821,6 +898,8 @@ path = "/Users/test/other"
                 token: Some("some-token".to_string()),
             },
             projects: BTreeMap::new(),
+
+            observability: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
 
@@ -844,6 +923,8 @@ path = "/Users/test/other"
                 token: None,
             },
             projects: BTreeMap::new(),
+
+            observability: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
 
@@ -1131,6 +1212,8 @@ path = "/Users/test/other"
                     path: repo.to_string_lossy().to_string(),
                 },
             )]),
+
+            observability: Default::default(),
         };
 
         let _cwd = CurrentDirGuard::push(&subdir);
@@ -1158,6 +1241,8 @@ path = "/Users/test/other"
                     path: "/some/path".to_string(),
                 },
             )]),
+
+            observability: Default::default(),
         }
     }
 
@@ -1218,6 +1303,8 @@ path = "/Users/test/other"
                 token: None,
             },
             projects: BTreeMap::new(),
+
+            observability: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config);
         assert!(result.is_err());

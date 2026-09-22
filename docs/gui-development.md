@@ -89,6 +89,40 @@ never on the adapter crates directly.
 | `permissions.rs` | Permission-mode translation and the `vtb-gate` prompt bridge |
 | `manager.rs` | Session registry and pane/session bookkeeping |
 
+### Opt-in OpenTelemetry collection
+
+The GUI reads telemetry settings from `[observability]` in the shared
+`config.toml` file at startup. Exporters remain off by default. When the local
+SigNoz OTLP HTTP NodePort (`30418`) is reachable from the host at `localhost`,
+add:
+
+```toml
+[observability]
+enabled = true
+endpoint = "http://localhost:30418"
+protocol = "http/protobuf"
+signals = ["traces", "metrics", "logs"]
+subsystems = ["local_chat", "claude_code"]
+level = "info"
+capture_message_content = true
+```
+
+`protocol` can also be `grpc` (the local cluster exposes it on NodePort
+`30417`, or a standard collector listener uses port `4317`). HTTP/protobuf uses
+the configured base endpoint and sends each signal to its OTLP path. `signals`
+accepts `traces`, `metrics`, and `logs`;
+`subsystems` accepts `local_chat` and `claude_code` for the current
+instrumentation. Restart the GUI after changing this file. Message bodies are
+off by default. Setting
+`capture_message_content = true` includes bodies in traces, truncated at 32 KiB;
+set it to `false` to retain message metadata without text.
+
+Live Claude input events and human messages reconstructed from JSONL transcript
+pages include session, thread, turn, source sequence, timestamp, and origin
+attributes. A separate send span records whether Claude accepted the write and
+the terminal turn outcome. The message event counter uses only fixed origin and
+outcome labels.
+
 Adding a provider therefore means adding a `harnesses/<provider>/` module that
 supplies the model catalog and session creation. Event translation stays in
 `harnesses/shared.rs` because it works on the neutral `HarnessEventV1` stream.

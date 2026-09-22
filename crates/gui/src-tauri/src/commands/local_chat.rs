@@ -9,7 +9,8 @@ use std::{
 use vertebrae_core::Provider;
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory};
 use vertebrae_harness_core::{
-    ProviderResumeId, StreamId, TranscriptReplayPageRequest, TranscriptReplayRequest,
+    HarnessEventPayloadV1, ProviderResumeId, StreamId, TranscriptReplayPageRequest,
+    TranscriptReplayRequest, TurnInputProvenance,
 };
 
 /// Open a validated local-chat file reference with the operating system's
@@ -386,6 +387,8 @@ pub async fn load_local_chat_session_replay(
         LocalChatHarnessKind::Claude => Provider::Anthropic,
         LocalChatHarnessKind::Codex => Provider::Openai,
     };
+    let claude_local_chat = input.harness == LocalChatHarnessKind::Claude;
+    let session_id = input.session_id.clone();
     let request = TranscriptReplayRequest {
         provider_resume_id: ProviderResumeId::new(provider_resume_id.clone()),
         stream_id: StreamId::new(format!("local-replay/{}", input.session_id)),
@@ -413,6 +416,29 @@ pub async fn load_local_chat_session_replay(
     let events = replay
         .as_ref()
         .map(|page| {
+            if claude_local_chat {
+                for event in &page.events {
+                    if let HarnessEventPayloadV1::TurnInput(turn_input) = &event.payload {
+                        if turn_input.provenance == TurnInputProvenance::Human {
+                            let timestamp = event.timestamp.to_rfc3339();
+                            crate::telemetry::record_message_received(
+                                "persisted_jsonl",
+                                event
+                                    .correlation
+                                    .session_id
+                                    .as_ref()
+                                    .map(|id| id.as_str())
+                                    .unwrap_or(&session_id),
+                                turn_input.thread_id.as_str(),
+                                event.correlation.turn_id.as_ref().map(|id| id.as_str()),
+                                event.provider_sequence.or(Some(event.sequence)),
+                                Some(&timestamp),
+                                &turn_input.content,
+                            );
+                        }
+                    }
+                }
+            }
             page.events
                 .iter()
                 .map(serde_json::to_string)

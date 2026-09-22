@@ -693,6 +693,8 @@ mod tests {
                     path: registered.to_string_lossy().to_string(),
                 },
             )]),
+
+            observability: Default::default(),
         };
 
         ensure_project_slug_available_for_path(&config, "duplicate", &registered).unwrap();
@@ -737,6 +739,8 @@ mod tests {
                 token: None,
             },
             projects: BTreeMap::new(),
+
+            observability: Default::default(),
         })
         .unwrap();
         let custom_status = sacrum_config_status().await.unwrap();
@@ -808,6 +812,8 @@ mod tests {
                     path: registered.to_string_lossy().to_string(),
                 },
             )]),
+
+            observability: Default::default(),
         })
         .unwrap();
 
@@ -845,6 +851,8 @@ mod tests {
                 token: Some("sac_valid-token".to_string()),
             },
             projects: BTreeMap::new(),
+
+            observability: Default::default(),
         })
         .unwrap();
 
@@ -897,6 +905,8 @@ mod tests {
                 token: Some("sac_valid-token".to_string()),
             },
             projects: BTreeMap::new(),
+
+            observability: Default::default(),
         })
         .unwrap();
 
