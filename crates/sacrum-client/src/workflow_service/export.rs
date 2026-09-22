@@ -18,12 +18,46 @@ use crate::queries::workflows::{
 
 use super::SacrumWorkflowService;
 
+fn validate_workflow_selection(workflow_ids: &[String]) -> ServiceResult<()> {
+    if workflow_ids.is_empty() {
+        return Err(ServiceError::invalid_input(
+            "workflow export requires at least one selected workflow ID",
+        ));
+    }
+
+    let unique_ids: HashSet<&str> = workflow_ids.iter().map(String::as_str).collect();
+    if unique_ids.len() != workflow_ids.len() {
+        return Err(ServiceError::invalid_input(
+            "workflow export contains duplicate workflow IDs",
+        ));
+    }
+
+    Ok(())
+}
+
 impl SacrumWorkflowService {
     pub async fn export_workflow_bundle(
         &self,
         workflow_id: Option<&str>,
     ) -> ServiceResult<WorkflowBundleManifest> {
-        let snapshot = self.export_workflow_snapshot(workflow_id).await?;
+        let workflow_ids = workflow_id.map(|workflow_id| vec![workflow_id.to_string()]);
+        self.export_workflow_bundle_selected(workflow_ids.as_deref())
+            .await
+    }
+
+    pub async fn export_workflow_bundle_for(
+        &self,
+        workflow_ids: &[String],
+    ) -> ServiceResult<WorkflowBundleManifest> {
+        self.export_workflow_bundle_selected(Some(workflow_ids))
+            .await
+    }
+
+    async fn export_workflow_bundle_selected(
+        &self,
+        workflow_ids: Option<&[String]>,
+    ) -> ServiceResult<WorkflowBundleManifest> {
+        let snapshot = self.export_workflow_snapshot_selected(workflow_ids).await?;
         snapshot_to_bundle(&snapshot)
     }
 
@@ -39,11 +73,25 @@ impl SacrumWorkflowService {
         &self,
         workflow_id: Option<&str>,
     ) -> ServiceResult<WorkflowExportSnapshot> {
+        let workflow_ids = workflow_id.map(|workflow_id| vec![workflow_id.to_string()]);
+        self.export_workflow_snapshot_selected(workflow_ids.as_deref())
+            .await
+    }
+
+    async fn export_workflow_snapshot_selected(
+        &self,
+        workflow_ids: Option<&[String]>,
+    ) -> ServiceResult<WorkflowExportSnapshot> {
         let fragments = [WORKFLOW_EXPORT_FIELDS, WORKFLOW_EXPORT_STEP_FIELDS];
-        let workflows = match workflow_id {
-            Some(workflow_id) => {
+        let workflows = match workflow_ids {
+            Some(workflow_ids) => {
+                validate_workflow_selection(workflow_ids)?;
                 let query = with_fragments(EXPORT_WORKFLOW, &fragments);
-                vec![self.read_export_workflow(&query, workflow_id).await?]
+                let mut workflows = Vec::with_capacity(workflow_ids.len());
+                for workflow_id in workflow_ids {
+                    workflows.push(self.read_export_workflow(&query, workflow_id).await?);
+                }
+                workflows
             }
             None => {
                 let workflow_ids: Vec<ShortIdResponse> = self

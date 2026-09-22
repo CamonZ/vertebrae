@@ -567,6 +567,33 @@ async fn workflow_export_stdout_should_be_valid(world: &mut SmokeWorld) {
     assert!(bundle["workflows"].is_array());
 }
 
+#[then("the workflow export stdout should contain both selected workflows")]
+async fn workflow_export_stdout_should_contain_both_selected_workflows(world: &mut SmokeWorld) {
+    let bundle: serde_json::Value =
+        serde_json::from_str(&world.last_stdout).expect("workflow export should be valid JSON");
+    let workflows = bundle["workflows"]
+        .as_array()
+        .expect("workflow bundle should contain a workflow array");
+    assert_eq!(
+        workflows.len(),
+        2,
+        "bundle should contain exactly two selected workflows"
+    );
+
+    let mut names = workflows
+        .iter()
+        .map(|workflow| {
+            workflow["name"]
+                .as_str()
+                .expect("each workflow should have a name")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(names, vec!["Selected First WF", "Selected Second WF"]);
+    assert_eq!(bundle["workflow_edges"].as_array().unwrap().len(), 1);
+}
+
 #[then("the workflow export stdout should not contain persistence fields")]
 async fn workflow_export_stdout_should_not_contain_persistence_fields(world: &mut SmokeWorld) {
     for field in [
