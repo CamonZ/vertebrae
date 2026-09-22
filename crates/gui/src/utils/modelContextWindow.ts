@@ -8,10 +8,11 @@
  * Keys are matched as case-insensitive substrings against the model name
  * reported by Claude CLI (e.g. "claude-opus-4-7-20250115").
  */
-// Each model appears twice: hyphen format (4-7) for date-stamped CLI names
-// like "claude-opus-4-7-20250115", and dot format (4.7) for aliased names.
-// Both are needed because Claude CLI uses both in different output contexts.
+// Include both hyphenated model IDs and dot-form aliases because Claude CLI
+// uses both formats in different output contexts.
 const MODEL_CONTEXT_WINDOW: Array<{ pattern: string; max: number }> = [
+  { pattern: "opus-5-5", max: 1_000_000 },
+  { pattern: "opus-5.5", max: 1_000_000 },
   { pattern: "opus-4-8", max: 1_000_000 },
   { pattern: "opus-4.8", max: 1_000_000 },
   { pattern: "opus-4-7", max: 1_000_000 },

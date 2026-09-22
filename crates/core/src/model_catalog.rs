@@ -510,6 +510,7 @@ mod tests {
     #[test]
     fn classify_anthropic_prefixes() {
         assert_eq!(classify_model("claude-opus-4-5"), Some(Provider::Anthropic));
+        assert_eq!(classify_model("claude-opus-5-5"), Some(Provider::Anthropic));
         assert_eq!(
             classify_model("claude-3-5-sonnet"),
             Some(Provider::Anthropic)
@@ -604,6 +605,7 @@ mod tests {
     fn validate_accepts_matching_pair() {
         assert!(validate_provider_model(Provider::Anthropic, Some("opus")).is_ok());
         assert!(validate_provider_model(Provider::Anthropic, Some("claude-opus-4-5")).is_ok());
+        assert!(validate_provider_model(Provider::Anthropic, Some("claude-opus-5-5")).is_ok());
         assert!(validate_provider_model(Provider::Anthropic, Some("fable")).is_ok());
         assert!(validate_provider_model(Provider::Openai, Some("gpt-4o")).is_ok());
         assert!(validate_provider_model(Provider::Openai, Some("o3-mini")).is_ok());
