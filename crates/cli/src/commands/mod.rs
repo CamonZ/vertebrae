@@ -545,9 +545,8 @@ impl Command {
                 | workflow::WorkflowCommand::List(_)
                 | workflow::WorkflowCommand::Import(_) => {}
                 workflow::WorkflowCommand::Export(c) => {
-                    if let Some(workflow) = &mut c.workflow {
-                        let resolved = resolve_workflow_id(workflow, services).await?;
-                        *workflow = resolved;
+                    for workflow_id in &mut c.workflow {
+                        *workflow_id = resolve_workflow_id(workflow_id, services).await?;
                     }
                 }
                 workflow::WorkflowCommand::Unassign(c) => {

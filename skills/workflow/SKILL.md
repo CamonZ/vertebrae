@@ -40,15 +40,16 @@ vtb workflow show <workflow-id>      # See steps within a workflow
 
 ```bash
 vtb workflow export --workflow <workflow-id> --output workflow.json
+vtb workflow export --workflow <workflow-id-1> --workflow <workflow-id-2> --output selected-workflows.json
 vtb workflow export --all --output workflows.json
 ```
 
-Export selection is explicit: choose exactly one workflow UUID with
-`--workflow <workflow-id>` or choose the complete project graph with `--all`.
-The selector does not accept workflow names, and exporting a named subset is
-not currently supported. A single-workflow export is a closed bundle: it fails
-when outgoing workflow transitions or route targets refer to another workflow;
-use `--all` when the selected graph has cross-workflow references.
+Choose exactly one export mode: repeat `--workflow <workflow-id>` to select one
+or more workflow IDs for a single bundle, or use `--all` to export every
+workflow in the active project. Selection is by ID; workflow names are not
+accepted. Selected exports are closed bundles, so workflow transitions and
+route targets must stay within the selected set. If a reference points to an
+omitted workflow, add that workflow ID or use `--all`.
 
 ## workflow import
 

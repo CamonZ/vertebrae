@@ -189,6 +189,13 @@ impl WorkflowService for SacrumWorkflowService {
         SacrumWorkflowService::export_workflow_bundle(self, workflow_id).await
     }
 
+    async fn export_workflow_bundle_for(
+        &self,
+        workflow_ids: &[String],
+    ) -> ServiceResult<vertebrae_core::WorkflowBundleManifest> {
+        SacrumWorkflowService::export_workflow_bundle_for(self, workflow_ids).await
+    }
+
     async fn import_workflow_bundle(
         &self,
         bundle: WorkflowBundleImportInput,
@@ -1146,6 +1153,114 @@ mod tests {
         );
         assert_eq!(snapshot.workflows[0].workflow_steps.len(), 0);
         assert_eq!(server.received_requests().await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_export_selected_workflows_includes_internal_edges_and_is_deterministic() {
+        let server = MockServer::start().await;
+        let mut first = gql_empty_export_workflow("wf-1", "First");
+        first["transitions"] = json!([{
+            "id": "handoff",
+            "to_workflow_id": "wf-2",
+            "target_step_id": null,
+            "label": "handoff"
+        }]);
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("\"id\":\"wf-1\""))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflow": first}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("\"id\":\"wf-2\""))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflow": gql_empty_export_workflow("wf-2", "Second")}
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let workflow_ids = vec!["wf-1".to_string(), "wf-2".to_string()];
+        let bundle = service
+            .export_workflow_bundle_for(&workflow_ids)
+            .await
+            .unwrap();
+        bundle.validate().unwrap();
+        assert_eq!(bundle.workflows.len(), 2);
+        assert_eq!(bundle.workflow_edges.len(), 1);
+        let canonical_json = bundle.canonical_json().unwrap();
+
+        let reversed_ids = vec!["wf-2".to_string(), "wf-1".to_string()];
+        let reversed_bundle = service
+            .export_workflow_bundle_for(&reversed_ids)
+            .await
+            .unwrap();
+        assert_eq!(reversed_bundle.canonical_json().unwrap(), canonical_json);
+        assert_eq!(server.received_requests().await.unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_export_selected_workflows_rejects_references_outside_the_selection() {
+        let server = MockServer::start().await;
+        let mut first = gql_empty_export_workflow("wf-1", "First");
+        first["transitions"] = json!([{
+            "id": "handoff",
+            "to_workflow_id": "wf-3",
+            "target_step_id": null,
+            "label": "handoff"
+        }]);
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("\"id\":\"wf-1\""))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflow": first}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("\"id\":\"wf-2\""))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"workflow": gql_empty_export_workflow("wf-2", "Second")}
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let workflow_ids = vec!["wf-1".to_string(), "wf-2".to_string()];
+        let result = service.export_workflow_bundle_for(&workflow_ids).await;
+
+        assert!(matches!(
+            result,
+            Err(ServiceError::InvalidInput(message))
+                if message.contains("missing destination") && message.contains("wf-3")
+        ));
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_export_selected_workflows_rejects_empty_or_duplicate_ids_before_requests() {
+        let server = MockServer::start().await;
+        let service = create_wiremock_service(&server.uri());
+
+        let empty = service.export_workflow_bundle_for(&[]).await;
+        assert!(matches!(
+            empty,
+            Err(ServiceError::InvalidInput(message))
+                if message.contains("at least one")
+        ));
+        let duplicate = service
+            .export_workflow_bundle_for(&["wf-1".to_string(), "wf-1".to_string()])
+            .await;
+        assert!(matches!(
+            duplicate,
+            Err(ServiceError::InvalidInput(message))
+                if message.contains("duplicate workflow IDs")
+        ));
+        assert!(server.received_requests().await.unwrap().is_empty());
     }
 
     #[tokio::test]

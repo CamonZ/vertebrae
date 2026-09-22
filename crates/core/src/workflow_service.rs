@@ -350,6 +350,26 @@ pub trait WorkflowService: Send + Sync {
         workflow_id: Option<&str>,
     ) -> ServiceResult<WorkflowBundleManifest>;
 
+    /// Export an explicitly selected set of workflows as one closed bundle.
+    ///
+    /// Services that only support single-workflow export retain a compatible
+    /// fallback for one ID and return a clear error for larger selections.
+    /// Services with multi-workflow export should override this method.
+    async fn export_workflow_bundle_for(
+        &self,
+        workflow_ids: &[String],
+    ) -> ServiceResult<WorkflowBundleManifest> {
+        match workflow_ids {
+            [] => Err(ServiceError::invalid_input(
+                "workflow export requires at least one selected workflow ID",
+            )),
+            [workflow_id] => self.export_workflow_bundle(Some(workflow_id)).await,
+            _ => Err(ServiceError::invalid_input(
+                "this workflow service does not support exporting multiple selected workflows",
+            )),
+        }
+    }
+
     async fn import_workflow_bundle(
         &self,
         _bundle: WorkflowBundleImportInput,

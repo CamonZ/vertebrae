@@ -10,14 +10,15 @@ static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Args)]
 pub struct WorkflowExportCommand {
-    /// Export this workflow as a closed bundle.
+    /// Export this workflow as a closed bundle. Repeat to select multiple workflows.
     #[arg(
         long,
+        action = clap::ArgAction::Append,
         value_name = "WORKFLOW_ID",
         value_parser = crate::commands::parse_uuid("workflow ID"),
         conflicts_with = "all"
     )]
-    pub workflow: Option<String>,
+    pub workflow: Vec<String>,
 
     /// Export every workflow in the active project.
     #[arg(long, conflicts_with = "workflow")]
@@ -33,8 +34,11 @@ impl WorkflowExportCommand {
     /// validated bytes atomically and returns `None`, so a successful file
     /// export does not contaminate stdout with diagnostics or prose.
     pub async fn execute(&self, service: &dyn WorkflowService) -> ServiceResult<Option<String>> {
-        let workflow_id = self.selection()?;
-        let bundle = service.export_workflow_bundle(workflow_id).await?;
+        let workflow_ids = self.selection()?;
+        let bundle = match workflow_ids {
+            Some(workflow_ids) => service.export_workflow_bundle_for(workflow_ids).await?,
+            None => service.export_workflow_bundle(None).await?,
+        };
         bundle.validate().map_err(|error| {
             ServiceError::invalid_input(format!("workflow export validation failed: {error}"))
         })?;
@@ -50,12 +54,12 @@ impl WorkflowExportCommand {
         }
     }
 
-    fn selection(&self) -> ServiceResult<Option<&str>> {
-        match (self.workflow.as_deref(), self.all) {
-            (Some(workflow_id), false) => Ok(Some(workflow_id)),
-            (None, true) => Ok(None),
+    fn selection(&self) -> ServiceResult<Option<&[String]>> {
+        match (!self.workflow.is_empty(), self.all) {
+            (true, false) => Ok(Some(&self.workflow)),
+            (false, true) => Ok(None),
             _ => Err(ServiceError::invalid_input(
-                "choose exactly one workflow export selection: --workflow WORKFLOW_ID or --all",
+                "choose exactly one workflow export selection: one or more --workflow WORKFLOW_ID flags, or --all",
             )),
         }
     }
@@ -122,19 +126,28 @@ mod tests {
     }
 
     #[test]
-    fn selection_flags_are_mutually_exclusive() {
+    fn selection_flags_accept_multiple_workflows_and_are_mutually_exclusive_with_all() {
+        let first = "deadbeef-0000-4000-8000-000000000001";
+        let second = "deadbeef-0000-4000-8000-000000000002";
         let parsed = TestCli::try_parse_from(["test", "--workflow", "deadbeef"]);
         assert!(parsed.is_ok());
+        let parsed = TestCli::try_parse_from(["test", "--workflow", first, "--workflow", second]);
+        assert_eq!(
+            parsed.unwrap().command.workflow,
+            vec![first.to_string(), second.to_string()]
+        );
         let parsed = TestCli::try_parse_from(["test", "--all"]);
         assert!(parsed.is_ok());
         let parsed = TestCli::try_parse_from(["test", "--all", "--workflow", "deadbeef"]);
+        assert!(parsed.is_err());
+        let parsed = TestCli::try_parse_from(["test", "--workflow", "not-a-uuid"]);
         assert!(parsed.is_err());
     }
 
     #[test]
     fn missing_selection_is_rejected_before_service_use() {
         let command = WorkflowExportCommand {
-            workflow: None,
+            workflow: Vec::new(),
             all: false,
             output: None,
         };

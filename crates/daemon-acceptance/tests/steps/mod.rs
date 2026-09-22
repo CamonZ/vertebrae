@@ -7,3 +7,4 @@ pub mod setup;
 pub mod stop;
 pub mod telemetry;
 pub mod workflow;
+pub mod worktree;

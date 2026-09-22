@@ -24,6 +24,17 @@ Feature: Workflow bundle export
     And the workflow export stdout should be a valid versioned bundle
     And the workflow export stdout should not contain persistence fields
 
+  Scenario: Export a selected workflow set together as one closed bundle
+    Given I create a workflow "Selected First WF" with:
+      | steps | first |
+    Then the command should succeed
+    And a second workflow "Selected Second WF" with steps "second"
+    When I run vtb "workflow transition add <workflow_id> <second_workflow_id> --label handoff"
+    Then the command should succeed
+    When I run vtb "workflow export --workflow <workflow_id> --workflow <second_workflow_id>"
+    Then the command should succeed
+    And the workflow export stdout should contain both selected workflows
+
   Scenario: Export all workflows and preserve exact file bytes
     Given I create a workflow "First Export WF" with:
       | steps | first, second |
