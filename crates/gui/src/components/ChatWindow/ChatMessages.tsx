@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { commands } from "../../bindings";
 import type {
   ChatCompactionSummary,
@@ -28,6 +29,10 @@ import {
   presentChatShortcut,
   type ChatShortcutDefinition,
 } from "./chatShortcuts";
+import {
+  textSelectionToAnchor,
+  type TextSelectionAnchor,
+} from "./assistantTextComments";
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 const BOTTOM_SCROLL_TOLERANCE_PX = 24;
@@ -240,6 +245,7 @@ interface ChatMessagesProps {
   isLoadingOlderMessages?: boolean;
   replayError?: string | null;
   onLoadOlderMessages?: () => Promise<boolean>;
+  onAddComment?: (anchor: TextSelectionAnchor, body: string) => void;
 }
 
 export function ChatMessages({
@@ -259,6 +265,7 @@ export function ChatMessages({
   isLoadingOlderMessages = false,
   replayError = null,
   onLoadOlderMessages,
+  onAddComment = () => undefined,
 }: ChatMessagesProps) {
   const resolveUserQuestion = useChatStore(
     (state) => state.resolveUserQuestion
@@ -290,6 +297,13 @@ export function ChatMessages({
   const [fullContentToolIds, setFullContentToolIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
+  const [selectionAction, setSelectionAction] = useState<{
+    anchor: TextSelectionAnchor;
+    top: number;
+    left: number;
+  } | null>(null);
+  const [commentEditorOpen, setCommentEditorOpen] = useState(false);
+  const [commentDraft, setCommentDraft] = useState("");
   const toggleTool = useCallback((toolId: string) => {
     setExpandedToolIds((current) => {
       const next = new Set(current);
@@ -306,6 +320,45 @@ export function ChatMessages({
       return next;
     });
   }, []);
+  const updateTextSelection = useCallback(() => {
+    if (commentEditorOpen) {
+      return;
+    }
+    const transcript = messagesContainerRef.current;
+    const selection = window.getSelection();
+    if (!transcript || !selection || selection.isCollapsed) {
+      setSelectionAction(null);
+      return;
+    }
+
+    const anchor = textSelectionToAnchor(selection, transcript);
+    if (!anchor) {
+      setSelectionAction(null);
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const rect =
+      typeof range.getBoundingClientRect === "function"
+        ? range.getBoundingClientRect()
+        : new DOMRect();
+    setSelectionAction({
+      anchor,
+      top: Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - 230)),
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 312)),
+    });
+  }, [commentEditorOpen]);
+  useEffect(() => {
+    document.addEventListener("selectionchange", updateTextSelection);
+    return () =>
+      document.removeEventListener("selectionchange", updateTextSelection);
+  }, [updateTextSelection]);
+  useEffect(() => {
+    setSelectionAction(null);
+    setCommentEditorOpen(false);
+    setCommentDraft("");
+    window.getSelection()?.removeAllRanges();
+  }, [sessionId]);
   const registerMessageRef = useCallback(
     (id: string, element: HTMLElement | null) => {
       if (element) {
@@ -476,6 +529,8 @@ export function ChatMessages({
         ref={messagesContainerRef}
         className="min-h-0 flex-1 overflow-y-auto p-4"
         data-testid="chat-messages-scroll"
+        onMouseUp={updateTextSelection}
+        onKeyUp={updateTextSelection}
         onScroll={() => {
           const container = messagesContainerRef.current;
           if (container) {
@@ -569,6 +624,89 @@ export function ChatMessages({
             </div>
           )}
         </div>
+        {selectionAction && !commentEditorOpen
+          ? createPortal(
+              <button
+                type="button"
+                className="fixed z-[80] flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] text-[var(--color-fg)] shadow-lg transition-colors hover:bg-[var(--color-bg-2)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                data-testid="local-chat-add-comment"
+                aria-label="Add comment"
+                title="Add comment"
+                style={{ top: selectionAction.top, left: selectionAction.left }}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  setCommentDraft("");
+                  setCommentEditorOpen(true);
+                }}
+              >
+                <svg
+                  aria-hidden="true"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.8}
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M20.5 11.5a8.5 8.5 0 0 1-8.5 8.5 8.6 8.6 0 0 1-4-.95L3 20l.95-4.55A8.5 8.5 0 1 1 20.5 11.5Z" />
+                  <path d="M12 8.5v6M9 11.5h6" />
+                </svg>
+              </button>,
+              document.body
+            )
+          : null}
+        {selectionAction && commentEditorOpen
+          ? createPortal(
+              <div
+                className="fixed z-[80] w-72 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] p-3 shadow-xl"
+                role="group"
+                aria-label="Add a comment to selected text"
+                style={{ top: selectionAction.top, left: selectionAction.left }}
+              >
+                <label
+                  htmlFor="local-chat-comment-draft"
+                  className="mb-1 block text-xs font-medium text-[var(--color-fg)]"
+                >
+                  Comment on selected text
+                </label>
+                <textarea
+                  id="local-chat-comment-draft"
+                  data-testid="local-chat-comment-draft"
+                  aria-label="Comment on selected text"
+                  value={commentDraft}
+                  onChange={(event) => setCommentDraft(event.target.value)}
+                  autoFocus
+                  rows={3}
+                  className="w-full resize-y rounded-md border border-[var(--color-line)] bg-[var(--color-bg)] p-2 text-sm text-[var(--color-fg)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                />
+                <div className="mt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded-md px-2 py-1 text-xs text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-hover)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                    onClick={() => setCommentEditorOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="local-chat-save-comment"
+                    className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!commentDraft.trim()}
+                    onClick={() => {
+                      onAddComment(selectionAction.anchor, commentDraft.trim());
+                      setCommentEditorOpen(false);
+                      setSelectionAction(null);
+                      window.getSelection()?.removeAllRanges();
+                    }}
+                  >
+                    Add to reply
+                  </button>
+                </div>
+              </div>,
+              document.body
+            )
+          : null}
       </div>
     </MarkdownProjectRootProvider>
   );

@@ -465,10 +465,10 @@ function agentMessage(
       : speaker,
     model,
     prose: text,
+    ...(itemId ? { itemId } : {}),
     ...(lifecycle
       ? {
           lifecycle,
-          ...(itemId ? { itemId } : {}),
           streaming: lifecycle === "streaming",
           ...(lifecycle !== "completed" ? { proseFormat: "plain" } : {}),
         }
@@ -581,7 +581,9 @@ function stepExecutionToThread(
     turns = eventsToTurns(events, exec, runStartMs);
     turns = appendStepResult(turns, exec, execId);
     // Reprojection must retain row identity so completed prose stays mounted.
-    turns.forEach((turn) => stabilizeHistoricMessageKeys(turn.messages, turn.id));
+    turns.forEach((turn) =>
+      stabilizeHistoricMessageKeys(turn.messages, turn.id)
+    );
   }
 
   const toolCount = turns.reduce(

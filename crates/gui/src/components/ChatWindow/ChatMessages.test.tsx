@@ -173,6 +173,89 @@ describe("ChatMessages", () => {
     expect(screen.getByText("Hi there")).toBeInTheDocument();
   });
 
+  it("offers a comment editor for selected completed assistant prose", () => {
+    const onAddComment = vi.fn();
+    const messages: ChatMessage[] = [
+      {
+        kind: "assistant",
+        itemId: "assistant-item-42",
+        text: "Read this carefully, then update the parser.",
+        timestamp: "2024-01-01T12:00:01Z",
+      },
+    ];
+    const { container } = render(
+      <ChatMessages
+        {...defaultProps({ messages, isEmpty: false, onAddComment })}
+      />
+    );
+
+    const response = container.querySelector(
+      '[data-local-chat-assistant-item-id="assistant-item-42"]'
+    ) as HTMLElement;
+    expect(response).toHaveAttribute(
+      "data-local-chat-assistant-response-id",
+      "assistant-item-42"
+    );
+    const textNode = response.querySelector("p")?.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, 10);
+    range.setEnd(textNode, 19);
+    Object.defineProperty(range, "getBoundingClientRect", {
+      value: () => ({ bottom: 24, left: 32 }),
+    });
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    fireEvent.mouseUp(screen.getByTestId("chat-messages-scroll"));
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Comment on selected text" }),
+      {
+        target: { value: "Please explain this wording." },
+      }
+    );
+    fireEvent.click(screen.getByTestId("local-chat-save-comment"));
+
+    expect(onAddComment).toHaveBeenCalledWith(
+      {
+        responseId: "assistant-item-42",
+        itemId: "assistant-item-42",
+        quote: "carefully",
+        contextBefore: "Read this ",
+        contextAfter: ", then update the parser.",
+      },
+      "Please explain this wording."
+    );
+    selection?.removeAllRanges();
+  });
+
+  it("does not offer comments for a selected user message", () => {
+    const messages: ChatMessage[] = [
+      {
+        kind: "user",
+        text: "A user phrase.",
+        timestamp: "2024-01-01T12:00:00Z",
+      },
+    ];
+    const { container } = render(
+      <ChatMessages {...defaultProps({ messages, isEmpty: false })} />
+    );
+    const textNode = container.querySelector(".evrow--user p")
+      ?.firstChild as Text;
+    const range = document.createRange();
+    range.selectNodeContents(textNode);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    fireEvent.mouseUp(screen.getByTestId("chat-messages-scroll"));
+    expect(
+      screen.queryByRole("button", { name: "Add comment" })
+    ).not.toBeInTheDocument();
+    selection?.removeAllRanges();
+  });
+
   it("opens a task panel from an entity link in an assistant chat row", async () => {
     const user = userEvent.setup();
     const taskId = "03111754-4769-47c1-a64c-078d73554af8";
