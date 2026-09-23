@@ -442,14 +442,12 @@ export function useChatSession(sessionId: string) {
   }, [canStopGeneration, handleStopGeneration]);
 
   // --- Action callbacks ---
-  const handleSend = useCallback(() => {
-    const trimmed = inputValue.trim();
-    if (!trimmed) return;
-    if (!canSendMessage) {
-      return;
-    }
+  const handleSend = useCallback((message?: string): boolean => {
+    const trimmed = (message ?? inputValue).trim();
+    if (!trimmed || !canSendMessage) return false;
     void sendMessage(trimmed);
     setInputValue("");
+    return true;
   }, [
     canQueueMessage,
     canSendMessage,
@@ -463,11 +461,13 @@ export function useChatSession(sessionId: string) {
     sessionId,
   ]);
 
-  const handleStartSession = useCallback(() => {
-    const initialPrompt = inputValue.trim();
+  const handleStartSession = useCallback((message?: string): boolean => {
+    if (!canUseComposer) return false;
+    const initialPrompt = (message ?? inputValue).trim();
     void startSession(initialPrompt || undefined);
     setInputValue("");
-  }, [inputValue, lifecycle, session?.backendSessionId, sessionId, startSession]);
+    return true;
+  }, [canUseComposer, inputValue, lifecycle, session?.backendSessionId, sessionId, startSession]);
 
   const handleClearMessages = useCallback(async () => {
     if (session?.backendSessionId) {

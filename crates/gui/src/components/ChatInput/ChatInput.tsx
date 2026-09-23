@@ -20,6 +20,7 @@ export interface ChatInputProps {
   buttonTitle?: string;
   buttonAriaLabel?: string;
   textareaTestId?: string;
+  inputAccessory?: ReactNode;
   footerLeft?: ReactNode;
   footerRight?: ReactNode;
 }
@@ -41,6 +42,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
       buttonTitle = "Send message",
       buttonAriaLabel = "Send message",
       textareaTestId,
+      inputAccessory,
       footerLeft,
       footerRight,
     },
@@ -116,6 +118,11 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
         className="chat-input-shell relative rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg)]"
         data-testid="chat-input-shell"
       >
+        {inputAccessory != null ? (
+          <div className="flex items-center gap-1 px-2 pt-2">
+            {inputAccessory}
+          </div>
+        ) : null}
         <textarea
           ref={setRefs}
           value={value}

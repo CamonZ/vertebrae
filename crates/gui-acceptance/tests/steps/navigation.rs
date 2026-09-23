@@ -453,6 +453,39 @@ async fn gui_should_show_element_with_test_id_within(
 }
 
 #[then(
+    expr = "the local chat selection action should be visible above the panel within {int} seconds"
+)]
+async fn local_chat_selection_action_visible_above_panel(world: &mut GuiWorld, timeout: u64) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    gui_acceptance::wait_for_js(
+        &client,
+        "local chat selection action to be visible above the chat panel",
+        r#"
+          const action = document.querySelector('[data-testid="local-chat-add-comment"]');
+          const panel = document.querySelector('.hc-panel');
+          if (!action || !panel) return false;
+          const style = getComputedStyle(action);
+          const rect = action.getBoundingClientRect();
+          const panelZ = Number.parseInt(getComputedStyle(panel).zIndex, 10) || 0;
+          const actionZ = Number.parseInt(style.zIndex, 10) || 0;
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          return style.display !== 'none' && style.visibility === 'visible' &&
+            rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.left >= 0 &&
+            rect.bottom <= window.innerHeight && rect.right <= window.innerWidth &&
+            actionZ > panelZ && (hit === action || action.contains(hit));
+        "#,
+        vec![],
+        std::time::Duration::from_secs(timeout),
+    )
+    .await;
+}
+
+#[then(
     expr = "the GUI should show exactly {int} elements with test id {string} within {int} seconds"
 )]
 async fn gui_should_show_exactly_elements_with_test_id_within(
@@ -533,6 +566,237 @@ async fn configure_mock_local_chat_reply_with_step_link(world: &mut GuiWorld) {
     let response = format!("Open [the linked step](vtb://step/{step_id})");
     std::fs::write(gui_acceptance::MOCK_CHAT_RESPONSE_FILE, response)
         .expect("write mock local chat response");
+}
+
+#[when(expr = "I configure the mock local chat reply as {string}")]
+async fn configure_mock_local_chat_reply(_world: &mut GuiWorld, response: String) {
+    let response = response.replace("\\n", "\n");
+    std::fs::write(gui_acceptance::MOCK_CHAT_RESPONSE_FILE, response)
+        .expect("write mock local chat response");
+}
+
+#[when(expr = "I select {string} from a completed local chat response")]
+async fn select_text_from_completed_local_chat_response(
+    world: &mut GuiWorld,
+    selected_text: String,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let result = client
+        .execute(
+            r#"
+              const phrase = arguments[0];
+              const responses = [...document.querySelectorAll('[data-local-chat-assistant-response-id]')];
+              const response = responses.at(-1);
+              if (!response) return false;
+              const walker = document.createTreeWalker(response, NodeFilter.SHOW_TEXT);
+              let node;
+              while ((node = walker.nextNode())) {
+                const start = node.textContent.indexOf(phrase);
+                if (start < 0) continue;
+                const range = document.createRange();
+                range.setStart(node, start);
+                range.setEnd(node, start + phrase.length);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                response.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                return true;
+              }
+              return false;
+            "#,
+            vec![serde_json::Value::String(selected_text.clone())],
+        )
+        .await
+        .expect("select text in completed assistant response");
+    assert_eq!(
+        result.as_bool(),
+        Some(true),
+        "could not find selected text '{selected_text}' in the latest completed response"
+    );
+    world
+        .screenshot(&client, "after-select-assistant-response-text")
+        .await;
+}
+
+#[when("I select the first paragraph of the latest completed local chat response")]
+async fn select_first_paragraph_of_latest_completed_local_chat_response(world: &mut GuiWorld) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let result = client
+        .execute(
+            r#"
+              const responses = [...document.querySelectorAll('[data-local-chat-assistant-response-id]')];
+              const response = responses.at(-1);
+              const paragraph = response?.querySelector('p');
+              if (!paragraph) return false;
+              const range = document.createRange();
+              range.selectNodeContents(paragraph);
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+              response.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+              return true;
+            "#,
+            vec![],
+        )
+        .await
+        .expect("select paragraph in completed assistant response");
+    assert_eq!(
+        result.as_bool(),
+        Some(true),
+        "the latest completed local chat response has no rendered paragraph"
+    );
+    world
+        .screenshot(&client, "after-select-assistant-response-paragraph")
+        .await;
+}
+
+#[when(expr = "I hover over the element with test id {string}")]
+async fn hover_over_element_with_test_id(world: &mut GuiWorld, test_id: String) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let result = client
+        .execute(
+            r#"
+              const element = [...document.querySelectorAll('[data-testid]')]
+                .find(
+                  (candidate) => candidate.getAttribute('data-testid') === arguments[0]
+                );
+              if (!element) return false;
+              element.dispatchEvent(
+                new MouseEvent('mouseover', { bubbles: true, view: window })
+              );
+              return true;
+            "#,
+            vec![serde_json::Value::String(test_id.clone())],
+        )
+        .await
+        .expect("hover over GUI element");
+    assert_eq!(
+        result.as_bool(),
+        Some(true),
+        "could not find element with test id '{test_id}' to hover over"
+    );
+    world
+        .screenshot(&client, "after-hover-local-chat-comment")
+        .await;
+}
+
+#[when(expr = "I clear text in the element with test id {string}")]
+async fn clear_text_in_element_with_test_id(world: &mut GuiWorld, test_id: String) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(5))
+        .for_element(Locator::Css(&format!("[data-testid=\"{test_id}\"]")))
+        .await
+        .unwrap_or_else(|_| panic!("element with test id '{test_id}' not found"));
+    gui_acceptance::wait_actionable(&element).await;
+    element
+        .clear()
+        .await
+        .unwrap_or_else(|_| panic!("failed to clear element with test id '{test_id}'"));
+}
+
+#[then(
+    expr = "the local chat should show {int} completed assistant responses within {int} seconds"
+)]
+async fn local_chat_should_show_completed_responses(
+    world: &mut GuiWorld,
+    expected_count: usize,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let locator = Locator::Css("[data-local-chat-assistant-response-id]");
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
+    loop {
+        let actual_count = client
+            .find_all(locator)
+            .await
+            .map(|elements| elements.len())
+            .unwrap_or_default();
+        if actual_count == expected_count {
+            world
+                .screenshot(&client, "after-assert-completed-assistant-response-count")
+                .await;
+            return;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            world
+                .screenshot(&client, "fail-completed-assistant-response-count")
+                .await;
+            panic!("expected {expected_count} completed assistant responses, found {actual_count}");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+#[then(expr = "the latest local chat user message should contain {string} within {int} seconds")]
+async fn latest_local_chat_user_message_should_contain(
+    world: &mut GuiWorld,
+    expected_text: String,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
+    loop {
+        let result = client
+            .execute(
+                r#"
+                  const rows = [...document.querySelectorAll(
+                    '[data-testid="chat-messages-scroll"] .evrow--user:not(.is-prompt):not(.is-system)'
+                  )];
+                  return rows.at(-1)?.textContent ?? '';
+                "#,
+                vec![],
+            )
+            .await
+            .expect("read latest local chat user message");
+        let actual_text = result.as_str().unwrap_or_default();
+        if actual_text.contains(&expected_text) {
+            world
+                .screenshot(&client, "after-assert-latest-local-chat-user-message")
+                .await;
+            return;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            world
+                .screenshot(&client, "fail-latest-local-chat-user-message")
+                .await;
+            panic!(
+                "latest local chat user message did not contain '{expected_text}'; actual text: '{actual_text}'"
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 #[then("the artifact preview has no composer")]

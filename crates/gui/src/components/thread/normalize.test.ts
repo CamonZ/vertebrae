@@ -659,6 +659,25 @@ describe("msgsToThread — CHAT variant", () => {
 });
 
 describe("conversationEventsToThread", () => {
+  it("preserves completed assistant item identity without an explicit lifecycle", () => {
+    const thread = conversationEventsToThread([
+      {
+        kind: "assistant_message",
+        timestamp: "2026-08-02T00:00:03Z",
+        text: "Completed response",
+        itemId: "assistant-item-42",
+      },
+    ]);
+
+    const assistant = thread.turns[0].messages[0] as AgentMessage;
+    expect(assistant).toMatchObject({
+      type: "agent",
+      itemId: "assistant-item-42",
+      prose: "Completed response",
+    });
+    expect(assistant.lifecycle).toBeUndefined();
+  });
+
   it("retains subagent user input inside its spawned child thread", () => {
     const events: ConversationEvent[] = [
       {

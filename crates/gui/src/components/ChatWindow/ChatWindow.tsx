@@ -1,10 +1,16 @@
-import { Profiler, useEffect, useRef } from "react";
+import { Profiler, useCallback, useEffect, useRef, useState } from "react";
 import { useChatSession } from "../../hooks/useChatSession";
 import { useChatStore } from "../../stores/chatStore";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
 import { localChatSessionProjectDisplayName } from "../../utils/localChatSessionGroups";
+import type {
+  PendingTextComment,
+  TextSelectionAnchor,
+} from "./assistantTextComments";
+
+let nextPendingCommentId = 0;
 
 interface ChatWindowProps {
   renderObserver?: (part: "transcript" | "composer") => void;
@@ -51,10 +57,76 @@ export function ChatWindow({
   renderObserver,
 }: ChatWindowProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [pendingCommentState, setPendingCommentState] = useState<{
+    sessionId: string;
+    comments: PendingTextComment[];
+  }>(() => ({ sessionId, comments: [] }));
 
   const chat = useChatSession(sessionId);
   const loadOlderReplayMessages = useChatStore(
     (state) => state.loadOlderReplayMessages
+  );
+  const pendingComments =
+    pendingCommentState.sessionId === sessionId
+      ? pendingCommentState.comments
+      : [];
+  const updatePendingComments = useCallback(
+    (update: (comments: PendingTextComment[]) => PendingTextComment[]) => {
+      setPendingCommentState((current) => ({
+        sessionId,
+        comments: update(
+          current.sessionId === sessionId ? current.comments : []
+        ),
+      }));
+    },
+    [sessionId]
+  );
+  const handleAddComment = useCallback(
+    (anchor: TextSelectionAnchor, body: string) => {
+      updatePendingComments((comments) => [
+        ...comments,
+        {
+          ...anchor,
+          id: `local-comment-${nextPendingCommentId++}`,
+          body,
+        },
+      ]);
+    },
+    [updatePendingComments]
+  );
+  const handleUpdateComment = useCallback(
+    (id: string, body: string) => {
+      updatePendingComments((comments) =>
+        comments.map((comment) =>
+          comment.id === id ? { ...comment, body } : comment
+        )
+      );
+    },
+    [updatePendingComments]
+  );
+  const handleRemoveComment = useCallback(
+    (id: string) => {
+      updatePendingComments((comments) =>
+        comments.filter((comment) => comment.id !== id)
+      );
+    },
+    [updatePendingComments]
+  );
+  const handleSend = useCallback(
+    (message?: string) => {
+      const accepted = chat.handleSend(message);
+      if (accepted) updatePendingComments(() => []);
+      return accepted;
+    },
+    [chat.handleSend, updatePendingComments]
+  );
+  const handleStartSession = useCallback(
+    (initialPrompt?: string) => {
+      const accepted = chat.handleStartSession(initialPrompt);
+      if (accepted) updatePendingComments(() => []);
+      return accepted;
+    },
+    [chat.handleStartSession, updatePendingComments]
   );
 
   // Focus the composer when this chat window is the foreground pane.
@@ -123,6 +195,7 @@ export function ChatWindow({
           }
           replayError={chat.session.providerReplay?.error ?? null}
           onLoadOlderMessages={() => loadOlderReplayMessages(sessionId)}
+          onAddComment={handleAddComment}
         />
       </Profiler>
       <Profiler
@@ -156,8 +229,11 @@ export function ChatWindow({
           ctxColor={chat.ctxColor}
           usage={chat.usage}
           threadTotalTokens={chat.threadTotalTokens}
-          onSend={chat.handleSend}
-          onStartSession={chat.handleStartSession}
+          pendingComments={pendingComments}
+          onUpdateComment={handleUpdateComment}
+          onRemoveComment={handleRemoveComment}
+          onSend={handleSend}
+          onStartSession={handleStartSession}
           onHarnessChange={chat.handleHarnessChange}
           onModelChange={chat.handleModelChange}
           onReasoningEffortChange={chat.handleReasoningEffortChange}

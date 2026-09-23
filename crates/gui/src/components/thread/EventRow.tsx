@@ -40,15 +40,22 @@ function LogProse({
   proseFormat = "markdown",
   lifecycle,
   streaming,
+  responseId,
+  itemId,
 }: {
   prose?: ReactNode;
   proseFormat?: AgentMessage["proseFormat"];
   lifecycle?: AgentMessage["lifecycle"];
   streaming?: boolean;
+  responseId?: string;
+  itemId?: string;
 }): ReactNode {
   const isStreaming = lifecycle ? lifecycle === "streaming" : streaming;
+  const isCompleted =
+    (lifecycle ?? (streaming ? "streaming" : "completed")) === "completed";
   if (prose == null && !isStreaming) return null;
-  const plain = proseFormat === "plain" ||
+  const plain =
+    proseFormat === "plain" ||
     (lifecycle ? lifecycle !== "completed" : !!streaming);
   const inner =
     typeof prose === "string" && !plain ? (
@@ -57,7 +64,15 @@ function LogProse({
       prose
     );
   return (
-    <div className={`evprose${plain ? " evprose--plain" : ""}`}>
+    <div
+      className={`evprose${plain ? " evprose--plain" : ""}`}
+      {...(isCompleted && responseId
+        ? {
+            "data-local-chat-assistant-response-id": responseId,
+            ...(itemId ? { "data-local-chat-assistant-item-id": itemId } : {}),
+          }
+        : {})}
+    >
       {inner}
       {isStreaming ? <span className="ev-cursor" /> : null}
     </div>
@@ -282,6 +297,8 @@ function AgentBody({
   lifecycle,
   tools = [],
   streaming,
+  responseId,
+  itemId,
 }: {
   speaker?: string;
   model?: string;
@@ -290,6 +307,8 @@ function AgentBody({
   lifecycle?: AgentMessage["lifecycle"];
   tools?: ToolMessage[];
   streaming?: boolean;
+  responseId?: string;
+  itemId?: string;
 }): ReactNode {
   return (
     <div className="evbody">
@@ -309,7 +328,14 @@ function AgentBody({
           ))}
         </div>
       ) : null}
-      <LogProse prose={prose} proseFormat={proseFormat} lifecycle={lifecycle} streaming={streaming} />
+      <LogProse
+        prose={prose}
+        proseFormat={proseFormat}
+        lifecycle={lifecycle}
+        streaming={streaming}
+        responseId={responseId}
+        itemId={itemId}
+      />
     </div>
   );
 }
@@ -384,6 +410,8 @@ export function EventRow(props: EventRowProps): ReactNode {
         lifecycle={m.lifecycle}
         tools={m.tools}
         streaming={m.streaming}
+        responseId={m.itemId ?? m.evt}
+        itemId={m.itemId}
       />
     );
   } else if (type === "tool") {
