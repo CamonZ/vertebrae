@@ -9,7 +9,7 @@ Feature: Daemon translates step config into Claude CLI invocation
     And a task assigned to the workflow
     And the step is configured with agent_config '{"model":"claude-opus-4-5"}'
     When the mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the mock argv contains "--model" followed by "claude-opus-4-5"
     And the mock argv contains the managed manifestless skill plugin root exactly once
@@ -19,7 +19,7 @@ Feature: Daemon translates step config into Claude CLI invocation
     And a workflow with one execute step using anthropic, speed tier "fast", and personality "friendly"
     And a task assigned to the workflow
     When the mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the mock argv contains Claude output style "friendly"
@@ -31,7 +31,7 @@ Feature: Daemon translates step config into Claude CLI invocation
     And a task assigned to the workflow
     And the step is configured with agent_config '{"permission_mode":"plan"}'
     When the mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the mock argv contains "--permission-mode" followed by "plan"
     And the mock argv contains "bypassPermissions" exactly 0 times
@@ -42,7 +42,7 @@ Feature: Daemon translates step config into Claude CLI invocation
     And a task assigned to the workflow
     And the step is configured with agent_config '{"permission_mode":"auto"}'
     When the mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the mock argv contains "--permission-mode" followed by "auto"
 
@@ -52,14 +52,6 @@ Feature: Daemon translates step config into Claude CLI invocation
     And a task assigned to the workflow
     And the task has worktree "/tmp"
     When the mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the mock working directory is "/tmp"
-
-  Scenario: Empty prompt falls back to "Execute step"
-    Given a configured daemon test environment
-    And a workflow with one execute step
-    And a task assigned to the workflow
-    When run_step is invoked
-    And I wait for the execution to reach status "completed"
-    Then the mock argv contains "--print" followed by "Execute step"

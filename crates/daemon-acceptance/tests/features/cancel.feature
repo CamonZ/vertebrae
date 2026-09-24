@@ -9,7 +9,7 @@ Feature: Cancel a running step
     And a workflow with one execute step
     And a task assigned to the workflow
     When the mock is scripted to sleep 15000 milliseconds
-    And run_step is invoked
+    And I start a TaskRun
     And Sacrum broadcasts cancel_step for the running execution
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"

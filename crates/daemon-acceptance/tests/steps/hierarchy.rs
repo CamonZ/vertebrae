@@ -9,8 +9,8 @@
 //!   assigned to the appropriate workflows.
 //!
 //! Orchestration is triggered via the `orchestrate_task` GraphQL mutation
-//! (not `vtb run`), because wait_children is handled server-side by
-//! Sacrum's TaskOrchestrator rather than by the daemon.
+//! because wait_children is handled server-side by Sacrum's TaskOrchestrator,
+//! rather than by the daemon.
 
 use std::time::{Duration, Instant};
 

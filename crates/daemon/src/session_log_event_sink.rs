@@ -367,10 +367,6 @@ mod tests {
             unused()
         }
 
-        async fn run_step(&self, _task_id: &str, _step_id: &str) -> ServiceResult<StepExecution> {
-            unused()
-        }
-
         async fn update_execution_status(
             &self,
             _execution_id: &str,

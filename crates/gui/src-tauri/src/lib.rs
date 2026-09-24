@@ -133,7 +133,6 @@ fn create_builder() -> Builder {
             commands::update_step,
             commands::delete_step,
             // Workflow execution commands
-            commands::run_step,
             commands::run_workflow,
             commands::stop_run,
             commands::orchestrate_task,

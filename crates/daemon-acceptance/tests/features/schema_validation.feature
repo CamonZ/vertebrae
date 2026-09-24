@@ -8,7 +8,7 @@ Feature: Schema validation failure
     And a workflow with one execute step and an output schema
     And a task assigned to the workflow
     When the mock is scripted to emit output that violates the schema
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"
     And the execution output contains "schema"
@@ -18,7 +18,7 @@ Feature: Schema validation failure
     And a workflow with one execute step and an output schema
     And a task assigned to the workflow
     When the mock is scripted to succeed without a result line
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"
     And the execution output contains "no JSON output"
@@ -28,7 +28,7 @@ Feature: Schema validation failure
     And a workflow with one execute step and an output schema
     And a task assigned to the workflow
     When the mock is scripted to emit malformed JSON inside a fence
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"
     And the execution output contains "invalid JSON"
@@ -38,6 +38,6 @@ Feature: Schema validation failure
     And a workflow with one execute step and an output schema
     And a task assigned to the workflow
     When the mock emits valid fenced JSON with surrounding prose
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"

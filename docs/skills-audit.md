@@ -122,7 +122,6 @@ and is audited separately from the embedded CLI command skills.
 | `skills/ref/SKILL.md` | `vtb ref` | Command reference | Live `vtb ref --help`; `docs/vtb-guide/references.md` | keep-generated | File-spec rules should match shared parser behavior. |
 | `skills/refs/SKILL.md` | `vtb refs` | Command reference | Live `vtb refs --help`; `docs/vtb-guide/references.md` | keep-generated | Verify examples against live help. |
 | `skills/run-workflow/SKILL.md` | `vtb start-taskrun`; `vtb stop-taskrun` | Command reference | Live `vtb start-taskrun --help` and `vtb stop-taskrun --help`; `docs/vtb-guide/execution.md` | keep-generated | File name remains for compatibility, but title and examples use the primary command names only. |
-| `skills/run/SKILL.md` | `vtb run` | Command reference | Live `vtb run --help`; `docs/vtb-guide/execution.md` | keep-generated | Distinguish one-step execution from TaskRun. |
 | `skills/section/SKILL.md` | `vtb section` | Command reference | Live `vtb section --help`; `docs/vtb-guide/sections.md` | keep-generated | Section type list must be generated from live help and section docs. |
 | `skills/sections/SKILL.md` | `vtb sections` | Command reference | Live `vtb sections --help`; `docs/vtb-guide/sections.md` | keep-generated | Verify examples against live help. |
 | `skills/step/SKILL.md` | `vtb step ...` | Command family reference | Live `vtb step --help` and subcommand help; `docs/vtb-guide/steps.md` | keep-generated | Regenerate subcommand syntax, especially provider/model flags. |

@@ -229,17 +229,6 @@ pub const CREATE_LOG: &str = r#"
     }
 "#;
 
-/// Trigger a workflow step execution via the orchestrator.
-/// Sacrum creates a StepExecution and broadcasts run_step to daemon clients.
-/// NOTE: Prepend EXECUTION_FIELDS when sending.
-pub const RUN_STEP: &str = r#"
-    mutation RunStep($task_id: Uuid4!, $step_id: Uuid4!) {
-        run_step(task_id: $task_id, step_id: $step_id) {
-            ...ExecutionFields
-        }
-    }
-"#;
-
 /// Cancel a running step execution. Sacrum sets the status to `cancelling`
 /// and broadcasts `cancel_step` to the daemon, which kills the child process.
 /// NOTE: Prepend EXECUTION_FIELDS when sending.

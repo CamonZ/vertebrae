@@ -983,26 +983,6 @@ impl ExecutionService for MockExecutionService {
         Ok(())
     }
 
-    async fn run_step(&self, task_id: &str, _step_id: &str) -> ServiceResult<StepExecution> {
-        let mut s = self.state.lock().unwrap();
-        let id = s.gen_id();
-        let mut execution = StepExecution::new(task_id, "mock_workflow", "mock_step")
-            .with_prompt("mock prompt")
-            .with_output("mock output")
-            .with_context(r#"{"mock":"context"}"#)
-            .with_transition_result("mock_next_step")
-            .with_model_used("claude-opus-4")
-            .with_model_provider("anthropic")
-            .with_session_id("mock-session-id")
-            .with_token_usage(vertebrae_core::TokenUsage::new(123, 45))
-            .with_cost_usd(0.001)
-            .with_duration_ms(250)
-            .with_handoff(r#"{"to":"mock_next_step"}"#);
-        execution.id = Some(id.clone());
-        s.executions.insert(id, execution.clone());
-        Ok(execution)
-    }
-
     async fn update_execution_status(
         &self,
         execution_id: &str,
@@ -1124,7 +1104,18 @@ impl ExecutionService for MockExecutionService {
         let execution_id = s.gen_id();
         let now = Utc::now();
         let mut execution = StepExecution::new(task_id, "mock_workflow", "mock_step")
-            .with_task_run_id(run_id.clone());
+            .with_task_run_id(run_id.clone())
+            .with_prompt("mock prompt")
+            .with_output("mock output")
+            .with_context(r#"{"mock":"context"}"#)
+            .with_transition_result("mock_next_step")
+            .with_model_used("claude-opus-4")
+            .with_model_provider("anthropic")
+            .with_session_id("mock-session-id")
+            .with_token_usage(vertebrae_core::TokenUsage::new(123, 45))
+            .with_cost_usd(0.001)
+            .with_duration_ms(250)
+            .with_handoff(r#"{"to":"mock_next_step"}"#);
         execution.id = Some(execution_id.clone());
         s.executions.insert(execution_id.clone(), execution);
 

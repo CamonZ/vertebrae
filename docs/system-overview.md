@@ -236,8 +236,8 @@ This is the core loop: a task moves through a workflow, and each step is execute
 1. Task assigned to workflow
    └── workflow_id set, current_step_id = initial step
 
-2. Step execution triggered
-   └── vtb run <task_id>  OR  orchestrate_task(task_id)
+2. Workflow run triggered
+   └── vtb start-taskrun <task_id>  OR  GUI Run Workflow
 
 3. Sacrum orchestrator starts (gen_statem)
    ├── :initializing  — load workflow graph
@@ -405,7 +405,6 @@ vtb transition-to <task> <step>  # Jump to specific step
 
 ### Execution
 ```bash
-vtb run <task>                   # Execute current step via daemon
 vtb start-taskrun <task>         # Start a durable workflow TaskRun
 vtb stop-taskrun <task>          # Stop the active TaskRun for a task
 ```

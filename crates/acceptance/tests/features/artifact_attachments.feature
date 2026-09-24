@@ -32,7 +32,7 @@ Feature: Direct artifact attachments
     When I run vtb "start-taskrun <TASK_ID>"
     Then the command should succeed
     When I store the latest TaskRun ID as "task_run_id"
-    When I create an artifact step execution
+    When I store the TaskRun's latest step execution ID
     When I add artifact "run-output.md" with body "run output" attached to "task_run" "<task_run_id>"
     Then the command should succeed
     When I add artifact "step-output.md" with body "step output" attached to "step_execution" "<step_execution_id>"
