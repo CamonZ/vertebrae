@@ -113,15 +113,24 @@ the configured base endpoint and sends each signal to its OTLP path. `signals`
 accepts `traces`, `metrics`, and `logs`;
 `subsystems` accepts `local_chat` and `claude_code` for the current
 instrumentation. Restart the GUI after changing this file. Message bodies are
-off by default. Setting
-`capture_message_content = true` includes bodies in traces, truncated at 32 KiB;
-set it to `false` to retain message metadata without text.
+off by default. Setting `capture_message_content = true` includes message text
+in traces, capped at 32 KiB for each human input message and cumulatively across
+each assistant turn; set it to `false` to retain message metadata without text.
 
 Live Claude input events and human messages reconstructed from JSONL transcript
 pages include session, thread, turn, source sequence, timestamp, and origin
-attributes. A separate send span records whether Claude accepted the write and
-the terminal turn outcome. The message event counter uses only fixed origin and
-outcome labels.
+attributes. The `local_chat.send_message` span records whether Claude accepted
+the write and the terminal turn outcome. Each live Claude text delta is added
+to that span as a `local_chat.inference_delta` event, correlated by `turn.id`.
+Delta events carry the normalized event and stream IDs, event and provider
+sequence numbers, timestamp, session/thread/turn/run IDs, message item ID,
+tool-call and parent-tool-call IDs, and provider resume ID when available. With
+content capture enabled, `message.delta` contains the delta text until the
+32 KiB per-turn cap is reached; afterward the event retains its metadata and
+marks content as truncated. A turn records at most 2,048 delta events;
+`inference.delta_count` and `inference.delta_events_dropped` on the send span
+make the count and any cap visible. Reasoning deltas are not captured as chat
+text. The message event counter uses only fixed origin and outcome labels.
 
 Adding a provider therefore means adding a `harnesses/<provider>/` module that
 supplies the model catalog and session creation. Event translation stays in

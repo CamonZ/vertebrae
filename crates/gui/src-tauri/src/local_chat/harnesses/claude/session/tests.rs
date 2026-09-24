@@ -7,17 +7,33 @@ use std::{
 };
 
 use async_trait::async_trait;
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_sdk::{
+    error::OTelSdkResult,
+    trace::{SpanData, SpanExporter},
+};
+use tracing_subscriber::prelude::*;
 use vertebrae_harness_core::{
     ApprovalCategory, ApprovalRequest, CompletionStatus, ControlRequest, ControlRequestEnvelope,
     ControlSink, DiagnosticEvent, EventCorrelation, EventId, EventSink, HarnessCapabilities,
-    HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, ProviderResumeId, RunHandle, RunRequest,
-    SessionCloseOutcome, SessionCloseStatus, SessionHandle, SessionId, SessionStarted,
-    SessionUsage, SpeedTier, SpeedTierStatus, StreamId, TextEvent, TokenUsage, ToolCallEvent,
-    ToolCallId, ToolOutputEvent, ToolStatus, TurnHandle, TurnId, TurnOutcome, TurnUsage,
-    UpdateSemantics, UsageEvent,
+    HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, ItemId, ProviderResumeId, RunHandle,
+    RunRequest, SessionCloseOutcome, SessionCloseStatus, SessionHandle, SessionId, SessionStarted,
+    SessionUsage, SpeedTier, SpeedTierStatus, StreamId, TextEvent, ThreadId, TokenUsage,
+    ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus, TurnHandle, TurnId, TurnOutcome,
+    TurnUsage, UpdateSemantics, UsageEvent,
 };
 
 use super::*;
+
+#[derive(Clone, Default, Debug)]
+struct MemorySpanExporter(Arc<Mutex<Vec<SpanData>>>);
+
+impl SpanExporter for MemorySpanExporter {
+    async fn export(&self, mut batch: Vec<SpanData>) -> OTelSdkResult {
+        self.0.lock().unwrap().append(&mut batch);
+        Ok(())
+    }
+}
 
 #[derive(Default)]
 struct MockRuntimeState {
@@ -427,10 +443,13 @@ async fn tauri_delivery_failure_is_returned_to_the_harness_event_source() {
         "backend-delivery".into(),
         1,
         LocalChatEventSink::failing_for_tests("window closed"),
-        Arc::new(RwLock::new(SessionRegistry::default())),
         None,
-        crate::local_chat::permissions::PermissionBridge::new(),
-        Arc::new(tokio::sync::Mutex::new(())),
+        ClaudeGuiEventSinkContext {
+            sessions: Arc::new(RwLock::new(SessionRegistry::default())),
+            turn_traces: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            permission_bridge: crate::local_chat::permissions::PermissionBridge::new(),
+            lifecycle_gate: Arc::new(tokio::sync::Mutex::new(())),
+        },
     );
 
     let error = EventSink::emit(
@@ -448,6 +467,130 @@ async fn tauri_delivery_failure_is_returned_to_the_harness_event_source() {
     .unwrap_err();
 
     assert!(matches!(error, HarnessError::EventSink(message) if message == "window closed"));
+}
+
+#[tokio::test]
+async fn inference_delta_is_attached_to_the_send_span_for_its_turn_id() {
+    let exporter = MemorySpanExporter::default();
+    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+        .with_simple_exporter(exporter.clone())
+        .build();
+    let subscriber = tracing_subscriber::registry().with(
+        tracing_opentelemetry::layer()
+            .with_tracer(provider.tracer("claude-session-test"))
+            .with_filter(tracing::level_filters::LevelFilter::TRACE),
+    );
+    let dispatch = tracing::Dispatch::new(Arc::new(subscriber));
+    let _default = tracing::dispatcher::set_default(&dispatch);
+
+    let turn_id = TurnId::new("turn-correlated");
+    let span = tracing::info_span!(
+        "local_chat.send_message",
+        turn.id = %turn_id,
+        inference.delta_count = tracing::field::Empty,
+        inference.delta_events_dropped = tracing::field::Empty,
+    );
+    let other_turn_id = TurnId::new("turn-other");
+    let other_span = tracing::info_span!(
+        "local_chat.send_message",
+        turn.id = %other_turn_id,
+        inference.delta_count = tracing::field::Empty,
+        inference.delta_events_dropped = tracing::field::Empty,
+    );
+    let turn_traces = Arc::new(Mutex::new(HashMap::from([
+        (
+            turn_id.clone(),
+            Arc::new(Mutex::new(telemetry::ClaudeInferenceTrace::new(span))),
+        ),
+        (
+            other_turn_id,
+            Arc::new(Mutex::new(telemetry::ClaudeInferenceTrace::new(other_span))),
+        ),
+    ])));
+    let sink = ClaudeGuiEventSink::new(
+        "backend-delivery".into(),
+        1,
+        LocalChatEventSink::failing_for_tests("window closed"),
+        None,
+        ClaudeGuiEventSinkContext {
+            sessions: Arc::new(RwLock::new(SessionRegistry::default())),
+            turn_traces: turn_traces.clone(),
+            permission_bridge: crate::local_chat::permissions::PermissionBridge::new(),
+            lifecycle_gate: Arc::new(tokio::sync::Mutex::new(())),
+        },
+    );
+    let mut delta = event(
+        17,
+        UpdateSemantics::Delta,
+        HarnessEventPayloadV1::Text(TextEvent {
+            text: "hello from Claude".into(),
+            ..Default::default()
+        }),
+    );
+    delta.correlation = EventCorrelation {
+        session_id: Some(SessionId::new("session-correlated")),
+        thread_id: Some(ThreadId::new("thread-correlated")),
+        turn_id: Some(turn_id),
+        item_id: Some(ItemId::new("message-1:block:0")),
+        parent_tool_call_id: Some(ToolCallId::new("tool-parent")),
+        ..EventCorrelation::default()
+    };
+
+    let error = EventSink::emit(&sink, delta).await.unwrap_err();
+    assert!(matches!(error, HarnessError::EventSink(message) if message == "window closed"));
+    drop(sink);
+    drop(turn_traces);
+    drop(_default);
+    drop(dispatch);
+    drop(provider);
+
+    let spans = exporter.0.lock().unwrap();
+    let span = spans
+        .iter()
+        .find(|span| {
+            span.name == "local_chat.send_message"
+                && span.attributes.iter().any(|attribute| {
+                    attribute.key.as_str() == "turn.id"
+                        && attribute.value.to_string() == "turn-correlated"
+                })
+        })
+        .expect("the correlated turn span is exported");
+    assert_eq!(span.events.len(), 1);
+    let event = &span.events[0];
+    assert_eq!(event.name, "local_chat.inference_delta");
+    let attribute = |name: &str| {
+        event
+            .attributes
+            .iter()
+            .find(|attribute| attribute.key.as_str() == name)
+    };
+    assert_eq!(
+        attribute("turn.id").map(|attribute| attribute.value.to_string()),
+        Some("turn-correlated".into())
+    );
+    assert_eq!(
+        attribute("thread.id").map(|attribute| attribute.value.to_string()),
+        Some("thread-correlated".into())
+    );
+    assert_eq!(
+        attribute("message.item_id").map(|attribute| attribute.value.to_string()),
+        Some("message-1:block:0".into())
+    );
+    assert_eq!(
+        attribute("tool.parent_call_id").map(|attribute| attribute.value.to_string()),
+        Some("tool-parent".into())
+    );
+    let other_span = spans
+        .iter()
+        .find(|span| {
+            span.name == "local_chat.send_message"
+                && span.attributes.iter().any(|attribute| {
+                    attribute.key.as_str() == "turn.id"
+                        && attribute.value.to_string() == "turn-other"
+                })
+        })
+        .expect("the other turn span is exported");
+    assert!(other_span.events.is_empty());
 }
 
 #[tokio::test]
