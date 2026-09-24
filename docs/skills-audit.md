@@ -64,7 +64,7 @@ Sacrum skill files that are intentionally **not** copied into Vertebrae:
 
 | Sacrum skill | Vertebrae treatment | Reason |
 |---|---|---|
-| `start-step` | Fold into `run`, `transition-to`, and execution guide text | Current Vertebrae exposes daemon execution through `run` for one step and TaskRuns through `start-taskrun`; there is no local `start-step` command. |
+| `start-step` | Fold into `start-taskrun`, `transition-to`, and execution guide text | Vertebrae exposes workflow execution through `start-taskrun`; it has no single-step `run` or local `start-step` command. |
 | `complete-step` | Fold into workflow transition guidance | Current step movement is documented through `transition-to`, workflow assignment, and TaskRun execution; there is no local `complete-step` command. |
 | `reject-step` | Fold into transition/workflow guidance | Rejection is modeled as workflow movement or review policy, not a standalone CLI command. |
 | `review` | Not installed as a command skill | Human review is represented by workflow/step configuration and task movement; the local CLI has no `review` command. |
