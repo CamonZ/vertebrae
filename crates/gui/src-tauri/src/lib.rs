@@ -22,7 +22,6 @@ use tokio::sync::RwLock;
 
 use specta_typescript::Typescript;
 use tauri::{Manager, RunEvent};
-use tauri_plugin_log::Target;
 use tauri_specta::{collect_commands, collect_events, Builder};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
@@ -223,7 +222,6 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
-                .target(Target::new(tauri_plugin_log::TargetKind::Stdout))
                 .build(),
         );
 

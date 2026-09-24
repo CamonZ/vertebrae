@@ -1,18 +1,24 @@
-use std::time::Duration;
 use std::{
     collections::BTreeSet,
+    future::Future,
     sync::{
         atomic::{AtomicBool, Ordering},
         OnceLock,
     },
+    time::Duration,
 };
 
 use opentelemetry::{global, metrics::Counter, trace::TracerProvider as _, KeyValue};
 use opentelemetry_otlp::{Protocol, WithExportConfig};
 use opentelemetry_sdk::{
-    logs::SdkLoggerProvider, metrics::SdkMeterProvider, trace::SdkTracerProvider, Resource,
+    error::OTelSdkResult,
+    logs::SdkLoggerProvider,
+    metrics::SdkMeterProvider,
+    trace::{SdkTracerProvider, SpanData, SpanExporter as SdkSpanExporter},
+    Resource,
 };
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+use tracing_subscriber::{layer::SubscriberExt, EnvFilter};
 use vertebrae_sacrum_client::{
     ObservabilityConfig, ObservabilityLevel, ObservabilityProtocol, ObservabilitySignal,
     ObservabilitySubsystem,
@@ -20,6 +26,65 @@ use vertebrae_sacrum_client::{
 
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(5);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+const MESSAGE_CONTENT_LIMIT_BYTES: usize = 32 * 1024;
+const MAX_INFERENCE_DELTA_EVENTS_PER_TURN: u32 = 2_048;
+const OTLP_TRACES_PATH: &str = "/v1/traces";
+const OTLP_METRICS_PATH: &str = "/v1/metrics";
+const OTLP_LOGS_PATH: &str = "/v1/logs";
+
+// TEMP: keep these diagnostics while investigating why GUI spans are missing in SigNoz.
+#[derive(Debug)]
+struct DiagnosticSpanExporter {
+    inner: opentelemetry_otlp::SpanExporter,
+}
+
+impl SdkSpanExporter for DiagnosticSpanExporter {
+    fn export(&self, batch: Vec<SpanData>) -> impl Future<Output = OTelSdkResult> + Send {
+        let batch_span_count = batch.len();
+        let span_names = batch
+            .iter()
+            .map(|span| span.name.as_ref())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+            .join(",");
+        let started_at = std::time::Instant::now();
+        log::info!(
+            target: "vertebrae.telemetry",
+            "[OTEL-DIAG] exporting trace batch: span_count={batch_span_count} span_names={span_names}"
+        );
+
+        let export = self.inner.export(batch);
+        async move {
+            let result = export.await;
+            match &result {
+                Ok(()) => log::info!(
+                    target: "vertebrae.telemetry",
+                    "[OTEL-DIAG] trace batch export succeeded: span_count={batch_span_count} elapsed_ms={}",
+                    started_at.elapsed().as_millis()
+                ),
+                Err(error) => log::error!(
+                    target: "vertebrae.telemetry",
+                    "[OTEL-DIAG] trace batch export failed: span_count={batch_span_count} elapsed_ms={} error={error:?}",
+                    started_at.elapsed().as_millis()
+                ),
+            }
+            result
+        }
+    }
+
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.inner.shutdown_with_timeout(timeout)
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        self.inner.force_flush()
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.inner.set_resource(resource);
+    }
+}
 
 #[derive(Clone, Default)]
 struct RuntimeSettings {
@@ -28,6 +93,161 @@ struct RuntimeSettings {
 
 static SETTINGS: OnceLock<RuntimeSettings> = OnceLock::new();
 static MESSAGE_EVENTS: OnceLock<Counter<u64>> = OnceLock::new();
+
+pub(crate) struct ClaudeInferenceTrace {
+    span: tracing::Span,
+    delta_sequence: u64,
+    dropped_delta_events: u64,
+    captured_content_bytes: usize,
+    finished: bool,
+}
+
+impl ClaudeInferenceTrace {
+    pub(crate) fn new(span: tracing::Span) -> Self {
+        Self {
+            span,
+            delta_sequence: 0,
+            dropped_delta_events: 0,
+            captured_content_bytes: 0,
+            finished: false,
+        }
+    }
+
+    pub(crate) fn record_text_delta(&mut self, delta: InferenceDelta<'_>, text: &str) {
+        self.record_text_delta_with_capture(
+            delta,
+            text,
+            capture_message_content(),
+            MESSAGE_CONTENT_LIMIT_BYTES,
+            MAX_INFERENCE_DELTA_EVENTS_PER_TURN,
+        );
+    }
+
+    fn record_text_delta_with_capture(
+        &mut self,
+        delta: InferenceDelta<'_>,
+        text: &str,
+        capture_content: bool,
+        content_limit_bytes: usize,
+        max_delta_events: u32,
+    ) {
+        if self.finished {
+            return;
+        }
+        if self.delta_sequence >= u64::from(max_delta_events) {
+            self.delta_sequence = self.delta_sequence.saturating_add(1);
+            self.dropped_delta_events = self.dropped_delta_events.saturating_add(1);
+            return;
+        }
+        let captured_len = if capture_content {
+            utf8_prefix_len(
+                text,
+                content_limit_bytes.saturating_sub(self.captured_content_bytes),
+            )
+        } else {
+            0
+        };
+        let content_captured = capture_content
+            && self.captured_content_bytes < content_limit_bytes
+            && (text.is_empty() || captured_len > 0);
+        let content_truncated = capture_content && captured_len < text.len();
+        let mut attributes = vec![
+            KeyValue::new("event.id", delta.event_id.to_owned()),
+            KeyValue::new("stream.id", delta.stream_id.to_owned()),
+            KeyValue::new("session.id", delta.session_id.to_owned()),
+            KeyValue::new("turn.id", delta.turn_id.to_owned()),
+            KeyValue::new("event.sequence", otel_i64(delta.sequence)),
+            KeyValue::new("event.timestamp", delta.timestamp.to_owned()),
+            KeyValue::new("message.delta.sequence", otel_i64(self.delta_sequence)),
+            KeyValue::new("message.delta.type", "text"),
+            KeyValue::new("message.content_len", otel_i64(text.len() as u64)),
+            KeyValue::new(
+                "message.content_captured_bytes",
+                otel_i64(captured_len as u64),
+            ),
+            KeyValue::new("message.content_captured", content_captured),
+            KeyValue::new("message.content_truncated", content_truncated),
+        ];
+        append_optional(&mut attributes, "thread.id", delta.thread_id);
+        append_optional(&mut attributes, "run.id", delta.run_id);
+        append_optional(&mut attributes, "message.item_id", delta.item_id);
+        append_optional(&mut attributes, "tool.call_id", delta.tool_call_id);
+        append_optional(
+            &mut attributes,
+            "tool.parent_call_id",
+            delta.parent_tool_call_id,
+        );
+        append_optional(
+            &mut attributes,
+            "provider.resume_id",
+            delta.provider_resume_id,
+        );
+        if let Some(provider_sequence) = delta.provider_sequence {
+            attributes.push(KeyValue::new(
+                "event.provider_sequence",
+                otel_i64(provider_sequence),
+            ));
+        }
+        if content_captured {
+            attributes.push(KeyValue::new(
+                "message.delta",
+                text[..captured_len].to_owned(),
+            ));
+        }
+
+        self.span
+            .add_event("local_chat.inference_delta", attributes);
+        self.delta_sequence = self.delta_sequence.saturating_add(1);
+        self.captured_content_bytes = self.captured_content_bytes.saturating_add(captured_len);
+    }
+
+    pub(crate) fn finish(&mut self) {
+        if self.finished {
+            return;
+        }
+        self.span
+            .record("inference.delta_count", otel_i64(self.delta_sequence));
+        self.span.record(
+            "inference.delta_events_dropped",
+            otel_i64(self.dropped_delta_events),
+        );
+        self.finished = true;
+    }
+}
+
+pub(crate) struct InferenceDelta<'a> {
+    pub(crate) event_id: &'a str,
+    pub(crate) stream_id: &'a str,
+    pub(crate) sequence: u64,
+    pub(crate) provider_sequence: Option<u64>,
+    pub(crate) timestamp: &'a str,
+    pub(crate) session_id: &'a str,
+    pub(crate) thread_id: Option<&'a str>,
+    pub(crate) turn_id: &'a str,
+    pub(crate) run_id: Option<&'a str>,
+    pub(crate) item_id: Option<&'a str>,
+    pub(crate) tool_call_id: Option<&'a str>,
+    pub(crate) parent_tool_call_id: Option<&'a str>,
+    pub(crate) provider_resume_id: Option<&'a str>,
+}
+
+fn append_optional(attributes: &mut Vec<KeyValue>, key: &'static str, value: Option<&str>) {
+    if let Some(value) = value {
+        attributes.push(KeyValue::new(key, value.to_owned()));
+    }
+}
+
+fn otel_i64(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+fn utf8_prefix_len(text: &str, max_bytes: usize) -> usize {
+    let mut end = text.len().min(max_bytes);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    end
+}
 
 pub(crate) struct TelemetryGuard {
     tracer_provider: Option<SdkTracerProvider>,
@@ -39,6 +259,18 @@ pub(crate) struct TelemetryGuard {
 impl TelemetryGuard {
     // Keep exporter initialization fail-open so telemetry cannot block GUI startup.
     pub(crate) fn initialize(config: ObservabilityConfig) -> Self {
+        // TEMP: keep this summary while investigating missing GUI spans. Message bodies
+        // and the configured endpoint are intentionally excluded from console output.
+        log::info!(
+            target: "vertebrae.telemetry",
+            "[OTEL-DIAG] initializing telemetry: enabled={} protocol={:?} signals={:?} subsystems={:?} level={:?} capture_message_content={}",
+            config.enabled,
+            config.protocol,
+            config.signals,
+            config.subsystems,
+            config.level,
+            config.capture_message_content
+        );
         let _ = SETTINGS.set(RuntimeSettings {
             config: config.clone(),
         });
@@ -72,11 +304,15 @@ impl TelemetryGuard {
                 Ok(exporter) => Some(
                     SdkTracerProvider::builder()
                         .with_resource(resource.clone())
-                        .with_batch_exporter(exporter)
+                        .with_max_events_per_span(MAX_INFERENCE_DELTA_EVENTS_PER_TURN)
+                        .with_batch_exporter(DiagnosticSpanExporter { inner: exporter })
                         .build(),
                 ),
-                Err(_) => {
-                    log::warn!("Could not create the configured OpenTelemetry trace exporter");
+                Err(error) => {
+                    log::error!(
+                        target: "vertebrae.telemetry",
+                        "[OTEL-DIAG] could not create trace exporter: {error:?}"
+                    );
                     None
                 }
             }
@@ -124,13 +360,19 @@ impl TelemetryGuard {
         });
 
         if trace_layer.is_some() || log_layer.is_some() {
-            if let Err(error) = tracing_subscriber::registry()
+            let subscriber = tracing_subscriber::registry()
                 .with(trace_layer)
                 .with(log_layer)
-                .with(make_filter(config))
-                .try_init()
-            {
-                log::warn!("Could not install configured OpenTelemetry tracing layers: {error}");
+                .with(make_filter(config));
+            match tracing::subscriber::set_global_default(subscriber) {
+                Ok(()) => log::info!(
+                    target: "vertebrae.telemetry",
+                    "[OTEL-DIAG] OpenTelemetry tracing subscriber installed"
+                ),
+                Err(error) => log::warn!(
+                    target: "vertebrae.telemetry",
+                    "[OTEL-DIAG] could not install OpenTelemetry tracing subscriber: {error}"
+                ),
             }
         }
         guard.tracer_provider = tracer_provider;
@@ -177,6 +419,12 @@ pub(crate) fn record_message_received(
     content: &str,
 ) {
     if enabled_for_claude_chat(ObservabilitySignal::Traces) {
+        // TEMP: log span creation without exposing the message body.
+        log::info!(
+            target: "vertebrae.telemetry",
+            "[OTEL-DIAG] creating local-chat message span: origin={origin} content_bytes={}",
+            content.len()
+        );
         let span = tracing::info_span!(
             target: "vertebrae.local_chat.claude_code",
             "local_chat.message_received",
@@ -226,10 +474,7 @@ pub(crate) fn record_message_content(span: &tracing::Span, content: &str) {
     if !capture_message_content() {
         return;
     }
-    let mut end = content.len().min(32 * 1024);
-    while !content.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = utf8_prefix_len(content, MESSAGE_CONTENT_LIMIT_BYTES);
     span.record("message.content", &content[..end]);
 }
 
@@ -332,7 +577,7 @@ fn build_span_exporter(
     match config.protocol {
         ObservabilityProtocol::HttpProtobuf => opentelemetry_otlp::SpanExporter::builder()
             .with_http()
-            .with_endpoint(config.endpoint.clone())
+            .with_endpoint(http_signal_endpoint(&config.endpoint, OTLP_TRACES_PATH))
             .with_timeout(EXPORT_TIMEOUT)
             .with_protocol(Protocol::HttpBinary)
             .build(),
@@ -350,7 +595,7 @@ fn build_metric_exporter(
     match config.protocol {
         ObservabilityProtocol::HttpProtobuf => opentelemetry_otlp::MetricExporter::builder()
             .with_http()
-            .with_endpoint(config.endpoint.clone())
+            .with_endpoint(http_signal_endpoint(&config.endpoint, OTLP_METRICS_PATH))
             .with_timeout(EXPORT_TIMEOUT)
             .with_protocol(Protocol::HttpBinary)
             .build(),
@@ -368,7 +613,7 @@ fn build_log_exporter(
     match config.protocol {
         ObservabilityProtocol::HttpProtobuf => opentelemetry_otlp::LogExporter::builder()
             .with_http()
-            .with_endpoint(config.endpoint.clone())
+            .with_endpoint(http_signal_endpoint(&config.endpoint, OTLP_LOGS_PATH))
             .with_timeout(EXPORT_TIMEOUT)
             .with_protocol(Protocol::HttpBinary)
             .build(),
@@ -377,5 +622,210 @@ fn build_log_exporter(
             .with_endpoint(config.endpoint.clone())
             .with_timeout(EXPORT_TIMEOUT)
             .build(),
+    }
+}
+
+fn http_signal_endpoint(base_endpoint: &str, signal_path: &str) -> String {
+    format!("{}{signal_path}", base_endpoint.trim_end_matches('/'))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use opentelemetry::{trace::TracerProvider as _, Value};
+    use opentelemetry_sdk::{
+        error::OTelSdkResult,
+        trace::{SdkTracerProvider, SpanData, SpanExporter},
+    };
+    use tracing_subscriber::prelude::*;
+
+    use super::{
+        http_signal_endpoint, ClaudeInferenceTrace, InferenceDelta, OTLP_LOGS_PATH,
+        OTLP_METRICS_PATH, OTLP_TRACES_PATH,
+    };
+
+    #[derive(Clone, Default, Debug)]
+    struct MemorySpanExporter(Arc<Mutex<Vec<SpanData>>>);
+
+    impl SpanExporter for MemorySpanExporter {
+        async fn export(&self, mut batch: Vec<SpanData>) -> OTelSdkResult {
+            self.0.lock().unwrap().append(&mut batch);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn http_exporter_appends_the_otlp_signal_path_to_the_base_endpoint() {
+        let endpoint = "http://192.168.1.39:30418/";
+
+        assert_eq!(
+            http_signal_endpoint(endpoint, OTLP_TRACES_PATH),
+            "http://192.168.1.39:30418/v1/traces"
+        );
+        assert_eq!(
+            http_signal_endpoint(endpoint, OTLP_METRICS_PATH),
+            "http://192.168.1.39:30418/v1/metrics"
+        );
+        assert_eq!(
+            http_signal_endpoint(endpoint, OTLP_LOGS_PATH),
+            "http://192.168.1.39:30418/v1/logs"
+        );
+    }
+
+    #[test]
+    fn inference_text_deltas_are_correlated_and_respect_content_capture_limits() {
+        let exporter = MemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_opentelemetry::layer()
+                .with_tracer(provider.tracer("telemetry-test"))
+                .with_filter(tracing::level_filters::LevelFilter::TRACE),
+        );
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!(
+                "local_chat.send_message",
+                inference.delta_count = tracing::field::Empty,
+                inference.delta_events_dropped = tracing::field::Empty,
+            );
+            let mut trace = ClaudeInferenceTrace::new(span);
+            trace.record_text_delta_with_capture(
+                test_delta("event-1", 41, 9001),
+                "éclair",
+                true,
+                3,
+                3,
+            );
+            trace.record_text_delta_with_capture(
+                test_delta("event-2", 42, 9002),
+                "tail",
+                true,
+                3,
+                3,
+            );
+            trace.record_text_delta_with_capture(
+                test_delta("event-3", 43, 9003),
+                "private body omitted",
+                false,
+                3,
+                3,
+            );
+            trace.record_text_delta_with_capture(
+                test_delta("event-4", 44, 9004),
+                "beyond event cap",
+                false,
+                3,
+                3,
+            );
+            trace.finish();
+        });
+        drop(provider);
+
+        let spans = exporter.0.lock().unwrap();
+        let span = spans
+            .iter()
+            .find(|span| span.name == "local_chat.send_message")
+            .expect("the turn send span is exported");
+        assert_eq!(span.events.len(), 3);
+        assert_eq!(span_int_attr(span, "inference.delta_count"), Some(4));
+        assert_eq!(
+            span_int_attr(span, "inference.delta_events_dropped"),
+            Some(1)
+        );
+
+        let first = &span.events[0];
+        assert_eq!(first.name, "local_chat.inference_delta");
+        assert_eq!(string_attr(first, "turn.id"), Some("turn-1"));
+        assert_eq!(string_attr(first, "thread.id"), Some("thread-1"));
+        assert_eq!(string_attr(first, "stream.id"), Some("stream-1"));
+        assert_eq!(string_attr(first, "message.item_id"), Some("item-1"));
+        assert_eq!(string_attr(first, "tool.parent_call_id"), Some("tool-1"));
+        assert_eq!(string_attr(first, "event.id"), Some("event-1"));
+        assert_eq!(int_attr(first, "event.sequence"), Some(41));
+        assert_eq!(int_attr(first, "event.provider_sequence"), Some(9001));
+        assert_eq!(int_attr(first, "message.delta.sequence"), Some(0));
+        assert_eq!(string_attr(first, "message.delta"), Some("éc"));
+        assert_eq!(int_attr(first, "message.content_captured_bytes"), Some(3));
+        assert_eq!(bool_attr(first, "message.content_truncated"), Some(true));
+
+        let second = &span.events[1];
+        assert_eq!(int_attr(second, "message.delta.sequence"), Some(1));
+        assert_eq!(string_attr(second, "message.delta"), None);
+        assert_eq!(bool_attr(second, "message.content_captured"), Some(false));
+        assert_eq!(bool_attr(second, "message.content_truncated"), Some(true));
+
+        let third = &span.events[2];
+        assert_eq!(int_attr(third, "message.delta.sequence"), Some(2));
+        assert_eq!(string_attr(third, "message.delta"), None);
+        assert_eq!(bool_attr(third, "message.content_captured"), Some(false));
+        assert_eq!(bool_attr(third, "message.content_truncated"), Some(false));
+    }
+
+    fn test_delta(
+        event_id: &'static str,
+        sequence: u64,
+        provider_sequence: u64,
+    ) -> InferenceDelta<'static> {
+        InferenceDelta {
+            event_id,
+            stream_id: "stream-1",
+            sequence,
+            provider_sequence: Some(provider_sequence),
+            timestamp: "2026-09-24T05:47:13Z",
+            session_id: "session-1",
+            thread_id: Some("thread-1"),
+            turn_id: "turn-1",
+            run_id: None,
+            item_id: Some("item-1"),
+            tool_call_id: None,
+            parent_tool_call_id: Some("tool-1"),
+            provider_resume_id: Some("resume-1"),
+        }
+    }
+
+    fn string_attr<'a>(event: &'a opentelemetry::trace::Event, key: &str) -> Option<&'a str> {
+        event
+            .attributes
+            .iter()
+            .find(|attribute| attribute.key.as_str() == key)
+            .and_then(|attribute| match &attribute.value {
+                Value::String(value) => Some(value.as_str()),
+                _ => None,
+            })
+    }
+
+    fn int_attr(event: &opentelemetry::trace::Event, key: &str) -> Option<i64> {
+        event
+            .attributes
+            .iter()
+            .find(|attribute| attribute.key.as_str() == key)
+            .and_then(|attribute| match attribute.value {
+                Value::I64(value) => Some(value),
+                _ => None,
+            })
+    }
+
+    fn bool_attr(event: &opentelemetry::trace::Event, key: &str) -> Option<bool> {
+        event
+            .attributes
+            .iter()
+            .find(|attribute| attribute.key.as_str() == key)
+            .and_then(|attribute| match attribute.value {
+                Value::Bool(value) => Some(value),
+                _ => None,
+            })
+    }
+
+    fn span_int_attr(span: &SpanData, key: &str) -> Option<i64> {
+        span.attributes
+            .iter()
+            .find(|attribute| attribute.key.as_str() == key)
+            .and_then(|attribute| match &attribute.value {
+                Value::I64(value) => Some(*value),
+                _ => None,
+            })
     }
 }

@@ -19,7 +19,7 @@ use vertebrae_harness_core::{
     interrupt_close_and_await, CompletionStatus, EventSink, HarnessError, HarnessEventPayloadV1,
     HarnessEventV1, ProviderResumeId, ProviderThreadRef, RequestConfig, SendTurnRequest,
     SessionCloseStatus, SessionHandle, SessionId, SpeedTier, StartSessionRequest, StreamId, TurnId,
-    TurnInputProvenance,
+    TurnInputProvenance, UpdateSemantics,
 };
 
 use crate::commands::AppState;
@@ -47,6 +47,7 @@ type RuntimeFactory = dyn Fn(
     + Send
     + Sync
     + 'static;
+type TurnTraceRegistry = Arc<Mutex<HashMap<TurnId, Arc<Mutex<telemetry::ClaudeInferenceTrace>>>>>;
 
 const DEFAULT_CLAUDE_CONTEXT_WINDOW: u32 = 200_000;
 
@@ -121,6 +122,7 @@ struct ActiveSession {
     generation: u64,
     handle: Arc<dyn SessionHandle>,
     active_turn: Arc<Mutex<Option<Arc<dyn vertebrae_harness_core::TurnHandle>>>>,
+    turn_traces: TurnTraceRegistry,
     permission_bridge: crate::local_chat::permissions::PermissionBridge,
     #[cfg(unix)]
     _permission_socket: Option<crate::local_chat::permissions::PermissionSocketGuard>,
@@ -395,8 +397,16 @@ struct ClaudeGuiEventSink {
     generation: u64,
     adapter: Arc<crate::local_chat::harnesses::shared::LocalChatHarnessEventSink>,
     sessions: Arc<RwLock<SessionRegistry>>,
+    turn_traces: TurnTraceRegistry,
     permission_bridge: crate::local_chat::permissions::PermissionBridge,
     closed: Arc<AtomicBool>,
+    lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+struct ClaudeGuiEventSinkContext {
+    sessions: Arc<RwLock<SessionRegistry>>,
+    turn_traces: TurnTraceRegistry,
+    permission_bridge: crate::local_chat::permissions::PermissionBridge,
     lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -405,10 +415,8 @@ impl ClaudeGuiEventSink {
         backend_session_id: String,
         generation: u64,
         event_sink: LocalChatEventSink,
-        sessions: Arc<RwLock<SessionRegistry>>,
         initial_model: Option<String>,
-        permission_bridge: crate::local_chat::permissions::PermissionBridge,
-        lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
+        context: ClaudeGuiEventSinkContext,
     ) -> Self {
         let adapter_backend_session_id = backend_session_id.clone();
         Self {
@@ -424,10 +432,11 @@ impl ClaudeGuiEventSink {
                     false,
                 ),
             ),
-            sessions,
-            permission_bridge,
+            sessions: context.sessions,
+            turn_traces: context.turn_traces,
+            permission_bridge: context.permission_bridge,
             closed: Arc::new(AtomicBool::new(false)),
-            lifecycle_gate,
+            lifecycle_gate: context.lifecycle_gate,
         }
     }
 
@@ -473,10 +482,67 @@ impl EventSink for ClaudeGuiEventSink {
                 );
             }
         }
+        if semantics == UpdateSemantics::Delta {
+            if let (Some(turn_id), HarnessEventPayloadV1::Text(text)) =
+                (correlation.turn_id.as_ref(), &payload)
+            {
+                let session_id = correlation
+                    .session_id
+                    .as_ref()
+                    .map(SessionId::as_str)
+                    .unwrap_or(&self.backend_session_id);
+                let timestamp = timestamp.to_rfc3339();
+                let delta = telemetry::InferenceDelta {
+                    event_id: event_id.as_str(),
+                    stream_id: stream_id.as_str(),
+                    sequence,
+                    provider_sequence,
+                    timestamp: &timestamp,
+                    session_id,
+                    thread_id: correlation.thread_id.as_ref().map(|id| id.as_str()),
+                    turn_id: turn_id.as_str(),
+                    run_id: correlation.run_id.as_ref().map(|id| id.as_str()),
+                    item_id: correlation.item_id.as_ref().map(|id| id.as_str()),
+                    tool_call_id: correlation.tool_call_id.as_ref().map(|id| id.as_str()),
+                    parent_tool_call_id: correlation
+                        .parent_tool_call_id
+                        .as_ref()
+                        .map(|id| id.as_str()),
+                    provider_resume_id: correlation
+                        .provider_resume_id
+                        .as_ref()
+                        .map(|id| id.as_str()),
+                };
+                let turn_traces = self
+                    .turn_traces
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let trace = turn_traces.get(turn_id).cloned();
+                drop(turn_traces);
+                if let Some(trace) = trace {
+                    let mut trace = trace
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    trace.record_text_delta(delta, &text.text);
+                }
+            }
+        }
         match payload {
             HarnessEventPayloadV1::SessionClosed(outcome) => {
                 let _lifecycle = self.lifecycle_gate.lock().await;
                 self.closed.store(true, Ordering::Release);
+                let traces = std::mem::take(
+                    &mut *self
+                        .turn_traces
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                );
+                for trace in traces.into_values() {
+                    let mut trace = trace
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    trace.finish();
+                }
                 let terminal_session = self
                     .sessions
                     .write()
@@ -712,14 +778,18 @@ impl ClaudeSessionRuntime {
         );
 
         let lifecycle_gate = Arc::new(tokio::sync::Mutex::new(()));
+        let turn_traces = Arc::new(Mutex::new(HashMap::new()));
         let event_sink = Arc::new(ClaudeGuiEventSink::new(
             backend_session_id.clone(),
             generation,
             runtime.event_sink(),
-            self.sessions.clone(),
             model.clone(),
-            runtime.permission_bridge(),
-            lifecycle_gate.clone(),
+            ClaudeGuiEventSinkContext {
+                sessions: self.sessions.clone(),
+                turn_traces: turn_traces.clone(),
+                permission_bridge: runtime.permission_bridge(),
+                lifecycle_gate: lifecycle_gate.clone(),
+            },
         ));
         let control_sink = Arc::new(
             crate::local_chat::harnesses::shared::LocalChatControlSink::new(
@@ -821,6 +891,7 @@ impl ClaudeSessionRuntime {
                 generation,
                 handle: handle.clone(),
                 active_turn: active_turn.clone(),
+                turn_traces: turn_traces.clone(),
                 permission_bridge: runtime.permission_bridge(),
                 #[cfg(unix)]
                 _permission_socket: started.take_permission_socket(),
@@ -834,7 +905,14 @@ impl ClaudeSessionRuntime {
             .initial_prompt
             .filter(|prompt| !prompt.trim().is_empty())
         {
-            if let Err(error) = send_turn(&backend_session_id, &handle, &active_turn, prompt).await
+            if let Err(error) = send_turn(
+                &backend_session_id,
+                &handle,
+                &active_turn,
+                &turn_traces,
+                prompt,
+            )
+            .await
             {
                 let closing_session = self.sessions.write().await.begin_close(&backend_session_id);
                 if let Some(session) = closing_session {
@@ -870,17 +948,29 @@ impl ClaudeSessionRuntime {
         session_id: &str,
         content: &str,
     ) -> Result<(), LocalChatSessionError> {
-        let (handle, active_turn) = self
+        let (handle, active_turn, turn_traces) = self
             .sessions
             .read()
             .await
             .active
             .get(session_id)
-            .map(|session| (session.handle.clone(), session.active_turn.clone()))
+            .map(|session| {
+                (
+                    session.handle.clone(),
+                    session.active_turn.clone(),
+                    session.turn_traces.clone(),
+                )
+            })
             .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
-        send_turn(session_id, &handle, &active_turn, content.to_string())
-            .await
-            .map_err(send_error)
+        send_turn(
+            session_id,
+            &handle,
+            &active_turn,
+            &turn_traces,
+            content.to_string(),
+        )
+        .await
+        .map_err(send_error)
     }
 
     pub(crate) async fn close_session(
@@ -1223,10 +1313,19 @@ async fn send_turn(
     session_id: &str,
     handle: &Arc<dyn SessionHandle>,
     active_turn: &Arc<Mutex<Option<Arc<dyn vertebrae_harness_core::TurnHandle>>>>,
+    turn_traces: &TurnTraceRegistry,
     content: String,
 ) -> Result<(), HarnessError> {
     let requested_turn_id = TurnId::new(uuid::Uuid::new_v4().to_string());
-    let span = if telemetry::traces_enabled(ObservabilitySubsystem::ClaudeCode) {
+    let trace_enabled = telemetry::traces_enabled(ObservabilitySubsystem::ClaudeCode);
+    // TEMP: confirm that the Claude send path reaches span creation without
+    // writing the chat body to the console.
+    log::info!(
+        target: "vertebrae.telemetry",
+        "[OTEL-DIAG] Claude local-chat send: trace_span_enabled={trace_enabled} content_bytes={}",
+        content.len()
+    );
+    let span = if trace_enabled {
         let span = tracing::info_span!(
             target: "vertebrae.claude_code.local_chat",
             "local_chat.send_message",
@@ -1235,11 +1334,24 @@ async fn send_turn(
             message.content_len = content.len(),
             send.outcome = tracing::field::Empty,
             turn.outcome = tracing::field::Empty,
+            inference.delta_count = tracing::field::Empty,
+            inference.delta_events_dropped = tracing::field::Empty,
         );
         span
     } else {
         tracing::Span::none()
     };
+    if trace_enabled {
+        turn_traces
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                requested_turn_id.clone(),
+                Arc::new(Mutex::new(telemetry::ClaudeInferenceTrace::new(
+                    span.clone(),
+                ))),
+            );
+    }
     let turn = match handle
         .send(SendTurnRequest {
             turn_id: requested_turn_id.clone(),
@@ -1263,6 +1375,16 @@ async fn send_turn(
             turn
         }
         Err(error) => {
+            let trace = turn_traces
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&requested_turn_id);
+            if let Some(trace) = trace {
+                let mut trace = trace
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                trace.finish();
+            }
             span.record("send.outcome", "rejected");
             tracing::warn!(
                 target: "vertebrae.claude_code",
@@ -1284,6 +1406,7 @@ async fn send_turn(
     let turn_id = turn.turn_id().clone();
     let metric_session_id = session_id.to_string();
     let outcome_span = span.clone();
+    let turn_traces = turn_traces.clone();
     tokio::spawn(
         async move {
             match turn.await_outcome().await {
@@ -1318,6 +1441,16 @@ async fn send_turn(
                     telemetry::record_message_outcome("live_turn", "error");
                     log::warn!("Claude harness turn ended without an outcome: {}", error);
                 }
+            }
+            let trace = turn_traces
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&turn_id);
+            if let Some(trace) = trace {
+                let mut trace = trace
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                trace.finish();
             }
             if let Ok(mut active) = active_turn.lock() {
                 if active
