@@ -1097,15 +1097,6 @@ impl ExecutionService for MockExecutionService {
         Ok(())
     }
 
-    async fn run_step(&self, task_id: &str, _step_id: &str) -> ServiceResult<StepExecution> {
-        let mut s = self.state.lock().unwrap();
-        let id = s.gen_id();
-        let mut execution = StepExecution::new(task_id, "mock_workflow", "mock_step");
-        execution.id = Some(id.clone());
-        s.executions.insert(id, execution.clone());
-        Ok(execution)
-    }
-
     async fn update_execution_status(
         &self,
         execution_id: &str,

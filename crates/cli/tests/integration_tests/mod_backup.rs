@@ -11,7 +11,6 @@ mod basic_tests;
 mod ready_tests;
 mod review_tests;
 mod step_done_tests;
-// Temporary disable: mod run_tests;
 // Temporary disable: mod sections_tests;
 // Temporary disable: mod unsection_tests;
 // Temporary disable: mod workflow_cmd_tests;

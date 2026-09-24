@@ -33,7 +33,7 @@ Feature: Artifact link metadata and logical-name context
     When I run vtb "start-taskrun <TASK_ID>"
     Then the command should succeed
     When I store the latest TaskRun ID as "task_run_id"
-    And I create an artifact step execution
+    And I store the TaskRun's latest step execution ID
     When I reattach artifact "<task_artifact>" to "step_execution" "<step_execution_id>" with logical name "execution-result" without changing its body
     Then the command should succeed
     And the artifact JSON operation should be "updated" with logical name "execution-result" and metadata content kind "result"

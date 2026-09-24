@@ -1,6 +1,7 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cucumber::when;
+use tokio::time::sleep;
 
 use crate::DaemonWorld;
 
@@ -133,18 +134,23 @@ async fn set_prompt(world: &mut DaemonWorld, builder: daemon_acceptance::MockRes
     world.assert_vtb_ok("step update --prompt");
 }
 
-#[when("run_step is invoked")]
-pub async fn invoke_run_step(world: &mut DaemonWorld) {
+#[when("I start a TaskRun")]
+pub async fn start_task_run(world: &mut DaemonWorld) {
     let task_id = world.task_id.as_ref().expect("task not created").clone();
-    world.run_vtb(&["run", &task_id]).await;
-    world.assert_vtb_ok("vtb run");
+    world.run_vtb(&["start-taskrun", &task_id]).await;
+    world.assert_vtb_ok("vtb start-taskrun");
 
-    // `vtb run` prints a human string with a short execution id. Resolve the
-    // full UUID by listing the task's executions and picking the newest.
-    let execution_id = world
-        .latest_execution_id(&task_id)
-        .await
-        .unwrap_or_else(|e| panic!("could not resolve execution id after vtb run: {e}"));
+    // TaskRun scheduling creates the step execution asynchronously.
+    let deadline = Instant::now() + DEFAULT_POLL_TIMEOUT;
+    let execution_id = loop {
+        match world.latest_execution_id(&task_id).await {
+            Ok(id) => break id,
+            Err(error) if error == "no step_executions for task" && Instant::now() < deadline => {
+                sleep(Duration::from_millis(100)).await;
+            }
+            Err(error) => panic!("could not resolve execution id after TaskRun start: {error}"),
+        }
+    };
     world.execution_id = Some(execution_id);
 }
 

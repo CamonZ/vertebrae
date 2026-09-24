@@ -89,8 +89,8 @@ vtb --json step delete <step-id>
 ```
 
 `vtb step add` takes a required `<name>` positional argument plus required
-`--workflow` / `-w`; run `vtb step add --help` for the complete creation flag
-list. `--transition-to` accepts full UUIDs or 8-character short IDs. The global
+`--workflow` / `-w`; run `vtb step add --help` for the complete creation flag list.
+`--transition-to` accepts full UUIDs or 8-character short IDs. The global
 `--json` flag returns a creation envelope with `command`, `status`, `step_id`,
 and `workflow_id`.
 
@@ -612,7 +612,7 @@ codex --version
 vtb workflow add "Smoke-Claude" --step Hello:sonnet
 vtb add "Smoke: Claude default" -d "say hi"
 vtb workflow assign <task-id> <smoke-claude-wf-id>
-vtb run <task-id>
+vtb start-taskrun <task-id>
 # Confirm the run in the GUI or by watching daemon logs.
 
 # 2. OpenAI / Codex provider selection.
@@ -625,16 +625,16 @@ vtb step add "Hello" -w <smoke-codex-wf-id> \
   --prompt "Reply with the single word: ok"
 vtb add "Smoke: Codex" -d "say hi"
 vtb workflow assign <task-id-2> <smoke-codex-wf-id>
-vtb run <task-id-2>
+vtb start-taskrun <task-id-2>
 # Confirm the run in the GUI or by watching daemon logs.
 ```
 
-Each smoke task uses a single-step workflow so the run is unambiguous about
-which provider the daemon resolved. The resolved provider and model are
-persisted on the `StepExecution` record (and reported back to the backend); the
-CLI does not expose StepExecution detail output, so confirm the harness was
-actually used by tailing the daemon logs or by inspecting the spawned process
-while the run is in flight.
+Each smoke task uses a workflow with one step, started as a durable TaskRun, so
+the execution is unambiguous about which provider the daemon resolved. The
+resolved provider and model are persisted on the `StepExecution` record and
+reported back to the backend. The CLI does not expose `StepExecution` detail
+output, so confirm the harness was used by tailing daemon logs or inspecting
+the spawned process while the run is in flight.
 
 #### Out of scope for the MVP
 

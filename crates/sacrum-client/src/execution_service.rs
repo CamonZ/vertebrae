@@ -18,8 +18,8 @@ use crate::api_types::{
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::executions::{
     ACTIVE_RUN, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS, LIST_LOGS,
-    ORCHESTRATE_TASK, RUN_STEP, RUN_WORKFLOW, SESSION_LOG_FIELDS, STOP_ORCHESTRATOR, STOP_RUN,
-    TASK_RUN, TASK_RUN_FIELDS, TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS, UPDATE_EXECUTION,
+    ORCHESTRATE_TASK, RUN_WORKFLOW, SESSION_LOG_FIELDS, STOP_ORCHESTRATOR, STOP_RUN, TASK_RUN,
+    TASK_RUN_FIELDS, TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS, UPDATE_EXECUTION,
 };
 
 /// Response shape for mutations that return only an id
@@ -256,19 +256,6 @@ impl ExecutionService for SacrumExecutionService {
             .await?;
 
         Ok(responses.iter().map(Self::response_to_log).collect())
-    }
-
-    async fn run_step(&self, task_id: &str, step_id: &str) -> ServiceResult<StepExecution> {
-        let query = with_fragments(RUN_STEP, &[EXECUTION_FIELDS]);
-        let variables = json!({
-            "task_id": task_id,
-            "step_id": step_id,
-        });
-
-        let response: StepExecutionResponse =
-            self.client.execute(&query, variables, "run_step").await?;
-
-        Ok(Self::response_to_execution(&response))
     }
 
     async fn orchestrate_task(&self, task_id: &str) -> ServiceResult<()> {
@@ -1082,96 +1069,6 @@ mod tests {
             .unwrap();
 
         assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_run_step_returns_execution() {
-        let server = MockServer::start().await;
-
-        Mock::given(method("POST"))
-            .and(path("/graphql"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": {
-                    "run_step": {
-                        "id": "exec-run-1",
-                        "task_id": "task-1",
-                        "workflow_id": "wf-1",
-                        "step_name": "implement",
-                        "status": "in_progress",
-                        "context": null,
-                        "prompt": null,
-                        "output": null,
-                        "transition_result": null,
-                        "model": null,
-                        "model_provider": null,
-                        "input_tokens": null,
-                        "output_tokens": null,
-                        "cost": null,
-                        "duration_ms": null,
-                        "inserted_at": "2024-06-01T00:00:00Z",
-                        "updated_at": "2024-06-01T00:00:00Z"
-                    }
-                }
-            })))
-            .mount(&server)
-            .await;
-
-        let service = create_wiremock_service(&server.uri());
-        let result = service.run_step("task-1", "step-1").await.unwrap();
-
-        assert_eq!(result.id, Some("exec-run-1".to_string()));
-        assert_eq!(result.task_id, "task-1");
-        assert_eq!(result.step_name, "implement");
-        assert_eq!(result.status, ExecutionStatus::InProgress);
-    }
-
-    #[tokio::test]
-    async fn test_run_step_graphql_error() {
-        let server = MockServer::start().await;
-
-        Mock::given(method("POST"))
-            .and(path("/graphql"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": null,
-                "errors": [{"message": "no_daemon_connected"}]
-            })))
-            .mount(&server)
-            .await;
-
-        let service = create_wiremock_service(&server.uri());
-        let result = service.run_step("task-1", "step-1").await;
-
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("no_daemon_connected"),
-            "Expected error about daemon, got: {}",
-            err_msg
-        );
-    }
-
-    #[tokio::test]
-    async fn test_run_step_stop_rejection_is_returned_without_execution() {
-        let server = MockServer::start().await;
-
-        Mock::given(method("POST"))
-            .and(path("/graphql"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": null,
-                "errors": [{"message": "stop steps cannot be dispatched directly"}]
-            })))
-            .mount(&server)
-            .await;
-
-        let service = create_wiremock_service(&server.uri());
-        let result = service.run_step("task-1", "stop-step").await;
-
-        let error = result.expect_err("direct stop dispatch should fail");
-        assert!(
-            error
-                .to_string()
-                .contains("stop steps cannot be dispatched")
-        );
     }
 
     // =========================================================================

@@ -8,7 +8,7 @@ Feature: Codex App Server step execution
     And a workflow with one execute step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the Codex App Server uses the persistent session RPC flow
@@ -20,7 +20,7 @@ Feature: Codex App Server step execution
     And a workflow with one execute step using openai and reasoning effort "high"
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the Codex App Server request contains model "gpt-5.5" and reasoning effort "high"
@@ -30,7 +30,7 @@ Feature: Codex App Server step execution
     And a workflow with one execute step using openai, speed tier "fast", personality "friendly", and verbosity "high"
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the Codex App Server request contains service tier "priority" and personality "friendly"
@@ -41,7 +41,7 @@ Feature: Codex App Server step execution
     And a workflow with one execute step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the Codex App Server request omits optional model settings
@@ -52,7 +52,7 @@ Feature: Codex App Server step execution
     And a workflow with one execute step using openai, codex model provider "openrouter", and model "deepseek/deepseek-v4-flash"
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the Codex App Server request contains model "deepseek/deepseek-v4-flash" and model provider "openrouter"
@@ -62,7 +62,7 @@ Feature: Codex App Server step execution
     And a workflow with one execute step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to succeed without an agent_message
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution has no recorded output
@@ -73,7 +73,7 @@ Feature: Codex App Server step execution
     And a workflow with one execute step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to emit three jsonl item events
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution has at least 3 session log entries
@@ -84,7 +84,7 @@ Feature: Codex App Server step execution
     And a workflow with one execute step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to emit an error event
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"
 
@@ -93,6 +93,6 @@ Feature: Codex App Server step execution
     And a workflow with one execute step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to emit a turn.failed event
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"

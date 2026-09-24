@@ -714,20 +714,6 @@ async deleteStep(stepId: string) : Promise<Result<null, CommandError>> {
 }
 },
 /**
- * Run a single workflow step for a task via Sacrum
- * 
- * Sacrum creates a StepExecution record and broadcasts a run_step event
- * to connected daemon clients, which pick up and execute the step.
- */
-async runStep(taskId: string, stepId: string) : Promise<Result<StepExecution, CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("run_step", { taskId, stepId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Start or schedule a durable TaskRun workflow via Sacrum.
  */
 async runWorkflow(taskId: string, maxConcurrency: number | null) : Promise<Result<TaskRun, CommandError>> {

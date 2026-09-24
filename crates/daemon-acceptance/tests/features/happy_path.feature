@@ -9,7 +9,7 @@ Feature: Happy path step execution
     And a workflow with one execute step
     And a task assigned to the workflow
     When the mock is scripted to succeed with full metrics
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution output contains "computed-answer"
@@ -22,7 +22,7 @@ Feature: Happy path step execution
     And a workflow with one execute step
     And a task assigned to the workflow
     When the mock is scripted to succeed without a result line
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution has no recorded output
@@ -33,7 +33,7 @@ Feature: Happy path step execution
     And a workflow with one execute step
     And a task assigned to the workflow
     When the mock is scripted to emit three stream-json lines
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution has at least 3 session log entries
@@ -43,7 +43,7 @@ Feature: Happy path step execution
     And a workflow with one execute step
     And a task assigned to the workflow
     When the mock is scripted to succeed with only stderr output
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution has no recorded output

@@ -1,4 +1,5 @@
 use cucumber::{given, then, when};
+use tokio::time::{Duration, Instant, sleep};
 use tokio_postgres::NoTls;
 use uuid::Uuid;
 
@@ -680,35 +681,44 @@ async fn create_artifact_task_section_fixture(world: &mut SmokeWorld) {
         .insert("section_id".to_string(), section_id.to_string());
 }
 
-#[when("I create an artifact step execution")]
-async fn create_artifact_step_execution(world: &mut SmokeWorld) {
-    let task_id = world.task_id.as_ref().expect("no task fixture").clone();
-    let step_id = world
+#[when("I store the TaskRun's latest step execution ID")]
+async fn store_latest_task_run_step_execution_id(world: &mut SmokeWorld) {
+    let task_run_id = world
         .stored_ids
-        .get("step:execute")
-        .expect("workflow fixture did not create the execute step")
+        .get("task_run_id")
+        .expect("no TaskRun ID stored")
         .clone();
     let client = world
         .graphql_client
         .as_ref()
         .expect("configured Sacrum client is required");
-    let execution: serde_json::Value = client
-        .execute(
-            r#"mutation ArtifactFixtureRunStep($task_id: Uuid4!, $step_id: Uuid4!) {
-                runStep(taskId: $task_id, stepId: $step_id) { id }
-            }"#,
-            serde_json::json!({"task_id": task_id, "step_id": step_id}),
-            "runStep",
-        )
-        .await
-        .expect("failed to create step execution fixture");
-    let execution_id = execution
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .expect("runStep did not return an execution ID");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let execution_id = loop {
+        let run: serde_json::Value = client
+            .execute(
+                r#"query ArtifactFixtureTaskRun($id: Uuid4!) {
+                    taskRun(id: $id) { latestStepExecutionId }
+                }"#,
+                serde_json::json!({"id": &task_run_id}),
+                "taskRun",
+            )
+            .await
+            .expect("failed to read TaskRun fixture");
+        if let Some(execution_id) = run
+            .get("latestStepExecutionId")
+            .and_then(serde_json::Value::as_str)
+        {
+            break execution_id.to_string();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "TaskRun {task_run_id} did not create a step execution within 30 seconds"
+        );
+        sleep(Duration::from_millis(100)).await;
+    };
     world
         .stored_ids
-        .insert("step_execution_id".to_string(), execution_id.to_string());
+        .insert("step_execution_id".to_string(), execution_id);
 }
 
 #[then(expr = "the artifact list should include {string} with filename {string} and body {string}")]

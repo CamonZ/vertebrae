@@ -232,26 +232,22 @@ mod tests {
     #[tokio::test]
     async fn get_execution_returns_full_field_set() {
         let app = build_app_with_services();
+        let task_id = create_task_with_workflow(&app).await;
         let state: tauri::State<'_, AppState> = app.state();
 
-        let exec_id = {
-            let app_state = app.state::<AppState>();
-            let services_guard = app_state.services.read().await;
-            let services = services_guard.as_ref().expect("services initialized");
-            let core_exec = services
-                .executions()
-                .run_step("task-1", "step-1")
-                .await
-                .expect("run_step succeeds");
-            core_exec.id.clone().expect("execution id assigned")
-        };
+        let run = run_workflow(state.clone(), task_id.clone(), None)
+            .await
+            .expect("run workflow succeeds");
+        let exec_id = run
+            .latest_step_execution_id
+            .expect("workflow creates a step execution");
 
         let fetched = get_execution(state, exec_id.clone())
             .await
             .unwrap()
             .expect("execution found");
         assert_eq!(fetched.id.as_deref(), Some(exec_id.as_str()));
-        assert_eq!(fetched.task_id, "task-1");
+        assert_eq!(fetched.task_id, task_id);
         assert_eq!(fetched.prompt.as_deref(), Some("mock prompt"));
         assert_eq!(fetched.output.as_deref(), Some("mock output"));
         assert_eq!(fetched.context.as_deref(), Some(r#"{"mock":"context"}"#));

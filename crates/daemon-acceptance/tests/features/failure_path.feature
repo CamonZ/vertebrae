@@ -7,7 +7,7 @@ Feature: Failure path step execution
     And a workflow with one execute step
     And a task assigned to the workflow
     When the mock is scripted to exit non-zero with an error message
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"
 
@@ -16,7 +16,7 @@ Feature: Failure path step execution
     And a workflow with one execute step
     And a task assigned to the workflow
     When the mock is scripted to exit with code 137
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"
     And the execution output contains "137"

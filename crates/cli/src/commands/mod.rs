@@ -18,7 +18,6 @@ pub mod path;
 pub mod ready;
 pub mod r#ref;
 pub mod refs;
-pub mod run;
 pub mod run_workflow;
 pub mod section;
 pub mod sections;
@@ -47,7 +46,6 @@ pub use path::PathCommand;
 pub use ready::ReadyCommand;
 pub use r#ref::RefCommand;
 pub use refs::RefsCommand;
-pub use run::RunCommand;
 pub use run_workflow::RunWorkflowCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
@@ -165,8 +163,6 @@ pub enum Command {
     Ref(RefCommand),
     /// List all code references for a task
     Refs(RefsCommand),
-    /// Run the current step for a task
-    Run(RunCommand),
     /// Start a TaskRun for a task's assigned workflow
     #[command(name = "start-taskrun")]
     RunWorkflow(RunWorkflowCommand),
@@ -499,7 +495,6 @@ impl Command {
             }
             Command::Ref(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Refs(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
-            Command::Run(cmd) => cmd.task_id = resolve_id(&cmd.task_id, services).await?,
             Command::RunWorkflow(cmd) => cmd.task_id = resolve_id(&cmd.task_id, services).await?,
             Command::Section(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Sections(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
@@ -677,10 +672,6 @@ impl Command {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
-            Command::Run(cmd) => {
-                let result = cmd.execute(services).await?;
-                Ok(CommandResult::Message(result))
-            }
             Command::RunWorkflow(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
@@ -839,7 +830,6 @@ impl Command {
                 )
             }
             Command::Refs(cmd) => json_value(cmd.execute(services).await?)?,
-            Command::Run(cmd) => json_value(cmd.execute_result(services).await?)?,
             Command::RunWorkflow(cmd) => json_value(cmd.execute_result(services).await?)?,
             Command::Section(cmd) => json_value(cmd.execute(services).await?)?,
             Command::Sections(cmd) => {

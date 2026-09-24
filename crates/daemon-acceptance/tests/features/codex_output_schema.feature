@@ -8,7 +8,7 @@ Feature: Codex structured-output JSON parsing
     And a workflow with one execute step using openai and an output schema
     And a task assigned to the workflow
     When the codex mock is scripted to emit a structured JSON agent_message
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution output contains "verdict"
@@ -20,7 +20,7 @@ Feature: Codex structured-output JSON parsing
     And a workflow with one execute step using openai and an output schema
     And a task assigned to the workflow
     When the codex mock is scripted to emit a malformed JSON agent_message
-    And run_step is invoked
+    And I start a TaskRun
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"
     And the execution output contains "not valid JSON"
