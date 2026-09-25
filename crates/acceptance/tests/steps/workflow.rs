@@ -26,24 +26,6 @@ async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
     // Keep the shared fixture unchanged for round-trip tests, while making
     // this live import fixture valid for the backend's import contract.
     fixture["workflows"][0]["steps"][0]["prompt"] = serde_json::Value::Null;
-    fixture["workflows"][0]["steps"][1]["output_schema"] = json!({
-        "type": "object",
-        "properties": {
-            "transition_to": {"type": "string"},
-            "transition_type": {
-                "type": "string",
-                "enum": ["intra_workflow", "inter_workflow"]
-            },
-            "handoff": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-                "additionalProperties": false
-            }
-        },
-        "required": ["transition_to", "transition_type", "handoff"],
-        "additionalProperties": false
-    });
     fixture["workflows"][0]["steps"][2]["output_schema"] = json!({
         "type": "object",
         "properties": {
@@ -74,7 +56,7 @@ async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
         "required": [],
         "additionalProperties": false
     });
-    fixture["workflows"][1]["steps"][0]["step_type"] = json!("execute");
+    fixture["workflows"][1]["steps"][0]["step_type"] = json!("llm_inference");
     let contents = serde_json::to_string(&fixture).expect("workflow fixture should serialize");
     let path = world.write_temp_file(&contents);
     world.stored_ids.insert(
@@ -259,6 +241,26 @@ fn mapped_step_id<'a>(
     mapped_id(mappings, step_ref)
 }
 
+/// Drop the null and empty fields a GraphQL config union selection returns.
+fn non_blank_config(config: &Value) -> Value {
+    match config {
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .filter(|(_, value)| match value {
+                    Value::Null => false,
+                    Value::Array(items) => !items.is_empty(),
+                    Value::Object(object) => !object.is_empty(),
+                    Value::String(text) => !text.is_empty(),
+                    _ => true,
+                })
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 fn materialize_route_refs(
     value: &Value,
     workflow_mappings: &Map<String, Value>,
@@ -393,27 +395,37 @@ async fn destination_workflow_graph_should_match_import_mappings(world: &mut Smo
             assert_eq!(actual.workflow_id, workflow_id);
             assert_eq!(actual.name, step.name);
             assert_eq!(actual.goal, step.goal);
-            assert_eq!(actual.prompt, step.prompt);
-            assert_eq!(actual.agents, step.agents);
-            assert_eq!(actual.skills, step.skills);
-            assert_eq!(actual.agent_config, step.agent_config);
             assert_eq!(
-                actual.step_type.as_deref().unwrap_or("execute"),
+                actual.step_type.as_deref().unwrap_or(""),
                 step.step_type.as_str()
             );
             assert_eq!(actual.step_order, step.step_order);
-            assert_eq!(actual.output_schema, step.output_schema);
             assert_eq!(actual.persistence_options, step.persistence_options);
+
+            // Sacrum imports the manifest's non-blank flat fields as config.
+            let mut expected_config = step.config_value();
+            if let Some(route_config) = expected_config.get_mut("route_config") {
+                *route_config = materialize_route_refs(
+                    route_config,
+                    workflow_mappings,
+                    step_mappings,
+                    &workflow.workflow_ref,
+                );
+            }
+            let expected_config = match step.step_type.config_fields() {
+                Some(_) => expected_config,
+                None => Value::Null,
+            };
             assert_eq!(
-                actual.route_config,
-                step.route_config.as_ref().map(|route_config| {
-                    materialize_route_refs(
-                        route_config,
-                        workflow_mappings,
-                        step_mappings,
-                        &workflow.workflow_ref,
-                    )
-                })
+                actual
+                    .config
+                    .as_ref()
+                    .map(non_blank_config)
+                    .unwrap_or_default(),
+                expected_config,
+                "imported config mismatch for {}/{}",
+                workflow.workflow_ref,
+                step.step_ref
             );
         }
         destination_workflows.push((workflow.workflow_ref.clone(), destination));

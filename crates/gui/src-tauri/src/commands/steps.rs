@@ -99,41 +99,7 @@ pub(crate) async fn create_step_inner(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Build transitions_to list
-    let transitions: Vec<String> = options
-        .transitions_to
-        .iter()
-        .map(|id| id.to_lowercase())
-        .collect();
-
-    // Build the step
-    let mut step = vertebrae_core::Step::new(&options.name, options.workflow_id)
-        .with_agent_config(options.agent_config.unwrap_or_default().into())
-        .with_agents(options.agents)
-        .with_skills(options.skills)
-        .with_order(options.order)
-        .with_transitions_to(transitions)
-        .with_step_type(options.step_type.into());
-
-    if let Some(goal) = options.goal {
-        step = step.with_goal(&goal);
-    }
-
-    if let Some(prompt) = options.prompt {
-        step = step.with_prompt(&prompt);
-    }
-
-    if let Some(schema) = options.output_schema {
-        step = step.with_output_schema(schema);
-    }
-
-    if let Some(persistence_options) = options.persistence_options {
-        step = step.with_persistence_options(persistence_options);
-    }
-
-    if let Some(route_config) = options.route_config {
-        step = step.with_route_config(route_config);
-    }
+    let step = options.into_step()?;
 
     match service.steps().create_step(&step).await {
         Ok(created) => {
@@ -158,11 +124,11 @@ pub async fn update_step(
     options: crate::types::UpdateStepOptions,
 ) -> Result<(), CommandError> {
     log::info!(
-        "update_step called with step_id: '{}', name: {:?}, goal: {:?}, prompt: {:?}",
+        "update_step called with step_id: '{}', name: {:?}, goal: {:?}, config: {:?}",
         options.step_id,
         options.name,
         options.goal,
-        options.prompt,
+        options.config,
     );
     let step_id = options.step_id.clone();
     let service_guard = state.services.read().await;
@@ -280,24 +246,29 @@ mod tests {
                 workflow_id: "wf-1".to_string(),
                 name: "Review".to_string(),
                 goal: Some("Review the code".to_string()),
-                prompt: Some("Review the code carefully".to_string()),
-                agents: vec!["sonnet".to_string()],
-                skills: vec![],
-                agent_config: None,
                 order: 0,
                 transitions_to: vec![],
                 step_type: Default::default(),
-                output_schema: None,
+                config: serde_json::json!({
+                    "prompt": "Review the code carefully",
+                    "agents": ["sonnet"]
+                })
+                .as_object()
+                .cloned(),
                 persistence_options: Some(serde_json::json!({
                     "artifact": { "logical_name": "review-result" }
                 })),
-                route_config: None,
             },
         )
         .await
         .unwrap();
         assert_eq!(step.name, "Review");
         assert!(step.id.is_some());
+        let Some(crate::types::StepConfig::LlmInference(config)) = &step.config else {
+            panic!("expected llm_inference config");
+        };
+        assert_eq!(config.prompt.as_deref(), Some("Review the code carefully"));
+        assert_eq!(config.agents, vec!["sonnet"]);
         assert_eq!(
             step.persistence_options,
             Some(serde_json::json!({ "artifact": { "logical_name": "review-result" } }))
@@ -309,7 +280,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_route_step_rejects_prompt_and_output_schema() {
+    async fn create_route_step_rejects_undeclared_config_fields() {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
 
@@ -319,21 +290,21 @@ mod tests {
                 workflow_id: "wf-route".to_string(),
                 name: "Router".to_string(),
                 goal: None,
-                prompt: Some("legacy route prompt".to_string()),
-                agents: vec![],
-                skills: vec![],
-                agent_config: None,
                 order: 0,
                 transitions_to: vec![],
                 step_type: crate::types::StepType::Route,
-                output_schema: Some(serde_json::json!({"type": "object"})),
+                config: serde_json::json!({"prompt": "route prompt"})
+                    .as_object()
+                    .cloned(),
                 persistence_options: None,
-                route_config: None,
             },
         )
         .await;
 
-        assert!(result.unwrap_err().message.contains("route steps"));
+        assert!(result
+            .unwrap_err()
+            .message
+            .contains("$.prompt: is not supported for route steps"));
     }
 
     #[tokio::test]
@@ -346,16 +317,11 @@ mod tests {
                 workflow_id: "wf-finish".to_string(),
                 name: "Finish".to_string(),
                 goal: None,
-                prompt: None,
-                agents: vec![],
-                skills: vec![],
-                agent_config: None,
                 order: 0,
                 transitions_to: vec![],
                 step_type: crate::types::StepType::Finish,
-                output_schema: None,
                 persistence_options: None,
-                route_config: None,
+                config: None,
             },
         )
         .await
@@ -366,7 +332,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_stop_step_preserves_boundary_fields() {
+    async fn create_stop_step_has_no_config() {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
         let step = create_step_inner(
@@ -375,36 +341,19 @@ mod tests {
                 workflow_id: "wf-stop".to_string(),
                 name: "Pause run".to_string(),
                 goal: Some("Pause this TaskRun".to_string()),
-                prompt: Some("This prompt is not dispatched".to_string()),
-                agents: vec!["reviewer".to_string()],
-                skills: vec!["simplify".to_string()],
-                agent_config: Some(crate::types::AgentConfig {
-                    model: Some("gpt-5.5".to_string()),
-                    provider: Some(crate::types::AgentProvider::Openai),
-                    ..Default::default()
-                }),
                 order: 1,
                 transitions_to: vec!["next-step".to_string()],
                 step_type: crate::types::StepType::Stop,
-                output_schema: Some(serde_json::json!({"type": "object"})),
+                config: None,
                 persistence_options: None,
-                route_config: None,
             },
         )
         .await
         .unwrap();
 
         assert_eq!(step.step_type, crate::types::StepType::Stop);
-        assert_eq!(
-            step.prompt.as_deref(),
-            Some("This prompt is not dispatched")
-        );
+        assert!(step.config.is_none());
         assert_eq!(step.transitions_to, vec!["next-step"]);
-        assert_eq!(step.agent_config.model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(
-            step.agent_config.provider,
-            Some(crate::types::AgentProvider::Openai)
-        );
     }
 
     #[tokio::test]
@@ -425,16 +374,11 @@ mod tests {
                 workflow_id: "wf-x".to_string(),
                 name: "Step1".to_string(),
                 goal: None,
-                prompt: None,
-                agents: vec![],
-                skills: vec![],
-                agent_config: None,
                 order: 0,
                 transitions_to: vec![],
                 step_type: Default::default(),
-                output_schema: None,
                 persistence_options: None,
-                route_config: None,
+                config: None,
             },
         )
         .await
@@ -445,16 +389,11 @@ mod tests {
                 workflow_id: "wf-x".to_string(),
                 name: "Step2".to_string(),
                 goal: None,
-                prompt: None,
-                agents: vec![],
-                skills: vec![],
-                agent_config: None,
                 order: 1,
                 transitions_to: vec![],
                 step_type: Default::default(),
-                output_schema: None,
                 persistence_options: None,
-                route_config: None,
+                config: None,
             },
         )
         .await
@@ -486,40 +425,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_route_step_rejects_prompt_write_without_type_change() {
+    async fn update_step_config_patch_keeps_unsent_fields() {
         let services = mock_services();
-        let step = vertebrae_core::Step::new("Router", "wf-1".to_string())
-            .with_prompt("legacy route prompt");
+        let step = vertebrae_core::Step::new("Implement", "wf-1".to_string())
+            .with_prompt("first")
+            .with_skills(vec!["rust".to_string()]);
         let created = services.steps().create_step(&step).await.unwrap();
         let step_id = created.id.unwrap();
-        services
-            .steps()
-            .update_step(
-                &step_id,
-                &vertebrae_core::StepUpdate::new().with_step_type(vertebrae_core::StepType::Route),
-            )
-            .await
-            .unwrap();
+
+        update_step_inner(
+            &services,
+            &step_id,
+            vertebrae_core::StepUpdate::new().with_prompt("second"),
+        )
+        .await
+        .unwrap();
+        let updated = services.steps().get_step(&step_id).await.unwrap().unwrap();
+        assert_eq!(updated.prompt(), Some("second"));
+        assert_eq!(updated.skills(), ["rust"]);
 
         let result = update_step_inner(
             &services,
             &step_id,
-            vertebrae_core::StepUpdate::new().with_prompt("new route prompt"),
+            vertebrae_core::StepUpdate::new().with_route_config(Some(serde_json::json!({}))),
         )
         .await;
-
-        assert!(result.unwrap_err().message.contains("route steps"));
-        assert_eq!(
-            services
-                .steps()
-                .get_step(&step_id)
-                .await
-                .unwrap()
-                .unwrap()
-                .prompt
-                .as_deref(),
-            Some("legacy route prompt")
-        );
+        assert!(result
+            .unwrap_err()
+            .message
+            .contains("$.route_config: is not supported for llm_inference steps"));
     }
 
     #[tokio::test]

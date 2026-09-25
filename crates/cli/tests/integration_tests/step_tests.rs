@@ -5,7 +5,7 @@
 use super::mock::mock_services;
 use vertebrae_cli::commands::step::*;
 use vertebrae_cli::commands::{Command, CommandResult};
-use vertebrae_core::{CreateWorkflowOptions, StepUpdate};
+use vertebrae_core::CreateWorkflowOptions;
 
 // ============================================================================
 // Step creation tests
@@ -46,7 +46,7 @@ mod step_create_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -85,7 +85,7 @@ mod step_create_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: Some(r#"{"type":"object"}"#.to_string()),
             persistence_options: Some(persistence.to_string()),
             route_config: None,
@@ -125,7 +125,6 @@ mod step_create_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: Some(
@@ -173,7 +172,6 @@ mod step_create_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -239,7 +237,7 @@ mod step_create_tests {
             .unwrap();
 
         assert_eq!(step.step_type, vertebrae_core::StepType::Finish);
-        assert!(step.prompt.is_none());
+        assert!(step.prompt().map(str::to_string).is_none());
         assert!(step.transitions_to.is_empty());
     }
 
@@ -311,7 +309,7 @@ mod step_create_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -363,7 +361,7 @@ mod step_create_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -415,7 +413,7 @@ mod step_create_tests {
             codex_model_provider: None,
             order: 5,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -510,7 +508,7 @@ mod step_create_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -525,13 +523,13 @@ mod step_create_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(step.agents.len(), 2);
+        assert_eq!(step.agents().len(), 2);
         assert!(
-            step.agents
+            step.agents()
                 .contains(&".claude/agents/reviewer.md".to_string())
         );
         assert!(
-            step.agents
+            step.agents()
                 .contains(&".claude/agents/analyzer.md".to_string())
         );
     }
@@ -567,7 +565,7 @@ mod step_create_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -577,9 +575,9 @@ mod step_create_tests {
 
         // Verify skills are set
         let step = services.steps().get_step("testing").await.unwrap().unwrap();
-        assert_eq!(step.skills.len(), 2);
-        assert!(step.skills.contains(&"test-writing".to_string()));
-        assert!(step.skills.contains(&"debugging".to_string()));
+        assert_eq!(step.skills().len(), 2);
+        assert!(step.skills().contains(&"test-writing".to_string()));
+        assert!(step.skills().contains(&"debugging".to_string()));
     }
 
     #[tokio::test]
@@ -617,7 +615,7 @@ mod step_create_tests {
                 "rejected".to_string(),
                 "needs_revision".to_string(),
             ],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -669,7 +667,7 @@ mod step_create_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -684,7 +682,10 @@ mod step_create_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(step.agent_config.model, Some("sonnet".to_string()));
+        assert_eq!(
+            step.agent_config().unwrap().model,
+            Some("sonnet".to_string())
+        );
     }
 }
 
@@ -731,7 +732,7 @@ mod step_list_tests {
                 step_type: if i == 2 {
                     CliStepType::Finish
                 } else {
-                    CliStepType::Execute
+                    CliStepType::LlmInference
                 },
                 output_schema: None,
                 persistence_options: None,
@@ -748,9 +749,9 @@ mod step_list_tests {
 
         // Verify output contains steps
         assert!(result.contains("Steps for workflow"));
-        assert!(result.contains("1. Step 1 (id: step-0, type: execute, model: default)"));
-        assert!(result.contains("2. Step 2 (id: step-1, type: execute, model: default)"));
-        assert!(result.contains("3. Step 3 (id: step-2, type: finish, model: default)"));
+        assert!(result.contains("1. Step 1 (id: step-0, type: llm_inference, model: default)"));
+        assert!(result.contains("2. Step 2 (id: step-1, type: llm_inference, model: default)"));
+        assert!(result.contains("3. Step 3 (id: step-2, type: finish)"));
     }
 
     #[tokio::test]
@@ -782,7 +783,7 @@ mod step_list_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Evaluate,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -806,8 +807,8 @@ mod step_list_tests {
         assert_eq!(steps[0]["name"], "Review");
         assert_eq!(steps[0]["workflow_id"], workflow_id);
         assert_eq!(steps[0]["goal"], "Review implementation");
-        assert_eq!(steps[0]["step_type"], "evaluate");
-        assert_eq!(steps[0]["agent_config"]["model"], "sonnet");
+        assert_eq!(steps[0]["step_type"], "llm_inference");
+        assert_eq!(steps[0]["config"]["agent_config"]["model"], "sonnet");
     }
 
     #[tokio::test]
@@ -863,7 +864,7 @@ mod step_list_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -919,7 +920,7 @@ mod step_show_tests {
             codex_model_provider: None,
             order: 1,
             transitions_to: vec!["approved".to_string(), "rejected".to_string()],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -970,7 +971,7 @@ mod step_show_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1077,7 +1078,7 @@ mod step_show_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1123,7 +1124,7 @@ mod step_show_tests {
             order: 2,
             transitions_to: vec![],
             step_type: CliStepType::HumanInput,
-            output_schema: Some(r#"{"type":"object","required":["decision"]}"#.to_string()),
+            output_schema: None,
             persistence_options: Some(
                 r#"{"artifact":{"logical_name":"human-result"}}"#.to_string(),
             ),
@@ -1150,7 +1151,7 @@ mod step_show_tests {
         assert_eq!(json["goal"], "Collect reviewer decision");
         assert_eq!(json["order"], 2);
         assert_eq!(json["step_type"], "human_input");
-        assert_eq!(json["output_schema"]["required"][0], "decision");
+        assert!(json["config"].is_null());
         assert_eq!(
             json["persistence_options"],
             serde_json::json!({ "artifact": { "logical_name": "human-result" } })
@@ -1196,7 +1197,7 @@ mod step_update_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1227,7 +1228,6 @@ mod step_update_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -1243,7 +1243,7 @@ mod step_update_tests {
     }
 
     #[tokio::test]
-    async fn test_update_step_to_finish_rejects_existing_prompt() {
+    async fn test_finish_step_rejects_config_flags() {
         let services = mock_services();
         let workflow_id = services
             .workflows()
@@ -1251,13 +1251,13 @@ mod step_update_tests {
             .await
             .unwrap();
 
-        StepAddCommand {
+        let mut add = StepAddCommand {
             speed_tier: None,
             personality: None,
             verbosity: None,
-            name: "Prompted".to_string(),
+            name: "Done".to_string(),
             workflow: workflow_id,
-            id: Some("prompted".to_string()),
+            id: Some("done".to_string()),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1269,52 +1269,33 @@ mod step_update_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::Finish,
             output_schema: None,
             persistence_options: None,
             route_config: None,
-        }
-        .execute(services.steps())
-        .await
-        .unwrap();
+        };
+        let error = add.execute(services.steps()).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("config: must be null for finish steps"),
+            "{error}"
+        );
 
-        let error = StepUpdateCommand {
-            speed_tier: None,
-            personality: None,
-            verbosity: None,
-            clear_speed_tier: false,
-            clear_personality: false,
-            clear_verbosity: false,
-            id: "prompted".to_string(),
-            name: None,
-            goal: None,
-            agent: vec![],
-            clear_agents: false,
-            skill: vec![],
-            clear_skills: false,
-            prompt: None,
-            agent_config: None,
-            model: None,
-            provider: None,
-            reasoning_effort: None,
-            codex_model_provider: None,
-            order: None,
-            transitions_to: vec![],
-            clear_transitions: false,
-            step_type: Some(CliStepType::Finish),
-            output_schema: None,
-            clear_output_schema: false,
-            persistence_options: None,
-            clear_persistence_options: false,
-            route_config: None,
-            clear_prompt: false,
-            clear_route_config: false,
-        }
-        .execute(services.steps())
-        .await
-        .unwrap_err();
+        add.prompt = None;
+        add.execute(services.steps()).await.unwrap();
+        let step = services.steps().get_step("done").await.unwrap().unwrap();
+        assert_eq!(step.config, None);
 
-        assert!(error.to_string().contains("Finish steps"));
+        let mut update = super::route_config_tests::update_command("done");
+        update.model = Some("opus".to_string());
+        let error = update.execute(services.steps()).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("config: must be null for finish steps"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
@@ -1347,7 +1328,7 @@ mod step_update_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1378,7 +1359,6 @@ mod step_update_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -1423,7 +1403,7 @@ mod step_update_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1454,7 +1434,6 @@ mod step_update_tests {
             order: Some(5),
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -1499,7 +1478,7 @@ mod step_update_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1530,7 +1509,6 @@ mod step_update_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -1547,9 +1525,9 @@ mod step_update_tests {
         // Verify agents were actually stored (kills !self.agent.is_empty() mutant)
         let step = services.steps().get_step("step").await.unwrap().unwrap();
         assert!(
-            step.agents.contains(&".claude/agents/new.md".to_string()),
+            step.agents().contains(&".claude/agents/new.md".to_string()),
             "expected agent to be set after update, got: {:?}",
-            step.agents
+            step.agents()
         );
     }
 
@@ -1583,7 +1561,7 @@ mod step_update_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1614,7 +1592,6 @@ mod step_update_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -1659,7 +1636,7 @@ mod step_update_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1690,7 +1667,6 @@ mod step_update_tests {
             order: None,
             transitions_to: vec!["next".to_string(), "retry".to_string()],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -1748,7 +1724,7 @@ mod step_update_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec!["old".to_string()],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1779,7 +1755,6 @@ mod step_update_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: true,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -1823,7 +1798,7 @@ mod step_update_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1853,7 +1828,6 @@ mod step_update_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -1869,14 +1843,14 @@ mod step_update_tests {
         // Verify skills were actually stored (kills !self.skill.is_empty() mutant)
         let step = services.steps().get_step("step").await.unwrap().unwrap();
         assert!(
-            step.skills.contains(&"code-review".to_string()),
+            step.skills().contains(&"code-review".to_string()),
             "expected 'code-review' skill, got: {:?}",
-            step.skills
+            step.skills()
         );
         assert!(
-            step.skills.contains(&"testing".to_string()),
+            step.skills().contains(&"testing".to_string()),
             "expected 'testing' skill, got: {:?}",
-            step.skills
+            step.skills()
         );
     }
 }
@@ -1919,7 +1893,7 @@ mod step_dispatcher_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -1973,7 +1947,7 @@ mod step_delete_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2041,7 +2015,7 @@ mod step_delete_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2088,7 +2062,7 @@ mod step_delete_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2144,7 +2118,7 @@ mod step_prompt_and_agent_config_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2154,7 +2128,7 @@ mod step_prompt_and_agent_config_tests {
 
         let step = services.steps().get_step("review").await.unwrap().unwrap();
         assert_eq!(
-            step.prompt,
+            step.prompt().map(str::to_string),
             Some("Review the code for quality and best practices".to_string())
         );
     }
@@ -2188,7 +2162,7 @@ mod step_prompt_and_agent_config_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2197,8 +2171,8 @@ mod step_prompt_and_agent_config_tests {
         cmd.execute(services.steps()).await.unwrap();
 
         let step = services.steps().get_step("deploy").await.unwrap().unwrap();
-        assert_eq!(step.agent_config.model, Some("opus".to_string()));
-        assert_eq!(step.agent_config.max_budget_usd, Some(5.0));
+        assert_eq!(step.agent_config().unwrap().model, Some("opus".to_string()));
+        assert_eq!(step.agent_config().unwrap().max_budget_usd, Some(5.0));
     }
 
     #[tokio::test]
@@ -2231,7 +2205,7 @@ mod step_prompt_and_agent_config_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2246,12 +2220,12 @@ mod step_prompt_and_agent_config_tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            step.agent_config.model,
+            step.agent_config().unwrap().model,
             Some("opus".to_string()),
             "--model should override model from --agent-config"
         );
         assert_eq!(
-            step.agent_config.max_budget_usd,
+            step.agent_config().unwrap().max_budget_usd,
             Some(10.0),
             "Other agent_config fields from JSON should be preserved"
         );
@@ -2286,7 +2260,7 @@ mod step_prompt_and_agent_config_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2331,7 +2305,7 @@ mod step_prompt_and_agent_config_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2361,7 +2335,6 @@ mod step_prompt_and_agent_config_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -2404,7 +2377,7 @@ mod step_prompt_and_agent_config_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2435,7 +2408,6 @@ mod step_prompt_and_agent_config_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -2478,7 +2450,7 @@ mod step_prompt_and_agent_config_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2508,7 +2480,6 @@ mod step_prompt_and_agent_config_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -2557,7 +2528,7 @@ mod step_prompt_and_agent_config_tests {
             codex_model_provider: None,
             order: 2,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2566,10 +2537,13 @@ mod step_prompt_and_agent_config_tests {
         cmd.execute(services.steps()).await.unwrap();
 
         let step = services.steps().get_step("full").await.unwrap().unwrap();
-        assert_eq!(step.prompt, Some("Analyze the codebase".to_string()));
+        assert_eq!(
+            step.prompt().map(str::to_string),
+            Some("Analyze the codebase".to_string())
+        );
         assert_eq!(step.goal, Some("Complete review".to_string()));
-        assert_eq!(step.agent_config.model, Some("opus".to_string()));
-        assert_eq!(step.agent_config.max_budget_usd, Some(15.0));
+        assert_eq!(step.agent_config().unwrap().model, Some("opus".to_string()));
+        assert_eq!(step.agent_config().unwrap().max_budget_usd, Some(15.0));
         assert_eq!(step.order, 2);
     }
 }
@@ -2609,7 +2583,7 @@ mod provider_tests {
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::LlmInference,
             output_schema: None,
             persistence_options: None,
             route_config: None,
@@ -2645,7 +2619,6 @@ mod provider_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -2690,7 +2663,7 @@ mod provider_tests {
         cmd.execute(services.steps()).await.unwrap();
 
         let step = services.steps().get_step("ovl-1").await.unwrap().unwrap();
-        let cfg: &AgentConfig = &step.agent_config;
+        let cfg: &AgentConfig = step.agent_config().unwrap();
 
         assert_eq!(cfg.model.as_deref(), Some("opus"));
         assert_eq!(cfg.provider, Some(Provider::Anthropic));
@@ -2725,9 +2698,18 @@ mod provider_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(step.agent_config.provider, Some(Provider::Openai));
-        assert_eq!(step.agent_config.model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(step.agent_config.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(
+            step.agent_config().unwrap().provider,
+            Some(Provider::Openai)
+        );
+        assert_eq!(
+            step.agent_config().unwrap().model.as_deref(),
+            Some("gpt-5.5")
+        );
+        assert_eq!(
+            step.agent_config().unwrap().reasoning_effort.as_deref(),
+            Some("high")
+        );
     }
 
     #[tokio::test]
@@ -2752,13 +2734,16 @@ mod provider_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(step.agent_config.provider, Some(Provider::Openai));
         assert_eq!(
-            step.agent_config.model.as_deref(),
+            step.agent_config().unwrap().provider,
+            Some(Provider::Openai)
+        );
+        assert_eq!(
+            step.agent_config().unwrap().model.as_deref(),
             Some("deepseek/deepseek-v4-flash")
         );
         assert_eq!(
-            step.agent_config.codex_model_provider.as_deref(),
+            step.agent_config().unwrap().codex_model_provider.as_deref(),
             Some("openrouter")
         );
     }
@@ -2848,7 +2833,7 @@ mod provider_tests {
             .unwrap();
 
         let step = services.steps().get_step("upd-1").await.unwrap().unwrap();
-        let cfg = &step.agent_config;
+        let cfg = step.agent_config().unwrap();
 
         assert_eq!(cfg.provider, Some(Provider::Anthropic));
         assert_eq!(cfg.model.as_deref(), Some("claude-opus-4-5"));
@@ -2884,9 +2869,18 @@ mod provider_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(step.agent_config.provider, Some(Provider::Openai));
-        assert_eq!(step.agent_config.model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(step.agent_config.reasoning_effort.as_deref(), Some("xhigh"));
+        assert_eq!(
+            step.agent_config().unwrap().provider,
+            Some(Provider::Openai)
+        );
+        assert_eq!(
+            step.agent_config().unwrap().model.as_deref(),
+            Some("gpt-5.5")
+        );
+        assert_eq!(
+            step.agent_config().unwrap().reasoning_effort.as_deref(),
+            Some("xhigh")
+        );
     }
 
     #[tokio::test]
@@ -2920,10 +2914,16 @@ mod provider_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(step.agent_config.provider, Some(Provider::Openai));
-        assert_eq!(step.agent_config.model.as_deref(), Some("glm-5.1"));
         assert_eq!(
-            step.agent_config.codex_model_provider.as_deref(),
+            step.agent_config().unwrap().provider,
+            Some(Provider::Openai)
+        );
+        assert_eq!(
+            step.agent_config().unwrap().model.as_deref(),
+            Some("glm-5.1")
+        );
+        assert_eq!(
+            step.agent_config().unwrap().codex_model_provider.as_deref(),
             Some("zai")
         );
     }
@@ -2954,7 +2954,10 @@ mod provider_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(step.agent_config.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(
+            step.agent_config().unwrap().reasoning_effort.as_deref(),
+            Some("high")
+        );
     }
 
     #[tokio::test]
@@ -2991,9 +2994,12 @@ mod provider_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(step.agent_config.provider, Some(Provider::Anthropic));
-        assert_eq!(step.agent_config.model.as_deref(), Some("opus"));
-        assert_eq!(step.agent_config.reasoning_effort, None);
+        assert_eq!(
+            step.agent_config().unwrap().provider,
+            Some(Provider::Anthropic)
+        );
+        assert_eq!(step.agent_config().unwrap().model.as_deref(), Some("opus"));
+        assert_eq!(step.agent_config().unwrap().reasoning_effort, None);
     }
 
     #[tokio::test]
@@ -3024,7 +3030,7 @@ mod provider_tests {
             .unwrap();
 
         let step = services.steps().get_step("upd-2").await.unwrap().unwrap();
-        let cfg = &step.agent_config;
+        let cfg = step.agent_config().unwrap();
 
         assert_eq!(cfg.provider, Some(Provider::Anthropic));
         assert_eq!(cfg.model.as_deref(), Some("opus"));
@@ -3188,8 +3194,14 @@ mod provider_tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(step.agent_config.provider, Some(Provider::Anthropic));
-        assert_eq!(step.agent_config.model.as_deref(), Some("sonnet"));
+        assert_eq!(
+            step.agent_config().unwrap().provider,
+            Some(Provider::Anthropic)
+        );
+        assert_eq!(
+            step.agent_config().unwrap().model.as_deref(),
+            Some("sonnet")
+        );
     }
 
     #[tokio::test]
@@ -3207,8 +3219,11 @@ mod provider_tests {
 
         cmd.execute(services.steps()).await.unwrap();
         let step = services.steps().get_step("esc-1").await.unwrap().unwrap();
-        assert_eq!(step.agent_config.model.as_deref(), Some("vendor-mystery-3"));
-        assert_eq!(step.agent_config.provider, None);
+        assert_eq!(
+            step.agent_config().unwrap().model.as_deref(),
+            Some("vendor-mystery-3")
+        );
+        assert_eq!(step.agent_config().unwrap().provider, None);
     }
 
     #[tokio::test]
@@ -3228,8 +3243,14 @@ mod provider_tests {
         .unwrap();
 
         let step = services.steps().get_step("ok-1").await.unwrap().unwrap();
-        assert_eq!(step.agent_config.provider, Some(Provider::Openai));
-        assert_eq!(step.agent_config.model.as_deref(), Some("gpt-4o"));
+        assert_eq!(
+            step.agent_config().unwrap().provider,
+            Some(Provider::Openai)
+        );
+        assert_eq!(
+            step.agent_config().unwrap().model.as_deref(),
+            Some("gpt-4o")
+        );
     }
 }
 
@@ -3240,7 +3261,7 @@ mod provider_tests {
 #[cfg(test)]
 mod route_config_tests {
     use super::*;
-    use vertebrae_core::{Step, StepType};
+    use vertebrae_core::StepType;
 
     fn route_config() -> serde_json::Value {
         serde_json::json!({
@@ -3297,7 +3318,7 @@ mod route_config_tests {
         }
     }
 
-    fn update_command(id: &str) -> StepUpdateCommand {
+    pub(super) fn update_command(id: &str) -> StepUpdateCommand {
         StepUpdateCommand {
             speed_tier: None,
             personality: None,
@@ -3322,7 +3343,6 @@ mod route_config_tests {
             order: None,
             transitions_to: vec![],
             clear_transitions: false,
-            step_type: None,
             output_schema: None,
             clear_output_schema: false,
             persistence_options: None,
@@ -3352,7 +3372,8 @@ mod route_config_tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .route_config,
+                .route_config()
+                .cloned(),
             None
         );
 
@@ -3367,7 +3388,8 @@ mod route_config_tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .route_config,
+                .route_config()
+                .cloned(),
             Some(first.clone())
         );
 
@@ -3385,7 +3407,8 @@ mod route_config_tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .route_config,
+                .route_config()
+                .cloned(),
             Some(replacement)
         );
 
@@ -3399,13 +3422,14 @@ mod route_config_tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .route_config,
+                .route_config()
+                .cloned(),
             None
         );
     }
 
     #[tokio::test]
-    async fn route_prompt_clear_is_distinct_from_empty_prompt_and_visible_in_reads() {
+    async fn route_reads_show_only_route_config_and_reject_prompt_writes() {
         let services = mock_services();
         let workflow_id = services
             .workflows()
@@ -3413,17 +3437,8 @@ mod route_config_tests {
             .await
             .unwrap();
         let config = route_config();
-        let mut route_step = Step::new("Router", workflow_id).with_prompt("legacy prompt");
-        route_step.id = Some("router".to_string());
-        services.steps().create_step(&route_step).await.unwrap();
-        services
-            .steps()
-            .update_step(
-                "router",
-                &StepUpdate::new()
-                    .with_step_type(StepType::Route)
-                    .with_route_config(Some(config.clone())),
-            )
+        add_command(&workflow_id, "router", Some(config.to_string()))
+            .execute(services.steps())
             .await
             .unwrap();
 
@@ -3433,7 +3448,7 @@ mod route_config_tests {
         .execute(services.steps())
         .await
         .unwrap();
-        assert!(human.contains("Prompt:        legacy prompt"));
+        assert!(!human.contains("Prompt:"));
         assert!(human.contains("Route Config:"));
         assert!(human.contains("\"future\""));
 
@@ -3446,27 +3461,22 @@ mod route_config_tests {
         let CommandResult::Json(json) = json else {
             panic!("step show --json should return the raw step");
         };
-        assert_eq!(json["prompt"], "legacy prompt");
-        assert_eq!(json["route_config"], config);
-
-        let mut update = update_command("router");
-        update.clear_prompt = true;
-        update.execute(services.steps()).await.unwrap();
+        assert_eq!(json["step_type"], "route");
         assert_eq!(
-            services
-                .steps()
-                .get_step("router")
-                .await
-                .unwrap()
-                .unwrap()
-                .prompt,
-            None
+            json["config"],
+            serde_json::json!({"version": 1, "route_config": config})
         );
+        assert!(json.get("prompt").is_none());
 
         let mut update = update_command("router");
         update.prompt = Some(String::new());
         let error = update.execute(services.steps()).await.unwrap_err();
-        assert!(error.to_string().contains("route steps"));
+        assert!(
+            error
+                .to_string()
+                .contains("config: $.prompt: is not supported for route steps"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
@@ -3479,9 +3489,14 @@ mod route_config_tests {
             .unwrap();
 
         let mut non_route = add_command(&workflow_id, "execute", Some(route_config().to_string()));
-        non_route.step_type = CliStepType::Execute;
+        non_route.step_type = CliStepType::LlmInference;
         let error = non_route.execute(services.steps()).await.unwrap_err();
-        assert!(error.to_string().contains("only valid for route steps"));
+        assert!(
+            error
+                .to_string()
+                .contains("$.route_config: is not supported for llm_inference steps"),
+            "{error}"
+        );
         assert!(
             services
                 .steps()
@@ -3494,7 +3509,12 @@ mod route_config_tests {
         let mut prompted_route = add_command(&workflow_id, "prompted", None);
         prompted_route.prompt = Some("write this".to_string());
         let error = prompted_route.execute(services.steps()).await.unwrap_err();
-        assert!(error.to_string().contains("only clear"));
+        assert!(
+            error
+                .to_string()
+                .contains("$.prompt: is not supported for route steps"),
+            "{error}"
+        );
         assert!(
             services
                 .steps()
@@ -3532,41 +3552,40 @@ mod route_config_tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .route_config,
+                .route_config()
+                .cloned(),
             None
         );
     }
 
     #[tokio::test]
-    async fn conversion_away_from_configured_route_requires_atomic_clear() {
+    async fn config_updates_are_patches_on_an_immutable_step_type() {
         let services = mock_services();
         let workflow_id = services
             .workflows()
             .create_workflow(CreateWorkflowOptions::new("Routes", vec![]))
             .await
             .unwrap();
-        let prompt = "keep until explicitly cleared";
-        let config = route_config();
         StepAddCommand {
             speed_tier: None,
             personality: None,
             verbosity: None,
-            name: "Execute".to_string(),
+            name: "Implement".to_string(),
             workflow: workflow_id,
-            id: Some("convert".to_string()),
+            id: Some("implement".to_string()),
             goal: None,
             agent: vec![],
-            skill: vec![],
-            prompt: Some(prompt.to_string()),
+            skill: vec!["rust".to_string()],
+            prompt: Some("first".to_string()),
             agent_config: None,
-            model: None,
+            model: Some("opus".to_string()),
             provider: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
-            output_schema: None,
+            step_type: CliStepType::LlmInference,
+            output_schema: Some(r#"{"type":"object"}"#.to_string()),
             persistence_options: None,
             route_config: None,
         }
@@ -3574,35 +3593,52 @@ mod route_config_tests {
         .await
         .unwrap();
 
-        let mut to_route = update_command("convert");
-        to_route.step_type = Some(CliStepType::Route);
-        to_route.route_config = Some(config.to_string());
-        to_route.execute(services.steps()).await.unwrap();
-        let routed_with_prompt = services.steps().get_step("convert").await.unwrap().unwrap();
-        assert_eq!(routed_with_prompt.step_type, StepType::Route);
-        assert_eq!(routed_with_prompt.prompt.as_deref(), Some(prompt));
-        assert_eq!(routed_with_prompt.route_config, Some(config.clone()));
+        let mut update = update_command("implement");
+        update.prompt = Some("second".to_string());
+        update.execute(services.steps()).await.unwrap();
+        let step = services
+            .steps()
+            .get_step("implement")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.step_type, StepType::LlmInference);
+        assert_eq!(step.prompt(), Some("second"));
+        assert_eq!(step.skills(), ["rust"]);
+        assert_eq!(step.agent_config().unwrap().model.as_deref(), Some("opus"));
+        assert_eq!(
+            step.output_schema(),
+            Some(&serde_json::json!({"type": "object"}))
+        );
 
-        let mut clear_prompt = update_command("convert");
-        clear_prompt.clear_prompt = true;
-        clear_prompt.execute(services.steps()).await.unwrap();
-        let routed = services.steps().get_step("convert").await.unwrap().unwrap();
-        assert_eq!(routed.prompt, None);
+        let mut clear = update_command("implement");
+        clear.clear_output_schema = true;
+        clear.execute(services.steps()).await.unwrap();
+        let step = services
+            .steps()
+            .get_step("implement")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.output_schema(), None);
+        assert_eq!(step.prompt(), Some("second"));
 
-        let mut to_execute = update_command("convert");
-        to_execute.step_type = Some(CliStepType::Execute);
-        let error = to_execute.execute(services.steps()).await.unwrap_err();
-        assert!(error.to_string().contains("route_config"));
-        let still_routed = services.steps().get_step("convert").await.unwrap().unwrap();
-        assert_eq!(still_routed.step_type, StepType::Route);
-        assert_eq!(still_routed.route_config, Some(config.clone()));
-
-        let mut to_execute = update_command("convert");
-        to_execute.step_type = Some(CliStepType::Execute);
-        to_execute.clear_route_config = true;
-        to_execute.execute(services.steps()).await.unwrap();
-        let executed = services.steps().get_step("convert").await.unwrap().unwrap();
-        assert_eq!(executed.step_type, StepType::Execute);
-        assert_eq!(executed.route_config, None);
+        let mut retarget = update_command("implement");
+        retarget.route_config = Some(route_config().to_string());
+        let error = retarget.execute(services.steps()).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("$.route_config: is not supported for llm_inference steps"),
+            "{error}"
+        );
+        let step = services
+            .steps()
+            .get_step("implement")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.step_type, StepType::LlmInference);
+        assert_eq!(step.route_config(), None);
     }
 }

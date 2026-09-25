@@ -84,24 +84,10 @@ export interface ThreadCapabilities {
 // ===========================================================================
 
 /**
- * The seven Vertebrae step kinds plus the subagent fallback. Drives the tick /
- * kind-badge color (--step-execute / -eval / -route / -human / -wait / -stop) and the
- * subthread spine color. Maps from Sacrum `StepType`:
- *   execute       → "execute"
- *   evaluate      → "eval"
- *   route         → "route"
- *   human_input   → "human"
- *   wait_children → "wait", stop → "stop", finish → "finish"
- * A spawned subagent thread that carries no step uses "execute" by default.
+ * Visual step kinds used for thread colors and badges. Sacrum's
+ * `llm_inference` maps to `llm`; a subagent without a step uses `llm`.
  */
-export type StepKind =
-  | "execute"
-  | "eval"
-  | "route"
-  | "human"
-  | "wait"
-  | "stop"
-  | "finish";
+export type StepKind = "llm" | "route" | "human" | "wait" | "stop" | "finish";
 
 /**
  * Status of a thread / subthread, used by the subthread summary status mark
@@ -391,7 +377,7 @@ export interface Thread {
   step?: ThreadStep;
   /**
    * Direct kind for a subthread (when there is no `step`). Falls back to
-   * "execute". For root threads, `step.kind` takes precedence.
+   * "llm". For root threads, `step.kind` takes precedence.
    */
   kind?: StepKind;
   /** Eyebrow tag for a subthread summary (e.g. "subagent"). */

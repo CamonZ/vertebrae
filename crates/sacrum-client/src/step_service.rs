@@ -6,9 +6,9 @@
 use async_trait::async_trait;
 use serde_json::json;
 use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::models::{AgentConfig, Step, StepType, StepUpdate};
+use vertebrae_core::models::{Step, StepConfig, StepType, StepUpdate};
 use vertebrae_core::step_service::StepService;
-use vertebrae_core::{validate_route_fields, validate_route_update};
+use vertebrae_core::validate_step_config;
 
 use crate::api_types::{ShortIdResponse, WorkflowResponse, WorkflowStepResponse};
 use crate::client::{GraphqlClient, with_fragments};
@@ -30,13 +30,7 @@ impl SacrumStepService {
         Self { client }
     }
 
-    fn response_to_step(response: &WorkflowStepResponse) -> Step {
-        let agent_config = response
-            .agent_config
-            .as_ref()
-            .and_then(|v| serde_json::from_value::<AgentConfig>(v.clone()).ok())
-            .unwrap_or_default();
-
+    fn response_to_step(response: &WorkflowStepResponse) -> ServiceResult<Step> {
         let transitions_to = response
             .transitions
             .as_ref()
@@ -61,24 +55,28 @@ impl SacrumStepService {
             .map(StepType::from_wire_str)
             .unwrap_or_default();
 
-        Step {
+        let config =
+            StepConfig::from_value(&step_type, response.config.clone().unwrap_or_default())
+                .map_err(|e| {
+                    ServiceError::validation_failed(format!(
+                        "Invalid {step_type} config for step {}: {e}",
+                        response.id
+                    ))
+                })?;
+
+        Ok(Step {
             id: Some(response.id.clone()),
             name: response.name.clone(),
             workflow_id: response.workflow_id.clone(),
             goal: response.goal.clone(),
-            prompt: response.prompt.clone(),
-            agents: response.agents.clone(),
-            skills: response.skills.clone(),
-            agent_config,
             step_type,
-            output_schema: response.output_schema.clone(),
-            route_config: response.route_config.clone(),
+            config,
             persistence_options: response.persistence_options.clone(),
             transitions_to,
             order: response.step_order,
             created_at,
             updated_at,
-        }
+        })
     }
 
     fn validate_stop_transitions(
@@ -94,24 +92,9 @@ impl SacrumStepService {
         Ok(())
     }
 
-    fn needs_existing_for_route_policy(updates: &StepUpdate) -> bool {
-        match updates.step_type.as_ref() {
-            // These writes need the current type to determine whether they
-            // are legal. Clearing a nullable field is self-contained.
-            None => {
-                matches!(updates.prompt, Some(Some(_)))
-                    || matches!(updates.output_schema, Some(Some(_)))
-                    || matches!(updates.route_config, Some(Some(_)))
-            }
-            // A route conversion must inspect an existing schema so it cannot
-            // leave a client-owned output schema attached to the route.
-            Some(StepType::Route) => {
-                updates.output_schema.is_none() && !matches!(updates.prompt, Some(Some(_)))
-            }
-            // A non-route conversion must inspect the existing config unless
-            // this patch explicitly replaces or clears it.
-            Some(_) => updates.route_config.is_none(),
-        }
+    fn json_variable(value: &impl serde::Serialize, label: &str) -> ServiceResult<String> {
+        serde_json::to_string(value)
+            .map_err(|e| ServiceError::validation_failed(format!("Invalid {label}: {e}")))
     }
 }
 
@@ -119,44 +102,22 @@ impl SacrumStepService {
 impl StepService for SacrumStepService {
     async fn create_step(&self, step: &Step) -> ServiceResult<Step> {
         Self::validate_stop_transitions(&step.step_type, &step.transitions_to)?;
-        validate_route_fields(
-            &step.step_type,
-            step.prompt.is_some(),
-            step.output_schema.is_some(),
-            step.route_config.as_ref(),
-        )?;
+        validate_step_config(step)?;
 
         let query = with_fragments(CREATE_STEP, &[STEP_FIELDS]);
-        let agent_config_str = serde_json::to_string(&step.agent_config)
-            .map_err(|e| ServiceError::validation_failed(format!("Invalid agent config: {}", e)))?;
         let mut variables = json!({
             "workflow_id": step.workflow_id,
             "name": step.name,
             "goal": step.goal,
-            "prompt": step.prompt,
-            "agents": step.agents,
-            "skills": step.skills,
-            "agent_config": agent_config_str,
             "step_type": step.step_type.as_str(),
             "step_order": step.order,
         });
-        if let Some(schema) = &step.output_schema {
-            let schema_str = serde_json::to_string(schema).map_err(|e| {
-                ServiceError::validation_failed(format!("Invalid output schema: {}", e))
-            })?;
-            variables["output_schema"] = json!(schema_str);
+        if let Some(config) = &step.config {
+            variables["config"] = json!(Self::json_variable(config, "config")?);
         }
         if let Some(options) = &step.persistence_options {
-            let options_str = serde_json::to_string(options).map_err(|e| {
-                ServiceError::validation_failed(format!("Invalid persistence options: {}", e))
-            })?;
-            variables["persistence_options"] = json!(options_str);
-        }
-        if let Some(route_config) = &step.route_config {
-            let route_config_str = serde_json::to_string(route_config).map_err(|e| {
-                ServiceError::validation_failed(format!("Invalid route config: {}", e))
-            })?;
-            variables["route_config"] = json!(route_config_str);
+            variables["persistence_options"] =
+                json!(Self::json_variable(options, "persistence options")?);
         }
 
         let response: WorkflowStepResponse = self
@@ -164,7 +125,7 @@ impl StepService for SacrumStepService {
             .execute(&query, variables, "create_workflow_step")
             .await?;
 
-        let mut created = Self::response_to_step(&response);
+        let mut created = Self::response_to_step(&response)?;
 
         // If the step has transitions, sync them after creation
         if !step.transitions_to.is_empty()
@@ -184,7 +145,7 @@ impl StepService for SacrumStepService {
                 .client
                 .execute(&sync_query, sync_vars, "sync_step_transitions")
                 .await?;
-            created = Self::response_to_step(&synced);
+            created = Self::response_to_step(&synced)?;
         }
 
         Ok(created)
@@ -204,7 +165,7 @@ impl StepService for SacrumStepService {
             .execute::<WorkflowStepResponse>(&query, variables, "workflow_step")
             .await
         {
-            Ok(response) => Ok(Some(Self::response_to_step(&response))),
+            Ok(response) => Self::response_to_step(&response).map(Some),
             Err(SacrumClientError::GraphqlError { ref messages, .. })
                 if messages
                     .iter()
@@ -280,36 +241,10 @@ impl StepService for SacrumStepService {
             .execute(&query, variables, "workflow_steps")
             .await?;
 
-        Ok(responses.iter().map(Self::response_to_step).collect())
+        responses.iter().map(Self::response_to_step).collect()
     }
 
     async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String> {
-        if let (Some(StepType::Stop), Some(transitions_to)) =
-            (&updates.step_type, &updates.transitions_to)
-        {
-            Self::validate_stop_transitions(&StepType::Stop, transitions_to)?;
-        }
-
-        let existing =
-            if Self::needs_existing_for_route_policy(updates) {
-                Some(self.get_step(id).await?.ok_or_else(|| {
-                    ServiceError::validation_failed(format!("Step not found: {id}"))
-                })?)
-            } else {
-                None
-            };
-
-        if let Some(existing) = existing.as_ref() {
-            validate_route_update(existing, updates)?;
-        } else if let Some(step_type) = updates.step_type.as_ref() {
-            validate_route_fields(
-                step_type,
-                matches!(updates.prompt, Some(Some(_))),
-                matches!(updates.output_schema, Some(Some(_))),
-                updates.route_config.as_ref().and_then(Option::as_ref),
-            )?;
-        }
-
         let query = with_fragments(&update_step_query(updates), &[STEP_FIELDS]);
         let mut variables = json!({ "id": id });
 
@@ -319,63 +254,19 @@ impl StepService for SacrumStepService {
         if let Some(goal) = &updates.goal {
             variables["goal"] = json!(goal);
         }
-        if let Some(prompt) = &updates.prompt {
-            variables["prompt"] = match prompt {
-                Some(prompt) => json!(prompt),
-                None => serde_json::Value::Null,
-            };
-        }
-        if let Some(agents) = &updates.agents {
-            variables["agents"] = json!(agents);
-        }
-        if let Some(skills) = &updates.skills {
-            variables["skills"] = json!(skills);
-        }
-        if let Some(agent_config) = &updates.agent_config {
-            variables["agent_config"] =
-                json!(serde_json::to_string(agent_config).map_err(|e| {
-                    ServiceError::validation_failed(format!("Invalid agent config: {}", e))
-                })?);
+        if let Some(config) = &updates.config {
+            variables["config"] = json!(Self::json_variable(config, "config")?);
         }
         if let Some(order) = updates.order {
             variables["step_order"] = json!(order);
         }
-        if let Some(step_type) = &updates.step_type {
-            variables["step_type"] = json!(step_type.as_str());
-        }
-        match &updates.output_schema {
-            Some(Some(output_schema)) => {
-                let schema_str = serde_json::to_string(output_schema).map_err(|e| {
-                    ServiceError::validation_failed(format!("Invalid output schema: {}", e))
-                })?;
-                variables["output_schema"] = json!(schema_str);
-            }
-            Some(None) => {
-                variables["clear_output_schema"] = json!(true);
-            }
-            None => {}
-        }
         match &updates.persistence_options {
             Some(Some(options)) => {
-                let options_str = serde_json::to_string(options).map_err(|e| {
-                    ServiceError::validation_failed(format!("Invalid persistence options: {}", e))
-                })?;
-                variables["persistence_options"] = json!(options_str);
+                variables["persistence_options"] =
+                    json!(Self::json_variable(options, "persistence options")?);
             }
             Some(None) => {
                 variables["persistence_options"] = serde_json::Value::Null;
-            }
-            None => {}
-        }
-        match &updates.route_config {
-            Some(Some(route_config)) => {
-                let route_config_str = serde_json::to_string(route_config).map_err(|e| {
-                    ServiceError::validation_failed(format!("Invalid route config: {}", e))
-                })?;
-                variables["route_config"] = json!(route_config_str);
-            }
-            Some(None) => {
-                variables["route_config"] = serde_json::Value::Null;
             }
             None => {}
         }
@@ -479,56 +370,65 @@ mod tests {
         let _service = SacrumStepService::new(client);
     }
 
+    fn step_response(step_type: Option<&str>, config: serde_json::Value) -> WorkflowStepResponse {
+        WorkflowStepResponse {
+            id: "step-1".to_string(),
+            name: "Review".to_string(),
+            goal: None,
+            step_type: step_type.map(str::to_string),
+            config: Some(config),
+            persistence_options: None,
+            step_order: 0,
+            workflow_id: "wf-1".to_string(),
+            transitions: None,
+            inserted_at: None,
+            updated_at: None,
+        }
+    }
+
     #[test]
     fn test_response_to_step_conversion() {
         let response = WorkflowStepResponse {
-            id: "step-1".to_string(),
-            name: "Review".to_string(),
             goal: Some("Review the code".to_string()),
-            prompt: Some("Review the PR for issues".to_string()),
-            agents: vec!["claude".to_string()],
-            skills: vec!["code-review".to_string()],
-            agent_config: None,
-            step_type: Some("evaluate".to_string()),
-            output_schema: Some(json!({"type": "object"})),
             persistence_options: Some(json!({
                 "artifact": {"logical_name": "step_result"}
             })),
-            route_config: Some(json!({
-                "version": 1,
-                "future": {"unknown": ["nested", true, null]}
-            })),
-            step_order: 0,
-            workflow_id: "wf-1".to_string(),
             transitions: Some(vec![StepTransitionResponse {
                 id: "t-1".to_string(),
                 to_step_id: "step-2".to_string(),
                 label: Some("next".to_string()),
             }]),
             inserted_at: Some("2024-01-01T00:00:00Z".to_string()),
-            updated_at: None,
+            ..step_response(
+                Some("llm_inference"),
+                json!({
+                    "version": 1,
+                    "prompt": "Review the PR for issues",
+                    "output_schema": {"type": "object"},
+                    "agents": ["claude"],
+                    "skills": ["code-review"],
+                    "agent_config": {"model": "claude-opus"}
+                }),
+            )
         };
 
-        let step = SacrumStepService::response_to_step(&response);
+        let step = SacrumStepService::response_to_step(&response).unwrap();
 
         assert_eq!(step.id, Some("step-1".to_string()));
         assert_eq!(step.name, "Review");
         assert_eq!(step.goal.as_deref(), Some("Review the code"));
-        assert_eq!(step.prompt.as_deref(), Some("Review the PR for issues"));
-        assert_eq!(step.agents, vec!["claude"]);
-        assert_eq!(step.skills, vec!["code-review"]);
-        assert_eq!(step.step_type, StepType::Evaluate);
-        assert_eq!(step.output_schema, Some(json!({"type": "object"})));
+        assert_eq!(step.step_type, StepType::LlmInference);
+        assert_eq!(step.prompt(), Some("Review the PR for issues"));
+        assert_eq!(step.agents(), ["claude"]);
+        assert_eq!(step.skills(), ["code-review"]);
+        assert_eq!(step.output_schema(), Some(&json!({"type": "object"})));
+        assert_eq!(
+            step.agent_config().unwrap().model.as_deref(),
+            Some("claude-opus")
+        );
         assert_eq!(
             step.persistence_options,
             Some(json!({"artifact": {"logical_name": "step_result"}}))
-        );
-        assert_eq!(
-            step.route_config,
-            Some(json!({
-                "version": 1,
-                "future": {"unknown": ["nested", true, null]}
-            }))
         );
         assert_eq!(step.order, 0);
         assert_eq!(step.workflow_id, "wf-1");
@@ -537,127 +437,93 @@ mod tests {
     }
 
     #[test]
-    fn test_response_to_step_minimal() {
-        let response = WorkflowStepResponse {
-            id: "step-min".to_string(),
-            name: "Minimal".to_string(),
-            goal: None,
-            prompt: None,
-            agents: vec![],
-            skills: vec![],
-            agent_config: None,
-            step_type: None,
-            output_schema: None,
-            persistence_options: None,
-            route_config: None,
-            step_order: 5,
-            workflow_id: "wf-1".to_string(),
-            transitions: None,
-            inserted_at: None,
-            updated_at: None,
-        };
+    fn test_response_to_step_decodes_route_config_opaquely() {
+        let route_config = json!({
+            "version": 1,
+            "future": {"unknown": ["nested", true, null]}
+        });
+        let step = SacrumStepService::response_to_step(&step_response(
+            Some("route"),
+            json!({"version": 1, "route_config": route_config}),
+        ))
+        .unwrap();
 
-        let step = SacrumStepService::response_to_step(&response);
-
-        assert_eq!(step.id, Some("step-min".to_string()));
-        assert_eq!(step.name, "Minimal");
-        assert!(step.goal.is_none());
-        assert!(step.prompt.is_none());
-        assert!(step.agents.is_empty());
-        assert!(step.skills.is_empty());
-        assert_eq!(step.step_type, StepType::Execute);
-        assert!(step.output_schema.is_none());
-        assert!(step.persistence_options.is_none());
-        assert_eq!(step.order, 5);
-        assert!(step.transitions_to.is_empty());
+        assert_eq!(step.step_type, StepType::Route);
+        assert_eq!(step.route_config(), Some(&route_config));
+        assert_eq!(step.prompt(), None);
     }
 
     #[test]
-    fn test_response_to_step_with_agent_config() {
-        let response = WorkflowStepResponse {
-            id: "step-cfg".to_string(),
-            name: "Configured".to_string(),
-            goal: None,
-            prompt: None,
-            agents: vec![],
-            skills: vec![],
-            agent_config: Some(json!({"model": "claude-opus"})),
-            step_type: Some("route".to_string()),
-            output_schema: None,
-            persistence_options: None,
-            route_config: None,
-            step_order: 0,
-            workflow_id: "wf-1".to_string(),
-            transitions: None,
-            inserted_at: None,
-            updated_at: None,
-        };
+    fn test_response_to_step_decodes_wait_children_config() {
+        let step = SacrumStepService::response_to_step(&step_response(
+            Some("wait_children"),
+            json!({"version": 1, "output_schema": {"type": "object"}}),
+        ))
+        .unwrap();
 
-        let step = SacrumStepService::response_to_step(&response);
+        assert_eq!(
+            step.config,
+            Some(StepConfig::WaitChildren(
+                vertebrae_core::WaitChildrenConfig {
+                    version: 1,
+                    output_schema: Some(json!({"type": "object"})),
+                }
+            ))
+        );
+    }
 
-        assert_eq!(step.agent_config.model.as_deref(), Some("claude-opus"));
+    #[test]
+    fn test_response_to_step_null_config_for_config_less_types() {
+        for step_type in ["human_input", "stop", "finish"] {
+            let step = SacrumStepService::response_to_step(&step_response(
+                Some(step_type),
+                serde_json::Value::Null,
+            ))
+            .unwrap();
+            assert_eq!(step.config, None, "{step_type}");
+        }
+    }
+
+    #[test]
+    fn test_response_to_step_rejects_malformed_config() {
+        let error = SacrumStepService::response_to_step(&step_response(
+            Some("llm_inference"),
+            json!({"version": 1, "agents": "not-a-list"}),
+        ))
+        .unwrap_err();
+        assert!(error.to_string().contains("Invalid llm_inference config"));
     }
 
     #[test]
     fn test_response_to_step_unknown_step_type_is_preserved() {
-        let response = WorkflowStepResponse {
-            id: "step-unk".to_string(),
-            name: "Unknown".to_string(),
-            goal: None,
-            prompt: None,
-            agents: vec![],
-            skills: vec![],
-            agent_config: None,
-            step_type: Some("future_type".to_string()),
-            output_schema: None,
-            persistence_options: None,
-            route_config: None,
-            step_order: 0,
-            workflow_id: "wf-1".to_string(),
-            transitions: None,
-            inserted_at: None,
-            updated_at: None,
-        };
-
-        let step = SacrumStepService::response_to_step(&response);
+        let step = SacrumStepService::response_to_step(&step_response(
+            Some("future_type"),
+            json!({"version": 1}),
+        ))
+        .unwrap();
         assert_eq!(
             step.step_type,
             StepType::Unsupported("future_type".to_string())
         );
-        assert_ne!(step.step_type, StepType::Execute);
+        assert_eq!(step.config, None);
     }
 
     #[test]
     fn test_response_to_step_maps_all_step_type_variants() {
         for (input, expected) in [
-            ("execute", StepType::Execute),
-            ("evaluate", StepType::Evaluate),
+            ("llm_inference", StepType::LlmInference),
             ("route", StepType::Route),
             ("wait_children", StepType::WaitChildren),
             ("human_input", StepType::HumanInput),
             ("stop", StepType::Stop),
             ("finish", StepType::Finish),
+            ("execute", StepType::Unsupported("execute".to_string())),
         ] {
-            let response = WorkflowStepResponse {
-                id: "step-x".to_string(),
-                name: "X".to_string(),
-                goal: None,
-                prompt: None,
-                agents: vec![],
-                skills: vec![],
-                agent_config: None,
-                step_type: Some(input.to_string()),
-                output_schema: None,
-                persistence_options: None,
-                route_config: None,
-                step_order: 0,
-                workflow_id: "wf-1".to_string(),
-                transitions: None,
-                inserted_at: None,
-                updated_at: None,
-            };
-
-            let step = SacrumStepService::response_to_step(&response);
+            let step = SacrumStepService::response_to_step(&step_response(
+                Some(input),
+                serde_json::Value::Null,
+            ))
+            .unwrap();
             assert_eq!(
                 step.step_type, expected,
                 "step_type '{}' should map to {:?}",
@@ -709,13 +575,16 @@ mod tests {
             "id": id,
             "name": name,
             "goal": null,
-            "agents": [],
-            "skills": [],
-            "agent_config": null,
-            "prompt": null,
-            "output_schema": null,
+            "step_type": "llm_inference",
+            "config": {
+                "version": 1,
+                "prompt": null,
+                "output_schema": null,
+                "agents": [],
+                "skills": [],
+                "agent_config": null
+            },
             "persistence_options": null,
-            "route_config": null,
             "step_order": step_order,
             "workflow_id": workflow_id,
             "project_id": "test-project",
@@ -748,15 +617,81 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_route_step_rejects_prompt_and_output_schema_writes() {
+    async fn test_create_step_rejects_config_fields_the_type_does_not_declare() {
         let service = create_wiremock_service("http://localhost:4000");
-        let step = Step::new("Route", "wf-1")
-            .with_step_type(StepType::Route)
-            .with_prompt("legacy route prompt");
+        let mut step = Step::new("Route", "wf-1").with_step_type(StepType::Route);
+        step.config = Some(StepConfig::LlmInference(Box::default()));
 
         let error = service.create_step(&step).await.unwrap_err();
 
-        assert!(error.to_string().contains("route steps"));
+        assert!(
+            error
+                .to_string()
+                .contains("is not supported for route steps"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_step_sends_type_and_config() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(
+                "create_workflow_step",
+                make_step_response("step-new", "Review", "wf-1", 0),
+            )))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let step = Step::new("Review", "wf-1")
+            .with_prompt("Review it")
+            .with_skills(vec!["review".to_string()]);
+        service.create_step(&step).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["variables"]["step_type"], "llm_inference");
+        let config: serde_json::Value =
+            serde_json::from_str(body["variables"]["config"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            config,
+            json!({
+                "version": 1,
+                "prompt": "Review it",
+                "output_schema": null,
+                "agents": [],
+                "skills": ["review"],
+                "agent_config": {}
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_config_less_step_omits_config() {
+        let server = MockServer::start().await;
+        let mut response = make_step_response("step-done", "Done", "wf-1", 0);
+        response["step_type"] = json!("finish");
+        response["config"] = serde_json::Value::Null;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(graphql_response("create_workflow_step", response)),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let step = Step::new("Done", "wf-1").with_step_type(StepType::Finish);
+        let created = service.create_step(&step).await.unwrap();
+
+        assert_eq!(created.config, None);
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["variables"]["step_type"], "finish");
+        assert!(body["variables"].get("config").is_none());
     }
 
     #[tokio::test]
@@ -819,10 +754,9 @@ mod tests {
 
         let requests = server.received_requests().await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-        assert_eq!(
-            body["variables"]["route_config"],
-            serde_json::to_string(&route_config).unwrap()
-        );
+        let config: serde_json::Value =
+            serde_json::from_str(body["variables"]["config"].as_str().unwrap()).unwrap();
+        assert_eq!(config, json!({"version": 1, "route_config": route_config}));
     }
 
     #[tokio::test]
@@ -837,9 +771,8 @@ mod tests {
                     "id": "step-1",
                     "name": "Implement",
                     "goal": "Write the code",
-                    "agents": ["claude"],
-                    "skills": [],
-                    "agent_config": null,
+                    "step_type": "llm_inference",
+                    "config": {"version": 1, "agents": ["claude"]},
                     "step_order": 1,
                     "workflow_id": "wf-1",
                     "project_id": "test-project",
@@ -859,7 +792,7 @@ mod tests {
         assert_eq!(step.id, Some("step-1".to_string()));
         assert_eq!(step.name, "Implement");
         assert_eq!(step.goal.as_deref(), Some("Write the code"));
-        assert_eq!(step.agents, vec!["claude"]);
+        assert_eq!(step.agents(), ["claude"]);
         assert_eq!(step.transitions_to, vec!["step-2"]);
     }
 
@@ -950,22 +883,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_stop_step_requires_exactly_one_transition() {
-        let service = create_wiremock_service("http://localhost:4000");
-        let updates = StepUpdate::new()
-            .with_step_type(StepType::Stop)
-            .with_transitions_to(Vec::new());
-
-        let error = service.update_step("step-1", &updates).await.unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("exactly one outgoing transition")
-        );
-    }
-
-    #[tokio::test]
     async fn test_get_step_preserves_unsupported_step_type() {
         let server = MockServer::start().await;
 
@@ -988,7 +905,7 @@ mod tests {
             step.step_type,
             StepType::Unsupported("manual_gate".to_string())
         );
-        assert_ne!(step.step_type, StepType::Execute);
+        assert_eq!(step.config, None);
     }
 
     #[tokio::test]
@@ -1110,23 +1027,23 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
         let query = body["query"].as_str().unwrap();
         let operation = query.split("fragment StepFields").next().unwrap();
-        assert!(!operation.contains("prompt: $prompt"));
-        assert!(!operation.contains("route_config: $route_config"));
+        assert!(!operation.contains("config: $config"));
+        assert!(!operation.contains("step_type"));
         assert_eq!(body["variables"]["name"], "Updated");
     }
 
     #[tokio::test]
-    async fn test_update_existing_route_rejects_prompt_write_without_type_change() {
+    async fn test_update_step_surfaces_immutable_step_type_error() {
         let server = MockServer::start().await;
-        let mut route_response = make_step_response("step-1", "Route", "wf-1", 0);
-        route_response["step_type"] = json!("route");
-
         Mock::given(method("POST"))
             .and(path("/graphql"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(graphql_response("workflow_step", route_response)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"update_workflow_step": null},
+                "errors": [{
+                    "message": "config: $.prompt: is not supported for route steps",
+                    "path": ["update_workflow_step"]
+                }]
+            })))
             .mount(&server)
             .await;
 
@@ -1136,49 +1053,13 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(error.to_string().contains("route steps"));
+        assert!(
+            error
+                .to_string()
+                .contains("config: $.prompt: is not supported for route steps"),
+            "{error}"
+        );
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_update_converts_configured_route_without_clear_is_rejected() {
-        let server = MockServer::start().await;
-        let mut route_response = make_step_response("step-1", "Route", "wf-1", 0);
-        route_response["step_type"] = json!("route");
-        route_response["route_config"] = json!({"version": 1});
-
-        Mock::given(method("POST"))
-            .and(path("/graphql"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(graphql_response("workflow_step", route_response)),
-            )
-            .mount(&server)
-            .await;
-
-        let service = create_wiremock_service(&server.uri());
-        let error = service
-            .update_step(
-                "step-1",
-                &StepUpdate::new().with_step_type(StepType::Execute),
-            )
-            .await
-            .unwrap_err();
-
-        assert!(error.to_string().contains("route_config is only valid"));
-        assert_eq!(server.received_requests().await.unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_update_route_config_rejects_non_route_result_before_mutation() {
-        let service = create_wiremock_service("http://localhost:4000");
-        let updates = StepUpdate::new()
-            .with_step_type(StepType::Execute)
-            .with_route_config(Some(json!({"version": 1})));
-
-        let error = service.update_step("step-1", &updates).await.unwrap_err();
-
-        assert!(error.to_string().contains("only valid for route steps"));
     }
 
     #[tokio::test]
@@ -1220,16 +1101,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_step_serializes_route_config_set_and_explicit_clear() {
+    async fn test_update_step_sends_config_as_a_partial_patch() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/graphql"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": {
-                    "workflow_step": make_step_response("step-1", "Route", "wf-1", 0),
-                    "update_workflow_step": make_step_response("step-1", "Updated", "wf-1", 0)
-                }
-            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(
+                "update_workflow_step",
+                make_step_response("step-1", "Updated", "wf-1", 0),
+            )))
             .mount(&server)
             .await;
 
@@ -1241,76 +1120,35 @@ mod tests {
         service
             .update_step(
                 "step-1",
-                &StepUpdate::new()
-                    .with_step_type(StepType::Route)
-                    .with_route_config(Some(route_config.clone())),
+                &StepUpdate::new().with_route_config(Some(route_config.clone())),
             )
             .await
             .unwrap();
         service
             .update_step(
                 "step-1",
-                &StepUpdate::new()
-                    .with_step_type(StepType::Route)
-                    .with_route_config(None),
+                &StepUpdate::new().clear_prompt().with_output_schema(None),
             )
             .await
             .unwrap();
 
         let requests = server.received_requests().await.unwrap();
-        assert_eq!(requests.len(), 4);
-        let set_body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
-        assert_eq!(
-            set_body["variables"]["route_config"],
-            serde_json::to_string(&route_config).unwrap()
-        );
-        let clear_body: serde_json::Value = serde_json::from_slice(&requests[3].body).unwrap();
-        assert!(clear_body["variables"]["route_config"].is_null());
+        assert_eq!(requests.len(), 2);
+        let config = |index: usize| -> serde_json::Value {
+            let body: serde_json::Value = serde_json::from_slice(&requests[index].body).unwrap();
+            assert!(body["variables"].get("step_type").is_none());
+            serde_json::from_str(body["variables"]["config"].as_str().unwrap()).unwrap()
+        };
+        assert_eq!(config(0), json!({"route_config": route_config}));
+        assert_eq!(config(1), json!({"prompt": null, "output_schema": null}));
     }
 
     #[tokio::test]
-    async fn test_update_step_sends_explicit_null_to_clear_prompt() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/graphql"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(
-                "update_workflow_step",
-                make_step_response("step-1", "Updated", "wf-1", 0),
-            )))
-            .mount(&server)
-            .await;
-
-        let service = create_wiremock_service(&server.uri());
-        service
-            .update_step("step-1", &StepUpdate::new().clear_prompt())
-            .await
-            .unwrap();
-
-        let requests = server.received_requests().await.unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-        assert!(body["variables"]["prompt"].is_null());
-    }
-
-    #[tokio::test]
-    async fn test_update_step_rejects_prompt_write_for_explicit_route_result() {
-        let service = create_wiremock_service("http://localhost:4000");
-        let updates = StepUpdate::new()
-            .with_step_type(StepType::Route)
-            .with_prompt("routing prompt");
-
-        let error = service.update_step("step-1", &updates).await.unwrap_err();
-
-        assert!(error.to_string().contains("prompt"));
-        assert!(error.to_string().contains("route"));
-    }
-
-    #[tokio::test]
-    async fn test_update_stop_step_serializes_type_and_transition_sync() {
+    async fn test_update_step_syncs_transitions() {
         let server = MockServer::start().await;
 
         let response = json!({
             "data": {
-                "workflow_step": make_step_response("step-1", "Pause", "wf-1", 0),
                 "update_workflow_step": make_step_response("step-1", "Pause", "wf-1", 0),
                 "sync_step_transitions": make_step_response("step-1", "Pause", "wf-1", 0)
             }
@@ -1322,20 +1160,12 @@ mod tests {
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        let updates = StepUpdate::new()
-            .with_step_type(StepType::Stop)
-            .with_transitions_to(vec!["step-next".to_string()]);
+        let updates = StepUpdate::new().with_transitions_to(vec!["step-next".to_string()]);
         service.update_step("step-1", &updates).await.unwrap();
 
         let requests = server.received_requests().await.unwrap();
-        assert_eq!(
-            requests.len(),
-            3,
-            "existing, update, and transition sync requests"
-        );
-        let update_body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
-        assert_eq!(update_body["variables"]["step_type"], "stop");
-        let sync_body: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
+        assert_eq!(requests.len(), 2, "update and transition sync requests");
+        let sync_body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
         assert_eq!(
             sync_body["variables"]["transitions"],
             json!([{ "to_step_id": "step-next" }])
@@ -1399,15 +1229,14 @@ mod tests {
                 json!([
                     {
                         "id": "step-1", "name": "Backlog", "goal": null,
-                        "agents": [], "skills": [], "agent_config": null,
-                        "step_type": "execute", "step_order": 0, "workflow_id": "wf-1",
+                        "step_type": "llm_inference", "config": {"version": 1},
+                        "step_order": 0, "workflow_id": "wf-1",
                         "project_id": "test-project",
                         "inserted_at": null, "updated_at": null, "transitions": []
                     },
                     {
                         "id": "step-2", "name": "Done", "goal": null,
-                        "agents": [], "skills": [], "agent_config": null,
-                        "step_type": "finish", "step_order": 1, "workflow_id": "wf-1",
+                        "step_type": "finish", "config": null, "step_order": 1, "workflow_id": "wf-1",
                         "project_id": "test-project",
                         "inserted_at": null, "updated_at": null, "transitions": []
                     }

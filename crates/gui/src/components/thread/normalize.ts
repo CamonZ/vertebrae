@@ -106,10 +106,10 @@ export interface ChatMsg {
 
 /**
  * Map a Sacrum {@link StepType} to a {@link StepKind}.
- *   execute → "execute", evaluate → "eval", route → "route",
+ *   llm_inference → "llm", route → "route",
  *   human_input → "human", wait_children → "wait", stop → "stop",
  *   finish → "finish".
- * Unknown / `{ unsupported }` types fall back to "execute".
+ * Unknown / `{ unsupported }` types fall back to "llm".
  *
  * `StepExecution.step_type` arrives as a nullable string (not the union), so
  * this accepts a loose string and is also reused for the typed `StepType`.
@@ -118,10 +118,8 @@ export function stepKindFromStepType(
   stepType: StepType | string | null | undefined
 ): StepKind {
   switch (stepType) {
-    case "execute":
-      return "execute";
-    case "evaluate":
-      return "eval";
+    case "llm_inference":
+      return "llm";
     case "route":
       return "route";
     case "human_input":
@@ -133,7 +131,7 @@ export function stepKindFromStepType(
     case "finish":
       return "finish";
     default:
-      return "execute";
+      return "llm";
   }
 }
 
@@ -896,7 +894,7 @@ function eventsToMessages(
  *   2. build the main agent's flat message series;
  *   3. when we reach the parent spawn tool's `tool_call`, REPLACE its
  *      ToolMessage with a {@link SpawnMessage} whose child Thread is built from
- *      that group's events (kind "execute", spawnLabel "subagent"), inserted at
+ *      that group's events (kind "llm", spawnLabel "subagent"), inserted at
  *      the parent tool's position.
  *
  * When NO event carries a parent id this degrades to a flat series — identical
@@ -1051,7 +1049,7 @@ function spawnMessage(
   const childThread: Thread = {
     id: threadId,
     label: spawnLabel(parentCall),
-    kind: "execute",
+    kind: "llm",
     spawnLabel: "subagent",
     summary,
     turns,

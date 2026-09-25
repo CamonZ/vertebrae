@@ -1,3 +1,4 @@
+import { createMockAgentConfig } from "../test/test-utils";
 import { describe, expect, it } from "vitest";
 import type {
   PipelineStep,
@@ -38,7 +39,7 @@ function makeStep(
     ticket: 0,
     task: 0,
   },
-  activeCount = 0,
+  activeCount = 0
 ): PipelineStep {
   return {
     id,
@@ -46,7 +47,7 @@ function makeStep(
     workflow_id: workflowId,
     goal: null,
     step_order: order,
-    step_type: "execute",
+    step_type: "llm_inference",
     transitions_to: [],
     task_counts: taskCounts,
     pipeline_counts: { ...taskCounts, active: activeCount },
@@ -86,7 +87,7 @@ function deletedEvent(
   taskId: string,
   current_step_id: string | null,
   level: TaskLevel | null,
-  archived: boolean | null = false,
+  archived: boolean | null = false
 ): TaskChangedEvent {
   return {
     task_id: taskId,
@@ -100,7 +101,7 @@ function deletedEvent(
 }
 
 function updatedEvent(
-  overrides: Partial<TaskChangedEvent> = {},
+  overrides: Partial<TaskChangedEvent> = {}
 ): TaskChangedEvent {
   const task = createMockTask({
     id: "t-1",
@@ -284,7 +285,7 @@ describe("applyTaskDeleted", () => {
 
     const next = applyTaskDeleted(
       summary,
-      deletedEvent("t-1", "s1", "ticket", true),
+      deletedEvent("t-1", "s1", "ticket", true)
     );
 
     expect(next).toBe(summary);
@@ -446,7 +447,7 @@ describe("structural sharing", () => {
 function fakeWorkflow(
   id: string,
   display_order: number,
-  overrides: Partial<Workflow> = {},
+  overrides: Partial<Workflow> = {}
 ): Workflow {
   return {
     id,
@@ -467,14 +468,22 @@ function fakeStep(
   id: string,
   workflow_id: string,
   order: number,
-  overrides: Partial<Step> = {},
+  overrides: Partial<Step> = {}
 ): Step {
   return {
     id,
     name: id,
     workflow_id,
     goal: null,
-    prompt: null,
+    step_type: "llm_inference",
+    config: {
+      version: 1,
+      prompt: null,
+      output_schema: null,
+      agents: [],
+      skills: [],
+      agent_config: createMockAgentConfig({ model: null }),
+    },
     transitions_to: [],
     order,
     created_at: null,
@@ -508,7 +517,10 @@ describe("applyWorkflowCreated", () => {
   it("skips when the workflow has no id", () => {
     const summary = makeSummary([]);
 
-    const next = applyWorkflowCreated(summary, fakeWorkflow("", 0, { id: null }));
+    const next = applyWorkflowCreated(
+      summary,
+      fakeWorkflow("", 0, { id: null })
+    );
 
     expect(next).toBe(summary);
   });
@@ -526,19 +538,19 @@ describe("applyWorkflowUpdated", () => {
         name: "renamed",
         kanban_column: "Doing",
         factory_name: "Factory Two",
-      }),
+      })
     );
 
     expect(next.workflows[0].name).toBe("renamed");
     expect(next.workflows[0].kanban_column).toBe("Doing");
     expect(next.workflows[0].factory_name).toBe("Factory Two");
     expect(next.workflows[0].workflow_steps).toBe(
-      summary.workflows[0].workflow_steps,
+      summary.workflows[0].workflow_steps
     );
 
     const cleared = applyWorkflowUpdated(
       next,
-      fakeWorkflow("wf-1", 0, { factory_name: null }),
+      fakeWorkflow("wf-1", 0, { factory_name: null })
     );
     expect(cleared.workflows[0].factory_name).toBeNull();
   });
@@ -634,7 +646,7 @@ describe("applyStepUpdated", () => {
 
     const next = applyStepUpdated(
       summary,
-      fakeStep("s1", "wf-1", 0, { name: "Renamed", goal: "Reviewed" }),
+      fakeStep("s1", "wf-1", 0, { name: "Renamed", goal: "Reviewed" })
     );
 
     const step = next.workflows[0].workflow_steps[0];
@@ -669,7 +681,7 @@ describe("applyStepUpdated", () => {
 
     const next = applyStepUpdated(
       summary,
-      fakeStep("s1", "wf-1", 0, { step_type: "stop" }),
+      fakeStep("s1", "wf-1", 0, { step_type: "stop" })
     );
 
     const step = next.workflows[0].workflow_steps[0];

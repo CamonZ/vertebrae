@@ -621,8 +621,7 @@ impl From<AgentConfig> for vertebrae_core::AgentConfig {
 #[serde(rename_all = "snake_case")]
 pub enum StepType {
     #[default]
-    Execute,
-    Evaluate,
+    LlmInference,
     Route,
     WaitChildren,
     HumanInput,
@@ -634,8 +633,7 @@ pub enum StepType {
 impl From<vertebrae_core::StepType> for StepType {
     fn from(st: vertebrae_core::StepType) -> Self {
         match st {
-            vertebrae_core::StepType::Execute => StepType::Execute,
-            vertebrae_core::StepType::Evaluate => StepType::Evaluate,
+            vertebrae_core::StepType::LlmInference => StepType::LlmInference,
             vertebrae_core::StepType::Route => StepType::Route,
             vertebrae_core::StepType::WaitChildren => StepType::WaitChildren,
             vertebrae_core::StepType::HumanInput => StepType::HumanInput,
@@ -649,8 +647,7 @@ impl From<vertebrae_core::StepType> for StepType {
 impl From<StepType> for vertebrae_core::StepType {
     fn from(st: StepType) -> Self {
         match st {
-            StepType::Execute => vertebrae_core::StepType::Execute,
-            StepType::Evaluate => vertebrae_core::StepType::Evaluate,
+            StepType::LlmInference => vertebrae_core::StepType::LlmInference,
             StepType::Route => vertebrae_core::StepType::Route,
             StepType::WaitChildren => vertebrae_core::StepType::WaitChildren,
             StepType::HumanInput => vertebrae_core::StepType::HumanInput,
@@ -661,8 +658,77 @@ impl From<StepType> for vertebrae_core::StepType {
     }
 }
 
-/// Workflow step entity - mirrors db::Step
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+/// Config of an `llm_inference` step.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct LlmInferenceStepConfig {
+    pub version: i32,
+    /// Prompt sent to the agent when executing this step
+    pub prompt: Option<String>,
+    /// JSON Schema describing the expected output of this step
+    pub output_schema: Option<serde_json::Value>,
+    /// Paths to .claude/agents/ files for this step
+    pub agents: Vec<String>,
+    /// Skill names available for this step
+    pub skills: Vec<String>,
+    /// Agent configuration for this step
+    pub agent_config: AgentConfig,
+}
+
+/// Config of a `route` step.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct RouteStepConfig {
+    pub version: i32,
+    /// Opaque deterministic route configuration
+    pub route_config: Option<serde_json::Value>,
+}
+
+/// Config of a `wait_children` step.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct WaitChildrenStepConfig {
+    pub version: i32,
+    /// JSON Schema describing the expected output of this step
+    pub output_schema: Option<serde_json::Value>,
+}
+
+/// A step's `step_type`-specific configuration, serialized as the bare
+/// config object. Narrow it with the owning step's `step_type`.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(untagged)]
+pub enum StepConfig {
+    LlmInference(Box<LlmInferenceStepConfig>),
+    Route(RouteStepConfig),
+    WaitChildren(WaitChildrenStepConfig),
+}
+
+impl From<vertebrae_core::StepConfig> for StepConfig {
+    fn from(config: vertebrae_core::StepConfig) -> Self {
+        match config {
+            vertebrae_core::StepConfig::LlmInference(config) => {
+                StepConfig::LlmInference(Box::new(LlmInferenceStepConfig {
+                    version: config.version,
+                    prompt: config.prompt,
+                    output_schema: config.output_schema,
+                    agents: config.agents,
+                    skills: config.skills,
+                    agent_config: config.agent_config.into(),
+                }))
+            }
+            vertebrae_core::StepConfig::Route(config) => StepConfig::Route(RouteStepConfig {
+                version: config.version,
+                route_config: config.route_config,
+            }),
+            vertebrae_core::StepConfig::WaitChildren(config) => {
+                StepConfig::WaitChildren(WaitChildrenStepConfig {
+                    version: config.version,
+                    output_schema: config.output_schema,
+                })
+            }
+        }
+    }
+}
+
+/// Workflow step entity - mirrors core::Step
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct Step {
     /// Step ID (string form)
     pub id: Option<String>,
@@ -672,40 +738,71 @@ pub struct Step {
     pub workflow_id: String,
     /// What this step should accomplish
     pub goal: Option<String>,
-    /// Prompt sent to the agent when executing this step
-    pub prompt: Option<String>,
-    /// Paths to .claude/agents/ files for this step
-    #[serde(default)]
-    pub agents: Vec<String>,
-    /// Skill names available for this step
-    #[serde(default)]
-    pub skills: Vec<String>,
-    /// Agent configuration for this step
-    #[serde(default)]
-    pub agent_config: AgentConfig,
-    /// Step type mirrored from core::StepType.
-    #[serde(default)]
+    /// Step type mirrored from core::StepType; fixed once the step exists.
     pub step_type: StepType,
-    /// JSON Schema describing the expected output of this step
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_schema: Option<serde_json::Value>,
+    /// `step_type`-specific configuration; null for human_input, stop, and
+    /// finish steps.
+    pub config: Option<StepConfig>,
     /// Orchestrator-owned persistence configuration for this step
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub persistence_options: Option<serde_json::Value>,
-    /// Opaque deterministic route configuration for route steps
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub route_config: Option<serde_json::Value>,
     /// List of step IDs this step can transition to
-    #[serde(default)]
     pub transitions_to: Vec<String>,
     /// Ordering index for sequential fallback (0-based, Sacrum: `step_order`).
-    #[serde(default, alias = "step_order")]
     pub order: i32,
     /// Creation timestamp (ISO 8601 string)
-    #[serde(alias = "inserted_at")]
     pub created_at: Option<String>,
     /// Last update timestamp (ISO 8601 string)
     pub updated_at: Option<String>,
+}
+
+/// Wire shape of a step in Sacrum channel payloads and GUI events.
+#[derive(Deserialize)]
+struct StepWire {
+    id: Option<String>,
+    name: String,
+    workflow_id: String,
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default)]
+    step_type: vertebrae_core::StepType,
+    #[serde(default)]
+    config: serde_json::Value,
+    #[serde(default)]
+    persistence_options: Option<serde_json::Value>,
+    #[serde(default)]
+    transitions_to: Vec<String>,
+    #[serde(default, alias = "step_order")]
+    order: i32,
+    #[serde(default, alias = "inserted_at")]
+    created_at: Option<String>,
+    #[serde(default)]
+    updated_at: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for Step {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = StepWire::deserialize(deserializer)?;
+        // The step type discriminates the config variant.
+        let config = vertebrae_core::StepConfig::from_value(&wire.step_type, wire.config)
+            .map_err(serde::de::Error::custom)?;
+        Ok(Step {
+            id: wire.id,
+            name: wire.name,
+            workflow_id: wire.workflow_id,
+            goal: wire.goal,
+            step_type: wire.step_type.into(),
+            config: config.map(Into::into),
+            persistence_options: wire.persistence_options,
+            transitions_to: wire.transitions_to,
+            order: wire.order,
+            created_at: wire.created_at,
+            updated_at: wire.updated_at,
+        })
+    }
 }
 
 impl From<vertebrae_core::Step> for Step {
@@ -715,14 +812,9 @@ impl From<vertebrae_core::Step> for Step {
             name: step.name,
             workflow_id: step.workflow_id,
             goal: step.goal,
-            prompt: step.prompt,
-            agents: step.agents,
-            skills: step.skills,
-            agent_config: step.agent_config.into(),
             step_type: step.step_type.into(),
-            output_schema: step.output_schema,
+            config: step.config.map(Into::into),
             persistence_options: step.persistence_options,
-            route_config: step.route_config,
             transitions_to: step.transitions_to,
             order: step.order,
             created_at: step.created_at.map(|dt| dt.to_rfc3339()),
@@ -1075,7 +1167,7 @@ pub struct StepExecution {
     /// Execution context (arbitrary JSON serialized as string)
     #[serde(default)]
     pub context: Option<String>,
-    /// Transition decision payload (route/evaluate steps)
+    /// Transition decision payload (route steps)
     #[serde(default)]
     pub transition_result: Option<String>,
     /// Model identifier (e.g. "claude-opus-4")
@@ -1381,50 +1473,75 @@ pub struct CreateStepOptions {
     pub workflow_id: String,
     pub name: String,
     pub goal: Option<String>,
-    #[serde(default)]
-    pub prompt: Option<String>,
-    pub agents: Vec<String>,
-    pub skills: Vec<String>,
-    #[serde(default)]
-    pub agent_config: Option<AgentConfig>,
     pub order: i32,
     pub transitions_to: Vec<String>,
     #[serde(default)]
     pub step_type: StepType,
-    pub output_schema: Option<serde_json::Value>,
+    /// Config fields declared by `step_type` (snake_case keys; `agent_config`
+    /// uses the GUI `AgentConfig` shape). Omitted fields take the type's
+    /// defaults; must be null for human_input, stop, and finish steps.
+    #[serde(default)]
+    pub config: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default)]
     pub persistence_options: Option<serde_json::Value>,
-    #[serde(default)]
-    pub route_config: Option<serde_json::Value>,
 }
 
-/// Options for updating a workflow step.
-/// Only fields that are Some will be updated. The clear flags explicitly remove
-/// an existing optional value when no replacement value is supplied.
+/// Convert a patch's GUI-shaped `agent_config` (JSON-string `agents` and
+/// `json_schema`) into the core shape Sacrum stores.
+fn core_config_patch(
+    mut patch: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    if let Some(agent_config) = patch.get_mut("agent_config") {
+        if let Ok(gui) = serde_json::from_value::<AgentConfig>(agent_config.clone()) {
+            let core: vertebrae_core::AgentConfig = gui.into();
+            if let Ok(value) = serde_json::to_value(core) {
+                *agent_config = value;
+            }
+        }
+    }
+    patch
+}
+
+impl CreateStepOptions {
+    /// Build the core step, rejecting config fields the type does not declare.
+    pub fn into_step(self) -> Result<vertebrae_core::Step, vertebrae_core::ServiceError> {
+        let step_type: vertebrae_core::StepType = self.step_type.into();
+        let mut step = vertebrae_core::Step::new(&self.name, self.workflow_id)
+            .with_step_type(step_type)
+            .with_order(self.order)
+            .with_transitions_to(
+                self.transitions_to
+                    .iter()
+                    .map(|id| id.to_lowercase())
+                    .collect(),
+            );
+        if let Some(goal) = self.goal {
+            step = step.with_goal(&goal);
+        }
+        if let Some(options) = self.persistence_options {
+            step = step.with_persistence_options(options);
+        }
+        if let Some(config) = self.config {
+            vertebrae_core::apply_config_patch(&mut step, &core_config_patch(config))?;
+        }
+        Ok(step)
+    }
+}
+
+/// Options for updating a workflow step. A step's type cannot change.
+/// Only fields that are Some will be updated. `config` is a partial patch:
+/// only its keys are written, and a null value clears that field.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct UpdateStepOptions {
     pub step_id: String,
     pub name: Option<String>,
     pub goal: Option<String>,
-    pub prompt: Option<String>,
     #[serde(default)]
-    pub clear_prompt: bool,
-    pub agents: Option<Vec<String>>,
-    pub skills: Option<Vec<String>>,
-    #[serde(default)]
-    pub agent_config: Option<AgentConfig>,
-    pub step_type: Option<StepType>,
-    pub output_schema: Option<serde_json::Value>,
-    #[serde(default)]
-    pub clear_output_schema: bool,
+    pub config: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default)]
     pub persistence_options: Option<serde_json::Value>,
     #[serde(default)]
     pub clear_persistence_options: bool,
-    #[serde(default)]
-    pub route_config: Option<serde_json::Value>,
-    #[serde(default)]
-    pub clear_route_config: bool,
     pub order: Option<i32>,
     pub transitions_to: Option<Vec<String>>,
 }
@@ -1438,42 +1555,14 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
         if let Some(goal) = opts.goal {
             update = update.with_goal(&goal);
         }
-        if opts.clear_prompt {
-            update = update.clear_prompt();
-        } else if let Some(prompt) = opts.prompt {
-            update = update.with_prompt(&prompt);
-        }
-        if let Some(agents) = opts.agents {
-            update = update.with_agents(agents);
-        }
-        if let Some(skills) = opts.skills {
-            update = update.with_skills(skills);
-        }
-        if let Some(agent_config) = opts.agent_config {
-            let config: vertebrae_core::AgentConfig = agent_config.into();
-            let value = serde_json::to_value(config).unwrap_or_else(|_| serde_json::json!({}));
-            update = update.with_agent_config(value);
-        }
+        update.config = opts.config.map(core_config_patch);
         if let Some(order) = opts.order {
             update = update.with_order(order);
-        }
-        if let Some(step_type) = opts.step_type {
-            update = update.with_step_type(step_type.into());
-        }
-        if opts.clear_output_schema {
-            update = update.with_output_schema(None);
-        } else if let Some(output_schema) = opts.output_schema {
-            update = update.with_output_schema(Some(output_schema));
         }
         if opts.clear_persistence_options {
             update = update.with_persistence_options(None);
         } else if let Some(persistence_options) = opts.persistence_options {
             update = update.with_persistence_options(Some(persistence_options));
-        }
-        if opts.clear_route_config {
-            update = update.with_route_config(None);
-        } else if let Some(route_config) = opts.route_config {
-            update = update.with_route_config(Some(route_config));
         }
         if let Some(transitions) = opts.transitions_to {
             let transition_ids: Vec<String> =
@@ -1997,11 +2086,153 @@ mod tests {
         assert_eq!(gui.name, "review");
         assert_eq!(gui.workflow_id, "wf1");
         assert_eq!(gui.goal, None);
-        assert_eq!(gui.prompt, None);
-        assert!(gui.agents.is_empty());
-        assert!(gui.skills.is_empty());
+        assert_eq!(gui.step_type, StepType::LlmInference);
+        let Some(StepConfig::LlmInference(config)) = gui.config else {
+            panic!("expected llm_inference config");
+        };
+        assert_eq!(config.prompt, None);
+        assert!(config.agents.is_empty());
+        assert!(config.skills.is_empty());
         assert!(gui.transitions_to.is_empty());
         assert_eq!(gui.order, 0);
+    }
+
+    #[test]
+    fn step_deserializes_channel_payload_config_by_step_type() {
+        let step: Step = serde_json::from_value(serde_json::json!({
+            "id": "step-1",
+            "name": "Wait",
+            "workflow_id": "wf-1",
+            "step_type": "wait_children",
+            "config": {"__type__": "wait_children", "version": 1, "output_schema": {"type": "object"}},
+            "step_order": 3,
+            "inserted_at": "2026-01-01T00:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(step.step_type, StepType::WaitChildren);
+        assert_eq!(step.order, 3);
+        let Some(StepConfig::WaitChildren(config)) = step.config else {
+            panic!("expected wait_children config");
+        };
+        assert_eq!(
+            config.output_schema,
+            Some(serde_json::json!({"type": "object"}))
+        );
+
+        let step: Step = serde_json::from_value(serde_json::json!({
+            "id": "step-2",
+            "name": "Implement",
+            "workflow_id": "wf-1",
+            "step_type": "llm_inference",
+            "config": {
+                "version": 1,
+                "prompt": "Do it",
+                "agents": ["a"],
+                "skills": null,
+                "agent_config": {"model": "opus"}
+            }
+        }))
+        .unwrap();
+        let Some(StepConfig::LlmInference(config)) = step.config else {
+            panic!("expected llm_inference config");
+        };
+        assert_eq!(config.prompt.as_deref(), Some("Do it"));
+        assert_eq!(config.agents, vec!["a"]);
+        assert!(config.skills.is_empty());
+        assert_eq!(config.agent_config.model.as_deref(), Some("opus"));
+
+        let step: Step = serde_json::from_value(serde_json::json!({
+            "id": "step-3",
+            "name": "Done",
+            "workflow_id": "wf-1",
+            "step_type": "finish",
+            "config": null
+        }))
+        .unwrap();
+        assert!(step.config.is_none());
+    }
+
+    #[test]
+    fn create_step_options_reject_undeclared_config_fields() {
+        let options = |step_type: StepType, config: serde_json::Value| CreateStepOptions {
+            workflow_id: "wf-1".to_string(),
+            name: "Step".to_string(),
+            goal: None,
+            order: 0,
+            transitions_to: vec![],
+            step_type,
+            config: config.as_object().cloned(),
+            persistence_options: None,
+        };
+
+        let step = options(
+            StepType::Route,
+            serde_json::json!({"route_config": {"version": 1}}),
+        )
+        .into_step()
+        .unwrap();
+        assert_eq!(
+            step.route_config(),
+            Some(&serde_json::json!({"version": 1}))
+        );
+
+        let error = options(StepType::Route, serde_json::json!({"prompt": "x"}))
+            .into_step()
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("$.prompt: is not supported for route steps"));
+
+        let error = options(StepType::Finish, serde_json::json!({"prompt": "x"}))
+            .into_step()
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("config: must be null for finish steps"));
+    }
+
+    #[test]
+    fn update_step_options_convert_gui_agent_config() {
+        let update: vertebrae_core::StepUpdate = UpdateStepOptions {
+            step_id: "step-1".to_string(),
+            name: None,
+            goal: None,
+            config: serde_json::json!({
+                "agent_config": {"model": "opus", "json_schema": "{\"type\":\"object\"}"}
+            })
+            .as_object()
+            .cloned(),
+            persistence_options: None,
+            clear_persistence_options: false,
+            order: None,
+            transitions_to: None,
+        }
+        .into();
+        assert_eq!(
+            update.config.unwrap()["agent_config"],
+            serde_json::json!({"model": "opus", "json_schema": {"type": "object"}})
+        );
+    }
+
+    #[test]
+    fn update_step_options_forward_the_config_patch() {
+        let update: vertebrae_core::StepUpdate = UpdateStepOptions {
+            step_id: "step-1".to_string(),
+            name: None,
+            goal: None,
+            config: serde_json::json!({"prompt": null, "skills": ["s"]})
+                .as_object()
+                .cloned(),
+            persistence_options: None,
+            clear_persistence_options: false,
+            order: None,
+            transitions_to: None,
+        }
+        .into();
+        assert_eq!(
+            serde_json::Value::Object(update.config.unwrap()),
+            serde_json::json!({"prompt": null, "skills": ["s"]})
+        );
     }
 
     #[test]
@@ -2053,94 +2284,22 @@ mod tests {
     }
 
     #[test]
-    fn update_step_options_preserves_finish_type() {
-        let update: vertebrae_core::StepUpdate = UpdateStepOptions {
-            step_id: "finish".to_string(),
-            name: None,
-            goal: None,
-            prompt: None,
-            clear_prompt: false,
-            agents: None,
-            skills: None,
-            agent_config: None,
-            step_type: Some(StepType::Finish),
-            output_schema: None,
-            clear_output_schema: false,
-            persistence_options: None,
-            clear_persistence_options: false,
-            route_config: None,
-            clear_route_config: false,
-            order: None,
-            transitions_to: Some(vec![]),
-        }
-        .into();
-
-        assert_eq!(update.step_type, Some(vertebrae_core::StepType::Finish));
-        assert_eq!(update.transitions_to, Some(vec![]));
-    }
-
-    #[test]
-    fn update_step_options_can_replace_agent_config_and_clear_schema() {
-        let update: vertebrae_core::StepUpdate = UpdateStepOptions {
-            step_id: "stop".to_string(),
-            name: None,
-            goal: None,
-            prompt: None,
-            clear_prompt: false,
-            agents: None,
-            skills: None,
-            agent_config: Some(AgentConfig {
-                model: Some("gpt-5.5".to_string()),
-                provider: Some(AgentProvider::Openai),
-                ..Default::default()
-            }),
-            step_type: Some(StepType::Stop),
-            output_schema: None,
-            clear_output_schema: true,
-            persistence_options: None,
-            clear_persistence_options: false,
-            route_config: None,
-            clear_route_config: false,
-            order: None,
-            transitions_to: Some(vec!["next".to_string()]),
-        }
-        .into();
-
-        assert_eq!(update.step_type, Some(vertebrae_core::StepType::Stop));
-        assert_eq!(update.transitions_to, Some(vec!["next".to_string()]));
-        assert_eq!(update.output_schema, Some(None));
-        assert_eq!(
-            update.agent_config,
-            Some(serde_json::json!({"provider": "openai", "model": "gpt-5.5"}))
-        );
-    }
-
-    #[test]
     fn update_step_options_sets_and_clears_persistence_options() {
-        let configured: vertebrae_core::StepUpdate = UpdateStepOptions {
+        let options = |persistence_options, clear_persistence_options| UpdateStepOptions {
             step_id: "step".to_string(),
             name: None,
             goal: None,
-            prompt: None,
-            clear_prompt: false,
-            agents: None,
-            skills: None,
-            agent_config: None,
-            step_type: None,
-            output_schema: None,
-            clear_output_schema: false,
-            persistence_options: Some(serde_json::json!({
-                "artifact": { "logical_name": "result" }
-            })),
-            clear_persistence_options: false,
-            route_config: Some(serde_json::json!({
-                "version": 1,
-                "future": {"nested": ["value", true, null]}
-            })),
-            clear_route_config: false,
+            config: None,
+            persistence_options,
+            clear_persistence_options,
             order: None,
             transitions_to: None,
-        }
+        };
+
+        let configured: vertebrae_core::StepUpdate = options(
+            Some(serde_json::json!({ "artifact": { "logical_name": "result" } })),
+            false,
+        )
         .into();
         assert_eq!(
             configured.persistence_options,
@@ -2148,81 +2307,10 @@ mod tests {
                 "artifact": { "logical_name": "result" }
             })))
         );
+        assert!(configured.config.is_none());
 
-        let cleared: vertebrae_core::StepUpdate = UpdateStepOptions {
-            step_id: "step".to_string(),
-            name: None,
-            goal: None,
-            prompt: None,
-            clear_prompt: false,
-            agents: None,
-            skills: None,
-            agent_config: None,
-            step_type: None,
-            output_schema: None,
-            clear_output_schema: false,
-            persistence_options: None,
-            clear_persistence_options: true,
-            route_config: None,
-            clear_route_config: false,
-            order: None,
-            transitions_to: None,
-        }
-        .into();
+        let cleared: vertebrae_core::StepUpdate = options(None, true).into();
         assert_eq!(cleared.persistence_options, Some(None));
-    }
-
-    #[test]
-    fn update_step_options_preserves_route_config_and_prompt_clear_state() {
-        let route_config = serde_json::json!({
-            "version": 1,
-            "unknown": {"array": [1, false, null]}
-        });
-        let configured: vertebrae_core::StepUpdate = UpdateStepOptions {
-            step_id: "route".to_string(),
-            name: None,
-            goal: None,
-            prompt: None,
-            clear_prompt: false,
-            agents: None,
-            skills: None,
-            agent_config: None,
-            step_type: Some(StepType::Route),
-            output_schema: None,
-            clear_output_schema: false,
-            persistence_options: None,
-            clear_persistence_options: false,
-            route_config: Some(route_config.clone()),
-            clear_route_config: false,
-            order: None,
-            transitions_to: None,
-        }
-        .into();
-        assert_eq!(configured.route_config, Some(Some(route_config)));
-        assert_eq!(configured.prompt, None);
-
-        let cleared: vertebrae_core::StepUpdate = UpdateStepOptions {
-            step_id: "route".to_string(),
-            name: None,
-            goal: None,
-            prompt: None,
-            clear_prompt: true,
-            agents: None,
-            skills: None,
-            agent_config: None,
-            step_type: None,
-            output_schema: None,
-            clear_output_schema: false,
-            persistence_options: None,
-            clear_persistence_options: false,
-            route_config: None,
-            clear_route_config: true,
-            order: None,
-            transitions_to: None,
-        }
-        .into();
-        assert_eq!(cleared.prompt, Some(None));
-        assert_eq!(cleared.route_config, Some(None));
     }
 
     #[test]
@@ -2236,28 +2324,32 @@ mod tests {
         let gui = Step::from(core);
         assert_eq!(gui.name, "review");
         assert_eq!(gui.goal, Some("Review code".to_string()));
-        assert_eq!(gui.prompt, Some("Review the PR".to_string()));
-        assert_eq!(gui.agents, vec!["claude"]);
-        assert_eq!(gui.skills, vec!["code-review"]);
         assert_eq!(gui.order, 5);
+        let Some(StepConfig::LlmInference(config)) = gui.config else {
+            panic!("expected llm_inference config");
+        };
+        assert_eq!(config.prompt, Some("Review the PR".to_string()));
+        assert_eq!(config.agents, vec!["claude"]);
+        assert_eq!(config.skills, vec!["code-review"]);
     }
 
     #[test]
-    fn step_from_core_preserves_route_config_and_retained_prompt() {
+    fn step_from_core_serializes_route_config_only() {
         let route_config = serde_json::json!({
             "version": 1,
             "rules": [{"future": {"nested": ["value", true, null]}}]
         });
         let core = vertebrae_core::Step::new("router", "wf1")
             .with_step_type(vertebrae_core::StepType::Route)
-            .with_prompt("legacy prompt")
             .with_route_config(route_config.clone());
 
         let gui = Step::from(core);
 
         assert_eq!(gui.step_type, StepType::Route);
-        assert_eq!(gui.prompt.as_deref(), Some("legacy prompt"));
-        assert_eq!(gui.route_config, Some(route_config));
+        assert_eq!(
+            serde_json::to_value(&gui).unwrap()["config"],
+            serde_json::json!({"version": 1, "route_config": route_config})
+        );
     }
 
     // ─── Workflow Conversion Tests ──────────────────────────────────
@@ -2622,7 +2714,16 @@ mod tests {
             "name": "review",
             "workflow_id": "wf-001",
             "goal": "Review code changes",
-            "prompt": "Review the PR carefully",
+            "step_type": "llm_inference",
+            "config": {
+                "__type__": "llm_inference",
+                "version": 1,
+                "prompt": "Review the PR carefully",
+                "output_schema": null,
+                "agents": [],
+                "skills": [],
+                "agent_config": {}
+            },
             "order": 2,
             "inserted_at": "2026-03-15T10:00:00.000000Z",
             "updated_at": "2026-03-15T11:00:00.000000Z",
@@ -2636,8 +2737,11 @@ mod tests {
         assert_eq!(step.workflow_id, "wf-001");
         assert_eq!(step.goal, Some("Review code changes".to_string()));
         assert_eq!(step.order, 2);
-        assert!(step.agents.is_empty());
-        assert!(step.skills.is_empty());
+        let Some(StepConfig::LlmInference(config)) = &step.config else {
+            panic!("expected llm_inference config");
+        };
+        assert_eq!(config.prompt.as_deref(), Some("Review the PR carefully"));
+        assert!(config.agents.is_empty());
         assert!(step.transitions_to.is_empty());
         assert_eq!(
             step.created_at,

@@ -1,3 +1,4 @@
+import { createMockAgentConfig } from "../test/test-utils";
 import { describe, it, expect } from "vitest";
 import { groupTasksByStep } from "./groupTasksByStep";
 import type { Step, Task } from "../bindings";
@@ -15,29 +16,15 @@ function createStep(id: string, name: string, order: number): Step {
     name,
     workflow_id: "test_workflow",
     goal: null,
-    prompt: null,
-    agent_config: {
-      model: "haiku",
-      codex_model_provider: null,
-      fallback_model: null,
-      reasoning_effort: null,
-      speed_tier: null,
-      personality: null,
-      verbosity: null,
-      system_prompt: null,
-      append_system_prompt: null,
-      agents: null,
-      tools: [],
-      allowed_tools: [],
-      disallowed_tools: [],
-      permission_mode: null,
-      max_budget_usd: null,
-      mcp_config: [],
-      plugin_dirs: [],
-      json_schema: null,
+    config: {
+      version: 1,
+      prompt: null,
+      output_schema: null,
+      agents: [],
+      skills: [],
+      agent_config: createMockAgentConfig({ model: "haiku" }),
     },
-    step_type: "execute",
-    output_schema: null,
+    step_type: "llm_inference",
     transitions_to: [],
     order,
     created_at: null,

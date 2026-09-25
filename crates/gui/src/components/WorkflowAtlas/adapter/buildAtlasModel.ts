@@ -35,19 +35,15 @@ export function stepRef(workflowId: string, stepId: string): string {
  * Derive the visual `Kind` of a step.
  *
  *  Maps the REAL backend `StepType` via `hearthStepKind`, renaming the Hearth
- *  kinds to the Atlas vocabulary: `eval` (evaluate), `wait` (wait_children),
- *  `human` (human_input). `execute`/`route`/`stop`/`finish` pass through. `unknown`
- *  collapses to `execute` (a generic process box). There is no synthetic
- *  entry/final kind — the backend has no such types; position is `Role`,
- *  terminality is the finish type.
+ *  kinds to the Atlas vocabulary: `llm`, `wait`, and `human`. Unknown
+ *  step types render as a generic `llm` process box.
  */
 export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
   // PipelineStep.step_type is `string | null`. hearthStepKind only recognises
   // the known StepType strings (its lookup table throws on arbitrary values),
   // so gate on the known set and treat anything else as a generic process box.
   const known: ReadonlySet<string> = new Set([
-    "execute",
-    "evaluate",
+    "llm_inference",
     "route",
     "human_input",
     "wait_children",
@@ -55,12 +51,12 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
     "finish",
   ]);
   const raw = step.step_type;
-  if (raw === null || !known.has(raw)) return "execute";
+  if (raw === null || !known.has(raw)) return "llm";
 
   const hearth = hearthStepKind(raw as StepType);
   switch (hearth) {
-    case "eval":
-      return "eval";
+    case "llm":
+      return "llm";
     case "wait":
       return "wait";
     case "human":
@@ -71,10 +67,9 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
       return "stop";
     case "finish":
       return "finish";
-    case "execute":
     case "unknown":
     default:
-      return "execute";
+      return "llm";
   }
 }
 

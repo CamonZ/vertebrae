@@ -11,14 +11,14 @@
 
 /**
  * Visual step kind used across the Atlas — the REAL backend step type, mapped
- * from `StepType` via `hearthStepKind` (renaming `eval`/`wait`/`human`). Drives
+ * from `StepType` via `hearthStepKind` (renaming `llm`/`wait`/`human`). Drives
  * `k-<kind>` token classes. NOTE: there is no synthetic `entry`/`final` kind —
  * the backend has no such step types; flow position is carried by `Role`, and
  * terminality by the finish type.
  */
 export type Kind =
-  | "execute"
-  | "eval"
+  | "llm"
+  | "llm"
   | "route"
   | "wait"
   | "human"

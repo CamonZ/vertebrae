@@ -16,7 +16,8 @@
           "labels": [
             "one",
             "two"
-          ]
+          ],
+          "unicode": "café"
         }
       },
       "initial_step": {
@@ -37,25 +38,8 @@
           "name": "Route",
           "goal": "Choose the next workflow",
           "prompt": null,
-          "agents": [
-            "router-agent"
-          ],
-          "skills": [
-            "routing"
-          ],
-          "agent_config": {
-            "model": "gpt-5.5",
-            "nested": {
-              "unicode": "café"
-            }
-          },
           "step_type": "route",
           "step_order": 1,
-          "persistence_options": {
-            "artifact": {
-              "logical_name": "route-decision"
-            }
-          },
           "route_config": {
             "version": 1,
             "match_policy": "exactly_one",
@@ -151,8 +135,13 @@
               }
             }
           },
-          "step_type": "execute",
+          "step_type": "llm_inference",
           "step_order": 0,
+          "persistence_options": {
+            "artifact": {
+              "logical_name": "build-result"
+            }
+          },
           "output_schema": {
             "type": "object",
             "required": [
@@ -177,19 +166,9 @@
           "step_ref": "input",
           "name": "Human Approval",
           "goal": "Collect approval",
-          "prompt": "Approve the build",
+          "prompt": null,
           "step_type": "human_input",
-          "step_order": 4,
-          "output_schema": {
-            "type": "object",
-            "properties": {
-              "approved": {
-                "type": "boolean"
-              }
-            },
-            "required": ["approved"],
-            "additionalProperties": false
-          }
+          "step_order": 4
         },
         {
           "step_ref": "pause",
@@ -231,7 +210,6 @@
           "skills": [
             "review"
           ],
-          "step_type": "evaluate",
           "step_order": 0,
           "output_schema": {
             "type": "object"

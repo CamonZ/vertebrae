@@ -597,34 +597,6 @@ async fn when_update_step_with_flag(
         .await;
 }
 
-#[when(expr = "I update the step {string} to stop and continue to {string}")]
-async fn when_update_step_to_stop_with_continuation(
-    world: &mut SmokeWorld,
-    name: String,
-    target_name: String,
-) {
-    let step_id = world
-        .stored_ids
-        .get(&format!("step:{}", name))
-        .cloned()
-        .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
-    let target_id = get_step_json(world, &target_name)
-        .await
-        .and_then(|step| step["id"].as_str().map(str::to_owned))
-        .unwrap_or_else(|| panic!("step '{}' not found in workflow", target_name));
-    world
-        .run_vtb(&[
-            "step",
-            "update",
-            &step_id,
-            "--step-type",
-            "stop",
-            "--transition-to",
-            &target_id,
-        ])
-        .await;
-}
-
 #[when(
     expr = "I update the step {string} in the workflow with provider {string}, codex model provider {string}, and model {string}"
 )]
@@ -779,56 +751,6 @@ async fn when_update_configured_route_with_invalid_reference(world: &mut SmokeWo
         .await;
 }
 
-#[when(expr = "I create a route step {string} with a retained prompt")]
-async fn when_create_route_step_with_retained_prompt(world: &mut SmokeWorld, name: String) {
-    let workflow_id = workflow_id(world);
-    let client = world
-        .graphql_client
-        .as_ref()
-        .expect("configured Sacrum client is required");
-    let response: serde_json::Value = client
-        .execute(
-            r#"mutation CreateRetainedRoute($workflow_id: Uuid4!, $name: String!, $prompt: String!) {
-                create_workflow_step(
-                    workflow_id: $workflow_id,
-                    name: $name,
-                    prompt: $prompt,
-                    step_type: "route",
-                    step_order: 0
-                ) { id }
-            }"#,
-            serde_json::json!({
-                "workflow_id": workflow_id,
-                "name": name,
-                "prompt": "retained prompt"
-            }),
-            "create_workflow_step",
-        )
-        .await
-        .expect("failed to create retained route prompt fixture");
-    let step_id = response
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .expect("retained route fixture did not return a step ID")
-        .to_string();
-    world.stored_ids.insert(format!("step:{name}"), step_id);
-}
-
-#[when(expr = "I convert the configured route step {string} to execute and clear its route config")]
-async fn when_convert_route_to_execute_with_clear(world: &mut SmokeWorld, name: String) {
-    let route_id = stored_step_id(world, &name);
-    world
-        .run_vtb(&[
-            "step",
-            "update",
-            &route_id,
-            "--step-type",
-            "execute",
-            "--clear-route-config",
-        ])
-        .await;
-}
-
 /// Update a step with a flag that takes no value (e.g. --clear-output-schema)
 #[when(expr = "I update the step {string} in the workflow with flag {string} and no value")]
 async fn when_update_step_with_flag_no_value(world: &mut SmokeWorld, name: String, flag: String) {
@@ -871,7 +793,7 @@ async fn then_step_should_have_prompt(world: &mut SmokeWorld, step_name: String,
     let json = get_step_json(world, &step_name)
         .await
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
-    let actual = json["prompt"].as_str().unwrap_or("");
+    let actual = json["config"]["prompt"].as_str().unwrap_or("");
     assert_eq!(
         actual, expected,
         "step '{}' prompt mismatch: expected '{}', got '{}'\nJSON: {}",
@@ -891,7 +813,9 @@ async fn then_step_should_have_agent_config_field(
     let json = get_step_json(world, &step_name)
         .await
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
-    let actual = json["agent_config"][&field].as_str().unwrap_or("");
+    let actual = json["config"]["agent_config"][&field]
+        .as_str()
+        .unwrap_or("");
     assert_eq!(
         actual, expected,
         "step '{}' agent_config.{} mismatch: expected '{}', got '{}'\nJSON: {}",
@@ -909,7 +833,7 @@ async fn then_step_should_not_have_agent_config_field(
         .await
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
     assert!(
-        json["agent_config"][&field].is_null(),
+        json["config"]["agent_config"][&field].is_null(),
         "step '{}' agent_config.{} should be absent, got JSON: {}",
         step_name,
         field,
@@ -926,7 +850,7 @@ async fn then_step_should_have_step_type(
     let json = get_step_json(world, &step_name)
         .await
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
-    let actual = json["step_type"].as_str().unwrap_or("execute");
+    let actual = json["step_type"].as_str().unwrap_or("");
     assert_eq!(
         actual, expected,
         "step '{}' step_type mismatch: expected '{}', got '{}'\nJSON: {}",
@@ -965,7 +889,7 @@ async fn then_step_show_json_should_have_prompt(world: &mut SmokeWorld, expected
     let json: serde_json::Value =
         serde_json::from_str(&world.last_stdout).expect("step show JSON should be valid JSON");
     assert_eq!(
-        json["prompt"].as_str(),
+        json["config"]["prompt"].as_str(),
         Some(expected.as_str()),
         "step show JSON prompt mismatch: {}",
         json
@@ -982,9 +906,9 @@ async fn then_step_show_json_should_have_null_prompt(world: &mut SmokeWorld) {
     let json: serde_json::Value =
         serde_json::from_str(&world.last_stdout).expect("step show JSON should be valid JSON");
     assert!(
-        json["prompt"].is_null(),
+        json["config"]["prompt"].is_null(),
         "expected step show JSON prompt to be null, got {}",
-        json["prompt"]
+        json["config"]["prompt"]
     );
 }
 
@@ -1000,7 +924,7 @@ async fn then_step_show_json_should_contain_route_config(world: &mut SmokeWorld)
     let done_id = stored_step_id(world, "done");
     let expected: serde_json::Value = serde_json::from_str(&route_config_for(&done_id))
         .expect("deterministic route fixture should be valid JSON");
-    assert_eq!(json["route_config"], expected);
+    assert_eq!(json["config"]["route_config"], expected);
 }
 
 #[then("the step show JSON should contain the replacement route config")]
@@ -1015,7 +939,7 @@ async fn then_step_show_json_should_contain_replacement_route_config(world: &mut
     let done_id = stored_step_id(world, "done");
     let expected: serde_json::Value = serde_json::from_str(&replacement_route_config_for(&done_id))
         .expect("replacement route fixture should be valid JSON");
-    assert_eq!(json["route_config"], expected);
+    assert_eq!(json["config"]["route_config"], expected);
 }
 
 #[then("the step show JSON should have null route_config")]
@@ -1028,9 +952,9 @@ async fn then_step_show_json_should_have_null_route_config(world: &mut SmokeWorl
     let json: serde_json::Value =
         serde_json::from_str(&world.last_stdout).expect("step show JSON should be valid JSON");
     assert!(
-        json["route_config"].is_null(),
-        "expected route_config to be null, got {}",
-        json["route_config"]
+        json["config"]["route_config"].is_null(),
+        "expected config.route_config to be null, got {}",
+        json["config"]["route_config"]
     );
 }
 
@@ -1057,7 +981,7 @@ async fn then_step_should_have_output_schema(world: &mut SmokeWorld, step_name: 
     let json = get_step_json(world, &step_name)
         .await
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
-    let schema = &json["output_schema"];
+    let schema = &json["config"]["output_schema"];
     assert!(
         !schema.is_null(),
         "step '{}' expected output_schema to be present, but it was null\nJSON: {}",
@@ -1087,7 +1011,7 @@ async fn then_step_should_not_have_output_schema(world: &mut SmokeWorld, step_na
     let json = get_step_json(world, &step_name)
         .await
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
-    let schema = &json["output_schema"];
+    let schema = &json["config"]["output_schema"];
     assert!(
         schema.is_null(),
         "step '{}' expected output_schema to be null, but got: {}\nJSON: {}",
@@ -1106,7 +1030,9 @@ async fn then_step_should_have_agent_model(
     let json = get_step_json(world, &step_name)
         .await
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
-    let actual = json["agent_config"]["model"].as_str().unwrap_or("");
+    let actual = json["config"]["agent_config"]["model"]
+        .as_str()
+        .unwrap_or("");
     assert_eq!(
         actual, expected_model,
         "step '{}' agent model mismatch: expected '{}', got '{}'\nJSON: {}",

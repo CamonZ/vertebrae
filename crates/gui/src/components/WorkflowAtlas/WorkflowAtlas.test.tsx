@@ -63,7 +63,7 @@ function makeStep(
     workflow_id: workflowId,
     goal: null,
     step_order: order,
-    step_type: "execute",
+    step_type: "llm_inference",
     transitions_to: [],
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
@@ -768,7 +768,7 @@ describe("WorkflowAtlas — MAP view", () => {
   it("shows the real step-type legend (no synthetic entry/final/done)", async () => {
     await renderMap();
     const legend = document.querySelector(".uv-legend") as HTMLElement;
-    expect(within(legend).getByText("execute")).toBeInTheDocument();
+    expect(within(legend).getByText("llm")).toBeInTheDocument();
     expect(within(legend).queryByText("entry")).not.toBeInTheDocument();
     expect(within(legend).queryByText("final")).not.toBeInTheDocument();
     expect(within(legend).queryByText("done")).not.toBeInTheDocument();

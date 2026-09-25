@@ -88,7 +88,7 @@ function makeStep(
     workflow_id: "wf-build",
     goal: null,
     step_order: order,
-    step_type: "execute",
+    step_type: "llm_inference",
     transitions_to: [],
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
@@ -130,12 +130,13 @@ describe("splitRunConsole", () => {
     );
     const waiting = withRun(makeTask({ id: "running-2" }), makeRun("waiting"));
 
-    const { running: run, ready } = splitRunConsole([
-      idle,
-      queued,
-      running,
-      waiting,
-    ], new Map([[running.id, running.run_controls!.active_run!], [waiting.id, waiting.run_controls!.active_run!]]));
+    const { running: run, ready } = splitRunConsole(
+      [idle, queued, running, waiting],
+      new Map([
+        [running.id, running.run_controls!.active_run!],
+        [waiting.id, waiting.run_controls!.active_run!],
+      ])
+    );
 
     expect(run.map((r) => r.task.id).sort()).toEqual([
       "running-1",
@@ -156,7 +157,10 @@ describe("splitRunConsole", () => {
       makeTask({ id: "running-1" }),
       makeRun("executing", { started_at: "2024-06-01T12:00:00Z" })
     );
-    const { running: rows } = splitRunConsole([running], new Map([[running.id, running.run_controls!.active_run!]]));
+    const { running: rows } = splitRunConsole(
+      [running],
+      new Map([[running.id, running.run_controls!.active_run!]])
+    );
     expect(rows[0]?.startedAt).toBe("2024-06-01T12:00:00Z");
   });
 
@@ -165,7 +169,10 @@ describe("splitRunConsole", () => {
       makeTask({ id: "stopping-1" }),
       makeRun("stopping")
     );
-    const { running, ready } = splitRunConsole([stopping], new Map([[stopping.id, stopping.run_controls!.active_run!]]));
+    const { running, ready } = splitRunConsole(
+      [stopping],
+      new Map([[stopping.id, stopping.run_controls!.active_run!]])
+    );
     expect(running.map((r) => r.task.id)).toEqual(["stopping-1"]);
     expect(ready).toHaveLength(0);
   });
@@ -181,7 +188,7 @@ describe("miniPipeline", () => {
     const segs = miniPipeline(task, SUMMARY);
     expect(segs.map((s) => s.state)).toEqual(["done", "current", "queued"]);
     // kind is the real backend step type — no synthetic entry/final kinds.
-    expect(segs.map((s) => s.kind)).toEqual(["execute", "execute", "finish"]);
+    expect(segs.map((s) => s.kind)).toEqual(["llm", "llm", "finish"]);
   });
 
   it("marks the current step `running` only when the run is active", () => {

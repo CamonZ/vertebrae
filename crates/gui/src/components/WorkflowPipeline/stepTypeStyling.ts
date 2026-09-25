@@ -6,8 +6,7 @@ import type { StepType } from "../../bindings";
  * future server-side additions.
  */
 export type StepKind =
-  | "execute"
-  | "evaluate"
+  | "llm_inference"
   | "route"
   | "human_input"
   | "wait_children"
@@ -16,8 +15,7 @@ export type StepKind =
   | "unknown";
 
 export type HearthStepKind =
-  | "execute"
-  | "eval"
+  | "llm"
   | "route"
   | "human"
   | "wait"
@@ -27,7 +25,7 @@ export type HearthStepKind =
 
 export interface StepTypeStyle {
   kind: StepKind;
-  /** V2-facing kind used for stable Hearth classes such as `kind-eval`. */
+  /** V2-facing kind used for stable Hearth classes such as `kind-llm`. */
   hearthKind: HearthStepKind;
   /** Human-readable label (e.g., "AI" / "Review" / "Holding"). */
   label: string;
@@ -58,23 +56,14 @@ export function normalizeStepType(
 }
 
 const styles: Record<StepKind, StepTypeStyle> = {
-  execute: {
-    kind: "execute",
-    hearthKind: "execute",
-    label: "Execute",
+  llm_inference: {
+    kind: "llm_inference",
+    hearthKind: "llm",
+    label: "LLM Inference",
     icon: "⚡",
-    barVar: "--color-step-execute",
-    washVar: "--color-step-execute-wash",
-    fgVar: "--color-step-execute-fg",
-  },
-  evaluate: {
-    kind: "evaluate",
-    hearthKind: "eval",
-    label: "Evaluate",
-    icon: "✓",
-    barVar: "--color-step-eval",
-    washVar: "--color-step-eval-wash",
-    fgVar: "--color-step-eval-fg",
+    barVar: "--color-step-llm",
+    washVar: "--color-step-llm-wash",
+    fgVar: "--color-step-llm-fg",
   },
   route: {
     kind: "route",

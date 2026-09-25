@@ -22,7 +22,7 @@ function makeStep(
     workflow_id: workflowId,
     goal: null,
     step_order: order,
-    step_type: "execute",
+    step_type: "llm_inference",
     transitions_to: [],
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
@@ -68,15 +68,15 @@ function makeTransition(
 describe("kindFor", () => {
   it("maps StepType through the Atlas vocabulary", () => {
     const cases: Array<[string | null, string]> = [
-      ["execute", "execute"],
-      ["evaluate", "eval"],
+      ["llm", "llm"],
+      ["llm_inference", "llm"],
       ["wait_children", "wait"],
       ["human_input", "human"],
       ["route", "route"],
       ["stop", "stop"],
       ["finish", "finish"],
-      [null, "execute"],
-      ["totally-unknown", "execute"],
+      [null, "llm"],
+      ["totally-unknown", "llm"],
     ];
     for (const [type, expected] of cases) {
       expect(kindFor({ step_type: type })).toBe(expected);
@@ -86,23 +86,23 @@ describe("kindFor", () => {
   it("maps the real type even for initial / final steps (no synthetic kinds)", () => {
     // entry/final are NOT kinds — the real backend type always wins.
     expect(kindFor({ step_type: "route" })).toBe("route");
-    expect(kindFor({ step_type: "execute" })).toBe("execute");
+    expect(kindFor({ step_type: "llm_inference" })).toBe("llm");
   });
 });
 
 describe("roleFor", () => {
   it("labels the first step entry", () => {
-    expect(roleFor("execute", true)).toBe("entry");
+    expect(roleFor("llm", true)).toBe("entry");
   });
   it("labels route / terminal steps exit", () => {
     expect(roleFor("route", false)).toBe("exit");
-    expect(roleFor("execute", false)).toBe("process");
+    expect(roleFor("llm", false)).toBe("process");
     expect(roleFor("finish", false)).toBe("exit");
     expect(roleFor("stop", false)).toBe("process");
   });
   it("labels everything else process", () => {
-    expect(roleFor("execute", false)).toBe("process");
-    expect(roleFor("eval", false)).toBe("process");
+    expect(roleFor("llm", false)).toBe("process");
+    expect(roleFor("llm", false)).toBe("process");
   });
 });
 
@@ -116,8 +116,8 @@ describe("buildAtlasModel", () => {
           "wf",
           [
             makeStep("entry", "wf", 0),
-            makeStep("ai", "wf", 1, { step_type: "execute" }),
-            makeStep("gate", "wf", 2, { step_type: "evaluate" }),
+            makeStep("ai", "wf", 1, { step_type: "llm_inference" }),
+            makeStep("gate", "wf", 2, { step_type: "llm_inference" }),
             makeStep("router", "wf", 3, { step_type: "route" }),
             makeStep("pause", "wf", 4, { step_type: "stop" }),
             makeStep("done", "wf", 5, { step_type: "finish" }),
@@ -132,14 +132,14 @@ describe("buildAtlasModel", () => {
 
     // kind is always the REAL backend step type — the initial step ("entry")
     // and the terminal step ("done") both keep their real backend type.
-    expect(byId.get("entry")!.kind).toBe("execute");
-    expect(byId.get("ai")!.kind).toBe("execute");
-    expect(byId.get("gate")!.kind).toBe("eval");
+    expect(byId.get("entry")!.kind).toBe("llm");
+    expect(byId.get("ai")!.kind).toBe("llm");
+    expect(byId.get("gate")!.kind).toBe("llm");
     expect(byId.get("router")!.kind).toBe("route");
     expect(byId.get("pause")!.kind).toBe("stop");
     expect(byId.get("done")!.kind).toBe("finish");
     expect(byId.get("done")!.role).toBe("exit");
-    expect(byId.get("gate")!.stepType).toBe("evaluate");
+    expect(byId.get("gate")!.stepType).toBe("llm_inference");
     expect(byId.get("router")!.stepType).toBe("route");
 
     // role still carries flow position (first → entry, route/terminal → exit).

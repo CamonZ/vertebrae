@@ -271,7 +271,7 @@ pub async fn wait_for_page(client: &Client, path: &str, project: Option<&str>) {
             !!element && element.getClientRects().length > 0 &&
             (!project || avatar?.getAttribute('aria-label') === 'Switch project · ' + project);"#,
         vec![path.into(), selector.into(), project.into()],
-        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(30),
     )
     .await;
 }

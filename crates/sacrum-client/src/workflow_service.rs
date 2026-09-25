@@ -8,7 +8,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use vertebrae_core::WorkflowSummary;
 use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::models::{Workflow, WorkflowTransition};
+use vertebrae_core::models::{StepType, Workflow, WorkflowTransition};
 use vertebrae_core::service::TaskService;
 use vertebrae_core::workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowBundleImportInput,
@@ -242,12 +242,14 @@ impl WorkflowService for SacrumWorkflowService {
             let mut created_step_ids: Vec<String> = Vec::new();
 
             for (i, step) in options.steps.iter().enumerate() {
-                let agent_config =
-                    serde_json::to_string(&json!({ "model": step.model })).unwrap_or_default();
+                let config =
+                    serde_json::to_string(&json!({ "agent_config": { "model": step.model } }))
+                        .unwrap_or_default();
                 let step_variables = json!({
                     "workflow_id": workflow_id,
                     "name": step.name,
-                    "agent_config": agent_config,
+                    "step_type": StepType::LlmInference.as_str(),
+                    "config": config,
                     "step_order": i as i32,
                 });
 
@@ -980,14 +982,16 @@ mod tests {
                     "id": first_step_id,
                     "name": "implement",
                     "goal": "make the change",
-                    "prompt": null,
-                    "agents": ["agent-a"],
-                    "skills": ["rust"],
-                    "agent_config": {"model": "sonnet"},
-                    "step_type": "execute",
-                    "output_schema": null,
+                    "step_type": "llm_inference",
+                    "config": {
+                        "version": 1,
+                        "prompt": "",
+                        "output_schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+                        "agents": ["agent-a"],
+                        "skills": ["rust"],
+                        "agent_config": {"model": "sonnet"}
+                    },
                     "persistence_options": null,
-                    "route_config": null,
                     "step_order": 0,
                     "workflow_id": id,
                     "project_id": "test-proj",
@@ -1001,14 +1005,12 @@ mod tests {
                     "id": second_step_id,
                     "name": "review",
                     "goal": null,
-                    "prompt": "",
-                    "agents": [],
-                    "skills": [],
-                    "agent_config": {"model": "haiku"},
-                    "step_type": "evaluate",
-                    "output_schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+                    "step_type": "route",
+                    "config": {
+                        "version": 1,
+                        "route_config": {"rules": [{"transition": {"step_id": "opaque-id"}}]}
+                    },
                     "persistence_options": {"artifact": {"logical_name": "review"}},
-                    "route_config": {"rules": [{"transition": {"step_id": "opaque-id"}}]},
                     "step_order": 1,
                     "workflow_id": id,
                     "project_id": "test-proj",
@@ -1072,10 +1074,12 @@ mod tests {
             workflow.metadata.as_ref().unwrap()["nested"]["owner"],
             "workflow-export"
         );
-        assert_eq!(workflow.workflow_steps[0].prompt, None);
-        assert_eq!(workflow.workflow_steps[1].prompt, Some(String::new()));
+        assert_eq!(workflow.workflow_steps[0].prompt(), Some(""));
+        assert_eq!(workflow.workflow_steps[1].prompt(), None);
         assert_eq!(
-            workflow.workflow_steps[1].output_schema.as_ref().unwrap()["type"],
+            workflow.workflow_steps[0]
+                .config_field("output_schema")
+                .unwrap()["type"],
             "object"
         );
         assert_eq!(
@@ -1086,7 +1090,9 @@ mod tests {
             "review"
         );
         assert_eq!(
-            workflow.workflow_steps[1].route_config.as_ref().unwrap()["rules"][0]["transition"]["step_id"],
+            workflow.workflow_steps[1]
+                .config_field("route_config")
+                .unwrap()["rules"][0]["transition"]["step_id"],
             "opaque-id"
         );
         assert_eq!(
@@ -1101,10 +1107,10 @@ mod tests {
         let requests = server.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1);
         let query = String::from_utf8_lossy(&requests[0].body);
-        assert!(query.contains("prompt"));
-        assert!(query.contains("output_schema"));
+        assert!(query.contains("... on LlmInferenceStepConfig"));
+        assert!(query.contains("... on RouteStepConfig"));
+        assert!(query.contains("... on WaitChildrenStepConfig"));
         assert!(query.contains("persistence_options"));
-        assert!(query.contains("route_config"));
         assert!(query.contains("target_step_id"));
         assert!(query.contains("query ExportWorkflow"));
         assert!(!query.contains("mutation"));

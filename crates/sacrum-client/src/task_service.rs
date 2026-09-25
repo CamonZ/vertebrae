@@ -1343,16 +1343,16 @@ mod tests {
         let client = create_test_client();
         let service = SacrumTaskService::new(client);
         let workflow = workflow_response_with_steps(vec![WorkflowStepSummary {
-            id: "step-evaluate".to_string(),
+            id: "step-route".to_string(),
             name: "Review".to_string(),
-            step_type: Some("evaluate".to_string()),
+            step_type: Some("route".to_string()),
             step_order: 0,
         }]);
         let (workflow_names, step_names, step_types) =
             SacrumTaskService::lookups_from_workflows(&[workflow]);
         let mut response = make_task_response("task-review", "Review task");
         response.workflow_id = Some("wf-1".to_string());
-        response.current_step_id = Some("step-evaluate".to_string());
+        response.current_step_id = Some("step-route".to_string());
 
         let task = service
             .response_to_task_with_lookups(
@@ -1365,7 +1365,7 @@ mod tests {
 
         assert_eq!(task.workflow_name.as_deref(), Some("Workflow"));
         assert_eq!(task.step_name.as_deref(), Some("Review"));
-        assert_eq!(task.step_type, Some(StepType::Evaluate));
+        assert_eq!(task.step_type, Some(StepType::Route));
     }
 
     #[test]

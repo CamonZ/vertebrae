@@ -5,14 +5,15 @@ pub const STEP_FIELDS: &str = r#"
         id
         name
         goal
-        prompt
-        agents
-        skills
-        agent_config
         step_type
-        output_schema
+        config {
+            ... on LlmInferenceStepConfig {
+                version prompt output_schema agents skills agent_config
+            }
+            ... on RouteStepConfig { version route_config }
+            ... on WaitChildrenStepConfig { version output_schema }
+        }
         persistence_options
-        route_config
         step_order
         workflow_id
         project_id
@@ -32,14 +33,15 @@ pub const WORKFLOW_EXPORT_STEP_FIELDS: &str = r#"
         id
         name
         goal
-        prompt
-        agents
-        skills
-        agent_config
         step_type
-        output_schema
+        config {
+            ... on LlmInferenceStepConfig {
+                version prompt output_schema agents skills agent_config
+            }
+            ... on RouteStepConfig { version route_config }
+            ... on WaitChildrenStepConfig { version output_schema }
+        }
         persistence_options
-        route_config
         step_order
         workflow_id
         project_id
@@ -89,28 +91,18 @@ pub const CREATE_STEP: &str = r#"
         $workflow_id: Uuid4!,
         $name: String!,
         $goal: String,
-        $prompt: String,
-        $agents: [String!],
-        $skills: [String!],
-        $agent_config: Json,
         $step_type: String,
-        $output_schema: Json,
+        $config: Json,
         $persistence_options: Json,
-        $route_config: Json,
         $step_order: Int
     ) {
         create_workflow_step(
             workflow_id: $workflow_id,
             name: $name,
             goal: $goal,
-            prompt: $prompt,
-            agents: $agents,
-            skills: $skills,
-            agent_config: $agent_config,
             step_type: $step_type,
-            output_schema: $output_schema,
+            config: $config,
             persistence_options: $persistence_options,
-            route_config: $route_config,
             step_order: $step_order
         ) {
             ...StepFields
@@ -136,50 +128,11 @@ pub fn update_step_query(updates: &vertebrae_core::StepUpdate) -> String {
 
     add(updates.name.is_some(), "$name: String", "name: $name");
     add(updates.goal.is_some(), "$goal: String", "goal: $goal");
-    add(
-        updates.prompt.is_some(),
-        "$prompt: String",
-        "prompt: $prompt",
-    );
-    add(
-        updates.agents.is_some(),
-        "$agents: [String!]",
-        "agents: $agents",
-    );
-    add(
-        updates.skills.is_some(),
-        "$skills: [String!]",
-        "skills: $skills",
-    );
-    add(
-        updates.agent_config.is_some(),
-        "$agent_config: Json",
-        "agent_config: $agent_config",
-    );
-    add(
-        updates.step_type.is_some(),
-        "$step_type: String",
-        "step_type: $step_type",
-    );
-    add(
-        matches!(updates.output_schema, Some(Some(_))),
-        "$output_schema: Json",
-        "output_schema: $output_schema",
-    );
+    add(updates.config.is_some(), "$config: Json", "config: $config");
     add(
         updates.persistence_options.is_some(),
         "$persistence_options: Json",
         "persistence_options: $persistence_options",
-    );
-    add(
-        updates.route_config.is_some(),
-        "$route_config: Json",
-        "route_config: $route_config",
-    );
-    add(
-        matches!(updates.output_schema, Some(None)),
-        "$clear_output_schema: Boolean",
-        "clear_output_schema: $clear_output_schema",
     );
     add(
         updates.order.is_some(),
@@ -218,43 +171,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_step_operations_read_and_write_persistence_options() {
-        assert!(STEP_FIELDS.contains("persistence_options"));
-        assert!(STEP_FIELDS.contains("route_config"));
-        assert!(CREATE_STEP.contains("$persistence_options: Json"));
+    fn step_fragments_select_the_config_union() {
+        for fragment in [STEP_FIELDS, WORKFLOW_EXPORT_STEP_FIELDS] {
+            assert!(fragment.contains("persistence_options"));
+            assert!(fragment.contains("... on LlmInferenceStepConfig"));
+            assert!(fragment.contains("... on RouteStepConfig { version route_config }"));
+            assert!(fragment.contains("... on WaitChildrenStepConfig { version output_schema }"));
+        }
+        assert!(CREATE_STEP.contains("$config: Json"));
+        assert!(CREATE_STEP.contains("config: $config"));
         assert!(CREATE_STEP.contains("persistence_options: $persistence_options"));
-        assert!(CREATE_STEP.contains("$route_config: Json"));
-        assert!(CREATE_STEP.contains("route_config: $route_config"));
-        assert!(CREATE_STEP.contains("$prompt: String"));
-        assert!(CREATE_STEP.contains("prompt: $prompt"));
-
-        let update = vertebrae_core::StepUpdate::new()
-            .with_prompt("prompt")
-            .with_persistence_options(None)
-            .with_route_config(None);
-        let query = update_step_query(&update);
-        assert!(query.contains("$persistence_options: Json"));
-        assert!(query.contains("persistence_options: $persistence_options"));
-        assert!(query.contains("$route_config: Json"));
-        assert!(query.contains("route_config: $route_config"));
-        assert!(query.contains("$prompt: String"));
-        assert!(query.contains("prompt: $prompt"));
+        assert!(!CREATE_STEP.contains("$prompt"));
+        assert!(!CREATE_STEP.contains("$route_config"));
     }
 
     #[test]
     fn update_step_query_omits_unmodified_nullable_fields() {
+        let query = update_step_query(&vertebrae_core::StepUpdate::new().with_name("x"));
+        assert!(query.contains("name: $name"));
+        assert!(!query.contains("config: $config"));
+        assert!(!query.contains("persistence_options"));
+        assert!(!query.contains("step_type"));
+
         let query = update_step_query(
             &vertebrae_core::StepUpdate::new()
-                .with_name("x")
-                .with_route_config(Some(serde_json::json!({"version": 1}))),
+                .with_route_config(Some(serde_json::json!({"version": 1})))
+                .with_persistence_options(None),
         );
-
-        assert!(query.contains("$name: String"));
-        assert!(query.contains("name: $name"));
-        assert!(query.contains("$route_config: Json"));
-        assert!(query.contains("route_config: $route_config"));
-        assert!(!query.contains("$prompt: String"));
-        assert!(!query.contains("prompt: $prompt"));
-        assert!(!query.contains("$clear_output_schema: Boolean"));
+        assert!(query.contains("$config: Json"));
+        assert!(query.contains("config: $config"));
+        assert!(query.contains("persistence_options: $persistence_options"));
+        assert!(!query.contains("clear_output_schema"));
     }
 }

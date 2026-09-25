@@ -192,7 +192,7 @@ function renderWithTaskOverrides(
     workflow_id: "wf-1",
     current_step_id: "step-1",
     step_name: "in_progress",
-    step_type: "execute",
+    step_type: "llm_inference",
     ...overrides,
   });
   seedTaskLocation(canonicalTask);
@@ -210,7 +210,7 @@ function seedTaskLocation(task: Task) {
       id: stepId,
       workflow_id: workflowId,
       name: task.step_name ?? "in_progress",
-      step_type: task.step_type ?? "execute",
+      step_type: task.step_type ?? "llm_inference",
     })
   );
   queryClient.setQueryData(queryKeys.workflows.list(generation), [
@@ -261,7 +261,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         workflow_id: "wf-1",
         current_step_id: "step-1",
         step_name: "in_progress",
-        step_type: "execute",
+        step_type: "llm_inference",
         workflow_name: "Implementation",
       })
     );
@@ -333,7 +333,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         screen.queryByTestId("task-detail-parent-link")
       ).not.toBeInTheDocument();
     });
-
   });
 
   describe("Close button", () => {
@@ -360,7 +359,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
       expect(mockOnClose).toHaveBeenCalledTimes(1);
     });
-
   });
 
   describe("Header buttons", () => {
@@ -762,7 +760,9 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
       renderWithTaskOverrides({ run_controls: runnableControls() });
 
-      const concurrencyInput = screen.getByTestId("task-detail-max-concurrency");
+      const concurrencyInput = screen.getByTestId(
+        "task-detail-max-concurrency"
+      );
       expect(concurrencyInput.closest('[data-testid="task-detail-hero"]')).toBe(
         screen.getByTestId("task-detail-hero")
       );
@@ -800,9 +800,9 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       fireEvent.click(screen.getByTestId("task-detail-run-button"));
 
       expect(eventsModule.commands.runWorkflow).not.toHaveBeenCalled();
-      expect(
-        screen.getByRole("alert").textContent
-      ).toContain("positive integer");
+      expect(screen.getByRole("alert").textContent).toContain(
+        "positive integer"
+      );
     });
 
     it("shows an enabled Stop while the GUI start command is pending", async () => {
@@ -1324,7 +1324,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     it("does not render the review banner solely from a pending_review step label", () => {
       renderWithTaskOverrides({
         step_name: "pending_review",
-        step_type: "execute",
+        step_type: "llm_inference",
         run_controls: null,
       });
 

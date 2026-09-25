@@ -426,20 +426,31 @@ pub struct WorkflowExportStep {
     pub id: String,
     pub name: String,
     pub goal: Option<String>,
-    pub prompt: Option<String>,
-    pub agents: Vec<String>,
-    pub skills: Vec<String>,
-    pub agent_config: Option<serde_json::Value>,
     pub step_type: Option<String>,
-    pub output_schema: Option<serde_json::Value>,
+    /// `step_type`-specific config object; null for config-less types.
+    pub config: Option<serde_json::Value>,
     pub persistence_options: Option<serde_json::Value>,
-    pub route_config: Option<serde_json::Value>,
     pub step_order: i32,
     pub workflow_id: String,
     pub project_id: String,
     pub transitions: Vec<WorkflowExportStepTransition>,
     pub inserted_at: Option<String>,
     pub updated_at: Option<String>,
+}
+
+impl WorkflowExportStep {
+    /// A non-null field of the step's config object.
+    pub fn config_field(&self, key: &str) -> Option<&serde_json::Value> {
+        self.config
+            .as_ref()
+            .and_then(|config| config.get(key))
+            .filter(|value| !value.is_null())
+    }
+
+    pub fn prompt(&self) -> Option<&str> {
+        self.config_field("prompt")
+            .and_then(serde_json::Value::as_str)
+    }
 }
 
 /// An intra-workflow edge in an exported workflow graph.
@@ -508,21 +519,12 @@ pub struct WorkflowStepResponse {
     #[serde(default)]
     pub goal: Option<String>,
     #[serde(default)]
-    pub prompt: Option<String>,
-    #[serde(default)]
-    pub agents: Vec<String>,
-    #[serde(default)]
-    pub skills: Vec<String>,
-    #[serde(default)]
-    pub agent_config: Option<serde_json::Value>,
-    #[serde(default)]
     pub step_type: Option<String>,
+    /// `step_type`-specific config object; null for config-less types.
     #[serde(default)]
-    pub output_schema: Option<serde_json::Value>,
+    pub config: Option<serde_json::Value>,
     #[serde(default)]
     pub persistence_options: Option<serde_json::Value>,
-    #[serde(default)]
-    pub route_config: Option<serde_json::Value>,
     #[serde(default)]
     pub step_order: i32,
     pub workflow_id: String,
@@ -1264,13 +1266,10 @@ mod tests {
             "id": "step-1",
             "name": "Review",
             "goal": "Review the code",
-            "agents": ["claude"],
-            "skills": ["code-review"],
-            "agent_config": {"model": "opus"},
-            "step_type": "finish",
-            "route_config": {
+            "step_type": "route",
+            "config": {
                 "version": 1,
-                "future": {"array": ["value", 2, false, null]}
+                "route_config": {"version": 1, "future": {"array": ["value", 2, false, null]}}
             },
             "step_order": 0,
             "workflow_id": "wf-1",
@@ -1283,14 +1282,12 @@ mod tests {
         assert_eq!(step.id, "step-1");
         assert_eq!(step.name, "Review");
         assert_eq!(step.goal.as_deref(), Some("Review the code"));
-        assert_eq!(step.agents, vec!["claude"]);
-        assert_eq!(step.skills, vec!["code-review"]);
-        assert_eq!(step.step_type.as_deref(), Some("finish"));
+        assert_eq!(step.step_type.as_deref(), Some("route"));
         assert_eq!(
-            step.route_config,
+            step.config,
             Some(serde_json::json!({
                 "version": 1,
-                "future": {"array": ["value", 2, false, null]}
+                "route_config": {"version": 1, "future": {"array": ["value", 2, false, null]}}
             }))
         );
         assert_eq!(step.step_order, 0);

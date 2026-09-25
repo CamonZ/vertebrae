@@ -145,12 +145,6 @@ Feature: Step fields: prompt and agent-config
     When I show the step "Pause"
     Then the output should contain "Step Type:     stop"
 
-  Scenario: Update a step to a stop boundary with one continuation
-    When I add a step "PauseUpdate" to the workflow
-    And I update the step "PauseUpdate" to stop and continue to "done"
-    Then the command should succeed
-    And the step "PauseUpdate" in the workflow should have step_type "stop"
-
   Scenario: Stop step creation requires a continuation
     When I add a step "InvalidPause" to the workflow with flag "--step-type" and value "stop"
     Then the command should fail with "exactly one outgoing transition"
@@ -168,38 +162,44 @@ Feature: Step fields: prompt and agent-config
     When I add a step "Gate" to the workflow with flag "--step-type" and value "human_input"
     And I show the step "Gate"
     Then the output should contain "Step Type:     human_input"
-    And the output should not contain "Step Type:     execute"
+    And the output should not contain "Step Type:     llm_inference"
 
   Scenario: Step show JSON preserves human_input step type
     When I add a step "JsonGate" to the workflow with flag "--step-type" and value "human_input"
     And I show the step "JsonGate" as JSON
     Then the step show JSON should have step_type "human_input"
 
-  Scenario: Update a step's step_type to wait_children
+  Scenario: A step's type cannot be changed
     When I add a step "Waiter" to the workflow
     And I update the step "Waiter" in the workflow with flag "--step-type" and value "wait_children"
-    Then the command should succeed
-    And the step "Waiter" in the workflow should have step_type "wait_children"
+    Then the command should fail with "--step-type"
+    And the step "Waiter" in the workflow should have step_type "llm_inference"
 
-  Scenario: Create a step with --step-type evaluate and --output-schema
-    When I add a step "Checker" to the workflow with --step-type "evaluate" and --output-schema
+  Scenario: Create a wait_children step with --output-schema
+    When I add a step "Checker" to the workflow with --step-type "wait_children" and --output-schema
     Then the command should succeed
-    And the step "Checker" in the workflow should have step_type "evaluate"
+    And the step "Checker" in the workflow should have step_type "wait_children"
     And the step "Checker" in the workflow should have an output_schema
 
-  Scenario: Step type defaults to execute
+  Scenario: Retired step types are rejected
+    When I add a step "Legacy" to the workflow with flag "--step-type" and value "evaluate"
+    Then the command should fail with "evaluate"
+
+  Scenario: Step type defaults to llm_inference
     When I add a step "Default" to the workflow
     Then the command should succeed
-    And the step "Default" in the workflow should have step_type "execute"
+    And the step "Default" in the workflow should have step_type "llm_inference"
 
-  Scenario: Update a step's step_type
-    When I add a step "Worker" to the workflow
-    And I update the step "Worker" in the workflow with flag "--step-type" and value "evaluate"
+  Scenario: Updating one config field leaves the others unchanged
+    When I add a step "Patched" to the workflow with provider "openai", model "gpt-5.5", and reasoning effort "medium"
+    And I update the step "Patched" in the workflow with flag "--prompt" and value "Patched prompt"
     Then the command should succeed
-    And the step "Worker" in the workflow should have step_type "evaluate"
+    And the step "Patched" in the workflow should have prompt "Patched prompt"
+    And the step "Patched" in the workflow should have agent model "gpt-5.5"
+    And the step "Patched" in the workflow should have agent_config field "reasoning_effort" equal to "medium"
 
   Scenario: Update a step with --output-schema then --clear-output-schema
-    When I add a step "Evaluator" to the workflow with --step-type "evaluate" and --output-schema
+    When I add a step "Evaluator" to the workflow with --step-type "llm_inference" and --output-schema
     And I update the step "Evaluator" in the workflow with flag "--clear-output-schema" and no value
     Then the command should succeed
     And the step "Evaluator" in the workflow should not have an output_schema
@@ -228,7 +228,7 @@ Feature: Step fields: prompt and agent-config
     Then the command should succeed
     And the step "DraftRouter" in the workflow should have step_type "route"
     When I show the step "DraftRouter"
-    Then the output should contain "Route Config:   (none)"
+    Then the output should contain "Route Config:  (none)"
     When I update the step "DraftRouter" in the workflow with flag "--route-config" and value "{bad json}"
     Then the command should fail with "--route-config JSON"
 
@@ -238,26 +238,13 @@ Feature: Step fields: prompt and agent-config
     Then the command should fail with "$.rules[0].when.ref"
     And the error should contain "route_config"
 
-  Scenario: Retained route prompts are readable and clear-only
-    When I create a route step "RetainedPrompt" with a retained prompt
-    And I show the step "RetainedPrompt"
-    Then the output should contain "Prompt:        retained prompt"
-    When I show the step "RetainedPrompt" as JSON
-    Then the step show JSON should have prompt "retained prompt"
-    When I update the step "RetainedPrompt" in the workflow with flag "--clear-prompt" and no value
+  Scenario: Route steps reject fields they do not declare
+    When I add a step "PromptRouter" to the workflow with flag "--step-type" and value "route"
     Then the command should succeed
-    When I show the step "RetainedPrompt" as JSON
-    Then the step show JSON should have null prompt
-    When I update the step "RetainedPrompt" in the workflow with flag "--prompt" and value "replacement prompt"
-    Then the command should fail with "route steps may only clear an existing prompt"
-
-  Scenario: Converting a configured route requires an atomic clear
-    When I add and configure a deterministic route step "ConvertRouter" to the workflow
-    And I update the step "ConvertRouter" in the workflow with flag "--step-type" and value "execute"
-    Then the command should fail with "route_config"
-    When I convert the configured route step "ConvertRouter" to execute and clear its route config
-    Then the command should succeed
-    And the step "ConvertRouter" in the workflow should have step_type "execute"
+    When I update the step "PromptRouter" in the workflow with flag "--prompt" and value "route this"
+    Then the command should fail with "config: $.prompt: is not supported for route steps"
+    When I update the step "PromptRouter" in the workflow with flag "--output-schema" and value "{}"
+    Then the command should fail with "config: $.output_schema: is not supported for route steps"
 
   Scenario: Structured-output persistence options round-trip and display
     When I add a step "Persisted" to the workflow with persistence logical name "step_result"

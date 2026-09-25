@@ -34,12 +34,9 @@ export const V2_TOKEN_GROUPS = [
   {
     label: "Step kinds",
     tokens: [
-      "--step-execute",
-      "--step-execute-fg",
-      "--step-execute-wash",
-      "--step-eval",
-      "--step-eval-fg",
-      "--step-eval-wash",
+      "--step-llm",
+      "--step-llm-fg",
+      "--step-llm-wash",
       "--step-route",
       "--step-route-fg",
       "--step-route-wash",

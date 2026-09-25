@@ -54,7 +54,7 @@ function exec(over: Partial<StepExecution> & { id: string }): StepExecution {
     task_run_id: RUN_ID,
     workflow_id: "wf-1",
     step_name: "step",
-    step_type: "execute",
+    step_type: "llm_inference",
     started_at: "2024-01-01T10:00:00Z",
     completed_at: null,
     status: "completed",
@@ -162,16 +162,16 @@ function harnessConversationLogs(execId: string, model: string): SessionLog[] {
 // ===========================================================================
 
 describe("stepKindFromStepType", () => {
-  it("maps the seven known step types and falls back to execute", () => {
-    expect(stepKindFromStepType("execute")).toBe("execute");
-    expect(stepKindFromStepType("evaluate")).toBe("eval");
+  it("maps the six known step types and falls back to inference", () => {
+    expect(stepKindFromStepType("llm")).toBe("llm");
+    expect(stepKindFromStepType("llm_inference")).toBe("llm");
     expect(stepKindFromStepType("route")).toBe("route");
     expect(stepKindFromStepType("human_input")).toBe("human");
     expect(stepKindFromStepType("wait_children")).toBe("wait");
     expect(stepKindFromStepType("stop")).toBe("stop");
     expect(stepKindFromStepType("finish")).toBe("finish");
-    expect(stepKindFromStepType(null)).toBe("execute");
-    expect(stepKindFromStepType({ unsupported: "x" })).toBe("execute");
+    expect(stepKindFromStepType(null)).toBe("llm");
+    expect(stepKindFromStepType({ unsupported: "x" })).toBe("llm");
   });
 });
 
@@ -248,14 +248,14 @@ describe("runToThreads — ordering & step head", () => {
     const input: RunInput = {
       taskRun: taskRun("2024-01-01T10:00:00Z"),
       stepExecutions: [
-        exec({ id: "e1", step_type: "evaluate", duration_ms: 9000 }),
+        exec({ id: "e1", step_type: "llm_inference", duration_ms: 9000 }),
       ],
       logsByExecutionId: {},
     };
     const [t] = runToThreads(input);
-    expect(t.step?.kind).toBe("eval");
+    expect(t.step?.kind).toBe("llm");
     expect(t.step?.runtime).toBe("9.0s");
-    expect(t.kind).toBe("eval");
+    expect(t.kind).toBe("llm");
   });
 });
 

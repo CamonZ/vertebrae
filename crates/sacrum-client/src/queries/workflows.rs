@@ -46,7 +46,7 @@ pub const GET_WORKFLOW: &str = r#"
         workflow(id: $id) {
             ...WorkflowFields
             workflow_steps {
-                id name goal agents skills agent_config step_type
+                id name goal step_type
                 step_order workflow_id
                 transitions { id to_step_id label }
             }
