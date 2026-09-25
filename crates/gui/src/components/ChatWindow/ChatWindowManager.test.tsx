@@ -30,6 +30,7 @@ import {
 } from "../../utils/localChatPersistence";
 import { HISTORY_WIDTH_STORAGE_KEY } from "../../hooks/useChatHistoryPanelLayout";
 import { commands } from "../../bindings";
+import { useNotificationStore } from "../../stores/notificationStore";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -173,6 +174,7 @@ describe("ChatWindowManager", () => {
   beforeEach(() => {
     localStorage.clear();
     clearPersistedLocalChatSessions();
+    useNotificationStore.getState().clearNotifications();
     vi.clearAllMocks();
     vi.mocked(commands.getCurrentProject).mockResolvedValue({
       status: "ok",
@@ -2978,8 +2980,15 @@ describe("ChatWindowManager", () => {
     expect(miniPanel.queryByText("sonnet-4.5")).not.toBeInTheDocument();
   });
 
-  it("closes a live Claude session before deleting it from history", async () => {
+  it("deletes a live chat immediately while its Claude session closes in the background", async () => {
     const user = userEvent.setup();
+    let resolveClose!: (result: { status: "ok"; data: null }) => void;
+    vi.mocked(commands.closeLocalChatSession).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveClose = resolve;
+        }) as never
+    );
     const id = useChatStore
       .getState()
       .openSession("Live Task", "/test/project");
@@ -2989,6 +2998,9 @@ describe("ChatWindowManager", () => {
       timestamp: "2026-01-01T00:00:00Z",
     });
     useChatStore.getState().setBackendSessionId(id, "live-backend-session");
+    const otherId = useChatStore
+      .getState()
+      .startFreshSession("Other Task", "/test/project");
 
     render(<ChatWindowManager />);
 
@@ -3002,9 +3014,18 @@ describe("ChatWindowManager", () => {
     );
     expect(loadPersistedLocalChatSession(id)).toBeNull();
     expect(useChatStore.getState().sessions[id]).toBeUndefined();
+    expect(useChatStore.getState().sessions[otherId]).toBeDefined();
+    expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Delete local chat Live Task")
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveClose({ status: "ok", data: null });
+    });
   });
 
-  it("keeps the local session and shows feedback when close fails during history delete", async () => {
+  it("keeps the chat deleted and notifies when background close fails", async () => {
     vi.mocked(commands.closeLocalChatSession).mockResolvedValueOnce({
       status: "error",
       error: { SendFailed: "pipe closed" },
@@ -3028,12 +3049,59 @@ describe("ChatWindowManager", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        "Could not delete local chat. Try again."
+      expect(useNotificationStore.getState().notifications).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message:
+              "The chat was deleted, but its provider session may still be running.",
+            type: "error",
+            entity: "application",
+            entityId: `local-chat-close-${id}`,
+          }),
+        ])
       );
     });
-    expect(loadPersistedLocalChatSession(id)).not.toBeNull();
-    expect(useChatStore.getState().sessions[id]).toBeDefined();
+    expect(loadPersistedLocalChatSession(id)).toBeNull();
+    expect(useChatStore.getState().sessions[id]).toBeUndefined();
+  });
+
+  it("notifies when the background close command rejects", async () => {
+    vi.mocked(commands.closeLocalChatSession).mockRejectedValueOnce(
+      new Error("invoke failed")
+    );
+    const user = userEvent.setup();
+    const id = useChatStore
+      .getState()
+      .openSession("Live Task", "/test/project");
+    useChatStore.getState().addMessage(id, {
+      kind: "user",
+      text: "live question",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    useChatStore.getState().setBackendSessionId(id, "live-backend-session");
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByLabelText("Widen chat panel"));
+    await user.click(
+      await screen.findByLabelText("Delete local chat Live Task")
+    );
+
+    await waitFor(() => {
+      expect(useNotificationStore.getState().notifications).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message:
+              "The chat was deleted, but its provider session may still be running.",
+            type: "error",
+            entity: "application",
+            entityId: `local-chat-close-${id}`,
+          }),
+        ])
+      );
+    });
+    expect(loadPersistedLocalChatSession(id)).toBeNull();
+    expect(useChatStore.getState().sessions[id]).toBeUndefined();
   });
 
   it("closes the panel on Escape when it is the focused glass panel", async () => {

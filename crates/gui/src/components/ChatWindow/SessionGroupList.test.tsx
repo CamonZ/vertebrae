@@ -54,7 +54,6 @@ describe("SessionGroupList", () => {
       <SessionGroupList
         sessionGroups={groups}
         activeSessionId="s1"
-        deletingSessionId={null}
         renderGroup={(group, rows) => (
           <section key={group.id} data-testid={`group-${group.id}`}>
             <h3>{group.label}</h3>
@@ -88,7 +87,6 @@ describe("SessionGroupList", () => {
       <SessionGroupList
         sessionGroups={groups}
         activeSessionId="s2"
-        deletingSessionId={null}
         renderGroup={(_group, rows) => <div key="g1">{rows}</div>}
         renderRow={(session, state) => (
           <div
@@ -106,35 +104,11 @@ describe("SessionGroupList", () => {
     expect(screen.getByTestId("row-s2")).toHaveAttribute("data-active");
   });
 
-  it("passes isDeleting=true for the session matching deletingSessionId", () => {
-    const groups = [makeGroup({ sessions: [makeSummary({ id: "s1" })] })];
-    render(
-      <SessionGroupList
-        sessionGroups={groups}
-        activeSessionId=""
-        deletingSessionId="s1"
-        renderGroup={(_group, rows) => <div key="g1">{rows}</div>}
-        renderRow={(session, state) => (
-          <div
-            key={session.id}
-            data-testid={`row-${session.id}`}
-            data-deleting={state.isDeleting || undefined}
-          >
-            {session.label}
-          </div>
-        )}
-      />
-    );
-
-    expect(screen.getByTestId("row-s1")).toHaveAttribute("data-deleting");
-  });
-
   it("renders an empty list when there are no groups", () => {
     const { container } = render(
       <SessionGroupList
         sessionGroups={[]}
         activeSessionId=""
-        deletingSessionId={null}
         renderGroup={(group) => <div key={group.id} data-testid="group" />}
         renderRow={(session) => <div key={session.id} />}
       />
@@ -148,7 +122,6 @@ describe("SessionGroupList", () => {
       <SessionGroupList
         sessionGroups={groups}
         activeSessionId=""
-        deletingSessionId={null}
         renderGroup={(_g, rows) => <div key="g1">{rows}</div>}
         renderRow={(s) => (
           <div key={s.id} data-testid="row">
@@ -161,7 +134,6 @@ describe("SessionGroupList", () => {
       <SessionGroupList
         sessionGroups={groups}
         activeSessionId=""
-        deletingSessionId={null}
         renderGroup={(_g, rows) => <div key="g1">{rows}</div>}
         renderRow={(s) => (
           <div key={s.id} data-testid="row">

@@ -26,7 +26,6 @@ interface LocalChatMiniPanelProps {
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
   hasLocalChatSessions: boolean;
-  deletingSessionId: string | null;
   deleteError: string | null;
   projectWarning: string | null;
   sessionGroups: LocalChatSessionGroup[];
@@ -56,7 +55,6 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   searchQuery,
   onSearchQueryChange,
   hasLocalChatSessions,
-  deletingSessionId,
   deleteError,
   projectWarning,
   sessionGroups,
@@ -303,7 +301,6 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
             <SessionGroupList
               sessionGroups={expandedSessionGroups}
               activeSessionId={activeSessionId}
-              deletingSessionId={deletingSessionId}
               renderGroup={(group, rows) => {
                 const allSessionCount =
                   group.allSessions?.length ?? group.sessions.length;
@@ -370,7 +367,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                   </section>
                 );
               }}
-              renderRow={(session, { isActive, isDeleting }) => {
+              renderRow={(session, { isActive }) => {
                 const age = miniThreadAge(session.updatedAt);
                 const title = miniThreadTitle(session.title, session.label);
                 const spawnOutline =
@@ -410,7 +407,6 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                       </button>
                       <SessionDeleteButton
                         label={title}
-                        disabled={isDeleting}
                         onClick={() => void onDelete(session.id)}
                         dataMiniDelete
                       />
