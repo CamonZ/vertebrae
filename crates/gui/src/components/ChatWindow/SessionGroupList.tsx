@@ -4,13 +4,11 @@ import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 
 export interface SessionRowState {
   isActive: boolean;
-  isDeleting: boolean;
 }
 
 interface SessionGroupListProps {
   sessionGroups: LocalChatSessionGroup[];
   activeSessionId: string;
-  deletingSessionId: string | null;
   /** Render a single session row. The list keys rows by session id. */
   renderRow: (
     session: LocalChatSessionSummary,
@@ -34,7 +32,6 @@ interface SessionGroupListProps {
 export function SessionGroupList({
   sessionGroups,
   activeSessionId,
-  deletingSessionId,
   renderRow,
   renderGroup,
 }: SessionGroupListProps) {
@@ -45,7 +42,6 @@ export function SessionGroupList({
           <Fragment key={session.id}>
             {renderRow(session, {
               isActive: session.id === activeSessionId,
-              isDeleting: session.id === deletingSessionId,
             })}
           </Fragment>
         ));

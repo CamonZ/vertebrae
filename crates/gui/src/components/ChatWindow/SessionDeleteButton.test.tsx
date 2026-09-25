@@ -17,18 +17,6 @@ describe("SessionDeleteButton", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it("is disabled when disabled prop is true", () => {
-    render(
-      <SessionDeleteButton label="Test" onClick={vi.fn()} disabled />
-    );
-    expect(screen.getByRole("button")).toBeDisabled();
-  });
-
-  it("is not disabled by default", () => {
-    render(<SessionDeleteButton label="Test" onClick={vi.fn()} />);
-    expect(screen.getByRole("button")).not.toBeDisabled();
-  });
-
   it("renders the data-mini-delete attribute when dataMiniDelete is true", () => {
     render(
       <SessionDeleteButton label="Test" onClick={vi.fn()} dataMiniDelete />

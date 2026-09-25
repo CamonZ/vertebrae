@@ -95,7 +95,6 @@ function ControlledPanel({
         onQueryChange?.(nextQuery);
       }}
       hasLocalChatSessions={hasLocalChatSessions ?? sessionGroups.length > 0}
-      deletingSessionId={null}
       deleteError={null}
       projectWarning={null}
       sessionGroups={sessionGroups}
@@ -128,7 +127,6 @@ function DeletingPanel() {
       searchQuery={query}
       onSearchQueryChange={setQuery}
       hasLocalChatSessions={sessionGroups.length > 0}
-      deletingSessionId={null}
       deleteError={null}
       projectWarning={null}
       sessionGroups={sessionGroups}
@@ -168,7 +166,6 @@ function ExpandableDeletingPanel() {
       searchQuery=""
       onSearchQueryChange={vi.fn()}
       hasLocalChatSessions
-      deletingSessionId={null}
       deleteError={null}
       projectWarning={null}
       sessionGroups={[makeGroup("current", "Current project", sessions)]}

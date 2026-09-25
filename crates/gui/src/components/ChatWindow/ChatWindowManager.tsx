@@ -33,6 +33,7 @@ import { ChatShortcutHints } from "./ChatShortcutHints";
 import { buildSpawnOutline, scrollToSpawn } from "./sessionListUtils";
 import type { SpawnOutlineItem } from "./sessionListUtils";
 import { useUIStore } from "../../stores/uiStore";
+import { useNotificationStore } from "../../stores/notificationStore";
 
 /** Exit-animation duration (ms). Must match `.hc-panel.is-closing` (--t-base). */
 const EXIT_MS = 180;
@@ -85,9 +86,6 @@ export function ChatWindowManager({
   );
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
-    null
-  );
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const sessionList = useMemo(
@@ -415,12 +413,28 @@ export function ChatWindowManager({
   );
 
   const handleDeleteSession = useCallback(
-    async (sessionId: string) => {
+    (sessionId: string) => {
       setDeleteError(null);
       const target = useChatStore.getState().sessions[sessionId];
+      deleteLocalSession(sessionId);
+      bumpHistoryRevision();
+
       if (target?.backendSessionId) {
-        setDeletingSessionId(sessionId);
-        const closed = await doCloseSession(
+        const reportCloseFailure = () => {
+          try {
+            useNotificationStore.getState().addNotification({
+              message:
+                "The chat was deleted, but its provider session may still be running.",
+              type: "error",
+              entity: "application",
+              entityId: `local-chat-close-${sessionId}`,
+            });
+          } catch (error) {
+            console.error("Could not report local chat close failure", error);
+          }
+        };
+
+        void doCloseSession(
           target.backendSessionId,
           sessionId,
           {
@@ -429,15 +443,13 @@ export function ChatWindowManager({
             setBackendSessionId,
             clearQueuedMessages,
           }
+        ).then(
+          (closed) => {
+            if (!closed) reportCloseFailure();
+          },
+          reportCloseFailure
         );
-        setDeletingSessionId(null);
-        if (!closed) {
-          setDeleteError("Could not delete local chat. Try again.");
-          return;
-        }
       }
-      deleteLocalSession(sessionId);
-      bumpHistoryRevision();
     },
     [
       bumpHistoryRevision,
@@ -566,7 +578,6 @@ export function ChatWindowManager({
                 void selectAgentThreadForActivePane(sessionId, agent);
               }}
               onStartProjectChat={startProjectChat}
-              deletingSessionId={deletingSessionId}
               deleteError={deleteError}
               onDelete={(sessionId) => void handleDeleteSession(sessionId)}
             />

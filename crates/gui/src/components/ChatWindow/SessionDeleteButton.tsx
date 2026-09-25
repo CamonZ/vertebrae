@@ -1,6 +1,4 @@
 interface SessionDeleteButtonProps {
-  /** Disable while a delete request is in flight for this session. */
-  disabled?: boolean;
   /** Fires with the session label for the title/aria-label. */
   label: string;
   onClick: () => void;
@@ -14,7 +12,6 @@ interface SessionDeleteButtonProps {
  * the icon, classes, and a11y labels in one place.
  */
 export function SessionDeleteButton({
-  disabled,
   label,
   onClick,
   dataMiniDelete,
@@ -24,7 +21,6 @@ export function SessionDeleteButton({
       type="button"
       className="hc-ctrl danger shrink-0"
       data-mini-delete={dataMiniDelete || undefined}
-      disabled={disabled}
       onClick={onClick}
       title={`Delete local chat ${label}`}
       aria-label={`Delete local chat ${label}`}
