@@ -1,13 +1,19 @@
 use chrono::Utc;
 use serde_json::{Map, Value};
 use vertebrae_harness_core::{
-    AgentMetadata, EventCorrelation, HarnessEventDraftV1, HarnessEventPayloadV1, ProviderThreadRef,
-    StreamId, ThreadId, ToolCallId, UpdateSemantics,
+    AgentMetadata, EventCorrelation, HarnessEventDraftV1, HarnessEventPayloadV1, ItemId,
+    ProviderThreadRef, StreamId, ThreadId, ToolCallId, UpdateSemantics,
 };
 
 use super::ClaudeStreamDecoder;
 
 impl ClaudeStreamDecoder {
+    pub(super) fn content_block_item_id(&self, block_index: u64) -> Option<ItemId> {
+        self.current_item_id
+            .as_ref()
+            .map(|message_id| ItemId::new(format!("{}:block:{block_index}", message_id.as_str())))
+    }
+
     pub(super) fn draft(
         &self,
         stream_id: StreamId,

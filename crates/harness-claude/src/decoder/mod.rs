@@ -116,6 +116,7 @@ pub struct ClaudeStreamDecoder {
     event_timestamp: Option<DateTime<Utc>>,
     fast_mode_state: Option<String>,
     current_item_id: Option<ItemId>,
+    streamed_text_blocks: HashMap<u64, String>,
 }
 
 impl ClaudeStreamDecoder {
@@ -149,6 +150,7 @@ impl ClaudeStreamDecoder {
             event_timestamp: None,
             fast_mode_state: None,
             current_item_id: None,
+            streamed_text_blocks: HashMap::new(),
         }
     }
 
