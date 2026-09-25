@@ -431,8 +431,7 @@ fn convert_step(
         .cloned()
         .ok_or_else(|| missing_ref("step", &step.id))?;
     let route_config = step
-        .route_config
-        .as_ref()
+        .config_field("route_config")
         .map(|route_config| {
             let route_refs = refs.route_target_refs(workflow_ref);
             symbolize_route_config(route_config, &route_refs).map_err(|error| {
@@ -452,16 +451,33 @@ fn convert_step(
         step_ref,
         name: step.name.clone(),
         goal: step.goal.clone(),
-        prompt: step.prompt.clone(),
-        agents: step.agents.clone(),
-        skills: step.skills.clone(),
-        agent_config: step.agent_config.clone(),
-        step_type: StepType::from_wire_str(step.step_type.as_deref().unwrap_or("execute")),
+        prompt: step.prompt().map(str::to_string),
+        agents: string_list(step.config_field("agents")),
+        skills: string_list(step.config_field("skills")),
+        agent_config: step.config_field("agent_config").cloned(),
+        step_type: step
+            .step_type
+            .as_deref()
+            .map(StepType::from_wire_str)
+            .unwrap_or_default(),
         step_order: step.step_order,
-        output_schema: step.output_schema.clone(),
+        output_schema: step.config_field("output_schema").cloned(),
         persistence_options: step.persistence_options.clone(),
         route_config,
     })
+}
+
+/// The V1 bundle keeps step config as flat fields.
+fn string_list(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn ordered_workflows(workflows: &[WorkflowExport]) -> Vec<&WorkflowExport> {
@@ -493,7 +509,7 @@ fn ordered_steps(steps: &[WorkflowExportStep]) -> Vec<&WorkflowExportStep> {
             portable_ref(&left.name, "step"),
             &left.name,
             &left.goal,
-            &left.prompt,
+            left.prompt(),
             &left.id,
         )
             .cmp(&(
@@ -501,7 +517,7 @@ fn ordered_steps(steps: &[WorkflowExportStep]) -> Vec<&WorkflowExportStep> {
                 portable_ref(&right.name, "step"),
                 &right.name,
                 &right.goal,
-                &right.prompt,
+                right.prompt(),
                 &right.id,
             ))
     });
@@ -562,14 +578,16 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             goal: Some(format!("goal-{name}")),
-            prompt: Some(String::new()),
-            agents: vec!["first-agent".to_string(), "second-agent".to_string()],
-            skills: vec!["first-skill".to_string(), "second-skill".to_string()],
-            agent_config: Some(json!({"model": "sonnet"})),
-            step_type: Some("execute".to_string()),
-            output_schema: Some(json!({"type": "object"})),
+            step_type: Some("llm_inference".to_string()),
+            config: Some(json!({
+                "version": 1,
+                "prompt": "",
+                "agents": ["first-agent", "second-agent"],
+                "skills": ["first-skill", "second-skill"],
+                "agent_config": {"model": "sonnet"},
+                "output_schema": {"type": "object"}
+            })),
             persistence_options: Some(json!({"artifact": {"logical_name": name}})),
-            route_config: None,
             step_order: order,
             workflow_id: "workflow-id".to_string(),
             project_id: "project-id".to_string(),

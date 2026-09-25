@@ -15,7 +15,7 @@ describe("resolveTaskLocation", () => {
     id: "step-1",
     workflow_id: "workflow-from-step",
     name: "Renamed step",
-    step_type: "evaluate",
+    step_type: "llm_inference",
   });
   const workflow = createMockWorkflow({
     id: "workflow-from-step",
@@ -34,7 +34,7 @@ describe("resolveTaskLocation", () => {
       workflowId: "workflow-from-step",
       workflowName: "Renamed workflow",
       stepName: "Renamed step",
-      stepType: "evaluate",
+      stepType: "llm_inference",
     });
   });
 
@@ -45,7 +45,7 @@ describe("resolveTaskLocation", () => {
         current_step_id: "step-old",
         workflow_name: "Old workflow",
         step_name: "Old step",
-        step_type: "execute",
+        step_type: "llm_inference",
       }),
       undefined,
       undefined

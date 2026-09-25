@@ -71,7 +71,7 @@ vtb step add "Needs Work" -w <workflow-id> --transition-to <step-id>
 
 # With step type and structured output schema
 vtb step add "Evaluate" -w <workflow-id> \
-  --step-type evaluate \
+  --step-type llm_inference \
   --output-schema '{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}'
 
 # Create a deterministic route draft, then configure it after graph targets exist
@@ -80,7 +80,7 @@ vtb step update <step-id> --route-config '<route-config-json>'
 
 # Persist validated structured output as a task artifact (Sacrum-owned)
 vtb step add "Evaluate" -w <workflow-id> \
-  --step-type evaluate \
+  --step-type llm_inference \
   --output-schema '{"type":"object","required":["passed"]}' \
   --persistence-options '{"artifact":{"logical_name":"step_result"}}'
 
@@ -107,7 +107,7 @@ vtb --json step add "Review" -w <workflow-id>
 | `--speed-tier` | | Provider serving speed preference: `default` or `fast` |
 | `--personality` | | Provider style identifier; Codex accepts `none`, `friendly`, or `pragmatic` when supported by the selected model |
 | `--verbosity` | | Output detail level: `low`, `medium`, or `high`; alias `--output-verbosity`; currently valid with OpenAI/Codex |
-| `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (default: `execute`) |
+| `--step-type` | | Step type: `llm_inference`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (default: `llm_inference`) |
 | `--output-schema` | | JSON Schema describing expected structured output |
 | `--route-config` | | Opaque deterministic route configuration as a JSON string; only valid for `route` steps |
 | `--persistence-options` | | Sacrum-owned JSON configuration for persisting structured output as a task artifact |
@@ -155,8 +155,8 @@ vtb --json step list <workflow-id>
 Output:
 ```
 Steps for workflow '<workflow-id>':
-1. coding (id: a1b2c3d4, type: execute, model: sonnet)
-2. testing (id: e5f6a7b8, type: evaluate, model: haiku)
+1. coding (id: a1b2c3d4, type: llm_inference, model: sonnet)
+2. testing (id: e5f6a7b8, type: llm_inference, model: haiku)
 3. approved (id: c9d0e1f2, type: finish, model: default)
 ```
 
@@ -178,8 +178,8 @@ No steps found for workflow '<workflow-id>'
 ```
 
 `--json` returns the raw array of `Step` objects with fields such as `id`,
-`name`, `workflow_id`, `order`, `step_type`, `agent_config`,
-`output_schema`, `route_config`, `persistence_options`, `transitions_to`, and
+`name`, `workflow_id`, `order`, `step_type`, `config`,
+`persistence_options`, `transitions_to`, and
 timestamps. It does not wrap the result in an `output` field.
 
 ---
@@ -213,8 +213,7 @@ Missing optional fields are shown as `(none)`, and missing timestamps are shown
 as `-`.
 
 `--json` returns the raw `Step` object with fields such as `id`, `name`,
-`workflow_id`, `order`, `goal`, `prompt`, `agents`, `skills`, `step_type`,
-`agent_config`, `output_schema`, `route_config`, `persistence_options`,
+`workflow_id`, `order`, `goal`, `step_type`, `config`, `persistence_options`,
 `transitions_to`, and timestamps.
 It does not wrap the result in an `output` field.
 
@@ -264,9 +263,8 @@ vtb step update <step-id> --agent .claude/agents/reviewer.md
 # Replace skills list (replaces entire list, not additive)
 vtb step update <step-id> --skill review --skill simplify
 
-# Replace prompt, step type, and output schema on an ordinary execution step
+# Update prompt and output schema on an inference step
 vtb step update <step-id> --prompt "Review task {{task.id}}"
-vtb step update <step-id> --step-type evaluate
 vtb step update <step-id> --output-schema '{"type":"object"}'
 
 # Clear a retained prompt
@@ -296,9 +294,6 @@ vtb step update <step-id> --clear-transitions
 # Change order
 vtb step update <step-id> --order 1
 
-# Change terminality by setting the finish step type
-vtb step update <step-id> --step-type finish
-
 # Machine-readable update result
 vtb --json step update <step-id> --goal "New goal"
 ```
@@ -321,8 +316,7 @@ vtb --json step update <step-id> --goal "New goal"
 | `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
 | `--codex-model-provider` | | Codex upstream provider from `~/.codex/config.toml`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
 | `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh`; only valid when the resulting provider is OpenAI/Codex |
-| `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, or `finish` |
-| `--output-schema` | | New output schema as a JSON string |
+| | `--output-schema` | | New output schema as a JSON string |
 | `--clear-output-schema` | | Clear the output schema |
 | `--route-config` | | Replace the opaque deterministic route configuration |
 | `--clear-route-config` | | Clear the route configuration, leaving a route draft |
@@ -360,9 +354,7 @@ Invalid `--agent-config`, `--output-schema`, `--persistence-options`, or
 `--clear-persistence-options` to remove the
 nullable field; setting `{}` is accepted by Sacrum as an empty configuration,
 but it does not create an artifact and is not equivalent to clearing the field.
-For a resulting `route` step, `--prompt` and `--output-schema` are rejected;
-an existing prompt can only be inspected or explicitly removed with
-`--clear-prompt`. Route configuration is semantically validated by Sacrum, and
+For a `route` step, `--prompt` and `--output-schema` are rejected. Route configuration is semantically validated by Sacrum, and
 nested diagnostics retain
 their `route_config` field paths. Clearing route configuration leaves an
 unconfigured, non-runnable route draft.
@@ -454,14 +446,8 @@ The V1 envelope has this general shape:
 
 Use persisted graph targets and let Sacrum validate the complete graph. A route
 can be created without configuration as a draft; `--clear-route-config` returns
-a configured route to that state. Retained route prompts are readable and can
-be cleared with `--clear-prompt`, but `--prompt` is never a route authoring
-mechanism. New route authoring cannot set an `output_schema`; when converting a
-structured step to `route`, clear it in the same update with
-`--clear-output-schema`. Legacy route rows may still expose their retained
-output schema for inspection, but Vertebrae does not write or interpret that
-old routing contract. Ordinary `execute` and `evaluate` steps retain their
-normal prompt and `output_schema` behavior.
+a configured route to that state. Route steps accept only `route_config` inside their config. They cannot
+be converted from another step type; create a new route step instead.
 
 ### Persistence Options
 

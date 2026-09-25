@@ -55,10 +55,10 @@ describe("Hearth primitives", () => {
     render(
       <div>
         <RunChip status="executing" />
-        <KindChip stepType="evaluate" />
+        <KindChip stepType="llm_inference" />
         <Pipeline
           segments={[
-            { stepType: "execute", state: "completed" },
+            { stepType: "llm_inference", state: "completed" },
             { stepType: "human_input", state: "running" },
           ]}
         />
@@ -70,9 +70,9 @@ describe("Hearth primitives", () => {
       "c-run-chip",
       "running"
     );
-    expect(screen.getByLabelText("Step kind: Evaluate")).toHaveClass(
+    expect(screen.getByLabelText("Step kind: LLM Inference")).toHaveClass(
       "c-kind-chip",
-      "kind-eval"
+      "kind-llm"
     );
     expect(
       screen.getByLabelText("2 step pipeline").querySelectorAll(".seg")
@@ -92,10 +92,10 @@ describe("Hearth primitives", () => {
   });
 
   it("derives labels when KindChip receives only a Hearth kind", () => {
-    render(<KindChip kind="eval" />);
+    render(<KindChip kind="llm" />);
 
-    expect(screen.getByLabelText("Step kind: Evaluate")).toHaveClass(
-      "kind-eval"
+    expect(screen.getByLabelText("Step kind: LLM Inference")).toHaveClass(
+      "kind-llm"
     );
   });
 

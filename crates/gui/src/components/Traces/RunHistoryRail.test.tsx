@@ -8,7 +8,7 @@ function activeThreads(): Thread[] {
   return [
     {
       id: "th-1",
-      step: { to: "accept_user_turn", kind: "execute", at: "01:13:42" },
+      step: { to: "accept_user_turn", kind: "llm", at: "01:13:42" },
       summary: { turns: 2, tools: 3, status: "ok" },
       turns: [
         {
@@ -20,7 +20,7 @@ function activeThreads(): Thread[] {
               thread: {
                 id: "sub-1",
                 label: "write_failing_test",
-                kind: "execute",
+                kind: "llm",
                 spawnLabel: "subagent",
                 summary: { turns: 1, tools: 1, status: "ok" },
                 turns: [{ id: "st0", messages: [] }],
@@ -32,7 +32,7 @@ function activeThreads(): Thread[] {
     },
     {
       id: "th-2",
-      step: { to: "verify_changes", kind: "execute", at: "01:22:40" },
+      step: { to: "verify_changes", kind: "llm", at: "01:22:40" },
       summary: { turns: 1, tools: 1, status: "ok" },
       turns: [{ id: "t0", messages: [] }],
     },

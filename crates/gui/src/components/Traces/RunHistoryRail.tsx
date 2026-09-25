@@ -80,8 +80,8 @@ function dayGroupOf(iso: string | null): DayGroup {
 
 function stepKindColorVar(kind: string): string {
   switch (kind) {
-    case "eval":
-      return "var(--color-step-eval, var(--color-info))";
+    case "llm":
+      return "var(--color-step-llm, var(--color-info))";
     case "route":
       return "var(--color-step-route, var(--color-warn))";
     case "human":
@@ -91,7 +91,7 @@ function stepKindColorVar(kind: string): string {
     case "finish":
       return "var(--color-step-finish, var(--color-ok))";
     default:
-      return "var(--color-step-execute, var(--color-accent))";
+      return "var(--color-step-llm, var(--color-accent))";
   }
 }
 

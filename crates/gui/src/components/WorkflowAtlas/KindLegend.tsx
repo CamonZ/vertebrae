@@ -10,8 +10,7 @@
 import type { Kind } from "./layout/types";
 
 const KINDS: ReadonlyArray<Kind> = [
-  "execute",
-  "eval",
+  "llm",
   "route",
   "wait",
   "human",

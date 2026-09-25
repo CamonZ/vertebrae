@@ -54,11 +54,8 @@
   top: 4px;
   cursor: pointer;
 }
-.flight-strip .mk.kind-execute {
-  background: var(--color-step-execute, var(--color-accent));
-}
-.flight-strip .mk.kind-eval {
-  background: var(--color-step-eval, var(--color-info));
+.flight-strip .mk.kind-llm {
+  background: var(--color-step-llm, var(--color-info));
 }
 .flight-strip .mk.kind-route {
   background: var(--color-step-route, var(--color-warn));
@@ -93,7 +90,7 @@
   padding: 0;
 }
 .flight-strip .pip.tool {
-  background: color-mix(in oklch, var(--color-step-execute, var(--color-accent)) 80%, var(--color-bg));
+  background: color-mix(in oklch, var(--color-step-llm, var(--color-accent)) 80%, var(--color-bg));
 }
 .flight-strip .pip.agent {
   background: var(--color-fg-mute);

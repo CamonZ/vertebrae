@@ -176,7 +176,7 @@ export function Thread(props: ThreadProps): ReactNode {
   const [open, setOpen] = useState(!nested);
 
   const kind: StepKind =
-    (thread.step && thread.step.kind) || thread.kind || "execute";
+    (thread.step && thread.step.kind) || thread.kind || "llm";
   const sum = thread.summary ?? {};
   const turns = thread.turns ?? [];
   const showTurns = reveal === "deep" && turns.length > 1;
@@ -300,7 +300,7 @@ export function flattenThreads(
     out.push({
       id: th.id,
       label: ((th.step && th.step.to) || th.label) ?? "",
-      kind: (th.step && th.step.kind) || th.kind || "execute",
+      kind: (th.step && th.step.kind) || th.kind || "llm",
       depth,
       summary: th.summary ?? {},
     });

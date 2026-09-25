@@ -71,7 +71,7 @@ pub use service::{
     CreateTaskOptions, MutationCallback, MutationEvent, TaskService, UpdateTaskOptions,
 };
 pub use services::VertebraeServices;
-pub use step_constraints::{resulting_option, validate_route_fields, validate_route_update};
+pub use step_constraints::{apply_config_patch, validate_config_fields, validate_step_config};
 pub use step_service::StepService;
 pub use workflow_bundle::{
     ManifestError, ManifestValidationError, RouteTargetRefs, StepAddress, StepEdge, StepManifest,
@@ -88,8 +88,9 @@ pub use workflow_service::{
 // Re-export domain models for convenience
 pub use models::{
     AgentConfig, Artifact, ArtifactLinkMetadata, BlockerNode, CodeRef, CreateArtifactInput,
-    ExecutionStatus, GetArtifactByLogicalNameInput, Level, ListArtifactInput, PermissionMode,
-    Priority, Section, SectionType, SessionLog, Step, StepExecution, StepType, StepUpdate, Task,
-    TaskFilter, TaskRun, TaskRunControls, TaskRunStatus, TaskRunSummary, TaskRunTrace, TaskUpdate,
-    Thing, TokenUsage, UpdateArtifactInput, Workflow, WorkflowTransition,
+    ExecutionStatus, GetArtifactByLogicalNameInput, Level, ListArtifactInput, LlmInferenceConfig,
+    PermissionMode, Priority, RouteConfig, STEP_CONFIG_VERSION, Section, SectionType, SessionLog,
+    Step, StepConfig, StepExecution, StepType, StepUpdate, Task, TaskFilter, TaskRun,
+    TaskRunControls, TaskRunStatus, TaskRunSummary, TaskRunTrace, TaskUpdate, Thing, TokenUsage,
+    UpdateArtifactInput, WaitChildrenConfig, Workflow, WorkflowTransition,
 };

@@ -14,7 +14,7 @@
    unchanged — no token remapping was required (see P0 tokenMap).
 
    The one addition beyond a verbatim port: the prototype left --kc / --kf
-   (the subthread spine + kind-badge colors) to fall back to the execute
+   (the subthread spine + kind-badge colors) to fall back to the inference
    tokens unless a parent set them inline. Here the `.k-<kind>` classes set
    --kc / --kf explicitly so the primitive is self-contained and each
    subthread / step head is colored by its own kind, mirroring the
@@ -22,12 +22,9 @@
    ────────────────────────────────────────────────────────────────── */
 
 /* ── kind color channels (subthread spine + kind badge) ── */
-.thread.k-execute,
-.subthread.k-execute,
-.thread-head.k-execute { --kc: var(--step-execute); --kf: var(--step-execute-fg); }
-.thread.k-eval,
-.subthread.k-eval,
-.thread-head.k-eval { --kc: var(--step-eval); --kf: var(--step-eval-fg); }
+.thread.k-llm,
+.subthread.k-llm,
+.thread-head.k-llm { --kc: var(--step-llm); --kf: var(--step-llm-fg); }
 .thread.k-route,
 .subthread.k-route,
 .thread-head.k-route { --kc: var(--step-route); --kf: var(--step-route-fg); }
@@ -73,8 +70,7 @@
 .evstep:first-child { padding-top: var(--s-1); }
 .evlog--bare .evstep .evwhen { display: none; }
 .evstep-head { display: flex; align-items: center; gap: var(--s-2); padding-top: var(--s-3); border-top: 1px solid var(--line); cursor: pointer; }
-.evstep-tick { width: 8px; height: 8px; border-radius: 2px; background: var(--step-execute); flex-shrink: 0; }
-.evstep.kind-eval  .evstep-tick { background: var(--step-eval); }
+.evstep-tick { width: 8px; height: 8px; border-radius: 2px; background: var(--step-llm); flex-shrink: 0; }
 .evstep.kind-route .evstep-tick { background: var(--step-route); }
 .evstep.kind-wait  .evstep-tick { background: var(--step-wait); }
 .evstep.kind-stop  .evstep-tick { background: var(--step-stop); }
@@ -82,8 +78,7 @@
 .evstep.kind-finish .evstep-tick { background: var(--step-finish); }
 .evstep-arrow { color: var(--fg-ghost); font-family: var(--mono); font-size: var(--text-12); }
 .evstep-name { font-family: var(--mono); font-size: var(--text-12); color: var(--fg); letter-spacing: 0.01em; }
-.evstep-kind { font-family: var(--mono); font-size: var(--text-9); letter-spacing: var(--tracking-eyebrow); text-transform: uppercase; color: var(--step-execute-fg); margin-left: var(--s-1); padding: 1px var(--s-1h); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-xs); }
-.evstep.kind-eval  .evstep-kind { color: var(--step-eval-fg); }
+.evstep-kind { font-family: var(--mono); font-size: var(--text-9); letter-spacing: var(--tracking-eyebrow); text-transform: uppercase; color: var(--step-llm-fg); margin-left: var(--s-1); padding: 1px var(--s-1h); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-xs); }
 .evstep.kind-route .evstep-kind { color: var(--step-route-fg); }
 .evstep.kind-wait  .evstep-kind { color: var(--step-wait-fg); }
 .evstep.kind-stop  .evstep-kind { color: var(--step-stop-fg); }
@@ -281,12 +276,12 @@
 .thread-head.bare  { grid-template-columns: minmax(0, 1fr); padding: var(--s-2) 0 0; }
 .thread:first-child .thread-head { padding-top: var(--s-1); }
 .th-bar { display: flex; align-items: center; gap: var(--s-2); padding-top: var(--s-3); border-top: 1px solid var(--line); cursor: pointer; min-width: 0; }
-.th-tick { width: 8px; height: 8px; border-radius: 2px; background: var(--kc, var(--step-execute)); flex-shrink: 0; }
+.th-tick { width: 8px; height: 8px; border-radius: 2px; background: var(--kc, var(--step-llm)); flex-shrink: 0; }
 .th-arrow { color: var(--fg-ghost); font-family: var(--mono); font-size: var(--text-12); }
 .th-name { font-family: var(--mono); font-size: var(--text-12); color: var(--fg); letter-spacing: 0.01em; white-space: nowrap; }
 .thread-head.sel .th-name { color: var(--accent); }
 .th-bar:hover .th-name { color: var(--fg); }
-.th-kind { font-family: var(--mono); font-size: var(--text-9); letter-spacing: var(--tracking-eyebrow); text-transform: uppercase; color: var(--kf, var(--step-execute-fg)); margin-left: var(--s-1); padding: 1px var(--s-1h); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-xs); flex-shrink: 0; }
+.th-kind { font-family: var(--mono); font-size: var(--text-9); letter-spacing: var(--tracking-eyebrow); text-transform: uppercase; color: var(--kf, var(--step-llm-fg)); margin-left: var(--s-1); padding: 1px var(--s-1h); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-xs); flex-shrink: 0; }
 .th-sum { font-family: var(--mono); font-size: var(--text-9); color: var(--fg-faint); margin-left: var(--s-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .th-bar .c-id-chip { flex-shrink: 0; }
 .th-rt { margin-left: auto; font-family: var(--mono); font-size: var(--text-9); color: var(--fg-faint); letter-spacing: var(--tracking-wide); flex-shrink: 0; padding-left: var(--s-2); }
@@ -310,12 +305,12 @@
 .thr-row.bare  { grid-template-columns: minmax(0, 1fr); }
 
 /* ── nested thread (subagent / sub-step) — spine + collapsible ── */
-.subthread { padding-left: var(--s-3); border-left: 2px solid color-mix(in oklch, var(--kc, var(--step-execute)) 55%, transparent); margin: var(--s-2) 0; min-width: 0; }
+.subthread { padding-left: var(--s-3); border-left: 2px solid color-mix(in oklch, var(--kc, var(--step-llm)) 55%, transparent); margin: var(--s-2) 0; min-width: 0; }
 .sth-sum { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1h) var(--s-2h); background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-sm); cursor: pointer; font-family: var(--mono); font-size: var(--text-11); min-width: 0; transition: background var(--t-fast) var(--ease); }
 .sth-sum:hover { background: var(--bg-3); }
 .subthread.open > .sth-sum { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-color: transparent; }
-.sth-spawn { color: var(--kf, var(--step-execute-fg)); flex-shrink: 0; }
-.sth-kind { color: var(--kf, var(--step-execute-fg)); letter-spacing: var(--tracking-eyebrow); text-transform: uppercase; font-size: var(--text-9); flex-shrink: 0; }
+.sth-spawn { color: var(--kf, var(--step-llm-fg)); flex-shrink: 0; }
+.sth-kind { color: var(--kf, var(--step-llm-fg)); letter-spacing: var(--tracking-eyebrow); text-transform: uppercase; font-size: var(--text-9); flex-shrink: 0; }
 .sth-name { color: var(--fg); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .sth-meta { color: var(--fg-faint); white-space: nowrap; flex-shrink: 0; }
 .sth-status { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }

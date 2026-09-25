@@ -223,7 +223,7 @@ export function StepDivider({
   at,
   rel,
   to,
-  kind = "execute",
+  kind = "llm",
   runtime,
   selected,
   onClick,

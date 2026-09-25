@@ -51,11 +51,11 @@ impl WorkflowShowCommand {
             first_class_steps
                 .into_iter()
                 .map(|s| StepDisplayInfo {
+                    model: s.agent_config().and_then(|config| config.model.clone()),
+                    prompt: s.prompt().map(str::to_string),
                     id: s.id,
                     name: s.name,
-                    model: s.agent_config.model,
                     order: s.order,
-                    prompt: s.prompt,
                 })
                 .collect()
         } else {

@@ -50,13 +50,13 @@ describe("useTaskLocation", () => {
       current_step_id: "step-1",
       workflow_name: "stale workflow",
       step_name: "stale step",
-      step_type: "execute",
+      step_type: "llm_inference",
     });
     const step = createMockStep({
       id: "step-1",
       workflow_id: "workflow-1",
       name: "Before step",
-      step_type: "execute",
+      step_type: "llm_inference",
     });
     const workflow = createMockWorkflow({
       id: "workflow-1",
@@ -72,7 +72,7 @@ describe("useTaskLocation", () => {
 
     act(() => {
       upsertStepInQueryCache(
-        { ...step, name: "After step", step_type: "evaluate" },
+        { ...step, name: "After step", step_type: "llm_inference" },
         generation
       );
       upsertWorkflowInQueryCache(
@@ -86,7 +86,7 @@ describe("useTaskLocation", () => {
         status: "assigned",
         workflowName: "After workflow",
         stepName: "After step",
-        stepType: "evaluate",
+        stepType: "llm_inference",
       });
     });
     expect(commands.getStep).not.toHaveBeenCalled();

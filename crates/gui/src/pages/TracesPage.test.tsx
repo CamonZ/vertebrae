@@ -163,7 +163,7 @@ describe("TracesPage (single-run)", () => {
         task_run_id: "run-1",
         status: "completed",
         step_name: "in_progress",
-        step_type: "execute",
+        step_type: "llm_inference",
       }),
     ];
     renderAt("/traces/root");

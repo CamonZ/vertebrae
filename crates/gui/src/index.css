@@ -8,7 +8,7 @@
    VERTEBRAE · HEARTH — Neutral dark identity
    Copper accent on neutral charcoal surfaces, serif moments via Newsreader, mono
    via JetBrains.
-   Seven step types: execute / eval / route / human_review / wait_for_children /
+   Six step types: llm_inference / route / human_input / wait_children /
    stop / finish.
    Tokens are layered: Hearth primitives (--color-*, --spacing-*, --radius-*)
    are the single source of truth and own all values; the docs/design v2 adapter
@@ -78,17 +78,13 @@
   --color-info: oklch(0.78 0.13 220);
   --color-info-wash: oklch(0.32 0.1 220);
 
-  /* Step types — SEVEN Vertebrae step kinds, each with bar / wash / fg variants.
+  /* Step kinds, each with bar / wash / fg variants.
      bar  = top accent strip on a step node
      wash = subtle background tint on tinted surfaces
      fg   = readable foreground on the wash background */
-  --color-step-execute: oklch(0.72 0.16 285); /* violet — agent runs code */
-  --color-step-execute-wash: oklch(0.32 0.12 285);
-  --color-step-execute-fg: oklch(0.82 0.14 285);
-
-  --color-step-eval: oklch(0.78 0.13 200); /* cyan — agent evaluates */
-  --color-step-eval-wash: oklch(0.32 0.1 200);
-  --color-step-eval-fg: oklch(0.85 0.12 200);
+  --color-step-llm: oklch(0.72 0.16 285); /* violet — agent runs code */
+  --color-step-llm-wash: oklch(0.32 0.12 285);
+  --color-step-llm-fg: oklch(0.82 0.14 285);
 
   --color-step-route: oklch(0.82 0.18 135); /* lime — routing decision */
   --color-step-route-wash: oklch(0.32 0.12 135);
@@ -240,12 +236,9 @@
   --info-wash: var(--color-info-wash);
 
   /* Step kinds */
-  --step-execute: var(--color-step-execute);
-  --step-execute-wash: var(--color-step-execute-wash);
-  --step-execute-fg: var(--color-step-execute-fg);
-  --step-eval: var(--color-step-eval);
-  --step-eval-wash: var(--color-step-eval-wash);
-  --step-eval-fg: var(--color-step-eval-fg);
+  --step-llm: var(--color-step-llm);
+  --step-llm-wash: var(--color-step-llm-wash);
+  --step-llm-fg: var(--color-step-llm-fg);
   --step-route: var(--color-step-route);
   --step-route-wash: var(--color-step-route-wash);
   --step-route-fg: var(--color-step-route-fg);
@@ -406,13 +399,9 @@
   --color-info: oklch(0.48 0.13 220);
   --color-info-wash: oklch(0.93 0.04 220);
 
-  --color-step-execute: oklch(0.52 0.18 285);
-  --color-step-execute-wash: oklch(0.93 0.05 285);
-  --color-step-execute-fg: oklch(0.42 0.18 285);
-
-  --color-step-eval: oklch(0.52 0.13 200);
-  --color-step-eval-wash: oklch(0.93 0.05 200);
-  --color-step-eval-fg: oklch(0.4 0.13 200);
+  --color-step-llm: oklch(0.52 0.18 285);
+  --color-step-llm-wash: oklch(0.93 0.05 285);
+  --color-step-llm-fg: oklch(0.42 0.18 285);
 
   --color-step-route: oklch(0.55 0.18 135);
   --color-step-route-wash: oklch(0.93 0.07 135);
@@ -790,8 +779,8 @@ html.light ::selection {
 }
 
 .thinking-matrix__light--purple {
-  --thinking-light-color: var(--color-step-execute);
-  --thinking-light-active-color: var(--color-step-execute-fg);
+  --thinking-light-color: var(--color-step-llm);
+  --thinking-light-active-color: var(--color-step-llm-fg);
 }
 
 .thinking-matrix__light--red {
@@ -4060,15 +4049,10 @@ html.light ::selection {
    step nodes, strips) reads these three locals rather than the raw step tokens,
    so one carrier on an ancestor recolors a whole subtree. These are the REAL
    backend step types — there is no synthetic entry/final kind. */
-.k-execute {
-  --kc: var(--step-execute);
-  --kf: var(--step-execute-fg);
-  --kw: var(--step-execute-wash);
-}
-.k-eval {
-  --kc: var(--step-eval);
-  --kf: var(--step-eval-fg);
-  --kw: var(--step-eval-wash);
+.k-llm {
+  --kc: var(--step-llm);
+  --kf: var(--step-llm-fg);
+  --kw: var(--step-llm-wash);
 }
 .k-route {
   --kc: var(--step-route);

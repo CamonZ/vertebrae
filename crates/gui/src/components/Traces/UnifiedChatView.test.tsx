@@ -7,7 +7,7 @@ function run(): Thread[] {
   return [
     {
       id: "th-1",
-      step: { to: "accept_user_turn", kind: "execute", at: "01:13:42" },
+      step: { to: "accept_user_turn", kind: "llm", at: "01:13:42" },
       summary: { turns: 1, tools: 1, status: "ok" },
       turns: [
         {
@@ -38,7 +38,7 @@ function runWithSub(): Thread[] {
   return [
     {
       id: "th-1",
-      step: { to: "verify_changes", kind: "execute", at: "01:22:40" },
+      step: { to: "verify_changes", kind: "llm", at: "01:22:40" },
       summary: { turns: 1, tools: 1, status: "ok" },
       turns: [
         {
@@ -50,7 +50,7 @@ function runWithSub(): Thread[] {
               thread: {
                 id: "sub-1",
                 label: "write_failing_test",
-                kind: "execute",
+                kind: "llm",
                 spawnLabel: "subagent",
                 summary: { turns: 1, tools: 0, status: "ok" },
                 turns: [

@@ -1,3 +1,4 @@
+import { createMockAgentConfig } from "../../test/test-utils";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -26,33 +27,19 @@ function createStep(overrides?: Partial<Step>): Step {
     name: "Test Step",
     workflow_id: "workflow-1",
     goal: null,
-    prompt: null,
     order: 0,
     transitions_to: [],
-    step_type: "execute",
-    output_schema: null,
+    step_type: "llm_inference",
+    config: {
+      version: 1,
+      prompt: null,
+      output_schema: null,
+      agents: [],
+      skills: [],
+      agent_config: createMockAgentConfig({ model: null }),
+    },
     created_at: null,
     updated_at: null,
-    agent_config: {
-      model: null,
-      codex_model_provider: null,
-      fallback_model: null,
-      reasoning_effort: null,
-      speed_tier: null,
-      personality: null,
-      verbosity: null,
-      system_prompt: null,
-      append_system_prompt: null,
-      tools: [],
-      allowed_tools: [],
-      disallowed_tools: [],
-      permission_mode: null,
-      max_budget_usd: null,
-      mcp_config: [],
-      plugin_dirs: [],
-      agents: null,
-      json_schema: null,
-    },
     ...overrides,
   };
 }

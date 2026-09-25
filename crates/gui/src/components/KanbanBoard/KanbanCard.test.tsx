@@ -182,11 +182,11 @@ describe("KanbanCard", () => {
         current_step_id: "step-typed",
         step_name: "implement",
         workflow_name: "Execute workflow",
-        step_type: "evaluate",
+        step_type: "llm_inference",
       });
       queryClient.setQueryData(
         queryKeys.steps.byId(getProjectScopeGeneration(), "step-typed"),
-        createMockStep({ id: "step-typed", step_type: "evaluate" })
+        createMockStep({ id: "step-typed", step_type: "llm_inference" })
       );
       queryClient.setQueryData(
         queryKeys.workflows.list(getProjectScopeGeneration()),
@@ -196,13 +196,13 @@ describe("KanbanCard", () => {
 
       expect(
         screen.getByRole("button", { name: /Task: Typed step task/i })
-      ).toHaveAttribute("data-kind", "eval");
+      ).toHaveAttribute("data-kind", "llm");
     });
 
     it("uses the neutral board kind when step_type is missing", () => {
       const task = createMockTask({
         title: "Untyped step task",
-        step_name: "execute",
+        step_name: "llm",
         workflow_name: "Implementation",
         step_type: null,
       });

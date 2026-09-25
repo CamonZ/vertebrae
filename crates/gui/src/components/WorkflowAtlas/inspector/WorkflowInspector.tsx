@@ -60,7 +60,7 @@ export function WorkflowInspector({
   const wf = wfById.get(workflowId);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
-  const [newType, setNewType] = useState<StepType>("execute");
+  const [newType, setNewType] = useState<StepType>("llm_inference");
   const [newTransition, setNewTransition] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [addingBusy, setAddingBusy] = useState(false);
@@ -141,20 +141,22 @@ export function WorkflowInspector({
           workflow_id: wf.id,
           name: newName.trim(),
           goal: null,
-          prompt: null,
-          agents: [],
-          skills: [],
-          agent_config: null,
+          config:
+            newType === "llm_inference" ||
+            newType === "route" ||
+            newType === "wait_children"
+              ? {}
+              : null,
           order: wf.stepIds.length,
           transitions_to: transition ? [transition] : [],
           step_type: newType,
-          output_schema: null,
         })
       );
       setNewName("");
       setNewTransition("");
       setAdding(false);
-      if (created.id) onSelect({ type: "step", workflowId: wf.id, stepId: created.id });
+      if (created.id)
+        onSelect({ type: "step", workflowId: wf.id, stepId: created.id });
     } catch (cause) {
       setAddError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -343,11 +345,14 @@ export function WorkflowInspector({
               <label>
                 Type
                 <select
-                  value={typeof newType === "string" ? newType : "execute"}
-                  onChange={(event) => setNewType(event.target.value as StepType)}
+                  value={
+                    typeof newType === "string" ? newType : "llm_inference"
+                  }
+                  onChange={(event) =>
+                    setNewType(event.target.value as StepType)
+                  }
                 >
-                  <option value="execute">execute</option>
-                  <option value="evaluate">evaluate</option>
+                  <option value="llm_inference">llm_inference</option>
                   <option value="route">route</option>
                   <option value="wait_children">wait_children</option>
                   <option value="human_input">human_input</option>

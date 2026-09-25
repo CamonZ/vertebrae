@@ -22,7 +22,7 @@ and `initial_step`. Step fields map to `name`, `goal`, `prompt`, `agents`,
 output schema, persistence options, and route configuration preserve nested JSON
 without rewriting UUID-looking strings. Agents and skills retain their array
 order. A missing/default display order is `0`, `is_default` is `false`, and
-`step_type` is `execute`; `prompt` is serialized as `null` when absent, while
+`step_type` is `llm_inference`; `prompt` is serialized as `null` when absent, while
 `""` remains an empty prompt.
 
 Structural objects reject unknown fields. Consequently persistence ownership

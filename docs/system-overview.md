@@ -140,51 +140,29 @@ Workflows can chain: when a workflow completes, it can hand off to another workf
 
 ### WorkflowStep
 
-A single stage within a workflow. Each step defines an agent action or a Sacrum
-control action.
+A workflow step has a fixed `step_type`, a `goal`, ordering and transition
+fields, optional `persistence_options`, and a type-specific `config`.
 
-| Field | Description |
-|-------|-------------|
-| `name` | Stage name (e.g., "backlog", "in_progress", "pending_review") |
-| `step_type` | `execute` (default), `evaluate`, `route`, `wait_children`, `human_input`, or `finish` — determines step behavior |
-| `goal` | What this step accomplishes |
-| `prompt` | Template sent to the executing agent for execute/evaluate steps; retained route prompts are readable and clear-only |
-| `output_schema` | JSON Schema for execute/evaluate structured output (passed as `--json-schema` to the selected harness) |
-| `route_config` | Nullable opaque V1 deterministic route program, validated and evaluated locally by Sacrum |
-| `persistence_options` | Optional Sacrum-owned artifact configuration, currently `{"artifact":{"logical_name":"..."}}`; requires `output_schema` |
-| `agents` | Agent file paths to run |
-| `skills` | Skill names to enable as tools |
-| `agent_config` | LLM configuration (see below) |
-| `transitions_to` | Step IDs reachable from this step |
+| Type | `config` | Behavior |
+|------|----------|----------|
+| `llm_inference` (default) | `prompt`, `output_schema`, `agents`, `skills`, `agent_config` | Dispatches an agent through the selected harness. |
+| `route` | `route_config` | Sacrum evaluates the deterministic route locally; an empty config is a draft. |
+| `wait_children` | `output_schema` | Waits for child tasks and can validate their combined output. |
+| `human_input` | `null` | Pauses for external input; its detailed semantics remain unspecified. |
+| `stop` | `null` | Ends the current run and requires one continuation target. |
+| `finish` | `null` | Completes the task immediately without daemon dispatch. |
 
-**Step types:**
-- **`execute`** — Standard execution. Runs the prompt via Claude and produces output.
-- **`evaluate`** — Assesses previous output and can create branching decisions through multiple outgoing transitions.
-- **`route`** — Sacrum-local deterministic control step. Sacrum evaluates
-  `route_config` against the closed route context and graph; it does not
-  dispatch a daemon prompt or use `output_schema` as a routing program.
-- **`wait_children`** — Server-side parent/child barrier. Pauses until all child tasks complete; the daemon does not dispatch it.
-- **`human_input`** — Human review/input gate. Pauses for external input instead of dispatching a daemon execution.
-- **`finish`** — Explicit promptless terminal step. Completes the task immediately, has no outgoing transitions, and is never dispatched to the daemon.
+The GraphQL API reads the config union and creates or updates steps through a
+single `config` JSON argument. Config updates are patches: omitted keys keep
+their values and explicit `null` clears a nullable field. Step type cannot be
+changed after creation. The CLI keeps convenience flags for individual config
+fields and assembles the corresponding patch.
 
-`finish` is the sole explicit terminal type. A finish step completes the task
-immediately, has no outgoing transitions, and is never dispatched to the
-daemon. The finish type is preserved across the Sacrum wire model,
-core/CLI/Tauri models, GUI workflow/task surfaces, and trace events.
-
-**Output schema precedence:** Execute and evaluate steps may define an
-`output_schema`; when present, it
-overrides `agent_config.json_schema`. Route steps do not
-use `output_schema` as routing policy; their deterministic program is
-`route_config`.
-
-**Artifact persistence:** Sacrum's orchestrator persists validated output for
-`execute`, `evaluate`, `human_input`, and `wait_children` steps when
-`persistence_options` requests an artifact. Route decisions are validated and
-audited by Sacrum's local control path rather than daemon structured output.
-Writes upsert the task artifact by logical name. `finish` and `stop` persistence
-is rejected by Sacrum; the daemon remains storage-agnostic and only reports
-daemon step output.
+`llm_inference` output schemas override `agent_config.json_schema`. Route
+steps use `route_config` for routing and do not accept agent or output fields.
+Sacrum can persist validated output as an artifact when
+`persistence_options` is `{"artifact":{"logical_name":"..."}}` and the step
+has an output schema. `finish` and `stop` cannot persist artifacts.
 
 ### AgentConfig
 

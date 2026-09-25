@@ -16,13 +16,13 @@ import { createMockTask } from "../test/test-utils";
 
 const { taskHandlers, taskStepHandlers, emptyListen, getPipelineSummary } =
   vi.hoisted(() => ({
-  taskHandlers: [] as Array<(event: { payload: TaskChangedEvent }) => void>,
-  taskStepHandlers: [] as Array<
-    (event: { payload: TaskStepChangedEvent }) => void
-  >,
-  emptyListen: vi.fn(async () => vi.fn()),
-  getPipelineSummary: vi.fn(),
-}));
+    taskHandlers: [] as Array<(event: { payload: TaskChangedEvent }) => void>,
+    taskStepHandlers: [] as Array<
+      (event: { payload: TaskStepChangedEvent }) => void
+    >,
+    emptyListen: vi.fn(async () => vi.fn()),
+    getPipelineSummary: vi.fn(),
+  }));
 
 vi.mock("../bindings", () => ({
   commands: { getPipelineSummary },
@@ -59,7 +59,7 @@ import { usePipelineSummary } from "./usePipelineSummary";
 
 const summary = (
   ticketCount = 0,
-  secondStepTicketCount = 0,
+  secondStepTicketCount = 0
 ): PipelineSummary => ({
   workflows: [
     {
@@ -78,7 +78,7 @@ const summary = (
           workflow_id: "workflow-1",
           goal: null,
           step_order: 0,
-          step_type: "execute",
+          step_type: "llm_inference",
           transitions_to: [],
           task_counts: { epic: 0, ticket: ticketCount, task: 0 },
           pipeline_counts: {
@@ -95,7 +95,7 @@ const summary = (
           workflow_id: "workflow-1",
           goal: null,
           step_order: 1,
-          step_type: "execute",
+          step_type: "llm_inference",
           transitions_to: [],
           task_counts: {
             epic: 0,
@@ -143,7 +143,10 @@ describe("usePipelineSummary", () => {
         queryClient.getQueryData(queryKeys.pipelineSummary(newGeneration))
       ).toBeDefined()
     );
-    queryClient.setQueryData(queryKeys.pipelineSummary(oldGeneration), summary());
+    queryClient.setQueryData(
+      queryKeys.pipelineSummary(oldGeneration),
+      summary()
+    );
 
     act(() => {
       staleHandler({

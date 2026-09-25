@@ -81,7 +81,7 @@ async initializeProject(path: string, name: string | null) : Promise<Result<Init
 },
 /**
  * Add a project to the saved list
- * 
+ *
  * Takes a directory path, derives a slug from the folder name,
  * creates the project in Sacrum API if needed, and registers in global config.
  */
@@ -95,7 +95,7 @@ async addProject(path: string) : Promise<Result<SavedProject, CommandError>> {
 },
 /**
  * Remove a project from the saved list
- * 
+ *
  * Removes the project from config.toml by slug. If the removed project
  * is the currently selected project, clears the selection and services.
  */
@@ -153,7 +153,7 @@ async hasProjectSelected() : Promise<Result<boolean, CommandError>> {
 },
 /**
  * List tasks with optional filters
- * 
+ *
  * Returns a list of task summaries matching the filter criteria.
  */
 async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], CommandError>> {
@@ -166,7 +166,7 @@ async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], Comma
 },
 /**
  * List tasks that are ready to be worked on.
- * 
+ *
  * Mirrors `vtb ready`: the backend `list_ready` query returns tasks that are
  * not completed and have no incomplete blockers; archived tasks are filtered
  * out here, exactly as the CLI does.
@@ -181,7 +181,7 @@ async listReady() : Promise<Result<Task[], CommandError>> {
 },
 /**
  * Get a single task by ID with its relations
- * 
+ *
  * Returns the full task details.
  */
 async getTask(id: string) : Promise<Result<Task, CommandError>> {
@@ -216,7 +216,7 @@ async listTaskArtifacts(taskId: string) : Promise<Result<Artifact[], CommandErro
 },
 /**
  * Set the parent task
- * 
+ *
  * Sets the parent of the given task. If the task already has a parent, it will be replaced.
  * Validates that both tasks exist.
  */
@@ -230,7 +230,7 @@ async setParent(taskId: string, parentId: string) : Promise<Result<null, Command
 },
 /**
  * Remove the parent task
- * 
+ *
  * Removes the parent relationship from the given task, making it a root task.
  */
 async removeParent(taskId: string) : Promise<Result<null, CommandError>> {
@@ -243,7 +243,7 @@ async removeParent(taskId: string) : Promise<Result<null, CommandError>> {
 },
 /**
  * Add a dependency relationship
- * 
+ *
  * Makes the given task depend on another task (the task is blocked by the dependency).
  * Validates that both tasks exist and that adding the dependency won't create a cycle.
  */
@@ -257,7 +257,7 @@ async addDependency(taskId: string, dependsOnId: string) : Promise<Result<null, 
 },
 /**
  * Remove a dependency relationship
- * 
+ *
  * Removes a dependency from the given task (the task is no longer blocked by this dependency).
  */
 async removeDependency(taskId: string, dependsOnId: string) : Promise<Result<null, CommandError>> {
@@ -270,7 +270,7 @@ async removeDependency(taskId: string, dependsOnId: string) : Promise<Result<nul
 },
 /**
  * Replace the full dependency set for a task
- * 
+ *
  * Saves picker changes atomically instead of issuing one mutation per add/remove.
  */
 async syncDependencies(taskId: string, dependsOnIds: string[]) : Promise<Result<null, CommandError>> {
@@ -283,7 +283,7 @@ async syncDependencies(taskId: string, dependsOnIds: string[]) : Promise<Result<
 },
 /**
  * Create a new task with the given title, optional description, level, and parent task
- * 
+ *
  * Returns the ID of the newly created task.
  * Validates that parent task exists if specified.
  */
@@ -297,7 +297,7 @@ async createTask(title: string, description: string | null, level: string | null
 },
 /**
  * Update a task with multiple fields
- * 
+ *
  * Specify only the fields you want to update. Omitted fields remain unchanged.
  */
 async updateTask(taskId: string, options: UpdateTaskOptions) : Promise<Result<null, CommandError>> {
@@ -310,7 +310,7 @@ async updateTask(taskId: string, options: UpdateTaskOptions) : Promise<Result<nu
 },
 /**
  * Assign a workflow to a task
- * 
+ *
  * Associates the given workflow with the task for workflow state management.
  */
 async assignWorkflow(taskId: string, workflowId: string) : Promise<Result<null, CommandError>> {
@@ -323,10 +323,10 @@ async assignWorkflow(taskId: string, workflowId: string) : Promise<Result<null, 
 },
 /**
  * Delete a task with optional cascade delete for child tasks
- * 
+ *
  * When cascade is true, deletes the task and all its descendants.
  * When cascade is false, deletes the task but orphans its children (they lose their parent).
- * 
+ *
  * This operation is atomic - either fully succeeds or fully fails.
  */
 async deleteTask(taskId: string, cascade: boolean) : Promise<Result<null, CommandError>> {
@@ -339,7 +339,7 @@ async deleteTask(taskId: string, cascade: boolean) : Promise<Result<null, Comman
 },
 /**
  * Add a section to a task
- * 
+ *
  * Creates a new section with the given type and content.
  * For step and testing_criterion types, content can be optional.
  * The order is assigned by Sacrum.
@@ -354,7 +354,7 @@ async addSection(taskId: string, sectionType: string, content: string | null) : 
 },
 /**
  * Edit a section's content by its ordinal (position)
- * 
+ *
  * Updates the content of an existing section identified by its type and ordinal.
  */
 async editSection(taskId: string, sectionType: string, ordinal: number, newContent: string) : Promise<Result<Section, CommandError>> {
@@ -367,7 +367,7 @@ async editSection(taskId: string, sectionType: string, ordinal: number, newConte
 },
 /**
  * Toggle the completion status of a checklist item
- * 
+ *
  * Marks a checklist item as done or not done by toggling its done flag.
  * For checklist item sections only (other types will return an error).
  */
@@ -381,7 +381,7 @@ async toggleChecklistItemDone(taskId: string, ordinal: number) : Promise<Result<
 },
 /**
  * Remove a section from a task by its ordinal (position)
- * 
+ *
  * Deletes a section identified by its type and ordinal.
  * Remaining sections of the same type are renumbered.
  */
@@ -395,7 +395,7 @@ async removeSection(taskId: string, sectionType: string, ordinal: number) : Prom
 },
 /**
  * Add a code reference to a testing criterion section
- * 
+ *
  * Appends a code reference to an existing testing criterion section.
  */
 async addCriterionRef(taskId: string, sectionOrdinal: number, filePath: string, lineNumber: number | null, name: string | null) : Promise<Result<null, CommandError>> {
@@ -408,7 +408,7 @@ async addCriterionRef(taskId: string, sectionOrdinal: number, filePath: string, 
 },
 /**
  * Add a code reference to a task
- * 
+ *
  * Appends a code reference with optional line numbers and description.
  */
 async addCodeRef(taskId: string, path: string, lineStart: number | null, lineEnd: number | null, name: string | null, description: string | null) : Promise<Result<null, CommandError>> {
@@ -421,9 +421,9 @@ async addCodeRef(taskId: string, path: string, lineStart: number | null, lineEnd
 },
 /**
  * Remove code references from a task
- * 
+ *
  * Deletes one or more code references from the given task.
- * 
+ *
  * * `indices` - If provided, only these 0-based indices will be removed. Otherwise all are removed.
  */
 async removeCodeRefs(taskId: string, indices: number[] | null) : Promise<Result<null, CommandError>> {
@@ -436,7 +436,7 @@ async removeCodeRefs(taskId: string, indices: number[] | null) : Promise<Result<
 },
 /**
  * Replace all code references for a task
- * 
+ *
  * Removes all existing code references and adds the provided ones.
  */
 async replaceCodeRefs(taskId: string, refs: CodeRef[]) : Promise<Result<null, CommandError>> {
@@ -449,7 +449,7 @@ async replaceCodeRefs(taskId: string, refs: CodeRef[]) : Promise<Result<null, Co
 },
 /**
  * List all workflows
- * 
+ *
  * Returns a list of all workflows in the database.
  */
 async listWorkflows() : Promise<Result<Workflow[], CommandError>> {
@@ -462,7 +462,7 @@ async listWorkflows() : Promise<Result<Workflow[], CommandError>> {
 },
 /**
  * Get a single workflow by ID
- * 
+ *
  * Returns the full workflow details including steps.
  */
 async getWorkflow(id: string) : Promise<Result<Workflow, CommandError>> {
@@ -475,7 +475,7 @@ async getWorkflow(id: string) : Promise<Result<Workflow, CommandError>> {
 },
 /**
  * Get a workflow with its associated tasks
- * 
+ *
  * Returns the workflow along with all tasks that reference this workflow.
  */
 async getWorkflowWithTasks(id: string) : Promise<Result<WorkflowWithTasks, CommandError>> {
@@ -488,7 +488,7 @@ async getWorkflowWithTasks(id: string) : Promise<Result<WorkflowWithTasks, Comma
 },
 /**
  * Get a workflow with its associated tasks including full details and relations
- * 
+ *
  * Returns the workflow along with all tasks that reference this workflow,
  * including full task details (sections, refs) and relations (parent, children, dependencies).
  * Uses optimized single-query database access via graph traversal.
@@ -503,12 +503,12 @@ async getWorkflowWithTaskDetails(id: string) : Promise<Result<WorkflowWithTaskDe
 },
 /**
  * Fetch the full pipeline summary in a single GraphQL round-trip.
- * 
+ *
  * Returns one entry per workflow with preloaded steps (each carrying
  * `pipeline_counts`/`active_count` aggregates plus their outbound
  * transitions) and inter-workflow transitions. The Sacrum resolver runs at
  * most 4 SQL queries regardless of project size.
- * 
+ *
  * The frontend keeps these aggregates fresh by refetching this authoritative
  * summary after Sacrum websocket events that can change pipeline counts. It
  * does NOT issue a per-task execution query on mount.
@@ -523,7 +523,7 @@ async getPipelineSummary() : Promise<Result<PipelineSummary, CommandError>> {
 },
 /**
  * List all workflow transitions
- * 
+ *
  * Returns all defined transitions between workflows, including workflow names
  * from the same workflow fetch.
  */
@@ -571,7 +571,7 @@ async updateWorkflow(options: UpdateWorkflowOptions) : Promise<Result<null, Comm
 },
 /**
  * Get all step executions for a task
- * 
+ *
  * Returns a chronological list of all step executions for the given task.
  * This shows how the task has progressed through workflow steps over time.
  */
@@ -585,7 +585,7 @@ async getTaskExecutions(taskId: string) : Promise<Result<StepExecution[], Comman
 },
 /**
  * Fetch a single step execution by ID with full detail.
- * 
+ *
  * Returns the full StepExecution struct (including prompt, output, context,
  * transition_result, model, tokens, cost, duration_ms, handoff, session_id)
  * or `None` when no execution matches the given ID.
@@ -600,7 +600,7 @@ async getExecution(executionId: string) : Promise<Result<StepExecution | null, C
 },
 /**
  * Get all session logs for a step execution
- * 
+ *
  * Returns a chronological list of all session logs for the given execution.
  * This shows the content recorded during the step execution.
  */
@@ -636,7 +636,7 @@ async getTaskRuns(taskId: string) : Promise<Result<TaskRun[], CommandError>> {
 },
 /**
  * Get the trace for a single TaskRun.
- * 
+ *
  * `root_task_run_id` is a legacy parameter name; Sacrum accepts any TaskRun
  * id and returns that run's scoped trace.
  */
@@ -650,7 +650,7 @@ async getTaskRunTrace(rootTaskRunId: string) : Promise<Result<TaskRunTrace, Comm
 },
 /**
  * List all steps for a workflow
- * 
+ *
  * Returns all first-class Step entities associated with the given workflow ID.
  */
 async listStepsForWorkflow(workflowId: string) : Promise<Result<Step[], CommandError>> {
@@ -663,7 +663,7 @@ async listStepsForWorkflow(workflowId: string) : Promise<Result<Step[], CommandE
 },
 /**
  * Get a single step by ID
- * 
+ *
  * Returns the Step entity with the given ID.
  */
 async getStep(stepId: string) : Promise<Result<Step | null, CommandError>> {
@@ -676,7 +676,7 @@ async getStep(stepId: string) : Promise<Result<Step | null, CommandError>> {
 },
 /**
  * Create a new step for a workflow
- * 
+ *
  * Creates a new first-class Step entity with the given properties.
  */
 async createStep(options: CreateStepOptions) : Promise<Result<Step, CommandError>> {
@@ -689,7 +689,7 @@ async createStep(options: CreateStepOptions) : Promise<Result<Step, CommandError
 },
 /**
  * Update an existing step
- * 
+ *
  * Updates the step with the given ID. Only fields that are Some will be updated.
  */
 async updateStep(options: UpdateStepOptions) : Promise<Result<null, CommandError>> {
@@ -702,7 +702,7 @@ async updateStep(options: UpdateStepOptions) : Promise<Result<null, CommandError
 },
 /**
  * Delete a step
- * 
+ *
  * Deletes the step with the given ID.
  */
 async deleteStep(stepId: string) : Promise<Result<null, CommandError>> {
@@ -726,7 +726,7 @@ async runWorkflow(taskId: string, maxConcurrency: number | null) : Promise<Resul
 },
 /**
  * Stop a durable TaskRun by explicit run ID or by active task ID.
- * 
+ *
  * If both IDs are provided, `task_run_id` takes precedence.
  */
 async stopRun(request: StopRunRequest) : Promise<Result<TaskRun | null, CommandError>> {
@@ -739,7 +739,7 @@ async stopRun(request: StopRunRequest) : Promise<Result<TaskRun | null, CommandE
 },
 /**
  * Orchestrate a task through its entire workflow via the TaskRun path.
- * 
+ *
  * Compatibility shim for existing frontend call sites. New code should call
  * `run_workflow`, which returns the durable TaskRun.
  */
@@ -753,7 +753,7 @@ async orchestrateTask(taskId: string) : Promise<Result<null, CommandError>> {
 },
 /**
  * Stop the running TaskRun for a task via Sacrum.
- * 
+ *
  * Idempotent: if no orchestrator is running for the task, the call still
  * resolves successfully. The daemon receives the corresponding cancel_step
  * event and terminates any in-flight child process.
@@ -1005,7 +1005,7 @@ async rotateDaemonCredentials(connectionId: string, daemonId: string) : Promise<
 },
 /**
  * Quit the application.
- * 
+ *
  * Used by the first-run install screen's Cancel button so a user who does not
  * want to install the bundled tools can exit cleanly rather than being routed
  * into an app that can't function without them.
@@ -1020,7 +1020,7 @@ async quitApplication() : Promise<Result<null, CommandError>> {
 },
 /**
  * Check the signed GUI release metadata for every supported channel.
- * 
+ *
  * The updater plugin normally reads the single endpoint configured for the
  * current bundle. Channel selection needs independent availability, so each
  * endpoint is checked through a separate native updater builder. This keeps
@@ -1050,7 +1050,7 @@ async applyApprovedLocalBackendUpdate(approved: boolean, channel: string, versio
  * check. The plugin currently logs only that the endpoint returned a
  * non-success status, so this follow-up request captures the configured URL,
  * HTTP status, content type, and a bounded response preview in the app log.
- * 
+ *
  * This command is diagnostic-only: it never downloads, installs, or relaunches
  * the application. It is called only after the signed updater check fails.
  */
@@ -1064,7 +1064,7 @@ async diagnoseGuiUpdateCheck(reason: string) : Promise<Result<null, CommandError
 },
 /**
  * Probe the current install state without making any changes.
- * 
+ *
  * Safe to call on every app launch — performs only filesystem lookups and a
  * single OS service-manager status query (no `launchctl load`, no copy).
  */
@@ -1078,19 +1078,19 @@ async installationStatus() : Promise<Result<InstallationStatus, CommandError>> {
 },
 /**
  * Install the selected components from the bundled sidecars.
- * 
+ *
  * Steps for each component the caller asked for:
- * 
+ *
  * 1. Resolve the sidecar binary path next to the GUI executable
  * (`<exe_dir>/<name>-<target-triple>`).
  * 2. Hand it to `vertebrae_installer::install_binary`, which copies it into
  * the per-OS data dir, sets `0o755`, and creates a symlink in
  * `~/.local/bin`.
- * 
+ *
  * If the daemon was installed, we then call
  * `vertebrae_installer::install_service` to register it with launchd /
  * systemd `--user`. The CLI does not need a service.
- * 
+ *
  * Returns the post-install [`InstallationStatus`] so the caller can refresh
  * its UI without a follow-up `installation_status()` round-trip.
  */
@@ -1197,75 +1197,75 @@ workflowTransitionChangedEvent: "workflow-transition-changed-event"
 /**
  * Agent configuration for workflow steps - mirrors db::AgentConfig
  */
-export type AgentConfig = { provider?: AgentProvider | null; 
+export type AgentConfig = { provider?: AgentProvider | null;
 /**
  * Model for the current session
  */
-model: string | null; 
+model: string | null;
 /**
  * Codex upstream model provider configured in ~/.codex/config.toml
  */
-codex_model_provider: string | null; 
+codex_model_provider: string | null;
 /**
  * Fallback model when default model is overloaded
  */
-fallback_model: string | null; 
+fallback_model: string | null;
 /**
  * OpenAI/Codex reasoning effort for the configured model
  */
-reasoning_effort: string | null; 
+reasoning_effort: string | null;
 /**
  * Provider serving speed preference.
  */
-speed_tier: string | null; 
+speed_tier: string | null;
 /**
  * Provider style identifier.
  */
-personality: string | null; 
+personality: string | null;
 /**
  * Provider output detail level.
  */
-verbosity: string | null; 
+verbosity: string | null;
 /**
  * System prompt to use for the session
  */
-system_prompt: string | null; 
+system_prompt: string | null;
 /**
  * Append a system prompt to the default system prompt
  */
-append_system_prompt: string | null; 
+append_system_prompt: string | null;
 /**
  * JSON object defining custom agents (serialized as JSON string)
  */
-agents: string | null; 
+agents: string | null;
 /**
  * List of available tools from the built-in set
  */
-tools?: string[]; 
+tools?: string[];
 /**
  * List of tool names to allow
  */
-allowed_tools?: string[]; 
+allowed_tools?: string[];
 /**
  * List of tool names to deny
  */
-disallowed_tools?: string[]; 
+disallowed_tools?: string[];
 /**
  * Permission mode to use for the session
  */
-permission_mode: PermissionMode | null; 
+permission_mode: PermissionMode | null;
 /**
  * Maximum dollar amount to spend on API calls
  */
-max_budget_usd: number | null; 
+max_budget_usd: number | null;
 /**
  * Paths to MCP server configuration files or JSON strings
  */
-mcp_config?: string[]; 
+mcp_config?: string[];
 /**
  * Directories to load plugins from
  */
-plugin_dirs?: string[]; 
+plugin_dirs?: string[];
 /**
  * JSON Schema for structured output validation (serialized as JSON string)
  */
@@ -1287,23 +1287,23 @@ export type ArtifactLinkMetadata = { version: number; content_kind: string; form
 /**
  * Code reference - file location reference
  */
-export type CodeRef = { 
+export type CodeRef = {
 /**
  * Path to the file (relative to repository root)
  */
-path: string; 
+path: string;
 /**
  * Optional starting line number
  */
-line_start: number | null; 
+line_start: number | null;
 /**
  * Optional ending line number
  */
-line_end: number | null; 
+line_end: number | null;
 /**
  * Optional name/label for this reference
  */
-name: string | null; 
+name: string | null;
 /**
  * Optional description
  */
@@ -1314,7 +1314,7 @@ description: string | null }
 export type CommandError = { message: string }
 /**
  * State of a single component (one of `vtb`, `vtb-daemon`, `vtb-gate`) on this machine.
- * 
+ *
  * The welcome screen renders different copy depending on whether the user
  * already has the binary available from a previous `cargo install`,
  * package-manager install, or GUI-managed install. We surface the managed
@@ -1322,24 +1322,24 @@ export type CommandError = { message: string }
  * checks while stale GUI-managed installs can be rewritten from the bundled
  * sidecars.
  */
-export type ComponentStatus = { 
+export type ComponentStatus = {
 /**
  * `true` if `<bin_dir>/<name>` exists (i.e. we previously staged this
  * component, or another tool did). When this is `true` and
  * `needs_refresh` is `false`, the installer can be skipped for this
  * component.
  */
-installed_at_symlink: boolean; 
+installed_at_symlink: boolean;
 /**
  * `true` if this component has an installer-managed staged binary or
  * managed symlink whose bytes differ from the bundled sidecar shipped
  * with this GUI. Unrelated PATH-only binaries never set this flag.
  */
-needs_refresh: boolean; 
+needs_refresh: boolean;
 /**
  * Absolute path of the symlink we manage in `~/.local/bin`.
  */
-symlink_path: string; 
+symlink_path: string;
 /**
  * `true` if some executable named `<name>` is resolvable on `$PATH`
  * (anywhere — not necessarily the symlink we manage). Lets the UI
@@ -1350,7 +1350,13 @@ export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backe
 /**
  * Options for creating a workflow step.
  */
-export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; prompt?: string | null; agents: string[]; skills: string[]; agent_config?: AgentConfig | null; order: number; transitions_to: string[]; step_type?: StepType; output_schema: JsonValue | null; persistence_options?: JsonValue | null; route_config?: JsonValue | null }
+export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; order: number; transitions_to: string[]; step_type?: StepType;
+/**
+ * Config fields declared by `step_type` (snake_case keys; `agent_config`
+ * uses the GUI `AgentConfig` shape). Omitted fields take the type's
+ * defaults; must be null for human_input, stop, and finish steps.
+ */
+config?: Partial<{ [key in string]: JsonValue }> | null; persistence_options?: JsonValue | null }
 export type Daemon = { id: string; status: string; name: string | null; display_name: string; max_concurrency: number | null; enrolled_at: string | null; removed_at: string | null; inserted_at: string | null; updated_at: string | null; daemon_version?: string | null; os?: string | null; architecture?: string | null; host?: string | null; started_at?: string | null; last_seen_at?: string | null; report_version?: number | null; capabilities?: JsonValue | null; connection_status?: string | null; health?: string | null; health_reason?: string | null }
 export type DaemonBootstrap = { daemon: Daemon; enrollment_token: string; expires_at: string }
 export type DaemonBootstrapResult = { connection_id: string; bootstrap: DaemonBootstrap }
@@ -1392,23 +1398,23 @@ export type InferLocalChatSessionTitleOutput = { title: string | null; confidenc
 /**
  * Result returned after GUI-native project initialization.
  */
-export type InitializeProjectResult = { 
+export type InitializeProjectResult = {
 /**
  * Project slug registered in config.toml.
  */
-slug: string; 
+slug: string;
 /**
  * Sacrum project ID.
  */
-project_id: string; 
+project_id: string;
 /**
  * Display name used for the Sacrum project.
  */
-project_name: string; 
+project_name: string;
 /**
  * Canonical local project path.
  */
-path: string; 
+path: string;
 /**
  * Whether this call created the project on Sacrum.
  */
@@ -1419,16 +1425,40 @@ project_created: boolean }
  */
 export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
-export type LoadLocalChatSessionReplayInput = { session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; project_path: string | null; created_at: string | null; 
+/**
+ * Config of an `llm_inference` step.
+ */
+export type LlmInferenceStepConfig = { version: number;
+/**
+ * Prompt sent to the agent when executing this step
+ */
+prompt: string | null;
+/**
+ * JSON Schema describing the expected output of this step
+ */
+output_schema: JsonValue | null;
+/**
+ * Paths to .claude/agents/ files for this step
+ */
+agents: string[];
+/**
+ * Skill names available for this step
+ */
+skills: string[];
+/**
+ * Agent configuration for this step
+ */
+agent_config: AgentConfig }
+export type LoadLocalChatSessionReplayInput = { session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; project_path: string | null; created_at: string | null;
 /**
  * Opaque cursor returned by the previous (newer) replay page.
  */
-cursor: string | null; 
+cursor: string | null;
 /**
  * Requested normalized event count; the harness applies a safe maximum.
  */
 limit: number | null }
-export type LoadLocalChatSessionReplayOutput = { 
+export type LoadLocalChatSessionReplayOutput = {
 /**
  * Each entry is one serialized, normalized HarnessEventV1 JSON object.
  */
@@ -1459,7 +1489,7 @@ export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: 
 export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; selectedPersonality: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; threadTotalTokens: number | null; messageCount: number; lifecycle: string; status: string }
 export type LocalChatSessionInitEvent = { backend_session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; model: string; tools: string[]; speed_tier_status?: LocalChatSpeedTierStatus | null }
 export type LocalChatSessionTitleEvent = { backend_session_id: string; harness: LocalChatHarnessKind; title: string }
-export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; model: string; context_tokens: number; context_window: number; 
+export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; model: string; context_tokens: number; context_window: number;
 /**
  * Cumulative thread token total, distinct from the current request's
  * context utilization above.
@@ -1487,19 +1517,19 @@ export type PermissionRequestEvent = { request_id: string; session_id: string | 
  * resolver-computed `pipeline_counts`/`active_count` aggregates and the
  * preloaded list of intra-workflow `transitions_to` step IDs.
  */
-export type PipelineStep = { id: string; name: string; workflow_id: string; goal: string | null; step_order: number; step_type: string | null; 
+export type PipelineStep = { id: string; name: string; workflow_id: string; goal: string | null; step_order: number; step_type: string | null;
 /**
  * IDs of the steps that this step transitions into within the same workflow.
  */
-transitions_to: string[]; 
+transitions_to: string[];
 /**
  * Per-level task counts for tasks currently parked at this step.
  */
-task_counts: PipelineTaskCounts; 
+task_counts: PipelineTaskCounts;
 /**
  * Canonical per-step counts from Sacrum, including active TaskRun count.
  */
-pipeline_counts: PipelineStepCounts; 
+pipeline_counts: PipelineStepCounts;
 /**
  * Number of active TaskRuns for tasks currently parked at this step.
  */
@@ -1511,7 +1541,7 @@ active_count: number }
 export type PipelineStepCounts = { epic: number; ticket: number; task: number; active: number }
 /**
  * Full pipeline summary payload returned by `get_pipeline_summary`.
- * 
+ *
  * One `PipelineWorkflow` per workflow in the project. There is intentionally
  * no top-level flat task index — the GUI refreshes this authoritative
  * aggregate payload from Sacrum websocket events.
@@ -1535,21 +1565,29 @@ export type ResolvePermissionRequestError = { kind: ResolvePermissionRequestErro
 export type ResolvePermissionRequestErrorKind = "unavailable" | "not_found" | "invalid" | "internal"
 export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
 /**
+ * Config of a `route` step.
+ */
+export type RouteStepConfig = { version: number;
+/**
+ * Opaque deterministic route configuration
+ */
+route_config: JsonValue | null }
+/**
  * Current Sacrum settings state for GUI onboarding.
  */
-export type SacrumConfigStatus = { 
+export type SacrumConfigStatus = {
 /**
  * Shared config.toml path, when the platform exposes a config directory.
  */
-config_path: string | null; 
+config_path: string | null;
 /**
  * Whether config.toml exists on disk.
  */
-config_exists: boolean; 
+config_exists: boolean;
 /**
  * Sacrum URL used by GUI onboarding.
  */
-url: string; 
+url: string;
 /**
  * Whether a non-empty API token is configured.
  */
@@ -1558,15 +1596,15 @@ export type SaveLocalChatSessionIndexInput = { sessions: LocalChatSessionIndexEn
 /**
  * A saved project in the project list
  */
-export type SavedProject = { 
+export type SavedProject = {
 /**
  * Project slug (from config.toml key)
  */
-slug: string; 
+slug: string;
 /**
  * Sacrum project ID (UUID)
  */
-project_id: string; 
+project_id: string;
 /**
  * Git root path for the project
  */
@@ -1574,27 +1612,27 @@ path: string }
 /**
  * Section content within a task
  */
-export type Section = { 
+export type Section = {
 /**
  * The type of this section
  */
-type: SectionType; 
+type: SectionType;
 /**
  * The content of this section
  */
-content: string; 
+content: string;
 /**
  * Optional ordering for sections of the same type
  */
-order: number | null; 
+order: number | null;
 /**
  * Whether this section (typically a step) is done
  */
-done: boolean | null; 
+done: boolean | null;
 /**
  * When this section was marked as done (ISO 8601 string)
  */
-done_at: string | null; 
+done_at: string | null;
 /**
  * Code references attached to this section
  */
@@ -1618,15 +1656,15 @@ export type SectionType = "goal" | "context" | "current_behavior" | "desired_beh
  * `--user` on Linux). Mirrors [`vertebrae_installer::ServiceStatus`] in a
  * shape that's friendlier to TypeScript.
  */
-export type ServiceState = 
+export type ServiceState =
 /**
  * Service is registered and currently running.
  */
-{ kind: "running"; pid: number } | 
+{ kind: "running"; pid: number } |
 /**
  * Service is registered but not currently running.
  */
-{ kind: "loaded"; last_exit_status: number } | 
+{ kind: "loaded"; last_exit_status: number } |
 /**
  * Service is not registered with the OS service manager.
  */
@@ -1634,27 +1672,27 @@ export type ServiceState =
 /**
  * Session log entry - mirrors db::SessionLog
  */
-export type SessionLog = { 
+export type SessionLog = {
 /**
  * Log ID (string form)
  */
-id: string | null; 
+id: string | null;
 /**
  * Stable key for ephemeral logs that replace earlier snapshots
  */
-logical_key?: string | null; 
+logical_key?: string | null;
 /**
  * Step execution ID this log belongs to
  */
-step_execution_id?: string; 
+step_execution_id?: string;
 /**
  * The log content
  */
-content?: string; 
+content?: string;
 /**
  * Producer format used to select the compatible frontend parser.
  */
-format?: string | null; 
+format?: string | null;
 /**
  * When this log was created (ISO 8601 string)
  */
@@ -1672,69 +1710,50 @@ export type SessionLogCreatedEvent = { log_id: string; step_execution_id: string
  */
 export type SessionLogUpdatedEvent = { log_id: string; step_execution_id: string; session_log: SessionLog | null }
 /**
- * Workflow step entity - mirrors db::Step
+ * Workflow step entity - mirrors core::Step
  */
-export type Step = { 
+export type Step = {
 /**
  * Step ID (string form)
  */
-id: string | null; 
+id: string | null;
 /**
  * Display name for this step
  */
-name: string; 
+name: string;
 /**
  * Reference to the workflow this step belongs to
  */
-workflow_id: string; 
+workflow_id: string;
 /**
  * What this step should accomplish
  */
-goal: string | null; 
+goal: string | null;
 /**
- * Prompt sent to the agent when executing this step
+ * Step type mirrored from core::StepType; fixed once the step exists.
  */
-prompt: string | null; 
+step_type: StepType;
 /**
- * Paths to .claude/agents/ files for this step
+ * `step_type`-specific configuration; null for human_input, stop, and
+ * finish steps.
  */
-agents?: string[]; 
-/**
- * Skill names available for this step
- */
-skills?: string[]; 
-/**
- * Agent configuration for this step
- */
-agent_config?: AgentConfig; 
-/**
- * Step type mirrored from core::StepType.
- */
-step_type?: StepType; 
-/**
- * JSON Schema describing the expected output of this step
- */
-output_schema?: JsonValue | null; 
+config: StepConfig | null;
 /**
  * Orchestrator-owned persistence configuration for this step
  */
-persistence_options?: JsonValue | null; 
-/**
- * Opaque deterministic route configuration for route steps
- */
-route_config?: JsonValue | null; 
+persistence_options?: JsonValue | null;
 /**
  * List of step IDs this step can transition to
  */
-transitions_to?: string[]; 
+transitions_to: string[];
 /**
  * Ordering index for sequential fallback (0-based, Sacrum: `step_order`).
  */
-order?: number; 
+order: number;
 /**
  * Creation timestamp (ISO 8601 string)
  */
-created_at: string | null; 
+created_at: string | null;
 /**
  * Last update timestamp (ISO 8601 string)
  */
@@ -1750,100 +1769,105 @@ export type StepChangeType = "Created" | "Updated" | "Deleted"
  */
 export type StepChangedEvent = { step_id: string; workflow_id: string; change_type: StepChangeType; step: Step | null }
 /**
+ * A step's `step_type`-specific configuration, serialized as the bare
+ * config object. Narrow it with the owning step's `step_type`.
+ */
+export type StepConfig = LlmInferenceStepConfig | RouteStepConfig | WaitChildrenStepConfig
+/**
  * Step execution record - mirrors db::StepExecution.
- * 
+ *
  * Carries the full sacrum field set so the traces UI can render prompt,
  * output, context, transition_result, model/provider, token usage, cost,
  * duration, handoff, and session_id. All extended fields are `Option`-typed
  * because historical executions and minimal payloads may not populate them.
  */
-export type StepExecution = { 
+export type StepExecution = {
 /**
  * Execution ID (string form)
  */
-id: string | null; 
+id: string | null;
 /**
  * Task ID this execution belongs to
  */
-task_id?: string; 
+task_id?: string;
 /**
  * TaskRun ID this execution belongs to, when present
  */
-task_run_id?: string | null; 
+task_run_id?: string | null;
 /**
  * Workflow ID being executed
  */
-workflow_id?: string; 
+workflow_id?: string;
 /**
  * Name of the step being executed
  */
-step_name?: string; 
+step_name?: string;
 /**
  * Semantic workflow step type, when provided by Sacrum
  */
-step_type?: string | null; 
+step_type?: string | null;
 /**
  * When this step execution started (ISO 8601 string)
  */
-started_at?: string; 
+started_at?: string;
 /**
  * When this step execution completed (ISO 8601 string)
  */
-completed_at: string | null; 
+completed_at: string | null;
 /**
  * Current status of this step execution
  */
-status?: ExecutionStatus; 
+status?: ExecutionStatus;
 /**
  * Prompt text/JSON that drove the execution
  */
-prompt?: string | null; 
+prompt?: string | null;
 /**
  * Final output of the execution
  */
-output?: string | null; 
+output?: string | null;
 /**
  * Execution context (arbitrary JSON serialized as string)
  */
-context?: string | null; 
+context?: string | null;
 /**
- * Transition decision payload (route/evaluate steps)
+ * Transition decision payload (route steps)
  */
-transition_result?: string | null; 
+transition_result?: string | null;
 /**
  * Model identifier (e.g. "claude-opus-4")
  */
-model?: string | null; 
+model?: string | null;
 /**
  * Model provider (e.g. "anthropic")
  */
-model_provider?: string | null; 
+model_provider?: string | null;
 /**
  * Input tokens consumed
  */
-input_tokens?: number | null; 
+input_tokens?: number | null;
 /**
  * Output tokens emitted
  */
-output_tokens?: number | null; 
+output_tokens?: number | null;
 /**
  * Cache-read ("cache hit") input tokens. Session-cumulative figure from
  * Sacrum; aggregate per run by taking the latest execution's value.
  */
-cache_read_tokens?: number | null; 
+cache_read_tokens?: number | null;
 /**
  * Cost in USD, serialized as a string to preserve Decimal precision
  * across the Sacrum WS / GraphQL boundary.
  */
-cost?: string | null; 
+cost?: string | null;
 /**
  * Wall-clock duration in milliseconds
  */
-duration_ms?: number | null; 
+duration_ms?: number | null;
 /**
  * Handoff payload from a route step (JSON encoded)
  */
-handoff?: string | null; 
+handoff?: string | null;
 /**
  * Provider session identifier (e.g. Claude session ID)
  */
@@ -1869,7 +1893,7 @@ export type StepTransitionChangeType = "Created" | "Deleted"
 /**
  * Event payload for step transition changes.
  * Emitted when a step transition is created or deleted.
- * 
+ *
  * `from_step_id` / `to_step_id` are hoisted from the Sacrum payload so the
  * pipeline reducer can update each step's `transitions_to[]` without a
  * refetch. Sacrum sends the full edge on both `Created` and `Deleted`
@@ -1880,7 +1904,7 @@ export type StepTransitionChangedEvent = { transition_id: string; from_step_id: 
 /**
  * Step type - mirrors core::StepType
  */
-export type StepType = "execute" | "evaluate" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
+export type StepType = "llm_inference" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
 /**
  * StopRun command input. Provide either `task_run_id` or `task_id`.
  */
@@ -1888,103 +1912,103 @@ export type StopRunRequest = { task_run_id: string | null; task_id: string | nul
 /**
  * Full task details - mirrors core::Task with string IDs and dates
  */
-export type Task = { 
+export type Task = {
 /**
  * Task ID (string form)
  */
-id: string; 
+id: string;
 /**
  * Task title
  */
-title: string; 
+title: string;
 /**
  * Optional description
  */
-description: string | null; 
+description: string | null;
 /**
  * Hierarchy level (null when created without explicit level)
  */
-level: TaskLevel | null; 
+level: TaskLevel | null;
 /**
  * Optional priority
  */
-priority: TaskPriority | null; 
+priority: TaskPriority | null;
 /**
  * Tags for categorization
  */
-tags?: string[]; 
+tags?: string[];
 /**
  * Workflow ID (string form)
  */
-workflow_id: string | null; 
+workflow_id: string | null;
 /**
  * Current step ID (string form) - used for positioning
  */
-current_step_id: string | null; 
+current_step_id: string | null;
 /**
  * Workflow name (if task is assigned to a workflow)
  */
-workflow_name: string | null; 
+workflow_name: string | null;
 /**
  * Current step name (if task has a current step in workflow)
  */
-step_name: string | null; 
+step_name: string | null;
 /**
  * Current step type (if task has a current step in workflow)
  */
-step_type: StepType | null; 
+step_type: StepType | null;
 /**
  * Server-derived TaskRun controls for Run/Stop surfaces
  */
-run_controls?: TaskRunControls | null; 
+run_controls?: TaskRunControls | null;
 /**
  * Whether this task is archived
  */
-archived?: boolean; 
+archived?: boolean;
 /**
  * Optional worktree path
  */
-worktree: string | null; 
+worktree: string | null;
 /**
  * Reason why the task was rejected
  */
-rejection_reason: string | null; 
+rejection_reason: string | null;
 /**
  * Parent task ID (if any)
  */
-parent_id: string | null; 
+parent_id: string | null;
 /**
  * IDs of tasks this task depends on
  */
-dependency_ids?: string[]; 
+dependency_ids?: string[];
 /**
  * IDs of tasks that depend on this task (populated by get_task)
  */
-dependent_ids?: string[]; 
+dependent_ids?: string[];
 /**
  * IDs of child tasks (populated by get_task)
  */
-child_ids?: string[]; 
+child_ids?: string[];
 /**
  * Embedded sections
  */
-sections?: Section[]; 
+sections?: Section[];
 /**
  * Embedded code references
  */
-code_refs?: CodeRef[]; 
+code_refs?: CodeRef[];
 /**
  * Creation timestamp (ISO 8601 string)
  */
-created_at: string | null; 
+created_at: string | null;
 /**
  * Last update timestamp (ISO 8601 string)
  */
-updated_at: string | null; 
+updated_at: string | null;
 /**
  * When this task was started (ISO 8601 string)
  */
-started_at: string | null; 
+started_at: string | null;
 /**
  * When this task was completed (ISO 8601 string)
  */
@@ -1997,7 +2021,7 @@ export type TaskChangeType = "Created" | "Updated" | "Deleted" | "StatusChanged"
  * Event payload for task changes.
  * Emitted when a task is created, updated, deleted, or its status changes.
  * For create/update events, `task` carries the full deserialized entity.
- * 
+ *
  * `current_step_id`, `workflow_id`, `level`, and `archived` are hoisted from
  * the Sacrum CDC payload so the reducer can act on `Deleted` events (which
  * carry a before-image tombstone, not a full Task) without keeping a local
@@ -2008,35 +2032,35 @@ export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType; t
 /**
  * Filter options for listing tasks
  */
-export type TaskFilterOptions = { 
+export type TaskFilterOptions = {
 /**
  * Filter by step names (OR semantics) - workflow step names
  */
-step_names: string[] | null; 
+step_names: string[] | null;
 /**
  * Filter by levels (OR semantics)
  */
-levels: TaskLevel[] | null; 
+levels: TaskLevel[] | null;
 /**
  * Filter by tags (OR semantics)
  */
-tags: string[] | null; 
+tags: string[] | null;
 /**
  * Show only root items (no parent)
  */
-root_only: boolean | null; 
+root_only: boolean | null;
 /**
  * Show only children of a specific task
  */
-children_of: string | null; 
+children_of: string | null;
 /**
  * Search text in title and description
  */
-search: string | null; 
+search: string | null;
 /**
  * Filter by workflow_id (tasks assigned to a specific workflow)
  */
-workflow_id: string | null; 
+workflow_id: string | null;
 /**
  * Filter by current_step_id (tasks currently sitting at a specific step)
  */
@@ -2056,71 +2080,71 @@ export type TaskPriority = "low" | "medium" | "high" | "critical"
 /**
  * Durable workflow run for a task.
  */
-export type TaskRun = { 
+export type TaskRun = {
 /**
  * TaskRun ID
  */
-id: string; 
+id: string;
 /**
  * Task ID this run belongs to
  */
-task_id: string; 
+task_id: string;
 /**
  * Project ID this run belongs to
  */
-project_id: string; 
+project_id: string;
 /**
  * User ID, when returned by the backend
  */
-user_id: string | null; 
+user_id: string | null;
 /**
  * Durable run lifecycle status
  */
-status: TaskRunStatus; 
+status: TaskRunStatus;
 /**
  * Effective maximum concurrent step attempts for the root TaskRun tree
  */
-max_concurrency: number | null; 
+max_concurrency: number | null;
 /**
  * When this run started (ISO 8601 string)
  */
-started_at: string | null; 
+started_at: string | null;
 /**
  * When this run ended (ISO 8601 string)
  */
-ended_at: string | null; 
+ended_at: string | null;
 /**
  * When stop was requested (ISO 8601 string)
  */
-stop_requested_at: string | null; 
+stop_requested_at: string | null;
 /**
  * Latest step execution ID associated with this run
  */
-latest_step_execution_id: string | null; 
+latest_step_execution_id: string | null;
 /**
  * Terminal outcome kind
  */
-outcome_kind: string | null; 
+outcome_kind: string | null;
 /**
  * Structured terminal outcome context
  */
-outcome_context: JsonValue | null; 
+outcome_context: JsonValue | null;
 /**
  * Parent TaskRun ID for child workflow runs
  */
-parent_task_run_id: string | null; 
+parent_task_run_id: string | null;
 /**
  * Ancestor TaskRun ID recorded by Sacrum, when this run belongs to a run tree
  */
-root_task_run_id: string | null; 
+root_task_run_id: string | null;
 /**
  * Step execution that triggered this child run
  */
-triggered_by_step_execution_id: string | null; 
+triggered_by_step_execution_id: string | null;
 /**
  * Creation timestamp from Sacrum (ISO 8601 string)
  */
-inserted_at: string | null; 
+inserted_at: string | null;
 /**
  * Last update timestamp from Sacrum (ISO 8601 string)
  */
@@ -2150,12 +2174,12 @@ export type TaskRunControlsPayload = { kind: "present"; controls: TaskRunControl
 export type TaskRunStatus = "queued" | "executing" | "waiting" | "stopping" | "stopped" | "completed" | "failed"
 /**
  * Event payload for orchestrator-driven task workflow step changes.
- * 
+ *
  * Mirrors Sacrum's `task_run_step_changed` wire event. Fires whenever a
  * task's `current_step_id` changes while a TaskRun exists, and at run-end
  * paths (completion, retry exhaustion, stop) where `to_step_id` will be
  * `null` because the run has left active statuses.
- * 
+ *
  * Disjoint with `TaskStepChangedEvent`: manual moves are blocked while an
  * orchestrator is active, so clients never receive both for the same
  * transition.
@@ -2167,11 +2191,11 @@ export type TaskRunStepChangedEvent = { task_run_id: string; task_id: string; fr
 export type TaskRunTrace = { root_task_run_id: string; task_runs?: TaskRun[]; step_executions?: StepExecution[]; session_logs?: SessionLog[] }
 /**
  * Event payload for manual task workflow step changes (no TaskRun involved).
- * 
+ *
  * Mirrors Sacrum's `task_step_changed` wire event. Fires for manual moves
  * (`assign_workflow`, `advance_to_step`, `move_to_step`) when no orchestrator
  * run exists for the task. Only emitted when `from_step_id != to_step_id`.
- * 
+ *
  * `from_step_id` may be `null` on the first workflow assignment. `to_step_id`
  * is always present on this event — run-end paths are reported through
  * `TaskRunStepChangedEvent` instead.
@@ -2180,43 +2204,43 @@ export type TaskStepChangedEvent = { task_id: string; from_step_id: string | nul
 export type UpdateComponentResult = { component: string; state: UpdateComponentState; message: string }
 export type UpdateComponentState = "pending" | "downloaded" | "verified" | "staged" | "activated" | "health_checked" | "pending_relaunch" | "rolled_back" | "failed"
 /**
- * Options for updating a workflow step.
- * Only fields that are Some will be updated. The clear flags explicitly remove
- * an existing optional value when no replacement value is supplied.
+ * Options for updating a workflow step. A step's type cannot change.
+ * Only fields that are Some will be updated. `config` is a partial patch:
+ * only its keys are written, and a null value clears that field.
  */
-export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; prompt: string | null; clear_prompt?: boolean; agents: string[] | null; skills: string[] | null; agent_config?: AgentConfig | null; step_type: StepType | null; output_schema: JsonValue | null; clear_output_schema?: boolean; persistence_options?: JsonValue | null; clear_persistence_options?: boolean; route_config?: JsonValue | null; clear_route_config?: boolean; order: number | null; transitions_to: string[] | null }
+export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; config?: Partial<{ [key in string]: JsonValue }> | null; persistence_options?: JsonValue | null; clear_persistence_options?: boolean; order: number | null; transitions_to: string[] | null }
 /**
  * Options for updating a task - allows updating multiple fields at once
  */
-export type UpdateTaskOptions = { 
+export type UpdateTaskOptions = {
 /**
  * New title (if provided)
  */
-title: string | null; 
+title: string | null;
 /**
  * New description (if provided, null clears it)
  */
-description: string | null; 
+description: string | null;
 /**
  * New priority (if provided, null clears it)
  */
-priority: string | null; 
+priority: string | null;
 /**
  * Tags to add
  */
-add_tags?: string[]; 
+add_tags?: string[];
 /**
  * Tags to remove
  */
-remove_tags?: string[]; 
+remove_tags?: string[];
 /**
  * New task level (epic, ticket, task)
  */
-level: string | null; 
+level: string | null;
 /**
  * Whether the task is archived
  */
-archived: boolean | null; 
+archived: boolean | null;
 /**
  * Worktree path (if provided, null clears it)
  */
@@ -2225,56 +2249,64 @@ export type UpdateTransactionResult = { transaction_id: string | null; state: Up
 export type UpdateTransactionState = "preflight" | "downloading" | "verifying" | "activating" | "health_checked" | "deferred_relaunch" | "success" | "partial_failure" | "retryable_failure"
 /**
  * Options for updating a workflow from the GUI.
- * 
+ *
  * Only fields that are Some will be updated.
  */
 export type UpdateWorkflowOptions = { workflow_id: string; name: string | null; description: string | null; order: number | null; is_default: boolean | null; kanban_column: string | null; factory_name: string | null; clear_factory_name: boolean }
 export type UserQuestion = { question: string; header: string; options: UserQuestionOption[]; multi_select: boolean }
 export type UserQuestionOption = { label: string; description: string }
 /**
+ * Config of a `wait_children` step.
+ */
+export type WaitChildrenStepConfig = { version: number;
+/**
+ * JSON Schema describing the expected output of this step
+ */
+output_schema: JsonValue | null }
+/**
  * Workflow - mirrors db::Workflow
  */
-export type Workflow = { 
+export type Workflow = {
 /**
  * Workflow ID (string form)
  */
-id: string | null; 
+id: string | null;
 /**
  * Workflow name
  */
-name: string; 
+name: string;
 /**
  * Optional description of the workflow
  */
-description: string | null; 
+description: string | null;
 /**
  * Reference to the initial step in the workflow
  */
-initial_step: string | null; 
+initial_step: string | null;
 /**
  * Optional kanban column
  */
-kanban_column: string | null; 
+kanban_column: string | null;
 /**
  * Optional factory name used to group related workflows
  */
-factory_name: string | null; 
+factory_name: string | null;
 /**
  * Whether this is the default workflow for new tasks
  */
-is_default?: boolean; 
+is_default?: boolean;
 /**
  * Sort order for displaying workflows (Sacrum: `display_order`).
  */
-display_order?: number; 
+display_order?: number;
 /**
  * Additional metadata as key-value pairs
  */
-metadata?: Partial<{ [key in string]: string }>; 
+metadata?: Partial<{ [key in string]: string }>;
 /**
  * Creation timestamp (ISO 8601 string)
  */
-created_at: string | null; 
+created_at: string | null;
 /**
  * Last update timestamp (ISO 8601 string)
  */
@@ -2282,11 +2314,11 @@ updated_at: string | null }
 /**
  * The type of change that occurred on a workflow.
  */
-export type WorkflowChangeType = "Created" | "Updated" | "Deleted" | 
+export type WorkflowChangeType = "Created" | "Updated" | "Deleted" |
 /**
  * A task was assigned to this workflow
  */
-"TaskAssigned" | 
+"TaskAssigned" |
 /**
  * A task was unassigned from a workflow
  */
@@ -2300,31 +2332,31 @@ export type WorkflowChangedEvent = { workflow_id: string; change_type: WorkflowC
 /**
  * Workflow transition - defines allowed transitions between workflows
  */
-export type WorkflowTransition = { 
+export type WorkflowTransition = {
 /**
  * Transition ID (string form)
  */
-id: string | null; 
+id: string | null;
 /**
  * Source workflow ID
  */
-from_workflow_id: string; 
+from_workflow_id: string;
 /**
  * Source workflow name
  */
-from_workflow_name: string; 
+from_workflow_name: string;
 /**
  * Target workflow ID
  */
-to_workflow_id: string; 
+to_workflow_id: string;
 /**
  * Target workflow name
  */
-to_workflow_name: string; 
+to_workflow_name: string;
 /**
  * Human-readable label for this transition
  */
-label: string; 
+label: string;
 /**
  * Optional target step ID in the destination workflow
  */
@@ -2336,7 +2368,7 @@ export type WorkflowTransitionChangeType = "Created" | "Deleted"
 /**
  * Event payload for workflow transition changes.
  * Emitted when a workflow-to-workflow transition is created or deleted.
- * 
+ *
  * `target_step_id` and `label` are hoisted from the Sacrum payload so the
  * pipeline reducer can construct a complete `PipelineWorkflowTransition`
  * on `Created` without a refetch.
@@ -2345,11 +2377,11 @@ export type WorkflowTransitionChangedEvent = { transition_id: string; from_workf
 /**
  * Workflow with its associated tasks including full details
  */
-export type WorkflowWithTaskDetails = { 
+export type WorkflowWithTaskDetails = {
 /**
  * The workflow itself
  */
-workflow: Workflow; 
+workflow: Workflow;
 /**
  * Tasks associated with this workflow
  */
@@ -2357,11 +2389,11 @@ tasks: Task[] }
 /**
  * Workflow with its associated tasks
  */
-export type WorkflowWithTasks = { 
+export type WorkflowWithTasks = {
 /**
  * The workflow itself
  */
-workflow: Workflow; 
+workflow: Workflow;
 /**
  * Tasks associated with this workflow
  */

@@ -4,7 +4,7 @@ import { WfBox } from "./WfBox";
 import type { AtlasWorkflow, Kind, Rect } from "./layout/types";
 
 const RECT: Rect = { x: 0, y: 0, w: 264, h: 140 };
-const SHAPE: Kind[] = ["execute", "eval"];
+const SHAPE: Kind[] = ["llm", "llm"];
 
 function makeWorkflow(overrides: Partial<AtlasWorkflow> = {}): AtlasWorkflow {
   return {

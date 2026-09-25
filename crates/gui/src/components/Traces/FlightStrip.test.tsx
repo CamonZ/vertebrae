@@ -9,7 +9,7 @@ function flatRun(): Thread[] {
   return [
     {
       id: "th-1",
-      step: { to: "accept_user_turn", kind: "execute", at: "01:13:42" },
+      step: { to: "accept_user_turn", kind: "llm", at: "01:13:42" },
       summary: { turns: 1, tools: 2, status: "ok" },
       turns: [
         {
@@ -22,7 +22,13 @@ function flatRun(): Thread[] {
               speaker: "Agent",
               prose: "hi",
             },
-            { evt: "t1", type: "tool", at: "01:14:01", cmd: "rg", kind: "shell" },
+            {
+              evt: "t1",
+              type: "tool",
+              at: "01:14:01",
+              cmd: "rg",
+              kind: "shell",
+            },
             {
               evt: "t2",
               type: "tool",
@@ -56,7 +62,7 @@ function runWithSubagent(): Thread[] {
   return [
     {
       id: "th-1",
-      step: { to: "verify_changes", kind: "execute", at: "01:22:40" },
+      step: { to: "verify_changes", kind: "llm", at: "01:22:40" },
       summary: { turns: 1, tools: 1, status: "ok" },
       turns: [
         {
@@ -75,7 +81,7 @@ function runWithSubagent(): Thread[] {
               thread: {
                 id: "sub-1",
                 label: "write_failing_test",
-                kind: "execute",
+                kind: "llm",
                 spawnLabel: "subagent",
                 summary: { turns: 1, tools: 1, status: "ok" },
                 turns: [
@@ -135,7 +141,9 @@ describe("FlightStrip", () => {
     render(<FlightStrip threads={flatRun()} />);
     expect(screen.getByTestId("flight-strip")).toBeInTheDocument();
     expect(screen.getAllByTestId("flight-strip-step")).toHaveLength(2);
-    expect(screen.getAllByTestId("flight-strip-tool").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("flight-strip-tool").length).toBeGreaterThan(
+      0
+    );
     expect(screen.getAllByTestId("flight-strip-turn")).toHaveLength(1);
   });
 

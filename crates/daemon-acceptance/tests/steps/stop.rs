@@ -18,10 +18,6 @@ pub async fn stop_boundary_workflow(world: &mut DaemonWorld) {
             &workflow_name,
             "--step",
             "work:claude-sonnet-4-6",
-            "--step",
-            "pause:claude-sonnet-4-6",
-            "--step",
-            "finish:claude-sonnet-4-6",
         ])
         .await;
     world.assert_vtb_ok("workflow add (stop boundary)");
@@ -36,9 +32,39 @@ pub async fn stop_boundary_workflow(world: &mut DaemonWorld) {
     world.workflow_id = Some(workflow_id.clone());
     world.created_workflow_ids.push(workflow_id.clone());
 
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            "finish",
+            "-w",
+            &workflow_id,
+            "--step-type",
+            "finish",
+            "--order",
+            "2",
+        ])
+        .await;
+    world.assert_vtb_ok("step add finish continuation");
+    let finish_id = step_id_by_name(world, &workflow_id, "finish").await;
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            "pause",
+            "-w",
+            &workflow_id,
+            "--step-type",
+            "stop",
+            "--order",
+            "1",
+            "--transition-to",
+            &finish_id,
+        ])
+        .await;
+    world.assert_vtb_ok("step add stop boundary");
     let work_id = step_id_by_name(world, &workflow_id, "work").await;
     let pause_id = step_id_by_name(world, &workflow_id, "pause").await;
-    let finish_id = step_id_by_name(world, &workflow_id, "finish").await;
 
     let prompt = world
         .mock_response("stop-work")
@@ -48,27 +74,17 @@ pub async fn stop_boundary_workflow(world: &mut DaemonWorld) {
         .build()
         .expect("stop boundary work response builds");
     world
-        .run_vtb(&["step", "update", &work_id, "--prompt", &prompt])
-        .await;
-    world.assert_vtb_ok("step update (stop boundary work)");
-
-    world
         .run_vtb(&[
             "step",
             "update",
-            &pause_id,
-            "--step-type",
-            "stop",
+            &work_id,
+            "--prompt",
+            &prompt,
             "--transition-to",
-            &finish_id,
+            &pause_id,
         ])
         .await;
-    world.assert_vtb_ok("step update (stop boundary)");
-
-    world
-        .run_vtb(&["step", "update", &finish_id, "--step-type", "finish"])
-        .await;
-    world.assert_vtb_ok("step update (finish continuation)");
+    world.assert_vtb_ok("step update (stop boundary work)");
 
     world.step_id = Some(pause_id);
 }

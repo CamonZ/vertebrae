@@ -4,10 +4,10 @@
 
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
-    AgentConfig, OutputVerbosity, Provider, ServiceError, SpeedTier, Step, StepService, StepType,
-    StepUpdate, VertebraeServices, normalize_provider_personality,
-    normalize_provider_reasoning_effort, validate_provider_agent_config,
-    validate_provider_model_with_codex_provider, validate_route_fields, validate_route_update,
+    AgentConfig, OutputVerbosity, Provider, ServiceError, SpeedTier, Step, StepConfig, StepService,
+    StepType, StepUpdate, VertebraeServices, normalize_provider_personality,
+    normalize_provider_reasoning_effort, validate_config_fields, validate_provider_agent_config,
+    validate_provider_model_with_codex_provider,
 };
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -45,8 +45,8 @@ impl From<CliOutputVerbosity> for OutputVerbosity {
 /// CLI representation of step types, maps to `vertebrae_core::StepType`.
 #[derive(Debug, Clone, ValueEnum)]
 pub enum CliStepType {
-    Execute,
-    Evaluate,
+    #[value(name = "llm_inference")]
+    LlmInference,
     Route,
     #[value(name = "wait_children")]
     WaitChildren,
@@ -60,8 +60,7 @@ pub enum CliStepType {
 impl From<CliStepType> for StepType {
     fn from(cli: CliStepType) -> Self {
         match cli {
-            CliStepType::Execute => StepType::Execute,
-            CliStepType::Evaluate => StepType::Evaluate,
+            CliStepType::LlmInference => StepType::LlmInference,
             CliStepType::Route => StepType::Route,
             CliStepType::WaitChildren => StepType::WaitChildren,
             CliStepType::HumanInput => StepType::HumanInput,
@@ -71,14 +70,13 @@ impl From<CliStepType> for StepType {
     }
 }
 
-fn validate_step_constraints(
+fn validate_step_transitions(
     step_type: &StepType,
-    prompt: Option<&str>,
     transitions_to: &[String],
 ) -> Result<(), ServiceError> {
-    if matches!(step_type, StepType::Finish) && (prompt.is_some() || !transitions_to.is_empty()) {
+    if matches!(step_type, StepType::Finish) && !transitions_to.is_empty() {
         return Err(ServiceError::validation_failed(
-            "Finish steps cannot define a prompt or outgoing transitions",
+            "Finish steps cannot define outgoing transitions",
         ));
     }
 
@@ -89,6 +87,18 @@ fn validate_step_constraints(
     }
 
     Ok(())
+}
+
+fn parse_json_flag(
+    value: Option<&str>,
+    flag: &str,
+) -> Result<Option<serde_json::Value>, ServiceError> {
+    value
+        .map(|json_str| {
+            serde_json::from_str::<serde_json::Value>(json_str)
+                .map_err(|e| ServiceError::validation_failed(format!("Invalid {flag} JSON: {e}")))
+        })
+        .transpose()
 }
 
 /// Step management commands
@@ -200,8 +210,13 @@ pub struct StepAddCommand {
     #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
     pub provider: Option<Provider>,
 
-    /// Type of this step (execute, evaluate, route, wait_children, human_input, stop, finish)
-    #[arg(long, value_enum, default_value = "execute")]
+    /// Type of this step (llm_inference, route, wait_children, human_input, stop, finish).
+    ///
+    /// A step's type cannot change after creation. Config flags must be
+    /// declared by the type: llm_inference takes the prompt, output schema,
+    /// agent, skill, and agent-config flags; route takes --route-config;
+    /// wait_children takes --output-schema; the others take none.
+    #[arg(long, value_enum, default_value = "llm_inference")]
     pub step_type: CliStepType,
 
     /// JSON Schema describing the expected output of this step (raw JSON string)
@@ -306,99 +321,91 @@ fn build_overlayed_agent_config(
 }
 
 impl StepAddCommand {
+    fn agent_config_flags_present(&self) -> bool {
+        self.agent_config.is_some()
+            || self.model.is_some()
+            || self.provider.is_some()
+            || self.codex_model_provider.is_some()
+            || self.reasoning_effort.is_some()
+            || self.speed_tier.is_some()
+            || self.personality.is_some()
+            || self.verbosity.is_some()
+    }
+
+    /// Config fields written by the given flags.
+    fn config_fields(&self) -> Vec<&'static str> {
+        [
+            ("prompt", self.prompt.is_some()),
+            ("output_schema", self.output_schema.is_some()),
+            ("agents", !self.agent.is_empty()),
+            ("skills", !self.skill.is_empty()),
+            ("agent_config", self.agent_config_flags_present()),
+            ("route_config", self.route_config.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(field, present)| present.then_some(field))
+        .collect()
+    }
+
+    fn build_config(&self, step_type: &StepType) -> Result<Option<StepConfig>, ServiceError> {
+        let output_schema = parse_json_flag(self.output_schema.as_deref(), "--output-schema")?;
+        let route_config = parse_json_flag(self.route_config.as_deref(), "--route-config")?;
+
+        let mut config = StepConfig::default_for(step_type);
+        match &mut config {
+            Some(StepConfig::LlmInference(config)) => {
+                config.prompt = self.prompt.clone();
+                config.output_schema = output_schema;
+                config.agents = self.agent.clone();
+                config.skills = self.skill.clone();
+                config.agent_config = build_overlayed_agent_config(
+                    AgentConfig::new(),
+                    self.agent_config.as_deref(),
+                    AgentConfigOverrides {
+                        provider: self.provider,
+                        model: self.model.as_deref(),
+                        codex_model_provider: self.codex_model_provider.as_deref(),
+                        reasoning_effort: self.reasoning_effort.as_deref(),
+                        speed_tier: self.speed_tier.map(Into::into),
+                        personality: self.personality.as_deref(),
+                        verbosity: self.verbosity.map(Into::into),
+                    },
+                )?;
+            }
+            Some(StepConfig::Route(config)) => config.route_config = route_config,
+            Some(StepConfig::WaitChildren(config)) => config.output_schema = output_schema,
+            None => {}
+        }
+        Ok(config)
+    }
+
     pub async fn execute_result(&self, service: &dyn StepService) -> Result<String, ServiceError> {
         let workflow_id = self.workflow.to_lowercase();
-
-        let agent_config = build_overlayed_agent_config(
-            AgentConfig::new(),
-            self.agent_config.as_deref(),
-            AgentConfigOverrides {
-                provider: self.provider,
-                model: self.model.as_deref(),
-                codex_model_provider: self.codex_model_provider.as_deref(),
-                reasoning_effort: self.reasoning_effort.as_deref(),
-                speed_tier: self.speed_tier.map(Into::into),
-                personality: self.personality.as_deref(),
-                verbosity: self.verbosity.map(Into::into),
-            },
-        )?;
+        let step_type: StepType = self.step_type.clone().into();
 
         let transitions_to: Vec<String> = self
             .transitions_to
             .iter()
             .map(|id| id.to_lowercase())
             .collect();
+        validate_step_transitions(&step_type, &transitions_to)?;
+        validate_config_fields(&step_type, self.config_fields())?;
 
-        let output_schema = self
-            .output_schema
-            .as_deref()
-            .map(|json_str| {
-                serde_json::from_str::<serde_json::Value>(json_str).map_err(|e| {
-                    ServiceError::validation_failed(format!("Invalid --output-schema JSON: {}", e))
-                })
-            })
-            .transpose()?;
-
-        let persistence_options = self
-            .persistence_options
-            .as_deref()
-            .map(|json_str| {
-                serde_json::from_str::<serde_json::Value>(json_str).map_err(|e| {
-                    ServiceError::validation_failed(format!(
-                        "Invalid --persistence-options JSON: {}",
-                        e
-                    ))
-                })
-            })
-            .transpose()?;
-
-        let route_config = self
-            .route_config
-            .as_deref()
-            .map(|json_str| {
-                serde_json::from_str::<serde_json::Value>(json_str).map_err(|e| {
-                    ServiceError::validation_failed(format!("Invalid --route-config JSON: {}", e))
-                })
-            })
-            .transpose()?;
-
-        let step_type: StepType = self.step_type.clone().into();
-        validate_step_constraints(&step_type, self.prompt.as_deref(), &transitions_to)?;
-        validate_route_fields(
-            &step_type,
-            self.prompt.is_some(),
-            output_schema.is_some(),
-            route_config.as_ref(),
-        )?;
+        let persistence_options =
+            parse_json_flag(self.persistence_options.as_deref(), "--persistence-options")?;
+        let config = self.build_config(&step_type)?;
 
         let mut step = Step::new(&self.name, workflow_id)
-            .with_agent_config(agent_config)
             .with_step_type(step_type)
-            .with_order(self.order);
+            .with_config(config)
+            .with_order(self.order)
+            .with_transitions_to(transitions_to);
 
-        if let Some(schema) = output_schema {
-            step = step.with_output_schema(schema);
-        }
         if let Some(options) = persistence_options {
             step = step.with_persistence_options(options);
         }
-        if let Some(route_config) = route_config {
-            step = step.with_route_config(route_config);
-        }
         if let Some(goal) = &self.goal {
             step = step.with_goal(goal);
-        }
-        if let Some(prompt) = &self.prompt {
-            step = step.with_prompt(prompt);
-        }
-        if !self.agent.is_empty() {
-            step = step.with_agents(self.agent.clone());
-        }
-        if !self.skill.is_empty() {
-            step = step.with_skills(self.skill.clone());
-        }
-        for transition in transitions_to {
-            step = step.with_transition(transition);
         }
 
         let created = if let Some(id) = &self.id {
@@ -476,16 +483,24 @@ impl StepListCommand {
                     s.id.as_ref()
                         .map(|t| t.to_string())
                         .unwrap_or_else(|| "?".to_string());
-                let model = s.agent_config.model.as_deref().unwrap_or("default");
                 let step_type = s.step_type.to_string();
-                format!(
-                    "{}. {} (id: {}, type: {}, model: {})",
-                    s.order + 1,
-                    s.name,
-                    id,
-                    step_type,
-                    model
-                )
+                match s.agent_config() {
+                    Some(agent_config) => format!(
+                        "{}. {} (id: {}, type: {}, model: {})",
+                        s.order + 1,
+                        s.name,
+                        id,
+                        step_type,
+                        agent_config.model.as_deref().unwrap_or("default")
+                    ),
+                    None => format!(
+                        "{}. {} (id: {}, type: {})",
+                        s.order + 1,
+                        s.name,
+                        id,
+                        step_type
+                    ),
+                }
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -533,21 +548,7 @@ impl StepShowCommand {
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| "?".to_string());
         let workflow_id = s.workflow_id.to_string();
-        let model = s.agent_config.model.as_deref().unwrap_or("default");
-
         let goal = s.goal.as_deref().unwrap_or("(none)");
-
-        let agents = if s.agents.is_empty() {
-            "(none)".to_string()
-        } else {
-            s.agents.join(", ")
-        };
-
-        let skills = if s.skills.is_empty() {
-            "(none)".to_string()
-        } else {
-            s.skills.join(", ")
-        };
 
         let transitions = if s.transitions_to.is_empty() {
             "(none)".to_string()
@@ -555,27 +556,9 @@ impl StepShowCommand {
             s.transitions_to.join(", ")
         };
 
-        let output_schema = s
-            .output_schema
-            .as_ref()
-            .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
-            .unwrap_or_else(|| "(none)".to_string());
+        let persistence_options = pretty_json(s.persistence_options.as_ref());
 
-        let persistence_options = s
-            .persistence_options
-            .as_ref()
-            .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
-            .unwrap_or_else(|| "(none)".to_string());
-
-        let prompt = s.prompt.as_deref().unwrap_or("(none)");
-
-        let route_config = s
-            .route_config
-            .as_ref()
-            .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
-            .unwrap_or_else(|| "(none)".to_string());
-
-        let output = format!(
+        let mut output = format!(
             r#"Step: {} - {}
 ============================================================
 
@@ -583,29 +566,39 @@ Workflow:      {}
 Order:         {}
 Step Type:     {}
 Goal:          {}
-Agents:        {}
-Skills:        {}
-Model:         {}
-Prompt:        {}
-Output Schema: {}
-Persistence:    {}
-Route Config:   {}
-Transitions:   {}
-Created:       {}
-Updated:       {}"#,
-            id,
-            s.name,
-            workflow_id,
-            s.order,
-            s.step_type,
-            goal,
-            agents,
-            skills,
-            model,
-            prompt,
-            output_schema,
+"#,
+            id, s.name, workflow_id, s.order, s.step_type, goal,
+        );
+
+        match &s.config {
+            Some(StepConfig::LlmInference(config)) => {
+                output.push_str(&format!(
+                    "Agents:        {}\nSkills:        {}\nModel:         {}\nPrompt:        {}\nOutput Schema: {}\n",
+                    list_or_none(&config.agents),
+                    list_or_none(&config.skills),
+                    config.agent_config.model.as_deref().unwrap_or("default"),
+                    config.prompt.as_deref().unwrap_or("(none)"),
+                    pretty_json(config.output_schema.as_ref()),
+                ));
+            }
+            Some(StepConfig::Route(config)) => {
+                output.push_str(&format!(
+                    "Route Config:  {}\n",
+                    pretty_json(config.route_config.as_ref())
+                ));
+            }
+            Some(StepConfig::WaitChildren(config)) => {
+                output.push_str(&format!(
+                    "Output Schema: {}\n",
+                    pretty_json(config.output_schema.as_ref())
+                ));
+            }
+            None => output.push_str("Config:        (none)\n"),
+        }
+
+        output.push_str(&format!(
+            "Persistence:   {}\nTransitions:   {}\nCreated:       {}\nUpdated:       {}",
             persistence_options,
-            route_config,
             transitions,
             s.created_at
                 .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
@@ -613,10 +606,24 @@ Updated:       {}"#,
             s.updated_at
                 .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_else(|| "-".to_string()),
-        );
+        ));
 
         Ok(output)
     }
+}
+
+fn list_or_none(values: &[String]) -> String {
+    if values.is_empty() {
+        "(none)".to_string()
+    } else {
+        values.join(", ")
+    }
+}
+
+fn pretty_json(value: Option<&serde_json::Value>) -> String {
+    value
+        .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
+        .unwrap_or_else(|| "(none)".to_string())
 }
 
 /// Update a step's properties
@@ -711,10 +718,6 @@ pub struct StepUpdateCommand {
     #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
     pub provider: Option<Provider>,
 
-    /// New step type (execute, evaluate, route, wait_children, human_input, stop, finish)
-    #[arg(long, value_enum)]
-    pub step_type: Option<CliStepType>,
-
     /// New output schema as a JSON string
     #[arg(long, value_name = "JSON")]
     pub output_schema: Option<String>,
@@ -764,62 +767,83 @@ impl StepUpdateCommand {
     /// # Errors
     ///
     /// Returns `ServiceError` if the step doesn't exist or service operations fail.
+    fn agent_config_flags_present(&self) -> bool {
+        self.agent_config.is_some()
+            || self.model.is_some()
+            || self.provider.is_some()
+            || self.codex_model_provider.is_some()
+            || self.reasoning_effort.is_some()
+            || self.speed_tier.is_some()
+            || self.personality.is_some()
+            || self.verbosity.is_some()
+            || self.clear_speed_tier
+            || self.clear_personality
+            || self.clear_verbosity
+    }
+
+    /// Config fields written (set or cleared) by the given flags.
+    fn config_fields(&self) -> Vec<&'static str> {
+        [
+            ("prompt", self.prompt.is_some() || self.clear_prompt),
+            (
+                "output_schema",
+                self.output_schema.is_some() || self.clear_output_schema,
+            ),
+            ("agents", !self.agent.is_empty() || self.clear_agents),
+            ("skills", !self.skill.is_empty() || self.clear_skills),
+            ("agent_config", self.agent_config_flags_present()),
+            (
+                "route_config",
+                self.route_config.is_some() || self.clear_route_config,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(field, present)| present.then_some(field))
+        .collect()
+    }
+
     pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
-        let existing = service.get_step(&self.id.to_lowercase()).await?;
-        if existing.is_none() {
-            return Err(ServiceError::validation_failed(format!(
-                "Step not found: {}",
-                self.id
-            )));
-        }
+        let existing = service
+            .get_step(&self.id.to_lowercase())
+            .await?
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!("Step not found: {}", self.id))
+            })?;
 
-        let existing = existing.unwrap();
-        let resulting_step_type = self
-            .step_type
-            .as_ref()
-            .map(|step_type| StepType::from(step_type.clone()))
-            .unwrap_or_else(|| existing.step_type.clone());
-
-        if self.prompt.is_some() && self.clear_prompt {
-            return Err(ServiceError::validation_failed(
-                "--prompt and --clear-prompt cannot be used together",
-            ));
-        }
-        if self.route_config.is_some() && self.clear_route_config {
-            return Err(ServiceError::validation_failed(
-                "--route-config and --clear-route-config cannot be used together",
-            ));
-        }
-
-        let route_config = self
-            .route_config
-            .as_deref()
-            .map(|json_str| {
-                serde_json::from_str::<serde_json::Value>(json_str).map_err(|e| {
-                    ServiceError::validation_failed(format!("Invalid --route-config JSON: {}", e))
-                })
-            })
-            .transpose()?;
-
-        let resulting_prompt = if self.clear_prompt {
-            None
-        } else {
-            self.prompt.as_deref().or(existing.prompt.as_deref())
-        };
-        let resulting_transitions = if self.clear_transitions || !self.transitions_to.is_empty() {
-            if self.clear_transitions {
-                Vec::new()
-            } else {
-                self.transitions_to.clone()
+        for (set, clear, flags) in [
+            (
+                self.prompt.is_some(),
+                self.clear_prompt,
+                "--prompt and --clear-prompt",
+            ),
+            (
+                self.output_schema.is_some(),
+                self.clear_output_schema,
+                "--output-schema and --clear-output-schema",
+            ),
+            (
+                self.route_config.is_some(),
+                self.clear_route_config,
+                "--route-config and --clear-route-config",
+            ),
+        ] {
+            if set && clear {
+                return Err(ServiceError::validation_failed(format!(
+                    "{flags} cannot be used together"
+                )));
             }
+        }
+
+        validate_config_fields(&existing.step_type, self.config_fields())?;
+
+        let resulting_transitions = if self.clear_transitions {
+            Vec::new()
+        } else if !self.transitions_to.is_empty() {
+            self.transitions_to.clone()
         } else {
             existing.transitions_to.clone()
         };
-        validate_step_constraints(
-            &resulting_step_type,
-            resulting_prompt,
-            &resulting_transitions,
-        )?;
+        validate_step_transitions(&existing.step_type, &resulting_transitions)?;
 
         let mut updates = StepUpdate::new();
 
@@ -850,34 +874,27 @@ impl StepUpdateCommand {
             updates = updates.with_skills(self.skill.clone());
         }
 
-        if let Some(step_type) = &self.step_type {
-            updates = updates.with_step_type(step_type.clone().into());
-        }
-
         if self.clear_output_schema {
             updates = updates.with_output_schema(None);
-        } else if let Some(json_str) = &self.output_schema {
-            let value: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
-                ServiceError::validation_failed(format!("Invalid --output-schema JSON: {}", e))
-            })?;
-            updates = updates.with_output_schema(Some(value));
+        } else if let Some(schema) =
+            parse_json_flag(self.output_schema.as_deref(), "--output-schema")?
+        {
+            updates = updates.with_output_schema(Some(schema));
         }
 
         if self.clear_persistence_options {
             updates = updates.with_persistence_options(None);
-        } else if let Some(json_str) = &self.persistence_options {
-            let value: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
-                ServiceError::validation_failed(format!(
-                    "Invalid --persistence-options JSON: {}",
-                    e
-                ))
-            })?;
-            updates = updates.with_persistence_options(Some(value));
+        } else if let Some(options) =
+            parse_json_flag(self.persistence_options.as_deref(), "--persistence-options")?
+        {
+            updates = updates.with_persistence_options(Some(options));
         }
 
         if self.clear_route_config {
             updates = updates.with_route_config(None);
-        } else if let Some(route_config) = route_config {
+        } else if let Some(route_config) =
+            parse_json_flag(self.route_config.as_deref(), "--route-config")?
+        {
             updates = updates.with_route_config(Some(route_config));
         }
 
@@ -885,20 +902,9 @@ impl StepUpdateCommand {
             updates = updates.with_order(order);
         }
 
-        if self.agent_config.is_some()
-            || self.model.is_some()
-            || self.provider.is_some()
-            || self.codex_model_provider.is_some()
-            || self.reasoning_effort.is_some()
-            || self.speed_tier.is_some()
-            || self.personality.is_some()
-            || self.verbosity.is_some()
-            || self.clear_speed_tier
-            || self.clear_personality
-            || self.clear_verbosity
-        {
+        if self.agent_config_flags_present() {
             let mut agent_config = build_overlayed_agent_config(
-                existing.agent_config.clone(),
+                existing.agent_config().cloned().unwrap_or_default(),
                 self.agent_config.as_deref(),
                 AgentConfigOverrides {
                     provider: self.provider,
@@ -924,8 +930,6 @@ impl StepUpdateCommand {
             })?;
             updates = updates.with_agent_config(config_value);
         }
-
-        validate_route_update(&existing, &updates)?;
 
         if self.clear_transitions {
             updates = updates.with_transitions_to(vec![]);
@@ -1627,7 +1631,7 @@ mod tests {
     }
 
     #[test]
-    fn test_step_add_defaults_step_type_to_execute() {
+    fn test_step_add_defaults_step_type_to_llm_inference() {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
@@ -1639,7 +1643,7 @@ mod tests {
         match cli.command {
             StepCommand::Add(cmd) => {
                 let core_type: StepType = cmd.step_type.into();
-                assert_eq!(core_type, StepType::Execute);
+                assert_eq!(core_type, StepType::LlmInference);
             }
             _ => panic!("Expected Add command"),
         }
@@ -1667,23 +1671,18 @@ mod tests {
     }
 
     #[test]
-    fn test_step_add_with_step_type_evaluate() {
-        let cli = TestCli::try_parse_from([
-            "test",
-            "add",
-            "Checker",
-            "--workflow",
-            "a1b2c3d4-0000-4000-8000-000000000006",
-            "--step-type",
-            "evaluate",
-        ])
-        .unwrap();
-        match cli.command {
-            StepCommand::Add(cmd) => {
-                let core_type: StepType = cmd.step_type.into();
-                assert_eq!(core_type, StepType::Evaluate);
-            }
-            _ => panic!("Expected Add command"),
+    fn test_step_add_rejects_retired_step_types() {
+        for retired in ["execute", "evaluate"] {
+            let result = TestCli::try_parse_from([
+                "test",
+                "add",
+                "Checker",
+                "--workflow",
+                "a1b2c3d4-0000-4000-8000-000000000006",
+                "--step-type",
+                retired,
+            ]);
+            assert!(result.is_err(), "{retired} should be rejected");
         }
     }
 
@@ -1775,65 +1774,8 @@ mod tests {
     }
 
     #[test]
-    fn test_step_update_with_step_type_wait_children() {
-        let cli = TestCli::try_parse_from([
-            "test",
-            "update",
-            "a1b2c3d4-0000-4000-8000-00000000000b",
-            "--step-type",
-            "wait_children",
-        ])
-        .unwrap();
-        match cli.command {
-            StepCommand::Update(cmd) => {
-                let core_type: StepType = cmd.step_type.unwrap().into();
-                assert_eq!(core_type, StepType::WaitChildren);
-            }
-            _ => panic!("Expected Update command"),
-        }
-    }
-
-    #[test]
-    fn test_step_update_with_step_type_human_input() {
-        let cli = TestCli::try_parse_from([
-            "test",
-            "update",
-            "a1b2c3d4-0000-4000-8000-00000000000b",
-            "--step-type",
-            "human_input",
-        ])
-        .unwrap();
-        match cli.command {
-            StepCommand::Update(cmd) => {
-                let core_type: StepType = cmd.step_type.unwrap().into();
-                assert_eq!(core_type, StepType::HumanInput);
-            }
-            _ => panic!("Expected Update command"),
-        }
-    }
-
-    #[test]
-    fn test_step_update_with_step_type_stop() {
-        let cli = TestCli::try_parse_from([
-            "test",
-            "update",
-            "a1b2c3d4-0000-4000-8000-00000000000b",
-            "--step-type",
-            "stop",
-        ])
-        .unwrap();
-        match cli.command {
-            StepCommand::Update(cmd) => {
-                let core_type: StepType = cmd.step_type.unwrap().into();
-                assert_eq!(core_type, StepType::Stop);
-            }
-            _ => panic!("Expected Update command"),
-        }
-    }
-
-    #[test]
     fn test_stop_requires_exactly_one_transition() {
-        let error = validate_step_constraints(&StepType::Stop, None, &[]).unwrap_err();
+        let error = validate_step_transitions(&StepType::Stop, &[]).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -1841,38 +1783,22 @@ mod tests {
         );
 
         let transitions = vec!["step-1".to_string(), "step-2".to_string()];
-        let error = validate_step_constraints(&StepType::Stop, None, &transitions).unwrap_err();
+        let error = validate_step_transitions(&StepType::Stop, &transitions).unwrap_err();
         assert!(
             error
                 .to_string()
                 .contains("exactly one outgoing transition")
         );
 
-        validate_step_constraints(
-            &StepType::Stop,
-            Some("ignored by the orchestrator"),
-            &["step-1".to_string()],
-        )
-        .unwrap();
+        validate_step_transitions(&StepType::Stop, &["step-1".to_string()]).unwrap();
     }
 
     #[test]
-    fn test_step_update_with_step_type_finish() {
-        let cli = TestCli::try_parse_from([
-            "test",
-            "update",
-            "a1b2c3d4-0000-4000-8000-00000000000b",
-            "--step-type",
-            "finish",
-        ])
-        .unwrap();
-        match cli.command {
-            StepCommand::Update(cmd) => {
-                let core_type: StepType = cmd.step_type.unwrap().into();
-                assert_eq!(core_type, StepType::Finish);
-            }
-            _ => panic!("Expected Update command"),
-        }
+    fn test_finish_rejects_transitions() {
+        let error =
+            validate_step_transitions(&StepType::Finish, &["step-1".to_string()]).unwrap_err();
+        assert!(error.to_string().contains("outgoing transitions"));
+        validate_step_transitions(&StepType::Finish, &[]).unwrap();
     }
 
     #[test]
@@ -1930,7 +1856,7 @@ mod tests {
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
             "--step-type",
-            "evaluate",
+            "wait_children",
             "--output-schema",
             r#"{"type":"object"}"#,
         ])
@@ -1938,7 +1864,7 @@ mod tests {
         match cli.command {
             StepCommand::Add(cmd) => {
                 let core_type: StepType = cmd.step_type.into();
-                assert_eq!(core_type, StepType::Evaluate);
+                assert_eq!(core_type, StepType::WaitChildren);
                 assert_eq!(cmd.output_schema, Some(r#"{"type":"object"}"#.to_string()));
             }
             _ => panic!("Expected Add command"),
@@ -1960,22 +1886,15 @@ mod tests {
     }
 
     #[test]
-    fn test_step_update_with_step_type() {
-        let cli = TestCli::try_parse_from([
+    fn test_step_update_rejects_step_type_flag() {
+        let result = TestCli::try_parse_from([
             "test",
             "update",
             "a1b2c3d4-0000-4000-8000-00000000000b",
             "--step-type",
-            "evaluate",
-        ])
-        .unwrap();
-        match cli.command {
-            StepCommand::Update(cmd) => {
-                let core_type: StepType = cmd.step_type.unwrap().into();
-                assert_eq!(core_type, StepType::Evaluate);
-            }
-            _ => panic!("Expected Update command"),
-        }
+            "route",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -2039,13 +1958,12 @@ mod tests {
     }
 
     #[test]
-    fn test_step_update_without_step_type_defaults_to_none() {
+    fn test_step_update_defaults_leave_fields_unchanged() {
         let cli =
             TestCli::try_parse_from(["test", "update", "a1b2c3d4-0000-4000-8000-00000000000b"])
                 .unwrap();
         match cli.command {
             StepCommand::Update(cmd) => {
-                assert!(cmd.step_type.is_none());
                 assert!(cmd.output_schema.is_none());
                 assert!(!cmd.clear_output_schema);
                 assert!(cmd.persistence_options.is_none());

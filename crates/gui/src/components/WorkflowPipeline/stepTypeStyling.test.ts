@@ -8,8 +8,7 @@ import {
 
 describe("normalizeStepType", () => {
   it.each([
-    ["execute", "execute"],
-    ["evaluate", "evaluate"],
+    ["llm_inference", "llm_inference"],
     ["route", "route"],
     ["human_input", "human_input"],
     ["wait_children", "wait_children"],
@@ -28,8 +27,7 @@ describe("normalizeStepType", () => {
 
 describe("stepTypeStyle", () => {
   it("returns the matching style for each kind", () => {
-    expect(stepTypeStyle("execute").barVar).toBe("--color-step-execute");
-    expect(stepTypeStyle("evaluate").barVar).toBe("--color-step-eval");
+    expect(stepTypeStyle("llm_inference").barVar).toBe("--color-step-llm");
     expect(stepTypeStyle("route").barVar).toBe("--color-step-route");
     expect(stepTypeStyle("human_input").barVar).toBe("--color-step-human");
     expect(stepTypeStyle("wait_children").barVar).toBe("--color-step-wait");
@@ -47,8 +45,7 @@ describe("stepTypeStyle", () => {
 
 describe("hearthStepKind", () => {
   it.each([
-    ["execute", "execute"],
-    ["evaluate", "eval"],
+    ["llm_inference", "llm"],
     ["route", "route"],
     ["human_input", "human"],
     ["wait_children", "wait"],
@@ -61,11 +58,11 @@ describe("hearthStepKind", () => {
 
 describe("hearthStepStyle", () => {
   it("reuses the canonical step palette for v2 Hearth kinds", () => {
-    expect(hearthStepStyle("eval")).toMatchObject({
-      label: "Evaluate",
-      barVar: "--color-step-eval",
-      washVar: "--color-step-eval-wash",
-      fgVar: "--color-step-eval-fg",
+    expect(hearthStepStyle("llm")).toMatchObject({
+      label: "LLM Inference",
+      barVar: "--color-step-llm",
+      washVar: "--color-step-llm-wash",
+      fgVar: "--color-step-llm-fg",
     });
   });
 });

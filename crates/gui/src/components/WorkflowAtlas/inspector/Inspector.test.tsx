@@ -1,3 +1,4 @@
+import { createMockAgentConfig } from "../../../test/test-utils";
 import {
   fireEvent,
   render,
@@ -44,7 +45,7 @@ function makeStep(
     workflow_id: workflowId,
     goal: null,
     step_order: order,
-    step_type: "execute",
+    step_type: "llm_inference",
     transitions_to: [],
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
@@ -131,26 +132,15 @@ const stepFixture = (overrides: Partial<Step> = {}): Step => ({
   name: "Plan",
   workflow_id: "wf-build",
   goal: "Lay out the plan",
-  prompt: "Plan for {{ task.title }}",
-  agents: ["planner"],
-  skills: ["estimate"],
-  agent_config: {
-    model: "claude-opus",
-    codex_model_provider: null,
-    fallback_model: null,
-    reasoning_effort: null,
-    speed_tier: null,
-    personality: null,
-    verbosity: null,
-    system_prompt: null,
-    append_system_prompt: null,
-    agents: null,
-    permission_mode: null,
-    max_budget_usd: null,
-    json_schema: null,
+  step_type: "llm_inference",
+  config: {
+    version: 1,
+    prompt: "Plan for {{ task.title }}",
+    output_schema: null,
+    agents: ["planner"],
+    skills: ["estimate"],
+    agent_config: createMockAgentConfig({ model: "claude-opus" }),
   },
-  step_type: "execute",
-  route_config: null,
   transitions_to: [],
   order: 0,
   created_at: null,
@@ -178,10 +168,43 @@ beforeEach(() => {
     status: "ok",
     data: null,
   });
+  vi.mocked(commands.createStep).mockResolvedValue({
+    status: "ok",
+    data: stepFixture({ id: "new-step" }),
+  });
   mockUseStep(stepFixture());
 });
 
 describe("WorkflowInspector", () => {
+  it.each([
+    ["llm_inference", {}],
+    ["route", {}],
+    ["wait_children", {}],
+    ["finish", null],
+  ] as const)("creates %s with its config shape", async (stepType, config) => {
+    render(
+      <WorkflowInspector
+        model={MODEL}
+        workflowId="wf-build"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "New step" },
+    });
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: stepType },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create step" }));
+    await waitFor(() =>
+      expect(commands.createStep).toHaveBeenCalledWith(
+        expect.objectContaining({ step_type: stepType, config })
+      )
+    );
+  });
+
   it("shows the workflow factory name", () => {
     const model = buildAtlasModel({
       workflows: [
@@ -409,12 +432,22 @@ describe("StepInspector", () => {
     // carries the kind carrier + data-no-pan
     const root = document.querySelector(".wfd.kindspine");
     expect(root).toHaveAttribute("data-no-pan");
-    expect(root).toHaveClass("k-execute"); // s1's real backend step type
+    expect(root).toHaveClass("k-llm"); // s1's real backend step type
   });
 
   it("shows placeholders when config is absent", () => {
     mockUseStep(
-      stepFixture({ goal: null, prompt: null, agents: [], skills: [] })
+      stepFixture({
+        goal: null,
+        config: {
+          version: 1,
+          prompt: null,
+          output_schema: null,
+          agents: [],
+          skills: [],
+          agent_config: createMockAgentConfig({ model: null }),
+        },
+      })
     );
     render(
       <StepInspector
@@ -435,10 +468,17 @@ describe("StepInspector", () => {
   it("renders the structured output schema tree when present", () => {
     mockUseStep(
       stepFixture({
-        output_schema: {
-          type: "object",
-          properties: { verdict: { type: "string" } },
-          required: ["verdict"],
+        config: {
+          version: 1,
+          prompt: null,
+          agents: [],
+          skills: [],
+          agent_config: createMockAgentConfig({ model: null }),
+          output_schema: {
+            type: "object",
+            properties: { verdict: { type: "string" } },
+            required: ["verdict"],
+          },
         },
       })
     );
@@ -472,7 +512,7 @@ describe("StepInspector", () => {
         id: "s3",
         name: "Ship",
         step_type: "route",
-        route_config: configured,
+        config: { version: 1, route_config: configured },
       })
     );
     const { rerender } = render(
@@ -497,8 +537,7 @@ describe("StepInspector", () => {
         id: "s3",
         name: "Ship",
         step_type: "route",
-        route_config: null,
-        prompt: null,
+        config: { version: 1, route_config: null },
       })
     );
     rerender(
@@ -515,14 +554,13 @@ describe("StepInspector", () => {
     );
   });
 
-  it("only allows retained route prompts to be cleared", async () => {
+  it("updates route config through the config patch", async () => {
     mockUseStep(
       stepFixture({
         id: "s3",
         name: "Ship",
         step_type: "route",
-        route_config: {},
-        prompt: "legacy prompt",
+        config: { version: 1, route_config: null },
       })
     );
     render(
@@ -534,38 +572,84 @@ describe("StepInspector", () => {
         onClose={vi.fn()}
       />
     );
-
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const prompt = screen.getByLabelText("Prompt");
-    expect(prompt).toBeDisabled();
-    expect(prompt).toHaveValue("legacy prompt");
-    fireEvent.click(screen.getByRole("button", { name: "Clear prompt" }));
-    expect(prompt).toHaveValue("");
-    expect(
-      screen.getByText("Prompt will be cleared on save.")
-    ).toBeInTheDocument();
-
+    expect(screen.queryByLabelText("Prompt")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Route config"), {
+      target: { value: '{"rules":[]}' },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save step" }));
     await waitFor(() =>
       expect(commands.updateStep).toHaveBeenCalledWith(
-        expect.objectContaining({
-          prompt: null,
-          clear_prompt: true,
-          route_config: null,
-          clear_route_config: false,
-          clear_output_schema: false,
-        })
+        expect.objectContaining({ config: { route_config: { rules: [] } } })
       )
     );
   });
 
-  it("clears an existing output schema when converting to a route", async () => {
+  it("keeps an invalid route draft for correction", () => {
     mockUseStep(
       stepFixture({
-        step_type: "execute",
-        output_schema: { type: "object" },
+        id: "s3",
+        name: "Ship",
+        step_type: "route",
+        config: { version: 1, route_config: null },
       })
     );
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s3"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Route config"), {
+      target: { value: "{" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+    expect(screen.getByLabelText("Route config")).toHaveValue("{");
+    expect(screen.getByLabelText("Route config")).toHaveAttribute(
+      "aria-invalid",
+      "true"
+    );
+    expect(
+      screen.getByText("Route config must be valid JSON.")
+    ).toBeInTheDocument();
+    expect(commands.updateStep).not.toHaveBeenCalled();
+  });
+
+  it("closes a draft when the inspected step changes", () => {
+    const { rerender } = render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Unsaved" },
+    });
+    mockUseStep(stepFixture({ id: "s2", name: "Execute" }));
+    rerender(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s2"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.queryByTestId("step-editor")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("Execute");
+  });
+
+  it("hides output schema for human input", () => {
+    mockUseStep(stepFixture({ step_type: "human_input", config: null }));
     render(
       <StepInspector
         model={MODEL}
@@ -575,67 +659,43 @@ describe("StepInspector", () => {
         onClose={vi.fn()}
       />
     );
-
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Type"), {
-      target: { value: "route" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
-
-    await waitFor(() =>
-      expect(commands.updateStep).toHaveBeenCalledWith(
-        expect.objectContaining({
-          step_type: "route",
-          output_schema: null,
-          clear_output_schema: true,
-        })
-      )
-    );
+    expect(screen.queryByText("Output Schema")).not.toBeInTheDocument();
   });
 
-  it("clears route configuration when converting a configured route", async () => {
-    mockUseStep(
-      stepFixture({
-        id: "s3",
-        name: "Ship",
-        step_type: "route",
-        route_config: { version: 1, rules: [] },
-        prompt: null,
-      })
-    );
+  it("keeps the type fixed while editing", async () => {
     render(
       <StepInspector
         model={MODEL}
         workflowId="wf-build"
-        stepId="s3"
+        stepId="s1"
         onSelect={vi.fn()}
         onClose={vi.fn()}
       />
     );
-
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Type"), {
-      target: { value: "execute" },
-    });
+    expect(
+      screen.queryByRole("combobox", { name: "Type" })
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save step" }));
-
-    await waitFor(() =>
-      expect(commands.updateStep).toHaveBeenCalledWith(
-        expect.objectContaining({
-          step_type: "execute",
-          route_config: null,
-          clear_route_config: true,
-        })
-      )
+    await waitFor(() => expect(commands.updateStep).toHaveBeenCalled());
+    expect(vi.mocked(commands.updateStep).mock.calls[0][0]).not.toHaveProperty(
+      "step_type"
     );
   });
 
   it("edits and displays orchestrator persistence options", async () => {
     mockUseStep(
       stepFixture({
-        output_schema: {
-          type: "object",
-          properties: { answer: { type: "string" } },
+        config: {
+          version: 1,
+          prompt: null,
+          agents: [],
+          skills: [],
+          agent_config: createMockAgentConfig({ model: null }),
+          output_schema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+          },
         },
         persistence_options: { artifact: { logical_name: "step-result" } },
       })
@@ -737,7 +797,7 @@ describe("StepInspector", () => {
         id: "pause",
         name: "Pause run",
         step_type: "stop",
-        prompt: null,
+        config: null,
         transitions_to: ["next"],
       })
     );

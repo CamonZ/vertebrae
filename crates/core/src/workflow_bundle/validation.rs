@@ -77,6 +77,17 @@ pub(super) fn validate_bundle(
                     format!("unsupported step type {:?}", step.step_type.as_str()),
                 ));
             }
+            if let Some(field) = step.config_fields().into_iter().find(|field| {
+                !step
+                    .step_type
+                    .config_fields()
+                    .is_some_and(|declared| declared.contains(field))
+            }) {
+                return Err(ManifestValidationError::new(
+                    format!("{step_path}.{field}"),
+                    format!("{field} is not supported for {} steps", step.step_type),
+                ));
+            }
             validate_json_object_or_null(
                 step.output_schema.as_ref(),
                 format!("{step_path}.output_schema"),

@@ -1186,12 +1186,7 @@ impl MockStepService {
 #[async_trait]
 impl StepService for MockStepService {
     async fn create_step(&self, step: &Step) -> ServiceResult<Step> {
-        vertebrae_core::validate_route_fields(
-            &step.step_type,
-            step.prompt.is_some(),
-            step.output_schema.is_some(),
-            step.route_config.as_ref(),
-        )?;
+        vertebrae_core::validate_step_config(step)?;
         let mut s = self.state.lock().unwrap();
         let id = step.id.clone().unwrap_or_else(|| s.gen_id());
         let mut stored = step.clone();
@@ -1200,12 +1195,7 @@ impl StepService for MockStepService {
         Ok(stored)
     }
     async fn create_step_with_id(&self, id: &str, step: &Step) -> ServiceResult<Step> {
-        vertebrae_core::validate_route_fields(
-            &step.step_type,
-            step.prompt.is_some(),
-            step.output_schema.is_some(),
-            step.route_config.as_ref(),
-        )?;
+        vertebrae_core::validate_step_config(step)?;
         let mut s = self.state.lock().unwrap();
         let mut stored = step.clone();
         stored.id = Some(id.to_string());
@@ -1267,7 +1257,10 @@ impl StepService for MockStepService {
             .get_step(id)
             .await?
             .ok_or_else(|| ServiceError::validation_failed(format!("Step not found: {id}")))?;
-        vertebrae_core::validate_route_update(&existing, updates)?;
+        let mut updated = existing;
+        if let Some(patch) = &updates.config {
+            vertebrae_core::apply_config_patch(&mut updated, patch)?;
+        }
 
         let mut s = self.state.lock().unwrap();
         let step = s
@@ -1280,36 +1273,15 @@ impl StepService for MockStepService {
         if let Some(goal) = &updates.goal {
             step.goal = Some(goal.clone());
         }
-        if let Some(prompt) = &updates.prompt {
-            step.prompt = prompt.clone();
-        }
-        if let Some(agents) = &updates.agents {
-            step.agents = agents.clone();
-        }
-        if let Some(skills) = &updates.skills {
-            step.skills = skills.clone();
-        }
+        step.config = updated.config;
         if let Some(order) = updates.order {
             step.order = order;
         }
         if let Some(transitions) = &updates.transitions_to {
             step.transitions_to = transitions.clone();
         }
-        if let Some(step_type) = &updates.step_type {
-            step.step_type = step_type.clone();
-        }
-        if let Some(schema_update) = &updates.output_schema {
-            step.output_schema = schema_update.clone();
-        }
         if let Some(persistence_update) = &updates.persistence_options {
             step.persistence_options = persistence_update.clone();
-        }
-        if let Some(route_config_update) = &updates.route_config {
-            step.route_config = route_config_update.clone();
-        }
-        if let Some(agent_config_value) = &updates.agent_config {
-            step.agent_config = serde_json::from_value(agent_config_value.clone())
-                .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
         }
         Ok(step.workflow_id.clone())
     }

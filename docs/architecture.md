@@ -273,17 +273,15 @@ DaemonSupervisor
   harness: `anthropic` (default) → the Claude streaming harness,
   `openai` → the Codex App Server streaming harness. See
   [vtb Guide — Provider Selection](vtb-guide/steps.md#provider-selection-anthropic--openai).
-- When an execute/evaluate step has an `output_schema`, passes it through the
+- When an `llm_inference` step has an `output_schema`, passes it through the
   provider-neutral harness request to enforce structured output
 - Step-level `output_schema` takes precedence over `agent_config.json_schema`
 - Persists the harness's normalized `HarnessEventV1` stream to Sacrum as
   `format=harness` `SessionLog` records via `SessionLogEventSink`
 - Reports completion/failure with token counts, cost, and the actual
   provider/model used, derived from the normalized usage and outcome events
-- Handles daemon-executed step types: `execute` (run prompt) and `evaluate`
-  (assess output for branching). `route` is a Sacrum-local deterministic
-  control step and is never dispatched to a daemon or evaluated from prompt/
-  `output_schema` output.
+- Handles daemon-dispatched `llm_inference` steps. `route` is a Sacrum-local
+  deterministic control step and is never dispatched to a daemon.
 - Runs as a macOS launchd or Linux systemd user service installed by the GUI onboarding flow.
   Service installation only writes the service definition; it never rewrites
   standalone enrollment state.

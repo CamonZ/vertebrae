@@ -137,6 +137,21 @@ fn validation_failures_are_table_driven_and_actionable() {
             "workflows[2].workflow_ref",
         ),
         (
+            "route step with llm_inference field",
+            |bundle: &mut WorkflowBundleManifest| {
+                bundle.workflows[0].steps[1].agents = vec!["router".to_string()];
+            },
+            "workflows[0].steps[1].agents",
+        ),
+        (
+            "config field on config-less step",
+            |bundle: &mut WorkflowBundleManifest| {
+                bundle.workflows[0].steps[0].output_schema =
+                    Some(serde_json::json!({"type": "object"}));
+            },
+            "workflows[0].steps[0].output_schema",
+        ),
+        (
             "duplicate step ref",
             |bundle: &mut WorkflowBundleManifest| {
                 let step = bundle.workflows[0].steps[0].clone();

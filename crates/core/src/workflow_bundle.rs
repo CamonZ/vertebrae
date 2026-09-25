@@ -94,7 +94,10 @@ pub struct StepManifest {
     // Opaque Sacrum configuration: target references are validated separately.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_config: Option<Value>,
-    #[serde(default = "default_step_type", skip_serializing_if = "is_execute")]
+    #[serde(
+        default = "default_step_type",
+        skip_serializing_if = "is_llm_inference"
+    )]
     pub step_type: StepType,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub step_order: i32,
@@ -122,6 +125,54 @@ impl StepManifest {
             persistence_options: None,
             route_config: None,
         }
+    }
+
+    /// Flat fields that carry a value. Sacrum imports these as the step's
+    /// config, so each must be declared by the step type; blank values
+    /// (null, `""`, `[]`, `{}`) are ignored.
+    pub fn config_fields(&self) -> Vec<&'static str> {
+        fn blank(value: Option<&Value>) -> bool {
+            match value {
+                None | Some(Value::Null) => true,
+                Some(Value::Object(object)) => object.is_empty(),
+                Some(_) => false,
+            }
+        }
+
+        [
+            ("prompt", self.prompt.as_deref().is_none_or(str::is_empty)),
+            ("output_schema", blank(self.output_schema.as_ref())),
+            ("agents", self.agents.is_empty()),
+            ("skills", self.skills.is_empty()),
+            ("agent_config", blank(self.agent_config.as_ref())),
+            ("route_config", blank(self.route_config.as_ref())),
+        ]
+        .into_iter()
+        .filter_map(|(field, blank)| (!blank).then_some(field))
+        .collect()
+    }
+
+    /// The step config object Sacrum builds from this manifest's non-blank
+    /// flat fields.
+    pub fn config_value(&self) -> Value {
+        let fields = self.config_fields();
+        let mut config = serde_json::Map::from_iter([(
+            "version".to_string(),
+            Value::from(crate::models::STEP_CONFIG_VERSION),
+        )]);
+        for field in fields {
+            let value = match field {
+                "prompt" => Value::from(self.prompt.clone()),
+                "output_schema" => self.output_schema.clone().unwrap_or_default(),
+                "agents" => Value::from(self.agents.clone()),
+                "skills" => Value::from(self.skills.clone()),
+                "agent_config" => self.agent_config.clone().unwrap_or_default(),
+                "route_config" => self.route_config.clone().unwrap_or_default(),
+                _ => unreachable!("config_fields only yields known fields"),
+            };
+            config.insert(field.to_string(), value);
+        }
+        Value::Object(config)
     }
 }
 
@@ -294,8 +345,8 @@ fn default_step_type() -> StepType {
     StepType::default()
 }
 
-fn is_execute(step_type: &StepType) -> bool {
-    matches!(step_type, StepType::Execute)
+fn is_llm_inference(step_type: &StepType) -> bool {
+    matches!(step_type, StepType::LlmInference)
 }
 
 fn is_zero(value: &i32) -> bool {

@@ -259,7 +259,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       workflow_id: "workflow-1",
       current_step_id: "step-todo",
       step_name: "todo",
-      step_type: "execute",
+      step_type: "llm_inference",
     });
     const filter = taskFilter({
       step_names: ["todo"],
@@ -282,7 +282,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       workflow_id: "workflow-1",
       current_step_id: "step-todo",
       step_name: "todo",
-      step_type: "execute",
+      step_type: "llm_inference",
     });
     emitTaskChanged({
       task_id: "wrong-search",
@@ -300,7 +300,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       workflow_name: "Implementation",
       current_step_id: "step-done",
       step_name: "done",
-      step_type: "execute" as const,
+      step_type: "llm_inference" as const,
     };
     emitTaskChanged({
       task_id: "visible",
@@ -361,7 +361,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       workflow_name: "Finished",
       current_step_id: "step-done",
       step_name: "done",
-      step_type: "execute" as const,
+      step_type: "llm_inference" as const,
     };
     emitTaskChanged({
       task_id: "visible-done",
@@ -459,7 +459,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       workflow_name: "Implementation",
       current_step_id: "step-review",
       step_name: "review",
-      step_type: "evaluate",
+      step_type: "llm_inference",
     });
     seedTaskList([cached]);
 

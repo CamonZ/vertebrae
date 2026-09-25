@@ -167,7 +167,7 @@ export function buildFlightProjection(threads: Thread[]): FlightProjection {
     n <= 1 ? 0.02 : 0.02 + (0.96 * i) / (n - 1);
 
   threads.forEach((thread, ti) => {
-    const kind: StepKind = thread.step?.kind ?? thread.kind ?? "execute";
+    const kind: StepKind = thread.step?.kind ?? thread.kind ?? "llm";
     const isWait =
       kind === "wait" ||
       (thread.turns ?? []).some((t) =>
@@ -210,7 +210,12 @@ export function buildFlightProjection(threads: Thread[]): FlightProjection {
           error: Boolean(f.msg.error) || f.msg.status === "err",
         });
       } else if (f.msg.type === "error") {
-        tools.push({ evt: f.msg.evt, threadId: thread.id, left: x, error: true });
+        tools.push({
+          evt: f.msg.evt,
+          threadId: thread.id,
+          left: x,
+          error: true,
+        });
       } else if (f.msg.type === "agent") {
         turns.push({ evt: f.msg.evt, threadId: thread.id, left: x });
       }
@@ -226,8 +231,7 @@ export function buildFlightProjection(threads: Thread[]): FlightProjection {
         const anchor =
           (childTimes.length > 0 ? norm(Math.min(...childTimes)) : null) ??
           left + width;
-        const childKind: StepKind =
-          child.step?.kind ?? child.kind ?? "execute";
+        const childKind: StepKind = child.step?.kind ?? child.kind ?? "llm";
         let sLeft = anchor;
         let sWidth = 0.06;
         if (span && childTimes.length > 1) {

@@ -161,8 +161,7 @@ impl SectionType {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum StepType {
     #[default]
-    Execute,
-    Evaluate,
+    LlmInference,
     Route,
     WaitChildren,
     HumanInput,
@@ -175,8 +174,7 @@ pub enum StepType {
 impl StepType {
     pub fn from_wire_str(value: &str) -> Self {
         match value {
-            "execute" => StepType::Execute,
-            "evaluate" => StepType::Evaluate,
+            "llm_inference" => StepType::LlmInference,
             "route" => StepType::Route,
             "wait_children" => StepType::WaitChildren,
             "human_input" => StepType::HumanInput,
@@ -188,14 +186,32 @@ impl StepType {
 
     pub fn as_str(&self) -> &str {
         match self {
-            StepType::Execute => "execute",
-            StepType::Evaluate => "evaluate",
+            StepType::LlmInference => "llm_inference",
             StepType::Route => "route",
             StepType::WaitChildren => "wait_children",
             StepType::HumanInput => "human_input",
             StepType::Stop => "stop",
             StepType::Finish => "finish",
             StepType::Unsupported(value) => value.as_str(),
+        }
+    }
+
+    /// Config fields this step type declares, or `None` when steps of this
+    /// type carry no config (`human_input`, `stop`, `finish`).
+    pub fn config_fields(&self) -> Option<&'static [&'static str]> {
+        match self {
+            StepType::LlmInference => Some(&[
+                "prompt",
+                "output_schema",
+                "agents",
+                "skills",
+                "agent_config",
+            ]),
+            StepType::Route => Some(&["route_config"]),
+            StepType::WaitChildren => Some(&["output_schema"]),
+            StepType::HumanInput | StepType::Stop | StepType::Finish => None,
+            // Sacrum is the authority for types this client does not know.
+            StepType::Unsupported(_) => None,
         }
     }
 }
@@ -1631,8 +1647,182 @@ impl PartialEq for Task {
 
 impl Eq for Task {}
 
+/// Current version of every step config variant.
+pub const STEP_CONFIG_VERSION: i32 = 1;
+
+fn step_config_version() -> i32 {
+    STEP_CONFIG_VERSION
+}
+
+/// Config of an `llm_inference` step.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmInferenceConfig {
+    #[serde(default = "step_config_version")]
+    pub version: i32,
+    /// Prompt sent to the agent when executing this step
+    #[serde(default)]
+    pub prompt: Option<String>,
+    /// JSON Schema describing the expected output of this step
+    #[serde(default)]
+    pub output_schema: Option<serde_json::Value>,
+    /// Agent file paths
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub agents: Vec<String>,
+    /// Skill names
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub skills: Vec<String>,
+    /// Agent configuration
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub agent_config: AgentConfig,
+}
+
+impl Default for LlmInferenceConfig {
+    fn default() -> Self {
+        Self {
+            version: STEP_CONFIG_VERSION,
+            prompt: None,
+            output_schema: None,
+            agents: Vec::new(),
+            skills: Vec::new(),
+            agent_config: AgentConfig::default(),
+        }
+    }
+}
+
+/// Config of a `route` step.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RouteConfig {
+    #[serde(default = "step_config_version")]
+    pub version: i32,
+    /// Opaque deterministic route configuration owned by Sacrum
+    #[serde(default)]
+    pub route_config: Option<serde_json::Value>,
+}
+
+impl Default for RouteConfig {
+    fn default() -> Self {
+        Self {
+            version: STEP_CONFIG_VERSION,
+            route_config: None,
+        }
+    }
+}
+
+/// Config of a `wait_children` step.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WaitChildrenConfig {
+    #[serde(default = "step_config_version")]
+    pub version: i32,
+    /// JSON Schema describing the expected output of this step
+    #[serde(default)]
+    pub output_schema: Option<serde_json::Value>,
+}
+
+impl Default for WaitChildrenConfig {
+    fn default() -> Self {
+        Self {
+            version: STEP_CONFIG_VERSION,
+            output_schema: None,
+        }
+    }
+}
+
+fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// A step's `step_type`-specific configuration.
+///
+/// Serializes as the bare config object; the owning step's `step_type` is the
+/// discriminator, so deserialization goes through [`StepConfig::from_value`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum StepConfig {
+    LlmInference(Box<LlmInferenceConfig>),
+    Route(RouteConfig),
+    WaitChildren(WaitChildrenConfig),
+}
+
+impl StepConfig {
+    /// Default config for a new step of `step_type`, or `None` for types
+    /// without config.
+    pub fn default_for(step_type: &StepType) -> Option<Self> {
+        match step_type {
+            StepType::LlmInference => Some(Self::LlmInference(Box::default())),
+            StepType::Route => Some(Self::Route(RouteConfig::default())),
+            StepType::WaitChildren => Some(Self::WaitChildren(WaitChildrenConfig::default())),
+            _ => None,
+        }
+    }
+
+    /// Decode a config object using the owning step's type.
+    pub fn from_value(
+        step_type: &StepType,
+        value: serde_json::Value,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        if value.is_null() {
+            return Ok(None);
+        }
+        Ok(match step_type {
+            StepType::LlmInference => {
+                Some(Self::LlmInference(Box::new(serde_json::from_value(value)?)))
+            }
+            StepType::Route => Some(Self::Route(serde_json::from_value(value)?)),
+            StepType::WaitChildren => Some(Self::WaitChildren(serde_json::from_value(value)?)),
+            _ => None,
+        })
+    }
+
+    pub fn prompt(&self) -> Option<&str> {
+        match self {
+            Self::LlmInference(config) => config.prompt.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub fn output_schema(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::LlmInference(config) => config.output_schema.as_ref(),
+            Self::WaitChildren(config) => config.output_schema.as_ref(),
+            Self::Route(_) => None,
+        }
+    }
+
+    pub fn agents(&self) -> &[String] {
+        match self {
+            Self::LlmInference(config) => &config.agents,
+            _ => &[],
+        }
+    }
+
+    pub fn skills(&self) -> &[String] {
+        match self {
+            Self::LlmInference(config) => &config.skills,
+            _ => &[],
+        }
+    }
+
+    pub fn agent_config(&self) -> Option<&AgentConfig> {
+        match self {
+            Self::LlmInference(config) => Some(&config.agent_config),
+            _ => None,
+        }
+    }
+
+    pub fn route_config(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::Route(config) => config.route_config.as_ref(),
+            _ => None,
+        }
+    }
+}
+
 /// A workflow step entity (domain model)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Step {
     /// Unique identifier
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1645,48 +1835,24 @@ pub struct Step {
     pub workflow_id: String,
 
     /// Goal for this step
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub goal: Option<String>,
 
-    /// Prompt sent to the agent when executing this step
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<String>,
-
-    /// Agent file paths
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub agents: Vec<String>,
-
-    /// Skill names
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills: Vec<String>,
-
-    /// Agent configuration
-    #[serde(default)]
-    pub agent_config: AgentConfig,
-
-    /// The type of this step (execute, evaluate, route, wait_children,
-    /// human_input, or finish)
-    #[serde(default)]
+    /// The type of this step; immutable once the step exists.
     pub step_type: StepType,
 
-    /// JSON Schema describing the expected output of this step
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_schema: Option<serde_json::Value>,
-
-    /// Opaque nullable deterministic route configuration owned by Sacrum
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub route_config: Option<serde_json::Value>,
+    /// `step_type`-specific configuration; `None` for human_input, stop, and
+    /// finish steps.
+    pub config: Option<StepConfig>,
 
     /// Optional orchestrator-owned persistence configuration for structured output
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub persistence_options: Option<serde_json::Value>,
 
     /// Step IDs this step can transition to
-    #[serde(default)]
     pub transitions_to: Vec<String>,
 
     /// Ordering index
-    #[serde(default)]
     pub order: i32,
 
     /// Creation timestamp
@@ -1699,25 +1865,52 @@ pub struct Step {
 }
 
 impl Step {
-    /// Create a new step
+    /// Create a new `llm_inference` step with default config
     pub fn new(name: impl Into<String>, workflow_id: impl Into<String>) -> Self {
+        let step_type = StepType::default();
         Self {
             id: None,
             name: name.into(),
             workflow_id: workflow_id.into(),
             goal: None,
-            prompt: None,
-            agents: Vec::new(),
-            skills: Vec::new(),
-            agent_config: AgentConfig::default(),
-            step_type: StepType::default(),
-            output_schema: None,
-            route_config: None,
+            config: StepConfig::default_for(&step_type),
+            step_type,
             persistence_options: None,
             transitions_to: Vec::new(),
             order: 0,
             created_at: None,
             updated_at: None,
+        }
+    }
+
+    pub fn prompt(&self) -> Option<&str> {
+        self.config.as_ref().and_then(StepConfig::prompt)
+    }
+
+    pub fn output_schema(&self) -> Option<&serde_json::Value> {
+        self.config.as_ref().and_then(StepConfig::output_schema)
+    }
+
+    pub fn agents(&self) -> &[String] {
+        self.config.as_ref().map_or(&[], StepConfig::agents)
+    }
+
+    pub fn skills(&self) -> &[String] {
+        self.config.as_ref().map_or(&[], StepConfig::skills)
+    }
+
+    pub fn agent_config(&self) -> Option<&AgentConfig> {
+        self.config.as_ref().and_then(StepConfig::agent_config)
+    }
+
+    pub fn route_config(&self) -> Option<&serde_json::Value> {
+        self.config.as_ref().and_then(StepConfig::route_config)
+    }
+
+    fn llm_inference_config(&mut self) -> &mut LlmInferenceConfig {
+        match &mut self.config {
+            Some(StepConfig::LlmInference(config)) => config,
+            _ => panic!("{} steps have no llm_inference config", self.step_type),
         }
     }
 
@@ -1727,57 +1920,71 @@ impl Step {
         self
     }
 
-    /// Set the prompt
-    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.prompt = Some(prompt.into());
-        self
-    }
-
-    /// Set the agents
-    pub fn with_agents(mut self, agents: Vec<String>) -> Self {
-        self.agents = agents;
-        self
-    }
-
-    /// Add an agent
-    pub fn with_agent(mut self, agent: impl Into<String>) -> Self {
-        self.agents.push(agent.into());
-        self
-    }
-
-    /// Set the skills
-    pub fn with_skills(mut self, skills: Vec<String>) -> Self {
-        self.skills = skills;
-        self
-    }
-
-    /// Add a skill
-    pub fn with_skill(mut self, skill: impl Into<String>) -> Self {
-        self.skills.push(skill.into());
-        self
-    }
-
-    /// Set the agent configuration
-    pub fn with_agent_config(mut self, agent_config: AgentConfig) -> Self {
-        self.agent_config = agent_config;
-        self
-    }
-
-    /// Set the step type
+    /// Set the step type, resetting config to that type's defaults.
     pub fn with_step_type(mut self, step_type: StepType) -> Self {
+        self.config = StepConfig::default_for(&step_type);
         self.step_type = step_type;
         self
     }
 
-    /// Set the output schema
-    pub fn with_output_schema(mut self, schema: serde_json::Value) -> Self {
-        self.output_schema = Some(schema);
+    /// Replace the config.
+    pub fn with_config(mut self, config: Option<StepConfig>) -> Self {
+        self.config = config;
         self
     }
 
-    /// Set the opaque deterministic route configuration.
+    /// Set the prompt of an `llm_inference` step.
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.llm_inference_config().prompt = Some(prompt.into());
+        self
+    }
+
+    /// Set the agents of an `llm_inference` step.
+    pub fn with_agents(mut self, agents: Vec<String>) -> Self {
+        self.llm_inference_config().agents = agents;
+        self
+    }
+
+    /// Add an agent to an `llm_inference` step.
+    pub fn with_agent(mut self, agent: impl Into<String>) -> Self {
+        self.llm_inference_config().agents.push(agent.into());
+        self
+    }
+
+    /// Set the skills of an `llm_inference` step.
+    pub fn with_skills(mut self, skills: Vec<String>) -> Self {
+        self.llm_inference_config().skills = skills;
+        self
+    }
+
+    /// Add a skill to an `llm_inference` step.
+    pub fn with_skill(mut self, skill: impl Into<String>) -> Self {
+        self.llm_inference_config().skills.push(skill.into());
+        self
+    }
+
+    /// Set the agent configuration of an `llm_inference` step.
+    pub fn with_agent_config(mut self, agent_config: AgentConfig) -> Self {
+        self.llm_inference_config().agent_config = agent_config;
+        self
+    }
+
+    /// Set the output schema of an `llm_inference` or `wait_children` step.
+    pub fn with_output_schema(mut self, schema: serde_json::Value) -> Self {
+        match &mut self.config {
+            Some(StepConfig::LlmInference(config)) => config.output_schema = Some(schema),
+            Some(StepConfig::WaitChildren(config)) => config.output_schema = Some(schema),
+            _ => panic!("{} steps have no output_schema", self.step_type),
+        }
+        self
+    }
+
+    /// Set the deterministic route configuration of a `route` step.
     pub fn with_route_config(mut self, route_config: serde_json::Value) -> Self {
-        self.route_config = Some(route_config);
+        match &mut self.config {
+            Some(StepConfig::Route(config)) => config.route_config = Some(route_config),
+            _ => panic!("{} steps have no route_config", self.step_type),
+        }
         self
     }
 
@@ -2467,27 +2674,18 @@ pub struct TaskUpdate {
     pub rejection_reason: Option<Option<String>>,
 }
 
-/// Update options for a step (domain model, no Thing fields)
+/// Update options for a step (domain model, no Thing fields).
+///
+/// A step's type cannot change. `config` is a partial patch: only the keys it
+/// contains are written, and a `null` value clears that field.
 #[derive(Debug, Default)]
 pub struct StepUpdate {
     /// New name
     pub name: Option<String>,
     /// New goal
     pub goal: Option<String>,
-    /// New prompt (Some(Some(value)) sets it; Some(None) clears it)
-    pub prompt: Option<Option<String>>,
-    /// New agents list
-    pub agents: Option<Vec<String>>,
-    /// New skills list
-    pub skills: Option<Vec<String>>,
-    /// New agent config
-    pub agent_config: Option<serde_json::Value>,
-    /// New step type
-    pub step_type: Option<StepType>,
-    /// New output schema
-    pub output_schema: Option<Option<serde_json::Value>>,
-    /// New route configuration (Some(Some(value)) replaces it; Some(None) clears it)
-    pub route_config: Option<Option<serde_json::Value>>,
+    /// Config fields to write
+    pub config: Option<serde_json::Map<String, serde_json::Value>>,
     /// New orchestrator-owned persistence configuration (Some(None) clears it)
     pub persistence_options: Option<Option<serde_json::Value>>,
     /// New transitions_to list (string IDs)
@@ -2514,52 +2712,47 @@ impl StepUpdate {
         self
     }
 
-    /// Set a new prompt
-    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.prompt = Some(Some(prompt.into()));
+    /// Write one config field; `Value::Null` clears it.
+    pub fn with_config_field(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.config
+            .get_or_insert_with(serde_json::Map::new)
+            .insert(key.into(), value);
         self
+    }
+
+    /// Set a new prompt
+    pub fn with_prompt(self, prompt: impl Into<String>) -> Self {
+        self.with_config_field("prompt", serde_json::Value::String(prompt.into()))
     }
 
     /// Explicitly clear the prompt.
-    pub fn clear_prompt(mut self) -> Self {
-        self.prompt = Some(None);
-        self
+    pub fn clear_prompt(self) -> Self {
+        self.with_config_field("prompt", serde_json::Value::Null)
     }
 
     /// Set agents list
-    pub fn with_agents(mut self, agents: Vec<String>) -> Self {
-        self.agents = Some(agents);
-        self
+    pub fn with_agents(self, agents: Vec<String>) -> Self {
+        self.with_config_field("agents", serde_json::json!(agents))
     }
 
     /// Set skills list
-    pub fn with_skills(mut self, skills: Vec<String>) -> Self {
-        self.skills = Some(skills);
-        self
+    pub fn with_skills(self, skills: Vec<String>) -> Self {
+        self.with_config_field("skills", serde_json::json!(skills))
     }
 
     /// Set a new agent config
-    pub fn with_agent_config(mut self, config: serde_json::Value) -> Self {
-        self.agent_config = Some(config);
-        self
-    }
-
-    /// Set the step type
-    pub fn with_step_type(mut self, step_type: StepType) -> Self {
-        self.step_type = Some(step_type);
-        self
+    pub fn with_agent_config(self, config: serde_json::Value) -> Self {
+        self.with_config_field("agent_config", config)
     }
 
     /// Set the output schema (Some to set, None to clear)
-    pub fn with_output_schema(mut self, schema: Option<serde_json::Value>) -> Self {
-        self.output_schema = Some(schema);
-        self
+    pub fn with_output_schema(self, schema: Option<serde_json::Value>) -> Self {
+        self.with_config_field("output_schema", schema.unwrap_or_default())
     }
 
     /// Set or clear the opaque deterministic route configuration.
-    pub fn with_route_config(mut self, route_config: Option<serde_json::Value>) -> Self {
-        self.route_config = Some(route_config);
-        self
+    pub fn with_route_config(self, route_config: Option<serde_json::Value>) -> Self {
+        self.with_config_field("route_config", route_config.unwrap_or_default())
     }
 
     /// Set or clear the orchestrator-owned persistence configuration
@@ -2863,8 +3056,8 @@ mod tests {
         assert_eq!(step.name, "review");
         assert_eq!(step.workflow_id, "wf1");
         assert_eq!(step.goal.as_deref(), Some("Review the code"));
-        assert_eq!(step.agents, vec!["agent1"]);
-        assert_eq!(step.skills, vec!["lint"]);
+        assert_eq!(step.agents(), ["agent1"]);
+        assert_eq!(step.skills(), ["lint"]);
         assert_eq!(step.transitions_to, vec!["s3"]);
         assert_eq!(step.order, 5);
     }
@@ -3250,9 +3443,10 @@ mod tests {
 
         assert_eq!(u.name.as_deref(), Some("new_name"));
         assert_eq!(u.goal.as_deref(), Some("new_goal"));
-        assert_eq!(u.agents.as_ref().unwrap(), &vec!["a1".to_string()]);
-        assert_eq!(u.skills.as_ref().unwrap(), &vec!["s1".to_string()]);
-        assert!(u.agent_config.is_some());
+        let config = u.config.as_ref().unwrap();
+        assert_eq!(config["agents"], serde_json::json!(["a1"]));
+        assert_eq!(config["skills"], serde_json::json!(["s1"]));
+        assert_eq!(config["agent_config"], serde_json::json!({"key": "val"}));
         assert_eq!(u.transitions_to.as_ref().unwrap(), &vec!["s2".to_string()]);
         assert_eq!(u.order, Some(3));
     }
@@ -3260,14 +3454,13 @@ mod tests {
     // ─── StepType Enum Tests ────────────────────────────────────────
 
     #[test]
-    fn step_type_default_is_execute() {
-        assert_eq!(StepType::default(), StepType::Execute);
+    fn step_type_default_is_llm_inference() {
+        assert_eq!(StepType::default(), StepType::LlmInference);
     }
 
     #[test]
     fn step_type_as_str() {
-        assert_eq!(StepType::Execute.as_str(), "execute");
-        assert_eq!(StepType::Evaluate.as_str(), "evaluate");
+        assert_eq!(StepType::LlmInference.as_str(), "llm_inference");
         assert_eq!(StepType::Route.as_str(), "route");
         assert_eq!(StepType::WaitChildren.as_str(), "wait_children");
         assert_eq!(StepType::HumanInput.as_str(), "human_input");
@@ -3281,8 +3474,7 @@ mod tests {
 
     #[test]
     fn step_type_display() {
-        assert_eq!(StepType::Execute.to_string(), "execute");
-        assert_eq!(StepType::Evaluate.to_string(), "evaluate");
+        assert_eq!(StepType::LlmInference.to_string(), "llm_inference");
         assert_eq!(StepType::Route.to_string(), "route");
         assert_eq!(StepType::WaitChildren.to_string(), "wait_children");
         assert_eq!(StepType::HumanInput.to_string(), "human_input");
@@ -3297,8 +3489,7 @@ mod tests {
     #[test]
     fn step_type_serde_roundtrip() {
         for (variant, expected_json) in [
-            (StepType::Execute, "\"execute\""),
-            (StepType::Evaluate, "\"evaluate\""),
+            (StepType::LlmInference, "\"llm_inference\""),
             (StepType::Route, "\"route\""),
             (StepType::WaitChildren, "\"wait_children\""),
             (StepType::HumanInput, "\"human_input\""),
@@ -3327,116 +3518,148 @@ mod tests {
     }
 
     #[test]
-    fn step_with_step_type_and_output_schema() {
-        let schema = serde_json::json!({
-            "type": "object",
-            "properties": {
-                "score": { "type": "number" }
-            }
-        });
-        let step = Step::new("eval", "wf1")
-            .with_step_type(StepType::Evaluate)
+    fn step_type_retired_values_are_unsupported() {
+        for retired in ["execute", "evaluate"] {
+            assert_eq!(
+                StepType::from_wire_str(retired),
+                StepType::Unsupported(retired.to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn step_type_config_fields() {
+        assert_eq!(
+            StepType::LlmInference.config_fields(),
+            Some(
+                &[
+                    "prompt",
+                    "output_schema",
+                    "agents",
+                    "skills",
+                    "agent_config"
+                ][..]
+            )
+        );
+        assert_eq!(StepType::Route.config_fields(), Some(&["route_config"][..]));
+        assert_eq!(
+            StepType::WaitChildren.config_fields(),
+            Some(&["output_schema"][..])
+        );
+        for step_type in [StepType::HumanInput, StepType::Stop, StepType::Finish] {
+            assert_eq!(step_type.config_fields(), None);
+        }
+    }
+
+    #[test]
+    fn step_with_step_type_resets_config_to_variant_defaults() {
+        let schema = serde_json::json!({"type": "object"});
+        let step = Step::new("wait", "wf1")
+            .with_step_type(StepType::WaitChildren)
             .with_output_schema(schema.clone());
+        assert_eq!(
+            step.config,
+            Some(StepConfig::WaitChildren(WaitChildrenConfig {
+                version: 1,
+                output_schema: Some(schema.clone()),
+            }))
+        );
+        assert_eq!(step.output_schema(), Some(&schema));
+        assert_eq!(step.prompt(), None);
 
-        assert_eq!(step.step_type, StepType::Evaluate);
-        assert_eq!(step.output_schema, Some(schema));
+        let finish = Step::new("done", "wf1").with_step_type(StepType::Finish);
+        assert_eq!(finish.config, None);
     }
 
     #[test]
-    fn step_persistence_options_builder_and_serde_roundtrip() {
-        let options = serde_json::json!({
-            "artifact": {"logical_name": "step_result"}
-        });
-        let step = Step::new("persist", "wf1").with_persistence_options(options.clone());
-
-        assert_eq!(step.persistence_options, Some(options.clone()));
-        let serialized = serde_json::to_string(&step).unwrap();
-        let deserialized: Step = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized.persistence_options, Some(options));
-    }
-
-    #[test]
-    fn step_new_defaults_step_type_to_execute() {
+    fn step_new_defaults_to_llm_inference_config() {
         let step = Step::new("run", "wf1");
-        assert_eq!(step.step_type, StepType::Execute);
-        assert_eq!(step.output_schema, None);
+        assert_eq!(step.step_type, StepType::LlmInference);
+        assert_eq!(step.config, Some(StepConfig::LlmInference(Box::default())));
+        assert_eq!(step.output_schema(), None);
     }
 
     #[test]
-    fn step_serde_roundtrip_with_new_fields() {
-        let route_config = serde_json::json!({
-            "version": 1,
-            "future": {
-                "array": ["text", 2.5, true, null],
-                "nested": {"unknown": "value"}
-            }
-        });
+    fn step_serializes_config_as_bare_object() {
+        let route_config = serde_json::json!({"version": 1, "rules": []});
         let step = Step::new("route_step", "wf1")
             .with_step_type(StepType::Route)
             .with_route_config(route_config.clone());
 
-        let json = serde_json::to_string(&step).unwrap();
-        let deserialized: Step = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(deserialized.step_type, StepType::Route);
-        assert_eq!(deserialized.route_config, Some(route_config));
+        let json = serde_json::to_value(&step).unwrap();
+        assert_eq!(json["step_type"], "route");
+        assert_eq!(
+            json["config"],
+            serde_json::json!({"version": 1, "route_config": route_config})
+        );
+        assert_eq!(
+            serde_json::to_value(Step::new("f", "wf1").with_step_type(StepType::Finish)).unwrap()["config"],
+            serde_json::Value::Null
+        );
     }
 
     #[test]
-    fn step_deserializes_without_new_fields() {
-        let json = r#"{"name":"legacy","workflow_id":"wf1"}"#;
-        let step: Step = serde_json::from_str(json).unwrap();
-        assert_eq!(step.step_type, StepType::Execute);
-        assert_eq!(step.output_schema, None);
-        assert_eq!(step.route_config, None);
-        assert_eq!(step.persistence_options, None);
-    }
-
-    #[test]
-    fn step_update_with_step_type_and_output_schema() {
-        let schema = serde_json::json!({"type": "boolean"});
-        let u = StepUpdate::new()
-            .with_step_type(StepType::Evaluate)
-            .with_output_schema(Some(schema.clone()));
-
-        assert_eq!(u.step_type, Some(StepType::Evaluate));
-        assert_eq!(u.output_schema, Some(Some(schema)));
-    }
-
-    #[test]
-    fn step_update_clear_output_schema() {
-        let u = StepUpdate::new().with_output_schema(None);
-        assert_eq!(u.output_schema, Some(None));
-    }
-
-    #[test]
-    fn step_update_distinguishes_route_config_unset_set_and_clear() {
-        let config = serde_json::json!({
+    fn step_config_from_value_uses_step_type() {
+        let value = serde_json::json!({
             "version": 1,
-            "rules": [{"future_operator": {"value": null}}]
+            "prompt": "Do it",
+            "output_schema": null,
+            "agents": null,
+            "skills": ["s"],
+            "agent_config": {"model": "opus"}
         });
-
-        assert_eq!(StepUpdate::new().route_config, None);
+        let config = StepConfig::from_value(&StepType::LlmInference, value)
+            .unwrap()
+            .unwrap();
+        assert_eq!(config.prompt(), Some("Do it"));
+        assert!(config.agents().is_empty());
+        assert_eq!(config.skills(), ["s"]);
         assert_eq!(
-            StepUpdate::new()
-                .with_route_config(Some(config.clone()))
-                .route_config,
-            Some(Some(config))
+            config.agent_config().unwrap().model.as_deref(),
+            Some("opus")
+        );
+
+        let wait = StepConfig::from_value(
+            &StepType::WaitChildren,
+            serde_json::json!({"version": 1, "output_schema": {"type": "object"}}),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(wait, StepConfig::WaitChildren(_)));
+
+        assert_eq!(
+            StepConfig::from_value(&StepType::Route, serde_json::Value::Null).unwrap(),
+            None
         );
         assert_eq!(
-            StepUpdate::new().with_route_config(None).route_config,
-            Some(None)
+            StepConfig::from_value(&StepType::Finish, serde_json::json!({})).unwrap(),
+            None
         );
     }
 
     #[test]
-    fn step_update_distinguishes_prompt_unset_set_and_clear() {
-        assert_eq!(StepUpdate::new().prompt, None);
+    fn step_update_config_is_a_partial_patch() {
+        assert_eq!(StepUpdate::new().config, None);
+
+        let schema = serde_json::json!({"type": "boolean"});
+        let update = StepUpdate::new()
+            .with_prompt("keep this")
+            .with_output_schema(Some(schema.clone()))
+            .with_route_config(None);
         assert_eq!(
-            StepUpdate::new().with_prompt("keep this").prompt,
-            Some(Some("keep this".to_string()))
+            serde_json::Value::Object(update.config.unwrap()),
+            serde_json::json!({
+                "prompt": "keep this",
+                "output_schema": schema,
+                "route_config": null
+            })
         );
-        assert_eq!(StepUpdate::new().clear_prompt().prompt, Some(None));
+
+        let cleared = StepUpdate::new().clear_prompt().with_output_schema(None);
+        assert_eq!(
+            serde_json::Value::Object(cleared.config.unwrap()),
+            serde_json::json!({"prompt": null, "output_schema": null})
+        );
     }
 
     #[test]

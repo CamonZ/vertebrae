@@ -14,7 +14,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { CloseIcon, IconButton } from "../../panels";
 import { useStep } from "../../../hooks";
-import { commands, type JsonValue, type StepType } from "../../../bindings";
+import {
+  commands,
+  type JsonValue,
+  type LlmInferenceStepConfig,
+  type RouteStepConfig,
+  type WaitChildrenStepConfig,
+} from "../../../bindings";
 import { unwrapCommand } from "../../../query";
 import { LiquidHighlight } from "../../StepDetail/LiquidHighlight";
 import { SchemaTree } from "../../StepDetail/SchemaTree";
@@ -45,8 +51,6 @@ interface Transition {
 
 function backendTypeForKind(kind: string): string {
   switch (kind) {
-    case "eval":
-      return "evaluate";
     case "human":
       return "human_input";
     case "wait":
@@ -58,7 +62,7 @@ function backendTypeForKind(kind: string): string {
     case "stop":
       return "stop";
     default:
-      return "execute";
+      return "llm_inference";
   }
 }
 
@@ -100,28 +104,44 @@ export function StepInspector({
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [clearPrompt, setClearPrompt] = useState(false);
-  const [type, setType] = useState<StepType>("execute");
   const [agentsText, setAgentsText] = useState("");
   const [skillsText, setSkillsText] = useState("");
   const [transitionsTo, setTransitionsTo] = useState("");
   const [modelValue, setModelValue] = useState("");
   const [outputSchema, setOutputSchema] = useState("");
+  const [routeConfig, setRouteConfig] = useState("");
   const [persistenceOptions, setPersistenceOptions] = useState("");
+
+  useEffect(() => {
+    setEditing(false);
+    setError(null);
+  }, [stepId]);
 
   useEffect(() => {
     if (!cfg || editing) return;
     setName(cfg.name);
     setGoal(cfg.goal ?? "");
-    setPrompt(cfg.prompt ?? "");
-    setClearPrompt(false);
-    setType(cfg.step_type ?? "execute");
-    setAgentsText((cfg.agents ?? []).join(", "));
-    setSkillsText((cfg.skills ?? []).join(", "));
+    const inferenceConfig =
+      cfg.step_type === "llm_inference"
+        ? (cfg.config as LlmInferenceStepConfig | null)
+        : null;
+    setPrompt(inferenceConfig?.prompt ?? "");
+    setAgentsText((inferenceConfig?.agents ?? []).join(", "));
+    setSkillsText((inferenceConfig?.skills ?? []).join(", "));
     setTransitionsTo((cfg.transitions_to ?? []).join(", "));
-    setModelValue(cfg.agent_config?.model ?? "");
+    setModelValue(inferenceConfig?.agent_config?.model ?? "");
     setOutputSchema(
-      cfg.output_schema ? JSON.stringify(cfg.output_schema, null, 2) : ""
+      cfg.config && "output_schema" in cfg.config && cfg.config.output_schema
+        ? JSON.stringify(cfg.config.output_schema, null, 2)
+        : ""
+    );
+    setRouteConfig(
+      cfg.step_type === "route" &&
+        cfg.config &&
+        "route_config" in cfg.config &&
+        cfg.config.route_config
+        ? JSON.stringify(cfg.config.route_config, null, 2)
+        : ""
     );
     setPersistenceOptions(
       cfg.persistence_options
@@ -194,25 +214,25 @@ export function StepInspector({
   const kindCls = kindClass(step.kind);
   const isFinish = step.kind === "finish";
   const isStop = step.kind === "stop";
-  const agents = cfg?.agents ?? [];
-  const skills = cfg?.skills ?? [];
-  const model_ = cfg?.agent_config?.model ?? null;
+  const inference =
+    cfg?.step_type === "llm_inference"
+      ? (cfg.config as LlmInferenceStepConfig | null)
+      : null;
+  const route =
+    cfg?.step_type === "route" ? (cfg.config as RouteStepConfig | null) : null;
+  const outputConfig =
+    cfg?.step_type === "llm_inference" || cfg?.step_type === "wait_children"
+      ? (cfg.config as LlmInferenceStepConfig | WaitChildrenStepConfig | null)
+      : null;
+  const agents = inference?.agents ?? [];
+  const skills = inference?.skills ?? [];
+  const model_ = inference?.agent_config?.model ?? null;
   const stepTypeLabel =
     stepTypeLabelFor(step.stepType) ??
     stepTypeLabelFor(cfg?.step_type) ??
     backendTypeForKind(step.kind);
-  const isRouteResult = type === "route";
-  const isRouteConfigVisible = isRouteResult || stepTypeLabel === "route";
-  const isConvertingToRoute =
-    isRouteResult && cfg?.step_type !== "route";
-  const isConfiguredRouteConversion =
-    cfg?.step_type === "route" &&
-    cfg.route_config !== null &&
-    cfg.route_config !== undefined &&
-    !isRouteResult;
-  const hasPrompt = cfg?.prompt !== null && cfg?.prompt !== undefined;
-  const hasRouteConfig =
-    cfg?.route_config !== null && cfg?.route_config !== undefined;
+  const isInference = cfg?.step_type === "llm_inference";
+  const hasRouteConfig = route?.route_config != null;
 
   const listValue = (value: string) =>
     value
@@ -222,17 +242,27 @@ export function StepInspector({
 
   const save = async () => {
     const nextTransitions = listValue(transitionsTo);
-    if (type === "stop" && nextTransitions.length !== 1) {
+    if (cfg?.step_type === "stop" && nextTransitions.length !== 1) {
       setError("Stop steps require exactly one outgoing transition.");
       return;
     }
 
     let parsedSchema: JsonValue | null = null;
-    if (!isRouteResult && outputSchema.trim()) {
+    if (outputConfig && outputSchema.trim()) {
       try {
         parsedSchema = JSON.parse(outputSchema) as JsonValue;
       } catch {
         setError("Output schema must be valid JSON.");
+        return;
+      }
+    }
+
+    let parsedRouteConfig: JsonValue | null = null;
+    if (cfg?.step_type === "route" && routeConfig.trim()) {
+      try {
+        parsedRouteConfig = JSON.parse(routeConfig) as JsonValue;
+      } catch {
+        setError("Route config must be valid JSON.");
         return;
       }
     }
@@ -281,7 +311,10 @@ export function StepInspector({
         setError("Artifact persistence requires an output schema.");
         return;
       }
-      if (type === "finish" || type === "stop") {
+      if (
+        cfg?.step_type !== "llm_inference" &&
+        cfg?.step_type !== "wait_children"
+      ) {
         setError("Finish and stop steps cannot persist artifacts.");
         return;
       }
@@ -291,26 +324,30 @@ export function StepInspector({
     setSaving(true);
     setError(null);
     try {
+      const config = isInference
+        ? {
+            prompt: prompt || null,
+            agents: listValue(agentsText),
+            skills: listValue(skillsText),
+            agent_config: {
+              ...inference?.agent_config,
+              model: modelValue || null,
+            },
+            output_schema: parsedSchema,
+          }
+        : cfg?.step_type === "wait_children"
+          ? { output_schema: parsedSchema }
+          : cfg?.step_type === "route"
+            ? { route_config: parsedRouteConfig }
+            : undefined;
       await unwrapCommand(
         commands.updateStep({
           step_id: stepId,
           name,
           goal,
-          prompt: isRouteResult ? null : prompt,
-          clear_prompt: clearPrompt,
-          agents: listValue(agentsText),
-          skills: listValue(skillsText),
-          agent_config: cfg?.agent_config
-            ? { ...cfg.agent_config, model: modelValue || null }
-            : undefined,
-          step_type: type,
-          output_schema: isRouteResult ? null : parsedSchema,
-          clear_output_schema:
-            isConvertingToRoute || (!isRouteResult && !outputSchema.trim()),
+          config,
           persistence_options: parsedPersistence,
           clear_persistence_options: clearPersistenceOptions,
-          route_config: null,
-          clear_route_config: isConfiguredRouteConversion,
           order: step.order,
           transitions_to: nextTransitions,
         })
@@ -377,91 +414,47 @@ export function StepInspector({
             Name
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </label>
-          <label>
-            Type
-            <select
-              value={typeof type === "string" ? type : "execute"}
-              onChange={(e) => setType(e.target.value as StepType)}
-            >
-              <option value="execute">execute</option>
-              <option value="evaluate">evaluate</option>
-              <option value="route">route</option>
-              <option value="wait_children">wait_children</option>
-              <option value="human_input">human_input</option>
-              <option value="stop">stop</option>
-              <option value="finish">finish</option>
-            </select>
-          </label>
+          <div className="wfd-row">
+            Type: {stepTypeLabel} (fixed after creation)
+          </div>
           <label>
             Goal
             <textarea value={goal} onChange={(e) => setGoal(e.target.value)} />
           </label>
-          <label>
-            Prompt
-            {isRouteResult ? (
-              <>
+          {isInference ? (
+            <>
+              <label>
+                Prompt
                 <textarea
-                  value={clearPrompt ? "" : prompt}
-                  readOnly
-                  disabled
-                  placeholder="Route prompts are read-only"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
                 />
-                {hasPrompt ? (
-                  <button
-                    className="wfd-action"
-                    onClick={() => {
-                      if (clearPrompt) {
-                        setPrompt(cfg?.prompt ?? "");
-                        setClearPrompt(false);
-                      } else {
-                        setPrompt("");
-                        setClearPrompt(true);
-                      }
-                    }}
-                    type="button"
-                  >
-                    {clearPrompt ? "Undo clear prompt" : "Clear prompt"}
-                  </button>
-                ) : null}
-                {clearPrompt ? (
-                  <span className="wfd-help">
-                    Prompt will be cleared on save.
-                  </span>
-                ) : null}
-              </>
-            ) : (
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder={
-                  isStop
-                    ? "Not dispatched for a stop boundary"
-                    : "Optional prompt"
-                }
-              />
-            )}
-          </label>
-          <label>
-            Agents <span className="wfd-help">comma or newline separated</span>
-            <input
-              value={agentsText}
-              onChange={(e) => setAgentsText(e.target.value)}
-            />
-          </label>
-          <label>
-            Skills <span className="wfd-help">comma or newline separated</span>
-            <input
-              value={skillsText}
-              onChange={(e) => setSkillsText(e.target.value)}
-            />
-          </label>
-          <label>
-            Model
-            <input
-              value={modelValue}
-              onChange={(e) => setModelValue(e.target.value)}
-            />
-          </label>
+              </label>
+              <label>
+                Agents{" "}
+                <span className="wfd-help">comma or newline separated</span>
+                <input
+                  value={agentsText}
+                  onChange={(e) => setAgentsText(e.target.value)}
+                />
+              </label>
+              <label>
+                Skills{" "}
+                <span className="wfd-help">comma or newline separated</span>
+                <input
+                  value={skillsText}
+                  onChange={(e) => setSkillsText(e.target.value)}
+                />
+              </label>
+              <label>
+                Model
+                <input
+                  value={modelValue}
+                  onChange={(e) => setModelValue(e.target.value)}
+                />
+              </label>
+            </>
+          ) : null}
           <label>
             Transitions{" "}
             <span className="wfd-help">stop requires exactly one</span>
@@ -470,14 +463,32 @@ export function StepInspector({
               onChange={(e) => setTransitionsTo(e.target.value)}
             />
           </label>
-          <label>
-            Output schema
-            <textarea
-              value={outputSchema}
-              onChange={(e) => setOutputSchema(e.target.value)}
-              placeholder="JSON Schema (optional)"
-            />
-          </label>
+          {outputConfig ? (
+            <label>
+              Output schema
+              <textarea
+                value={outputSchema}
+                onChange={(e) => setOutputSchema(e.target.value)}
+                placeholder="JSON Schema (optional)"
+              />
+            </label>
+          ) : null}
+          {cfg?.step_type === "route" ? (
+            <label>
+              Route config
+              <textarea
+                value={routeConfig}
+                onChange={(e) => setRouteConfig(e.target.value)}
+                placeholder="Route configuration JSON"
+                aria-invalid={error === "Route config must be valid JSON."}
+                aria-describedby={
+                  error === "Route config must be valid JSON."
+                    ? "step-editor-error"
+                    : undefined
+                }
+              />
+            </label>
+          ) : null}
           <label>
             Persistence options
             <textarea
@@ -486,7 +497,11 @@ export function StepInspector({
               placeholder='{"artifact":{"logical_name":"result"}}'
             />
           </label>
-          {error ? <div className="wfd-error">{error}</div> : null}
+          {error ? (
+            <div id="step-editor-error" className="wfd-error">
+              {error}
+            </div>
+          ) : null}
           <button
             className="wfd-save"
             disabled={saving || !name.trim()}
@@ -512,9 +527,9 @@ export function StepInspector({
 
         <section className="wfd-sec">
           <div className="wfd-lbl">Prompt</div>
-          {cfg?.prompt ? (
+          {inference?.prompt ? (
             <pre className="wfd-prompt">
-              <LiquidHighlight source={cfg.prompt} />
+              <LiquidHighlight source={inference.prompt} />
             </pre>
           ) : (
             <div className="wfd-placeholder">
@@ -632,16 +647,21 @@ export function StepInspector({
           </div>
         </section>
 
-        <section className="wfd-sec">
-          <div className="wfd-lbl">Output Schema</div>
-          {cfg?.output_schema ? (
-            <SchemaTree schema={cfg.output_schema as Record<string, unknown>} />
-          ) : (
-            <div className="wfd-placeholder">
-              {isLoading ? "Loading…" : "No output schema"}
-            </div>
-          )}
-        </section>
+        {cfg?.step_type === "llm_inference" ||
+        cfg?.step_type === "wait_children" ? (
+          <section className="wfd-sec">
+            <div className="wfd-lbl">Output Schema</div>
+            {outputConfig?.output_schema ? (
+              <SchemaTree
+                schema={outputConfig.output_schema as Record<string, unknown>}
+              />
+            ) : (
+              <div className="wfd-placeholder">
+                {isLoading ? "Loading…" : "No output schema"}
+              </div>
+            )}
+          </section>
+        ) : null}
 
         <section className="wfd-sec">
           <div className="wfd-lbl">Persistence</div>
@@ -656,14 +676,14 @@ export function StepInspector({
           )}
         </section>
 
-        {isRouteConfigVisible ? (
+        {cfg?.step_type === "route" ? (
           <section className="wfd-sec" data-testid="route-config-section">
             <div className="wfd-lbl">Route Config</div>
             {isLoading ? (
               <div className="wfd-placeholder">Loading…</div>
             ) : hasRouteConfig ? (
               <pre data-testid="route-config-value" className="wfd-prompt">
-                {JSON.stringify(cfg?.route_config, null, 2)}
+                {JSON.stringify(route?.route_config, null, 2)}
               </pre>
             ) : (
               <div

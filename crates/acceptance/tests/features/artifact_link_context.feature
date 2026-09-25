@@ -28,7 +28,7 @@ Feature: Artifact link metadata and logical-name context
     When I look up artifact logical name "task-result" on "task" "<TASK_ID>" as JSON
     Then the artifact JSON should have filename "task-result.md" and body "task body"
     And the artifact JSON should have logical name "task-result" and metadata content kind "result"
-    Given a workflow "artifact-link-workflow" with steps "execute:execute"
+    Given a workflow "artifact-link-workflow" with steps "execute"
     And I assign the workflow to the task
     When I run vtb "start-taskrun <TASK_ID>"
     Then the command should succeed

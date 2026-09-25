@@ -40,12 +40,12 @@ vtb step add "Review" -w <workflow-id> \
 
 # Add step with step type and output schema
 vtb step add "Evaluate" -w <workflow-id> \
-  --step-type evaluate \
+  --step-type llm_inference \
   --output-schema '{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}'
 
 # Persist validated structured output as a task artifact (Sacrum-owned)
 vtb step add "Evaluate" -w <workflow-id> \
-  --step-type evaluate \
+  --step-type llm_inference \
   --output-schema '{"type":"object","required":["passed"]}' \
   --persistence-options '{"artifact":{"logical_name":"step_result"}}'
 
@@ -73,8 +73,6 @@ vtb step update <step-id> --speed-tier fast --personality friendly --verbosity l
 vtb step update <step-id> --clear-speed-tier --clear-personality --clear-verbosity
 vtb step update <step-id> --prompt "New prompt for {{task.id}}"
 vtb step update <step-id> --clear-prompt
-vtb step update <step-id> --step-type evaluate
-vtb step update <step-id> --step-type stop --transition-to <next-step-id>
 vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
 vtb step update <step-id> --route-config '<route-config-json>'
@@ -82,7 +80,6 @@ vtb step update <step-id> --clear-route-config
 vtb step update <step-id> --persistence-options '{"artifact":{"logical_name":"step_result"}}'
 vtb step update <step-id> --clear-persistence-options
 vtb step update <step-id> --clear-agents --clear-skills
-vtb --json step update <step-id> --step-type finish
 vtb step delete <step-id>
 vtb step delete <step-id> --force
 vtb --json step delete <step-id>
@@ -101,8 +98,8 @@ flag plus `-h` / `--help`. Human-readable output is ordered by each step's
 
 ```text
 Steps for workflow '<workflow-id>':
-1. coding (id: a1b2c3d4, type: execute, model: sonnet)
-2. testing (id: e5f6a7b8, type: evaluate, model: haiku)
+1. coding (id: a1b2c3d4, type: llm_inference, model: sonnet)
+2. testing (id: e5f6a7b8, type: llm_inference, model: haiku)
 3. approved (id: c9d0e1f2, type: finish, model: default)
 ```
 
@@ -125,7 +122,7 @@ Step: 925c50ac-a1ed-4f5b-82c3-9dcb0773597b - implement
 
 Workflow:      84b28cbb-9c65-4d64-9ea0-b74587f9d056
 Order:         1
-Step Type:     execute
+Step Type:     llm_inference
 Goal:          Implement the ticket in the assigned worktree.
 Agents:        (none)
 Skills:        (none)
@@ -150,8 +147,9 @@ vtb --json step show <step-id>
 ```
 
 The JSON object includes fields such as `id`, `name`, `workflow_id`, `order`,
-`goal`, `prompt`, `agents`, `skills`, `step_type`, `agent_config`,
-`output_schema`, `route_config`, `transitions_to`, `created_at`, and `updated_at`.
+`goal`, `step_type`, `config`, `transitions_to`, `created_at`, and `updated_at`.
+`config` holds the fields declared for the step type and is null for
+`human_input`, `stop`, and `finish`.
 When configured, `persistence_options` is also included; it is `null`/absent
 for steps without persistence configuration. `route_config` is nullable opaque
 JSON and an empty object is distinct from `null`.
@@ -183,7 +181,6 @@ request with no property changes before reporting success.
 | `--clear-speed-tier` | | Remove `agent_config.speed_tier` |
 | `--clear-personality` | | Remove `agent_config.personality` |
 | `--clear-verbosity` | | Remove `agent_config.verbosity` |
-| `--step-type <STEP_TYPE>` | | Set the step type; values are `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, and `finish` |
 | `--output-schema <JSON>` | | Replace the step output schema from a JSON string |
 | `--clear-output-schema` | | Remove the output schema |
 | `--route-config <JSON>` | | Replace the opaque deterministic route configuration |
@@ -208,8 +205,7 @@ Invalid JSON in `--agent-config`, `--output-schema`, `--persistence-options`, or
 fails before persistence. Sacrum validates persistence configuration and
 surfaces errors for blank/overlong logical names, unknown keys, missing
 `output_schema`, and terminal `finish`/`stop` steps.
-For a resulting `route` step, `--prompt` is rejected; an existing prompt can
-only be inspected or explicitly removed with `--clear-prompt`. Route
+For a `route` step, `--prompt` and other inference-only flags are rejected. Route
 configuration errors are validated by Sacrum and retain their nested field
 path in the CLI diagnostic. A route may be created without configuration as a
 non-runnable draft, and `--clear-route-config` returns a configured route to
@@ -281,7 +277,7 @@ matching step exists, the command fails with `Step not found: <id>`. If an
 | `agents` | Agent file paths for AI-assisted execution |
 | `skills` | Slash commands available during this step |
 | `transition-to` | Restrict which steps can follow this one |
-| `step-type` | Type of step: `execute`, `evaluate`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (see below) |
+| `step-type` | Type of step: `llm_inference`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (see below) |
 | `output-schema` | JSON Schema for structured output enforcement (see below) |
 | `route-config` | Opaque nullable V1 deterministic route program; only valid for `route` steps |
 
@@ -291,8 +287,7 @@ Each step has a `--step-type` that determines its role in the workflow:
 
 | Type | Description |
 |------|-------------|
-| `execute` | **Default.** Runs the step's prompt via Claude and produces output. |
-| `evaluate` | Assesses the output of a previous step and can determine which transition to follow when a step has multiple outgoing paths. |
+| `llm_inference` | **Default.** Runs the configured prompt through the selected agent harness. |
 | `route` | Sacrum-local deterministic control step. Evaluates `route_config`; it does not dispatch a daemon prompt or use `output_schema` as a routing program. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
 | `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. |
@@ -301,7 +296,7 @@ Each step has a `--step-type` that determines its role in the workflow:
 
 ```bash
 # Set step type on creation
-vtb step add "Eval" -w <wf-id> --step-type evaluate
+vtb step add "Eval" -w <wf-id> --step-type llm_inference
 
 # Create a human-input gate
 vtb step add "Needs Input" -w <wf-id> --step-type human_input
@@ -312,16 +307,11 @@ vtb step add "Complete" -w <wf-id> --step-type finish
 # Create a stop boundary with one continuation
 vtb step add "Pause Run" -w <wf-id> --step-type stop --transition-to <next-step-id>
 
-# Change step type later
-vtb step update <step-id> --step-type route
 ```
 
-When a step has type `evaluate` and multiple outgoing transitions, the daemon
-runs a separate evaluation execution whose output is matched against transition
-labels to determine the next step — creating a **branching state machine**
-driven by AI judgment. A `route` step is different: Sacrum evaluates its
-`route_config` locally and deterministically, without a daemon execution or
-prompt/output-schema fallback.
+A `route` step evaluates its `route_config` locally and deterministically,
+without a daemon execution. Step type is fixed after creation; create a new
+step to use a different type.
 
 `finish` is the sole terminal step type. Its prompt, agent configuration, output
 schema, and outgoing transitions must be empty. Sacrum owns task completion and
@@ -418,28 +408,21 @@ Recommended authoring order is: create the workflow topology and persisted
 transition targets; give each predecessor its structured `route` result
 contract; create the `route` step as a draft; then set `--route-config` and let
 Sacrum validate the complete graph. `--clear-route-config` leaves a non-runnable
-route draft. Retained route prompts are readable and can be cleared with
-`--clear-prompt`, but `--prompt` is never a route authoring mechanism. Ordinary
-`execute` and `evaluate` steps retain their normal prompt and `output_schema`
-behavior. New route authoring cannot set an `output_schema`; when converting a
-structured step to `route`, clear it in the same update with
-`--clear-output-schema` (the GUI does this automatically). Legacy
-prompt/output-schema routes may expose their retained output schema for
-inspection, but new Vertebrae writes do not author or interpret that old
-routing contract. Existing route programs are not inferred or rewritten.
+route draft. Route steps accept only `route_config` inside `config`. They do not use a
+prompt or output schema. Existing route programs are not inferred or rewritten.
 
 ### Output Schemas
 
-Execute and evaluate steps can define an `output_schema` — a JSON Schema
+`llm_inference` and `wait_children` steps can define an `output_schema` — a JSON Schema
 describing the expected structured output from the selected harness. When present:
 
 - The daemon passes it to the selected harness subprocess, enforcing structured output
 - The step-level `output_schema` takes precedence over `agent_config.json_schema`
-- This enables reliable machine-readable responses for execute/evaluate steps and other automated pipeline stages. It is not a route program: Sacrum routes from `route_config`.
+- This enables reliable machine-readable responses for inference steps and other automated pipeline stages. It is not a route program: Sacrum routes from `route_config`.
 
 ```bash
 # Set output schema on creation
-vtb step add "Eval" -w <wf-id> --step-type evaluate \
+vtb step add "Eval" -w <wf-id> --step-type llm_inference \
   --output-schema '{"type":"object","required":["summary","passed"],"properties":{"summary":{"type":"string"},"passed":{"type":"boolean"}}}'
 
 # Update output schema
@@ -460,8 +443,7 @@ named JSON artifact attached to the current task:
 
 The `logical_name` must be nonblank and at most 255 characters. Artifact
 persistence requires an `output_schema`; Sacrum rejects unknown keys and
-rejects persistence on `finish` and `stop` steps. `execute`, `evaluate`,
-`human_input`, and `wait_children` outputs/snapshots are persisted by Sacrum,
+rejects persistence on `finish` and `stop` steps. `llm_inference` and `wait_children` outputs/snapshots are persisted by Sacrum,
 while route decisions are handled and audited locally by Sacrum. Repeated
 writes upsert the task's
 `<logical_name>.json` artifact. The daemon only executes and validates output;

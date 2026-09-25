@@ -25,7 +25,7 @@ Feature: Direct artifact attachments
     And I create an artifact task section fixture
     When I add artifact "section-output.md" with body "section output" attached to "task_section" "<section_id>"
     Then the command should succeed
-    Given a workflow "artifact-target-workflow" with steps "execute:execute"
+    Given a workflow "artifact-target-workflow" with steps "execute"
     When I add artifact "workflow-output.md" with body "workflow output" attached to "workflow" "<workflow_id>"
     Then the command should succeed
     Given I assign the workflow to the task

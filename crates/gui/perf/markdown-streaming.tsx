@@ -98,7 +98,7 @@ function Pane({ name }: { name: "a" | "b" }) {
         started_at: stamp,
         completed_at: null,
         status: "in_progress",
-        step_type: "execute",
+        step_type: "llm_inference",
       },
     ],
     logsByExecutionId: { [name]: logs },

@@ -83,7 +83,7 @@ function makeTask(id: string, run: TaskRun | null, title: string): Task {
     current_step_id: "s1",
     workflow_name: "Build",
     step_name: null,
-    step_type: "execute",
+    step_type: "llm_inference",
     run_controls: {
       runnable: !run,
       stoppable: !!run,
@@ -112,7 +112,7 @@ function makeStep(id: string, order: number): PipelineStep {
     workflow_id: "wf-build",
     goal: null,
     step_order: order,
-    step_type: "execute",
+    step_type: "llm_inference",
     transitions_to: [],
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
