@@ -47,6 +47,8 @@ impl From<CliOutputVerbosity> for OutputVerbosity {
 pub enum CliStepType {
     #[value(name = "llm_inference")]
     LlmInference,
+    #[value(name = "structured_inference")]
+    StructuredInference,
     Route,
     #[value(name = "wait_children")]
     WaitChildren,
@@ -61,6 +63,7 @@ impl From<CliStepType> for StepType {
     fn from(cli: CliStepType) -> Self {
         match cli {
             CliStepType::LlmInference => StepType::LlmInference,
+            CliStepType::StructuredInference => StepType::StructuredInference,
             CliStepType::Route => StepType::Route,
             CliStepType::WaitChildren => StepType::WaitChildren,
             CliStepType::HumanInput => StepType::HumanInput,
@@ -101,17 +104,61 @@ fn parse_json_flag(
         .transpose()
 }
 
+/// Read an `@path` flag value from the file; other values are used as given.
+fn read_flag_value(value: &str, flag: &str) -> Result<String, ServiceError> {
+    match value.strip_prefix('@') {
+        Some(path) => std::fs::read_to_string(path).map_err(|e| {
+            ServiceError::validation_failed(format!("Failed to read {flag} file {path}: {e}"))
+        }),
+        None => Ok(value.to_string()),
+    }
+}
+
+/// Parse `--state`: JSON objects, arrays, and strings are decoded; any other
+/// value is sent as a literal string template.
+fn parse_state_flag(value: Option<&str>) -> Result<Option<serde_json::Value>, ServiceError> {
+    value
+        .map(|value| {
+            let raw = read_flag_value(value, "--state")?;
+            Ok(match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(
+                    json @ (serde_json::Value::Object(_)
+                    | serde_json::Value::Array(_)
+                    | serde_json::Value::String(_)),
+                ) => json,
+                _ => serde_json::Value::String(raw),
+            })
+        })
+        .transpose()
+}
+
+fn parse_fields_flag(value: Option<&str>) -> Result<Option<serde_json::Value>, ServiceError> {
+    value
+        .map(|value| read_flag_value(value, "--fields"))
+        .transpose()?
+        .as_deref()
+        .map(|raw| parse_json_flag(Some(raw), "--fields"))
+        .transpose()
+        .map(Option::flatten)
+}
+
+fn parse_agent_provider(value: Option<&str>) -> Result<Option<Provider>, ServiceError> {
+    value
+        .map(|value| Provider::parse(value).map_err(ServiceError::validation_failed))
+        .transpose()
+}
+
 /// Step management commands
 #[derive(Debug, Subcommand)]
 pub enum StepCommand {
     /// Create a new step for a workflow
-    Add(StepAddCommand),
+    Add(Box<StepAddCommand>),
     /// List all steps for a workflow
     List(StepListCommand),
     /// Show details of a specific step
     Show(StepShowCommand),
     /// Update a step's properties
-    Update(StepUpdateCommand),
+    Update(Box<StepUpdateCommand>),
     /// Delete a step
     Delete(StepDeleteCommand),
 }
@@ -173,7 +220,8 @@ pub struct StepAddCommand {
     #[arg(long, value_name = "JSON")]
     pub agent_config: Option<String>,
 
-    /// Model to use for this step's agent (convenience shortcut for agent_config.model)
+    /// Model to use: `config.model` for structured_inference steps, otherwise
+    /// a convenience shortcut for agent_config.model
     #[arg(long, short)]
     pub model: Option<String>,
 
@@ -203,21 +251,36 @@ pub struct StepAddCommand {
     #[arg(long, alias = "output-verbosity", value_enum)]
     pub verbosity: Option<CliOutputVerbosity>,
 
-    /// Built-in execution provider for this step (anthropic, openai; alias: --model-provider).
+    /// Provider for this step (alias: --model-provider).
     ///
-    /// Convenience shortcut for `agent_config.provider`. Use `--agent-config`
-    /// JSON for any field this flag does not cover.
-    #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
-    pub provider: Option<Provider>,
+    /// For structured_inference steps this is `config.provider`, any
+    /// non-blank provider name. Otherwise it is a convenience shortcut for
+    /// `agent_config.provider` (anthropic, openai); use `--agent-config` JSON
+    /// for any field this flag does not cover.
+    #[arg(long, alias = "model-provider", value_name = "PROVIDER")]
+    pub provider: Option<String>,
 
-    /// Type of this step (llm_inference, route, wait_children, human_input, stop, finish).
+    /// Type of this step (llm_inference, structured_inference, route,
+    /// wait_children, human_input, stop, finish).
     ///
     /// A step's type cannot change after creation. Config flags must be
     /// declared by the type: llm_inference takes the prompt, output schema,
-    /// agent, skill, and agent-config flags; route takes --route-config;
-    /// wait_children takes --output-schema; the others take none.
+    /// agent, skill, and agent-config flags; structured_inference takes
+    /// --provider, --model, --state, and --fields; route takes
+    /// --route-config; wait_children takes --output-schema; the others take
+    /// none.
     #[arg(long, value_enum, default_value = "llm_inference")]
     pub step_type: CliStepType,
+
+    /// Input of a structured_inference step: JSON object, array, or string,
+    /// or a plain string template (`{{ dotted.path }}` references allowed);
+    /// `@path` reads it from a file
+    #[arg(long, value_name = "JSON|STRING")]
+    pub state: Option<String>,
+
+    /// JSON Schema of a structured_inference step's output, inline or `@path`
+    #[arg(long, value_name = "JSON")]
+    pub fields: Option<String>,
 
     /// JSON Schema describing the expected output of this step (raw JSON string)
     #[arg(long, value_name = "JSON")]
@@ -238,10 +301,6 @@ pub struct StepAddCommand {
     /// IDs of steps this step can transition to (can be specified multiple times)
     #[arg(long = "transition-to", short = 't', value_parser = crate::commands::parse_uuid("transition target ID"))]
     pub transitions_to: Vec<String>,
-}
-
-fn parse_provider_arg(input: &str) -> Result<Provider, String> {
-    Provider::parse(input)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -321,10 +380,11 @@ fn build_overlayed_agent_config(
 }
 
 impl StepAddCommand {
-    fn agent_config_flags_present(&self) -> bool {
+    fn agent_config_flags_present(&self, step_type: &StepType) -> bool {
+        let shortcuts = *step_type != StepType::StructuredInference
+            && (self.model.is_some() || self.provider.is_some());
         self.agent_config.is_some()
-            || self.model.is_some()
-            || self.provider.is_some()
+            || shortcuts
             || self.codex_model_provider.is_some()
             || self.reasoning_effort.is_some()
             || self.speed_tier.is_some()
@@ -333,14 +393,19 @@ impl StepAddCommand {
     }
 
     /// Config fields written by the given flags.
-    fn config_fields(&self) -> Vec<&'static str> {
+    fn config_fields(&self, step_type: &StepType) -> Vec<&'static str> {
+        let structured = *step_type == StepType::StructuredInference;
         [
             ("prompt", self.prompt.is_some()),
             ("output_schema", self.output_schema.is_some()),
             ("agents", !self.agent.is_empty()),
             ("skills", !self.skill.is_empty()),
-            ("agent_config", self.agent_config_flags_present()),
+            ("agent_config", self.agent_config_flags_present(step_type)),
             ("route_config", self.route_config.is_some()),
+            ("provider", structured && self.provider.is_some()),
+            ("model", structured && self.model.is_some()),
+            ("state", self.state.is_some()),
+            ("fields", self.fields.is_some()),
         ]
         .into_iter()
         .filter_map(|(field, present)| present.then_some(field))
@@ -362,7 +427,7 @@ impl StepAddCommand {
                     AgentConfig::new(),
                     self.agent_config.as_deref(),
                     AgentConfigOverrides {
-                        provider: self.provider,
+                        provider: parse_agent_provider(self.provider.as_deref())?,
                         model: self.model.as_deref(),
                         codex_model_provider: self.codex_model_provider.as_deref(),
                         reasoning_effort: self.reasoning_effort.as_deref(),
@@ -371,6 +436,12 @@ impl StepAddCommand {
                         verbosity: self.verbosity.map(Into::into),
                     },
                 )?;
+            }
+            Some(StepConfig::StructuredInference(config)) => {
+                config.provider = self.provider.clone();
+                config.model = self.model.clone();
+                config.state = parse_state_flag(self.state.as_deref())?;
+                config.fields = parse_fields_flag(self.fields.as_deref())?;
             }
             Some(StepConfig::Route(config)) => config.route_config = route_config,
             Some(StepConfig::WaitChildren(config)) => config.output_schema = output_schema,
@@ -389,7 +460,7 @@ impl StepAddCommand {
             .map(|id| id.to_lowercase())
             .collect();
         validate_step_transitions(&step_type, &transitions_to)?;
-        validate_config_fields(&step_type, self.config_fields())?;
+        validate_config_fields(&step_type, self.config_fields(&step_type))?;
 
         let persistence_options =
             parse_json_flag(self.persistence_options.as_deref(), "--persistence-options")?;
@@ -484,14 +555,23 @@ impl StepListCommand {
                         .map(|t| t.to_string())
                         .unwrap_or_else(|| "?".to_string());
                 let step_type = s.step_type.to_string();
-                match s.agent_config() {
-                    Some(agent_config) => format!(
+                let model = match &s.config {
+                    Some(StepConfig::LlmInference(config)) => {
+                        Some(config.agent_config.model.as_deref().unwrap_or("default"))
+                    }
+                    Some(StepConfig::StructuredInference(config)) => {
+                        Some(config.model.as_deref().unwrap_or("(none)"))
+                    }
+                    _ => None,
+                };
+                match model {
+                    Some(model) => format!(
                         "{}. {} (id: {}, type: {}, model: {})",
                         s.order + 1,
                         s.name,
                         id,
                         step_type,
-                        agent_config.model.as_deref().unwrap_or("default")
+                        model
                     ),
                     None => format!(
                         "{}. {} (id: {}, type: {})",
@@ -579,6 +659,15 @@ Goal:          {}
                     config.agent_config.model.as_deref().unwrap_or("default"),
                     config.prompt.as_deref().unwrap_or("(none)"),
                     pretty_json(config.output_schema.as_ref()),
+                ));
+            }
+            Some(StepConfig::StructuredInference(config)) => {
+                output.push_str(&format!(
+                    "Provider:      {}\nModel:         {}\nState:         {}\nFields:        {}\n",
+                    config.provider.as_deref().unwrap_or("(none)"),
+                    config.model.as_deref().unwrap_or("(none)"),
+                    pretty_json(config.state.as_ref()),
+                    pretty_json(config.fields.as_ref()),
                 ));
             }
             Some(StepConfig::Route(config)) => {
@@ -669,7 +758,8 @@ pub struct StepUpdateCommand {
     #[arg(long, value_name = "JSON")]
     pub agent_config: Option<String>,
 
-    /// New model for the step's agent (convenience shortcut for agent_config.model)
+    /// New model: `config.model` for structured_inference steps, otherwise a
+    /// convenience shortcut for agent_config.model
     #[arg(long, short)]
     pub model: Option<String>,
 
@@ -711,12 +801,23 @@ pub struct StepUpdateCommand {
     #[arg(long)]
     pub clear_verbosity: bool,
 
-    /// New built-in execution provider for this step (anthropic, openai; alias: --model-provider).
+    /// New provider for this step (alias: --model-provider).
     ///
-    /// Convenience shortcut for `agent_config.provider`. Use `--agent-config`
-    /// JSON for any field this flag does not cover.
-    #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
-    pub provider: Option<Provider>,
+    /// For structured_inference steps this is `config.provider`. Otherwise it
+    /// is a convenience shortcut for `agent_config.provider` (anthropic,
+    /// openai); use `--agent-config` JSON for any field this flag does not
+    /// cover.
+    #[arg(long, alias = "model-provider", value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
+    /// New input of a structured_inference step: JSON object, array, or
+    /// string, or a plain string template; `@path` reads it from a file
+    #[arg(long, value_name = "JSON|STRING")]
+    pub state: Option<String>,
+
+    /// New output JSON Schema of a structured_inference step, inline or `@path`
+    #[arg(long, value_name = "JSON")]
+    pub fields: Option<String>,
 
     /// New output schema as a JSON string
     #[arg(long, value_name = "JSON")]
@@ -767,10 +868,11 @@ impl StepUpdateCommand {
     /// # Errors
     ///
     /// Returns `ServiceError` if the step doesn't exist or service operations fail.
-    fn agent_config_flags_present(&self) -> bool {
+    fn agent_config_flags_present(&self, step_type: &StepType) -> bool {
+        let shortcuts = *step_type != StepType::StructuredInference
+            && (self.model.is_some() || self.provider.is_some());
         self.agent_config.is_some()
-            || self.model.is_some()
-            || self.provider.is_some()
+            || shortcuts
             || self.codex_model_provider.is_some()
             || self.reasoning_effort.is_some()
             || self.speed_tier.is_some()
@@ -782,7 +884,8 @@ impl StepUpdateCommand {
     }
 
     /// Config fields written (set or cleared) by the given flags.
-    fn config_fields(&self) -> Vec<&'static str> {
+    fn config_fields(&self, step_type: &StepType) -> Vec<&'static str> {
+        let structured = *step_type == StepType::StructuredInference;
         [
             ("prompt", self.prompt.is_some() || self.clear_prompt),
             (
@@ -791,11 +894,15 @@ impl StepUpdateCommand {
             ),
             ("agents", !self.agent.is_empty() || self.clear_agents),
             ("skills", !self.skill.is_empty() || self.clear_skills),
-            ("agent_config", self.agent_config_flags_present()),
+            ("agent_config", self.agent_config_flags_present(step_type)),
             (
                 "route_config",
                 self.route_config.is_some() || self.clear_route_config,
             ),
+            ("provider", structured && self.provider.is_some()),
+            ("model", structured && self.model.is_some()),
+            ("state", self.state.is_some()),
+            ("fields", self.fields.is_some()),
         ]
         .into_iter()
         .filter_map(|(field, present)| present.then_some(field))
@@ -834,7 +941,7 @@ impl StepUpdateCommand {
             }
         }
 
-        validate_config_fields(&existing.step_type, self.config_fields())?;
+        validate_config_fields(&existing.step_type, self.config_fields(&existing.step_type))?;
 
         let resulting_transitions = if self.clear_transitions {
             Vec::new()
@@ -902,12 +1009,27 @@ impl StepUpdateCommand {
             updates = updates.with_order(order);
         }
 
-        if self.agent_config_flags_present() {
+        if existing.step_type == StepType::StructuredInference {
+            if let Some(provider) = &self.provider {
+                updates = updates.with_config_field("provider", provider.as_str().into());
+            }
+            if let Some(model) = &self.model {
+                updates = updates.with_config_field("model", model.as_str().into());
+            }
+        }
+        if let Some(state) = parse_state_flag(self.state.as_deref())? {
+            updates = updates.with_config_field("state", state);
+        }
+        if let Some(fields) = parse_fields_flag(self.fields.as_deref())? {
+            updates = updates.with_config_field("fields", fields);
+        }
+
+        if self.agent_config_flags_present(&existing.step_type) {
             let mut agent_config = build_overlayed_agent_config(
                 existing.agent_config().cloned().unwrap_or_default(),
                 self.agent_config.as_deref(),
                 AgentConfigOverrides {
-                    provider: self.provider,
+                    provider: parse_agent_provider(self.provider.as_deref())?,
                     model: self.model.as_deref(),
                     codex_model_provider: self.codex_model_provider.as_deref(),
                     reasoning_effort: self.reasoning_effort.as_deref(),
@@ -1082,7 +1204,7 @@ mod tests {
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Add(cmd) => {
-                assert_eq!(cmd.provider, Some(Provider::Openai));
+                assert_eq!(cmd.provider.as_deref(), Some("openai"));
                 assert_eq!(cmd.model.as_deref(), Some("gpt-5.5"));
                 assert_eq!(cmd.reasoning_effort.as_deref(), Some("high"));
             }
@@ -1136,7 +1258,7 @@ mod tests {
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Add(cmd) => {
-                assert_eq!(cmd.provider, Some(Provider::Openai));
+                assert_eq!(cmd.provider.as_deref(), Some("openai"));
                 assert_eq!(cmd.model.as_deref(), Some("deepseek/deepseek-v4-flash"));
                 assert_eq!(cmd.codex_model_provider.as_deref(), Some("openrouter"));
             }
@@ -1989,7 +2111,7 @@ mod tests {
         .unwrap();
         match cli.command {
             StepCommand::Add(cmd) => {
-                assert_eq!(cmd.provider, Some(Provider::Openai));
+                assert_eq!(cmd.provider.as_deref(), Some("openai"));
                 assert_eq!(cmd.model.as_deref(), Some("gpt-4o"));
             }
             _ => panic!("Expected Add command"),
@@ -2010,10 +2132,73 @@ mod tests {
         .unwrap();
         match cli.command {
             StepCommand::Add(cmd) => {
-                assert_eq!(cmd.provider, Some(Provider::Anthropic));
+                assert_eq!(cmd.provider.as_deref(), Some("anthropic"));
             }
             _ => panic!("Expected Add command"),
         }
+    }
+
+    #[test]
+    fn test_step_add_structured_inference_parses() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Classify",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "structured_inference",
+            "--provider",
+            "typesafe",
+            "--model",
+            "jev",
+            "--state",
+            "{{ task.title }}",
+            "--fields",
+            r#"{"type":"object"}"#,
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                assert!(matches!(cmd.step_type, CliStepType::StructuredInference));
+                assert_eq!(cmd.provider.as_deref(), Some("typesafe"));
+                assert_eq!(cmd.state.as_deref(), Some("{{ task.title }}"));
+                assert_eq!(cmd.fields.as_deref(), Some(r#"{"type":"object"}"#));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_state_flag_decodes_json_containers_and_keeps_templates() {
+        assert_eq!(
+            parse_state_flag(Some(r#"{"a":1}"#)).unwrap(),
+            Some(serde_json::json!({"a": 1}))
+        );
+        assert_eq!(
+            parse_state_flag(Some(r#""quoted""#)).unwrap(),
+            Some(serde_json::json!("quoted"))
+        );
+        assert_eq!(
+            parse_state_flag(Some("{{ task.title }}")).unwrap(),
+            Some(serde_json::json!("{{ task.title }}"))
+        );
+        assert_eq!(
+            parse_state_flag(Some("42")).unwrap(),
+            Some(serde_json::json!("42"))
+        );
+        assert!(
+            parse_fields_flag(Some("not json"))
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid --fields JSON")
+        );
+        assert!(
+            parse_fields_flag(Some("@/nonexistent/vtb-fields.json"))
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to read --fields file")
+        );
     }
 
     #[test]
@@ -2028,7 +2213,7 @@ mod tests {
         .unwrap();
         match cli.command {
             StepCommand::Update(cmd) => {
-                assert_eq!(cmd.provider, Some(Provider::Openai));
+                assert_eq!(cmd.provider.as_deref(), Some("openai"));
             }
             _ => panic!("Expected Update command"),
         }

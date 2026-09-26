@@ -42,6 +42,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -81,6 +83,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -120,6 +124,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -167,6 +173,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -218,6 +226,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -264,6 +274,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -305,6 +317,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -357,6 +371,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -409,6 +425,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 5,
@@ -453,6 +471,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -504,6 +524,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -561,6 +583,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -607,6 +631,8 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -663,6 +689,8 @@ mod step_create_tests {
             agent_config: None,
             model: Some("sonnet".to_string()),
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -725,6 +753,8 @@ mod step_list_tests {
                 agent_config: None,
                 model: None,
                 provider: None,
+                state: None,
+                fields: None,
                 reasoning_effort: None,
                 codex_model_provider: None,
                 order: i,
@@ -779,6 +809,8 @@ mod step_list_tests {
             agent_config: None,
             model: Some("sonnet".to_string()),
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -860,6 +892,8 @@ mod step_list_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -916,6 +950,8 @@ mod step_show_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 1,
@@ -967,6 +1003,8 @@ mod step_show_tests {
             agent_config: None,
             model: Some("opus".to_string()),
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1016,6 +1054,8 @@ mod step_show_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 10,
@@ -1074,6 +1114,8 @@ mod step_show_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1119,6 +1161,8 @@ mod step_show_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 2,
@@ -1193,6 +1237,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1223,6 +1269,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1265,6 +1313,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1324,6 +1374,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1354,6 +1406,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1399,6 +1453,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1429,6 +1485,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: Some(5),
@@ -1474,6 +1532,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1504,6 +1564,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1557,6 +1619,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1587,6 +1651,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1632,6 +1698,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1662,6 +1730,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1720,6 +1790,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1750,6 +1822,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1794,6 +1868,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1823,6 +1899,8 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1875,7 +1953,7 @@ mod step_dispatcher_tests {
             .await
             .unwrap();
 
-        let cmd = StepCommand::Add(StepAddCommand {
+        let cmd = StepCommand::Add(Box::new(StepAddCommand {
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -1889,6 +1967,8 @@ mod step_dispatcher_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1897,7 +1977,7 @@ mod step_dispatcher_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
-        });
+        }));
 
         // Call through the dispatcher, not the inner command directly
         let result = cmd.execute(&services).await.unwrap();
@@ -1943,6 +2023,8 @@ mod step_delete_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2011,6 +2093,8 @@ mod step_delete_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2058,6 +2142,8 @@ mod step_delete_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2114,6 +2200,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2158,6 +2246,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some(r#"{"model":"opus","max_budget_usd":5.0}"#.to_string()),
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2201,6 +2291,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some(r#"{"model":"sonnet","max_budget_usd":10.0}"#.to_string()),
             model: Some("opus".to_string()),
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2256,6 +2348,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some("not valid json".to_string()),
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2301,6 +2395,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: None,
             model: Some("sonnet".to_string()),
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2330,6 +2426,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some(r#"{"model":"haiku","max_budget_usd":2.5}"#.to_string()),
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -2373,6 +2471,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2403,6 +2503,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some(r#"{"model":"sonnet","max_budget_usd":3.0}"#.to_string()),
             model: Some("opus".to_string()),
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -2446,6 +2548,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2475,6 +2579,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some("{bad json}".to_string()),
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -2524,6 +2630,8 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some(r#"{"model":"opus","max_budget_usd":15.0}"#.to_string()),
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 2,
@@ -2578,7 +2686,9 @@ mod provider_tests {
             prompt: None,
             agent_config,
             model,
-            provider,
+            provider: provider.map(|provider| provider.to_string()),
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2613,7 +2723,9 @@ mod provider_tests {
             prompt: None,
             agent_config,
             model,
-            provider,
+            provider: provider.map(|provider| provider.to_string()),
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -3307,6 +3419,8 @@ mod route_config_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -3338,6 +3452,8 @@ mod route_config_tests {
             agent_config: None,
             model: None,
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -3580,6 +3696,8 @@ mod route_config_tests {
             agent_config: None,
             model: Some("opus".to_string()),
             provider: None,
+            state: None,
+            fields: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -3640,5 +3758,287 @@ mod route_config_tests {
             .unwrap();
         assert_eq!(step.step_type, StepType::LlmInference);
         assert_eq!(step.route_config(), None);
+    }
+}
+
+// ============================================================================
+// structured_inference step tests
+// ============================================================================
+
+#[cfg(test)]
+mod structured_inference_tests {
+    use super::*;
+    use vertebrae_core::{StepConfig, StepType, StructuredInferenceConfig};
+
+    fn add_cmd(workflow_id: String, step_type: CliStepType) -> StepAddCommand {
+        StepAddCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            name: "Classify".to_string(),
+            workflow: workflow_id,
+            id: Some("classify".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            agent_config: None,
+            model: None,
+            provider: None,
+            state: None,
+            fields: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: 0,
+            transitions_to: vec![],
+            step_type,
+            output_schema: None,
+            persistence_options: None,
+            route_config: None,
+        }
+    }
+
+    fn update_cmd(id: &str) -> StepUpdateCommand {
+        StepUpdateCommand {
+            speed_tier: None,
+            personality: None,
+            verbosity: None,
+            clear_speed_tier: false,
+            clear_personality: false,
+            clear_verbosity: false,
+            id: id.to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            agent_config: None,
+            model: None,
+            provider: None,
+            state: None,
+            fields: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+            output_schema: None,
+            clear_output_schema: false,
+            persistence_options: None,
+            clear_persistence_options: false,
+            route_config: None,
+            clear_prompt: false,
+            clear_route_config: false,
+        }
+    }
+
+    async fn mk_workflow() -> (vertebrae_core::VertebraeServices, String) {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Default", vec![]))
+            .await
+            .unwrap();
+        (services, workflow_id)
+    }
+
+    fn structured(step: &vertebrae_core::Step) -> &StructuredInferenceConfig {
+        match &step.config {
+            Some(StepConfig::StructuredInference(config)) => config,
+            other => panic!("expected structured_inference config, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_persists_config_and_show_returns_it() {
+        let (services, workflow_id) = mk_workflow().await;
+        let fields_path =
+            std::env::temp_dir().join(format!("vtb-structured-fields-{}.json", std::process::id()));
+        std::fs::write(
+            &fields_path,
+            r#"{"type":"object","properties":{"ok":{"type":"boolean"}}}"#,
+        )
+        .unwrap();
+
+        let mut add = add_cmd(workflow_id, CliStepType::StructuredInference);
+        add.provider = Some("typesafe".to_string());
+        add.model = Some("jev".to_string());
+        add.state = Some(r#"{"title":"{{ task.title }}"}"#.to_string());
+        add.fields = Some(format!("@{}", fields_path.display()));
+        add.execute(services.steps()).await.unwrap();
+        std::fs::remove_file(&fields_path).ok();
+
+        let step = StepShowCommand {
+            id: "classify".to_string(),
+        }
+        .get_step(services.steps())
+        .await
+        .unwrap();
+        assert_eq!(step.step_type, StepType::StructuredInference);
+        let config = structured(&step);
+        assert_eq!(config.provider.as_deref(), Some("typesafe"));
+        assert_eq!(config.model.as_deref(), Some("jev"));
+        assert_eq!(
+            config.state,
+            Some(serde_json::json!({"title": "{{ task.title }}"}))
+        );
+        assert_eq!(
+            config.fields,
+            Some(serde_json::json!({"type": "object", "properties": {"ok": {"type": "boolean"}}}))
+        );
+
+        let shown = StepShowCommand {
+            id: "classify".to_string(),
+        }
+        .execute(services.steps())
+        .await
+        .unwrap();
+        assert!(
+            shown.contains("Step Type:     structured_inference"),
+            "{shown}"
+        );
+        assert!(shown.contains("Provider:      typesafe"), "{shown}");
+        assert!(shown.contains("Model:         jev"), "{shown}");
+    }
+
+    #[tokio::test]
+    async fn plain_string_state_is_sent_as_a_template() {
+        let (services, workflow_id) = mk_workflow().await;
+        let mut add = add_cmd(workflow_id, CliStepType::StructuredInference);
+        add.provider = Some("typesafe".to_string());
+        add.model = Some("jev".to_string());
+        add.state = Some("{{ task.description }}".to_string());
+        add.fields = Some(r#"{"type":"object"}"#.to_string());
+        add.execute(services.steps()).await.unwrap();
+
+        let step = services
+            .steps()
+            .get_step("classify")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            structured(&step).state,
+            Some(serde_json::json!("{{ task.description }}"))
+        );
+    }
+
+    #[tokio::test]
+    async fn updating_fields_leaves_provider_model_and_state() {
+        let (services, workflow_id) = mk_workflow().await;
+        let mut add = add_cmd(workflow_id, CliStepType::StructuredInference);
+        add.provider = Some("typesafe".to_string());
+        add.model = Some("jev".to_string());
+        add.state = Some(r#"["{{ task.title }}"]"#.to_string());
+        add.fields = Some(r#"{"type":"object"}"#.to_string());
+        add.execute(services.steps()).await.unwrap();
+
+        let mut update = update_cmd("classify");
+        update.fields = Some(r#"{"type":"object","required":["ok"]}"#.to_string());
+        update.execute(services.steps()).await.unwrap();
+
+        let step = services
+            .steps()
+            .get_step("classify")
+            .await
+            .unwrap()
+            .unwrap();
+        let config = structured(&step);
+        assert_eq!(config.provider.as_deref(), Some("typesafe"));
+        assert_eq!(config.model.as_deref(), Some("jev"));
+        assert_eq!(config.state, Some(serde_json::json!(["{{ task.title }}"])));
+        assert_eq!(
+            config.fields,
+            Some(serde_json::json!({"type": "object", "required": ["ok"]}))
+        );
+
+        let mut update = update_cmd("classify");
+        update.provider = Some("other".to_string());
+        update.model = Some("m2".to_string());
+        update.execute(services.steps()).await.unwrap();
+        let step = services
+            .steps()
+            .get_step("classify")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(structured(&step).provider.as_deref(), Some("other"));
+        assert_eq!(structured(&step).model.as_deref(), Some("m2"));
+        assert!(step.agent_config().is_none());
+    }
+
+    #[tokio::test]
+    async fn llm_inference_rejects_state_and_fields() {
+        let (services, workflow_id) = mk_workflow().await;
+        for (state, fields, field) in [
+            (Some("{}".to_string()), None, "state"),
+            (None, Some(r#"{"type":"object"}"#.to_string()), "fields"),
+        ] {
+            let mut add = add_cmd(workflow_id.clone(), CliStepType::LlmInference);
+            add.state = state;
+            add.fields = fields;
+            let error = add.execute(services.steps()).await.unwrap_err().to_string();
+            assert!(
+                error.contains(&format!(
+                    "config: $.{field}: is not supported for llm_inference steps"
+                )),
+                "{error}"
+            );
+        }
+        assert!(
+            services
+                .steps()
+                .get_step("classify")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let mut add = add_cmd(workflow_id, CliStepType::LlmInference);
+        add.provider = Some("openai".to_string());
+        add.execute(services.steps()).await.unwrap();
+        let mut update = update_cmd("classify");
+        update.fields = Some(r#"{"type":"object"}"#.to_string());
+        let error = update
+            .execute(services.steps())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("config: $.fields: is not supported for llm_inference steps"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn structured_inference_rejects_agent_config_flags() {
+        let (services, workflow_id) = mk_workflow().await;
+        let mut add = add_cmd(workflow_id, CliStepType::StructuredInference);
+        add.provider = Some("typesafe".to_string());
+        add.prompt = Some("not here".to_string());
+        let error = add.execute(services.steps()).await.unwrap_err().to_string();
+        assert!(
+            error.contains("config: $.prompt: is not supported for structured_inference steps"),
+            "{error}"
+        );
+
+        let mut add = add_cmd(
+            services
+                .workflows()
+                .create_workflow(CreateWorkflowOptions::new("Other", vec![]))
+                .await
+                .unwrap(),
+            CliStepType::StructuredInference,
+        );
+        add.reasoning_effort = Some("high".to_string());
+        let error = add.execute(services.steps()).await.unwrap_err().to_string();
+        assert!(
+            error.contains(
+                "config: $.agent_config: is not supported for structured_inference steps"
+            ),
+            "{error}"
+        );
     }
 }

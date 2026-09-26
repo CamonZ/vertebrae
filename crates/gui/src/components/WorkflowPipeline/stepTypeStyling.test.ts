@@ -9,6 +9,7 @@ import {
 describe("normalizeStepType", () => {
   it.each([
     ["llm_inference", "llm_inference"],
+    ["structured_inference", "structured_inference"],
     ["route", "route"],
     ["human_input", "human_input"],
     ["wait_children", "wait_children"],
@@ -28,6 +29,12 @@ describe("normalizeStepType", () => {
 describe("stepTypeStyle", () => {
   it("returns the matching style for each kind", () => {
     expect(stepTypeStyle("llm_inference").barVar).toBe("--color-step-llm");
+    expect(stepTypeStyle("structured_inference").barVar).toBe(
+      "--color-step-structured"
+    );
+    expect(stepTypeStyle("structured_inference").label).toBe(
+      "Structured Inference"
+    );
     expect(stepTypeStyle("route").barVar).toBe("--color-step-route");
     expect(stepTypeStyle("human_input").barVar).toBe("--color-step-human");
     expect(stepTypeStyle("wait_children").barVar).toBe("--color-step-wait");
@@ -46,6 +53,7 @@ describe("stepTypeStyle", () => {
 describe("hearthStepKind", () => {
   it.each([
     ["llm_inference", "llm"],
+    ["structured_inference", "structured"],
     ["route", "route"],
     ["human_input", "human"],
     ["wait_children", "wait"],

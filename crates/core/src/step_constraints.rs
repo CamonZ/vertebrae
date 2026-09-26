@@ -82,6 +82,13 @@ mod tests {
         assert!(validate_config_fields(&StepType::LlmInference, ["prompt", "skills"]).is_ok());
         assert!(validate_config_fields(&StepType::Route, ["route_config"]).is_ok());
         assert!(validate_config_fields(&StepType::WaitChildren, ["output_schema"]).is_ok());
+        assert!(
+            validate_config_fields(
+                &StepType::StructuredInference,
+                ["provider", "model", "state", "fields"]
+            )
+            .is_ok()
+        );
         assert!(validate_config_fields(&StepType::Finish, []).is_ok());
     }
 
@@ -92,6 +99,14 @@ mod tests {
             .to_string();
         assert!(
             error.contains("config: $.prompt: is not supported for route steps"),
+            "{error}"
+        );
+
+        let error = validate_config_fields(&StepType::StructuredInference, ["prompt"])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("config: $.prompt: is not supported for structured_inference steps"),
             "{error}"
         );
 

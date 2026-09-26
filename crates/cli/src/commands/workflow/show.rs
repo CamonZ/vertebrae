@@ -51,8 +51,12 @@ impl WorkflowShowCommand {
             first_class_steps
                 .into_iter()
                 .map(|s| StepDisplayInfo {
-                    model: s.agent_config().and_then(|config| config.model.clone()),
+                    model: s
+                        .agent_config()
+                        .and_then(|config| config.model.clone())
+                        .or_else(|| s.structured_inference().and_then(|c| c.model.clone())),
                     prompt: s.prompt().map(str::to_string),
+                    structured_inference: s.structured_inference().cloned(),
                     id: s.id,
                     name: s.name,
                     order: s.order,

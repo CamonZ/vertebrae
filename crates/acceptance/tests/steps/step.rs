@@ -205,6 +205,72 @@ async fn when_add_step_with_flag(
     store_step_id_if_created(world, &name);
 }
 
+const STRUCTURED_STATE: &str = r#"{"title":"{{ task.title }}"}"#;
+const STRUCTURED_FIELDS: &str = r#"{"type":"object","properties":{"label":{"type":"string"}},"required":["label"],"additionalProperties":false}"#;
+const REPLACEMENT_STRUCTURED_FIELDS: &str = r#"{"type":"object","properties":{"score":{"type":"number"}},"required":["score"],"additionalProperties":false}"#;
+
+#[when(expr = "I add a structured_inference step {string} to the workflow")]
+async fn when_add_structured_inference_step(world: &mut SmokeWorld, name: String) {
+    let wf_id = workflow_id(world);
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--step-type",
+            "structured_inference",
+            "--provider",
+            "typesafe",
+            "--model",
+            "jev",
+            "--state",
+            STRUCTURED_STATE,
+            "--fields",
+            STRUCTURED_FIELDS,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
+#[when(expr = "I replace the fields of structured_inference step {string}")]
+async fn when_replace_structured_inference_fields(world: &mut SmokeWorld, name: String) {
+    let step_id = stored_step_id(world, &name);
+    world
+        .run_vtb(&[
+            "step",
+            "update",
+            &step_id,
+            "--fields",
+            REPLACEMENT_STRUCTURED_FIELDS,
+        ])
+        .await;
+}
+
+#[when(expr = "I add a structured_inference step {string} to the workflow without a provider")]
+async fn when_add_structured_inference_step_without_provider(world: &mut SmokeWorld, name: String) {
+    let wf_id = workflow_id(world);
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--step-type",
+            "structured_inference",
+            "--model",
+            "jev",
+            "--state",
+            STRUCTURED_STATE,
+            "--fields",
+            STRUCTURED_FIELDS,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
 #[when(expr = "I add a step {string} to the workflow with persistence logical name {string}")]
 async fn when_add_step_with_persistence_name(
     world: &mut SmokeWorld,
@@ -838,6 +904,68 @@ async fn then_step_should_not_have_agent_config_field(
         step_name,
         field,
         json
+    );
+}
+
+#[then(
+    expr = "the step {string} in the workflow should have config field {string} equal to {string}"
+)]
+async fn then_step_should_have_config_field(
+    world: &mut SmokeWorld,
+    step_name: String,
+    field: String,
+    expected: String,
+) {
+    let json = get_step_json(world, &step_name)
+        .await
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
+    assert_eq!(
+        json["config"][&field].as_str(),
+        Some(expected.as_str()),
+        "step '{}' config.{} mismatch\nJSON: {}",
+        step_name,
+        field,
+        json
+    );
+}
+
+#[then(
+    expr = "the step {string} in the workflow should have the default structured_inference state and fields"
+)]
+async fn then_step_should_have_default_structured_state_and_fields(
+    world: &mut SmokeWorld,
+    step_name: String,
+) {
+    let json = get_step_json(world, &step_name)
+        .await
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
+    let state: serde_json::Value = serde_json::from_str(STRUCTURED_STATE).unwrap();
+    assert_eq!(json["config"]["state"], state, "JSON: {json}");
+    let fields: serde_json::Value = serde_json::from_str(STRUCTURED_FIELDS).unwrap();
+    assert_eq!(json["config"]["fields"], fields, "JSON: {json}");
+}
+
+#[then(
+    expr = "the step {string} in the workflow should have the replacement structured_inference fields"
+)]
+async fn then_step_should_have_replacement_structured_fields(
+    world: &mut SmokeWorld,
+    step_name: String,
+) {
+    let json = get_step_json(world, &step_name)
+        .await
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
+    let state: serde_json::Value = serde_json::from_str(STRUCTURED_STATE).unwrap();
+    assert_eq!(json["config"]["state"], state, "JSON: {json}");
+    let fields: serde_json::Value = serde_json::from_str(REPLACEMENT_STRUCTURED_FIELDS).unwrap();
+    assert_eq!(json["config"]["fields"], fields, "JSON: {json}");
+}
+
+#[then(expr = "the step {string} in the workflow should not exist")]
+async fn then_step_should_not_exist(world: &mut SmokeWorld, step_name: String) {
+    assert!(
+        get_step_json(world, &step_name).await.is_none(),
+        "step '{step_name}' should not have been created"
     );
 }
 

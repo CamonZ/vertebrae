@@ -3,7 +3,8 @@
 
    Rendered as the CONTENT inside a right-docked FloatingDetailPanel shell. The
    topology shape (ordering, transitions, kind) comes from the pure `AtlasModel`;
-   the rich configuration (goal, prompt, agents, skills, model, route config) is fetched live
+   the rich configuration (goal, prompt, agents, skills, model, route config,
+   structured_inference provider/state/fields) is fetched live
    via `useStep(stepId)` because `PipelineStep` carries none of it.
 
    Transitions — the implicit forward step plus every explicit out-edge — are
@@ -19,6 +20,7 @@ import {
   type JsonValue,
   type LlmInferenceStepConfig,
   type RouteStepConfig,
+  type StructuredInferenceStepConfig,
   type WaitChildrenStepConfig,
 } from "../../../bindings";
 import { unwrapCommand } from "../../../query";
@@ -28,6 +30,13 @@ import { splitRef, shortId } from "../layout/geometry";
 import type { AtlasModel, AtlasWorkflow } from "../layout/types";
 import type { AtlasSelection } from "./selection";
 import { kindClass } from "./selection";
+import { StructuredInferenceFields } from "./StructuredInferenceFields";
+import {
+  EMPTY_STRUCTURED_INPUT,
+  structuredInferenceConfig,
+  structuredInferenceInput,
+  type StructuredInferenceInput,
+} from "../../../utils/stepConfig";
 
 export interface StepInspectorProps {
   model: AtlasModel;
@@ -53,6 +62,8 @@ function backendTypeForKind(kind: string): string {
   switch (kind) {
     case "human":
       return "human_input";
+    case "structured":
+      return "structured_inference";
     case "wait":
       return "wait_children";
     case "route":
@@ -111,6 +122,9 @@ export function StepInspector({
   const [outputSchema, setOutputSchema] = useState("");
   const [routeConfig, setRouteConfig] = useState("");
   const [persistenceOptions, setPersistenceOptions] = useState("");
+  const [structured, setStructured] = useState<StructuredInferenceInput>(
+    EMPTY_STRUCTURED_INPUT
+  );
 
   useEffect(() => {
     setEditing(false);
@@ -147,6 +161,13 @@ export function StepInspector({
       cfg.persistence_options
         ? JSON.stringify(cfg.persistence_options, null, 2)
         : ""
+    );
+    setStructured(
+      structuredInferenceInput(
+        cfg.step_type === "structured_inference"
+          ? (cfg.config as StructuredInferenceStepConfig | null)
+          : null
+      )
     );
   }, [cfg, editing]);
 
@@ -220,13 +241,20 @@ export function StepInspector({
       : null;
   const route =
     cfg?.step_type === "route" ? (cfg.config as RouteStepConfig | null) : null;
+  const structuredConfig =
+    cfg?.step_type === "structured_inference"
+      ? (cfg.config as StructuredInferenceStepConfig | null)
+      : null;
+  const isStructured = cfg?.step_type === "structured_inference";
   const outputConfig =
     cfg?.step_type === "llm_inference" || cfg?.step_type === "wait_children"
       ? (cfg.config as LlmInferenceStepConfig | WaitChildrenStepConfig | null)
       : null;
   const agents = inference?.agents ?? [];
   const skills = inference?.skills ?? [];
-  const model_ = inference?.agent_config?.model ?? null;
+  const model_ =
+    inference?.agent_config?.model ?? structuredConfig?.model ?? null;
+  const structuredState = structuredConfig?.state ?? null;
   const stepTypeLabel =
     stepTypeLabelFor(step.stepType) ??
     stepTypeLabelFor(cfg?.step_type) ??
@@ -255,6 +283,16 @@ export function StepInspector({
         setError("Output schema must be valid JSON.");
         return;
       }
+    }
+
+    let structuredPatch: Record<string, JsonValue> | undefined;
+    if (isStructured) {
+      const result = structuredInferenceConfig(structured);
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      structuredPatch = result.config;
     }
 
     let parsedRouteConfig: JsonValue | null = null;
@@ -307,13 +345,14 @@ export function StepInspector({
         );
         return;
       }
-      if (!outputSchema.trim()) {
+      if (isStructured ? !structured.fields.trim() : !outputSchema.trim()) {
         setError("Artifact persistence requires an output schema.");
         return;
       }
       if (
         cfg?.step_type !== "llm_inference" &&
-        cfg?.step_type !== "wait_children"
+        cfg?.step_type !== "wait_children" &&
+        !isStructured
       ) {
         setError("Finish and stop steps cannot persist artifacts.");
         return;
@@ -339,7 +378,7 @@ export function StepInspector({
           ? { output_schema: parsedSchema }
           : cfg?.step_type === "route"
             ? { route_config: parsedRouteConfig }
-            : undefined;
+            : structuredPatch;
       await unwrapCommand(
         commands.updateStep({
           step_id: stepId,
@@ -455,6 +494,12 @@ export function StepInspector({
               </label>
             </>
           ) : null}
+          {isStructured ? (
+            <StructuredInferenceFields
+              value={structured}
+              onChange={setStructured}
+            />
+          ) : null}
           <label>
             Transitions{" "}
             <span className="wfd-help">stop requires exactly one</span>
@@ -525,24 +570,43 @@ export function StepInspector({
           )}
         </section>
 
-        <section className="wfd-sec">
-          <div className="wfd-lbl">Prompt</div>
-          {inference?.prompt ? (
-            <pre className="wfd-prompt">
-              <LiquidHighlight source={inference.prompt} />
-            </pre>
-          ) : (
-            <div className="wfd-placeholder">
-              {isLoading
-                ? "Loading…"
-                : isFinish
-                  ? "No prompt — completes task immediately"
-                  : isStop
-                    ? "No prompt — run boundary is not dispatched"
-                    : "No prompt"}
-            </div>
-          )}
-        </section>
+        {isStructured ? (
+          <section className="wfd-sec" data-testid="structured-state-section">
+            <div className="wfd-lbl">State</div>
+            {structuredState === null ? (
+              <div className="wfd-placeholder">
+                {isLoading ? "Loading…" : "No state"}
+              </div>
+            ) : (
+              <pre className="wfd-prompt">
+                {typeof structuredState === "string" ? (
+                  <LiquidHighlight source={structuredState} />
+                ) : (
+                  JSON.stringify(structuredState, null, 2)
+                )}
+              </pre>
+            )}
+          </section>
+        ) : (
+          <section className="wfd-sec">
+            <div className="wfd-lbl">Prompt</div>
+            {inference?.prompt ? (
+              <pre className="wfd-prompt">
+                <LiquidHighlight source={inference.prompt} />
+              </pre>
+            ) : (
+              <div className="wfd-placeholder">
+                {isLoading
+                  ? "Loading…"
+                  : isFinish
+                    ? "No prompt — completes task immediately"
+                    : isStop
+                      ? "No prompt — run boundary is not dispatched"
+                      : "No prompt"}
+              </div>
+            )}
+          </section>
+        )}
 
         <section className="wfd-sec">
           <div className="wfd-lbl">Overview</div>
@@ -637,6 +701,16 @@ export function StepInspector({
 
         <section className="wfd-sec">
           <div className="wfd-lbl">Model</div>
+          {isStructured ? (
+            <div className="wfd-row">
+              <span className="rk">Provider</span>
+              {structuredConfig?.provider ? (
+                <span className="wfd-pill">{structuredConfig.provider}</span>
+              ) : (
+                <span className="wfd-placeholder">none</span>
+              )}
+            </div>
+          ) : null}
           <div className="wfd-row">
             <span className="rk">Primary</span>
             {model_ ? (
@@ -646,6 +720,21 @@ export function StepInspector({
             )}
           </div>
         </section>
+
+        {isStructured ? (
+          <section className="wfd-sec" data-testid="structured-fields-section">
+            <div className="wfd-lbl">Fields</div>
+            {structuredConfig?.fields ? (
+              <SchemaTree
+                schema={structuredConfig.fields as Record<string, unknown>}
+              />
+            ) : (
+              <div className="wfd-placeholder">
+                {isLoading ? "Loading…" : "No fields schema"}
+              </div>
+            )}
+          </section>
+        ) : null}
 
         {cfg?.step_type === "llm_inference" ||
         cfg?.step_type === "wait_children" ? (

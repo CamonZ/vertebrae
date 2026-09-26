@@ -144,7 +144,13 @@ function classNames(...values: Array<string | false | null | undefined>) {
 function normalizeHearthKind(
   kind: HearthStepKind | StepType | null | undefined
 ): HearthStepKind {
-  if (kind === "llm" || kind === "human" || kind === "wait") return kind;
+  if (
+    kind === "llm" ||
+    kind === "structured" ||
+    kind === "human" ||
+    kind === "wait"
+  )
+    return kind;
   return hearthStepKind(kind as StepType | null | undefined);
 }
 

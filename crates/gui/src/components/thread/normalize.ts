@@ -52,6 +52,12 @@ import {
   type FileEditEvent,
   type TodoListEvent,
 } from "../../types/conversation";
+import {
+  executionPrompt,
+  executionStructuredInference,
+  formatStateInput,
+  structuredInferenceMeta,
+} from "../../utils/stepConfig";
 import type {
   ActivityMessage,
   AgentMessage,
@@ -106,7 +112,8 @@ export interface ChatMsg {
 
 /**
  * Map a Sacrum {@link StepType} to a {@link StepKind}.
- *   llm_inference → "llm", route → "route",
+ *   llm_inference → "llm", structured_inference → "structured",
+ *   route → "route",
  *   human_input → "human", wait_children → "wait", stop → "stop",
  *   finish → "finish".
  * Unknown / `{ unsupported }` types fall back to "llm".
@@ -120,6 +127,8 @@ export function stepKindFromStepType(
   switch (stepType) {
     case "llm_inference":
       return "llm";
+    case "structured_inference":
+      return "structured";
     case "route":
       return "route";
     case "human_input":
@@ -138,6 +147,16 @@ export function stepKindFromStepType(
 /** A wait step is the only one rendered as a terminal WaitMessage (constraint #3). */
 function isWaitStep(stepType: string | null | undefined): boolean {
   return stepType === "wait_children";
+}
+
+function executionInput(
+  exec: StepExecution
+): { label: string; body: string } | null {
+  const prompt = executionPrompt(exec)?.trim();
+  if (prompt) return { label: "System", body: prompt };
+  const state = formatStateInput(executionStructuredInference(exec)?.state);
+  if (state.trim()) return { label: "State", body: state.trim() };
+  return null;
 }
 
 /** A finish step is terminal and has no provider/session transcript. */
@@ -668,19 +687,30 @@ function appendStepResult(
     .map((t) => ({ ...t, messages: t.messages.filter((m) => !isDuplicate(m)) }))
     .filter((t) => t.messages.length > 0);
 
-  const result: ResultMessage = {
-    evt: `${execId}-output`,
-    type: "result",
-    label: output ? "output" : "handoff",
-    body,
-  };
+  const results: ResultMessage[] = [
+    {
+      evt: `${execId}-output`,
+      type: "result",
+      label: output ? "output" : "handoff",
+      body,
+    },
+  ];
+  const meta = structuredInferenceMeta(exec);
+  if (meta !== null && meta !== undefined) {
+    results.push({
+      evt: `${execId}-meta`,
+      type: "result",
+      label: "meta",
+      body: JSON.stringify(meta),
+    });
+  }
   if (deduped.length === 0) {
-    return [{ id: `${execId}-result`, messages: [result] }];
+    return [{ id: `${execId}-result`, messages: results }];
   }
   const last = deduped[deduped.length - 1];
   return [
     ...deduped.slice(0, -1),
-    { ...last, messages: [...last.messages, result] },
+    { ...last, messages: [...last.messages, ...results] },
   ];
 }
 
@@ -746,18 +776,19 @@ function eventsToTurns(
 
   // Trace step executions are interpolated and carry NO human turn (the
   // `user` role only originates from chat). So lead the single turn with the
-  // step's interpolated prompt as a SystemMessage. reveal="shallow" (chat)
+  // execution's rendered input — the llm_inference prompt or the resolved
+  // structured_inference state — as a SystemMessage. reveal="shallow" (chat)
   // drops these; reveal="deep" (traces) shows them.
-  if (exec.prompt && exec.prompt.trim()) {
-    // Keep the row quiet: a one-line summary in `text`, the full interpolated
-    // prompt in the collapsible `body` (revealed via "show input"). Otherwise
+  const input = executionInput(exec);
+  if (input) {
+    // Keep the row quiet: a one-line summary in `text`, the full rendered
+    // input in the collapsible `body` (revealed via "show input"). Otherwise
     // the whole multi-KB prompt floods the stream.
-    const fullPrompt = exec.prompt.trim();
     const firstLine =
-      fullPrompt
+      input.body
         .split("\n")
         .map((l) => l.trim())
-        .find((l) => l.length > 0) ?? fullPrompt;
+        .find((l) => l.length > 0) ?? input.body;
     const summary =
       firstLine.length > 140
         ? firstLine.slice(0, 139).trimEnd() + "…"
@@ -767,9 +798,9 @@ function eventsToTurns(
       type: "system",
       at: clock(exec.started_at),
       rel: rel(runStartMs, ms(exec.started_at)),
-      label: "System",
+      label: input.label,
       text: summary,
-      body: fullPrompt,
+      body: input.body,
     };
     messages.push(sys);
   }

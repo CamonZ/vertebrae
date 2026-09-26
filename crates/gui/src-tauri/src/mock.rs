@@ -1105,7 +1105,12 @@ impl ExecutionService for MockExecutionService {
         let now = Utc::now();
         let mut execution = StepExecution::new(task_id, "mock_workflow", "mock_step")
             .with_task_run_id(run_id.clone())
-            .with_prompt("mock prompt")
+            .with_config(vertebrae_core::StepConfig::LlmInference(Box::new(
+                vertebrae_core::LlmInferenceConfig {
+                    prompt: Some("mock prompt".to_string()),
+                    ..Default::default()
+                },
+            )))
             .with_output("mock output")
             .with_context(r#"{"mock":"context"}"#)
             .with_transition_result("mock_next_step")

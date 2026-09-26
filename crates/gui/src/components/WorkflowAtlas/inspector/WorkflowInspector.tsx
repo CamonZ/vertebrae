@@ -15,12 +15,18 @@
    ────────────────────────────────────────────────────────────────── */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CloseIcon, IconButton } from "../../panels";
-import { commands, type StepType } from "../../../bindings";
+import { commands, type JsonValue, type StepType } from "../../../bindings";
 import { unwrapCommand } from "../../../query";
 import { splitRef } from "../layout/geometry";
 import type { AtlasModel, AtlasWorkflow } from "../layout/types";
 import type { AtlasSelection } from "./selection";
 import { kindClass } from "./selection";
+import { StructuredInferenceFields } from "./StructuredInferenceFields";
+import {
+  EMPTY_STRUCTURED_INPUT,
+  structuredInferenceConfig,
+  type StructuredInferenceInput,
+} from "../../../utils/stepConfig";
 
 export interface WorkflowInspectorProps {
   model: AtlasModel;
@@ -62,6 +68,9 @@ export function WorkflowInspector({
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<StepType>("llm_inference");
   const [newTransition, setNewTransition] = useState("");
+  const [newStructured, setNewStructured] = useState<StructuredInferenceInput>(
+    EMPTY_STRUCTURED_INPUT
+  );
   const [addError, setAddError] = useState<string | null>(null);
   const [addingBusy, setAddingBusy] = useState(false);
   const [editingFactory, setEditingFactory] = useState(false);
@@ -132,6 +141,15 @@ export function WorkflowInspector({
       setAddError("Stop steps require exactly one outgoing transition.");
       return;
     }
+    let structuredConfig: Record<string, JsonValue> | null = null;
+    if (newType === "structured_inference") {
+      const result = structuredInferenceConfig(newStructured);
+      if ("error" in result) {
+        setAddError(result.error);
+        return;
+      }
+      structuredConfig = result.config;
+    }
 
     setAddingBusy(true);
     setAddError(null);
@@ -142,11 +160,13 @@ export function WorkflowInspector({
           name: newName.trim(),
           goal: null,
           config:
-            newType === "llm_inference" ||
-            newType === "route" ||
-            newType === "wait_children"
-              ? {}
-              : null,
+            newType === "structured_inference"
+              ? structuredConfig
+              : newType === "llm_inference" ||
+                  newType === "route" ||
+                  newType === "wait_children"
+                ? {}
+                : null,
           order: wf.stepIds.length,
           transitions_to: transition ? [transition] : [],
           step_type: newType,
@@ -154,6 +174,7 @@ export function WorkflowInspector({
       );
       setNewName("");
       setNewTransition("");
+      setNewStructured(EMPTY_STRUCTURED_INPUT);
       setAdding(false);
       if (created.id)
         onSelect({ type: "step", workflowId: wf.id, stepId: created.id });
@@ -353,6 +374,9 @@ export function WorkflowInspector({
                   }
                 >
                   <option value="llm_inference">llm_inference</option>
+                  <option value="structured_inference">
+                    structured_inference
+                  </option>
                   <option value="route">route</option>
                   <option value="wait_children">wait_children</option>
                   <option value="human_input">human_input</option>
@@ -360,6 +384,12 @@ export function WorkflowInspector({
                   <option value="finish">finish</option>
                 </select>
               </label>
+              {newType === "structured_inference" ? (
+                <StructuredInferenceFields
+                  value={newStructured}
+                  onChange={setNewStructured}
+                />
+              ) : null}
               <label>
                 Transition target
                 <input

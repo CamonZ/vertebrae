@@ -90,7 +90,7 @@ pub use models::{
     AgentConfig, Artifact, ArtifactLinkMetadata, BlockerNode, CodeRef, CreateArtifactInput,
     ExecutionStatus, GetArtifactByLogicalNameInput, Level, ListArtifactInput, LlmInferenceConfig,
     PermissionMode, Priority, RouteConfig, STEP_CONFIG_VERSION, Section, SectionType, SessionLog,
-    Step, StepConfig, StepExecution, StepType, StepUpdate, Task, TaskFilter, TaskRun,
-    TaskRunControls, TaskRunStatus, TaskRunSummary, TaskRunTrace, TaskUpdate, Thing, TokenUsage,
-    UpdateArtifactInput, WaitChildrenConfig, Workflow, WorkflowTransition,
+    Step, StepConfig, StepExecution, StepType, StepUpdate, StructuredInferenceConfig, Task,
+    TaskFilter, TaskRun, TaskRunControls, TaskRunStatus, TaskRunSummary, TaskRunTrace, TaskUpdate,
+    Thing, TokenUsage, UpdateArtifactInput, WaitChildrenConfig, Workflow, WorkflowTransition,
 };

@@ -45,7 +45,7 @@ function makeExec(
     started_at: overrides.started_at ?? "2026-05-08T10:00:00Z",
     completed_at: overrides.completed_at ?? null,
     status: overrides.status ?? "in_progress",
-    prompt: overrides.prompt ?? null,
+    config: overrides.config ?? null,
     output: null,
     context: null,
     transition_result: null,
@@ -170,17 +170,14 @@ describe("resolveHumanInputGate", () => {
       status: "waiting",
       latest_step_execution_id: "e-1",
     });
-    const exec = makeExec({
-      id: "e-1",
-      step_name: "approval",
-      prompt: "Approve change?",
-    });
+    const exec = makeExec({ id: "e-1", step_name: "approval" });
     const gate = resolveHumanInputGate(run, [exec]);
     expect(gate).not.toBeNull();
     expect(gate?.run.id).toBe("run-1");
     expect(gate?.execution?.id).toBe("e-1");
     expect(gate?.stepName).toBe("approval");
-    expect(gate?.prompt).toBe("Approve change?");
+    // human_input executions carry no rendered config, hence no prompt.
+    expect(gate?.prompt).toBeNull();
     expect(gate?.outputSchema).toBeNull();
   });
 

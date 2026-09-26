@@ -512,6 +512,7 @@ mod tests {
     fn test_response_to_step_maps_all_step_type_variants() {
         for (input, expected) in [
             ("llm_inference", StepType::LlmInference),
+            ("structured_inference", StepType::StructuredInference),
             ("route", StepType::Route),
             ("wait_children", StepType::WaitChildren),
             ("human_input", StepType::HumanInput),
@@ -666,6 +667,46 @@ mod tests {
                 "agent_config": {}
             })
         );
+    }
+
+    #[tokio::test]
+    async fn test_create_structured_inference_step_round_trips_config() {
+        let config = json!({
+            "version": 1,
+            "provider": "typesafe",
+            "model": "jev",
+            "state": {"title": "{{ task.title }}"},
+            "fields": {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+        });
+        let server = MockServer::start().await;
+        let mut response = make_step_response("step-si", "Classify", "wf-1", 0);
+        response["step_type"] = json!("structured_inference");
+        response["config"] = config.clone();
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(graphql_response("create_workflow_step", response)),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let step = Step::new("Classify", "wf-1")
+            .with_step_type(StepType::StructuredInference)
+            .with_config(
+                StepConfig::from_value(&StepType::StructuredInference, config.clone()).unwrap(),
+            );
+        let created = service.create_step(&step).await.unwrap();
+
+        assert_eq!(created.step_type, StepType::StructuredInference);
+        assert_eq!(created.config, step.config);
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["variables"]["step_type"], "structured_inference");
+        let sent: serde_json::Value =
+            serde_json::from_str(body["variables"]["config"].as_str().unwrap()).unwrap();
+        assert_eq!(sent, config);
     }
 
     #[tokio::test]

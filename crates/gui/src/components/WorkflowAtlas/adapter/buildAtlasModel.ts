@@ -44,6 +44,7 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
   // so gate on the known set and treat anything else as a generic process box.
   const known: ReadonlySet<string> = new Set([
     "llm_inference",
+    "structured_inference",
     "route",
     "human_input",
     "wait_children",
@@ -57,6 +58,8 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
   switch (hearth) {
     case "llm":
       return "llm";
+    case "structured":
+      return "structured";
     case "wait":
       return "wait";
     case "human":

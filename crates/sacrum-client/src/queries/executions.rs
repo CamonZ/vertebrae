@@ -10,7 +10,14 @@ pub const EXECUTION_FIELDS: &str = r#"
         step_type
         status
         context
-        prompt
+        config {
+            ... on LlmInferenceStepConfig {
+                version prompt output_schema agents skills agent_config
+            }
+            ... on StructuredInferenceStepConfig { version provider model state fields }
+            ... on RouteStepConfig { version route_config }
+            ... on WaitChildrenStepConfig { version output_schema }
+        }
         output
         transition_result
         model

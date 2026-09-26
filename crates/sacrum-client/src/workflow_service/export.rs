@@ -430,6 +430,19 @@ fn convert_step(
         .get(&step.id)
         .cloned()
         .ok_or_else(|| missing_ref("step", &step.id))?;
+    let step_type = step
+        .step_type
+        .as_deref()
+        .map(StepType::from_wire_str)
+        .unwrap_or_default();
+    // Bundle manifests have no structured_inference fields yet; refuse
+    // rather than export the step without its config.
+    if step_type == StepType::StructuredInference {
+        return Err(ServiceError::invalid_input(format!(
+            "step {} is a structured_inference step; workflow bundles cannot export structured_inference config yet",
+            step.id
+        )));
+    }
     let route_config = step
         .config_field("route_config")
         .map(|route_config| {
@@ -455,11 +468,7 @@ fn convert_step(
         agents: string_list(step.config_field("agents")),
         skills: string_list(step.config_field("skills")),
         agent_config: step.config_field("agent_config").cloned(),
-        step_type: step
-            .step_type
-            .as_deref()
-            .map(StepType::from_wire_str)
-            .unwrap_or_default(),
+        step_type,
         step_order: step.step_order,
         output_schema: step.config_field("output_schema").cloned(),
         persistence_options: step.persistence_options.clone(),
@@ -668,6 +677,26 @@ mod tests {
             value["workflows"][0]["steps"][0]
                 .get("updated_at")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn conversion_rejects_structured_inference_steps() {
+        let mut snapshot = snapshot();
+        let step = &mut snapshot.workflows[0].workflow_steps[0];
+        step.step_type = Some("structured_inference".to_string());
+        step.config = Some(json!({
+            "version": 1,
+            "provider": "typesafe",
+            "model": "jev",
+            "state": "{{ task.title }}",
+            "fields": {"type": "object"}
+        }));
+
+        let error = snapshot_to_bundle(&snapshot).unwrap_err().to_string();
+        assert!(
+            error.contains("second-step-id is a structured_inference step"),
+            "{error}"
         );
     }
 
