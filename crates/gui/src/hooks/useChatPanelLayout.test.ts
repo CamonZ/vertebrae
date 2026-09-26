@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useChatPanelLayout } from "./useChatPanelLayout";
+import { useShellStore } from "../stores/shellStore";
 
 const WIDTH_STORAGE_KEY = "chat-window-manager-width";
 
@@ -12,6 +13,7 @@ function renderPanelHook(overrides: { unsplitPanes?: () => void } = {}) {
 describe("useChatPanelLayout", () => {
   beforeEach(() => {
     localStorage.clear();
+    useShellStore.setState({ chatPanelPresentation: "compact" });
     vi.useFakeTimers();
   });
 

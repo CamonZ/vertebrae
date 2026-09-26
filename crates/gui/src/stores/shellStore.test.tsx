@@ -6,6 +6,7 @@ describe("useShellStore", () => {
     useShellStore.setState({
       pageTitle: "",
       headerActions: null,
+      chatPanelPresentation: "compact",
     });
   });
 
