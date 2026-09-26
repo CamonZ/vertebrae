@@ -435,14 +435,6 @@ fn convert_step(
         .as_deref()
         .map(StepType::from_wire_str)
         .unwrap_or_default();
-    // Bundle manifests have no structured_inference fields yet; refuse
-    // rather than export the step without its config.
-    if step_type == StepType::StructuredInference {
-        return Err(ServiceError::invalid_input(format!(
-            "step {} is a structured_inference step; workflow bundles cannot export structured_inference config yet",
-            step.id
-        )));
-    }
     let route_config = step
         .config_field("route_config")
         .map(|route_config| {
@@ -473,6 +465,16 @@ fn convert_step(
         output_schema: step.config_field("output_schema").cloned(),
         persistence_options: step.persistence_options.clone(),
         route_config,
+        provider: step
+            .config_field("provider")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        model: step
+            .config_field("model")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        state: step.config_field("state").cloned(),
+        questions: step.config_field("questions").cloned(),
     })
 }
 
@@ -681,7 +683,7 @@ mod tests {
     }
 
     #[test]
-    fn conversion_rejects_structured_inference_steps() {
+    fn conversion_exports_structured_inference_questions() {
         let mut snapshot = snapshot();
         let step = &mut snapshot.workflows[0].workflow_steps[0];
         step.step_type = Some("structured_inference".to_string());
@@ -690,14 +692,25 @@ mod tests {
             "provider": "typesafe",
             "model": "jev",
             "state": "{{ task.title }}",
-            "fields": {"type": "object"}
+            "questions": {"ok": {"type": "noul", "instructions": "ok?", "criteria": {"true": "yes", "false": "no"}}}
         }));
 
-        let error = snapshot_to_bundle(&snapshot).unwrap_err().to_string();
-        assert!(
-            error.contains("second-step-id is a structured_inference step"),
-            "{error}"
+        let bundle = snapshot_to_bundle(&snapshot).unwrap();
+        let step = bundle.workflows[0]
+            .steps
+            .iter()
+            .find(|step| step.step_ref == "second")
+            .unwrap();
+        assert_eq!(step.provider.as_deref(), Some("typesafe"));
+        assert_eq!(step.model.as_deref(), Some("jev"));
+        assert_eq!(step.state, Some(json!("{{ task.title }}")));
+        assert_eq!(
+            step.questions,
+            Some(json!({
+                "ok": {"type": "noul", "instructions": "ok?", "criteria": {"true": "yes", "false": "no"}}
+            }))
         );
+        assert_eq!(step.config_value()["questions"]["ok"]["type"], "noul");
     }
 
     #[test]

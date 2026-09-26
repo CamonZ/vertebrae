@@ -18,8 +18,12 @@ Workflow fields map to Sacrum's exportable fields: `name`, `description`,
 `display_order`, `is_default`, `kanban_column`, `factory_name`, `metadata`,
 and `initial_step`. Step fields map to `name`, `goal`, `prompt`, `agents`,
 `skills`, `agent_config`, `step_type`, `step_order`, `output_schema`,
-`persistence_options`, and `route_config`. `metadata`, agent configuration,
-output schema, persistence options, and route configuration preserve nested JSON
+`persistence_options`, `route_config`, `provider`, `model`, `state`, and
+`questions`. Structured inference uses provider/model/state/questions; the
+question map is preserved as JSON, while Sacrum resolves state and validates
+answers against a schema derived from the questions. `metadata`, agent
+configuration, output schema, persistence options, route configuration, state,
+and questions preserve nested JSON
 without rewriting UUID-looking strings. Agents and skills retain their array
 order. A missing/default display order is `0`, `is_default` is `false`, and
 `step_type` is `llm_inference`; `prompt` is serialized as `null` when absent, while

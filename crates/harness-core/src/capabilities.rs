@@ -63,6 +63,9 @@ pub struct HarnessCapabilities {
     pub unavailable_reason: Option<String>,
     pub persistent_sessions: bool,
     pub one_shot_runs: bool,
+    /// Whether this runtime implements the structured inference request API.
+    #[serde(default)]
+    pub structured_inference: bool,
     pub session_resumption: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,

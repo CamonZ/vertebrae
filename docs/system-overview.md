@@ -146,7 +146,7 @@ fields, optional `persistence_options`, and a type-specific `config`.
 | Type | `config` | Behavior |
 |------|----------|----------|
 | `llm_inference` (default) | `prompt`, `output_schema`, `agents`, `skills`, `agent_config` | Dispatches an agent through the selected harness. |
-| `structured_inference` | `provider`, `model`, `state`, `fields` | Sends resolved `state` and the `fields` JSON Schema to a provider harness; the output is JSON matching `fields`. |
+| `structured_inference` | `provider`, `model`, `state`, `questions` | Sends Sacrum-resolved `state` and provider-shaped System One `questions` to a supporting harness; the answer map is returned unchanged and validated by Sacrum against a schema derived from the questions. |
 | `route` | `route_config` | Sacrum evaluates the deterministic route locally; an empty config is a draft. |
 | `wait_children` | `output_schema` | Waits for child tasks and can validate their combined output. |
 | `human_input` | `null` | Pauses for external input; its detailed semantics remain unspecified. |

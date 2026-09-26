@@ -136,7 +136,7 @@ impl std::fmt::Display for WorkflowDetail {
                         config.provider.as_deref().unwrap_or("(none)")
                     )?;
                     writeln!(f, "   State: {}", json(config.state.as_ref()))?;
-                    writeln!(f, "   Fields: {}", json(config.fields.as_ref()))?;
+                    writeln!(f, "   Questions: {}", json(config.questions.as_ref()))?;
                 }
             }
         }
@@ -790,7 +790,9 @@ mod tests {
                     provider: Some("typesafe".to_string()),
                     model: Some("jev".to_string()),
                     state: Some(serde_json::json!("{{ task.title }}")),
-                    fields: Some(serde_json::json!({"type": "object"})),
+                    questions: Some(serde_json::json!({
+                        "label": {"type": "noul", "instructions": "label", "criteria": {"true": "label", "false": "not label"}}
+                    })),
                     ..Default::default()
                 }),
             }],
@@ -802,7 +804,9 @@ mod tests {
         assert!(output.contains("1. classify (model: jev)"));
         assert!(output.contains("Provider: typesafe"));
         assert!(output.contains(r#"State: "{{ task.title }}""#));
-        assert!(output.contains(r#"Fields: {"type":"object"}"#));
+        assert!(output.contains("Questions:"));
+        assert!(output.contains(r#""type":"noul""#));
+        assert!(output.contains(r#""instructions":"label""#));
     }
 
     // ==================== WorkflowSummary edge cases ====================

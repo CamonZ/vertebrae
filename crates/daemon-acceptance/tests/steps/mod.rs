@@ -6,5 +6,6 @@ pub mod mocks;
 pub mod setup;
 pub mod stop;
 pub mod telemetry;
+pub mod typesafe;
 pub mod workflow;
 pub mod worktree;

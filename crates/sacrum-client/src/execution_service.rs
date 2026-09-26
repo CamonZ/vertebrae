@@ -731,7 +731,7 @@ mod tests {
                 "provider": "typesafe",
                 "model": "jev",
                 "state": {"title": "Resolved"},
-                "fields": {"type": "object"}
+                "questions": {"ok": {"type": "noul", "instructions": "ok?", "criteria": {"true": "yes", "false": "no"}}}
             }
         }))
         .unwrap();

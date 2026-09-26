@@ -176,6 +176,7 @@ mod tests {
             unavailable_reason: None,
             persistent_sessions: true,
             one_shot_runs: true,
+            structured_inference: false,
             session_resumption: true,
             default_model: Some("default".into()),
             models: vec![
@@ -267,6 +268,7 @@ mod tests {
             unavailable_reason: None,
             persistent_sessions: true,
             one_shot_runs: true,
+            structured_inference: false,
             session_resumption: true,
             default_model: Some("luna".into()),
             models: vec![ModelCapability {
@@ -300,6 +302,7 @@ mod tests {
             unavailable_reason: None,
             persistent_sessions: true,
             one_shot_runs: true,
+            structured_inference: false,
             session_resumption: true,
             default_model: Some("unknown".into()),
             models: vec![ModelCapability {
@@ -326,6 +329,7 @@ mod tests {
             unavailable_reason: Some("catalog unavailable".into()),
             persistent_sessions: true,
             one_shot_runs: true,
+            structured_inference: false,
             session_resumption: true,
             default_model: None,
             models: Vec::new(),
