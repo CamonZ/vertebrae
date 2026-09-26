@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { commands } from "../bindings";
 import {
   useCurrentProject,
@@ -14,17 +14,27 @@ import {
   type WebSocketStatus,
 } from "../hooks/useWebSocketStatus";
 import { useGuiUpdateStore } from "../stores/guiUpdateStore";
+import { useShellStore } from "../stores/shellStore";
+import { useChatStore } from "../stores/chatStore";
 
 interface NavItemProps {
   to: string;
   id: string;
   label: string;
   icon: React.ReactNode;
+  shortcutIndex?: number;
   /** Render a small dot in the corner — used for unread/needs-attention. */
   withDot?: boolean;
 }
 
-function NavItem({ to, id, label, icon, withDot }: NavItemProps) {
+function NavItem({
+  to,
+  id,
+  label,
+  icon,
+  shortcutIndex,
+  withDot,
+}: NavItemProps) {
   return (
     <li>
       <NavLink
@@ -32,6 +42,7 @@ function NavItem({ to, id, label, icon, withDot }: NavItemProps) {
         data-testid={`sidebar-nav-${id}`}
         title={label}
         aria-label={label}
+        aria-keyshortcuts={shortcutIndex ? `Meta+${shortcutIndex}` : undefined}
         className={({ isActive }) =>
           [
             // 28px box matches the design rail's `.app-rail .item` (and our
@@ -481,22 +492,82 @@ const SETTINGS_NAV_ITEM = {
   ),
 } as const;
 
+const RAIL_PAGE_SHORTCUT_ROUTES = [
+  ...RAIL_NAV_ITEMS.map((item) => item.to),
+  SETTINGS_NAV_ITEM.to,
+];
+
 /**
  * Application sidebar. 48px fixed width, icon-only nav, project avatar at top,
  * project chat and Settings pinned to the bottom.
  */
 export function Sidebar() {
+  const location = useLocation();
   const project = useCurrentProject();
   const navigate = useNavigate();
   const hasAvailableGuiUpdate = useGuiUpdateStore(
     (state) => state.available !== null || state.localBackend.update !== null
   );
+  const chatPanelPresentation = useShellStore(
+    (state) => state.chatPanelPresentation
+  );
+  const setChatPanelPresentation = useShellStore(
+    (state) => state.setChatPanelPresentation
+  );
+  const chatPanelOpen = useChatStore((state) => state.panelOpen);
+  const hasActiveChat = useChatStore((state) => state.activeSessionId !== null);
+  const previousPathname = useRef(location.pathname);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [addProjectState, setAddProjectState] = useState<AddProjectState>({
     status: "idle",
   });
   const avatarRef = useRef<HTMLButtonElement | null>(null);
   const addProjectInFlight = useRef(false);
+
+  useEffect(() => {
+    if (previousPathname.current === location.pathname) return;
+    previousPathname.current = location.pathname;
+    if (chatPanelPresentation === "expanded") {
+      setChatPanelPresentation("suspended");
+    }
+  }, [chatPanelPresentation, location.pathname, setChatPanelPresentation]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        !event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        document.querySelector('[role="dialog"], [aria-modal="true"]')
+      ) {
+        return;
+      }
+
+      const match = /^(?:Digit|Numpad)?([1-7])$/.exec(event.code);
+      const shortcutIndex = match ? Number(match[1]) - 1 : -1;
+      const route = RAIL_PAGE_SHORTCUT_ROUTES[shortcutIndex];
+      if (!route) return;
+
+      event.preventDefault();
+      if (location.pathname === route && chatPanelPresentation === "expanded") {
+        setChatPanelPresentation("suspended");
+        return;
+      }
+      navigate(route);
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [
+    chatPanelPresentation,
+    location.pathname,
+    navigate,
+    setChatPanelPresentation,
+  ]);
 
   function handleSwitched() {
     setSwitcherOpen(false);
@@ -617,16 +688,60 @@ export function Sidebar() {
       />
       <nav aria-label="Main navigation" className="flex-1">
         <ul role="list" className="flex flex-col items-center gap-1">
-          {RAIL_NAV_ITEMS.map((item) => (
-            <NavItem key={item.id} {...item} />
+          {RAIL_NAV_ITEMS.map((item, index) => (
+            <NavItem key={item.id} {...item} shortcutIndex={index + 1} />
           ))}
         </ul>
       </nav>
+      {chatPanelOpen &&
+        hasActiveChat &&
+        chatPanelPresentation !== "compact" && (
+          <div>
+            <button
+              type="button"
+              title={
+                chatPanelPresentation === "expanded"
+                  ? "Expanded chat"
+                  : "Return to expanded chat"
+              }
+              aria-label={
+                chatPanelPresentation === "expanded"
+                  ? "Expanded chat"
+                  : "Return to expanded chat"
+              }
+              aria-pressed={chatPanelPresentation === "expanded"}
+              data-testid="sidebar-nav-chat"
+              onClick={() => setChatPanelPresentation("expanded")}
+              className={[
+                "group relative flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)]",
+                "transition-[background-color,color] duration-[var(--t-fast)] ease-[var(--ease-default)]",
+                "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]",
+                chatPanelPresentation === "expanded"
+                  ? "bg-[var(--color-accent-wash)] text-[var(--color-accent)]"
+                  : "text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)]",
+              ].join(" ")}
+            >
+              {chatPanelPresentation === "expanded" && (
+                <span
+                  aria-hidden
+                  className="absolute left-[-8px] top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-[var(--color-accent)] shadow-[0_0_6px_var(--color-accent-glow)]"
+                />
+              )}
+              <Icon size="sm" strokeWidth={2}>
+                <path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l1.7-3.4A7.5 7.5 0 1 1 20 11.5Z" />
+              </Icon>
+            </button>
+          </div>
+        )}
       <div
         className="flex flex-col items-center gap-1 pb-1"
         data-testid="sidebar-settings-utility"
       >
-        <NavItem {...SETTINGS_NAV_ITEM} withDot={hasAvailableGuiUpdate} />
+        <NavItem
+          {...SETTINGS_NAV_ITEM}
+          shortcutIndex={RAIL_NAV_ITEMS.length + 1}
+          withDot={hasAvailableGuiUpdate}
+        />
       </div>
       <RailConnectionStatus />
     </aside>

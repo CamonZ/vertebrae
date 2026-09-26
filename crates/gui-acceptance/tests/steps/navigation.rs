@@ -1207,6 +1207,7 @@ async fn press_key(world: &mut GuiWorld, key_name: String) {
         "slash" => "/",
         "j" => "j",
         "k" => "k",
+        "Meta+1" => "\u{E03D}1",
         other => panic!("unsupported key name '{}'", other),
     };
 
