@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde_json::json;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::{
-    StepAddress, StepEdge, StepManifest, StepType, WORKFLOW_BUNDLE_SCHEMA_VERSION,
-    WorkflowBundleManifest, WorkflowEdge, WorkflowManifest, symbolize_route_config,
+    StepAddress, StepEdge, StepManifest, StepType, WorkflowBundleManifest, WorkflowEdge,
+    WorkflowManifest, symbolize_route_config,
 };
 
 use crate::api_types::{
@@ -408,7 +408,6 @@ fn snapshot_to_bundle(snapshot: &WorkflowExportSnapshot) -> ServiceResult<Workfl
     }
 
     let bundle = WorkflowBundleManifest {
-        schema_version: WORKFLOW_BUNDLE_SCHEMA_VERSION,
         workflows: workflow_manifests,
         step_edges,
         workflow_edges,
@@ -435,60 +434,34 @@ fn convert_step(
         .as_deref()
         .map(StepType::from_wire_str)
         .unwrap_or_default();
-    let route_config = step
-        .config_field("route_config")
-        .map(|route_config| {
-            let route_refs = refs.route_target_refs(workflow_ref);
-            symbolize_route_config(route_config, &route_refs).map_err(|error| {
-                closed_bundle_error(
-                    workflow_id,
-                    &step.id,
-                    format!(
-                        "step {} route_config has an invalid destination: {error}",
-                        step.id
-                    ),
-                )
-            })
-        })
-        .transpose()?;
+    let mut config = step.config.clone();
+    if let Some(route_config) = config
+        .as_mut()
+        .and_then(|config| config.get_mut("route_config"))
+        && !route_config.is_null()
+    {
+        let route_refs = refs.route_target_refs(workflow_ref);
+        *route_config = symbolize_route_config(route_config, &route_refs).map_err(|error| {
+            closed_bundle_error(
+                workflow_id,
+                &step.id,
+                format!(
+                    "step {} route_config has an invalid destination: {error}",
+                    step.id
+                ),
+            )
+        })?;
+    }
 
     Ok(StepManifest {
         step_ref,
         name: step.name.clone(),
         goal: step.goal.clone(),
-        prompt: step.prompt().map(str::to_string),
-        agents: string_list(step.config_field("agents")),
-        skills: string_list(step.config_field("skills")),
-        agent_config: step.config_field("agent_config").cloned(),
         step_type,
         step_order: step.step_order,
-        output_schema: step.config_field("output_schema").cloned(),
         persistence_options: step.persistence_options.clone(),
-        route_config,
-        provider: step
-            .config_field("provider")
-            .and_then(|value| value.as_str())
-            .map(str::to_string),
-        model: step
-            .config_field("model")
-            .and_then(|value| value.as_str())
-            .map(str::to_string),
-        state: step.config_field("state").cloned(),
-        questions: step.config_field("questions").cloned(),
+        config,
     })
-}
-
-/// The V1 bundle keeps step config as flat fields.
-fn string_list(value: Option<&serde_json::Value>) -> Vec<String> {
-    value
-        .and_then(serde_json::Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn ordered_workflows(workflows: &[WorkflowExport]) -> Vec<&WorkflowExport> {
@@ -659,16 +632,16 @@ mod tests {
     fn conversion_is_portable_and_preserves_meaningful_order() {
         let bundle = snapshot_to_bundle(&snapshot()).unwrap();
         let value: Value = serde_json::from_str(&bundle.canonical_json().unwrap()).unwrap();
-        assert_eq!(value["schema_version"], 1);
+        assert!(value.get("schema_version").is_none());
         assert_eq!(value["workflows"][0]["workflow_ref"], "build_workflow");
         assert_eq!(value["workflows"][0]["steps"][0]["step_ref"], "first");
         assert_eq!(value["workflows"][0]["steps"][1]["step_ref"], "second");
         assert_eq!(
-            value["workflows"][0]["steps"][0]["agents"],
+            value["workflows"][0]["steps"][0]["config"]["agents"],
             json!(["first-agent", "second-agent"])
         );
         assert_eq!(
-            value["workflows"][0]["steps"][0]["skills"],
+            value["workflows"][0]["steps"][0]["config"]["skills"],
             json!(["first-skill", "second-skill"])
         );
         assert!(value["workflows"][0].get("id").is_none());
@@ -691,7 +664,7 @@ mod tests {
             "version": 1,
             "provider": "typesafe",
             "model": "jev",
-            "state": "{{ task.title }}",
+            "state": {"task_title": "{{ task.title }}"},
             "questions": {"ok": {"type": "noul", "instructions": "ok?", "criteria": {"true": "yes", "false": "no"}}}
         }));
 
@@ -701,16 +674,22 @@ mod tests {
             .iter()
             .find(|step| step.step_ref == "second")
             .unwrap();
-        assert_eq!(step.provider.as_deref(), Some("typesafe"));
-        assert_eq!(step.model.as_deref(), Some("jev"));
-        assert_eq!(step.state, Some(json!("{{ task.title }}")));
+        assert_eq!(step.config.as_ref().unwrap()["provider"], "typesafe");
+        assert_eq!(step.config.as_ref().unwrap()["model"], "jev");
         assert_eq!(
-            step.questions,
-            Some(json!({
-                "ok": {"type": "noul", "instructions": "ok?", "criteria": {"true": "yes", "false": "no"}}
-            }))
+            step.config.as_ref().unwrap()["state"],
+            json!({"task_title": "{{ task.title }}"})
         );
-        assert_eq!(step.config_value()["questions"]["ok"]["type"], "noul");
+        assert_eq!(
+            step.config.as_ref().unwrap()["questions"],
+            json!({
+                "ok": {"type": "noul", "instructions": "ok?", "criteria": {"true": "yes", "false": "no"}}
+            })
+        );
+        assert_eq!(
+            step.config.as_ref().unwrap()["questions"]["ok"]["type"],
+            "noul"
+        );
     }
 
     #[test]

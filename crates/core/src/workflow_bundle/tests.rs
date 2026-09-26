@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::*;
 
-const GOLDEN: &str = include_str!("../../tests/fixtures/workflow_bundle_v1.json");
+const GOLDEN: &str = include_str!("../../tests/fixtures/workflow_bundle.json");
 type ValidationCase = (&'static str, fn(&mut WorkflowBundleManifest), &'static str);
 
 fn golden() -> WorkflowBundleManifest {
@@ -15,10 +15,18 @@ fn golden_fixture_round_trips_without_semantic_loss() {
     let canonical = manifest.canonical_json().unwrap();
     let reparsed = parse_manifest(&canonical).unwrap();
     assert_eq!(reparsed, manifest.canonicalize());
-    assert!(canonical.contains("\"prompt\":null"));
     assert!(canonical.contains("\"prompt\":\"\""));
     assert!(canonical.contains("\"handoff\""));
     assert!(canonical.contains("\u{00e9}"));
+    let structured = manifest.workflows[1]
+        .steps
+        .iter()
+        .find(|step| step.step_ref == "classify")
+        .unwrap();
+    assert_eq!(
+        structured.config.as_ref().unwrap()["state"]["title"],
+        "{{ task.title }}"
+    );
 }
 
 #[test]
@@ -44,7 +52,10 @@ fn shuffled_unordered_collections_have_identical_canonical_bytes() {
         .iter()
         .find(|step| step.step_ref == "start")
         .unwrap();
-    assert_eq!(start.agents, vec!["agent-a", "agent-b"]);
+    assert_eq!(
+        start.config.as_ref().unwrap()["agents"],
+        serde_json::json!(["agent-a", "agent-b"])
+    );
 }
 
 #[test]
@@ -67,17 +78,14 @@ fn canonicalization_uses_display_and_step_order_without_reordering_config_arrays
         vec!["start", "route", "finish", "wait", "input", "pause"]
     );
     assert_eq!(
-        canonical.workflows[0].steps[0].agents,
-        vec!["agent-a", "agent-b"]
+        canonical.workflows[0].steps[0].config.as_ref().unwrap()["agents"],
+        serde_json::json!(["agent-a", "agent-b"])
     );
     assert_eq!(
-        canonical.workflows[0].steps[0].skills,
-        vec!["build", "verify"]
+        canonical.workflows[0].steps[0].config.as_ref().unwrap()["skills"],
+        serde_json::json!(["build", "verify"])
     );
-    let rules = canonical.workflows[0].steps[1]
-        .route_config
-        .as_ref()
-        .unwrap()["rules"]
+    let rules = canonical.workflows[0].steps[1].config.as_ref().unwrap()["route_config"]["rules"]
         .as_array()
         .unwrap();
     assert_eq!(rules[0]["id"], "approved");
@@ -124,11 +132,6 @@ fn name_conflicts_are_case_insensitive_and_create_only() {
 fn validation_failures_are_table_driven_and_actionable() {
     let cases: &[ValidationCase] = &[
         (
-            "unsupported version",
-            |bundle: &mut WorkflowBundleManifest| bundle.schema_version = 9,
-            "schema_version",
-        ),
-        (
             "duplicate workflow ref",
             |bundle: &mut WorkflowBundleManifest| {
                 let workflow = bundle.workflows[0].clone();
@@ -139,17 +142,17 @@ fn validation_failures_are_table_driven_and_actionable() {
         (
             "route step with llm_inference field",
             |bundle: &mut WorkflowBundleManifest| {
-                bundle.workflows[0].steps[1].agents = vec!["router".to_string()];
+                bundle.workflows[0].steps[1].config.as_mut().unwrap()["agents"] =
+                    serde_json::json!(["router"]);
             },
-            "workflows[0].steps[1].agents",
+            "workflows[0].steps[1].config.agents",
         ),
         (
             "config field on config-less step",
             |bundle: &mut WorkflowBundleManifest| {
-                bundle.workflows[0].steps[0].output_schema =
-                    Some(serde_json::json!({"type": "object"}));
+                bundle.workflows[0].steps[0].config = Some(serde_json::json!({"version":1}));
             },
-            "workflows[0].steps[0].output_schema",
+            "workflows[0].steps[0].config",
         ),
         (
             "duplicate step ref",
@@ -172,7 +175,7 @@ fn validation_failures_are_table_driven_and_actionable() {
                 let edge = bundle.step_edges[0].clone();
                 bundle.step_edges.push(edge);
             },
-            "step_edges[8]",
+            "step_edges[9]",
         ),
         (
             "cross-workflow step edge",
@@ -195,18 +198,18 @@ fn validation_failures_are_table_driven_and_actionable() {
         (
             "unresolved route target",
             |bundle: &mut WorkflowBundleManifest| {
-                bundle.workflows[0].steps[1].route_config.as_mut().unwrap()["rules"][0]["transition"]
-                    ["step_ref"] = Value::String("missing".into())
+                bundle.workflows[0].steps[1].config.as_mut().unwrap()["route_config"]["rules"][0]
+                    ["transition"]["step_ref"] = Value::String("missing".into())
             },
-            "route_config.rules[0].transition.step_ref",
+            "config.route_config.rules[0].transition.step_ref",
         ),
         (
             "route target without outgoing edge",
             |bundle: &mut WorkflowBundleManifest| {
-                bundle.workflows[0].steps[1].route_config.as_mut().unwrap()["rules"][0]["transition"]
-                    ["step_ref"] = Value::String("start".into())
+                bundle.workflows[0].steps[1].config.as_mut().unwrap()["route_config"]["rules"][0]
+                    ["transition"]["step_ref"] = Value::String("start".into())
             },
-            "route_config.rules[0].transition.step_ref",
+            "config.route_config.rules[0].transition.step_ref",
         ),
     ];
     for (name, mutate, path) in cases {
@@ -220,25 +223,31 @@ fn validation_failures_are_table_driven_and_actionable() {
 #[test]
 fn malformed_json_types_and_structural_runtime_fields_are_rejected_with_paths() {
     let cases = [
-        (r#"{"schema_version":1,"workflows":"nope"}"#, "workflows"),
+        (r#"{"schema_version":1}"#, "schema_version"),
+        (r#"{"workflows":"nope"}"#, "workflows"),
         (
-            r#"{"schema_version":1,"workflows":[{"workflow_ref":"w","name":7}]}"#,
+            r#"{"workflows":[{"workflow_ref":"w","name":7}]}"#,
             "workflows[0].name",
         ),
         (
-            r#"{"schema_version":1,"workflows":[{"workflow_ref":"w","name":"W","steps":[{"step_ref":"s","name":"S","agents":[false]}]}]}"#,
-            "agents[0]",
+            r#"{"workflows":[{"workflow_ref":"w","name":"W","steps":[{"step_ref":"s","name":"S","goal":null,"step_type":"llm_inference","step_order":0,"persistence_options":null,"config":{"version":1,"agents":[false]}}]}]}"#,
+            "config.agents[0]",
         ),
         (
-            r#"{"schema_version":1,"project_id":"foreign"}"#,
-            "project_id",
+            r#"{"workflows":[{"workflow_ref":"w","name":"W","steps":[{"step_ref":"s","name":"S","goal":null,"step_type":"llm_inference","step_order":0,"persistence_options":null,"config":null,"prompt":"flat"}]}]}"#,
+            "prompt",
         ),
         (
-            r#"{"schema_version":1,"workflows":[{"workflow_ref":"w","name":"W","inserted_at":"now"}]}"#,
+            r#"{"workflows":[{"workflow_ref":"w","name":"W","steps":[{"step_ref":"s","name":"S","goal":null,"step_type":"finish","step_order":0,"persistence_options":null}]}]}"#,
+            "steps[0].config",
+        ),
+        (r#"{"project_id":"foreign"}"#, "project_id"),
+        (
+            r#"{"workflows":[{"workflow_ref":"w","name":"W","inserted_at":"now"}]}"#,
             "inserted_at",
         ),
         (
-            r#"{"schema_version":1,"workflows":[{"workflow_ref":"w","name":"W","steps":[{"step_ref":"s","name":"S","verbose_daemon_logging":true}]}]}"#,
+            r#"{"workflows":[{"workflow_ref":"w","name":"W","steps":[{"step_ref":"s","name":"S","goal":null,"step_type":"finish","step_order":0,"persistence_options":null,"config":null,"verbose_daemon_logging":true}]}]}"#,
             "verbose_daemon_logging",
         ),
     ];

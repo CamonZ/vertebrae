@@ -1,5 +1,4 @@
 {
-  "schema_version": 1,
   "workflows": [
     {
       "workflow_ref": "build",
@@ -29,112 +28,92 @@
           "step_ref": "finish",
           "name": "Finish",
           "goal": "Close the build",
-          "prompt": "",
           "step_type": "finish",
-          "step_order": 2
+          "step_order": 2,
+          "config": null,
+          "persistence_options": null
         },
         {
           "step_ref": "route",
           "name": "Route",
           "goal": "Choose the next workflow",
-          "prompt": null,
           "step_type": "route",
           "step_order": 1,
-          "route_config": {
+          "config": {
             "version": 1,
-            "match_policy": "exactly_one",
-            "rules": [
-              {
-                "id": "approved",
-                "when": {
-                  "ref": "previous_output.route.result",
-                  "op": "eq",
-                  "value": "approved"
+            "route_config": {
+              "version": 1,
+              "match_policy": "exactly_one",
+              "rules": [
+                {
+                  "id": "approved",
+                  "when": {
+                    "ref": "previous_output.route.result",
+                    "op": "eq",
+                    "value": "approved"
+                  },
+                  "transition": {
+                    "type": "intra_workflow",
+                    "step_ref": "finish"
+                  },
+                  "handoff": {
+                    "decision": "{{ previous_output.route.result }}"
+                  }
                 },
-                "transition": {
-                  "type": "intra_workflow",
-                  "step_ref": "finish"
+                {
+                  "id": "review",
+                  "when": {
+                    "all": [
+                      {
+                        "ref": "task.tags",
+                        "op": "contains",
+                        "value": "review"
+                      }
+                    ]
+                  },
+                  "transition": {
+                    "type": "inter_workflow",
+                    "workflow_ref": "review"
+                  },
+                  "handoff": {
+                    "source": "route"
+                  }
                 },
-                "handoff": {
-                  "decision": "{{ previous_output.route.result }}"
+                {
+                  "id": "pause",
+                  "when": {
+                    "all": [
+                      {
+                        "ref": "task.tags",
+                        "op": "contains",
+                        "value": "pause"
+                      }
+                    ]
+                  },
+                  "transition": {
+                    "type": "intra_workflow",
+                    "step_ref": "wait"
+                  },
+                  "handoff": {
+                    "source": "route"
+                  }
                 }
-              },
-              {
-                "id": "review",
-                "when": {
-                  "all": [
-                    {
-                      "ref": "task.tags",
-                      "op": "contains",
-                      "value": "review"
-                    }
-                  ]
-                },
-                "transition": {
-                  "type": "inter_workflow",
-                  "workflow_ref": "review"
-                },
-                "handoff": {
-                  "source": "route"
-                }
-              },
-              {
-                "id": "pause",
-                "when": {
-                  "all": [
-                    {
-                      "ref": "task.tags",
-                      "op": "contains",
-                      "value": "pause"
-                    }
-                  ]
-                },
+              ],
+              "default": {
                 "transition": {
                   "type": "intra_workflow",
                   "step_ref": "wait"
                 },
-                "handoff": {
-                  "source": "route"
-                }
+                "handoff": {}
               }
-            ],
-            "default": {
-              "transition": {
-                "type": "intra_workflow",
-                "step_ref": "wait"
-              },
-              "handoff": {}
             }
-          }
+          },
+          "persistence_options": null
         },
         {
           "step_ref": "start",
           "name": "Start",
           "goal": "Start the build",
-          "prompt": null,
-          "agents": [
-            "agent-a",
-            "agent-b"
-          ],
-          "skills": [
-            "build",
-            "verify"
-          ],
-          "agent_config": {
-            "provider": "openai",
-            "allowed_tools": [
-              "Read",
-              "Write"
-            ],
-            "json_schema": {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "boolean"
-                }
-              }
-            }
-          },
           "step_type": "llm_inference",
           "step_order": 0,
           "persistence_options": {
@@ -142,14 +121,41 @@
               "logical_name": "build-result"
             }
           },
-          "output_schema": {
-            "type": "object",
-            "required": [
-              "ok"
+          "config": {
+            "version": 1,
+            "prompt": "",
+            "output_schema": {
+              "type": "object",
+              "required": [
+                "ok"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "agents": [
+              "agent-a",
+              "agent-b"
             ],
-            "properties": {
-              "ok": {
-                "type": "boolean"
+            "skills": [
+              "build",
+              "verify"
+            ],
+            "agent_config": {
+              "provider": "openai",
+              "allowed_tools": [
+                "Read",
+                "Write"
+              ],
+              "json_schema": {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  }
+                }
               }
             }
           }
@@ -158,25 +164,30 @@
           "step_ref": "wait",
           "name": "Wait for Children",
           "goal": "Wait for child tasks",
-          "prompt": null,
           "step_type": "wait_children",
-          "step_order": 3
+          "step_order": 3,
+          "config": {
+            "version": 1
+          },
+          "persistence_options": null
         },
         {
           "step_ref": "input",
           "name": "Human Approval",
           "goal": "Collect approval",
-          "prompt": null,
           "step_type": "human_input",
-          "step_order": 4
+          "step_order": 4,
+          "config": null,
+          "persistence_options": null
         },
         {
           "step_ref": "pause",
           "name": "Pause Run",
           "goal": "Pause the current run",
-          "prompt": null,
           "step_type": "stop",
-          "step_order": 5
+          "step_order": 5,
+          "config": null,
+          "persistence_options": null
         }
       ]
     },
@@ -198,21 +209,56 @@
           "step_ref": "done",
           "name": "Done",
           "step_type": "finish",
-          "step_order": 1
+          "step_order": 2,
+          "config": null,
+          "goal": null,
+          "persistence_options": null
         },
         {
           "step_ref": "review",
           "name": "Review",
-          "prompt": "Review output",
-          "agents": [
-            "reviewer"
-          ],
-          "skills": [
-            "review"
-          ],
           "step_order": 0,
-          "output_schema": {
-            "type": "object"
+          "step_type": "llm_inference",
+          "config": {
+            "version": 1,
+            "prompt": "Review output",
+            "output_schema": {
+              "type": "object"
+            },
+            "agents": [
+              "reviewer"
+            ],
+            "skills": [
+              "review"
+            ]
+          },
+          "goal": null,
+          "persistence_options": null
+        },
+        {
+          "step_ref": "classify",
+          "name": "Classify",
+          "goal": "Classify the review outcome",
+          "step_type": "structured_inference",
+          "step_order": 1,
+          "persistence_options": null,
+          "config": {
+            "version": 1,
+            "provider": "typesafe",
+            "model": "jev",
+            "state": {
+              "title": "{{ task.title }}"
+            },
+            "questions": {
+              "approved": {
+                "type": "noul",
+                "instructions": "Is this approved?",
+                "criteria": {
+                  "true": "The review is approved",
+                  "false": "The review is not approved"
+                }
+              }
+            }
           }
         }
       ]
@@ -303,9 +349,20 @@
       },
       "to": {
         "workflow_ref": "review",
-        "step_ref": "done"
+        "step_ref": "classify"
       },
       "label": "complete"
+    },
+    {
+      "from": {
+        "workflow_ref": "review",
+        "step_ref": "classify"
+      },
+      "to": {
+        "workflow_ref": "review",
+        "step_ref": "done"
+      },
+      "label": "classified"
     }
   ],
   "workflow_edges": [

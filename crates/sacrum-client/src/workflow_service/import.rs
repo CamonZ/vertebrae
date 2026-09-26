@@ -306,12 +306,13 @@ mod tests {
                 },
                 "review": {
                     "done": "77777777-7777-7777-7777-777777777777",
-                    "review": "88888888-8888-8888-8888-888888888888"
+                    "review": "88888888-8888-8888-8888-888888888888",
+                    "classify": "cccccccc-cccc-cccc-cccc-cccccccccccc"
                 }
             },
             "workflowCount": 2,
-            "stepCount": 8,
-            "stepEdgeCount": 8,
+            "stepCount": 9,
+            "stepEdgeCount": 9,
             "workflowEdgeCount": 2
         })
     }
@@ -328,7 +329,7 @@ mod tests {
             .await;
 
         let bundle: WorkflowBundleManifest = serde_json::from_str(include_str!(
-            "../../../core/tests/fixtures/workflow_bundle_v1.json"
+            "../../../core/tests/fixtures/workflow_bundle.json"
         ))
         .unwrap();
         bundle.validate().unwrap();
@@ -357,13 +358,16 @@ mod tests {
         let sent_bundle: Value = serde_json::from_str(encoded).unwrap();
         let original_bundle = serde_json::to_value(bundle).unwrap();
         assert_eq!(sent_bundle, original_bundle);
-        assert_eq!(sent_bundle["workflows"][0]["steps"][0]["prompt"], "");
         assert_eq!(
-            sent_bundle["workflows"][0]["steps"][1]["prompt"],
+            sent_bundle["workflows"][0]["steps"][2]["config"]["prompt"],
+            ""
+        );
+        assert_eq!(
+            sent_bundle["workflows"][0]["steps"][0]["config"],
             Value::Null
         );
         assert!(sent_bundle["workflows"][0]["metadata"].is_object());
-        assert!(sent_bundle["workflows"][0]["steps"][1]["route_config"].is_object());
+        assert!(sent_bundle["workflows"][0]["steps"][1]["config"]["route_config"].is_object());
     }
 
     #[tokio::test]
@@ -479,16 +483,19 @@ mod tests {
     #[tokio::test]
     async fn rejects_invalid_bundle_locally_without_sending_a_request() {
         let server = MockServer::start().await;
-        let bundle = WorkflowBundleManifest {
-            schema_version: 999,
-            ..WorkflowBundleManifest::empty()
-        };
+        let mut bundle = WorkflowBundleManifest::empty();
+        let mut workflow = vertebrae_core::WorkflowManifest::new("workflow", "Workflow");
+        let mut step = vertebrae_core::StepManifest::new("finish", "Finish");
+        step.step_type = vertebrae_core::StepType::Finish;
+        step.config = Some(json!({"version": 1}));
+        workflow.steps.push(step);
+        bundle.workflows.push(workflow);
 
         let error = service(&server.uri())
             .import_workflow_bundle(bundle)
             .await
             .expect_err("unsupported schema versions must fail before transport");
-        assert!(error.to_string().contains("schema_version"));
+        assert!(error.to_string().contains("config"));
         assert!(server.received_requests().await.unwrap().is_empty());
     }
 

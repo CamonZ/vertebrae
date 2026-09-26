@@ -1,6 +1,6 @@
 @workflow_import
 Feature: Workflow bundle import
-  Import versioned workflow bundles through preflight and one bulk mutation.
+  Import Sacrum-format workflow bundles through preflight and one bulk mutation.
 
   Background:
     Given a configured Sacrum client

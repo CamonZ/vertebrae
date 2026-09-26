@@ -14,8 +14,6 @@ mod validation;
 pub use route::{RouteTargetRefs, symbolize_route_config};
 pub use validation::ManifestValidationError;
 
-pub const WORKFLOW_BUNDLE_SCHEMA_VERSION: u32 = 1;
-
 pub type WorkflowRef = String;
 
 pub type StepRef = String;
@@ -82,39 +80,11 @@ impl WorkflowManifest {
 pub struct StepManifest {
     pub step_ref: StepRef,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<String>,
-    // Keep null distinct from an explicitly empty prompt in canonical JSON.
-    #[serde(default)]
-    pub prompt: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub agents: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills: Vec<String>,
-    // Opaque Sacrum configuration: target references are validated separately.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_config: Option<Value>,
-    #[serde(
-        default = "default_step_type",
-        skip_serializing_if = "is_llm_inference"
-    )]
     pub step_type: StepType,
-    #[serde(default, skip_serializing_if = "is_zero")]
     pub step_order: i32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_schema: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persistence_options: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub route_config: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub questions: Option<Value>,
+    pub config: Option<Value>,
 }
 
 impl StepManifest {
@@ -123,79 +93,11 @@ impl StepManifest {
             step_ref: step_ref.into(),
             name: name.into(),
             goal: None,
-            prompt: None,
-            agents: Vec::new(),
-            skills: Vec::new(),
-            agent_config: None,
             step_type: StepType::default(),
             step_order: 0,
-            output_schema: None,
             persistence_options: None,
-            route_config: None,
-            provider: None,
-            model: None,
-            state: None,
-            questions: None,
+            config: Some(serde_json::json!({"version": crate::models::STEP_CONFIG_VERSION})),
         }
-    }
-
-    /// Flat fields that carry a value. Sacrum imports these as the step's
-    /// config, so each must be declared by the step type; blank values
-    /// (null, `""`, `[]`, `{}`) are ignored.
-    pub fn config_fields(&self) -> Vec<&'static str> {
-        fn blank(value: Option<&Value>) -> bool {
-            match value {
-                None | Some(Value::Null) => true,
-                Some(Value::Object(object)) => object.is_empty(),
-                Some(_) => false,
-            }
-        }
-
-        [
-            ("prompt", self.prompt.as_deref().is_none_or(str::is_empty)),
-            ("output_schema", blank(self.output_schema.as_ref())),
-            ("agents", self.agents.is_empty()),
-            ("skills", self.skills.is_empty()),
-            ("agent_config", blank(self.agent_config.as_ref())),
-            ("route_config", blank(self.route_config.as_ref())),
-            (
-                "provider",
-                self.provider.as_deref().is_none_or(str::is_empty),
-            ),
-            ("model", self.model.as_deref().is_none_or(str::is_empty)),
-            ("state", blank(self.state.as_ref())),
-            ("questions", blank(self.questions.as_ref())),
-        ]
-        .into_iter()
-        .filter_map(|(field, blank)| (!blank).then_some(field))
-        .collect()
-    }
-
-    /// The step config object Sacrum builds from this manifest's non-blank
-    /// flat fields.
-    pub fn config_value(&self) -> Value {
-        let fields = self.config_fields();
-        let mut config = serde_json::Map::from_iter([(
-            "version".to_string(),
-            Value::from(crate::models::STEP_CONFIG_VERSION),
-        )]);
-        for field in fields {
-            let value = match field {
-                "prompt" => Value::from(self.prompt.clone()),
-                "output_schema" => self.output_schema.clone().unwrap_or_default(),
-                "agents" => Value::from(self.agents.clone()),
-                "skills" => Value::from(self.skills.clone()),
-                "agent_config" => self.agent_config.clone().unwrap_or_default(),
-                "route_config" => self.route_config.clone().unwrap_or_default(),
-                "provider" => Value::from(self.provider.clone()),
-                "model" => Value::from(self.model.clone()),
-                "state" => self.state.clone().unwrap_or_default(),
-                "questions" => self.questions.clone().unwrap_or_default(),
-                _ => unreachable!("config_fields only yields known fields"),
-            };
-            config.insert(field.to_string(), value);
-        }
-        Value::Object(config)
     }
 }
 
@@ -222,7 +124,6 @@ pub struct WorkflowEdge {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowBundleManifest {
-    pub schema_version: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workflows: Vec<WorkflowManifest>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -245,7 +146,6 @@ pub type WorkflowBundle = WorkflowBundleManifest;
 impl WorkflowBundleManifest {
     pub fn empty() -> Self {
         Self {
-            schema_version: WORKFLOW_BUNDLE_SCHEMA_VERSION,
             workflows: Vec::new(),
             step_edges: Vec::new(),
             workflow_edges: Vec::new(),
@@ -351,6 +251,22 @@ impl std::error::Error for ManifestError {}
 
 pub fn parse_manifest(input: &str) -> Result<WorkflowBundleManifest, ManifestError> {
     let value: Value = serde_json::from_str(input).map_err(ManifestError::Json)?;
+    if let Some(workflows) = value.get("workflows").and_then(Value::as_array) {
+        for (workflow_index, workflow) in workflows.iter().enumerate() {
+            if let Some(steps) = workflow.get("steps").and_then(Value::as_array) {
+                for (step_index, step) in steps.iter().enumerate() {
+                    for field in ["goal", "persistence_options", "config"] {
+                        if step.get(field).is_none() {
+                            return Err(ManifestError::InvalidField(ManifestValidationError::new(
+                                format!("workflows[{workflow_index}].steps[{step_index}].{field}"),
+                                "field is required",
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+    }
     let manifest: WorkflowBundleManifest =
         serde_path_to_error::deserialize(value).map_err(|error| {
             let path = error.path().to_string();
@@ -362,14 +278,6 @@ pub fn parse_manifest(input: &str) -> Result<WorkflowBundleManifest, ManifestErr
         })?;
     manifest.validate().map_err(ManifestError::InvalidField)?;
     Ok(manifest)
-}
-
-fn default_step_type() -> StepType {
-    StepType::default()
-}
-
-fn is_llm_inference(step_type: &StepType) -> bool {
-    matches!(step_type, StepType::LlmInference)
 }
 
 fn is_zero(value: &i32) -> bool {

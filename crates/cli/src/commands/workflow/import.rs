@@ -17,7 +17,7 @@ const AUTHORITY_WARNING: &str = "Sacrum remains authoritative for project access
 
 #[derive(Debug, Args)]
 pub struct WorkflowImportCommand {
-    /// Read a versioned workflow bundle from this JSON file.
+    /// Read a Sacrum-format workflow bundle from this JSON file.
     #[arg(value_name = "PATH")]
     pub input: PathBuf,
 
