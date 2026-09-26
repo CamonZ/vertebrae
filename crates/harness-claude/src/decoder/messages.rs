@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde_json::{Map, Value};
 use vertebrae_harness_core::{
     AgentMetadata, CompletionStatus, FileChange, FileChangeEvent, FileChangeKind,
@@ -48,6 +50,7 @@ impl ClaudeStreamDecoder {
                 "message content is not an array".into(),
             ));
         };
+        let mut matched_streamed_text_blocks = HashSet::new();
         for (index, item) in content.iter().enumerate() {
             let item = item.as_object().ok_or_else(|| {
                 ClaudeDecodeError::Malformed(format!(
@@ -60,6 +63,21 @@ impl ClaudeStreamDecoder {
                 "text" => {
                     let text = required_string(item, "text", "text content block")?;
                     if assistant {
+                        // Claude's completed snapshot can omit blocks that
+                        // streamed before this text (e.g. thinking), so its
+                        // content index may differ from the streamed block
+                        // index; reuse the streamed block's index by text.
+                        let block_index = self
+                            .streamed_text_blocks
+                            .iter()
+                            .filter(|(block_index, streamed_text)| {
+                                streamed_text.as_str() == text
+                                    && !matched_streamed_text_blocks.contains(*block_index)
+                            })
+                            .map(|(block_index, _)| *block_index)
+                            .min()
+                            .unwrap_or(index as u64);
+                        matched_streamed_text_blocks.insert(block_index);
                         let mut draft = self.draft(
                             stream_id.clone(),
                             thread_id,
@@ -70,9 +88,7 @@ impl ClaudeStreamDecoder {
                                 completion_status: Some(CompletionStatus::Completed),
                             }),
                         );
-                        draft.correlation.item_id = self.current_item_id.as_ref().map(|id| {
-                            vertebrae_harness_core::ItemId::new(format!("{id}:block:{index}"))
-                        });
+                        draft.correlation.item_id = self.content_block_item_id(block_index);
                         drafts.push(draft);
                     }
                 }

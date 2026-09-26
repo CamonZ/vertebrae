@@ -24,12 +24,16 @@ impl ClaudeStreamDecoder {
         self.provider_sequence = provider_sequence;
         let object = value.as_object().expect("validated Claude record object");
         let record_type = string(object, "type").expect("validated Claude record type");
-        // Only `assistant`/nested `message_start`/`message_stop` (below) own
-        // current_item_id's lifecycle. Do not null it here on other top-level
-        // record types (system, tool_progress, rate_limit_event, ...): those
-        // can legitimately interleave mid-block with an in-progress text
-        // stream, and nulling would strip item_id from later deltas in that
-        // same block, orphaning the GUI's streaming overlay for it.
+        // Nested `message_start`/`message_stop` own current_item_id's
+        // lifecycle. Do not null it here on other top-level record types
+        // (system, tool_progress, rate_limit_event, ...): those can
+        // legitimately interleave mid-block with an in-progress text stream,
+        // and nulling would strip item_id from later deltas in that same
+        // block, orphaning the GUI's streaming overlay for it. Claude emits a
+        // single-block `assistant` snapshot after each content block, before
+        // `message_stop`, so an `assistant` record borrows its own id only
+        // while it decodes and then restores the streamed message's id.
+        let streamed_item_id = (record_type == "assistant").then(|| self.current_item_id.clone());
         if record_type == "assistant" {
             self.current_item_id = object
                 .get("message")
@@ -360,8 +364,8 @@ impl ClaudeStreamDecoder {
                 }),
             )),
         }
-        if record_type == "assistant" {
-            self.current_item_id = None;
+        if let Some(streamed_item_id) = streamed_item_id {
+            self.current_item_id = streamed_item_id;
         }
         Ok(drafts)
     }
@@ -585,6 +589,7 @@ impl ClaudeStreamDecoder {
                     .and_then(Value::as_object)
                     .and_then(|message| string(message, "id"))
                     .map(ItemId::new);
+                self.streamed_text_blocks.clear();
             }
             Some("message_stop") => self.current_item_id = None,
             Some("content_block_start" | "content_block_stop" | "ping") => {}
@@ -629,7 +634,7 @@ impl ClaudeStreamDecoder {
     }
 
     pub(super) fn decode_delta(
-        &self,
+        &mut self,
         delta: Option<&Map<String, Value>>,
         block_index: u64,
         thread_id: &ThreadId,
@@ -652,6 +657,10 @@ impl ClaudeStreamDecoder {
             Some("text_delta") => {
                 let text = string(delta, "text")
                     .ok_or_else(|| ClaudeDecodeError::Malformed("text_delta has no text".into()))?;
+                self.streamed_text_blocks
+                    .entry(block_index)
+                    .or_default()
+                    .push_str(text);
                 HarnessEventPayloadV1::Text(TextEvent {
                     text: text.into(),
                     ..Default::default()
@@ -687,10 +696,7 @@ impl ClaudeStreamDecoder {
             UpdateSemantics::Delta,
             payload,
         );
-        draft.correlation.item_id = self
-            .current_item_id
-            .as_ref()
-            .map(|id| ItemId::new(format!("{id}:block:{block_index}")));
+        draft.correlation.item_id = self.content_block_item_id(block_index);
         drafts.push(draft);
         Ok(())
     }

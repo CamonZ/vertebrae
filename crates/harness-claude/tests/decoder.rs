@@ -1247,3 +1247,57 @@ fn text_blocks_keep_identity_from_deltas_to_snapshot() {
         .unwrap();
     assert!(error[0].correlation.item_id.is_none());
 }
+
+#[test]
+fn text_after_a_per_block_thinking_snapshot_keeps_its_streamed_item_id() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("run"),
+        StreamId::from("stream"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"session"}"#)
+        .unwrap();
+    decoder
+        .decode_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg"}}}"#,
+        )
+        .unwrap();
+    decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}}"#).unwrap();
+    // Claude emits a single-block assistant snapshot for each content block
+    // before `message_stop`; it must not sever the message's identity for
+    // the blocks that stream after it.
+    decoder.decode_line(r#"{"type":"assistant","message":{"id":"msg","content":[{"type":"thinking","thinking":"","signature":"sig"}]}}"#).unwrap();
+    decoder
+        .decode_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#)
+        .unwrap();
+    decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}}"#).unwrap();
+    let first = decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hello "}}}"#).unwrap();
+    let second = decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"world"}}}"#).unwrap();
+    let complete = decoder.decode_line(r#"{"type":"assistant","message":{"id":"msg","content":[{"type":"text","text":"hello world"}]}}"#).unwrap();
+    decoder
+        .decode_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":1}}"#)
+        .unwrap();
+    let expected = Some("msg:block:1");
+    assert_eq!(
+        first[0].correlation.item_id.as_ref().map(|id| id.as_str()),
+        expected
+    );
+    assert_eq!(
+        second[0].correlation.item_id.as_ref().map(|id| id.as_str()),
+        expected
+    );
+    let texts: Vec<_> = complete
+        .iter()
+        .filter(|d| matches!(d.payload, HarnessEventPayloadV1::Text(_)))
+        .collect();
+    assert_eq!(texts.len(), 1);
+    assert_eq!(
+        texts[0].correlation.item_id.as_ref().map(|id| id.as_str()),
+        expected
+    );
+    decoder
+        .decode_line(r#"{"type":"stream_event","event":{"type":"message_stop"}}"#)
+        .unwrap();
+    let orphan = decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"late"}}}"#).unwrap();
+    assert!(orphan[0].correlation.item_id.is_none());
+}
