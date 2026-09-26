@@ -107,6 +107,14 @@ pub struct StepManifest {
     pub persistence_options: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route_config: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub questions: Option<Value>,
 }
 
 impl StepManifest {
@@ -124,6 +132,10 @@ impl StepManifest {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            provider: None,
+            model: None,
+            state: None,
+            questions: None,
         }
     }
 
@@ -146,6 +158,13 @@ impl StepManifest {
             ("skills", self.skills.is_empty()),
             ("agent_config", blank(self.agent_config.as_ref())),
             ("route_config", blank(self.route_config.as_ref())),
+            (
+                "provider",
+                self.provider.as_deref().is_none_or(str::is_empty),
+            ),
+            ("model", self.model.as_deref().is_none_or(str::is_empty)),
+            ("state", blank(self.state.as_ref())),
+            ("questions", blank(self.questions.as_ref())),
         ]
         .into_iter()
         .filter_map(|(field, blank)| (!blank).then_some(field))
@@ -168,6 +187,10 @@ impl StepManifest {
                 "skills" => Value::from(self.skills.clone()),
                 "agent_config" => self.agent_config.clone().unwrap_or_default(),
                 "route_config" => self.route_config.clone().unwrap_or_default(),
+                "provider" => Value::from(self.provider.clone()),
+                "model" => Value::from(self.model.clone()),
+                "state" => self.state.clone().unwrap_or_default(),
+                "questions" => self.questions.clone().unwrap_or_default(),
                 _ => unreachable!("config_fields only yields known fields"),
             };
             config.insert(field.to_string(), value);

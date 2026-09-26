@@ -1657,6 +1657,7 @@ impl HarnessRuntime for CodexRuntime {
                 unavailable_reason: Some(error.to_string()),
                 persistent_sessions: true,
                 one_shot_runs: true,
+                structured_inference: false,
                 session_resumption: true,
                 default_model: None,
                 models: Vec::new(),

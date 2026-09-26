@@ -3,7 +3,7 @@
 //! Spawned by ProjectSupervisor upon receiving an execute_step channel event from Sacrum.
 //! Each StepExecutor:
 //! - Receives step config (prompt, model), execution_id, and task_id from its parent
-//! - Runs Claude and Codex through shared harness crates and persists normalized events
+//! - Runs provider inference through shared harness crates and persists normalized events
 //! - Reports StepCompleted or StepFailed to the parent ProjectSupervisor on exit
 //! - Cancels the active harness and awaits harness settlement
 //!
@@ -44,7 +44,10 @@ const CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT: std::time::Duration =
 
 #[derive(Debug, Clone)]
 pub struct StepConfig {
-    pub prompt: String,
+    pub prompt: Option<String>,
+    pub state: Option<serde_json::Value>,
+    pub questions: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+    pub structured_inference: bool,
     /// Full agent configuration (model, allowed_tools, permission_mode, etc.)
     pub agent_config: AgentConfig,
     /// Agent file paths/names to pass as --agent flags.
@@ -55,6 +58,33 @@ pub struct StepConfig {
     /// build/spawn/stream checkpoints. Defaults to false; toggled per-step
     /// from the Sacrum `run_step` payload.
     pub verbose_daemon_logging: bool,
+}
+
+fn structured_inference_request(
+    config: &StepConfig,
+    execution_id: &str,
+    stream_id: StreamId,
+    model: Option<String>,
+) -> Result<vertebrae_harness_core::StructuredInferenceRequest, String> {
+    let state = config
+        .state
+        .clone()
+        .ok_or_else(|| "Structured inference requires resolved state".to_string())?;
+    if !(state.is_string() || state.is_object() || state.is_array()) {
+        return Err("Structured inference state must be a string, object, or array".to_string());
+    }
+    let questions = config
+        .questions
+        .clone()
+        .filter(|questions| !questions.is_empty())
+        .ok_or_else(|| "Structured inference requires non-empty questions".to_string())?;
+    Ok(vertebrae_harness_core::StructuredInferenceRequest {
+        run_id: vertebrae_harness_core::RunId::new(execution_id),
+        stream_id,
+        state,
+        model,
+        questions,
+    })
 }
 
 /// Metrics reported with a completed workflow step.
@@ -705,7 +735,12 @@ impl StepExecutor {
         });
         let control_sink: Arc<dyn ControlSink> =
             Arc::new(DaemonControlSink::from_agent_config(&agent_config));
-        let prompt = state.config.step_config.prompt.clone();
+        let prompt = state
+            .config
+            .step_config
+            .prompt
+            .clone()
+            .unwrap_or_else(|| "Execute step".to_string());
         let actor_ref = myself.clone();
         if provider == Provider::Openai {
             let session = match instance
@@ -773,20 +808,53 @@ impl StepExecutor {
             return Ok(());
         }
 
-        let run = match instance
-            .runtime
-            .run_once(
-                vertebrae_harness_core::RunRequest {
-                    run_id: vertebrae_harness_core::RunId::new(state.execution_id.clone()),
-                    stream_id,
-                    prompt,
-                    config: request_config,
-                },
-                event_sink,
-                control_sink,
-            )
-            .await
-        {
+        let run_request = if state.config.step_config.structured_inference {
+            let request = match structured_inference_request(
+                &state.config.step_config,
+                &state.execution_id,
+                stream_id,
+                agent_config.model.clone(),
+            ) {
+                Ok(request) => request,
+                Err(error) => {
+                    let _ = state.parent.cast(ProjectMessage::StepFinished {
+                        execution_id: state.execution_id.clone(),
+                        task_id: state.task_id.clone(),
+                        result: StepResult::failed(None, error),
+                    });
+                    myself.stop(Some("invalid structured inference payload".into()));
+                    return Ok(());
+                }
+            };
+            let capabilities = instance.runtime.capabilities().await;
+            match capabilities {
+                Ok(capabilities) if capabilities.structured_inference => {
+                    instance
+                        .runtime
+                        .run_structured_inference(request, event_sink)
+                        .await
+                }
+                Ok(_) => Err(HarnessError::Unsupported(
+                    "provider harness does not support structured inference".into(),
+                )),
+                Err(error) => Err(error),
+            }
+        } else {
+            instance
+                .runtime
+                .run_once(
+                    vertebrae_harness_core::RunRequest {
+                        run_id: vertebrae_harness_core::RunId::new(state.execution_id.clone()),
+                        stream_id,
+                        prompt,
+                        config: request_config,
+                    },
+                    event_sink,
+                    control_sink,
+                )
+                .await
+        };
+        let run = match run_request {
             Ok(run) => run,
             Err(error) => {
                 let _ = state.parent.cast(ProjectMessage::StepFinished {
@@ -870,11 +938,16 @@ impl StepExecutor {
             Err(error) => StepResult::failed(None, error),
             Ok(outcome) => match outcome.status {
                 CompletionStatus::Completed => {
-                    match self.validate_output(
-                        state,
-                        outcome.structured_output.as_ref(),
-                        outcome.result_text.as_deref(),
-                    ) {
+                    let validation = if state.config.step_config.structured_inference {
+                        Ok(())
+                    } else {
+                        self.validate_output(
+                            state,
+                            outcome.structured_output.as_ref(),
+                            outcome.result_text.as_deref(),
+                        )
+                    };
+                    match validation {
                         Err(error) => step_result_for_schema_error(error),
                         Ok(()) => {
                             let usage = state
@@ -943,6 +1016,36 @@ impl StepExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structured_inference_request_rejects_missing_state_or_questions() {
+        let base = StepConfig {
+            prompt: None,
+            state: None,
+            questions: None,
+            structured_inference: true,
+            agent_config: AgentConfig::default(),
+            agents: Vec::new(),
+            skills: Vec::new(),
+            verbose_daemon_logging: false,
+        };
+        assert!(
+            structured_inference_request(&base, "exec", StreamId::new("stream"), None)
+                .unwrap_err()
+                .contains("resolved state")
+        );
+
+        let base = StepConfig {
+            state: Some(serde_json::json!({"title": "resolved"})),
+            questions: Some(Default::default()),
+            ..base
+        };
+        assert!(
+            structured_inference_request(&base, "exec", StreamId::new("stream"), None)
+                .unwrap_err()
+                .contains("non-empty questions")
+        );
+    }
 
     #[test]
     fn persistent_turn_result_maps_turn_and_requires_clean_session_close() {

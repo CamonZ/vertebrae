@@ -85,7 +85,7 @@ mod tests {
         assert!(
             validate_config_fields(
                 &StepType::StructuredInference,
-                ["provider", "model", "state", "fields"]
+                ["provider", "model", "state", "questions"]
             )
             .is_ok()
         );
