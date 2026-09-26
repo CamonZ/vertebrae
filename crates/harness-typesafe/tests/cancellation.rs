@@ -8,13 +8,10 @@ use async_trait::async_trait;
 use serde_json::json;
 use tokio::sync::Notify;
 use vertebrae_harness_core::{
-    ControlRequestEnvelope, ControlResolution, ControlSink, EventSink, HarnessError,
-    HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, RequestConfig, RunId, RunRequest,
-    StreamId,
+    EventSink, HarnessError, HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, RunId,
+    StreamId, StructuredInferenceRequest,
 };
-use vertebrae_harness_typesafe::{
-    Question, SystemOneRequest, TypeSafeClient, TypeSafeClientConfig, TypeSafeRuntime,
-};
+use vertebrae_harness_typesafe::{TypeSafeClient, TypeSafeClientConfig, TypeSafeRuntime};
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 struct CollectSink {
@@ -40,29 +37,6 @@ impl EventSink for CollectSink {
         self.events.lock().unwrap().push(event);
         Ok(())
     }
-}
-
-struct PanicControlSink;
-
-#[async_trait]
-impl ControlSink for PanicControlSink {
-    async fn request(
-        &self,
-        _request: ControlRequestEnvelope,
-    ) -> Result<ControlResolution, HarnessError> {
-        panic!("TypeSafe must never request a control")
-    }
-}
-
-fn prompt() -> String {
-    serde_json::to_string(&SystemOneRequest::new(
-        json!({"ticket": "blocked"}),
-        BTreeMap::from([(
-            "is_urgent".to_string(),
-            Question::noul("Should this ticket be handled urgently?"),
-        )]),
-    ))
-    .unwrap()
 }
 
 async fn wait_for_request(server: &MockServer) {
@@ -105,15 +79,22 @@ async fn blocked_one_shot_cancellation_has_exactly_one_terminal_outcome() {
     );
     let sink = Arc::new(CollectSink::default());
     let handle = runtime
-        .run_once(
-            RunRequest {
+        .run_structured_inference(
+            StructuredInferenceRequest {
                 run_id: RunId::from("cancelled-run"),
                 stream_id: StreamId::from("cancelled-stream"),
-                prompt: prompt(),
-                config: RequestConfig::default(),
+                state: json!({"ticket": "blocked"}),
+                model: Some("jev-latest".into()),
+                questions: BTreeMap::from([(
+                    "is_urgent".into(),
+                    json!({
+                        "type": "noul",
+                        "instructions": "Should this ticket be handled urgently?",
+                        "criteria": {"true": "urgent", "false": "not urgent"}
+                    }),
+                )]),
             },
             sink.clone(),
-            Arc::new(PanicControlSink),
         )
         .await
         .unwrap();

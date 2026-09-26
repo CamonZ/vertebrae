@@ -14,7 +14,7 @@ pub const EXECUTION_FIELDS: &str = r#"
             ... on LlmInferenceStepConfig {
                 version prompt output_schema agents skills agent_config
             }
-            ... on StructuredInferenceStepConfig { version provider model state fields }
+            ... on StructuredInferenceStepConfig { version provider model state questions }
             ... on RouteStepConfig { version route_config }
             ... on WaitChildrenStepConfig { version output_schema }
         }

@@ -21,7 +21,7 @@ import { splitRef } from "../layout/geometry";
 import type { AtlasModel, AtlasWorkflow } from "../layout/types";
 import type { AtlasSelection } from "./selection";
 import { kindClass } from "./selection";
-import { StructuredInferenceFields } from "./StructuredInferenceFields";
+import { StructuredInferenceQuestions } from "./StructuredInferenceQuestions";
 import {
   EMPTY_STRUCTURED_INPUT,
   structuredInferenceConfig,
@@ -385,7 +385,7 @@ export function WorkflowInspector({
                 </select>
               </label>
               {newType === "structured_inference" ? (
-                <StructuredInferenceFields
+                <StructuredInferenceQuestions
                   value={newStructured}
                   onChange={setNewStructured}
                 />

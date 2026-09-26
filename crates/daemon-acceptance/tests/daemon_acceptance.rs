@@ -10,6 +10,7 @@ use cucumber::World;
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig, StepExecutionResponse};
+use wiremock::MockServer;
 
 #[derive(World)]
 #[world(init = Self::new)]
@@ -58,6 +59,7 @@ pub struct DaemonWorld {
     pub capture_dir: PathBuf,
     pub managed_plugin_root: Option<PathBuf>,
     pub standalone_home: Option<PathBuf>,
+    pub typesafe_server: Option<MockServer>,
 }
 
 impl std::fmt::Debug for DaemonWorld {
@@ -125,6 +127,7 @@ impl DaemonWorld {
             )),
             managed_plugin_root: None,
             standalone_home: None,
+            typesafe_server: None,
         }
     }
 
@@ -238,7 +241,8 @@ impl DaemonWorld {
         let log_stderr = std::fs::File::create(&log_path).expect("create standalone daemon log");
         let log_stderr_dup = log_stderr.try_clone().expect("dup standalone daemon log");
         let mut cmd = Command::new(&self.vtb_daemon_binary);
-        cmd.env("HOME", &home)
+        cmd.envs(&self.env)
+            .env("HOME", &home)
             .env(
                 "CLAUDE_CODE_PATH",
                 std::env::var("CLAUDE_CODE_PATH").unwrap_or_default(),
@@ -438,6 +442,16 @@ impl DaemonWorld {
                         .any(|t| t.eq_ignore_ascii_case(&last_status))
                     {
                         return Ok(exec);
+                    }
+                    if last_status.eq_ignore_ascii_case("failed")
+                        && !target_statuses
+                            .iter()
+                            .any(|target| target.eq_ignore_ascii_case("failed"))
+                    {
+                        return Err(format!(
+                            "execution {execution_id} failed while waiting for {target_statuses:?}: output={:?}, context={:?}",
+                            exec.output, exec.context
+                        ));
                     }
                 }
                 Err(e) => {

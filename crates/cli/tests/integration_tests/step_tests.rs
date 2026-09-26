@@ -43,7 +43,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -84,7 +84,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -125,7 +125,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -174,7 +174,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -227,7 +227,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -275,7 +275,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -318,7 +318,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -372,7 +372,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -426,7 +426,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 5,
@@ -472,7 +472,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -525,7 +525,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -584,7 +584,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -632,7 +632,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -690,7 +690,7 @@ mod step_create_tests {
             model: Some("sonnet".to_string()),
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -754,7 +754,7 @@ mod step_list_tests {
                 model: None,
                 provider: None,
                 state: None,
-                fields: None,
+                questions: None,
                 reasoning_effort: None,
                 codex_model_provider: None,
                 order: i,
@@ -810,7 +810,7 @@ mod step_list_tests {
             model: Some("sonnet".to_string()),
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -893,7 +893,7 @@ mod step_list_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -951,7 +951,7 @@ mod step_show_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 1,
@@ -1004,7 +1004,7 @@ mod step_show_tests {
             model: Some("opus".to_string()),
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1055,7 +1055,7 @@ mod step_show_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 10,
@@ -1115,7 +1115,7 @@ mod step_show_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1162,7 +1162,7 @@ mod step_show_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 2,
@@ -1238,7 +1238,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1270,7 +1270,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1314,7 +1314,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1375,7 +1375,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1407,7 +1407,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1454,7 +1454,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1486,7 +1486,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: Some(5),
@@ -1533,7 +1533,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1565,7 +1565,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1620,7 +1620,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1652,7 +1652,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1699,7 +1699,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1731,7 +1731,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1791,7 +1791,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1823,7 +1823,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1869,7 +1869,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -1900,7 +1900,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -1968,7 +1968,7 @@ mod step_dispatcher_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2024,7 +2024,7 @@ mod step_delete_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2094,7 +2094,7 @@ mod step_delete_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2143,7 +2143,7 @@ mod step_delete_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2201,7 +2201,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2247,7 +2247,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2292,7 +2292,7 @@ mod step_prompt_and_agent_config_tests {
             model: Some("opus".to_string()),
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2349,7 +2349,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2396,7 +2396,7 @@ mod step_prompt_and_agent_config_tests {
             model: Some("sonnet".to_string()),
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2427,7 +2427,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -2472,7 +2472,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2504,7 +2504,7 @@ mod step_prompt_and_agent_config_tests {
             model: Some("opus".to_string()),
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -2549,7 +2549,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2580,7 +2580,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -2631,7 +2631,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 2,
@@ -2688,7 +2688,7 @@ mod provider_tests {
             model,
             provider: provider.map(|provider| provider.to_string()),
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -2725,7 +2725,7 @@ mod provider_tests {
             model,
             provider: provider.map(|provider| provider.to_string()),
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -3420,7 +3420,7 @@ mod route_config_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -3453,7 +3453,7 @@ mod route_config_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -3697,7 +3697,7 @@ mod route_config_tests {
             model: Some("opus".to_string()),
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -3786,7 +3786,7 @@ mod structured_inference_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
@@ -3818,7 +3818,7 @@ mod structured_inference_tests {
             model: None,
             provider: None,
             state: None,
-            fields: None,
+            questions: None,
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
@@ -3854,11 +3854,13 @@ mod structured_inference_tests {
     #[tokio::test]
     async fn create_persists_config_and_show_returns_it() {
         let (services, workflow_id) = mk_workflow().await;
-        let fields_path =
-            std::env::temp_dir().join(format!("vtb-structured-fields-{}.json", std::process::id()));
+        let questions_path = std::env::temp_dir().join(format!(
+            "vtb-structured-questions-{}.json",
+            std::process::id()
+        ));
         std::fs::write(
-            &fields_path,
-            r#"{"type":"object","properties":{"ok":{"type":"boolean"}}}"#,
+            &questions_path,
+            r#"{"ok":{"type":"choice","instructions":"is this okay?","criteria":["yes","no"]}}"#,
         )
         .unwrap();
 
@@ -3866,9 +3868,9 @@ mod structured_inference_tests {
         add.provider = Some("typesafe".to_string());
         add.model = Some("jev".to_string());
         add.state = Some(r#"{"title":"{{ task.title }}"}"#.to_string());
-        add.fields = Some(format!("@{}", fields_path.display()));
+        add.questions = Some(format!("@{}", questions_path.display()));
         add.execute(services.steps()).await.unwrap();
-        std::fs::remove_file(&fields_path).ok();
+        std::fs::remove_file(&questions_path).ok();
 
         let step = StepShowCommand {
             id: "classify".to_string(),
@@ -3885,8 +3887,10 @@ mod structured_inference_tests {
             Some(serde_json::json!({"title": "{{ task.title }}"}))
         );
         assert_eq!(
-            config.fields,
-            Some(serde_json::json!({"type": "object", "properties": {"ok": {"type": "boolean"}}}))
+            config.questions,
+            Some(
+                serde_json::json!({"ok": {"type": "choice", "instructions": "is this okay?", "criteria": ["yes", "no"]}})
+            )
         );
 
         let shown = StepShowCommand {
@@ -3910,7 +3914,9 @@ mod structured_inference_tests {
         add.provider = Some("typesafe".to_string());
         add.model = Some("jev".to_string());
         add.state = Some("{{ task.description }}".to_string());
-        add.fields = Some(r#"{"type":"object"}"#.to_string());
+        add.questions = Some(
+            r#"{"label":{"type":"noul","instructions":"label","criteria":{"true":"label","false":"not label"}}}"#.to_string(),
+        );
         add.execute(services.steps()).await.unwrap();
 
         let step = services
@@ -3926,17 +3932,20 @@ mod structured_inference_tests {
     }
 
     #[tokio::test]
-    async fn updating_fields_leaves_provider_model_and_state() {
+    async fn updating_questions_leaves_provider_model_and_state() {
         let (services, workflow_id) = mk_workflow().await;
         let mut add = add_cmd(workflow_id, CliStepType::StructuredInference);
         add.provider = Some("typesafe".to_string());
         add.model = Some("jev".to_string());
         add.state = Some(r#"["{{ task.title }}"]"#.to_string());
-        add.fields = Some(r#"{"type":"object"}"#.to_string());
+        add.questions = Some(
+            r#"{"label":{"type":"noul","instructions":"label","criteria":{"true":"label","false":"not label"}}}"#.to_string(),
+        );
         add.execute(services.steps()).await.unwrap();
 
         let mut update = update_cmd("classify");
-        update.fields = Some(r#"{"type":"object","required":["ok"]}"#.to_string());
+        update.questions =
+            Some(r#"{"ok":{"type":"noul","instructions":"okay?","criteria":{"true":"yes","false":"no"}}}"#.to_string());
         update.execute(services.steps()).await.unwrap();
 
         let step = services
@@ -3950,8 +3959,10 @@ mod structured_inference_tests {
         assert_eq!(config.model.as_deref(), Some("jev"));
         assert_eq!(config.state, Some(serde_json::json!(["{{ task.title }}"])));
         assert_eq!(
-            config.fields,
-            Some(serde_json::json!({"type": "object", "required": ["ok"]}))
+            config.questions,
+            Some(
+                serde_json::json!({"ok": {"type": "noul", "instructions": "okay?", "criteria": {"true": "yes", "false": "no"}}})
+            )
         );
 
         let mut update = update_cmd("classify");
@@ -3974,11 +3985,18 @@ mod structured_inference_tests {
         let (services, workflow_id) = mk_workflow().await;
         for (state, fields, field) in [
             (Some("{}".to_string()), None, "state"),
-            (None, Some(r#"{"type":"object"}"#.to_string()), "fields"),
+            (
+                None,
+                Some(
+                    r#"{"label":{"type":"noul","instructions":"label","criteria":{"true":"label","false":"not label"}}}"#
+                        .to_string(),
+                ),
+                "questions",
+            ),
         ] {
             let mut add = add_cmd(workflow_id.clone(), CliStepType::LlmInference);
             add.state = state;
-            add.fields = fields;
+            add.questions = fields;
             let error = add.execute(services.steps()).await.unwrap_err().to_string();
             assert!(
                 error.contains(&format!(
@@ -4000,14 +4018,16 @@ mod structured_inference_tests {
         add.provider = Some("openai".to_string());
         add.execute(services.steps()).await.unwrap();
         let mut update = update_cmd("classify");
-        update.fields = Some(r#"{"type":"object"}"#.to_string());
+        update.questions = Some(
+            r#"{"label":{"type":"noul","instructions":"label","criteria":{"true":"label","false":"not label"}}}"#.to_string(),
+        );
         let error = update
             .execute(services.steps())
             .await
             .unwrap_err()
             .to_string();
         assert!(
-            error.contains("config: $.fields: is not supported for llm_inference steps"),
+            error.contains("config: $.questions: is not supported for llm_inference steps"),
             "{error}"
         );
     }

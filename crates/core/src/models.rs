@@ -210,7 +210,7 @@ impl StepType {
                 "skills",
                 "agent_config",
             ]),
-            StepType::StructuredInference => Some(&["provider", "model", "state", "fields"]),
+            StepType::StructuredInference => Some(&["provider", "model", "state", "questions"]),
             StepType::Route => Some(&["route_config"]),
             StepType::WaitChildren => Some(&["output_schema"]),
             StepType::HumanInput | StepType::Stop | StepType::Finish => None,
@@ -1707,9 +1707,9 @@ pub struct StructuredInferenceConfig {
     /// `{{ dotted.path }}` references Sacrum resolves at dispatch
     #[serde(default)]
     pub state: Option<serde_json::Value>,
-    /// JSON Schema the step output must satisfy
+    /// Provider-shaped questions Sacrum resolves and validates for this step.
     #[serde(default)]
-    pub fields: Option<serde_json::Value>,
+    pub questions: Option<serde_json::Value>,
 }
 
 impl Default for StructuredInferenceConfig {
@@ -1719,7 +1719,7 @@ impl Default for StructuredInferenceConfig {
             provider: None,
             model: None,
             state: None,
-            fields: None,
+            questions: None,
         }
     }
 }
@@ -3440,7 +3440,7 @@ mod tests {
                 "provider": "typesafe",
                 "model": "jev",
                 "state": {"title": "Resolved title"},
-                "fields": {"type": "object"}
+                "questions": {"is_urgent": {"type": "noul", "instructions": "urgent?", "criteria": "yes"}}
             }
         });
 
@@ -3693,7 +3693,7 @@ mod tests {
         );
         assert_eq!(
             StepType::StructuredInference.config_fields(),
-            Some(&["provider", "model", "state", "fields"][..])
+            Some(&["provider", "model", "state", "questions"][..])
         );
         assert_eq!(StepType::Route.config_fields(), Some(&["route_config"][..]));
         assert_eq!(
@@ -3780,7 +3780,7 @@ mod tests {
                 "provider": "typesafe",
                 "model": "jev",
                 "state": "{{ task.title }}",
-                "fields": {"type": "object"}
+                "questions": {"is_urgent": {"type": "noul", "instructions": "urgent?", "criteria": "yes"}}
             }),
         )
         .unwrap()
@@ -3794,8 +3794,10 @@ mod tests {
             Some(serde_json::json!("{{ task.title }}"))
         );
         assert_eq!(
-            structured.fields,
-            Some(serde_json::json!({"type": "object"}))
+            structured.questions,
+            Some(serde_json::json!({
+                "is_urgent": {"type": "noul", "instructions": "urgent?", "criteria": "yes"}
+            }))
         );
 
         let wait = StepConfig::from_value(

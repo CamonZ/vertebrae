@@ -4,7 +4,7 @@
    Rendered as the CONTENT inside a right-docked FloatingDetailPanel shell. The
    topology shape (ordering, transitions, kind) comes from the pure `AtlasModel`;
    the rich configuration (goal, prompt, agents, skills, model, route config,
-   structured_inference provider/state/fields) is fetched live
+   structured_inference provider/state/questions) is fetched live
    via `useStep(stepId)` because `PipelineStep` carries none of it.
 
    Transitions — the implicit forward step plus every explicit out-edge — are
@@ -30,7 +30,7 @@ import { splitRef, shortId } from "../layout/geometry";
 import type { AtlasModel, AtlasWorkflow } from "../layout/types";
 import type { AtlasSelection } from "./selection";
 import { kindClass } from "./selection";
-import { StructuredInferenceFields } from "./StructuredInferenceFields";
+import { StructuredInferenceQuestions } from "./StructuredInferenceQuestions";
 import {
   EMPTY_STRUCTURED_INPUT,
   structuredInferenceConfig,
@@ -345,7 +345,7 @@ export function StepInspector({
         );
         return;
       }
-      if (isStructured ? !structured.fields.trim() : !outputSchema.trim()) {
+      if (isStructured ? !structured.questions.trim() : !outputSchema.trim()) {
         setError("Artifact persistence requires an output schema.");
         return;
       }
@@ -495,7 +495,7 @@ export function StepInspector({
             </>
           ) : null}
           {isStructured ? (
-            <StructuredInferenceFields
+            <StructuredInferenceQuestions
               value={structured}
               onChange={setStructured}
             />
@@ -722,15 +722,13 @@ export function StepInspector({
         </section>
 
         {isStructured ? (
-          <section className="wfd-sec" data-testid="structured-fields-section">
-            <div className="wfd-lbl">Fields</div>
-            {structuredConfig?.fields ? (
-              <SchemaTree
-                schema={structuredConfig.fields as Record<string, unknown>}
-              />
+          <section className="wfd-sec" data-testid="structured-questions-section">
+            <div className="wfd-lbl">Questions</div>
+            {structuredConfig?.questions ? (
+              <pre>{JSON.stringify(structuredConfig.questions, null, 2)}</pre>
             ) : (
               <div className="wfd-placeholder">
-                {isLoading ? "Loading…" : "No fields schema"}
+                {isLoading ? "Loading…" : "No questions configured"}
               </div>
             )}
           </section>

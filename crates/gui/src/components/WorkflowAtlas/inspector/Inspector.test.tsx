@@ -205,7 +205,7 @@ describe("WorkflowInspector", () => {
     );
   });
 
-  it("creates structured_inference with provider, model, state, and fields", async () => {
+  it("creates structured_inference with provider, model, state, and questions", async () => {
     render(
       <WorkflowInspector
         model={MODEL}
@@ -224,7 +224,7 @@ describe("WorkflowInspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create step" }));
     expect(
       screen.getByText(
-        "Structured inference steps require provider, model, state, and fields."
+        "Structured inference steps require provider, model, state, and questions."
       )
     ).toBeInTheDocument();
     expect(commands.createStep).not.toHaveBeenCalled();
@@ -238,7 +238,7 @@ describe("WorkflowInspector", () => {
     fireEvent.change(screen.getByLabelText(/^State/), {
       target: { value: "{{ task.title }}" },
     });
-    fireEvent.change(screen.getByLabelText("Fields"), {
+    fireEvent.change(screen.getByLabelText("Questions"), {
       target: { value: '{"type":"object"}' },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create step" }));
@@ -250,7 +250,7 @@ describe("WorkflowInspector", () => {
             provider: "typesafe",
             model: "jev",
             state: "{{ task.title }}",
-            fields: { type: "object" },
+            questions: { type: "object" },
           },
         })
       )
@@ -637,7 +637,7 @@ describe("StepInspector", () => {
     );
   });
 
-  it("shows and edits structured_inference provider, model, state, and fields", async () => {
+  it("shows and edits structured_inference provider, model, state, and questions", async () => {
     mockUseStep(
       stepFixture({
         id: "s1",
@@ -648,7 +648,7 @@ describe("StepInspector", () => {
           provider: "typesafe",
           model: "jev",
           state: { title: "{{ task.title }}" },
-          fields: {
+          questions: {
             type: "object",
             properties: { label: { type: "string" } },
           },
@@ -667,7 +667,7 @@ describe("StepInspector", () => {
     expect(screen.getByTestId("structured-state-section")).toHaveTextContent(
       "{{ task.title }}"
     );
-    expect(screen.getByTestId("structured-fields-section")).toHaveTextContent(
+    expect(screen.getByTestId("structured-questions-section")).toHaveTextContent(
       "label"
     );
     expect(screen.getByText("typesafe")).toBeInTheDocument();
@@ -676,7 +676,7 @@ describe("StepInspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.queryByLabelText("Prompt")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Provider")).toHaveValue("typesafe");
-    fireEvent.change(screen.getByLabelText("Fields"), {
+    fireEvent.change(screen.getByLabelText("Questions"), {
       target: { value: '{"type":"object","required":["label"]}' },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save step" }));
@@ -687,14 +687,14 @@ describe("StepInspector", () => {
             provider: "typesafe",
             model: "jev",
             state: { title: "{{ task.title }}" },
-            fields: { type: "object", required: ["label"] },
+            questions: { type: "object", required: ["label"] },
           },
         })
       )
     );
   });
 
-  it("rejects invalid structured_inference fields without saving", () => {
+  it("rejects invalid structured_inference questions without saving", () => {
     mockUseStep(
       stepFixture({
         step_type: "structured_inference",
@@ -703,7 +703,7 @@ describe("StepInspector", () => {
           provider: "typesafe",
           model: "jev",
           state: "x",
-          fields: { type: "object" },
+          questions: { type: "object" },
         },
       })
     );
@@ -717,12 +717,12 @@ describe("StepInspector", () => {
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Fields"), {
+    fireEvent.change(screen.getByLabelText("Questions"), {
       target: { value: "{" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save step" }));
     expect(
-      screen.getByText("Fields must be a valid JSON Schema.")
+      screen.getByText("Questions must be a valid JSON object.")
     ).toBeInTheDocument();
     expect(commands.updateStep).not.toHaveBeenCalled();
   });

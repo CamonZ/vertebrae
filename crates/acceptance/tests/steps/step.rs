@@ -206,8 +206,8 @@ async fn when_add_step_with_flag(
 }
 
 const STRUCTURED_STATE: &str = r#"{"title":"{{ task.title }}"}"#;
-const STRUCTURED_FIELDS: &str = r#"{"type":"object","properties":{"label":{"type":"string"}},"required":["label"],"additionalProperties":false}"#;
-const REPLACEMENT_STRUCTURED_FIELDS: &str = r#"{"type":"object","properties":{"score":{"type":"number"}},"required":["score"],"additionalProperties":false}"#;
+const STRUCTURED_QUESTIONS: &str = r#"{"label":{"type":"noul","instructions":"Is this label correct?","criteria":{"true":"The label matches","false":"The label does not match"}}}"#;
+const REPLACEMENT_STRUCTURED_QUESTIONS: &str = r#"{"score":{"type":"score","instructions":"Score this result","criteria":["poor","fair","good"]}}"#;
 
 #[when(expr = "I add a structured_inference step {string} to the workflow")]
 async fn when_add_structured_inference_step(world: &mut SmokeWorld, name: String) {
@@ -227,14 +227,14 @@ async fn when_add_structured_inference_step(world: &mut SmokeWorld, name: String
             "jev",
             "--state",
             STRUCTURED_STATE,
-            "--fields",
-            STRUCTURED_FIELDS,
+            "--questions",
+            STRUCTURED_QUESTIONS,
         ])
         .await;
     store_step_id_if_created(world, &name);
 }
 
-#[when(expr = "I replace the fields of structured_inference step {string}")]
+#[when(expr = "I replace the questions of structured_inference step {string}")]
 async fn when_replace_structured_inference_fields(world: &mut SmokeWorld, name: String) {
     let step_id = stored_step_id(world, &name);
     world
@@ -242,8 +242,8 @@ async fn when_replace_structured_inference_fields(world: &mut SmokeWorld, name: 
             "step",
             "update",
             &step_id,
-            "--fields",
-            REPLACEMENT_STRUCTURED_FIELDS,
+            "--questions",
+            REPLACEMENT_STRUCTURED_QUESTIONS,
         ])
         .await;
 }
@@ -264,8 +264,8 @@ async fn when_add_structured_inference_step_without_provider(world: &mut SmokeWo
             "jev",
             "--state",
             STRUCTURED_STATE,
-            "--fields",
-            STRUCTURED_FIELDS,
+            "--questions",
+            STRUCTURED_QUESTIONS,
         ])
         .await;
     store_step_id_if_created(world, &name);
@@ -930,7 +930,7 @@ async fn then_step_should_have_config_field(
 }
 
 #[then(
-    expr = "the step {string} in the workflow should have the default structured_inference state and fields"
+    expr = "the step {string} in the workflow should have the default structured_inference state and questions"
 )]
 async fn then_step_should_have_default_structured_state_and_fields(
     world: &mut SmokeWorld,
@@ -941,12 +941,12 @@ async fn then_step_should_have_default_structured_state_and_fields(
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
     let state: serde_json::Value = serde_json::from_str(STRUCTURED_STATE).unwrap();
     assert_eq!(json["config"]["state"], state, "JSON: {json}");
-    let fields: serde_json::Value = serde_json::from_str(STRUCTURED_FIELDS).unwrap();
-    assert_eq!(json["config"]["fields"], fields, "JSON: {json}");
+    let questions: serde_json::Value = serde_json::from_str(STRUCTURED_QUESTIONS).unwrap();
+    assert_eq!(json["config"]["questions"], questions, "JSON: {json}");
 }
 
 #[then(
-    expr = "the step {string} in the workflow should have the replacement structured_inference fields"
+    expr = "the step {string} in the workflow should have the replacement structured_inference questions"
 )]
 async fn then_step_should_have_replacement_structured_fields(
     world: &mut SmokeWorld,
@@ -957,8 +957,9 @@ async fn then_step_should_have_replacement_structured_fields(
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
     let state: serde_json::Value = serde_json::from_str(STRUCTURED_STATE).unwrap();
     assert_eq!(json["config"]["state"], state, "JSON: {json}");
-    let fields: serde_json::Value = serde_json::from_str(REPLACEMENT_STRUCTURED_FIELDS).unwrap();
-    assert_eq!(json["config"]["fields"], fields, "JSON: {json}");
+    let questions: serde_json::Value =
+        serde_json::from_str(REPLACEMENT_STRUCTURED_QUESTIONS).unwrap();
+    assert_eq!(json["config"]["questions"], questions, "JSON: {json}");
 }
 
 #[then(expr = "the step {string} in the workflow should not exist")]

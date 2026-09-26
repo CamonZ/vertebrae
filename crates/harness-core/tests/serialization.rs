@@ -403,6 +403,7 @@ fn capabilities_and_all_control_decisions_are_serializable() {
         unavailable_reason: None,
         persistent_sessions: true,
         one_shot_runs: true,
+        structured_inference: false,
         session_resumption: true,
         default_model: Some("m".into()),
         models: vec![ModelCapability {

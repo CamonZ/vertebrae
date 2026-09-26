@@ -676,7 +676,7 @@ mod tests {
             "provider": "typesafe",
             "model": "jev",
             "state": {"title": "{{ task.title }}"},
-            "fields": {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+            "questions": {"ok": {"type": "noul", "instructions": "ok?", "criteria": {"true": "yes", "false": "no"}}}
         });
         let server = MockServer::start().await;
         let mut response = make_step_response("step-si", "Classify", "wf-1", 0);

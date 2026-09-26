@@ -285,7 +285,7 @@ describe("runToThreads — structured_inference executions", () => {
       provider: "typesafe",
       model: "jev",
       state: { title: "Resolved title" },
-      fields: { type: "object" },
+      questions: { type: "object" },
     },
     output: '{"ok":true}',
     context: JSON.stringify({

@@ -193,6 +193,12 @@ pub struct RunStepPayload {
     /// The composed prompt for this step execution (built by Sacrum).
     #[serde(default)]
     pub prompt: Option<String>,
+    /// Sacrum-resolved structured inference input, when dispatching that step type.
+    #[serde(default)]
+    pub state: Option<serde_json::Value>,
+    /// Sacrum-validated System One question map, when dispatching structured inference.
+    #[serde(default)]
+    pub questions: Option<std::collections::BTreeMap<String, serde_json::Value>>,
     /// Agent names to use for this step.
     #[serde(default)]
     pub agents: Vec<String>,
@@ -265,17 +271,18 @@ pub fn parse_cancel_step_payload(payload: &serde_json::Value) -> Result<CancelSt
 /// Build a `StepConfig` from a parsed `RunStepPayload`.
 ///
 /// This is a pure function so it can be tested without an actor.
-/// - Uses the `prompt` field directly from the payload (composed by Sacrum).
+/// - Carries the `prompt` only when Sacrum supplied it; structured inference has no prompt.
 /// - Parses `agent_config` JSON into an `AgentConfig` struct.
 /// - Carries `agents` and `skills` from the payload into the config.
 pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
-    // An explicitly empty prompt is meaningful to providers and must not be
-    // rewritten. Only an omitted prompt gets the compatibility fallback.
-    let prompt = payload
-        .prompt
-        .clone()
-        .unwrap_or_else(|| "Execute step".to_string());
-
+    let structured_inference = payload.step_type.as_deref() == Some("structured_inference")
+        || payload.state.is_some()
+        || payload.questions.is_some()
+        || payload
+            .agent_config
+            .get("provider")
+            .and_then(serde_json::Value::as_str)
+            == Some("typesafe");
     let mut agent_config: AgentConfig =
         serde_json::from_value(payload.agent_config.clone()).unwrap_or_default();
 
@@ -285,7 +292,10 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
     }
 
     StepConfig {
-        prompt,
+        prompt: payload.prompt.clone(),
+        state: payload.state.clone(),
+        questions: payload.questions.clone(),
+        structured_inference,
         agent_config,
         agents: payload.agents.clone(),
         skills: payload.skills.clone(),
@@ -1142,7 +1152,10 @@ mod tests {
             execution_id: "exec-789".to_string(),
             task_id: "task-xyz".to_string(),
             step_config: Box::new(StepConfig {
-                prompt: "Implement feature".to_string(),
+                prompt: Some("Implement feature".to_string()),
+                state: None,
+                questions: None,
+                structured_inference: false,
                 agent_config: AgentConfig::new().with_model("claude-sonnet-4-20250514"),
                 agents: Vec::new(),
                 skills: Vec::new(),
@@ -1265,6 +1278,46 @@ mod tests {
         assert!(result.skills.is_empty());
         assert_eq!(result.agent_config, serde_json::Value::Null);
         assert!(should_dispatch_run_step(&result));
+    }
+
+    #[test]
+    fn structured_inference_payload_keeps_resolved_state_and_questions() {
+        let payload = serde_json::json!({
+            "id": "exec-structured",
+            "task_id": "task-structured",
+            "state": {"title": "resolved", "labels": ["bug"]},
+            "questions": {
+                "urgent": {"type": "noul", "instructions": "Urgent?", "criteria": {}},
+                "kind": {"type": "choice", "instructions": "Kind?", "criteria": {"bug": "Bug"}},
+                "score": {"type": "score", "instructions": "Score?", "criteria": ["low", "high"]}
+            },
+            "agent_config": {"provider": "typesafe", "model": "jev"}
+        });
+        let parsed = parse_run_step_payload(&payload).unwrap();
+        let config = build_step_config_from_payload(&parsed);
+        assert!(config.structured_inference);
+        assert!(config.prompt.is_none());
+        assert_eq!(config.state, Some(payload["state"].clone()));
+        assert_eq!(
+            config.questions,
+            Some(serde_json::from_value(payload["questions"].clone()).unwrap())
+        );
+    }
+
+    #[test]
+    fn typesafe_provider_marks_incomplete_structured_payload_for_preflight() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-structured-incomplete",
+            "task_id": "task-structured",
+            "agent_config": {"provider": "typesafe", "model": "jev"}
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+
+        assert!(config.structured_inference);
+        assert!(config.state.is_none());
+        assert!(config.questions.is_none());
     }
 
     #[test]
@@ -1396,8 +1449,8 @@ mod tests {
         let config = build_step_config_from_payload(&payload);
 
         assert_eq!(
-            config.prompt,
-            "Implement JWT token validation\n\n## Task Context\n**Title:** JWT Auth"
+            config.prompt.as_deref(),
+            Some("Implement JWT token validation\n\n## Task Context\n**Title:** JWT Auth")
         );
         assert_eq!(
             config.agent_config.model,
@@ -1444,7 +1497,7 @@ mod tests {
     }
 
     #[test]
-    fn build_step_config_falls_back_when_no_prompt() {
+    fn build_step_config_keeps_omitted_prompt_absent() {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-2",
             "task_id": "task-2"
@@ -1453,7 +1506,7 @@ mod tests {
 
         let config = build_step_config_from_payload(&payload);
 
-        assert_eq!(config.prompt, "Execute step");
+        assert_eq!(config.prompt, None);
         assert!(config.agent_config.model.is_none());
         assert!(config.agents.is_empty());
         assert!(config.skills.is_empty());
@@ -1470,7 +1523,7 @@ mod tests {
         .unwrap();
 
         let config = build_step_config_from_payload(&payload);
-        assert_eq!(config.prompt, "");
+        assert_eq!(config.prompt.as_deref(), Some(""));
     }
 
     #[test]
@@ -1570,7 +1623,10 @@ mod tests {
             execution_id: "exec-wt".to_string(),
             task_id: "task-wt".to_string(),
             step_config: Box::new(StepConfig {
-                prompt: "Implement in worktree".to_string(),
+                prompt: Some("Implement in worktree".to_string()),
+                state: None,
+                questions: None,
+                structured_inference: false,
                 agent_config: AgentConfig::default(),
                 agents: Vec::new(),
                 skills: Vec::new(),
@@ -1683,6 +1739,8 @@ mod tests {
             id: "exec-os-null".to_string(),
             task_id: "task-os-null".to_string(),
             prompt: None,
+            state: None,
+            questions: None,
             agent_config: serde_json::json!({}),
             agents: Vec::new(),
             skills: Vec::new(),

@@ -103,6 +103,7 @@ impl HarnessRuntime for ClaudeRuntime {
                 unavailable_reason: None,
                 persistent_sessions: true,
                 one_shot_runs: true,
+                structured_inference: false,
                 session_resumption: true,
                 default_model: Some("sonnet".into()),
                 models: DEFAULT_CLAUDE_MODELS
@@ -130,6 +131,7 @@ impl HarnessRuntime for ClaudeRuntime {
                 unavailable_reason: Some(error.to_string()),
                 persistent_sessions: true,
                 one_shot_runs: true,
+                structured_inference: false,
                 session_resumption: true,
                 default_model: Some("sonnet".into()),
                 models: Vec::new(),

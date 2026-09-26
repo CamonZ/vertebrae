@@ -9,7 +9,8 @@ use serde_json::{Value, json};
 use vertebrae_harness_core::{
     CompletionStatus, ControlRequestEnvelope, ControlResolution, ControlSink, EventSink,
     HarnessCapabilities, HarnessError, HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime,
-    RequestConfig, RunId, RunRequest, StartSessionRequest, StreamId, UsageEvent,
+    RequestConfig, RunId, RunRequest, StartSessionRequest, StreamId, StructuredInferenceRequest,
+    UsageEvent,
 };
 use vertebrae_harness_typesafe::{
     DEFAULT_MODEL, Question, SystemOneRequest, TypeSafeClient, TypeSafeClientConfig,
@@ -63,6 +64,19 @@ fn run_request(config: RequestConfig) -> RunRequest {
     }
 }
 
+fn structured_request() -> StructuredInferenceRequest {
+    StructuredInferenceRequest {
+        run_id: RunId::from("run-1"),
+        stream_id: StreamId::from("stream-1"),
+        state: json!({"ticket": {"title": "Export fails", "body": "The export button is broken."}}),
+        model: Some(DEFAULT_MODEL.into()),
+        questions: BTreeMap::from([(
+            "is_urgent".into(),
+            json!({"type": "noul", "instructions": "Does this need urgent handling?"}),
+        )]),
+    }
+}
+
 fn runtime(server: &MockServer) -> TypeSafeRuntime {
     TypeSafeRuntime::new(
         TypeSafeClient::from_config(
@@ -97,6 +111,7 @@ async fn capabilities_advertise_judgment_only_execution() {
             unavailable_reason: None,
             persistent_sessions: false,
             one_shot_runs: true,
+            structured_inference: true,
             session_resumption: false,
             default_model: Some(DEFAULT_MODEL.into()),
             models: Vec::new(),
@@ -188,14 +203,34 @@ async fn persistent_sessions_and_agent_options_are_rejected_without_network_work
 }
 
 #[tokio::test]
-async fn one_shot_maps_answers_usage_and_lifecycle_without_chat_events() {
+async fn structured_inference_sends_native_request_and_maps_answers_usage() {
     let server = MockServer::start().await;
+    let state =
+        json!({"ticket": {"title": "Export fails", "body": "The export button is broken."}});
+    let questions = json!({
+        "is_urgent": {"type": "noul", "instructions": "Does this need urgent handling?", "criteria": {"true": "blocking issue", "false": "not blocking"}},
+        "category": {"type": "choice", "instructions": "Choose a category", "criteria": {"bug": "A defect", "feature": "A feature"}},
+        "severity": {"type": "score", "instructions": "Rate severity", "criteria": ["low", "medium", "high"]}
+    });
     Mock::given(matchers::method("POST"))
         .and(matchers::path("/v1/systemone"))
+        .and(matchers::body_json(json!({
+            "state": state,
+            "model": "jev-custom",
+            "questions": questions
+        })))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("x-typesafe-request-id", "req-success")
-                .set_body_json(success_body()),
+                .set_body_json(json!({
+                    "model": "jev-custom",
+                    "answers": {
+                        "is_urgent": {"type": "noul", "noul": 0.92},
+                        "category": {"type": "choice", "choice": "bug", "probabilities": {"bug": 0.8, "feature": 0.2}, "confidence": 0.9},
+                        "severity": {"type": "score", "score": 1.0, "legend": {"0": "low", "1": "medium", "2": "high"}, "probabilities": {"0": 0.1, "1": 0.8, "2": 0.1}, "confidence": 0.8}
+                    },
+                    "usage": {"input_tokens": 312, "output_tokens": 48}
+                })),
         )
         .expect(1)
         .mount(&server)
@@ -203,10 +238,15 @@ async fn one_shot_maps_answers_usage_and_lifecycle_without_chat_events() {
 
     let sink = Arc::new(CollectSink::default());
     let handle = runtime(&server)
-        .run_once(
-            run_request(RequestConfig::default()),
+        .run_structured_inference(
+            StructuredInferenceRequest {
+                run_id: RunId::from("run-1"),
+                stream_id: StreamId::from("stream-1"),
+                state: state.clone(),
+                model: Some("jev-custom".into()),
+                questions: serde_json::from_value(questions.clone()).unwrap(),
+            },
             sink.clone(),
-            Arc::new(PanicControlSink),
         )
         .await
         .unwrap();
@@ -219,7 +259,11 @@ async fn one_shot_maps_answers_usage_and_lifecycle_without_chat_events() {
     assert_eq!(outcome.result_text, None);
     assert_eq!(
         outcome.structured_output,
-        Some(json!({"is_urgent": {"type": "noul", "noul": 0.92}}))
+        Some(json!({
+            "is_urgent": {"type": "noul", "noul": 0.92},
+            "category": {"type": "choice", "choice": "bug", "probabilities": {"bug": 0.8, "feature": 0.2}, "confidence": 0.9},
+            "severity": {"type": "score", "score": 1.0, "legend": {"0": "low", "1": "medium", "2": "high"}, "probabilities": {"0": 0.1, "1": 0.8, "2": 0.1}, "confidence": 0.8}
+        }))
     );
     let usage = outcome.usage.as_ref().unwrap();
     assert_eq!(usage.tokens.input_tokens, 312);
@@ -251,7 +295,7 @@ async fn one_shot_maps_answers_usage_and_lifecycle_without_chat_events() {
     assert!(matches!(
         &events[0].payload,
         HarnessEventPayloadV1::TurnInput(input)
-            if input.content == prompt()
+            if input.content.contains("jev-custom")
                 && input.run_id.as_ref().map(|id| id.as_str()) == Some("run-1")
                 && input.thread_id.as_str() == "run-1"
     ));
@@ -278,24 +322,20 @@ async fn one_shot_maps_answers_usage_and_lifecycle_without_chat_events() {
 async fn invalid_judgment_and_service_failures_settle_without_fabricated_output() {
     let server = MockServer::start().await;
     let runtime = runtime(&server);
-    let invalid_prompt = serde_json::to_string(&json!({"state": {"ticket": 1}})).unwrap();
     let error = match runtime
-        .run_once(
-            RunRequest {
-                prompt: invalid_prompt,
-                ..run_request(RequestConfig::default())
+        .run_structured_inference(
+            StructuredInferenceRequest {
+                questions: BTreeMap::new(),
+                ..structured_request()
             },
             Arc::new(CollectSink::default()),
-            Arc::new(PanicControlSink),
         )
         .await
     {
         Err(error) => error,
         Ok(_) => panic!("TypeSafe must reject invalid judgment input"),
     };
-    assert!(
-        matches!(error, HarnessError::InvalidRequest(message) if message.contains("structured judgment request"))
-    );
+    assert!(matches!(error, HarnessError::InvalidRequest(_)));
     assert!(server.received_requests().await.unwrap().is_empty());
 
     for (status, request_id) in [
@@ -321,11 +361,7 @@ async fn invalid_judgment_and_service_failures_settle_without_fabricated_output(
             )
             .unwrap(),
         )
-        .run_once(
-            run_request(RequestConfig::default()),
-            sink.clone(),
-            Arc::new(PanicControlSink),
-        )
+        .run_structured_inference(structured_request(), sink.clone())
         .await
         .unwrap()
         .await_outcome()
@@ -369,11 +405,7 @@ async fn client_timeout_becomes_one_failed_terminal_outcome() {
     .unwrap();
     let sink = Arc::new(CollectSink::default());
     let outcome = TypeSafeRuntime::new(client)
-        .run_once(
-            run_request(RequestConfig::default()),
-            sink.clone(),
-            Arc::new(PanicControlSink),
-        )
+        .run_structured_inference(structured_request(), sink.clone())
         .await
         .unwrap()
         .await_outcome()

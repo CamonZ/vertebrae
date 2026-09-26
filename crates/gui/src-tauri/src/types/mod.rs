@@ -686,8 +686,8 @@ pub struct StructuredInferenceStepConfig {
     /// Input sent to the provider (string, object, or array; may hold
     /// `{{ dotted.path }}` references)
     pub state: Option<serde_json::Value>,
-    /// JSON Schema the step output must satisfy
-    pub fields: Option<serde_json::Value>,
+    /// System One question map the step asks the provider.
+    pub questions: Option<serde_json::Value>,
 }
 
 /// Config of a `route` step.
@@ -736,7 +736,7 @@ impl From<vertebrae_core::StepConfig> for StepConfig {
                     provider: config.provider,
                     model: config.model,
                     state: config.state,
-                    fields: config.fields,
+                    questions: config.questions,
                 })
             }
             vertebrae_core::StepConfig::Route(config) => StepConfig::Route(RouteStepConfig {
@@ -2225,7 +2225,7 @@ mod tests {
                 "provider": "typesafe",
                 "model": "jev",
                 "state": {"title": "{{ task.title }}"},
-                "fields": {"type": "object", "required": ["ok"]}
+                "questions": {"ok": {"type": "noul", "instructions": "ok?", "criteria": {"true": "yes", "false": "no"}}}
             }
         });
         let step: Step = serde_json::from_value(payload).unwrap();
@@ -2240,8 +2240,10 @@ mod tests {
             Some(serde_json::json!({"title": "{{ task.title }}"}))
         );
         assert_eq!(
-            config.fields,
-            Some(serde_json::json!({"type": "object", "required": ["ok"]}))
+            config.questions,
+            Some(serde_json::json!({
+                "ok": {"type": "noul", "instructions": "ok?", "criteria": {"true": "yes", "false": "no"}}
+            }))
         );
 
         let json = serde_json::to_value(&step).unwrap();
@@ -2637,7 +2639,7 @@ mod tests {
                 "provider": "typesafe",
                 "model": "jev",
                 "state": {"title": "resolved"},
-                "fields": {"type": "object"}
+                "questions": {"ok": {"type": "noul", "instructions": "ok?", "criteria": {"true": "yes", "false": "no"}}}
             },
             "output": "done",
             "context": "{\"k\":\"v\"}",

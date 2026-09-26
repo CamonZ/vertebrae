@@ -61,14 +61,14 @@ export interface StructuredInferenceInput {
   provider: string;
   model: string;
   state: string;
-  fields: string;
+  questions: string;
 }
 
 export const EMPTY_STRUCTURED_INPUT: StructuredInferenceInput = {
   provider: "",
   model: "",
   state: "",
-  fields: "",
+  questions: "",
 };
 
 export function structuredInferenceInput(
@@ -78,7 +78,7 @@ export function structuredInferenceInput(
     provider: config?.provider ?? "",
     model: config?.model ?? "",
     state: formatStateInput(config?.state),
-    fields: config?.fields ? JSON.stringify(config.fields, null, 2) : "",
+    questions: config?.questions ? JSON.stringify(config.questions, null, 2) : "",
   };
 }
 
@@ -89,28 +89,28 @@ export function structuredInferenceConfig(
     !input.provider.trim() ||
     !input.model.trim() ||
     !input.state.trim() ||
-    !input.fields.trim()
+    !input.questions.trim()
   ) {
     return {
       error:
-        "Structured inference steps require provider, model, state, and fields.",
+        "Structured inference steps require provider, model, state, and questions.",
     };
   }
-  let fields: JsonValue;
+  let questions: JsonValue;
   try {
-    fields = JSON.parse(input.fields) as JsonValue;
+    questions = JSON.parse(input.questions) as JsonValue;
   } catch {
-    return { error: "Fields must be a valid JSON Schema." };
+    return { error: "Questions must be a valid JSON object." };
   }
-  if (fields === null || typeof fields !== "object" || Array.isArray(fields)) {
-    return { error: "Fields must be a valid JSON Schema." };
+  if (questions === null || typeof questions !== "object" || Array.isArray(questions)) {
+    return { error: "Questions must be a valid JSON object." };
   }
   return {
     config: {
       provider: input.provider.trim(),
       model: input.model.trim(),
       state: parseStateInput(input.state),
-      fields,
+      questions,
     },
   };
 }

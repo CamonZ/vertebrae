@@ -69,6 +69,17 @@ pub struct RunRequest {
     pub config: RequestConfig,
 }
 
+/// Provider-neutral input for one structured inference call. `state` and
+/// `questions` are already resolved and validated by the workflow service.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StructuredInferenceRequest {
+    pub run_id: RunId,
+    pub stream_id: StreamId,
+    pub state: Value,
+    pub model: Option<String>,
+    pub questions: BTreeMap<String, Value>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompletionStatus {
@@ -303,6 +314,16 @@ pub trait HarnessRuntime: Send + Sync {
         event_sink: Arc<dyn EventSink>,
         control_sink: Arc<dyn ControlSink>,
     ) -> Result<Arc<dyn RunHandle>, HarnessError>;
+
+    async fn run_structured_inference(
+        &self,
+        _request: StructuredInferenceRequest,
+        _event_sink: Arc<dyn EventSink>,
+    ) -> Result<Arc<dyn RunHandle>, HarnessError> {
+        Err(HarnessError::Unsupported(
+            "structured inference is unsupported by this harness".into(),
+        ))
+    }
 }
 
 /// Best-effort interrupt, then session close, then turn settlement.

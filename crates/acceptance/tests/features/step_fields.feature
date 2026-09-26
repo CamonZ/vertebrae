@@ -1,4 +1,4 @@
-Feature: Step fields: prompt and agent-config
+Feature: Step questions: prompt and agent-config
 
   Background:
     Given a configured Sacrum client
@@ -181,7 +181,7 @@ Feature: Step fields: prompt and agent-config
     And the step "Classify" in the workflow should have step_type "structured_inference"
     And the step "Classify" in the workflow should have config field "provider" equal to "typesafe"
     And the step "Classify" in the workflow should have config field "model" equal to "jev"
-    And the step "Classify" in the workflow should have the default structured_inference state and fields
+    And the step "Classify" in the workflow should have the default structured_inference state and questions
     When I show the step "Classify"
     Then the output should contain "Step Type:     structured_inference"
     And the output should contain "Provider:      typesafe"
@@ -189,11 +189,11 @@ Feature: Step fields: prompt and agent-config
     When I show the step "Classify" as JSON
     Then the step show JSON should have step_type "structured_inference"
 
-  Scenario: Updating structured_inference fields leaves provider, model, and state unchanged
+  Scenario: Updating structured_inference questions leaves provider, model, and state unchanged
     When I add a structured_inference step "Relabel" to the workflow
-    And I replace the fields of structured_inference step "Relabel"
+    And I replace the questions of structured_inference step "Relabel"
     Then the command should succeed
-    And the step "Relabel" in the workflow should have the replacement structured_inference fields
+    And the step "Relabel" in the workflow should have the replacement structured_inference questions
     And the step "Relabel" in the workflow should have config field "provider" equal to "typesafe"
     And the step "Relabel" in the workflow should have config field "model" equal to "jev"
 
@@ -207,8 +207,8 @@ Feature: Step fields: prompt and agent-config
     Then the command should fail with "config: $.state: is not supported for llm_inference steps"
     And the step "StatefulLlm" in the workflow should not exist
     When I add a step "PlainLlm" to the workflow
-    And I update the step "PlainLlm" in the workflow with flag "--fields" and value "{}"
-    Then the command should fail with "config: $.fields: is not supported for llm_inference steps"
+    And I update the step "PlainLlm" in the workflow with flag "--questions" and value "{}"
+    Then the command should fail with "config: $.questions: is not supported for llm_inference steps"
 
   Scenario: Create a wait_children step with --output-schema
     When I add a step "Checker" to the workflow with --step-type "wait_children" and --output-schema
@@ -273,7 +273,7 @@ Feature: Step fields: prompt and agent-config
     Then the command should fail with "$.rules[0].when.ref"
     And the error should contain "route_config"
 
-  Scenario: Route steps reject fields they do not declare
+  Scenario: Route steps reject questions they do not declare
     When I add a step "PromptRouter" to the workflow with flag "--step-type" and value "route"
     Then the command should succeed
     When I update the step "PromptRouter" in the workflow with flag "--prompt" and value "route this"

@@ -3,7 +3,7 @@
    ────────────────────────────────────────────────────────────────── */
 import type { StructuredInferenceInput } from "../../../utils/stepConfig";
 
-export function StructuredInferenceFields({
+export function StructuredInferenceQuestions({
   value,
   onChange,
 }: {
@@ -37,11 +37,11 @@ export function StructuredInferenceFields({
         />
       </label>
       <label>
-        Fields
+        Questions
         <textarea
-          value={value.fields}
-          onChange={(e) => set("fields")(e.target.value)}
-          placeholder="Output JSON Schema"
+          value={value.questions}
+          onChange={(e) => set("questions")(e.target.value)}
+          placeholder="System One questions JSON"
         />
       </label>
     </>

@@ -132,14 +132,34 @@ fn parse_state_flag(value: Option<&str>) -> Result<Option<serde_json::Value>, Se
         .transpose()
 }
 
-fn parse_fields_flag(value: Option<&str>) -> Result<Option<serde_json::Value>, ServiceError> {
-    value
-        .map(|value| read_flag_value(value, "--fields"))
+fn parse_questions_flag(value: Option<&str>) -> Result<Option<serde_json::Value>, ServiceError> {
+    let questions = value
+        .map(|value| read_flag_value(value, "--questions"))
         .transpose()?
         .as_deref()
-        .map(|raw| parse_json_flag(Some(raw), "--fields"))
+        .map(|raw| parse_json_flag(Some(raw), "--questions"))
         .transpose()
-        .map(Option::flatten)
+        .map(Option::flatten)?;
+    if let Some(questions) = &questions {
+        let valid = questions.as_object().is_some_and(|entries| {
+            !entries.is_empty()
+                && entries.values().all(|question| {
+                    question.as_object().is_some_and(|question| {
+                        matches!(
+                            question.get("type").and_then(serde_json::Value::as_str),
+                            Some("noul" | "choice" | "score")
+                        ) && question.contains_key("instructions")
+                            && question.contains_key("criteria")
+                    })
+                })
+        });
+        if !valid {
+            return Err(ServiceError::validation_failed(
+                "--questions must be a non-empty object of System One questions with type, instructions, and criteria",
+            ));
+        }
+    }
+    Ok(questions)
 }
 
 fn parse_agent_provider(value: Option<&str>) -> Result<Option<Provider>, ServiceError> {
@@ -266,7 +286,7 @@ pub struct StepAddCommand {
     /// A step's type cannot change after creation. Config flags must be
     /// declared by the type: llm_inference takes the prompt, output schema,
     /// agent, skill, and agent-config flags; structured_inference takes
-    /// --provider, --model, --state, and --fields; route takes
+    /// --provider, --model, --state, and --questions; route takes
     /// --route-config; wait_children takes --output-schema; the others take
     /// none.
     #[arg(long, value_enum, default_value = "llm_inference")]
@@ -278,9 +298,9 @@ pub struct StepAddCommand {
     #[arg(long, value_name = "JSON|STRING")]
     pub state: Option<String>,
 
-    /// JSON Schema of a structured_inference step's output, inline or `@path`
+    /// Provider-shaped System One questions for a structured_inference step, inline or `@path`
     #[arg(long, value_name = "JSON")]
-    pub fields: Option<String>,
+    pub questions: Option<String>,
 
     /// JSON Schema describing the expected output of this step (raw JSON string)
     #[arg(long, value_name = "JSON")]
@@ -405,7 +425,7 @@ impl StepAddCommand {
             ("provider", structured && self.provider.is_some()),
             ("model", structured && self.model.is_some()),
             ("state", self.state.is_some()),
-            ("fields", self.fields.is_some()),
+            ("questions", self.questions.is_some()),
         ]
         .into_iter()
         .filter_map(|(field, present)| present.then_some(field))
@@ -441,7 +461,7 @@ impl StepAddCommand {
                 config.provider = self.provider.clone();
                 config.model = self.model.clone();
                 config.state = parse_state_flag(self.state.as_deref())?;
-                config.fields = parse_fields_flag(self.fields.as_deref())?;
+                config.questions = parse_questions_flag(self.questions.as_deref())?;
             }
             Some(StepConfig::Route(config)) => config.route_config = route_config,
             Some(StepConfig::WaitChildren(config)) => config.output_schema = output_schema,
@@ -667,7 +687,7 @@ Goal:          {}
                     config.provider.as_deref().unwrap_or("(none)"),
                     config.model.as_deref().unwrap_or("(none)"),
                     pretty_json(config.state.as_ref()),
-                    pretty_json(config.fields.as_ref()),
+                    pretty_json(config.questions.as_ref()),
                 ));
             }
             Some(StepConfig::Route(config)) => {
@@ -815,9 +835,9 @@ pub struct StepUpdateCommand {
     #[arg(long, value_name = "JSON|STRING")]
     pub state: Option<String>,
 
-    /// New output JSON Schema of a structured_inference step, inline or `@path`
+    /// New provider-shaped System One questions for a structured_inference step, inline or `@path`
     #[arg(long, value_name = "JSON")]
-    pub fields: Option<String>,
+    pub questions: Option<String>,
 
     /// New output schema as a JSON string
     #[arg(long, value_name = "JSON")]
@@ -902,7 +922,7 @@ impl StepUpdateCommand {
             ("provider", structured && self.provider.is_some()),
             ("model", structured && self.model.is_some()),
             ("state", self.state.is_some()),
-            ("fields", self.fields.is_some()),
+            ("questions", self.questions.is_some()),
         ]
         .into_iter()
         .filter_map(|(field, present)| present.then_some(field))
@@ -1020,8 +1040,8 @@ impl StepUpdateCommand {
         if let Some(state) = parse_state_flag(self.state.as_deref())? {
             updates = updates.with_config_field("state", state);
         }
-        if let Some(fields) = parse_fields_flag(self.fields.as_deref())? {
-            updates = updates.with_config_field("fields", fields);
+        if let Some(questions) = parse_questions_flag(self.questions.as_deref())? {
+            updates = updates.with_config_field("questions", questions);
         }
 
         if self.agent_config_flags_present(&existing.step_type) {
@@ -1267,7 +1287,7 @@ mod tests {
     }
 
     #[test]
-    fn test_step_add_with_orchestration_fields() {
+    fn test_step_add_with_orchestration_questions() {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
@@ -1484,7 +1504,7 @@ mod tests {
     }
 
     #[test]
-    fn test_step_update_with_orchestration_fields() {
+    fn test_step_update_with_orchestration_questions() {
         let cli = TestCli::try_parse_from([
             "test",
             "update",
@@ -2080,7 +2100,7 @@ mod tests {
     }
 
     #[test]
-    fn test_step_update_defaults_leave_fields_unchanged() {
+    fn test_step_update_defaults_leave_questions_unchanged() {
         let cli =
             TestCli::try_parse_from(["test", "update", "a1b2c3d4-0000-4000-8000-00000000000b"])
                 .unwrap();
@@ -2154,8 +2174,8 @@ mod tests {
             "jev",
             "--state",
             "{{ task.title }}",
-            "--fields",
-            r#"{"type":"object"}"#,
+            "--questions",
+            r#"{"label":{"type":"noul","instructions":"label","criteria":{"true":"label","false":"not label"}}}"#,
         ])
         .unwrap();
         match cli.command {
@@ -2163,10 +2183,31 @@ mod tests {
                 assert!(matches!(cmd.step_type, CliStepType::StructuredInference));
                 assert_eq!(cmd.provider.as_deref(), Some("typesafe"));
                 assert_eq!(cmd.state.as_deref(), Some("{{ task.title }}"));
-                assert_eq!(cmd.fields.as_deref(), Some(r#"{"type":"object"}"#));
+                assert_eq!(
+                    cmd.questions.as_deref(),
+                    Some(
+                        r#"{"label":{"type":"noul","instructions":"label","criteria":{"true":"label","false":"not label"}}}"#
+                    )
+                );
             }
             _ => panic!("Expected Add command"),
         }
+    }
+
+    #[test]
+    fn structured_inference_no_longer_accepts_fields_flag() {
+        let result = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Classify",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "structured_inference",
+            "--fields",
+            "{}",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -2188,16 +2229,25 @@ mod tests {
             Some(serde_json::json!("42"))
         );
         assert!(
-            parse_fields_flag(Some("not json"))
+            parse_questions_flag(Some("not json"))
                 .unwrap_err()
                 .to_string()
-                .contains("Invalid --fields JSON")
+                .contains("Invalid --questions JSON")
         );
         assert!(
-            parse_fields_flag(Some("@/nonexistent/vtb-fields.json"))
+            parse_questions_flag(Some(
+                r#"{"label":{"type":"noul","instructions":"label","criteria":{"true":"label","false":"not label"}}}"#
+            ))
+            .is_ok()
+        );
+        assert!(parse_questions_flag(Some("[]")).is_err());
+        assert!(parse_questions_flag(Some("{}")).is_err());
+        assert!(parse_questions_flag(Some(r#"{"label":{"type":"string"}}"#)).is_err());
+        assert!(
+            parse_questions_flag(Some("@/nonexistent/vtb-questions.json"))
                 .unwrap_err()
                 .to_string()
-                .contains("Failed to read --fields file")
+                .contains("Failed to read --questions file")
         );
     }
 

@@ -1923,9 +1923,9 @@ export type StructuredInferenceStepConfig = { version: number; provider: string 
  */
 state: JsonValue | null;
 /**
- * JSON Schema the step output must satisfy
+ * System One question map the step asks the provider.
  */
-fields: JsonValue | null }
+questions: JsonValue | null }
 /**
  * Full task details - mirrors core::Task with string IDs and dates
  */

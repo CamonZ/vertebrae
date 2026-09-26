@@ -1,26 +1,22 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde::Deserialize;
-use serde_json::Value;
 use tokio::sync::watch;
 use vertebrae_harness_core::{
     CompletionStatus, EventCorrelation, EventSequencer, EventSink, HarnessCapabilities,
     HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, HarnessRuntime, ModelCapability,
     OutcomeMetrics, QuestionCapabilities, RunHandle, RunId, RunOutcome, RunRequest,
-    SequencedEventSink, SessionHandle, StartSessionRequest, ThreadId, TokenUsage, TurnInput,
-    TurnInputProvenance, TurnUsage, UpdateSemantics, UsageEvent,
+    SequencedEventSink, SessionHandle, StartSessionRequest, StructuredInferenceRequest, ThreadId,
+    TokenUsage, TurnInput, TurnInputProvenance, TurnUsage, UpdateSemantics, UsageEvent,
 };
 
 use crate::{
-    DEFAULT_MODEL, Question, SystemOneRequest, SystemOneResponse, TypeSafeClient,
-    TypeSafeClientConfig, TypeSafeError,
+    DEFAULT_MODEL, SystemOneRequest, SystemOneResponse, TypeSafeClient, TypeSafeClientConfig,
+    TypeSafeError,
 };
 
 /// A TypeSafe runtime exposes stateless System One judgments through the
-/// provider-neutral one-shot boundary. The prompt is the serialized,
-/// provider-owned [`SystemOneRequest`] because the neutral run contract only
-/// carries a prompt string.
+/// provider-neutral structured inference boundary.
 #[derive(Clone)]
 pub struct TypeSafeRuntime {
     client: TypeSafeClient,
@@ -47,14 +43,6 @@ impl TypeSafeRuntime {
     pub fn client(&self) -> &TypeSafeClient {
         &self.client
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct StructuredJudgmentRequest {
-    state: Value,
-    #[serde(default)]
-    model: Option<String>,
-    questions: BTreeMap<String, Question>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -120,6 +108,7 @@ impl HarnessRuntime for TypeSafeRuntime {
             unavailable_reason: None,
             persistent_sessions: false,
             one_shot_runs: true,
+            structured_inference: true,
             session_resumption: false,
             default_model: Some(DEFAULT_MODEL.into()),
             models: Vec::<ModelCapability>::new(),
@@ -144,22 +133,66 @@ impl HarnessRuntime for TypeSafeRuntime {
 
     async fn run_once(
         &self,
-        request: RunRequest,
-        event_sink: Arc<dyn EventSink>,
+        _request: RunRequest,
+        _event_sink: Arc<dyn EventSink>,
         _control_sink: Arc<dyn vertebrae_harness_core::ControlSink>,
     ) -> Result<Arc<dyn RunHandle>, HarnessError> {
-        validate_request_config(&request.config)?;
-        let judgment = parse_judgment_request(&request.prompt, request.config.model.as_deref())?;
+        Err(HarnessError::Unsupported(
+            "TypeSafe requires the structured inference request API".into(),
+        ))
+    }
+
+    async fn run_structured_inference(
+        &self,
+        request: StructuredInferenceRequest,
+        event_sink: Arc<dyn EventSink>,
+    ) -> Result<Arc<dyn RunHandle>, HarnessError> {
+        let questions =
+            serde_json::from_value(serde_json::to_value(request.questions).map_err(|error| {
+                HarnessError::InvalidRequest(format!("invalid structured questions: {error}"))
+            })?)
+            .map_err(|error| {
+                HarnessError::InvalidRequest(format!("invalid System One questions: {error}"))
+            })?;
+        let judgment = SystemOneRequest::for_model(
+            request.state,
+            request.model.unwrap_or_else(|| DEFAULT_MODEL.into()),
+            questions,
+        );
         judgment
             .validate()
             .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+        let prompt = serde_json::to_string(&judgment)
+            .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+        self.start_judgment(
+            request.run_id,
+            request.stream_id,
+            prompt,
+            judgment,
+            event_sink,
+        )
+    }
+}
 
+impl TypeSafeRuntime {
+    fn start_judgment(
+        &self,
+        run_id: RunId,
+        stream_id: vertebrae_harness_core::StreamId,
+        prompt: String,
+        judgment: SystemOneRequest,
+        event_sink: Arc<dyn EventSink>,
+    ) -> Result<Arc<dyn RunHandle>, HarnessError> {
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let (outcome_tx, outcome_rx) = watch::channel(OutcomeState::Pending);
-        let run_id = request.run_id.clone();
         tokio::spawn(execute_run(
             self.client.clone(),
-            request,
+            RunRequest {
+                run_id: run_id.clone(),
+                stream_id,
+                prompt,
+                config: Default::default(),
+            },
             judgment,
             event_sink,
             cancel_rx,
@@ -172,62 +205,6 @@ impl HarnessRuntime for TypeSafeRuntime {
             outcome_rx,
         }))
     }
-}
-
-fn validate_request_config(
-    config: &vertebrae_harness_core::RequestConfig,
-) -> Result<(), HarnessError> {
-    if config.working_directory.is_some() {
-        return Err(unsupported_option("working_directory"));
-    }
-    if config.reasoning_effort.is_some() {
-        return Err(unsupported_option("reasoning_effort"));
-    }
-    if config.speed_tier.is_some() {
-        return Err(unsupported_option("speed_tier"));
-    }
-    if config.personality.is_some() {
-        return Err(unsupported_option("personality"));
-    }
-    if config.verbosity.is_some() {
-        return Err(unsupported_option("verbosity"));
-    }
-    if config.output_schema.is_some() {
-        return Err(HarnessError::Unsupported(
-            "TypeSafe uses explicit judgment questions; generic output schemas are unsupported"
-                .into(),
-        ));
-    }
-    if config.developer_instructions.is_some() {
-        return Err(unsupported_option("developer_instructions"));
-    }
-    if !config.environment.is_empty() {
-        return Err(unsupported_option("environment"));
-    }
-    Ok(())
-}
-
-fn unsupported_option(option: &str) -> HarnessError {
-    HarnessError::Unsupported(format!("TypeSafe does not support RequestConfig.{option}"))
-}
-
-fn parse_judgment_request(
-    prompt: &str,
-    model_override: Option<&str>,
-) -> Result<SystemOneRequest, HarnessError> {
-    let request: StructuredJudgmentRequest = serde_json::from_str(prompt).map_err(|error| {
-        HarnessError::InvalidRequest(format!(
-            "TypeSafe run prompt must be a structured judgment request: {error}"
-        ))
-    })?;
-    Ok(SystemOneRequest::for_model(
-        request.state,
-        model_override
-            .map(ToOwned::to_owned)
-            .or(request.model)
-            .unwrap_or_else(|| DEFAULT_MODEL.into()),
-        request.questions,
-    ))
 }
 
 async fn execute_run(

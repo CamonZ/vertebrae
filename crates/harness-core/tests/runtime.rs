@@ -344,6 +344,7 @@ impl HarnessRuntime for MockRuntime {
             unavailable_reason: None,
             persistent_sessions: true,
             one_shot_runs: true,
+            structured_inference: false,
             session_resumption: true,
             default_model: None,
             models: Vec::new(),

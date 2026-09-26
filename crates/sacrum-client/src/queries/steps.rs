@@ -10,7 +10,7 @@ pub const STEP_FIELDS: &str = r#"
             ... on LlmInferenceStepConfig {
                 version prompt output_schema agents skills agent_config
             }
-            ... on StructuredInferenceStepConfig { version provider model state fields }
+            ... on StructuredInferenceStepConfig { version provider model state questions }
             ... on RouteStepConfig { version route_config }
             ... on WaitChildrenStepConfig { version output_schema }
         }
@@ -39,7 +39,7 @@ pub const WORKFLOW_EXPORT_STEP_FIELDS: &str = r#"
             ... on LlmInferenceStepConfig {
                 version prompt output_schema agents skills agent_config
             }
-            ... on StructuredInferenceStepConfig { version provider model state fields }
+            ... on StructuredInferenceStepConfig { version provider model state questions }
             ... on RouteStepConfig { version route_config }
             ... on WaitChildrenStepConfig { version output_schema }
         }
@@ -178,7 +178,7 @@ mod tests {
             assert!(fragment.contains("persistence_options"));
             assert!(fragment.contains("... on LlmInferenceStepConfig"));
             assert!(fragment.contains(
-                "... on StructuredInferenceStepConfig { version provider model state fields }"
+                "... on StructuredInferenceStepConfig { version provider model state questions }"
             ));
             assert!(fragment.contains("... on RouteStepConfig { version route_config }"));
             assert!(fragment.contains("... on WaitChildrenStepConfig { version output_schema }"));
