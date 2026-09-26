@@ -7,6 +7,7 @@ import type { StepType } from "../../bindings";
  */
 export type StepKind =
   | "llm_inference"
+  | "structured_inference"
   | "route"
   | "human_input"
   | "wait_children"
@@ -16,6 +17,7 @@ export type StepKind =
 
 export type HearthStepKind =
   | "llm"
+  | "structured"
   | "route"
   | "human"
   | "wait"
@@ -64,6 +66,15 @@ const styles: Record<StepKind, StepTypeStyle> = {
     barVar: "--color-step-llm",
     washVar: "--color-step-llm-wash",
     fgVar: "--color-step-llm-fg",
+  },
+  structured_inference: {
+    kind: "structured_inference",
+    hearthKind: "structured",
+    label: "Structured Inference",
+    icon: "◇",
+    barVar: "--color-step-structured",
+    washVar: "--color-step-structured-wash",
+    fgVar: "--color-step-structured-fg",
   },
   route: {
     kind: "route",

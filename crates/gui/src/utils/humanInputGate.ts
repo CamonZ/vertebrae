@@ -1,5 +1,6 @@
 import type { StepExecution, TaskRun } from "../bindings";
 import { safeMs } from "../components/Traces/timeUtils";
+import { executionPrompt } from "./stepConfig";
 
 const WAIT_CHILDREN_STEP_TYPE = "wait_children";
 
@@ -55,7 +56,7 @@ export function resolveHumanInputGate(
     run,
     execution,
     stepName: execution?.step_name ?? null,
-    prompt: execution?.prompt ?? null,
+    prompt: executionPrompt(execution),
     outputSchema: options.outputSchema ?? null,
   };
 }

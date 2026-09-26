@@ -248,7 +248,10 @@ mod tests {
             .expect("execution found");
         assert_eq!(fetched.id.as_deref(), Some(exec_id.as_str()));
         assert_eq!(fetched.task_id, task_id);
-        assert_eq!(fetched.prompt.as_deref(), Some("mock prompt"));
+        let Some(crate::types::StepConfig::LlmInference(config)) = &fetched.config else {
+            panic!("expected llm_inference config");
+        };
+        assert_eq!(config.prompt.as_deref(), Some("mock prompt"));
         assert_eq!(fetched.output.as_deref(), Some("mock output"));
         assert_eq!(fetched.context.as_deref(), Some(r#"{"mock":"context"}"#));
         assert_eq!(fetched.transition_result.as_deref(), Some("mock_next_step"));

@@ -34,7 +34,7 @@ const EXEC: StepExecution = {
   started_at: "2026-05-08T10:00:00Z",
   completed_at: null,
   status: "in_progress",
-  prompt: "**Approve** the change?",
+  config: null,
   output: null,
   context: null,
   transition_result: null,
@@ -64,9 +64,8 @@ function makeContext(
     prompt:
       "prompt" in overrides
         ? (overrides.prompt as string | null)
-        : (EXEC.prompt ?? null),
-    outputSchema:
-      "outputSchema" in overrides ? overrides.outputSchema : null,
+        : "**Approve** the change?",
+    outputSchema: "outputSchema" in overrides ? overrides.outputSchema : null,
   };
 }
 
@@ -79,9 +78,9 @@ describe("HumanInputGate", () => {
     expect(screen.getByTestId("human-input-gate-run-id")).toHaveTextContent(
       "run-abc-123"
     );
-    expect(screen.getByTestId("human-input-gate-execution-id")).toHaveTextContent(
-      "exec-xyz-456"
-    );
+    expect(
+      screen.getByTestId("human-input-gate-execution-id")
+    ).toHaveTextContent("exec-xyz-456");
     expect(screen.getByTestId("human-input-gate-step")).toHaveTextContent(
       "approval"
     );
@@ -132,7 +131,9 @@ describe("HumanInputGate", () => {
   });
 
   it("does not expose a submit / approve / bypass action", () => {
-    render(<HumanInputGate context={makeContext()} stoppable onStop={() => {}} />);
+    render(
+      <HumanInputGate context={makeContext()} stoppable onStop={() => {}} />
+    );
     expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /resume/i })).toBeNull();
@@ -159,11 +160,7 @@ describe("HumanInputGate", () => {
       type: "object",
       properties: { decision: { type: "string" } },
     };
-    render(
-      <HumanInputGate
-        context={makeContext({ outputSchema: schema })}
-      />
-    );
+    render(<HumanInputGate context={makeContext({ outputSchema: schema })} />);
     expect(
       screen.queryByTestId("human-input-gate-schema")
     ).not.toBeInTheDocument();

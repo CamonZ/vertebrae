@@ -2,6 +2,7 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
+use vertebrae_core::StructuredInferenceConfig;
 
 /// A summary of a workflow for display in the list
 #[derive(Debug, Clone, Serialize)]
@@ -44,6 +45,8 @@ pub struct StepDisplayInfo {
     pub order: i32,
     /// Prompt sent to the agent
     pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structured_inference: Option<StructuredInferenceConfig>,
 }
 
 /// Detailed view of a workflow with all steps
@@ -122,6 +125,18 @@ impl std::fmt::Display for WorkflowDetail {
                 )?;
                 if let Some(ref prompt) = step.prompt {
                     writeln!(f, "   Prompt: {}", prompt)?;
+                }
+                if let Some(ref config) = step.structured_inference {
+                    let json = |value: Option<&serde_json::Value>| {
+                        value.map_or_else(|| "(none)".to_string(), ToString::to_string)
+                    };
+                    writeln!(
+                        f,
+                        "   Provider: {}",
+                        config.provider.as_deref().unwrap_or("(none)")
+                    )?;
+                    writeln!(f, "   State: {}", json(config.state.as_ref()))?;
+                    writeln!(f, "   Fields: {}", json(config.fields.as_ref()))?;
                 }
             }
         }
@@ -214,6 +229,7 @@ mod tests {
                     model: Some("model1".to_string()),
                     order: 0,
                     prompt: None,
+                    structured_inference: None,
                 },
                 StepDisplayInfo {
                     id: Some("step-id".to_string()),
@@ -221,6 +237,7 @@ mod tests {
                     model: Some("model2".to_string()),
                     order: 1,
                     prompt: None,
+                    structured_inference: None,
                 },
             ],
             metadata: HashMap::new(),
@@ -483,6 +500,7 @@ mod tests {
                 model: None,
                 order: 0,
                 prompt: None,
+                structured_inference: None,
             }],
             metadata: HashMap::new(),
             created_at: None,
@@ -508,6 +526,7 @@ mod tests {
                     model: Some("m3".to_string()),
                     order: 2,
                     prompt: None,
+                    structured_inference: None,
                 },
                 StepDisplayInfo {
                     id: Some("step-id".to_string()),
@@ -515,6 +534,7 @@ mod tests {
                     model: Some("m1".to_string()),
                     order: 0,
                     prompt: None,
+                    structured_inference: None,
                 },
                 StepDisplayInfo {
                     id: Some("step-id".to_string()),
@@ -522,6 +542,7 @@ mod tests {
                     model: Some("m2".to_string()),
                     order: 1,
                     prompt: None,
+                    structured_inference: None,
                 },
             ],
             metadata: HashMap::new(),
@@ -629,6 +650,7 @@ mod tests {
             model: Some("sonnet".to_string()),
             order: 1,
             prompt: Some("Review carefully".to_string()),
+            structured_inference: None,
         };
         let cloned = step.clone();
         assert_eq!(step.id, cloned.id);
@@ -653,6 +675,7 @@ mod tests {
                 model: Some("sonnet".to_string()),
                 order: 0,
                 prompt: None,
+                structured_inference: None,
             }],
             metadata: HashMap::new(),
             created_at: None,
@@ -674,6 +697,7 @@ mod tests {
             model: Some("opus".to_string()),
             order: 0,
             prompt: None,
+            structured_inference: None,
         };
         let debug = format!("{:?}", step);
         assert!(debug.contains("StepDisplayInfo"));
@@ -689,6 +713,7 @@ mod tests {
             model: None,
             order: 0,
             prompt: None,
+            structured_inference: None,
         };
         assert!(step.model.is_none());
     }
@@ -710,6 +735,7 @@ mod tests {
                 model: None,
                 order: 0,
                 prompt: Some("Review the code for bugs".to_string()),
+                structured_inference: None,
             }],
             metadata: HashMap::new(),
             created_at: None,
@@ -734,6 +760,7 @@ mod tests {
                 model: None,
                 order: 0,
                 prompt: None,
+                structured_inference: None,
             }],
             metadata: HashMap::new(),
             created_at: None,
@@ -742,6 +769,40 @@ mod tests {
         let output = format!("{}", detail);
         assert!(output.contains("1. basic (model: default)"));
         assert!(!output.contains("Prompt:"));
+    }
+
+    #[test]
+    fn test_workflow_detail_display_structured_inference_step() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Structured".to_string(),
+            description: None,
+            is_default: false,
+            kanban_column: None,
+            factory_name: None,
+            steps: vec![StepDisplayInfo {
+                id: Some("step-id".to_string()),
+                name: "classify".to_string(),
+                model: Some("jev".to_string()),
+                order: 0,
+                prompt: None,
+                structured_inference: Some(StructuredInferenceConfig {
+                    provider: Some("typesafe".to_string()),
+                    model: Some("jev".to_string()),
+                    state: Some(serde_json::json!("{{ task.title }}")),
+                    fields: Some(serde_json::json!({"type": "object"})),
+                    ..Default::default()
+                }),
+            }],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("1. classify (model: jev)"));
+        assert!(output.contains("Provider: typesafe"));
+        assert!(output.contains(r#"State: "{{ task.title }}""#));
+        assert!(output.contains(r#"Fields: {"type":"object"}"#));
     }
 
     // ==================== WorkflowSummary edge cases ====================

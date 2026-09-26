@@ -1108,6 +1108,7 @@ mod tests {
         assert_eq!(requests.len(), 1);
         let query = String::from_utf8_lossy(&requests[0].body);
         assert!(query.contains("... on LlmInferenceStepConfig"));
+        assert!(query.contains("... on StructuredInferenceStepConfig"));
         assert!(query.contains("... on RouteStepConfig"));
         assert!(query.contains("... on WaitChildrenStepConfig"));
         assert!(query.contains("persistence_options"));

@@ -70,6 +70,7 @@ describe("kindFor", () => {
     const cases: Array<[string | null, string]> = [
       ["llm", "llm"],
       ["llm_inference", "llm"],
+      ["structured_inference", "structured"],
       ["wait_children", "wait"],
       ["human_input", "human"],
       ["route", "route"],

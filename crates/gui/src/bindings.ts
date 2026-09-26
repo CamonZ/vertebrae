@@ -1772,14 +1772,16 @@ export type StepChangedEvent = { step_id: string; workflow_id: string; change_ty
  * A step's `step_type`-specific configuration, serialized as the bare
  * config object. Narrow it with the owning step's `step_type`.
  */
-export type StepConfig = LlmInferenceStepConfig | RouteStepConfig | WaitChildrenStepConfig
+export type StepConfig = LlmInferenceStepConfig | StructuredInferenceStepConfig | RouteStepConfig | WaitChildrenStepConfig
 /**
  * Step execution record - mirrors db::StepExecution.
  *
- * Carries the full sacrum field set so the traces UI can render prompt,
- * output, context, transition_result, model/provider, token usage, cost,
- * duration, handoff, and session_id. All extended fields are `Option`-typed
- * because historical executions and minimal payloads may not populate them.
+ * Carries the full sacrum field set so the traces UI can render the rendered
+ * config, output, context, transition_result, model/provider, token usage,
+ * cost, duration, handoff, and session_id. All extended fields are
+ * `Option`-typed because historical executions and minimal payloads may not
+ * populate them. `config` is decoded by `step_type` when deserializing; the
+ * `serde(default)` attributes only keep these fields optional in bindings.
  */
 export type StepExecution = {
 /**
@@ -1819,9 +1821,11 @@ completed_at: string | null;
  */
 status?: ExecutionStatus;
 /**
- * Prompt text/JSON that drove the execution
+ * Step config the execution ran with, templates rendered (rendered
+ * prompt for llm_inference, resolved state for structured_inference);
+ * null for human_input, stop, and finish. Narrow it with `step_type`.
  */
-prompt?: string | null;
+config?: StepConfig | null;
 /**
  * Final output of the execution
  */
@@ -1904,11 +1908,24 @@ export type StepTransitionChangedEvent = { transition_id: string; from_step_id: 
 /**
  * Step type - mirrors core::StepType
  */
-export type StepType = "llm_inference" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
+export type StepType = "llm_inference" | "structured_inference" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
 /**
  * StopRun command input. Provide either `task_run_id` or `task_id`.
  */
 export type StopRunRequest = { task_run_id: string | null; task_id: string | null }
+/**
+ * Config of a `structured_inference` step.
+ */
+export type StructuredInferenceStepConfig = { version: number; provider: string | null; model: string | null;
+/**
+ * Input sent to the provider (string, object, or array; may hold
+ * `{{ dotted.path }}` references)
+ */
+state: JsonValue | null;
+/**
+ * JSON Schema the step output must satisfy
+ */
+fields: JsonValue | null }
 /**
  * Full task details - mirrors core::Task with string IDs and dates
  */

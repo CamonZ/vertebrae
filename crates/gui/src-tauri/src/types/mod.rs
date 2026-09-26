@@ -622,6 +622,7 @@ impl From<AgentConfig> for vertebrae_core::AgentConfig {
 pub enum StepType {
     #[default]
     LlmInference,
+    StructuredInference,
     Route,
     WaitChildren,
     HumanInput,
@@ -634,6 +635,7 @@ impl From<vertebrae_core::StepType> for StepType {
     fn from(st: vertebrae_core::StepType) -> Self {
         match st {
             vertebrae_core::StepType::LlmInference => StepType::LlmInference,
+            vertebrae_core::StepType::StructuredInference => StepType::StructuredInference,
             vertebrae_core::StepType::Route => StepType::Route,
             vertebrae_core::StepType::WaitChildren => StepType::WaitChildren,
             vertebrae_core::StepType::HumanInput => StepType::HumanInput,
@@ -648,6 +650,7 @@ impl From<StepType> for vertebrae_core::StepType {
     fn from(st: StepType) -> Self {
         match st {
             StepType::LlmInference => vertebrae_core::StepType::LlmInference,
+            StepType::StructuredInference => vertebrae_core::StepType::StructuredInference,
             StepType::Route => vertebrae_core::StepType::Route,
             StepType::WaitChildren => vertebrae_core::StepType::WaitChildren,
             StepType::HumanInput => vertebrae_core::StepType::HumanInput,
@@ -674,6 +677,19 @@ pub struct LlmInferenceStepConfig {
     pub agent_config: AgentConfig,
 }
 
+/// Config of a `structured_inference` step.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct StructuredInferenceStepConfig {
+    pub version: i32,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    /// Input sent to the provider (string, object, or array; may hold
+    /// `{{ dotted.path }}` references)
+    pub state: Option<serde_json::Value>,
+    /// JSON Schema the step output must satisfy
+    pub fields: Option<serde_json::Value>,
+}
+
 /// Config of a `route` step.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct RouteStepConfig {
@@ -696,6 +712,7 @@ pub struct WaitChildrenStepConfig {
 #[serde(untagged)]
 pub enum StepConfig {
     LlmInference(Box<LlmInferenceStepConfig>),
+    StructuredInference(StructuredInferenceStepConfig),
     Route(RouteStepConfig),
     WaitChildren(WaitChildrenStepConfig),
 }
@@ -712,6 +729,15 @@ impl From<vertebrae_core::StepConfig> for StepConfig {
                     skills: config.skills,
                     agent_config: config.agent_config.into(),
                 }))
+            }
+            vertebrae_core::StepConfig::StructuredInference(config) => {
+                StepConfig::StructuredInference(StructuredInferenceStepConfig {
+                    version: config.version,
+                    provider: config.provider,
+                    model: config.model,
+                    state: config.state,
+                    fields: config.fields,
+                })
             }
             vertebrae_core::StepConfig::Route(config) => StepConfig::Route(RouteStepConfig {
                 version: config.version,
@@ -1127,11 +1153,13 @@ impl From<vertebrae_core::ExecutionStatus> for ExecutionStatus {
 
 /// Step execution record - mirrors db::StepExecution.
 ///
-/// Carries the full sacrum field set so the traces UI can render prompt,
-/// output, context, transition_result, model/provider, token usage, cost,
-/// duration, handoff, and session_id. All extended fields are `Option`-typed
-/// because historical executions and minimal payloads may not populate them.
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+/// Carries the full sacrum field set so the traces UI can render the rendered
+/// config, output, context, transition_result, model/provider, token usage,
+/// cost, duration, handoff, and session_id. All extended fields are
+/// `Option`-typed because historical executions and minimal payloads may not
+/// populate them. `config` is decoded by `step_type` when deserializing; the
+/// `serde(default)` attributes only keep these fields optional in bindings.
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct StepExecution {
     /// Execution ID (string form)
     pub id: Option<String>,
@@ -1158,9 +1186,11 @@ pub struct StepExecution {
     /// Current status of this step execution
     #[serde(default = "StepExecution::default_status")]
     pub status: ExecutionStatus,
-    /// Prompt text/JSON that drove the execution
+    /// Step config the execution ran with, templates rendered (rendered
+    /// prompt for llm_inference, resolved state for structured_inference);
+    /// null for human_input, stop, and finish. Narrow it with `step_type`.
     #[serde(default)]
-    pub prompt: Option<String>,
+    pub config: Option<StepConfig>,
     /// Final output of the execution
     #[serde(default)]
     pub output: Option<String>,
@@ -1201,9 +1231,94 @@ pub struct StepExecution {
     pub session_id: Option<String>,
 }
 
+/// Wire shape of a step execution in Sacrum channel payloads; `config` stays
+/// raw JSON until `step_type` selects its variant.
+#[derive(Deserialize)]
+struct StepExecutionWire {
+    id: Option<String>,
+    #[serde(default)]
+    task_id: String,
+    #[serde(default)]
+    task_run_id: Option<String>,
+    #[serde(default)]
+    workflow_id: String,
+    #[serde(default)]
+    step_name: String,
+    #[serde(default)]
+    step_type: Option<String>,
+    #[serde(default)]
+    started_at: String,
+    completed_at: Option<String>,
+    #[serde(default = "StepExecution::default_status")]
+    status: ExecutionStatus,
+    #[serde(default)]
+    config: serde_json::Value,
+    #[serde(default)]
+    output: Option<String>,
+    #[serde(default)]
+    context: Option<String>,
+    #[serde(default)]
+    transition_result: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    model_provider: Option<String>,
+    #[serde(default)]
+    input_tokens: Option<u32>,
+    #[serde(default)]
+    output_tokens: Option<u32>,
+    #[serde(default)]
+    cache_read_tokens: Option<u32>,
+    #[serde(default)]
+    cost: Option<String>,
+    #[serde(default)]
+    duration_ms: Option<u32>,
+    #[serde(default)]
+    handoff: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
+}
+
 impl StepExecution {
     fn default_status() -> ExecutionStatus {
         ExecutionStatus::InProgress
+    }
+}
+
+impl<'de> Deserialize<'de> for StepExecution {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = StepExecutionWire::deserialize(deserializer)?;
+        let step_type =
+            vertebrae_core::StepType::from_wire_str(wire.step_type.as_deref().unwrap_or_default());
+        let config = vertebrae_core::StepConfig::from_value(&step_type, wire.config)
+            .map_err(serde::de::Error::custom)?;
+        Ok(StepExecution {
+            id: wire.id,
+            task_id: wire.task_id,
+            task_run_id: wire.task_run_id,
+            workflow_id: wire.workflow_id,
+            step_name: wire.step_name,
+            step_type: wire.step_type,
+            started_at: wire.started_at,
+            completed_at: wire.completed_at,
+            status: wire.status,
+            config: config.map(Into::into),
+            output: wire.output,
+            context: wire.context,
+            transition_result: wire.transition_result,
+            model: wire.model,
+            model_provider: wire.model_provider,
+            input_tokens: wire.input_tokens,
+            output_tokens: wire.output_tokens,
+            cache_read_tokens: wire.cache_read_tokens,
+            cost: wire.cost,
+            duration_ms: wire.duration_ms,
+            handoff: wire.handoff,
+            session_id: wire.session_id,
+        })
     }
 }
 
@@ -1231,7 +1346,7 @@ impl From<vertebrae_core::StepExecution> for StepExecution {
             started_at: exec.started_at.to_rfc3339(),
             completed_at: exec.completed_at.map(|dt| dt.to_rfc3339()),
             status: exec.status.into(),
-            prompt: exec.prompt,
+            config: exec.config.map(Into::into),
             output: exec.output,
             context: exec.context,
             transition_result: exec.transition_result,
@@ -2098,6 +2213,43 @@ mod tests {
     }
 
     #[test]
+    fn step_updated_payload_keeps_structured_inference_settings() {
+        let payload = serde_json::json!({
+            "id": "step-si",
+            "name": "Classify",
+            "workflow_id": "wf-1",
+            "step_type": "structured_inference",
+            "config": {
+                "__type__": "structured_inference",
+                "version": 1,
+                "provider": "typesafe",
+                "model": "jev",
+                "state": {"title": "{{ task.title }}"},
+                "fields": {"type": "object", "required": ["ok"]}
+            }
+        });
+        let step: Step = serde_json::from_value(payload).unwrap();
+        assert_eq!(step.step_type, StepType::StructuredInference);
+        let Some(StepConfig::StructuredInference(config)) = &step.config else {
+            panic!("expected structured_inference config");
+        };
+        assert_eq!(config.provider.as_deref(), Some("typesafe"));
+        assert_eq!(config.model.as_deref(), Some("jev"));
+        assert_eq!(
+            config.state,
+            Some(serde_json::json!({"title": "{{ task.title }}"}))
+        );
+        assert_eq!(
+            config.fields,
+            Some(serde_json::json!({"type": "object", "required": ["ok"]}))
+        );
+
+        let json = serde_json::to_value(&step).unwrap();
+        assert_eq!(json["step_type"], "structured_inference");
+        assert_eq!(json["config"]["provider"], "typesafe");
+    }
+
+    #[test]
     fn step_deserializes_channel_payload_config_by_step_type() {
         let step: Step = serde_json::from_value(serde_json::json!({
             "id": "step-1",
@@ -2432,7 +2584,12 @@ mod tests {
     #[test]
     fn step_execution_from_core_maps_full_field_set() {
         let core = vertebrae_core::StepExecution::new("task1", "wf1", "review")
-            .with_prompt("the prompt")
+            .with_config(vertebrae_core::StepConfig::LlmInference(Box::new(
+                vertebrae_core::LlmInferenceConfig {
+                    prompt: Some("the prompt".to_string()),
+                    ..Default::default()
+                },
+            )))
             .with_output("the output")
             .with_context(r#"{"k":"v"}"#)
             .with_transition_result("approved")
@@ -2445,7 +2602,10 @@ mod tests {
             .with_handoff(r#"{"to":"next"}"#);
 
         let gui = StepExecution::from(core);
-        assert_eq!(gui.prompt.as_deref(), Some("the prompt"));
+        let Some(StepConfig::LlmInference(config)) = &gui.config else {
+            panic!("expected llm_inference config");
+        };
+        assert_eq!(config.prompt.as_deref(), Some("the prompt"));
         assert_eq!(gui.output.as_deref(), Some("the output"));
         assert_eq!(gui.context.as_deref(), Some(r#"{"k":"v"}"#));
         assert_eq!(gui.transition_result.as_deref(), Some("approved"));
@@ -2471,7 +2631,14 @@ mod tests {
             "started_at": "2024-01-01T00:00:00Z",
             "completed_at": "2024-01-01T00:00:05Z",
             "status": "completed",
-            "prompt": "do the thing",
+            "step_type": "structured_inference",
+            "config": {
+                "version": 1,
+                "provider": "typesafe",
+                "model": "jev",
+                "state": {"title": "resolved"},
+                "fields": {"type": "object"}
+            },
             "output": "done",
             "context": "{\"k\":\"v\"}",
             "transition_result": "approved",
@@ -2489,7 +2656,11 @@ mod tests {
         assert_eq!(exec.id.as_deref(), Some("exec-1"));
         assert_eq!(exec.task_id, "task-1");
         assert_eq!(exec.status, ExecutionStatus::Completed);
-        assert_eq!(exec.prompt.as_deref(), Some("do the thing"));
+        let Some(StepConfig::StructuredInference(config)) = &exec.config else {
+            panic!("expected structured_inference config");
+        };
+        assert_eq!(config.provider.as_deref(), Some("typesafe"));
+        assert_eq!(config.state, Some(serde_json::json!({"title": "resolved"})));
         assert_eq!(exec.output.as_deref(), Some("done"));
         assert_eq!(exec.context.as_deref(), Some("{\"k\":\"v\"}"));
         assert_eq!(exec.transition_result.as_deref(), Some("approved"));
@@ -2505,7 +2676,10 @@ mod tests {
         // Re-serialize and re-deserialize to round-trip.
         let again: StepExecution =
             serde_json::from_value(serde_json::to_value(&exec).unwrap()).unwrap();
-        assert_eq!(again.prompt, exec.prompt);
+        assert_eq!(
+            serde_json::to_value(&again.config).unwrap(),
+            serde_json::to_value(&exec.config).unwrap()
+        );
         assert_eq!(again.output, exec.output);
         assert_eq!(again.context, exec.context);
         assert_eq!(again.transition_result, exec.transition_result);
@@ -2532,7 +2706,7 @@ mod tests {
             "status": "in_progress",
         });
         let exec: StepExecution = serde_json::from_value(payload).unwrap();
-        assert!(exec.prompt.is_none());
+        assert!(exec.config.is_none());
         assert!(exec.output.is_none());
         assert!(exec.context.is_none());
         assert!(exec.transition_result.is_none());

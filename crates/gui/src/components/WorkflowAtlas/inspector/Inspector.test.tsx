@@ -205,6 +205,58 @@ describe("WorkflowInspector", () => {
     );
   });
 
+  it("creates structured_inference with provider, model, state, and fields", async () => {
+    render(
+      <WorkflowInspector
+        model={MODEL}
+        workflowId="wf-build"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Classify" },
+    });
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "structured_inference" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create step" }));
+    expect(
+      screen.getByText(
+        "Structured inference steps require provider, model, state, and fields."
+      )
+    ).toBeInTheDocument();
+    expect(commands.createStep).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Provider"), {
+      target: { value: "typesafe" },
+    });
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "jev" },
+    });
+    fireEvent.change(screen.getByLabelText(/^State/), {
+      target: { value: "{{ task.title }}" },
+    });
+    fireEvent.change(screen.getByLabelText("Fields"), {
+      target: { value: '{"type":"object"}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create step" }));
+    await waitFor(() =>
+      expect(commands.createStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          step_type: "structured_inference",
+          config: {
+            provider: "typesafe",
+            model: "jev",
+            state: "{{ task.title }}",
+            fields: { type: "object" },
+          },
+        })
+      )
+    );
+  });
+
   it("shows the workflow factory name", () => {
     const model = buildAtlasModel({
       workflows: [
@@ -583,6 +635,96 @@ describe("StepInspector", () => {
         expect.objectContaining({ config: { route_config: { rules: [] } } })
       )
     );
+  });
+
+  it("shows and edits structured_inference provider, model, state, and fields", async () => {
+    mockUseStep(
+      stepFixture({
+        id: "s1",
+        name: "Classify",
+        step_type: "structured_inference",
+        config: {
+          version: 1,
+          provider: "typesafe",
+          model: "jev",
+          state: { title: "{{ task.title }}" },
+          fields: {
+            type: "object",
+            properties: { label: { type: "string" } },
+          },
+        },
+      })
+    );
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("structured-state-section")).toHaveTextContent(
+      "{{ task.title }}"
+    );
+    expect(screen.getByTestId("structured-fields-section")).toHaveTextContent(
+      "label"
+    );
+    expect(screen.getByText("typesafe")).toBeInTheDocument();
+    expect(screen.getByText("jev")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.queryByLabelText("Prompt")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Provider")).toHaveValue("typesafe");
+    fireEvent.change(screen.getByLabelText("Fields"), {
+      target: { value: '{"type":"object","required":["label"]}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+    await waitFor(() =>
+      expect(commands.updateStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: {
+            provider: "typesafe",
+            model: "jev",
+            state: { title: "{{ task.title }}" },
+            fields: { type: "object", required: ["label"] },
+          },
+        })
+      )
+    );
+  });
+
+  it("rejects invalid structured_inference fields without saving", () => {
+    mockUseStep(
+      stepFixture({
+        step_type: "structured_inference",
+        config: {
+          version: 1,
+          provider: "typesafe",
+          model: "jev",
+          state: "x",
+          fields: { type: "object" },
+        },
+      })
+    );
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Fields"), {
+      target: { value: "{" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+    expect(
+      screen.getByText("Fields must be a valid JSON Schema.")
+    ).toBeInTheDocument();
+    expect(commands.updateStep).not.toHaveBeenCalled();
   });
 
   it("keeps an invalid route draft for correction", () => {

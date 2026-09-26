@@ -74,6 +74,15 @@ vtb step add "Evaluate" -w <workflow-id> \
   --step-type llm_inference \
   --output-schema '{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}'
 
+# Add a structured_inference step: provider, model, state, and fields are
+# required; state may be JSON or a string template, fields may be @file
+vtb step add "Classify" -w <workflow-id> \
+  --step-type structured_inference \
+  --provider typesafe \
+  --model <model> \
+  --state '{"title":"{{ task.title }}"}' \
+  --fields @classify-schema.json
+
 # Create a deterministic route draft, then configure it after graph targets exist
 vtb step add "Router" -w <workflow-id> --step-type route
 vtb step update <step-id> --route-config '<route-config-json>'
@@ -100,14 +109,16 @@ vtb --json step add "Review" -w <workflow-id>
 | `--skill` | `-s` | Skill name (repeatable) |
 | `--prompt` | | Prompt sent to the agent when executing this step |
 | `--agent-config` | | Full agent config as a JSON string |
-| `--model` | `-m` | Model to use |
-| `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
+| `--model` | `-m` | Model to use; `config.model` for `structured_inference` steps |
+| `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider`. For `structured_inference` steps, any non-blank provider name (`config.provider`) |
+| `--state` | | `structured_inference` input: JSON object/array/string or a string template (`{{ dotted.path }}`); `@path` reads a file |
+| `--fields` | | `structured_inference` output JSON Schema, inline or `@path` |
 | `--codex-model-provider` | | Codex upstream provider from `~/.codex/config.toml`; alias `--codex-provider` |
 | `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh` |
 | `--speed-tier` | | Provider serving speed preference: `default` or `fast` |
 | `--personality` | | Provider style identifier; Codex accepts `none`, `friendly`, or `pragmatic` when supported by the selected model |
 | `--verbosity` | | Output detail level: `low`, `medium`, or `high`; alias `--output-verbosity`; currently valid with OpenAI/Codex |
-| `--step-type` | | Step type: `llm_inference`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (default: `llm_inference`) |
+| `--step-type` | | Step type: `llm_inference`, `structured_inference`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (default: `llm_inference`) |
 | `--output-schema` | | JSON Schema describing expected structured output |
 | `--route-config` | | Opaque deterministic route configuration as a JSON string; only valid for `route` steps |
 | `--persistence-options` | | Sacrum-owned JSON configuration for persisting structured output as a task artifact |
@@ -138,6 +149,11 @@ valid for `route` steps. A route may be created without it as a non-runnable
 draft; configure it after the workflow graph and predecessor contracts exist.
 Route authoring rejects `--prompt` and `--output-schema`; neither is a routing
 mechanism.
+
+`structured_inference` steps take only `--provider`, `--model`, `--state`, and
+`--fields`, and Sacrum requires all four on create. Agent, prompt, and output
+schema flags are rejected for them, and `--state`/`--fields` are rejected for
+every other step type.
 
 ---
 
@@ -270,6 +286,10 @@ vtb step update <step-id> --output-schema '{"type":"object"}'
 # Clear a retained prompt
 vtb step update <step-id> --clear-prompt
 
+# Replace a structured_inference step's output schema; provider, model, and
+# state keep their values
+vtb step update <step-id> --fields @classify-schema.json
+
 # Configure or clear a deterministic route
 vtb step update <step-id> --route-config '<route-config-json>'
 vtb step update <step-id> --clear-route-config
@@ -312,8 +332,10 @@ vtb --json step update <step-id> --goal "New goal"
 | `--prompt` | | New prompt |
 | `--clear-prompt` | | Explicitly clear a retained prompt |
 | `--agent-config` | | Full agent config as a JSON string |
-| `--model` | `-m` | Agent model shortcut |
-| `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
+| `--model` | `-m` | Agent model shortcut; `config.model` for `structured_inference` steps |
+| `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider`. `config.provider` for `structured_inference` steps |
+| `--state` | | New `structured_inference` state (JSON, string template, or `@path`) |
+| `--fields` | | New `structured_inference` output JSON Schema (inline or `@path`) |
 | `--codex-model-provider` | | Codex upstream provider from `~/.codex/config.toml`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
 | `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh`; only valid when the resulting provider is OpenAI/Codex |
 | | `--output-schema` | | New output schema as a JSON string |

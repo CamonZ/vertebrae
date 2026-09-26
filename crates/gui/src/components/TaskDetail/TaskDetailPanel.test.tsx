@@ -1140,7 +1140,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       overrides: Partial<{
         step_name: string;
         step_type: string | null;
-        prompt: string | null;
       }> = {}
     ): StepExecution {
       return {
@@ -1153,7 +1152,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         started_at: "2026-05-08T10:00:00Z",
         completed_at: null,
         status: "in_progress" as const,
-        prompt: overrides.prompt ?? null,
+        config: null,
         output: null,
         context: null,
         transition_result: null,
@@ -1172,7 +1171,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       seedRunTrace("run-wait-1", [
         execFor("run-wait-1", "exec-wait-1", {
           step_name: "approval",
-          prompt: "Approve change?",
         }),
       ]);
       renderWithTaskOverrides(
@@ -1192,10 +1190,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(screen.getByTestId("human-input-gate-step")).toHaveTextContent(
         "approval"
       );
-      // Prompt toggle is present (collapsible) since prompt was attached.
+      // human_input executions carry no rendered config, so no prompt.
       expect(
-        screen.getByTestId("human-input-gate-prompt-toggle")
-      ).toBeInTheDocument();
+        screen.queryByTestId("human-input-gate-prompt-toggle")
+      ).not.toBeInTheDocument();
     });
 
     it("offers Stop only when run_controls.stoppable is true", () => {
@@ -1300,7 +1298,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         upsertStepExecutionInQueryCache(
           execFor("run-wait-1", "exec-wait-1", {
             step_name: "approval",
-            prompt: "Approve change?",
           }),
           {
             taskId: mockTaskData.id,

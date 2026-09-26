@@ -49,6 +49,15 @@ vtb step add "Evaluate" -w <workflow-id> \
   --output-schema '{"type":"object","required":["passed"]}' \
   --persistence-options '{"artifact":{"logical_name":"step_result"}}'
 
+# Add a structured_inference step: provider, model, state, and fields are
+# required; state may be JSON or a string template, fields may be @file
+vtb step add "Classify" -w <workflow-id> \
+  --step-type structured_inference \
+  --provider typesafe \
+  --model <model> \
+  --state '{"title":"{{ task.title }}"}' \
+  --fields @classify-schema.json
+
 # Add a human-input gate
 vtb step add "Needs Input" -w <workflow-id> --step-type human_input
 
@@ -77,6 +86,7 @@ vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
 vtb step update <step-id> --route-config '<route-config-json>'
 vtb step update <step-id> --clear-route-config
+vtb step update <step-id> --fields '{"type":"object","required":["label"]}'
 vtb step update <step-id> --persistence-options '{"artifact":{"logical_name":"step_result"}}'
 vtb step update <step-id> --clear-persistence-options
 vtb step update <step-id> --clear-agents --clear-skills
@@ -91,6 +101,17 @@ vtb --json step delete <step-id>
 `--json` flag returns a creation envelope with `command`, `status`, `step_id`,
 and `workflow_id`.
 
+For `structured_inference` steps, `--provider` and `--model` set
+`config.provider` and `config.model` (any non-blank provider name; no
+allow-list), `--state` sets the input, and `--fields` sets the output JSON
+Schema. `--state` decodes a JSON object, array, or string and otherwise sends
+the value as a string template; `{{ dotted.path }}` references are resolved by
+Sacrum at dispatch. `--state` and `--fields` also accept `@path` to read the
+value from a file. Sacrum requires all four fields on create. For every other
+type `--provider` and `--model` remain `agent_config` shortcuts, and `--state`
+and `--fields` are rejected with
+`config: $.<field>: is not supported for <type> steps`.
+
 `vtb step list` takes exactly one required `<workflow>` argument and no
 command-specific flags. `vtb step list --help` shows only the global `--json`
 flag plus `-h` / `--help`. Human-readable output is ordered by each step's
@@ -100,8 +121,11 @@ flag plus `-h` / `--help`. Human-readable output is ordered by each step's
 Steps for workflow '<workflow-id>':
 1. coding (id: a1b2c3d4, type: llm_inference, model: sonnet)
 2. testing (id: e5f6a7b8, type: llm_inference, model: haiku)
-3. approved (id: c9d0e1f2, type: finish, model: default)
+3. approved (id: c9d0e1f2, type: finish)
 ```
+
+The model is `agent_config.model` for `llm_inference` steps and `config.model`
+for `structured_inference` steps; other types omit it.
 
 When the workflow has no steps, it prints `No steps found for workflow
 '<workflow-id>'`. With the global `--json` flag, `step list` returns the raw
@@ -133,6 +157,11 @@ Transitions:   57d373b1-e40d-4a42-9ae4-1c6461d7a2b9
 Created:       2026-05-29 12:53
 Updated:       2026-05-30 16:48
 ```
+
+The config lines depend on the step type: `structured_inference` steps show
+`Provider`, `Model`, `State`, and `Fields`; `route` steps show `Route Config`;
+`wait_children` steps show `Output Schema`; config-less types show
+`Config: (none)`.
 
 Missing optional fields are shown as `(none)`, and missing timestamps are shown
 as `-`. If a full UUID reaches `step show` but no matching step exists, the
@@ -171,8 +200,10 @@ request with no property changes before reporting success.
 | `--prompt <PROMPT>` | | Replace the execution prompt |
 | `--clear-prompt` | | Explicitly clear a retained prompt |
 | `--agent-config <JSON>` | | Replace/overlay the full agent config from a JSON string |
-| `--model <MODEL>` | `-m` | Set `agent_config.model` |
-| `--provider <PROVIDER>` | | Set `agent_config.provider`; accepts `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
+| `--model <MODEL>` | `-m` | Set `config.model` on `structured_inference` steps, otherwise `agent_config.model` |
+| `--provider <PROVIDER>` | | Set `config.provider` on `structured_inference` steps, otherwise `agent_config.provider` (`anthropic`/`claude` or `openai`/`codex`); alias `--model-provider` |
+| `--state <JSON\|STRING>` | | Replace a `structured_inference` step's state; JSON or string template, or `@path` |
+| `--fields <JSON>` | | Replace a `structured_inference` step's output JSON Schema, inline or `@path` |
 | `--codex-model-provider <PROVIDER>` | | Set `agent_config.codex_model_provider`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
 | `--reasoning-effort <EFFORT>` | | Set `agent_config.reasoning_effort`; valid values are `low`, `medium`, `high`, and `xhigh`; only valid when the resulting provider is OpenAI/Codex |
 | `--speed-tier <TIER>` | | Set `agent_config.speed_tier`; values are `default` and `fast` |

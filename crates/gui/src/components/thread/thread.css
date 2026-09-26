@@ -25,6 +25,9 @@
 .thread.k-llm,
 .subthread.k-llm,
 .thread-head.k-llm { --kc: var(--step-llm); --kf: var(--step-llm-fg); }
+.thread.k-structured,
+.subthread.k-structured,
+.thread-head.k-structured { --kc: var(--step-structured); --kf: var(--step-structured-fg); }
 .thread.k-route,
 .subthread.k-route,
 .thread-head.k-route { --kc: var(--step-route); --kf: var(--step-route-fg); }
@@ -71,6 +74,7 @@
 .evlog--bare .evstep .evwhen { display: none; }
 .evstep-head { display: flex; align-items: center; gap: var(--s-2); padding-top: var(--s-3); border-top: 1px solid var(--line); cursor: pointer; }
 .evstep-tick { width: 8px; height: 8px; border-radius: 2px; background: var(--step-llm); flex-shrink: 0; }
+.evstep.kind-structured .evstep-tick { background: var(--step-structured); }
 .evstep.kind-route .evstep-tick { background: var(--step-route); }
 .evstep.kind-wait  .evstep-tick { background: var(--step-wait); }
 .evstep.kind-stop  .evstep-tick { background: var(--step-stop); }
@@ -79,6 +83,7 @@
 .evstep-arrow { color: var(--fg-ghost); font-family: var(--mono); font-size: var(--text-12); }
 .evstep-name { font-family: var(--mono); font-size: var(--text-12); color: var(--fg); letter-spacing: 0.01em; }
 .evstep-kind { font-family: var(--mono); font-size: var(--text-9); letter-spacing: var(--tracking-eyebrow); text-transform: uppercase; color: var(--step-llm-fg); margin-left: var(--s-1); padding: 1px var(--s-1h); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-xs); }
+.evstep.kind-structured .evstep-kind { color: var(--step-structured-fg); }
 .evstep.kind-route .evstep-kind { color: var(--step-route-fg); }
 .evstep.kind-wait  .evstep-kind { color: var(--step-wait-fg); }
 .evstep.kind-stop  .evstep-kind { color: var(--step-stop-fg); }

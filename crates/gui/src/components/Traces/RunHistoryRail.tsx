@@ -82,6 +82,8 @@ function stepKindColorVar(kind: string): string {
   switch (kind) {
     case "llm":
       return "var(--color-step-llm, var(--color-info))";
+    case "structured":
+      return "var(--color-step-structured, var(--color-info))";
     case "route":
       return "var(--color-step-route, var(--color-warn))";
     case "human":

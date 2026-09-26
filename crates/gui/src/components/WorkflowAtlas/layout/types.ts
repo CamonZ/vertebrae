@@ -18,7 +18,7 @@
  */
 export type Kind =
   | "llm"
-  | "llm"
+  | "structured"
   | "route"
   | "wait"
   | "human"

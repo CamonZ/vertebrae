@@ -57,6 +57,9 @@
 .flight-strip .mk.kind-llm {
   background: var(--color-step-llm, var(--color-info));
 }
+.flight-strip .mk.kind-structured {
+  background: var(--color-step-structured, var(--color-info));
+}
 .flight-strip .mk.kind-route {
   background: var(--color-step-route, var(--color-warn));
 }

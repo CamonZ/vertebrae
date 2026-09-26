@@ -9,7 +9,13 @@ import {
   type RunInput,
   type ChatMsg,
 } from "./normalize";
-import type { SessionLog, StepExecution, TaskRun } from "../../bindings";
+import type {
+  LlmInferenceStepConfig,
+  SessionLog,
+  StepConfig,
+  StepExecution,
+  TaskRun,
+} from "../../bindings";
 import type { ConversationEvent } from "../../types/conversation";
 import type {
   AgentMessage,
@@ -48,6 +54,17 @@ function taskRun(startedAt: string): TaskRun {
   };
 }
 
+function llmConfig(prompt: string): StepConfig {
+  return {
+    version: 1,
+    prompt,
+    output_schema: null,
+    agents: [],
+    skills: [],
+    agent_config: {} as LlmInferenceStepConfig["agent_config"],
+  };
+}
+
 function exec(over: Partial<StepExecution> & { id: string }): StepExecution {
   return {
     task_id: "task-1",
@@ -58,7 +75,7 @@ function exec(over: Partial<StepExecution> & { id: string }): StepExecution {
     started_at: "2024-01-01T10:00:00Z",
     completed_at: null,
     status: "completed",
-    prompt: null,
+    config: null,
     output: null,
     context: null,
     transition_result: null,
@@ -259,11 +276,68 @@ describe("runToThreads — ordering & step head", () => {
   });
 });
 
+describe("runToThreads — structured_inference executions", () => {
+  const structured = exec({
+    id: "si-1",
+    step_type: "structured_inference",
+    config: {
+      version: 1,
+      provider: "typesafe",
+      model: "jev",
+      state: { title: "Resolved title" },
+      fields: { type: "object" },
+    },
+    output: '{"ok":true}',
+    context: JSON.stringify({
+      structured_inference: { provider: "typesafe", meta: { latency_ms: 12 } },
+    }),
+  });
+  const input: RunInput = {
+    taskRun: taskRun("2024-01-01T10:00:00Z"),
+    stepExecutions: [structured],
+    logsByExecutionId: {},
+  };
+
+  it("maps structured_inference to the structured kind", () => {
+    expect(stepKindFromStepType("structured_inference")).toBe("structured");
+    expect(runToThreads(input)[0].kind).toBe("structured");
+  });
+
+  it("leads with the resolved state and ends with output and meta", () => {
+    const [t] = runToThreads(input);
+    const messages = t.turns.flatMap((turn) => turn.messages);
+    const sys = messages[0] as SystemMessage;
+    expect(sys.type).toBe("system");
+    expect(sys.label).toBe("State");
+    expect(JSON.parse(String(sys.body))).toEqual({ title: "Resolved title" });
+
+    const results = messages.filter(
+      (m) => m.type === "result"
+    ) as ResultMessage[];
+    expect(results.map((r) => r.label)).toEqual(["output", "meta"]);
+    expect(results[0].body).toBe('{"ok":true}');
+    expect(JSON.parse(results[1].body)).toEqual({ latency_ms: 12 });
+  });
+
+  it("never renders a structured_inference config as a prompt", () => {
+    const [t] = runToThreads(input);
+    const labels = t.turns
+      .flatMap((turn) => turn.messages)
+      .filter((m) => m.type === "system")
+      .map((m) => (m as SystemMessage).label);
+    expect(labels).toEqual(["State"]);
+  });
+});
+
 describe("runToThreads — normalized harness events", () => {
   const input: RunInput = {
     taskRun: taskRun("2024-01-01T10:00:00Z"),
     stepExecutions: [
-      exec({ id: "e1", prompt: "do the thing", model: "claude-sonnet-4.5" }),
+      exec({
+        id: "e1",
+        config: llmConfig("do the thing"),
+        model: "claude-sonnet-4.5",
+      }),
     ],
     logsByExecutionId: {
       e1: harnessConversationLogs("e1", "claude-sonnet-4.5"),

@@ -559,8 +559,10 @@ pub struct StepExecutionResponse {
     pub status: String,
     #[serde(default)]
     pub context: Option<serde_json::Value>,
+    /// Rendered `step_type`-specific config the execution ran with; null for
+    /// human_input, stop, and finish executions.
     #[serde(default)]
-    pub prompt: Option<String>,
+    pub config: Option<serde_json::Value>,
     #[serde(default)]
     pub output: Option<String>,
     #[serde(default)]

@@ -162,6 +162,7 @@ impl SectionType {
 pub enum StepType {
     #[default]
     LlmInference,
+    StructuredInference,
     Route,
     WaitChildren,
     HumanInput,
@@ -175,6 +176,7 @@ impl StepType {
     pub fn from_wire_str(value: &str) -> Self {
         match value {
             "llm_inference" => StepType::LlmInference,
+            "structured_inference" => StepType::StructuredInference,
             "route" => StepType::Route,
             "wait_children" => StepType::WaitChildren,
             "human_input" => StepType::HumanInput,
@@ -187,6 +189,7 @@ impl StepType {
     pub fn as_str(&self) -> &str {
         match self {
             StepType::LlmInference => "llm_inference",
+            StepType::StructuredInference => "structured_inference",
             StepType::Route => "route",
             StepType::WaitChildren => "wait_children",
             StepType::HumanInput => "human_input",
@@ -207,6 +210,7 @@ impl StepType {
                 "skills",
                 "agent_config",
             ]),
+            StepType::StructuredInference => Some(&["provider", "model", "state", "fields"]),
             StepType::Route => Some(&["route_config"]),
             StepType::WaitChildren => Some(&["output_schema"]),
             StepType::HumanInput | StepType::Stop | StepType::Finish => None,
@@ -1689,6 +1693,37 @@ impl Default for LlmInferenceConfig {
     }
 }
 
+/// Config of a `structured_inference` step. Sacrum requires every field on
+/// create; they stay optional here so partial payloads decode.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StructuredInferenceConfig {
+    #[serde(default = "step_config_version")]
+    pub version: i32,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Input sent to the provider: a string, object, or array that may hold
+    /// `{{ dotted.path }}` references Sacrum resolves at dispatch
+    #[serde(default)]
+    pub state: Option<serde_json::Value>,
+    /// JSON Schema the step output must satisfy
+    #[serde(default)]
+    pub fields: Option<serde_json::Value>,
+}
+
+impl Default for StructuredInferenceConfig {
+    fn default() -> Self {
+        Self {
+            version: STEP_CONFIG_VERSION,
+            provider: None,
+            model: None,
+            state: None,
+            fields: None,
+        }
+    }
+}
+
 /// Config of a `route` step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RouteConfig {
@@ -1743,6 +1778,7 @@ where
 #[serde(untagged)]
 pub enum StepConfig {
     LlmInference(Box<LlmInferenceConfig>),
+    StructuredInference(StructuredInferenceConfig),
     Route(RouteConfig),
     WaitChildren(WaitChildrenConfig),
 }
@@ -1753,6 +1789,9 @@ impl StepConfig {
     pub fn default_for(step_type: &StepType) -> Option<Self> {
         match step_type {
             StepType::LlmInference => Some(Self::LlmInference(Box::default())),
+            StepType::StructuredInference => Some(Self::StructuredInference(
+                StructuredInferenceConfig::default(),
+            )),
             StepType::Route => Some(Self::Route(RouteConfig::default())),
             StepType::WaitChildren => Some(Self::WaitChildren(WaitChildrenConfig::default())),
             _ => None,
@@ -1771,6 +1810,9 @@ impl StepConfig {
             StepType::LlmInference => {
                 Some(Self::LlmInference(Box::new(serde_json::from_value(value)?)))
             }
+            StepType::StructuredInference => {
+                Some(Self::StructuredInference(serde_json::from_value(value)?))
+            }
             StepType::Route => Some(Self::Route(serde_json::from_value(value)?)),
             StepType::WaitChildren => Some(Self::WaitChildren(serde_json::from_value(value)?)),
             _ => None,
@@ -1788,7 +1830,14 @@ impl StepConfig {
         match self {
             Self::LlmInference(config) => config.output_schema.as_ref(),
             Self::WaitChildren(config) => config.output_schema.as_ref(),
-            Self::Route(_) => None,
+            Self::StructuredInference(_) | Self::Route(_) => None,
+        }
+    }
+
+    pub fn structured_inference(&self) -> Option<&StructuredInferenceConfig> {
+        match self {
+            Self::StructuredInference(config) => Some(config),
+            _ => None,
         }
     }
 
@@ -1905,6 +1954,12 @@ impl Step {
 
     pub fn route_config(&self) -> Option<&serde_json::Value> {
         self.config.as_ref().and_then(StepConfig::route_config)
+    }
+
+    pub fn structured_inference(&self) -> Option<&StructuredInferenceConfig> {
+        self.config
+            .as_ref()
+            .and_then(StepConfig::structured_inference)
     }
 
     fn llm_inference_config(&mut self) -> &mut LlmInferenceConfig {
@@ -2140,7 +2195,11 @@ impl PartialEq for Workflow {
 impl Eq for Workflow {}
 
 /// A record of a workflow step execution (domain model)
+///
+/// `config` is decoded by `step_type`, so deserialization goes through the
+/// manual [`Deserialize`] impl below.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct StepExecution {
     /// Unique identifier
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2177,9 +2236,11 @@ pub struct StepExecution {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
 
-    /// JSON prompt
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<String>,
+    /// The step config this execution ran with, templates rendered: the
+    /// rendered prompt for `llm_inference`, the resolved state for
+    /// `structured_inference`. `None` for human_input, stop, and finish.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub config: Option<StepConfig>,
 
     /// Final text result
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2220,6 +2281,34 @@ pub struct StepExecution {
     pub handoff: Option<String>,
 }
 
+impl Serialize for StepExecution {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StepExecution::serialize(self, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for StepExecution {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let mut value = serde_json::Value::deserialize(deserializer)?;
+        let config = value
+            .as_object_mut()
+            .and_then(|fields| fields.remove("config"))
+            .unwrap_or_default();
+        let mut execution = StepExecution::deserialize(value).map_err(D::Error::custom)?;
+        let step_type = StepType::from_wire_str(execution.step_type.as_deref().unwrap_or_default());
+        execution.config = StepConfig::from_value(&step_type, config).map_err(D::Error::custom)?;
+        Ok(execution)
+    }
+}
+
 impl StepExecution {
     /// Create a new step execution
     pub fn new(
@@ -2238,7 +2327,7 @@ impl StepExecution {
             completed_at: None,
             status: ExecutionStatus::InProgress,
             context: None,
-            prompt: None,
+            config: None,
             output: None,
             transition_result: None,
             model_used: None,
@@ -2281,10 +2370,14 @@ impl StepExecution {
         self
     }
 
-    /// Set prompt
-    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.prompt = Some(prompt.into());
+    pub fn with_config(mut self, config: StepConfig) -> Self {
+        self.config = Some(config);
         self
+    }
+
+    /// Rendered prompt of an `llm_inference` execution
+    pub fn prompt(&self) -> Option<&str> {
+        self.config.as_ref().and_then(StepConfig::prompt)
     }
 
     /// Set output
@@ -3273,7 +3366,10 @@ mod tests {
         let exec = StepExecution::new("task1", "wf1", "review")
             .with_task_run_id("run1")
             .with_context("ctx")
-            .with_prompt("do stuff")
+            .with_config(StepConfig::LlmInference(Box::new(LlmInferenceConfig {
+                prompt: Some("do stuff".to_string()),
+                ..Default::default()
+            })))
             .with_output("done")
             .with_transition_result("next_step")
             .with_model_used("claude-3")
@@ -3292,7 +3388,7 @@ mod tests {
         assert_eq!(exec.workflow_id, "wf1");
         assert_eq!(exec.step_name, "review");
         assert_eq!(exec.context.as_deref(), Some("ctx"));
-        assert_eq!(exec.prompt.as_deref(), Some("do stuff"));
+        assert_eq!(exec.prompt(), Some("do stuff"));
         assert_eq!(exec.output.as_deref(), Some("done"));
         assert_eq!(exec.transition_result.as_deref(), Some("next_step"));
         assert_eq!(exec.model_used.as_deref(), Some("claude-3"));
@@ -3327,6 +3423,55 @@ mod tests {
         assert!(!bare_json.contains("\"handoff\""));
         assert!(!bare_json.contains("\"model_provider\""));
         assert!(!bare_json.contains("\"task_run_id\""));
+    }
+
+    #[test]
+    fn step_execution_decodes_config_by_step_type() {
+        let json = serde_json::json!({
+            "task_id": "task-1",
+            "workflow_id": "workflow-1",
+            "step_name": "classify",
+            "step_type": "structured_inference",
+            "started_at": "2026-05-07T12:00:00Z",
+            "status": "completed",
+            "config": {
+                "__type__": "structured_inference",
+                "version": 1,
+                "provider": "typesafe",
+                "model": "jev",
+                "state": {"title": "Resolved title"},
+                "fields": {"type": "object"}
+            }
+        });
+
+        let exec: StepExecution = serde_json::from_value(json).expect("deserialize");
+        let config = exec
+            .config
+            .as_ref()
+            .and_then(StepConfig::structured_inference)
+            .expect("structured_inference config");
+        assert_eq!(config.provider.as_deref(), Some("typesafe"));
+        assert_eq!(
+            config.state,
+            Some(serde_json::json!({"title": "Resolved title"}))
+        );
+        assert_eq!(exec.prompt(), None);
+
+        let round_trip: StepExecution =
+            serde_json::from_value(serde_json::to_value(&exec).unwrap()).unwrap();
+        assert_eq!(round_trip.config, exec.config);
+
+        let human: StepExecution = serde_json::from_value(serde_json::json!({
+            "task_id": "task-1",
+            "workflow_id": "workflow-1",
+            "step_name": "approve",
+            "step_type": "human_input",
+            "started_at": "2026-05-07T12:00:00Z",
+            "status": "completed",
+            "config": null
+        }))
+        .unwrap();
+        assert_eq!(human.config, None);
     }
 
     #[test]
@@ -3461,6 +3606,10 @@ mod tests {
     #[test]
     fn step_type_as_str() {
         assert_eq!(StepType::LlmInference.as_str(), "llm_inference");
+        assert_eq!(
+            StepType::StructuredInference.as_str(),
+            "structured_inference"
+        );
         assert_eq!(StepType::Route.as_str(), "route");
         assert_eq!(StepType::WaitChildren.as_str(), "wait_children");
         assert_eq!(StepType::HumanInput.as_str(), "human_input");
@@ -3490,6 +3639,7 @@ mod tests {
     fn step_type_serde_roundtrip() {
         for (variant, expected_json) in [
             (StepType::LlmInference, "\"llm_inference\""),
+            (StepType::StructuredInference, "\"structured_inference\""),
             (StepType::Route, "\"route\""),
             (StepType::WaitChildren, "\"wait_children\""),
             (StepType::HumanInput, "\"human_input\""),
@@ -3540,6 +3690,10 @@ mod tests {
                     "agent_config"
                 ][..]
             )
+        );
+        assert_eq!(
+            StepType::StructuredInference.config_fields(),
+            Some(&["provider", "model", "state", "fields"][..])
         );
         assert_eq!(StepType::Route.config_fields(), Some(&["route_config"][..]));
         assert_eq!(
@@ -3617,6 +3771,31 @@ mod tests {
         assert_eq!(
             config.agent_config().unwrap().model.as_deref(),
             Some("opus")
+        );
+
+        let structured = StepConfig::from_value(
+            &StepType::StructuredInference,
+            serde_json::json!({
+                "version": 1,
+                "provider": "typesafe",
+                "model": "jev",
+                "state": "{{ task.title }}",
+                "fields": {"type": "object"}
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        let StepConfig::StructuredInference(structured) = structured else {
+            panic!("expected structured_inference config");
+        };
+        assert_eq!(structured.model.as_deref(), Some("jev"));
+        assert_eq!(
+            structured.state,
+            Some(serde_json::json!("{{ task.title }}"))
+        );
+        assert_eq!(
+            structured.fields,
+            Some(serde_json::json!({"type": "object"}))
         );
 
         let wait = StepConfig::from_value(

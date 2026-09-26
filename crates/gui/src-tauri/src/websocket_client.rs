@@ -2198,7 +2198,7 @@ mod tests {
     // ===== WS Payload Deserialization Tests =====
 
     /// A sacrum step_execution_status_changed payload should hydrate the full
-    /// StepExecution including prompt, output, context, transition_result,
+    /// StepExecution including config, output, context, transition_result,
     /// model, model_provider, tokens, cost, duration_ms, handoff, and
     /// session_id without dropping any fields on the way to the frontend.
     #[test]
@@ -2211,7 +2211,8 @@ mod tests {
             "started_at": "2024-01-01T00:00:00Z",
             "completed_at": "2024-01-01T00:00:09Z",
             "status": "completed",
-            "prompt": "ws prompt",
+            "step_type": "llm_inference",
+            "config": {"version": 1, "prompt": "ws prompt"},
             "output": "ws output",
             "context": "{\"src\":\"ws\"}",
             "transition_result": "approved",
@@ -2229,7 +2230,10 @@ mod tests {
             .expect("WS payload must deserialize into StepExecution");
 
         assert_eq!(exec.id.as_deref(), Some("exec-ws-1"));
-        assert_eq!(exec.prompt.as_deref(), Some("ws prompt"));
+        let Some(types::StepConfig::LlmInference(config)) = &exec.config else {
+            panic!("expected llm_inference config");
+        };
+        assert_eq!(config.prompt.as_deref(), Some("ws prompt"));
         assert_eq!(exec.output.as_deref(), Some("ws output"));
         assert_eq!(exec.context.as_deref(), Some("{\"src\":\"ws\"}"));
         assert_eq!(exec.transition_result.as_deref(), Some("approved"));
@@ -2259,7 +2263,7 @@ mod tests {
         let exec = try_deserialize::<types::StepExecution>(&payload, "StepExecution")
             .expect("minimal WS payload must deserialize");
         assert_eq!(exec.id.as_deref(), Some("exec-min"));
-        assert!(exec.prompt.is_none());
+        assert!(exec.config.is_none());
         assert!(exec.handoff.is_none());
         assert!(exec.session_id.is_none());
     }

@@ -6,10 +6,11 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
-use vertebrae_core::error::ServiceResult;
+use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::execution_service::{ExecutionService, StopRunTarget};
 use vertebrae_core::models::{
-    ExecutionStatus, SessionLog, StepExecution, TaskRun, TaskRunStatus, TaskRunTrace,
+    ExecutionStatus, SessionLog, StepConfig, StepExecution, StepType, TaskRun, TaskRunStatus,
+    TaskRunTrace,
 };
 
 use crate::api_types::{
@@ -52,7 +53,7 @@ impl SacrumExecutionService {
         Self { client }
     }
 
-    fn response_to_execution(response: &StepExecutionResponse) -> StepExecution {
+    fn response_to_execution(response: &StepExecutionResponse) -> ServiceResult<StepExecution> {
         let status =
             ExecutionStatus::parse(&response.status).unwrap_or(ExecutionStatus::InProgress);
 
@@ -65,7 +66,17 @@ impl SacrumExecutionService {
             None
         };
 
-        StepExecution {
+        let step_type = StepType::from_wire_str(response.step_type.as_deref().unwrap_or_default());
+        let config =
+            StepConfig::from_value(&step_type, response.config.clone().unwrap_or_default())
+                .map_err(|e| {
+                    ServiceError::validation_failed(format!(
+                        "Invalid {step_type} config for step execution {}: {e}",
+                        response.id
+                    ))
+                })?;
+
+        Ok(StepExecution {
             id: Some(response.id.clone()),
             task_id: response.task_id.clone(),
             task_run_id: response.task_run_id.clone(),
@@ -76,7 +87,7 @@ impl SacrumExecutionService {
             completed_at,
             status,
             context: response.context.as_ref().map(json_value_to_string),
-            prompt: response.prompt.clone(),
+            config,
             output: response.output.clone(),
             transition_result: response.transition_result.clone(),
             model_used: response.model.clone(),
@@ -100,7 +111,7 @@ impl SacrumExecutionService {
             duration_ms: response.duration_ms.map(|v| v as u64),
             model_provider: response.model_provider.clone(),
             handoff: response.handoff.as_ref().map(json_value_to_string),
-        }
+        })
     }
 
     pub(crate) fn response_to_task_run(response: &TaskRunResponse) -> TaskRun {
@@ -151,7 +162,7 @@ impl ExecutionService for SacrumExecutionService {
             .execute(&query, variables, "step_execution")
             .await?;
 
-        Ok(Some(Self::response_to_execution(&response)))
+        Self::response_to_execution(&response).map(Some)
     }
 
     async fn list_executions_for_task(&self, task_id: &str) -> ServiceResult<Vec<StepExecution>> {
@@ -163,7 +174,7 @@ impl ExecutionService for SacrumExecutionService {
             .execute(&query, variables, "step_executions")
             .await?;
 
-        Ok(responses.iter().map(Self::response_to_execution).collect())
+        responses.iter().map(Self::response_to_execution).collect()
     }
 
     async fn get_latest_execution_for_task(
@@ -342,7 +353,7 @@ impl ExecutionService for SacrumExecutionService {
                 .step_executions
                 .iter()
                 .map(Self::response_to_execution)
-                .collect(),
+                .collect::<ServiceResult<_>>()?,
             session_logs: response
                 .session_logs
                 .iter()
@@ -421,7 +432,7 @@ mod tests {
             step_type: Some("human_input".to_string()),
             status: "completed".to_string(),
             context: Some(serde_json::Value::String("ctx".to_string())),
-            prompt: Some("prompt".to_string()),
+            config: None,
             output: Some("output".to_string()),
             transition_result: Some("next".to_string()),
             model: Some("claude-opus".to_string()),
@@ -442,7 +453,7 @@ mod tests {
             updated_at: Some("2024-01-01T00:01:00Z".to_string()),
         };
 
-        let execution = SacrumExecutionService::response_to_execution(&response);
+        let execution = SacrumExecutionService::response_to_execution(&response).unwrap();
 
         assert_eq!(execution.id, Some("exec-1".to_string()));
         assert_eq!(execution.task_id, "task-1");
@@ -474,7 +485,7 @@ mod tests {
             step_type: None,
             status: "in_progress".to_string(),
             context: None,
-            prompt: None,
+            config: None,
             output: None,
             transition_result: None,
             model: None,
@@ -495,7 +506,7 @@ mod tests {
             updated_at: None,
         };
 
-        let execution = SacrumExecutionService::response_to_execution(&response);
+        let execution = SacrumExecutionService::response_to_execution(&response).unwrap();
 
         assert_eq!(execution.status, ExecutionStatus::InProgress);
         assert!(execution.completed_at.is_none());
@@ -514,7 +525,7 @@ mod tests {
             step_type: None,
             status: "completed".to_string(),
             context: None,
-            prompt: None,
+            config: None,
             output: None,
             transition_result: None,
             model: None,
@@ -535,7 +546,7 @@ mod tests {
             updated_at: None,
         };
 
-        let execution = SacrumExecutionService::response_to_execution(&response);
+        let execution = SacrumExecutionService::response_to_execution(&response).unwrap();
 
         let token_usage = execution.token_usage.expect("token_usage populated");
         assert_eq!(token_usage.input_tokens, 1200);
@@ -558,7 +569,7 @@ mod tests {
             step_type: None,
             status: "completed".to_string(),
             context: None,
-            prompt: None,
+            config: None,
             output: None,
             transition_result: None,
             model: None,
@@ -579,7 +590,7 @@ mod tests {
             updated_at: None,
         };
 
-        let execution = SacrumExecutionService::response_to_execution(&response);
+        let execution = SacrumExecutionService::response_to_execution(&response).unwrap();
         let token_usage = execution.token_usage.expect("token_usage populated");
         assert_eq!(token_usage.cache_read_input_tokens, Some(4096));
     }
@@ -677,7 +688,8 @@ mod tests {
                         "step_name": "review",
                         "status": "completed",
                         "context": "ctx",
-                        "prompt": "prompt",
+                        "step_type": "llm_inference",
+                        "config": {"version": 1, "prompt": "rendered prompt"},
                         "output": "result",
                         "transition_result": "advance",
                         "model": "claude-opus",
@@ -702,6 +714,54 @@ mod tests {
         assert_eq!(exec.task_id, "task-1");
         assert_eq!(exec.status, ExecutionStatus::Completed);
         assert_eq!(exec.model_used.as_deref(), Some("claude-opus"));
+        assert_eq!(exec.prompt(), Some("rendered prompt"));
+    }
+
+    #[test]
+    fn test_response_to_execution_decodes_structured_inference_config() {
+        let response: StepExecutionResponse = serde_json::from_value(json!({
+            "id": "exec-si",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "classify",
+            "step_type": "structured_inference",
+            "status": "completed",
+            "config": {
+                "version": 1,
+                "provider": "typesafe",
+                "model": "jev",
+                "state": {"title": "Resolved"},
+                "fields": {"type": "object"}
+            }
+        }))
+        .unwrap();
+
+        let execution = SacrumExecutionService::response_to_execution(&response).unwrap();
+        let config = execution
+            .config
+            .as_ref()
+            .and_then(StepConfig::structured_inference)
+            .expect("structured_inference config");
+        assert_eq!(config.state, Some(json!({"title": "Resolved"})));
+        assert_eq!(execution.prompt(), None);
+
+        let malformed: StepExecutionResponse = serde_json::from_value(json!({
+            "id": "exec-bad",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "classify",
+            "step_type": "structured_inference",
+            "status": "completed",
+            "config": {"provider": 7}
+        }))
+        .unwrap();
+        let error = SacrumExecutionService::response_to_execution(&malformed).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid structured_inference config for step execution exec-bad"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
