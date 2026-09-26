@@ -31,6 +31,7 @@ import {
 import { HISTORY_WIDTH_STORAGE_KEY } from "../../hooks/useChatHistoryPanelLayout";
 import { commands } from "../../bindings";
 import { useNotificationStore } from "../../stores/notificationStore";
+import { useShellStore } from "../../stores/shellStore";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -209,6 +210,7 @@ describe("ChatWindowManager", () => {
     });
     usePanelFocusStore.getState().reset();
     usePanelLayoutStore.getState().reset();
+    useShellStore.setState({ chatPanelPresentation: "compact" });
   });
 
   it("does not render when panel is closed", () => {

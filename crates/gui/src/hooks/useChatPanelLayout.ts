@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { SIDE_PANEL_INSET_PX } from "../stores/panelLayoutStore";
+import { useShellStore } from "../stores/shellStore";
 
 /** Floating chat-panel width: persistence key and clamp bounds (px). Mirrors
  * the task-detail panel's horizontal resize (TaskDetailPanel.tsx). */
@@ -29,6 +36,8 @@ interface UseChatPanelLayoutResult {
   setIsResizing: React.Dispatch<React.SetStateAction<boolean>>;
   computeMaximizedWidth: () => number;
   toggleMaximized: () => void;
+  toggleFromShortcut: () => void;
+  dismissMaximized: () => void;
   resizePanel: (nextWidth: number) => void;
   startResizeDrag: () => void;
   collapseMaximized: () => void;
@@ -52,7 +61,13 @@ export function useChatPanelLayout({
       : Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, stored));
   });
   const [restoredPanelWidth, setRestoredPanelWidth] = useState(panelWidth);
-  const [isMaximized, setIsMaximized] = useState(false);
+  const chatPanelPresentation = useShellStore(
+    (state) => state.chatPanelPresentation
+  );
+  const setChatPanelPresentation = useShellStore(
+    (state) => state.setChatPanelPresentation
+  );
+  const isMaximized = chatPanelPresentation === "expanded";
   const [maximizedWidth, setMaximizedWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
 
@@ -72,23 +87,51 @@ export function useChatPanelLayout({
     return Math.max(MIN_PANEL_WIDTH, rightEdge - DEFAULT_PANEL_LEFT_INSET);
   }, []);
 
+  // The sticky rail affordance resumes expanded chat from outside this hook.
+  // Measure before paint so the resumed panel does not flash at compact width.
+  useLayoutEffect(() => {
+    if (isMaximized) setMaximizedWidth(computeMaximizedWidth());
+  }, [computeMaximizedWidth, isMaximized]);
+
   const toggleMaximized = useCallback(() => {
     if (isMaximized) {
       unsplitPanes();
       setPanelWidth(restoredPanelWidth);
-      setIsMaximized(false);
+      setChatPanelPresentation("compact");
       return;
     }
-    setRestoredPanelWidth(panelWidth);
+    if (chatPanelPresentation === "compact") setRestoredPanelWidth(panelWidth);
     setMaximizedWidth(computeMaximizedWidth());
-    setIsMaximized(true);
+    setChatPanelPresentation("expanded");
   }, [
+    chatPanelPresentation,
     computeMaximizedWidth,
     isMaximized,
     panelWidth,
     restoredPanelWidth,
+    setChatPanelPresentation,
     unsplitPanes,
   ]);
+
+  const dismissMaximized = useCallback(() => {
+    if (chatPanelPresentation === "compact") return;
+    unsplitPanes();
+    setPanelWidth(restoredPanelWidth);
+    setChatPanelPresentation("compact");
+  }, [
+    chatPanelPresentation,
+    restoredPanelWidth,
+    setChatPanelPresentation,
+    unsplitPanes,
+  ]);
+
+  const toggleFromShortcut = useCallback(() => {
+    if (chatPanelPresentation !== "compact") {
+      dismissMaximized();
+      return;
+    }
+    toggleMaximized();
+  }, [chatPanelPresentation, dismissMaximized, toggleMaximized]);
 
   const resizePanel = useCallback(
     (nextWidth: number) => {
@@ -97,11 +140,11 @@ export function useChatPanelLayout({
         Math.max(MIN_PANEL_WIDTH, nextWidth)
       );
       unsplitPanes();
-      setIsMaximized(false);
+      setChatPanelPresentation("compact");
       setRestoredPanelWidth(width);
       setPanelWidth(width);
     },
-    [unsplitPanes]
+    [setChatPanelPresentation, unsplitPanes]
   );
 
   useEffect(() => {
@@ -136,14 +179,19 @@ export function useChatPanelLayout({
     return () => window.removeEventListener("resize", updateMaximizedWidth);
   }, [computeMaximizedWidth, isMaximized]);
 
-  /** Restore the pre-maximize width and unsplit after wide chat is dismissed. */
+  /** Restore the normal width and discard split layout after dismissal. */
   const collapseMaximized = useCallback(() => {
-    if (isMaximized) {
+    if (chatPanelPresentation !== "compact") {
       unsplitPanes();
       setPanelWidth(restoredPanelWidth);
-      setIsMaximized(false);
+      setChatPanelPresentation("compact");
     }
-  }, [isMaximized, restoredPanelWidth, unsplitPanes]);
+  }, [
+    chatPanelPresentation,
+    restoredPanelWidth,
+    setChatPanelPresentation,
+    unsplitPanes,
+  ]);
 
   const startResizeDrag = useCallback(() => setIsResizing(true), []);
 
@@ -159,6 +207,8 @@ export function useChatPanelLayout({
     setIsResizing,
     computeMaximizedWidth,
     toggleMaximized,
+    toggleFromShortcut,
+    dismissMaximized,
     resizePanel,
     startResizeDrag,
     collapseMaximized,

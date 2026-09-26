@@ -160,6 +160,8 @@ export function ChatWindowManager({
     isResizing,
     renderedPanelWidth,
     toggleMaximized,
+    toggleFromShortcut,
+    dismissMaximized,
     resizePanel,
     startResizeDrag,
     collapseMaximized,
@@ -254,8 +256,9 @@ export function ChatWindowManager({
   }, [open]);
 
   const closeChatPanel = useCallback(() => {
+    dismissMaximized();
     togglePanel();
-  }, [togglePanel]);
+  }, [dismissMaximized, togglePanel]);
 
   const startFreshActiveSession = useCallback(
     async (paneId: string) => {
@@ -482,7 +485,7 @@ export function ChatWindowManager({
       splitWithFreshSession,
       startFreshActiveSession: startFreshActiveSessionForKeyboard,
       toggleHistorySelector,
-      toggleMaximized,
+      toggleMaximized: toggleFromShortcut,
     },
     setShortcutsOpen,
   });
