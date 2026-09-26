@@ -48,7 +48,7 @@ pub enum WorkflowCommand {
     Delete(WorkflowDeleteCommand),
     /// Export selected workflows or all workflows as a portable JSON bundle
     Export(WorkflowExportCommand),
-    /// Import a versioned workflow bundle using create-only semantics
+    /// Import a Sacrum-format workflow bundle using create-only semantics
     Import(WorkflowImportCommand),
     /// Assign a task to a workflow
     Assign(WorkflowAssignCommand),

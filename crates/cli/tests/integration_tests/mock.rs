@@ -712,8 +712,11 @@ impl WorkflowService for MockWorkflowService {
                 imported_step.id = Some(step_id.clone());
                 imported_step.goal = step.goal.clone();
                 imported_step.step_type = step.step_type.clone();
-                imported_step.config = StepConfig::from_value(&step.step_type, step.config_value())
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                imported_step.config = StepConfig::from_value(
+                    &step.step_type,
+                    step.config.clone().unwrap_or(serde_json::Value::Null),
+                )
+                .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
                 imported_step.order = step.step_order;
                 imported_step.persistence_options = step.persistence_options.clone();
                 state.steps.insert(step_id.clone(), imported_step);

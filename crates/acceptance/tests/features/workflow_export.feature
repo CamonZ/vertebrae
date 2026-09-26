@@ -7,7 +7,7 @@ Feature: Workflow bundle export
   Scenario: Export all workflows from an empty project
     When I run vtb "workflow export --all"
     Then the command should succeed
-    And the workflow export stdout should be a valid versioned bundle
+    And the workflow export stdout should be a valid workflow bundle
 
   Scenario: Workflow export requires an explicit selection
     When I run vtb "workflow export"
@@ -21,7 +21,7 @@ Feature: Workflow bundle export
     Then the command should succeed
     When I run vtb "workflow export --workflow <workflow_id>"
     Then the command should succeed
-    And the workflow export stdout should be a valid versioned bundle
+    And the workflow export stdout should be a valid workflow bundle
     And the workflow export stdout should not contain persistence fields
 
   Scenario: Export a selected workflow set together as one closed bundle
@@ -49,7 +49,7 @@ Feature: Workflow bundle export
     And the workflow export file should equal the remembered stdout
     When I run vtb "workflow export --all"
     Then the command should succeed
-    And the workflow export stdout should be a valid versioned bundle
+    And the workflow export stdout should be a valid workflow bundle
 
   Scenario: Single workflow selection rejects an outgoing destination outside the bundle
     Given I create a workflow "Source Export WF" with:

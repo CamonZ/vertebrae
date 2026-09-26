@@ -19,14 +19,19 @@ fn extract_workflow_id(stdout: &str) -> String {
 #[when("I stage the built-in workflow bundle fixture")]
 async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
     let mut fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../core/tests/fixtures/workflow_bundle_v1.json"
+        "../../../core/tests/fixtures/workflow_bundle.json"
     ))
     .expect("built-in workflow bundle fixture should be valid JSON");
     // Sacrum applies stricter graph, persistence, and routing-schema rules.
     // Keep the shared fixture unchanged for round-trip tests, while making
     // this live import fixture valid for the backend's import contract.
-    fixture["workflows"][0]["steps"][0]["prompt"] = serde_json::Value::Null;
-    fixture["workflows"][0]["steps"][2]["output_schema"] = json!({
+    let steps = fixture["workflows"][0]["steps"].as_array_mut().unwrap();
+    let start = steps
+        .iter_mut()
+        .find(|step| step["step_ref"] == "start")
+        .unwrap();
+    start["config"]["prompt"] = serde_json::Value::Null;
+    start["config"]["output_schema"] = json!({
         "type": "object",
         "properties": {
             "route": {
@@ -50,13 +55,22 @@ async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
         "required": ["route"],
         "additionalProperties": false
     });
-    fixture["workflows"][1]["steps"][1]["output_schema"] = json!({
+    fixture["workflows"][1]["steps"][1]["config"]["output_schema"] = json!({
         "type": "object",
         "properties": {},
         "required": [],
         "additionalProperties": false
     });
-    fixture["workflows"][1]["steps"][0]["step_type"] = json!("llm_inference");
+    // The shared graph fixture contains a finish -> review edge to exercise
+    // complete portable graph preservation. Sacrum forbids outgoing edges on
+    // finish steps, so make this backend-only fixture variant nonterminal.
+    let review_steps = fixture["workflows"][1]["steps"].as_array_mut().unwrap();
+    let done = review_steps
+        .iter_mut()
+        .find(|step| step["step_ref"] == "done")
+        .unwrap();
+    done["step_type"] = json!("llm_inference");
+    done["config"] = json!({"version": 1});
     let contents = serde_json::to_string(&fixture).expect("workflow fixture should serialize");
     let path = world.write_temp_file(&contents);
     world.stored_ids.insert(
@@ -67,9 +81,7 @@ async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
 
 #[when("I stage a malformed workflow bundle")]
 async fn stage_malformed_workflow_bundle(world: &mut SmokeWorld) {
-    let path = world.write_temp_file(
-        r#"{"schema_version":1,"workflows":[{"workflow_ref":"broken","name":7}]}"#,
-    );
+    let path = world.write_temp_file(r#"{"workflows":[{"workflow_ref":"broken","name":7}]}"#);
     world.stored_ids.insert(
         "workflow_import_path".to_string(),
         path.display().to_string(),
@@ -402,8 +414,7 @@ async fn destination_workflow_graph_should_match_import_mappings(world: &mut Smo
             assert_eq!(actual.step_order, step.step_order);
             assert_eq!(actual.persistence_options, step.persistence_options);
 
-            // Sacrum imports the manifest's non-blank flat fields as config.
-            let mut expected_config = step.config_value();
+            let mut expected_config = step.config.clone().unwrap_or(Value::Null);
             if let Some(route_config) = expected_config.get_mut("route_config") {
                 *route_config = materialize_route_refs(
                     route_config,
@@ -412,17 +423,13 @@ async fn destination_workflow_graph_should_match_import_mappings(world: &mut Smo
                     &workflow.workflow_ref,
                 );
             }
-            let expected_config = match step.step_type.config_fields() {
-                Some(_) => expected_config,
-                None => Value::Null,
-            };
             assert_eq!(
                 actual
                     .config
                     .as_ref()
                     .map(non_blank_config)
                     .unwrap_or_default(),
-                expected_config,
+                non_blank_config(&expected_config),
                 "imported config mismatch for {}/{}",
                 workflow.workflow_ref,
                 step.step_ref
@@ -516,8 +523,8 @@ async fn workflow_import_json_should_contain_complete_mappings(world: &mut Smoke
     assert_eq!(value["workflow_mappings"].as_object().unwrap().len(), 2);
     assert_eq!(value["step_mappings"].as_object().unwrap().len(), 2);
     assert_eq!(value["workflow_count"], 2);
-    assert_eq!(value["step_count"], 8);
-    assert_eq!(value["step_edge_count"], 8);
+    assert_eq!(value["step_count"], 9);
+    assert_eq!(value["step_edge_count"], 9);
     assert_eq!(value["workflow_edge_count"], 2);
 }
 
@@ -567,7 +574,7 @@ async fn export_workflow_to_file(world: &mut SmokeWorld) {
         .await;
 }
 
-#[then("the workflow export stdout should be a valid versioned bundle")]
+#[then("the workflow export stdout should be a valid workflow bundle")]
 async fn workflow_export_stdout_should_be_valid(world: &mut SmokeWorld) {
     let bundle: serde_json::Value = serde_json::from_str(&world.last_stdout).unwrap_or_else(|e| {
         panic!(
@@ -575,7 +582,7 @@ async fn workflow_export_stdout_should_be_valid(world: &mut SmokeWorld) {
             world.last_stdout, world.last_stderr
         )
     });
-    assert_eq!(bundle["schema_version"], 1);
+    assert!(bundle.get("schema_version").is_none());
     assert!(bundle["workflows"].is_array());
 }
 
