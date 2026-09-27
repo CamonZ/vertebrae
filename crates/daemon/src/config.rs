@@ -135,6 +135,7 @@ pub struct ResolvedConfig {
     pub sacrum_url: String,
     pub api_token: Option<String>,
     pub typesafe_api_key: Option<String>,
+    pub typesafe_url: Option<String>,
     pub daemon_identity: Option<DaemonIdentity>,
     pub projects: Vec<ProjectEntry>,
 }
@@ -147,6 +148,10 @@ impl fmt::Debug for ResolvedConfig {
             .field(
                 "typesafe_api_key",
                 &self.typesafe_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "typesafe_url",
+                &self.typesafe_url.as_ref().map(|_| "<redacted>"),
             )
             .field("daemon_identity", &self.daemon_identity)
             .field("projects", &self.projects)
@@ -449,6 +454,7 @@ impl ResolvedConfig {
             sacrum_url,
             api_token: config.sacrum.token.clone(),
             typesafe_api_key: config.typesafe.api_key.clone(),
+            typesafe_url: config.typesafe.url.clone(),
             daemon_identity,
             projects,
         })
@@ -520,14 +526,21 @@ mod tests {
     fn resolved_config_keeps_typesafe_key_daemon_side_and_redacts_debug() {
         let mut config = config(Some("account-token"));
         config.typesafe.api_key = Some("typesafe-config-secret".into());
+        config.typesafe.url =
+            Some("https://config-user:typesafe-url-secret@example.test/v1/systemone".into());
 
         let resolved = ResolvedConfig::from_config_file(&config).unwrap();
         assert_eq!(
             resolved.typesafe_api_key.as_deref(),
             Some("typesafe-config-secret")
         );
+        assert_eq!(
+            resolved.typesafe_url.as_deref(),
+            Some("https://config-user:typesafe-url-secret@example.test/v1/systemone")
+        );
         let debug = format!("{resolved:?}");
         assert!(!debug.contains("typesafe-config-secret"));
+        assert!(!debug.contains("typesafe-url-secret"));
         assert!(debug.contains("<redacted>"));
     }
 

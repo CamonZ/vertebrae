@@ -78,6 +78,48 @@ async fn sends_authenticated_post_and_captures_request_id_and_usage() {
 }
 
 #[tokio::test]
+async fn configured_full_url_is_used_without_appending_the_default_path() {
+    let server = MockServer::start().await;
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/custom/system-one"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let endpoint = format!("{}/custom/system-one", server.uri());
+    let client =
+        TypeSafeClient::from_config(TypeSafeClientConfig::new("test-key").with_url(endpoint))
+            .unwrap();
+    let request = request();
+    client.system_one(request.clone()).await.unwrap();
+
+    let received = server.received_requests().await.unwrap();
+    assert_eq!(received.len(), 1);
+    let body: Value = serde_json::from_slice(&received[0].body).unwrap();
+    assert_eq!(body, serde_json::to_value(request).unwrap());
+    server.verify().await;
+}
+
+#[test]
+fn configured_full_url_requires_http_without_credentials_query_or_fragment() {
+    for url in [
+        "ftp://api.typesafe.test/v1/systemone",
+        "https://user:password@api.typesafe.test/v1/systemone",
+        "https://api.typesafe.test/v1/systemone?token=secret",
+        "https://api.typesafe.test/v1/systemone#fragment",
+        "not a URL",
+    ] {
+        let result =
+            TypeSafeClient::from_config(TypeSafeClientConfig::new("test-key").with_url(url));
+        assert!(
+            matches!(result, Err(TypeSafeError::InvalidConfiguration(_))),
+            "expected URL {url:?} to be rejected"
+        );
+    }
+}
+
+#[tokio::test]
 async fn transient_service_errors_are_returned_without_retry() {
     for status in [429, 529] {
         let server = MockServer::start().await;

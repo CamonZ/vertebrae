@@ -84,6 +84,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         daemon_identity,
         projects,
         typesafe_api_key,
+        typesafe_url,
         ..
     } = match ResolvedConfig::load() {
         Ok(config) => config,
@@ -111,7 +112,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (provider_binaries, provider_diagnostics) =
         resolve_all_provider_binaries_with_diagnostics(&shell_path);
     let typesafe_factory_config =
-        HarnessFactoryConfig::from_environment_with_typesafe_configured_api_key(typesafe_api_key);
+        HarnessFactoryConfig::from_environment_with_typesafe_configured_settings(
+            typesafe_api_key,
+            typesafe_url,
+        );
     tracing::info!(
         anthropic_binary = ?provider_binaries.anthropic,
         openai_binary = ?provider_binaries.openai,
@@ -130,6 +134,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         &compatibility_working_dir,
         typesafe_factory_config.typesafe_api_key,
         typesafe_factory_config.typesafe_base_url,
+        typesafe_factory_config.typesafe_url,
     ));
     capabilities.log_startup_diagnostics();
 
