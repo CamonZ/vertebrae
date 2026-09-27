@@ -13,6 +13,7 @@ use std::{
 };
 
 use vertebrae_core::Provider;
+use vertebrae_harness::HarnessFactoryConfig;
 use vertebrae_installer::ClaudePluginDirResolution;
 
 use crate::helpers::{ProviderBinaries, ProviderDiscoveryDiagnostics};
@@ -113,8 +114,7 @@ impl DaemonCapabilities {
                         .as_deref()
                         .is_some_and(|key| !key.trim().is_empty()))
                     .then(|| {
-                        "TypeSafe provider API key is not configured; set TYPESAFE_API_KEY"
-                            .to_string()
+                        "TypeSafe provider API key is not configured; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY".to_string()
                     }),
                 },
             ),
@@ -146,6 +146,11 @@ impl DaemonCapabilities {
             typesafe_api_key,
             typesafe_base_url,
         }
+    }
+
+    pub(crate) fn configure_typesafe_harness(&self, config: &mut HarnessFactoryConfig) {
+        config.typesafe_api_key = self.typesafe_api_key.clone();
+        config.typesafe_base_url = self.typesafe_base_url.clone();
     }
 
     /// Log the cached compatibility result once during daemon startup.
@@ -194,6 +199,23 @@ pub type SharedDaemonCapabilities = Arc<DaemonCapabilities>;
 mod tests {
     use super::*;
     use crate::helpers::{ProviderBinaries, ProviderDiscoveryDiagnostics};
+    use async_trait::async_trait;
+    use serde_json::json;
+    use vertebrae_harness::{HarnessRuntimeFactory, HarnessRuntimeOptions};
+    use vertebrae_harness_core::{
+        CompletionStatus, EventSink, HarnessError, HarnessEventV1, RunId, StreamId,
+        StructuredInferenceRequest,
+    };
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+
+    struct DiscardEvents;
+
+    #[async_trait]
+    impl EventSink for DiscardEvents {
+        async fn emit(&self, _event: HarnessEventV1) -> Result<(), HarnessError> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn missing_provider_discovery_is_retained_without_filtering_harnesses() {
@@ -228,7 +250,9 @@ mod tests {
                 .harnesses
                 .get(&Provider::Typesafe)
                 .and_then(|capability| capability.discovery_diagnostic.as_deref()),
-            Some("TypeSafe provider API key is not configured; set TYPESAFE_API_KEY")
+            Some(
+                "TypeSafe provider API key is not configured; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY"
+            )
         );
     }
 
@@ -247,5 +271,85 @@ mod tests {
         assert!(!debug.contains("typesafe-secret"));
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains("TYPESAFE_API_KEY"));
+    }
+
+    #[tokio::test]
+    async fn typesafe_key_from_config_reaches_the_http_bearer_header() {
+        let config: vertebrae_sacrum_client::VertebraeConfigFile = toml::from_str(
+            r#"
+[sacrum]
+token = "test-sacrum-token"
+
+[typesafe]
+api_key = "config-only-typesafe-key"
+"#,
+        )
+        .unwrap();
+        let resolved = crate::config::ResolvedConfig::from_config_file(&config).unwrap();
+        let server = MockServer::start().await;
+        Mock::given(matchers::method("POST"))
+            .and(matchers::path("/v1/systemone"))
+            .and(matchers::header(
+                "authorization",
+                "Bearer config-only-typesafe-key",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "model": "jev-custom",
+                "answers": {
+                    "is_urgent": {"type": "noul", "noul": 0.92}
+                },
+                "usage": {"input_tokens": 12, "output_tokens": 4}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let capabilities = DaemonCapabilities::new(
+            "/usr/bin:/bin".to_string(),
+            ProviderBinaries::default(),
+            ProviderDiscoveryDiagnostics::default(),
+            Path::new("/tmp/project"),
+            resolved.typesafe_api_key,
+            Some(server.uri()),
+        );
+        let mut factory_config = HarnessFactoryConfig::default();
+        capabilities.configure_typesafe_harness(&mut factory_config);
+        let instance = HarnessRuntimeFactory::new(factory_config)
+            .create(HarnessRuntimeOptions {
+                agent_config: vertebrae_core::AgentConfig::new()
+                    .with_provider(Provider::Typesafe)
+                    .with_model("jev-custom"),
+                request_config: Default::default(),
+            })
+            .expect("TypeSafe harness should use the daemon capability snapshot");
+        assert!(instance.request_config.environment.is_empty());
+
+        let run = instance
+            .runtime
+            .run_structured_inference(
+                StructuredInferenceRequest {
+                    run_id: RunId::from("run-config-typesafe"),
+                    stream_id: StreamId::from("stream-config-typesafe"),
+                    state: json!({"ticket": {"title": "Example"}}),
+                    model: Some("jev-custom".into()),
+                    questions: std::collections::BTreeMap::from([(
+                        "is_urgent".into(),
+                        json!({"type": "noul", "instructions": "Does this need urgent handling?"}),
+                    )]),
+                },
+                Arc::new(DiscardEvents),
+            )
+            .await
+            .expect("structured inference should be accepted");
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), run.await_outcome())
+            .await
+            .expect("stub response should complete promptly")
+            .expect("TypeSafe run should complete");
+        assert_eq!(outcome.status, CompletionStatus::Completed);
+        assert_eq!(
+            outcome.structured_output,
+            Some(json!({"is_urgent": {"type": "noul", "noul": 0.92}}))
+        );
+        server.verify().await;
     }
 }

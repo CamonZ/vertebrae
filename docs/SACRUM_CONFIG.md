@@ -15,6 +15,9 @@ directory (for example, `~/.config/vertebrae/config.toml` on Linux and
 url = "<backend-url>"
 token = "<api-token>"
 
+[typesafe]
+api_key = "<typesafe-api-key>"
+
 [projects.vertebrae]
 id = "my-project-id"
 path = "/Users/example/Code/vertebrae"
@@ -30,6 +33,14 @@ path = "/Users/example/Code/vertebrae"
 
 - **token** (required unless using `VTB_TOKEN`): Bearer token for GraphQL requests and Phoenix channel authentication. Do not print or commit it.
 
+`[typesafe]`
+
+- **api_key** (optional): Server-side API key for TypeSafe System One requests.
+  The daemon reads it from the shared `config.toml` at startup. Protect this file
+  as a credential store; Vertebrae writes it with owner-only permissions on
+  Unix. The daemon redacts it from Debug output and diagnostics. Do not print or
+  commit the key.
+
 `[projects.<slug>]`
 
 - **id** (required unless using `VTB_PROJECT_ID`): The project ID in Sacrum
@@ -43,6 +54,12 @@ path = "/Users/example/Code/vertebrae"
 - **VTB_URL**: Overrides `[sacrum].url`
 - **VTB_TOKEN**: Overrides `[sacrum].token`
 - **VTB_PROJECT_ID**: Overrides path-based project resolution and uses the given Sacrum project ID directly
+- **TYPESAFE_API_KEY**: A nonblank value overrides `[typesafe].api_key` for the daemon. If unset or blank, the daemon uses the TOML value. If neither source has a usable key, TypeSafe requests report that configuration is missing.
+
+The daemon snapshots the resolved TypeSafe key at startup; changes to the TOML
+file or environment take effect after restarting it. The credential stays in
+daemon configuration and is not copied into task or workflow data, `AgentConfig`,
+or provider-neutral request configuration.
 
 ## Backend ownership
 

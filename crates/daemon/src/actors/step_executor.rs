@@ -625,7 +625,7 @@ impl StepExecutor {
             }
         }
 
-        let factory_config = HarnessFactoryConfig {
+        let mut factory_config = HarnessFactoryConfig {
             anthropic_executable: state
                 .config
                 .capabilities
@@ -664,14 +664,16 @@ impl StepExecutor {
                 .iter()
                 .map(PathBuf::from)
                 .collect(),
-            typesafe_api_key: state.config.capabilities.typesafe_api_key.clone(),
-            typesafe_base_url: state.config.capabilities.typesafe_base_url.clone(),
             claude_root_locator_resolver: Some(Arc::new(
                 vertebrae_harness::daemon_opaque_claude_locator,
             )),
             default_permission_mode: Some(PermissionMode::BypassPermissions),
             ..HarnessFactoryConfig::default()
         };
+        state
+            .config
+            .capabilities
+            .configure_typesafe_harness(&mut factory_config);
         let request_config = RequestConfig {
             working_directory: (provider != Provider::Typesafe)
                 .then(|| state.config.working_dir().to_path_buf()),
