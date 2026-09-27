@@ -36,6 +36,8 @@ import {
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 const BOTTOM_SCROLL_TOLERANCE_PX = 24;
+const COMMENT_EDITOR_MAX_WIDTH_PX = 384;
+const COMMENT_EDITOR_VIEWPORT_GUTTER_PX = 8;
 
 interface ChatEmptyStateProps {
   notice?: ReactNode;
@@ -359,6 +361,15 @@ export function ChatMessages({
     setCommentDraft("");
     window.getSelection()?.removeAllRanges();
   }, [sessionId]);
+  const submitCommentDraft = useCallback(() => {
+    const body = commentDraft.trim();
+    if (!selectionAction || !body) return;
+
+    onAddComment(selectionAction.anchor, body);
+    setCommentEditorOpen(false);
+    setSelectionAction(null);
+    window.getSelection()?.removeAllRanges();
+  }, [commentDraft, onAddComment, selectionAction]);
   const registerMessageRef = useCallback(
     (id: string, element: HTMLElement | null) => {
       if (element) {
@@ -659,10 +670,21 @@ export function ChatMessages({
         {selectionAction && commentEditorOpen
           ? createPortal(
               <div
-                className="fixed z-[80] w-72 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] p-3 shadow-xl"
+                className="fixed z-[80] w-96 max-w-[calc(100vw-1rem)] rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] p-3 shadow-xl"
                 role="group"
                 aria-label="Add a comment to selected text"
-                style={{ top: selectionAction.top, left: selectionAction.left }}
+                style={{
+                  top: selectionAction.top,
+                  left: Math.max(
+                    COMMENT_EDITOR_VIEWPORT_GUTTER_PX,
+                    Math.min(
+                      selectionAction.left,
+                      window.innerWidth -
+                        COMMENT_EDITOR_MAX_WIDTH_PX -
+                        COMMENT_EDITOR_VIEWPORT_GUTTER_PX
+                    )
+                  ),
+                }}
               >
                 <label
                   htmlFor="local-chat-comment-draft"
@@ -676,6 +698,11 @@ export function ChatMessages({
                   aria-label="Comment on selected text"
                   value={commentDraft}
                   onChange={(event) => setCommentDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || !event.metaKey) return;
+                    event.preventDefault();
+                    submitCommentDraft();
+                  }}
                   autoFocus
                   rows={3}
                   className="w-full resize-y rounded-md border border-[var(--color-line)] bg-[var(--color-bg)] p-2 text-sm text-[var(--color-fg)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
@@ -693,12 +720,7 @@ export function ChatMessages({
                     data-testid="local-chat-save-comment"
                     className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={!commentDraft.trim()}
-                    onClick={() => {
-                      onAddComment(selectionAction.anchor, commentDraft.trim());
-                      setCommentEditorOpen(false);
-                      setSelectionAction(null);
-                      window.getSelection()?.removeAllRanges();
-                    }}
+                    onClick={submitCommentDraft}
                   >
                     Add to reply
                   </button>
