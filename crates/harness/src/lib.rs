@@ -65,6 +65,8 @@ pub struct HarnessFactoryConfig {
     pub typesafe_api_key: Option<String>,
     /// Optional server-owned TypeSafe endpoint override.
     pub typesafe_base_url: Option<String>,
+    /// Optional server-owned full TypeSafe System One endpoint URL.
+    pub typesafe_url: Option<String>,
 }
 
 impl fmt::Debug for HarnessFactoryConfig {
@@ -117,6 +119,10 @@ impl fmt::Debug for HarnessFactoryConfig {
                 "typesafe_base_url",
                 &redacted_base_url(&self.typesafe_base_url),
             )
+            .field(
+                "typesafe_url",
+                &self.typesafe_url.as_ref().map(|_| "<redacted>"),
+            )
             .finish()
     }
 }
@@ -126,7 +132,7 @@ impl HarnessFactoryConfig {
     /// still be supplied by an embedding server and take precedence when the
     /// factory constructs a TypeSafe client.
     pub fn from_environment() -> Self {
-        Self::from_environment_with_typesafe_configured_api_key(None)
+        Self::from_environment_with_typesafe_configured_settings(None, None)
     }
 
     /// Capture environment configuration while using the shared app config as
@@ -134,10 +140,21 @@ impl HarnessFactoryConfig {
     pub fn from_environment_with_typesafe_configured_api_key(
         configured_api_key: Option<String>,
     ) -> Self {
+        Self::from_environment_with_typesafe_configured_settings(configured_api_key, None)
+    }
+
+    /// Capture environment configuration while using shared app config as
+    /// fallbacks for the TypeSafe key and full endpoint URL. The legacy base
+    /// URL environment override takes precedence over the configured URL.
+    pub fn from_environment_with_typesafe_configured_settings(
+        configured_api_key: Option<String>,
+        configured_url: Option<String>,
+    ) -> Self {
         let environment_api_key = env::var("TYPESAFE_API_KEY").ok();
         Self {
             typesafe_api_key: resolve_typesafe_api_key(configured_api_key, environment_api_key),
             typesafe_base_url: env::var("TYPESAFE_BASE_URL").ok(),
+            typesafe_url: configured_url,
             ..Self::default()
         }
     }
@@ -368,6 +385,8 @@ impl HarnessRuntimeFactory {
             TypeSafeClientConfig::new(self.config.typesafe_api_key.clone().unwrap_or_default());
         if let Some(base_url) = &self.config.typesafe_base_url {
             config = config.with_base_url(base_url.clone());
+        } else if let Some(url) = &self.config.typesafe_url {
+            config = config.with_url(url.clone());
         }
         TypeSafeRuntime::from_config(config).map_err(map_typesafe_configuration_error)
     }
@@ -771,6 +790,26 @@ mod tests {
         assert_eq!(
             instance.request_config.model.as_deref(),
             Some(vertebrae_core::DEFAULT_TYPESAFE_MODEL)
+        );
+    }
+
+    #[test]
+    fn typesafe_base_url_override_takes_precedence_over_configured_full_url() {
+        let config = HarnessFactoryConfig {
+            typesafe_api_key: Some("typesafe-secret".into()),
+            typesafe_base_url: Some("https://typesafe.example.test".into()),
+            typesafe_url: Some("not a valid URL".into()),
+            ..HarnessFactoryConfig::default()
+        };
+
+        let instance = HarnessRuntimeFactory::new(config).create(HarnessRuntimeOptions {
+            agent_config: AgentConfig::new().with_provider(Provider::Typesafe),
+            request_config: RequestConfig::default(),
+        });
+
+        assert!(
+            instance.is_ok(),
+            "the legacy base URL override should be used instead of the configured full URL"
         );
     }
 

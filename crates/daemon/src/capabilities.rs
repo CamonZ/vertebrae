@@ -37,6 +37,7 @@ pub struct DaemonCapabilities {
     pub claude_plugin_dir: ClaudePluginDirResolution,
     pub typesafe_api_key: Option<String>,
     pub typesafe_base_url: Option<String>,
+    pub typesafe_url: Option<String>,
 }
 
 impl fmt::Debug for DaemonCapabilities {
@@ -59,6 +60,10 @@ impl fmt::Debug for DaemonCapabilities {
             .field(
                 "typesafe_base_url",
                 &redacted_base_url(&self.typesafe_base_url),
+            )
+            .field(
+                "typesafe_url",
+                &self.typesafe_url.as_ref().map(|_| "<redacted>"),
             )
             .finish()
     }
@@ -84,6 +89,7 @@ impl DaemonCapabilities {
         working_dir: &Path,
         typesafe_api_key: Option<String>,
         typesafe_base_url: Option<String>,
+        typesafe_url: Option<String>,
     ) -> Self {
         let installed_skills = vertebrae_installer::installed_skills_dir();
         let (installed_skills_roots, installed_skills_diagnostic) = match installed_skills {
@@ -145,12 +151,14 @@ impl DaemonCapabilities {
             claude_plugin_dir,
             typesafe_api_key,
             typesafe_base_url,
+            typesafe_url,
         }
     }
 
     pub(crate) fn configure_typesafe_harness(&self, config: &mut HarnessFactoryConfig) {
         config.typesafe_api_key = self.typesafe_api_key.clone();
         config.typesafe_base_url = self.typesafe_base_url.clone();
+        config.typesafe_url = self.typesafe_url.clone();
     }
 
     /// Log the cached compatibility result once during daemon startup.
@@ -229,6 +237,7 @@ mod tests {
             Path::new("/tmp/project"),
             None,
             None,
+            None,
         );
 
         assert_eq!(capabilities.harnesses.len(), 3);
@@ -265,30 +274,34 @@ mod tests {
             Path::new("/tmp/project"),
             Some("typesafe-secret".into()),
             Some("https://typesafe.example.test".into()),
+            Some("https://user:typesafe-url-secret@example.test/v1/systemone".into()),
         );
 
         let debug = format!("{capabilities:?}");
         assert!(!debug.contains("typesafe-secret"));
+        assert!(!debug.contains("typesafe-url-secret"));
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains("TYPESAFE_API_KEY"));
     }
 
     #[tokio::test]
-    async fn typesafe_key_from_config_reaches_the_http_bearer_header() {
-        let config: vertebrae_sacrum_client::VertebraeConfigFile = toml::from_str(
+    async fn typesafe_url_from_config_reaches_the_exact_http_endpoint() {
+        let server = MockServer::start().await;
+        let endpoint = format!("{}/configured/system-one", server.uri());
+        let config: vertebrae_sacrum_client::VertebraeConfigFile = toml::from_str(&format!(
             r#"
 [sacrum]
 token = "test-sacrum-token"
 
 [typesafe]
 api_key = "config-only-typesafe-key"
-"#,
-        )
+url = "{endpoint}"
+"#
+        ))
         .unwrap();
         let resolved = crate::config::ResolvedConfig::from_config_file(&config).unwrap();
-        let server = MockServer::start().await;
         Mock::given(matchers::method("POST"))
-            .and(matchers::path("/v1/systemone"))
+            .and(matchers::path("/configured/system-one"))
             .and(matchers::header(
                 "authorization",
                 "Bearer config-only-typesafe-key",
@@ -310,7 +323,8 @@ api_key = "config-only-typesafe-key"
             ProviderDiscoveryDiagnostics::default(),
             Path::new("/tmp/project"),
             resolved.typesafe_api_key,
-            Some(server.uri()),
+            None,
+            resolved.typesafe_url,
         );
         let mut factory_config = HarnessFactoryConfig::default();
         capabilities.configure_typesafe_harness(&mut factory_config);
@@ -350,6 +364,12 @@ api_key = "config-only-typesafe-key"
             outcome.structured_output,
             Some(json!({"is_urgent": {"type": "noul", "noul": 0.92}}))
         );
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&received[0].body).unwrap();
+        assert_eq!(body["state"], json!({"ticket": {"title": "Example"}}));
+        assert_eq!(body["model"], "jev-custom");
+        assert_eq!(body["questions"]["is_urgent"]["type"], "noul");
         server.verify().await;
     }
 }

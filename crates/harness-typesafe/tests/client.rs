@@ -129,6 +129,12 @@ fn criteria_aliases_are_usable_with_json_values() {
 fn diagnostics_redact_api_keys() {
     let key = "secret-key";
     assert!(!format!("{:?}", TypeSafeClientConfig::new(key)).contains(key));
+    let debug = format!(
+        "{:?}",
+        TypeSafeClientConfig::new(key)
+            .with_url("https://user:url-secret@example.test/v1/systemone")
+    );
+    assert!(!debug.contains("url-secret"));
 
     let error = TypeSafeError::ApiError {
         status: 401,

@@ -48,11 +48,14 @@ pub struct TypeSafeSection {
     /// Server-side API credential. Its Debug representation is always redacted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// Full System One endpoint URL. Its Debug representation is always redacted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 impl TypeSafeSection {
     fn is_default(&self) -> bool {
-        self.api_key.is_none()
+        self.api_key.is_none() && self.url.is_none()
     }
 }
 
@@ -61,6 +64,7 @@ impl fmt::Debug for TypeSafeSection {
         formatter
             .debug_struct("TypeSafeSection")
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("url", &self.url.as_ref().map(|_| "<redacted>"))
             .finish()
     }
 }
@@ -736,6 +740,7 @@ path = "/Users/test/vertebrae"
             r#"
 [typesafe]
 api_key = "typesafe-config-secret"
+url = "https://url-user:url-secret@example.test/v1/systemone"
 "#,
         )
         .unwrap();
@@ -744,8 +749,13 @@ api_key = "typesafe-config-secret"
             config.typesafe.api_key.as_deref(),
             Some("typesafe-config-secret")
         );
+        assert_eq!(
+            config.typesafe.url.as_deref(),
+            Some("https://url-user:url-secret@example.test/v1/systemone")
+        );
         let debug = format!("{config:?}");
         assert!(!debug.contains("typesafe-config-secret"));
+        assert!(!debug.contains("url-secret"));
         assert!(debug.contains("<redacted>"));
     }
 

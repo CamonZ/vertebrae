@@ -8,11 +8,12 @@ pub const DEFAULT_BASE_URL: &str = "https://api.typesafe.ai";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
-/// API keys are redacted from `Debug` output.
+/// API keys and URL credentials are redacted from `Debug` output.
 #[derive(Clone)]
 pub struct TypeSafeClientConfig {
     api_key: String,
     pub base_url: String,
+    endpoint_url: Option<String>,
     pub timeout: Duration,
     pub max_response_bytes: usize,
 }
@@ -22,7 +23,11 @@ impl fmt::Debug for TypeSafeClientConfig {
         formatter
             .debug_struct("TypeSafeClientConfig")
             .field("api_key", &"[REDACTED]")
-            .field("base_url", &self.base_url)
+            .field("base_url", &redacted_url(&self.base_url))
+            .field(
+                "endpoint_url",
+                &self.endpoint_url.as_ref().map(|_| "<redacted>"),
+            )
             .field("timeout", &self.timeout)
             .field("max_response_bytes", &self.max_response_bytes)
             .finish()
@@ -34,6 +39,7 @@ impl TypeSafeClientConfig {
         Self {
             api_key: api_key.into(),
             base_url: DEFAULT_BASE_URL.to_string(),
+            endpoint_url: None,
             timeout: DEFAULT_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
@@ -46,6 +52,13 @@ impl TypeSafeClientConfig {
 
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    /// Use a full System One endpoint URL instead of appending the default
+    /// `/v1/systemone` path to `base_url`.
+    pub fn with_url(mut self, url: impl Into<String>) -> Self {
+        self.endpoint_url = Some(url.into());
         self
     }
 
@@ -72,19 +85,12 @@ impl TypeSafeClientConfig {
             ));
         }
 
-        let base_url = Url::parse(&self.base_url)
-            .map_err(|_| invalid_configuration("base_url must be a valid URL"))?;
-        if !matches!(base_url.scheme(), "http" | "https")
-            || base_url.host_str().is_none()
-            || !base_url.username().is_empty()
-            || base_url.password().is_some()
-            || base_url.query().is_some()
-            || base_url.fragment().is_some()
-        {
-            return Err(invalid_configuration(
-                "base_url must use HTTP(S) without credentials, query, or fragment",
-            ));
+        if let Some(endpoint_url) = &self.endpoint_url {
+            validate_http_url(endpoint_url, "url")?;
+            return Ok(endpoint_url.clone());
         }
+
+        validate_http_url(&self.base_url, "base_url")?;
 
         Ok(format!(
             "{}/v1/systemone",
@@ -94,6 +100,31 @@ impl TypeSafeClientConfig {
 
     pub(crate) fn api_key(&self) -> &str {
         &self.api_key
+    }
+}
+
+fn validate_http_url(value: &str, name: &str) -> Result<(), TypeSafeError> {
+    let url = Url::parse(value)
+        .map_err(|_| invalid_configuration(format!("{name} must be a valid URL")))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(invalid_configuration(format!(
+            "{name} must use HTTP(S) without credentials, query, or fragment"
+        )));
+    }
+    Ok(())
+}
+
+fn redacted_url(value: &str) -> String {
+    if value.contains('@') || value.contains('?') || value.contains('#') {
+        "<redacted>".to_string()
+    } else {
+        value.to_string()
     }
 }
 

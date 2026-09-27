@@ -163,6 +163,7 @@ mod tests {
             },
             typesafe_api_key: None,
             typesafe_base_url: None,
+            typesafe_url: None,
         }
     }
 

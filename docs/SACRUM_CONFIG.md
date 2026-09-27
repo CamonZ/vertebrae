@@ -17,6 +17,7 @@ token = "<api-token>"
 
 [typesafe]
 api_key = "<typesafe-api-key>"
+url = "https://api.typesafe.ai/v1/systemone"
 
 [projects.vertebrae]
 id = "my-project-id"
@@ -41,6 +42,11 @@ path = "/Users/example/Code/vertebrae"
   Unix. The daemon redacts it from Debug output and diagnostics. Do not print or
   commit the key.
 
+- **url** (optional): Full TypeSafe System One HTTP(S) endpoint URL. Requests
+  POST to this URL exactly as configured; Vertebrae does not append a path.
+  Default: `https://api.typesafe.ai/v1/systemone`. URLs with credentials,
+  query strings, or fragments are rejected.
+
 `[projects.<slug>]`
 
 - **id** (required unless using `VTB_PROJECT_ID`): The project ID in Sacrum
@@ -55,9 +61,12 @@ path = "/Users/example/Code/vertebrae"
 - **VTB_TOKEN**: Overrides `[sacrum].token`
 - **VTB_PROJECT_ID**: Overrides path-based project resolution and uses the given Sacrum project ID directly
 - **TYPESAFE_API_KEY**: A nonblank value overrides `[typesafe].api_key` for the daemon. If unset or blank, the daemon uses the TOML value. If neither source has a usable key, TypeSafe requests report that configuration is missing.
+- **TYPESAFE_BASE_URL**: Overrides `[typesafe].url` and preserves the legacy
+  base URL behavior: Vertebrae appends `/v1/systemone` to this value. If it is
+  unset, the daemon uses `[typesafe].url`, then the default endpoint above.
 
-The daemon snapshots the resolved TypeSafe key at startup; changes to the TOML
-file or environment take effect after restarting it. The credential stays in
+The daemon snapshots the resolved TypeSafe settings at startup; changes to the
+TOML file or environment take effect after restarting it. The credential stays in
 daemon configuration and is not copied into task or workflow data, `AgentConfig`,
 or provider-neutral request configuration.
 
