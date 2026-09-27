@@ -694,6 +694,7 @@ mod tests {
                 },
             )]),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         };
 
@@ -740,6 +741,7 @@ mod tests {
             },
             projects: BTreeMap::new(),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         })
         .unwrap();
@@ -813,6 +815,7 @@ mod tests {
                 },
             )]),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         })
         .unwrap();
@@ -852,6 +855,7 @@ mod tests {
             },
             projects: BTreeMap::new(),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         })
         .unwrap();
@@ -906,6 +910,7 @@ mod tests {
             },
             projects: BTreeMap::new(),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         })
         .unwrap();

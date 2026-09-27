@@ -10,6 +10,7 @@
 use crate::error::{SacrumClientError, SacrumClientResult};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -33,8 +34,35 @@ pub struct VertebraeConfigFile {
     /// Per-project configuration keyed by slug
     #[serde(default)]
     pub projects: BTreeMap<String, ProjectSection>,
+    /// Optional server-owned provider configuration.
+    #[serde(default, skip_serializing_if = "TypeSafeSection::is_default")]
+    pub typesafe: TypeSafeSection,
     #[serde(default, skip_serializing_if = "ObservabilityConfig::is_default")]
     pub observability: ObservabilityConfig,
+}
+
+/// TypeSafe provider settings shared with the daemon at startup.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TypeSafeSection {
+    /// Server-side API credential. Its Debug representation is always redacted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+
+impl TypeSafeSection {
+    fn is_default(&self) -> bool {
+        self.api_key.is_none()
+    }
+}
+
+impl fmt::Debug for TypeSafeSection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TypeSafeSection")
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -603,6 +631,7 @@ mod tests {
                 ),
             ]),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         };
 
@@ -631,6 +660,7 @@ mod tests {
                 },
             )]),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         };
 
@@ -657,6 +687,7 @@ mod tests {
                 },
             )]),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         };
 
@@ -696,6 +727,26 @@ path = "/Users/test/vertebrae"
         let config: VertebraeConfigFile = toml::from_str(toml_str).unwrap();
         assert_eq!(config.sacrum.url, "https://vertebrae.dev");
         assert_eq!(config.sacrum.token.as_deref(), Some("sac_mytoken"));
+        assert!(config.typesafe.api_key.is_none());
+    }
+
+    #[test]
+    fn config_file_loads_typesafe_api_key_and_redacts_debug_output() {
+        let config: VertebraeConfigFile = toml::from_str(
+            r#"
+[typesafe]
+api_key = "typesafe-config-secret"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.typesafe.api_key.as_deref(),
+            Some("typesafe-config-secret")
+        );
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("typesafe-config-secret"));
+        assert!(debug.contains("<redacted>"));
     }
 
     #[test]
@@ -713,6 +764,7 @@ path = "/Users/test/vertebrae"
                 },
             )]),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         };
 
@@ -811,6 +863,7 @@ path = "/Users/test/other"
                 },
             )]),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         }
     }
@@ -899,6 +952,7 @@ path = "/Users/test/other"
             },
             projects: BTreeMap::new(),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
@@ -924,6 +978,7 @@ path = "/Users/test/other"
             },
             projects: BTreeMap::new(),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
@@ -1213,6 +1268,7 @@ path = "/Users/test/other"
                 },
             )]),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         };
 
@@ -1242,6 +1298,7 @@ path = "/Users/test/other"
                 },
             )]),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         }
     }
@@ -1304,6 +1361,7 @@ path = "/Users/test/other"
             },
             projects: BTreeMap::new(),
 
+            typesafe: Default::default(),
             observability: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config);

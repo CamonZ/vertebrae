@@ -214,7 +214,7 @@ pub fn find_provider_binary(provider: Provider, shell_path: &str) -> Result<Path
         Provider::Anthropic => find_claude_binary(shell_path),
         Provider::Openai => find_codex_binary(shell_path),
         Provider::Typesafe => Err(
-            "TypeSafe provider does not use a CLI executable; configure TYPESAFE_API_KEY"
+            "TypeSafe provider does not use a CLI executable; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY"
                 .to_string(),
         ),
     }

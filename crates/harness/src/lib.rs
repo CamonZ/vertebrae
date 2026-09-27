@@ -126,8 +126,17 @@ impl HarnessFactoryConfig {
     /// still be supplied by an embedding server and take precedence when the
     /// factory constructs a TypeSafe client.
     pub fn from_environment() -> Self {
+        Self::from_environment_with_typesafe_configured_api_key(None)
+    }
+
+    /// Capture environment configuration while using the shared app config as
+    /// the TypeSafe key fallback. A nonblank environment key takes precedence.
+    pub fn from_environment_with_typesafe_configured_api_key(
+        configured_api_key: Option<String>,
+    ) -> Self {
+        let environment_api_key = env::var("TYPESAFE_API_KEY").ok();
         Self {
-            typesafe_api_key: env::var("TYPESAFE_API_KEY").ok(),
+            typesafe_api_key: resolve_typesafe_api_key(configured_api_key, environment_api_key),
             typesafe_base_url: env::var("TYPESAFE_BASE_URL").ok(),
             ..Self::default()
         }
@@ -458,11 +467,20 @@ fn redacted_base_url(base_url: &Option<String>) -> Option<String> {
     })
 }
 
+fn resolve_typesafe_api_key(
+    configured_api_key: Option<String>,
+    environment_api_key: Option<String>,
+) -> Option<String> {
+    let nonblank = |value: String| (!value.trim().is_empty()).then_some(value);
+    environment_api_key
+        .and_then(nonblank)
+        .or_else(|| configured_api_key.and_then(nonblank))
+}
+
 fn map_typesafe_configuration_error(error: TypeSafeError) -> HarnessError {
     match error {
         TypeSafeError::MissingApiKey => HarnessError::Unavailable(
-            "TypeSafe provider API key is not configured; set TYPESAFE_API_KEY on the server"
-                .into(),
+            "TypeSafe provider API key is not configured; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY on the server".into(),
         ),
         TypeSafeError::InvalidConfiguration(message) => HarnessError::InvalidRequest(message),
         error => HarnessError::Unavailable(format!("TypeSafe provider is unavailable: {error}")),
@@ -556,6 +574,27 @@ mod tests {
 
     fn executable() -> PathBuf {
         std::env::current_exe().expect("the test executable should exist")
+    }
+
+    #[test]
+    fn typesafe_environment_key_overrides_config_and_blank_values_fall_back() {
+        assert_eq!(
+            resolve_typesafe_api_key(Some("toml-key".into()), Some("environment-key".into())),
+            Some("environment-key".into())
+        );
+        assert_eq!(
+            resolve_typesafe_api_key(Some("toml-key".into()), None),
+            Some("toml-key".into())
+        );
+        assert_eq!(
+            resolve_typesafe_api_key(Some("toml-key".into()), Some(" \t".into())),
+            Some("toml-key".into())
+        );
+        assert_eq!(
+            resolve_typesafe_api_key(None, Some("environment-key".into())),
+            Some("environment-key".into())
+        );
+        assert_eq!(resolve_typesafe_api_key(None, Some(" ".into())), None);
     }
 
     #[test]
