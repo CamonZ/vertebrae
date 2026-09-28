@@ -6,6 +6,9 @@
 //! - **Installed skills location** (`installed_skills_dir`) is
 //!   `data_dir()/skills`; [`provision_installed_skills_dir`] creates this root
 //!   without modifying any project or provider-specific directory.
+//! - **Agent-context docs location** (`installed_agent_context_dir`) is
+//!   `data_dir()/agent-context`; the GUI stages the embedded docs there for
+//!   local chat sessions to read.
 //! - **User-facing symlink location** (`bin_dir`) is `~/.local/bin` on every
 //!   Unix so the same `PATH` setup works everywhere.
 //! - **Daemon log directory** (`log_dir`) is fixed at
@@ -78,6 +81,18 @@ pub fn provision_installed_skills_dir() -> Result<PathBuf, InstallerError> {
         reason: error.to_string(),
     })?;
     Ok(path)
+}
+
+/// Return the root where the GUI stages the embedded agent-context docs.
+///
+/// Local chat sessions receive the root index with absolute links into this
+/// directory and read the linked docs on demand. The GUI replaces the whole
+/// directory on startup, so nothing else should write below it.
+///
+/// - macOS: `~/Library/Application Support/Vertebrae/agent-context`
+/// - Linux / other Unix: `~/.local/share/vertebrae/agent-context`
+pub fn installed_agent_context_dir() -> Result<PathBuf, InstallerError> {
+    Ok(data_dir()?.join("agent-context"))
 }
 
 /// Return the user-facing `bin` directory we symlink binaries into.
@@ -183,6 +198,16 @@ mod tests {
             data.join("bin"),
             "data_bin_dir should be data_dir()/bin"
         );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn installed_agent_context_dir_is_absolute_data_dir_plus_agent_context() {
+        let data = data_dir().expect("home dir resolvable in tests");
+        let docs = installed_agent_context_dir().expect("home dir resolvable in tests");
+
+        assert_eq!(docs, data.join("agent-context"));
+        assert!(docs.is_absolute(), "agent-context root should be absolute");
     }
 
     #[test]

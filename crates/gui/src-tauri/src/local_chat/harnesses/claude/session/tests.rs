@@ -634,6 +634,32 @@ async fn start_request_preserves_identity_resume_working_directory_model_and_rea
 }
 
 #[tokio::test]
+async fn start_request_carries_reference_instructions_and_agent_context_index() {
+    let test = test_adapter("backend-context");
+    let (runtime, _events) = LocalChatRuntime::capturing_for_tests();
+
+    test.adapter
+        .create_prepared_session(input("backend-context", None), runtime, prepared(None))
+        .await
+        .unwrap();
+
+    let requests = test.runtime_state.start_requests.lock().unwrap();
+    let instructions = requests[0]
+        .config
+        .developer_instructions
+        .as_deref()
+        .expect("Claude sessions receive developer instructions");
+    assert!(instructions.starts_with(crate::local_chat::CHAT_REFERENCE_INSTRUCTIONS));
+    assert!(instructions.contains("# Vertebrae agent context"));
+    let docs_root =
+        vertebrae_installer::installed_agent_context_dir().expect("home dir resolvable in tests");
+    assert!(instructions.contains(&format!(
+        "(<{}>)",
+        docs_root.join("permissions.md").display()
+    )));
+}
+
+#[tokio::test]
 async fn initial_prompt_and_subsequent_messages_use_the_same_session_handle() {
     let test = test_adapter("backend-turns");
     let (runtime, _events) = LocalChatRuntime::capturing_for_tests();

@@ -252,6 +252,16 @@ pub fn run() {
                 Err(error) => log::warn!("[STARTUP] Failed to stage managed skills: {error}"),
             }
 
+            // Local chat sessions receive the agent-context root index with
+            // absolute links into this staged copy and read docs on demand.
+            match provision_agent_context_docs() {
+                Ok((root, installed)) => log::info!(
+                    "[STARTUP] Staged {installed} agent-context docs in {}",
+                    root.display()
+                ),
+                Err(error) => log::warn!("[STARTUP] Failed to stage agent-context docs: {error}"),
+            }
+
             // Initialize project configuration
             let project_config = ProjectConfig::new().expect("Failed to initialize project config");
             let current_slug = project_config.get_current_project();
@@ -392,6 +402,13 @@ fn provision_managed_skills() -> Result<(PathBuf, usize), String> {
         vertebrae_installer::provision_installed_skills_dir().map_err(|error| error.to_string())?;
     let installed = vertebrae_skills_assets::install_embedded_skills(&root)
         .map_err(|error| error.to_string())?;
+    Ok((root, installed))
+}
+
+fn provision_agent_context_docs() -> Result<(PathBuf, usize), String> {
+    let root =
+        vertebrae_installer::installed_agent_context_dir().map_err(|error| error.to_string())?;
+    let installed = vertebrae_agent_context::install(&root).map_err(|error| error.to_string())?;
     Ok((root, installed))
 }
 

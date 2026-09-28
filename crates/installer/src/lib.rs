@@ -40,8 +40,8 @@ pub use binary::{BinaryTransaction, install_binary, uninstall_binary};
 pub use claude_plugin_dir::{ClaudePluginDirResolution, resolve_claude_plugin_dir};
 pub use error::InstallerError;
 pub use paths::{
-    bin_dir, data_bin_dir, data_dir, installed_skills_dir, log_dir, provision_installed_skills_dir,
-    symlink_path,
+    bin_dir, data_bin_dir, data_dir, installed_agent_context_dir, installed_skills_dir, log_dir,
+    provision_installed_skills_dir, symlink_path,
 };
 pub use service::{
     LAUNCHD_LABEL, SYSTEMD_UNIT_NAME, ServiceInstallReport, ServiceRelaunch, ServiceStatus,
