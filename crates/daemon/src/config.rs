@@ -8,7 +8,10 @@ use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+use vertebrae_core::{ProviderId, ProviderProfile};
 use vertebrae_sacrum_client::{VertebraeConfigFile, config_path, load_config_file};
 
 const DAEMON_CONFIG_FILENAME: &str = "daemon.toml";
@@ -136,6 +139,8 @@ pub struct ResolvedConfig {
     pub api_token: Option<String>,
     pub typesafe_api_key: Option<String>,
     pub typesafe_url: Option<String>,
+    /// Custom `[providers.<id>]` profiles; Debug output redacts secrets.
+    pub provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
     pub daemon_identity: Option<DaemonIdentity>,
     pub projects: Vec<ProjectEntry>,
 }
@@ -153,6 +158,7 @@ impl fmt::Debug for ResolvedConfig {
                 "typesafe_url",
                 &self.typesafe_url.as_ref().map(|_| "<redacted>"),
             )
+            .field("provider_profiles", &self.provider_profiles)
             .field("daemon_identity", &self.daemon_identity)
             .field("projects", &self.projects)
             .finish()
@@ -455,6 +461,7 @@ impl ResolvedConfig {
             api_token: config.sacrum.token.clone(),
             typesafe_api_key: config.typesafe.api_key.clone(),
             typesafe_url: config.typesafe.url.clone(),
+            provider_profiles: config.providers.clone(),
             daemon_identity,
             projects,
         })
@@ -483,6 +490,7 @@ mod tests {
             )]),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         }
     }
@@ -529,7 +537,17 @@ mod tests {
         config.typesafe.url =
             Some("https://config-user:typesafe-url-secret@example.test/v1/systemone".into());
 
+        config.providers.insert(
+            ProviderId::new("openrouter").unwrap(),
+            ProviderProfile {
+                api_key: Some("provider-config-secret".into()),
+                models: vec!["kimi-k2".into()],
+                ..ProviderProfile::new(vertebrae_core::StepHarness::Claude)
+            },
+        );
+
         let resolved = ResolvedConfig::from_config_file(&config).unwrap();
+        assert_eq!(resolved.provider_profiles, config.providers);
         assert_eq!(
             resolved.typesafe_api_key.as_deref(),
             Some("typesafe-config-secret")
@@ -541,6 +559,7 @@ mod tests {
         let debug = format!("{resolved:?}");
         assert!(!debug.contains("typesafe-config-secret"));
         assert!(!debug.contains("typesafe-url-secret"));
+        assert!(!debug.contains("provider-config-secret"));
         assert!(debug.contains("<redacted>"));
     }
 

@@ -120,7 +120,8 @@ settings. It accepts `claude`, `codex`, or `typesafe`; omitting it keeps
 Sacrum's configured default and provider backfill behavior. TypeSafe supports
 `structured_inference` steps. Claude and Codex run `llm_inference` steps.
 `--provider` and `--model` continue to configure the request, and do not set
-the step harness.
+the step harness. `--provider` accepts a built-in provider or a custom
+`[providers.<id>]` ID; see [Harness and Provider Settings](#harness-and-provider-settings).
 
 `vtb step list` takes exactly one required `<workflow>` argument and no
 command-specific flags. `vtb step list --help` shows only the global `--json`
@@ -215,11 +216,11 @@ request with no property changes before reporting success.
 | `--clear-prompt` | | Explicitly clear a retained prompt |
 | `--agent-config <JSON>` | | Replace/overlay the full agent config from a JSON string |
 | `--model <MODEL>` | `-m` | Set `config.model` on `structured_inference` steps, otherwise `agent_config.model` |
-| `--provider <PROVIDER>` | | Set `config.provider` on `structured_inference` steps, otherwise `agent_config.provider` (`anthropic`/`claude` or `openai`/`codex`); alias `--model-provider` |
+| `--provider <PROVIDER>` | | Set `config.provider` on `structured_inference` steps, otherwise `agent_config.provider`: a built-in provider (`anthropic`/`claude` or `openai`/`codex`) or a custom `[providers.<id>]` ID; alias `--model-provider` |
 | `--state <JSON\|STRING>` | | Replace a `structured_inference` step's state; JSON or string template, or `@path` |
 | `--questions <JSON>` | | Replace a `structured_inference` step's question map, inline or `@path` |
 | `--codex-model-provider <PROVIDER>` | | Set `agent_config.codex_model_provider`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
-| `--reasoning-effort <EFFORT>` | | Set `agent_config.reasoning_effort`; valid values are `low`, `medium`, `high`, and `xhigh`; only valid when the resulting provider is OpenAI/Codex |
+| `--reasoning-effort <EFFORT>` | | Set `agent_config.reasoning_effort`; valid values are `low`, `medium`, `high`, and `xhigh`; only valid on the Codex harness |
 | `--speed-tier <TIER>` | | Set `agent_config.speed_tier`; values are `default` and `fast` |
 | `--personality <STYLE>` | | Set the provider style identifier; Codex accepts `none`, `friendly`, and `pragmatic` when the selected model advertises support |
 | `--verbosity <LEVEL>` | | Set `agent_config.verbosity` to `low`, `medium`, or `high`; alias `--output-verbosity`; currently valid for OpenAI/Codex |
@@ -255,9 +256,12 @@ configuration errors are validated by Sacrum and retain their nested field
 path in the CLI diagnostic. A route may be created without configuration as a
 non-runnable draft, and `--clear-route-config` returns a configured route to
 that draft state.
-Provider/model mismatches, Codex upstream provider usage when the resulting
-provider is Anthropic, Anthropic reasoning effort, and Anthropic output
-verbosity are rejected by the CLI before the step is updated.
+Built-in provider/model mismatches, Codex upstream provider usage when the
+resulting provider is Anthropic, and reasoning effort or output verbosity on a
+non-Codex harness are rejected by the CLI before the step is updated. For a
+custom provider the CLI applies harness rules only when the step selects a
+harness explicitly; the executing daemon validates the rest against its
+profile.
 If a full UUID reaches `step update` but no matching step exists, the command
 fails with `Step not found: <id>`. If an 8-character hex short ID cannot be
 resolved, the shared ID resolver reports `step with prefix '<id>' not found`.
@@ -316,7 +320,7 @@ matching step exists, the command fails with `Step not found: <id>`. If an
 | `prompt` | Template sent to the executing agent (supports `{{task.id}}` interpolation) |
 | `model` | AI model shortcut (sonnet, haiku, opus) |
 | `agent-config` | Full LLM config JSON (model, budget, tools, permissions) |
-| `provider` | Built-in execution provider shortcut (`anthropic`/`claude` or `openai`/`codex`); `--model-provider` is an alias |
+| `provider` | Provider shortcut: built-in (`anthropic`/`claude` or `openai`/`codex`) or a custom `[providers.<id>]` ID; `--model-provider` is an alias |
 | `codex-model-provider` | Codex upstream provider shortcut from `~/.codex/config.toml`; `--codex-provider` is an alias |
 | `reasoning-effort` | OpenAI/Codex reasoning effort (`low`, `medium`, `high`, `xhigh`) |
 | `agents` | Agent file paths for AI-assisted execution |
@@ -498,10 +502,35 @@ it does not interpret this setting or create artifacts.
 
 `--harness` selects the runtime for a step. Its exact values are `claude`,
 `codex`, and `typesafe`. When the field is omitted, Sacrum's configured default
-and provider-backfill behavior remain in effect; the daemon also retains its
-legacy `agent_config.provider` fallback for old payloads. `--provider` and
-`--model` configure the request and model separately. Explicit provider/request
-settings must be compatible with the selected runtime.
+and provider-backfill behavior remain in effect; the daemon then derives the
+harness from `agent_config.provider`. `--provider` and `--model` configure the
+provider and model separately. Explicit provider/request settings must be
+compatible with the selected runtime.
+
+`--provider` names either a built-in provider (`anthropic`, `openai`,
+`typesafe`) or a custom provider declared under `[providers.<id>]` in the
+executing machine's config.toml (see
+[SACRUM_CONFIG.md](../SACRUM_CONFIG.md)). A custom provider binds to one
+harness, supplies its endpoint and credential, and lists the exact models it
+serves:
+
+```toml
+[providers.openrouter]
+harness = "claude"
+base_url = "https://openrouter.ai/api"
+api_key_env = "OPENROUTER_API_KEY"
+models = ["moonshotai/kimi-k2"]
+```
+
+```bash
+vtb step add "coding" -w <workflow> --harness claude \
+  --provider openrouter --model moonshotai/kimi-k2
+```
+
+The daemon fails the execution with a descriptive error when the provider is
+not configured on that machine, when its harness differs from the step's
+`--harness`, or when the model is not in its `models` list. It reports the
+provider ID and harness on the execution.
 
 | `--harness` | Runtime | Binary/transport | Provider-binary lookup env var |
 |-----------|---------|------------------|--------------------------------|
@@ -522,9 +551,10 @@ checking the provider-specific environment variable first, then the user's login
 `PATH`, then well-known install locations (`~/.local/bin`, `/usr/local/bin`,
 `/opt/homebrew/bin`).
 
-> **Authentication is the harness's job, not Vertebrae's.** The daemon does not
-> read `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or any other vendor credential
-> directly. Each provider authenticates through its own CLI's existing
+> **For built-in providers, authentication is the harness's job, not
+> Vertebrae's.** The daemon does not read `ANTHROPIC_API_KEY`,
+> `OPENAI_API_KEY`, or any other vendor credential directly. (Custom providers
+> are the exception: their `[providers.<id>]` entry names the credential.) Each provider authenticates through its own CLI's existing
 > mechanism — typically `claude login` for Claude Code and `codex login` (or
 > the equivalent vendor env var the harness itself reads) for Codex. Run the
 > harness once interactively, confirm it works standalone, then point

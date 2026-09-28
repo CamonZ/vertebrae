@@ -1,19 +1,23 @@
 //! Provider selection and pre-launch validation for daemon harness runs.
 //!
 //! Provider-specific launch arguments and protocols live in the reusable
-//! harness crates. The daemon only selects the requested provider and reports
+//! harness crates. The daemon only selects the requested provider (built-in or
+//! a custom `[providers.<id>]` profile from its startup config) and reports
 //! configuration or startup-resolution errors to the workflow.
 
-use vertebrae_core::Provider;
 use vertebrae_core::models::AgentConfig;
+use vertebrae_core::{ProviderId, StepHarness};
+use vertebrae_harness::ResolvedProvider;
+use vertebrae_harness_core::HarnessError;
 
 use crate::actors::step_executor::StepExecutorConfig;
+use crate::capabilities::DaemonCapabilities;
 
 #[derive(Debug)]
 pub enum ProviderResolutionError {
     InvalidProviderModel(String),
     InvalidReasoningEffort(String),
-    MissingProviderBinary { provider: Provider, hint: String },
+    MissingProviderBinary { harness: StepHarness, hint: String },
 }
 
 impl std::fmt::Display for ProviderResolutionError {
@@ -22,9 +26,9 @@ impl std::fmt::Display for ProviderResolutionError {
             Self::InvalidProviderModel(message) | Self::InvalidReasoningEffort(message) => {
                 f.write_str(message)
             }
-            Self::MissingProviderBinary { provider, hint } => write!(
+            Self::MissingProviderBinary { harness, hint } => write!(
                 f,
-                "{provider} provider requested but its CLI binary was not resolved at daemon startup. {hint}"
+                "{harness} harness requested but its CLI binary was not resolved at daemon startup. {hint}"
             ),
         }
     }
@@ -32,14 +36,43 @@ impl std::fmt::Display for ProviderResolutionError {
 
 impl std::error::Error for ProviderResolutionError {}
 
-/// Resolve which built-in provider should run this step. `None` preserves the
-/// historical default of Anthropic.
-pub fn resolve_provider(config: &StepExecutorConfig) -> Provider {
-    resolve_provider_from_agent_config(&config.step_config.agent_config)
+/// Resolve which provider and harness should run this step, using the custom
+/// provider profiles captured at daemon startup.
+pub fn resolve_provider(config: &StepExecutorConfig) -> Result<ResolvedProvider, HarnessError> {
+    resolve_provider_from_agent_config(
+        config.step_config.harness,
+        &config.step_config.agent_config,
+        &config.capabilities,
+    )
 }
 
-pub fn resolve_provider_from_agent_config(agent_config: &AgentConfig) -> Provider {
-    agent_config.provider.unwrap_or(Provider::Anthropic)
+pub fn resolve_provider_from_agent_config(
+    harness: Option<StepHarness>,
+    agent_config: &AgentConfig,
+    capabilities: &DaemonCapabilities,
+) -> Result<ResolvedProvider, HarnessError> {
+    vertebrae_harness::resolve_provider(harness, agent_config, &capabilities.provider_profiles)
+}
+
+/// The provider ID and harness the daemon reports on execution status
+/// updates. When resolution fails (for example an unknown custom provider)
+/// the requested provider ID is still reported, with the explicit step
+/// harness if any, so the failed execution records what was asked for.
+pub fn reported_provider_and_harness(
+    harness: Option<StepHarness>,
+    agent_config: &AgentConfig,
+    capabilities: &DaemonCapabilities,
+) -> (ProviderId, Option<StepHarness>) {
+    match resolve_provider_from_agent_config(harness, agent_config, capabilities) {
+        Ok(resolved) => (resolved.id, Some(resolved.harness)),
+        Err(_) => (
+            agent_config
+                .provider
+                .clone()
+                .unwrap_or_else(ProviderId::anthropic),
+            harness,
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -47,29 +80,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn missing_provider_defaults_to_anthropic() {
-        assert_eq!(
-            resolve_provider_from_agent_config(&AgentConfig::default()),
-            Provider::Anthropic
-        );
-    }
-
-    #[test]
-    fn explicit_openai_provider_is_preserved() {
-        assert_eq!(
-            resolve_provider_from_agent_config(&AgentConfig::new().with_provider(Provider::Openai)),
-            Provider::Openai
-        );
-    }
-
-    #[test]
-    fn missing_binary_error_includes_provider_and_hint() {
+    fn missing_binary_error_includes_harness_and_hint() {
         let error = ProviderResolutionError::MissingProviderBinary {
-            provider: Provider::Openai,
+            harness: StepHarness::Codex,
             hint: "Set CODEX_PATH".into(),
         };
         let rendered = error.to_string();
-        assert!(rendered.contains("openai"));
+        assert!(rendered.contains("codex"));
         assert!(rendered.contains("CODEX_PATH"));
     }
 }

@@ -237,7 +237,8 @@ fn test_adapter(session_id: &str) -> TestAdapter {
         move |config, options| {
             provider_configs.lock().unwrap().push(config);
             Ok(vertebrae_harness::HarnessRuntimeInstance {
-                provider: Provider::Anthropic,
+                provider: ProviderId::anthropic(),
+                harness: vertebrae_core::StepHarness::Claude,
                 runtime: Arc::new(MockRuntime {
                     state: runtime_state.clone(),
                     handle: handle.clone(),
@@ -265,6 +266,7 @@ fn input(session_id: &str, initial_prompt: Option<&str>) -> HarnessCreateSession
         speed_tier: None,
         permission_mode: Some(PermissionMode::Plan),
         personality: None,
+        provider: None,
     }
 }
 

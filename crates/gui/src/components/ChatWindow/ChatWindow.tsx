@@ -210,6 +210,7 @@ export function ChatWindow({
           harnessCatalog={chat.harnessCatalog}
           visibleHarness={chat.visibleHarness}
           providerOptions={chat.providerOptions}
+          selectedProviderId={chat.selectedProviderId}
           supportedModelIds={chat.supportedModelIds}
           reasoningEfforts={chat.reasoningEfforts}
           supportedReasoningEffortIds={chat.supportedReasoningEffortIds}

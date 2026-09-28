@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use vertebrae_core::Provider;
+use vertebrae_core::StepHarness;
 
 /// Resolved provider binaries (best-effort, per-startup).
 ///
@@ -22,13 +22,13 @@ pub struct ProviderDiscoveryDiagnostics {
 }
 
 impl ProviderBinaries {
-    /// Return the resolved binary for `provider`, or `None` if it was not
+    /// Return the resolved binary for `harness`, or `None` if it was not
     /// found at daemon startup.
-    pub fn get(&self, provider: Provider) -> Option<&Path> {
-        match provider {
-            Provider::Anthropic => self.anthropic.as_deref(),
-            Provider::Openai => self.openai.as_deref(),
-            Provider::Typesafe => None,
+    pub fn get(&self, harness: StepHarness) -> Option<&Path> {
+        match harness {
+            StepHarness::Claude => self.anthropic.as_deref(),
+            StepHarness::Codex => self.openai.as_deref(),
+            StepHarness::Typesafe => None,
         }
     }
 }
@@ -52,7 +52,7 @@ pub fn resolve_all_provider_binaries_with_diagnostics(
         Ok(path) => (Some(path), None),
         Err(err) => {
             tracing::warn!(
-                provider = %Provider::Anthropic,
+                harness = %StepHarness::Claude,
                 error = %err,
                 "Anthropic provider binary not resolved at startup; steps requesting it will fail"
             );
@@ -63,7 +63,7 @@ pub fn resolve_all_provider_binaries_with_diagnostics(
         Ok(path) => (Some(path), None),
         Err(err) => {
             tracing::warn!(
-                provider = %Provider::Openai,
+                harness = %StepHarness::Codex,
                 error = %err,
                 "OpenAI provider binary not resolved at startup; steps requesting it will fail"
             );
@@ -205,15 +205,15 @@ pub fn find_codex_binary(shell_path: &str) -> Result<PathBuf, String> {
     find_binary(&CODEX_SPEC, shell_path)
 }
 
-/// Find the binary for a built-in [`Provider`].
+/// Find the CLI binary for a [`StepHarness`].
 ///
-/// Errors are scoped to the requested provider so a user choosing OpenAI
+/// Errors are scoped to the requested harness so a user choosing Codex
 /// gets a Codex-specific error instead of a Claude-specific one.
-pub fn find_provider_binary(provider: Provider, shell_path: &str) -> Result<PathBuf, String> {
-    match provider {
-        Provider::Anthropic => find_claude_binary(shell_path),
-        Provider::Openai => find_codex_binary(shell_path),
-        Provider::Typesafe => Err(
+pub fn find_provider_binary(harness: StepHarness, shell_path: &str) -> Result<PathBuf, String> {
+    match harness {
+        StepHarness::Claude => find_claude_binary(shell_path),
+        StepHarness::Codex => find_codex_binary(shell_path),
+        StepHarness::Typesafe => Err(
             "TypeSafe provider does not use a CLI executable; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY"
                 .to_string(),
         ),
@@ -360,7 +360,7 @@ mod tests {
         let _c = EnvGuard::capture("CODEX_PATH");
         g.set("/bin/ls");
 
-        let result = find_provider_binary(Provider::Anthropic, "/usr/bin:/bin");
+        let result = find_provider_binary(StepHarness::Claude, "/usr/bin:/bin");
         assert_eq!(result.unwrap(), PathBuf::from("/bin/ls"));
     }
 
@@ -371,7 +371,7 @@ mod tests {
         let g = EnvGuard::capture("CODEX_PATH");
         g.set("/bin/ls");
 
-        let result = find_provider_binary(Provider::Openai, "/usr/bin:/bin");
+        let result = find_provider_binary(StepHarness::Codex, "/usr/bin:/bin");
         assert_eq!(result.unwrap(), PathBuf::from("/bin/ls"));
     }
 

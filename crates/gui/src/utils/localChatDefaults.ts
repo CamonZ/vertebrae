@@ -3,11 +3,22 @@ import type {
   LocalChatHarnessCatalog,
   LocalChatHarnessInfo,
   LocalChatHarnessKind,
+  LocalChatProviderInfo,
   PermissionMode,
 } from "../bindings";
 
 export const LOCAL_CHAT_DEFAULTS_STORAGE_KEY =
+  "vertebrae.local-chat-provider-defaults.v2";
+/** Pre-provider defaults keyed by harness; migrated on first read. */
+export const LEGACY_LOCAL_CHAT_DEFAULTS_STORAGE_KEY =
   "vertebrae.local-chat-harness-defaults.v1";
+
+/** Built-in provider that runs on each local chat harness. */
+export const BUILTIN_PROVIDER_BY_HARNESS: Record<LocalChatHarnessKind, string> =
+  {
+    claude: "anthropic",
+    codex: "openai",
+  };
 
 export interface LocalChatHarnessDefaults {
   modelId?: string;
@@ -17,36 +28,37 @@ export interface LocalChatHarnessDefaults {
   personality?: string;
 }
 
+/** A provider choice plus the harness it runs on. */
+export interface LocalChatProviderRef {
+  id: string;
+  harness: LocalChatHarnessKind;
+}
+
+/** Saved chat defaults keyed by provider ID. */
 export type LocalChatDefaults = Partial<
-  Record<LocalChatHarnessKind, LocalChatHarnessDefaults>
+  Record<string, LocalChatHarnessDefaults>
 >;
 
 interface LocalChatDefaultsState {
   defaults: LocalChatDefaults;
-  defaultHarness: LocalChatHarnessKind | null;
+  defaultProvider: LocalChatProviderRef | null;
   storageWarning: string | null;
-  setDefaultHarness: (harness: LocalChatHarnessKind | null) => void;
-  setModelDefault: (
-    harness: LocalChatHarnessKind,
-    modelId: string | null
-  ) => void;
+  setDefaultProvider: (provider: LocalChatProviderRef | null) => void;
+  setModelDefault: (providerId: string, modelId: string | null) => void;
   setReasoningEffortDefault: (
-    harness: LocalChatHarnessKind,
+    providerId: string,
     reasoningEffort: string | null
   ) => void;
-  setSpeedTierDefault: (
-    harness: LocalChatHarnessKind,
-    speedTier: string | null
-  ) => void;
+  setSpeedTierDefault: (providerId: string, speedTier: string | null) => void;
   setPermissionDefault: (
-    harness: LocalChatHarnessKind,
+    providerId: string,
     permissionMode: PermissionMode | null
   ) => void;
   setPersonalityDefault: (
-    harness: LocalChatHarnessKind,
+    providerId: string,
     personality: string | null
   ) => void;
-  resetHarness: (harness: LocalChatHarnessKind) => void;
+  resetProvider: (providerId: string) => void;
 }
 
 const HARNESS_KINDS: LocalChatHarnessKind[] = ["claude", "codex"];
@@ -78,94 +90,133 @@ function isSpeedTier(value: unknown): value is (typeof SPEED_TIERS)[number] {
   return typeof value === "string" && SPEED_TIERS.includes(value as never);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/** The provider a session or saved preference refers to. */
+export function sessionProviderId(session: {
+  harness: LocalChatHarnessKind;
+  providerId?: string | null;
+}): string {
+  return session.providerId?.trim() || BUILTIN_PROVIDER_BY_HARNESS[session.harness];
+}
+
+function readProviderDefaults(value: unknown): LocalChatHarnessDefaults | null {
+  if (!isRecord(value)) return null;
+  const trimmed = (candidate: unknown) =>
+    typeof candidate === "string" && candidate.trim()
+      ? candidate.trim()
+      : undefined;
+  const defaults: LocalChatHarnessDefaults = {
+    modelId: trimmed(value.modelId),
+    reasoningEffort: trimmed(value.reasoningEffort),
+    speedTier: isSpeedTier(value.speedTier) ? value.speedTier : undefined,
+    permissionMode: isPermissionMode(value.permissionMode)
+      ? value.permissionMode
+      : undefined,
+    personality: trimmed(value.personality),
+  };
+  return Object.values(defaults).some(Boolean) ? defaults : null;
+}
+
+function readProviderRef(value: unknown): LocalChatProviderRef | null {
+  if (!isRecord(value)) return null;
+  return typeof value.id === "string" &&
+    value.id.trim() &&
+    isHarnessKind(value.harness)
+    ? { id: value.id.trim(), harness: value.harness }
+    : null;
+}
+
+/** Map harness-keyed v1 defaults onto their built-in providers. */
+function migrateLegacyDefaults(parsed: Record<string, unknown>): {
+  defaults: LocalChatDefaults;
+  defaultProvider: LocalChatProviderRef | null;
+} {
+  const storedHarnesses = isRecord(parsed.harnesses) ? parsed.harnesses : parsed;
+  const defaults: LocalChatDefaults = {};
+  for (const [harness, value] of Object.entries(storedHarnesses)) {
+    if (!isHarnessKind(harness)) continue;
+    const providerDefaults = readProviderDefaults(value);
+    if (providerDefaults) {
+      defaults[BUILTIN_PROVIDER_BY_HARNESS[harness]] = providerDefaults;
+    }
+  }
+  const defaultProvider = isHarnessKind(parsed.defaultHarness)
+    ? {
+        id: BUILTIN_PROVIDER_BY_HARNESS[parsed.defaultHarness],
+        harness: parsed.defaultHarness,
+      }
+    : null;
+  return { defaults, defaultProvider };
+}
+
 function readStoredDefaults(): {
   defaults: LocalChatDefaults;
-  defaultHarness: LocalChatHarnessKind | null;
+  defaultProvider: LocalChatProviderRef | null;
   storageWarning: string | null;
 } {
+  const empty = { defaults: {}, defaultProvider: null };
   if (typeof window === "undefined") {
-    return { defaults: {}, defaultHarness: null, storageWarning: null };
+    return { ...empty, storageWarning: null };
   }
 
   try {
     const raw = window.localStorage.getItem(LOCAL_CHAT_DEFAULTS_STORAGE_KEY);
     if (!raw) {
-      return { defaults: {}, defaultHarness: null, storageWarning: null };
+      const legacy = window.localStorage.getItem(
+        LEGACY_LOCAL_CHAT_DEFAULTS_STORAGE_KEY
+      );
+      if (!legacy) return { ...empty, storageWarning: null };
+      const parsedLegacy: unknown = JSON.parse(legacy);
+      if (!isRecord(parsedLegacy)) {
+        return {
+          ...empty,
+          storageWarning: "Saved defaults were invalid; using provider defaults.",
+        };
+      }
+      return { ...migrateLegacyDefaults(parsedLegacy), storageWarning: null };
     }
     const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (!isRecord(parsed)) {
       return {
-        defaults: {},
-        defaultHarness: null,
-        storageWarning: "Saved defaults were invalid; using harness defaults.",
+        ...empty,
+        storageWarning: "Saved defaults were invalid; using provider defaults.",
       };
     }
 
-    const parsedRecord = parsed as Record<string, unknown>;
-    const storedHarnesses =
-      parsedRecord.harnesses &&
-      typeof parsedRecord.harnesses === "object" &&
-      !Array.isArray(parsedRecord.harnesses)
-        ? parsedRecord.harnesses
-        : parsed;
     const defaults: LocalChatDefaults = {};
-    for (const [harness, value] of Object.entries(storedHarnesses)) {
-      if (!isHarnessKind(harness) || !value || typeof value !== "object") {
-        continue;
-      }
-      const record = value as Record<string, unknown>;
-      const modelId =
-        typeof record.modelId === "string" && record.modelId.trim()
-          ? record.modelId.trim()
-          : undefined;
-      const reasoningEffort =
-        typeof record.reasoningEffort === "string" &&
-        record.reasoningEffort.trim()
-          ? record.reasoningEffort.trim()
-          : undefined;
-      const speedTier = isSpeedTier(record.speedTier)
-        ? record.speedTier
-        : undefined;
-      const permissionMode = isPermissionMode(record.permissionMode)
-        ? record.permissionMode
-        : undefined;
-      const personality =
-        typeof record.personality === "string" && record.personality.trim()
-          ? record.personality.trim()
-          : undefined;
-      if (modelId || reasoningEffort || speedTier || permissionMode || personality) {
-        defaults[harness] = {
-          modelId,
-          reasoningEffort,
-          speedTier,
-          permissionMode,
-          personality,
-        };
+    const storedProviders = isRecord(parsed.providers) ? parsed.providers : {};
+    for (const [providerId, value] of Object.entries(storedProviders)) {
+      const providerDefaults = readProviderDefaults(value);
+      if (providerId.trim() && providerDefaults) {
+        defaults[providerId.trim()] = providerDefaults;
       }
     }
-    const defaultHarness = isHarnessKind(parsedRecord.defaultHarness)
-      ? parsedRecord.defaultHarness
-      : null;
-    return { defaults, defaultHarness, storageWarning: null };
+    return {
+      defaults,
+      defaultProvider: readProviderRef(parsed.defaultProvider),
+      storageWarning: null,
+    };
   } catch {
     return {
-      defaults: {},
-      defaultHarness: null,
+      ...empty,
       storageWarning:
-        "Saved defaults could not be read; using harness defaults.",
+        "Saved defaults could not be read; using provider defaults.",
     };
   }
 }
 
 function writeStoredDefaults(
   defaults: LocalChatDefaults,
-  defaultHarness: LocalChatHarnessKind | null
+  defaultProvider: LocalChatProviderRef | null
 ): string | null {
   if (typeof window === "undefined") return null;
   try {
     window.localStorage.setItem(
       LOCAL_CHAT_DEFAULTS_STORAGE_KEY,
-      JSON.stringify({ defaultHarness, harnesses: defaults })
+      JSON.stringify({ defaultProvider, providers: defaults })
     );
     return null;
   } catch {
@@ -175,17 +226,17 @@ function writeStoredDefaults(
   }
 }
 
-function updateHarnessDefaults(
+function updateProviderDefaults(
   defaults: LocalChatDefaults,
-  harness: LocalChatHarnessKind,
+  providerId: string,
   update: (current: LocalChatHarnessDefaults) => LocalChatHarnessDefaults
 ): LocalChatDefaults {
-  const nextHarness = update(defaults[harness] ?? {});
+  const nextProvider = update(defaults[providerId] ?? {});
   const next = { ...defaults };
-  if (Object.keys(nextHarness).length === 0) {
-    delete next[harness];
+  if (Object.keys(nextProvider).length === 0) {
+    delete next[providerId];
   } else {
-    next[harness] = nextHarness;
+    next[providerId] = nextProvider;
   }
   return next;
 }
@@ -193,116 +244,89 @@ function updateHarnessDefaults(
 export const useLocalChatDefaultsStore = create<LocalChatDefaultsState>(
   (set) => {
     const initial = readStoredDefaults();
+    const setField =
+      (
+        field: keyof LocalChatHarnessDefaults,
+        normalize: (value: string | null) => string | undefined
+      ) =>
+      (providerId: string, value: string | null) =>
+        set((state) => {
+          const defaults = updateProviderDefaults(
+            state.defaults,
+            providerId,
+            (current) => {
+              const next = { ...current } as Record<string, string | undefined>;
+              const normalized = normalize(value);
+              if (normalized) next[field] = normalized;
+              else delete next[field];
+              return next as LocalChatHarnessDefaults;
+            }
+          );
+          return {
+            defaults,
+            storageWarning: writeStoredDefaults(defaults, state.defaultProvider),
+          };
+        });
+    const trimmed = (value: string | null) => value?.trim() || undefined;
     return {
       defaults: initial.defaults,
-      defaultHarness: initial.defaultHarness,
+      defaultProvider: initial.defaultProvider,
       storageWarning: initial.storageWarning,
-      setModelDefault: (harness, modelId) =>
+      setModelDefault: setField("modelId", trimmed),
+      setReasoningEffortDefault: setField("reasoningEffort", trimmed),
+      setSpeedTierDefault: setField("speedTier", (value) =>
+        isSpeedTier(value) ? value : undefined
+      ),
+      setPermissionDefault: (providerId, permissionMode) =>
+        setField("permissionMode", (value) =>
+          isPermissionMode(value) ? value : undefined
+        )(providerId, permissionMode),
+      setPersonalityDefault: setField("personality", trimmed),
+      resetProvider: (providerId) =>
         set((state) => {
-          const defaults = updateHarnessDefaults(
-            state.defaults,
-            harness,
-            (current) => {
-              const next = { ...current };
-              if (modelId?.trim()) next.modelId = modelId.trim();
-              else delete next.modelId;
-              return next;
-            }
-          );
-          return {
-            defaults,
-            storageWarning: writeStoredDefaults(defaults, state.defaultHarness),
-          };
-        }),
-      setReasoningEffortDefault: (harness, reasoningEffort) =>
-        set((state) => {
-          const defaults = updateHarnessDefaults(
-            state.defaults,
-            harness,
-            (current) => {
-              const next = { ...current };
-              if (reasoningEffort?.trim()) {
-                next.reasoningEffort = reasoningEffort.trim();
-              } else {
-                delete next.reasoningEffort;
-              }
-              return next;
-            }
-          );
-          return {
-            defaults,
-            storageWarning: writeStoredDefaults(defaults, state.defaultHarness),
-          };
-        }),
-      setSpeedTierDefault: (harness, speedTier) =>
-        set((state) => {
-          const defaults = updateHarnessDefaults(
-            state.defaults,
-            harness,
-            (current) => {
-              const next = { ...current };
-              if (isSpeedTier(speedTier)) next.speedTier = speedTier;
-              else delete next.speedTier;
-              return next;
-            }
-          );
-          return {
-            defaults,
-            storageWarning: writeStoredDefaults(defaults, state.defaultHarness),
-          };
-        }),
-      setPermissionDefault: (harness, permissionMode) =>
-        set((state) => {
-          const defaults = updateHarnessDefaults(
-            state.defaults,
-            harness,
-            (current) => {
-              const next = { ...current };
-              if (permissionMode) next.permissionMode = permissionMode;
-              else delete next.permissionMode;
-              return next;
-            }
-          );
-          return {
-            defaults,
-            storageWarning: writeStoredDefaults(defaults, state.defaultHarness),
-          };
-        }),
-      setPersonalityDefault: (harness, personality) =>
-        set((state) => {
-          const defaults = updateHarnessDefaults(
-            state.defaults,
-            harness,
-            (current) => {
-              const next = { ...current };
-              if (personality?.trim()) next.personality = personality.trim();
-              else delete next.personality;
-              return next;
-            }
-          );
-          return {
-            defaults,
-            storageWarning: writeStoredDefaults(defaults, state.defaultHarness),
-          };
-        }),
-      resetHarness: (harness) =>
-        set((state) => {
-          if (!state.defaults[harness]) return state;
+          if (!state.defaults[providerId]) return state;
           const defaults = { ...state.defaults };
-          delete defaults[harness];
+          delete defaults[providerId];
           return {
             defaults,
-            storageWarning: writeStoredDefaults(defaults, state.defaultHarness),
+            storageWarning: writeStoredDefaults(defaults, state.defaultProvider),
           };
         }),
-      setDefaultHarness: (defaultHarness) =>
+      setDefaultProvider: (defaultProvider) =>
         set((state) => ({
-          defaultHarness,
-          storageWarning: writeStoredDefaults(state.defaults, defaultHarness),
+          defaultProvider,
+          storageWarning: writeStoredDefaults(state.defaults, defaultProvider),
         })),
     };
   }
 );
+
+/**
+ * The harness capabilities as seen through a provider: custom providers
+ * replace the model list and default model with their configured ones and
+ * carry their own availability.
+ */
+export function providerHarnessInfo(
+  catalog: Pick<LocalChatHarnessCatalog, "harnesses">,
+  provider: LocalChatProviderInfo
+): LocalChatHarnessInfo | null {
+  const info = catalog.harnesses.find(
+    (candidate) => candidate.harness === provider.harness
+  );
+  if (!info) return null;
+  return {
+    ...info,
+    // Built-in providers keep their harness label ("Claude", "Codex") for
+    // the model controls; custom providers are labeled by their ID.
+    label: provider.custom ? provider.label : info.label,
+    available: provider.available,
+    unavailable_reason: provider.unavailable_reason,
+    models: provider.models ?? info.models,
+    default_model_id: provider.models
+      ? provider.default_model_id
+      : info.default_model_id,
+  };
+}
 
 export function resolveModelDefaultId(
   info: Pick<LocalChatHarnessInfo, "models" | "default_model_id">,
@@ -421,18 +445,17 @@ export function hasStaleReasoningEffort(
   );
 }
 
-export function resolveDefaultHarness(
-  catalog: Pick<LocalChatHarnessCatalog, "default_harness" | "harnesses">,
-  override?: LocalChatHarnessKind | null
-): LocalChatHarnessKind | null {
-  const available = catalog.harnesses.filter((info) => info.available);
-  if (override && available.some((info) => info.harness === override)) {
-    return override;
-  }
-  if (available.some((info) => info.harness === catalog.default_harness)) {
-    return catalog.default_harness;
-  }
-  return available[0]?.harness ?? null;
+export function resolveDefaultProvider(
+  catalog: Pick<LocalChatHarnessCatalog, "default_provider" | "providers">,
+  override?: string | null
+): LocalChatProviderInfo | null {
+  const available = catalog.providers.filter((provider) => provider.available);
+  return (
+    available.find((provider) => provider.id === override) ??
+    available.find((provider) => provider.id === catalog.default_provider) ??
+    available[0] ??
+    null
+  );
 }
 
 export function hasStaleModelDefault(

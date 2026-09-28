@@ -1,3 +1,4 @@
+import { withBuiltinProviders } from "../../test/localChatCatalog";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ChatComposer } from "./ChatComposer";
@@ -51,10 +52,10 @@ const CODEX_INFO: LocalChatHarnessInfo = {
   models: [],
 };
 
-const CATALOG: LocalChatHarnessCatalog = {
+const CATALOG: LocalChatHarnessCatalog = withBuiltinProviders({
   default_harness: "claude",
   harnesses: [CLAUDE_INFO, CODEX_INFO],
-};
+});
 
 function defaultProps(overrides: Record<string, unknown> = {}) {
   return {
@@ -64,7 +65,8 @@ function defaultProps(overrides: Record<string, unknown> = {}) {
     inputRef: { current: null },
     harnessCatalog: CATALOG,
     visibleHarness: CLAUDE_INFO,
-    providerOptions: [{ info: CLAUDE_INFO }],
+    providerOptions: [{ provider: CATALOG.providers[0], info: CLAUDE_INFO }],
+    selectedProviderId: "anthropic",
     supportedModelIds: new Set(["sonnet", "opus"]),
     supportedReasoningEffortIds: new Set<string>(),
     speedTiers: [],
@@ -164,7 +166,7 @@ describe("ChatComposer", () => {
       Array.from((picker as HTMLSelectElement).options).map(
         (option) => option.textContent
       )
-    ).toEqual(["Claude"]);
+    ).toEqual(["Anthropic"]);
   });
 
   it("fires onHarnessChange when provider is changed", () => {
@@ -657,7 +659,7 @@ describe("ChatComposer", () => {
       <ChatComposer
         {...defaultProps({
           visibleHarness: CODEX_INFO,
-          providerOptions: [{ info: CODEX_INFO }],
+          providerOptions: [{ provider: CATALOG.providers[1], info: CODEX_INFO }],
         })}
       />
     );
@@ -694,7 +696,7 @@ describe("ChatComposer", () => {
             providerResumeId: "codex-resume-1",
           }),
           visibleHarness: CODEX_INFO,
-          providerOptions: [{ info: CLAUDE_INFO }],
+          providerOptions: [{ provider: CATALOG.providers[0], info: CLAUDE_INFO }],
           lockedHarness: true,
           hasResume: true,
           canUseComposer: false,

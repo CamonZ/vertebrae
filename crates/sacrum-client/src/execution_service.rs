@@ -234,6 +234,9 @@ impl ExecutionService for SacrumExecutionService {
         if let Some(provider) = &params.model_provider {
             variables["model_provider"] = json!(provider);
         }
+        if let Some(harness) = &params.harness {
+            variables["harness"] = json!(harness);
+        }
 
         self.client
             .execute_void(UPDATE_EXECUTION, variables)
@@ -1267,7 +1270,8 @@ mod tests {
             ExecutionStatus::InProgress,
         )
         .with_model("claude-sonnet-4-5")
-        .with_model_provider("anthropic");
+        .with_model_provider("openrouter")
+        .with_harness("claude");
 
         service
             .update_execution_status("exec-meta", params)
@@ -1278,7 +1282,8 @@ mod tests {
         assert_eq!(variables["id"], "exec-meta");
         assert_eq!(variables["status"], "in_progress");
         assert_eq!(variables["model"], "claude-sonnet-4-5");
-        assert_eq!(variables["model_provider"], "anthropic");
+        assert_eq!(variables["model_provider"], "openrouter");
+        assert_eq!(variables["harness"], "claude");
     }
 
     #[tokio::test]
@@ -1312,6 +1317,10 @@ mod tests {
         assert!(
             variables.get("model_provider").is_none(),
             "model_provider must be omitted when not set, got: {variables:?}"
+        );
+        assert!(
+            variables.get("harness").is_none(),
+            "harness must be omitted when not set, got: {variables:?}"
         );
     }
 

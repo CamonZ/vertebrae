@@ -1,12 +1,13 @@
 //! Model catalog: maps model names to their built-in execution provider.
 //!
 //! This is a small, conservative classifier used by Vertebrae to validate
-//! `--model` / `--provider` combinations on `vtb step add` and
-//! `vtb step update`. It is intentionally not an exhaustive list of every
-//! model name a vendor publishes -- vendor catalogs change frequently. We only
-//! recognize the aliases and prefixes Vertebrae intentionally supports today,
-//! and we reject everything else with a clear error so users update the catalog
-//! before depending on a new model name.
+//! `--model` / `--provider` combinations for the built-in providers. It is
+//! intentionally not an exhaustive list of every model name a vendor
+//! publishes -- vendor catalogs change frequently. We only recognize the
+//! aliases and prefixes Vertebrae intentionally supports today, and we reject
+//! everything else with a clear error so users update the catalog before
+//! depending on a new model name. Custom providers declared in config.toml are
+//! validated only against their own `models` list, never against these rules.
 //!
 //! Built-in providers:
 //! - `anthropic` (Claude Code): `claude-*` prefix and the bare aliases
@@ -15,63 +16,90 @@
 //!   (e.g. `o1`, `o3`, `o4-mini`), and `codex-*`.
 //! - `typesafe` (TypeSafe System One): `jev-*` models, including the
 //!   documented `jev-latest` default.
+//!
+//! Request capability rules (reasoning effort, personality, verbosity, and
+//! agent-only options) depend on the harness that consumes them, so they key
+//! on [`StepHarness`] and apply equally to built-in and custom providers.
 
-use crate::{AgentConfig, OutputVerbosity};
+use crate::{AgentConfig, OutputVerbosity, ProviderId, StepHarness};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Codex reasoning efforts currently accepted by the OpenAI provider path.
+/// Codex reasoning efforts currently accepted by the Codex harness.
 pub const SUPPORTED_OPENAI_REASONING_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh"];
 
 pub const DEFAULT_TYPESAFE_MODEL: &str = "jev-latest";
 
-/// Built-in execution providers recognized by Vertebrae.
-///
-/// `Provider` is the MVP set; user-owned harness profiles are out of scope.
+/// Built-in execution providers recognized by Vertebrae without any
+/// configuration. Each one runs on exactly one harness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Provider {
+pub enum BuiltinProvider {
     Anthropic,
     Openai,
     Typesafe,
 }
 
-impl Provider {
+impl BuiltinProvider {
+    pub const ALL: [BuiltinProvider; 3] = [Self::Anthropic, Self::Openai, Self::Typesafe];
+
     /// String form used on the CLI and in serialized agent_config JSON.
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Provider::Anthropic => "anthropic",
-            Provider::Openai => "openai",
-            Provider::Typesafe => "typesafe",
+            BuiltinProvider::Anthropic => "anthropic",
+            BuiltinProvider::Openai => "openai",
+            BuiltinProvider::Typesafe => "typesafe",
         }
     }
 
-    /// Parse a provider name (case-insensitive). Accepts the canonical names
-    /// (`anthropic`, `openai`, `typesafe`) plus common aliases.
-    pub fn parse(input: &str) -> Result<Self, String> {
-        let normalized = input.trim().to_ascii_lowercase();
-        match normalized.as_str() {
-            "anthropic" | "claude" => Ok(Provider::Anthropic),
-            "openai" | "codex" => Ok(Provider::Openai),
+    pub fn id(self) -> ProviderId {
+        ProviderId::new(self.as_str()).expect("built-in provider IDs are valid")
+    }
+
+    /// Exact canonical-name lookup.
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|builtin| builtin.as_str() == id)
+    }
+
+    /// Case-insensitive lookup accepting canonical names plus common aliases.
+    pub fn parse_alias(input: &str) -> Option<Self> {
+        match input.trim().to_ascii_lowercase().as_str() {
+            "anthropic" | "claude" => Some(BuiltinProvider::Anthropic),
+            "openai" | "codex" => Some(BuiltinProvider::Openai),
             "typesafe" | "type-safe" | "type_safe" | "systemone" | "system-one" | "system_one" => {
-                Ok(Provider::Typesafe)
+                Some(BuiltinProvider::Typesafe)
             }
-            other => Err(format!(
-                "Unknown provider '{}'. Supported providers: anthropic, openai, typesafe",
-                other
-            )),
+            _ => None,
+        }
+    }
+
+    /// The harness that runs this built-in provider.
+    pub const fn harness(self) -> StepHarness {
+        match self {
+            BuiltinProvider::Anthropic => StepHarness::Claude,
+            BuiltinProvider::Openai => StepHarness::Codex,
+            BuiltinProvider::Typesafe => StepHarness::Typesafe,
+        }
+    }
+
+    /// The built-in provider served by a harness when no provider is named.
+    pub const fn for_harness(harness: StepHarness) -> Self {
+        match harness {
+            StepHarness::Claude => BuiltinProvider::Anthropic,
+            StepHarness::Codex => BuiltinProvider::Openai,
+            StepHarness::Typesafe => BuiltinProvider::Typesafe,
         }
     }
 
     pub const fn default_model(self) -> Option<&'static str> {
         match self {
-            Provider::Typesafe => Some(DEFAULT_TYPESAFE_MODEL),
-            Provider::Anthropic | Provider::Openai => None,
+            BuiltinProvider::Typesafe => Some(DEFAULT_TYPESAFE_MODEL),
+            BuiltinProvider::Anthropic | BuiltinProvider::Openai => None,
         }
     }
 }
 
-impl fmt::Display for Provider {
+impl fmt::Display for BuiltinProvider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -83,7 +111,7 @@ impl fmt::Display for Provider {
 /// aliases/prefixes we recognize, and `None` for anything else. Unknown
 /// names are not silently mapped to a provider -- callers should reject
 /// them or require an explicit override.
-pub fn classify_model(model: &str) -> Option<Provider> {
+pub fn classify_model(model: &str) -> Option<BuiltinProvider> {
     let trimmed = model.trim();
     if trimmed.is_empty() {
         return None;
@@ -95,7 +123,7 @@ pub fn classify_model(model: &str) -> Option<Provider> {
         || normalized.starts_with("claude-")
         || normalized == "claude"
     {
-        return Some(Provider::Anthropic);
+        return Some(BuiltinProvider::Anthropic);
     }
 
     // OpenAI: `gpt-*`, `codex-*`, and reasoning `o<digit>...` models
@@ -108,13 +136,13 @@ pub fn classify_model(model: &str) -> Option<Provider> {
         || normalized == "codex"
         || is_openai_reasoning_alias(&normalized)
     {
-        return Some(Provider::Openai);
+        return Some(BuiltinProvider::Openai);
     }
 
     // TypeSafe System One: keep the catalog intentionally narrow while
     // accepting future documented JEV model revisions.
     if normalized == "jev" || normalized.starts_with("jev-") {
-        return Some(Provider::Typesafe);
+        return Some(BuiltinProvider::Typesafe);
     }
 
     None
@@ -138,7 +166,7 @@ fn is_openai_reasoning_alias(normalized: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-/// Validate that a `(provider, model)` pair is internally consistent.
+/// Validate that a built-in `(provider, model)` pair is internally consistent.
 ///
 /// Rules:
 /// - If the model is recognized and maps to a different provider, reject with
@@ -148,24 +176,24 @@ fn is_openai_reasoning_alias(normalized: &str) -> bool {
 /// - If the model is `None`, any provider is fine -- the provider can be
 ///   stored on the agent_config without a model.
 pub fn validate_provider_model(
-    provider: Provider,
+    provider: BuiltinProvider,
     model: Option<&str>,
 ) -> Result<(), ProviderModelMismatch> {
     validate_provider_model_with_codex_provider(provider, model, None)
 }
 
-/// Validate a `(provider, model)` pair, allowing arbitrary Codex upstream
-/// model IDs only when the built-in provider is OpenAI/Codex and an explicit
-/// Codex model provider override is configured.
+/// Validate a built-in `(provider, model)` pair, allowing arbitrary Codex
+/// upstream model IDs only when the built-in provider is OpenAI/Codex and an
+/// explicit Codex model provider override is configured.
 pub fn validate_provider_model_with_codex_provider(
-    provider: Provider,
+    provider: BuiltinProvider,
     model: Option<&str>,
     codex_model_provider: Option<&str>,
 ) -> Result<(), ProviderModelMismatch> {
     if let Some(codex_model_provider) = codex_model_provider
         && !codex_model_provider.trim().is_empty()
     {
-        if provider != Provider::Openai {
+        if provider != BuiltinProvider::Openai {
             return Err(ProviderModelMismatch::UnsupportedCodexModelProvider {
                 requested: provider,
                 codex_model_provider: codex_model_provider.trim().to_string(),
@@ -196,7 +224,7 @@ pub fn validate_provider_model_with_codex_provider(
     }
 }
 
-fn wrong_provider_error(provider: Provider, model: &str) -> Option<ProviderModelMismatch> {
+fn wrong_provider_error(provider: BuiltinProvider, model: &str) -> Option<ProviderModelMismatch> {
     let trimmed = model.trim();
     classify_model(trimmed).and_then(|detected| {
         (detected != provider).then(|| ProviderModelMismatch::WrongProvider {
@@ -207,12 +235,12 @@ fn wrong_provider_error(provider: Provider, model: &str) -> Option<ProviderModel
     })
 }
 
-/// Validate that a reasoning effort is supported by the provider.
+/// Validate that a reasoning effort is supported by the harness.
 ///
-/// Reasoning effort is an OpenAI/Codex-only setting. Anthropic/Claude steps
-/// reject it before persistence or spawn so it never leaks into Claude argv.
-pub fn normalize_provider_reasoning_effort(
-    provider: Provider,
+/// Reasoning effort is a Codex-only setting. Claude and TypeSafe steps reject
+/// it before persistence or spawn so it never leaks into Claude argv.
+pub fn normalize_harness_reasoning_effort(
+    harness: StepHarness,
     reasoning_effort: Option<&str>,
 ) -> Result<Option<String>, ProviderReasoningEffortMismatch> {
     let Some(reasoning_effort) = reasoning_effort else {
@@ -224,9 +252,9 @@ pub fn normalize_provider_reasoning_effort(
             effort: reasoning_effort.to_string(),
         });
     }
-    if provider != Provider::Openai {
-        return Err(ProviderReasoningEffortMismatch::UnsupportedProvider {
-            provider,
+    if harness != StepHarness::Codex {
+        return Err(ProviderReasoningEffortMismatch::UnsupportedHarness {
+            harness,
             effort: normalized,
         });
     }
@@ -236,21 +264,21 @@ pub fn normalize_provider_reasoning_effort(
     Err(ProviderReasoningEffortMismatch::UnsupportedEffort { effort: normalized })
 }
 
-pub fn validate_provider_reasoning_effort(
-    provider: Provider,
+pub fn validate_harness_reasoning_effort(
+    harness: StepHarness,
     reasoning_effort: Option<&str>,
 ) -> Result<(), ProviderReasoningEffortMismatch> {
-    normalize_provider_reasoning_effort(provider, reasoning_effort).map(|_| ())
+    normalize_harness_reasoning_effort(harness, reasoning_effort).map(|_| ())
 }
 
-/// Validate agent-only settings before a provider runtime is constructed.
+/// Validate agent-only settings before a harness runtime is constructed.
 /// TypeSafe accepts only its provider and model selection; chat-oriented agent
 /// options must fail instead of being silently ignored by the one-shot adapter.
-pub fn validate_provider_agent_config(
-    provider: Provider,
+pub fn validate_harness_agent_config(
+    harness: StepHarness,
     config: &AgentConfig,
 ) -> Result<(), ProviderAgentOptionMismatch> {
-    if provider != Provider::Typesafe {
+    if harness != StepHarness::Typesafe {
         return Ok(());
     }
 
@@ -280,7 +308,7 @@ pub fn validate_provider_agent_config(
         ("json_schema", config.json_schema.is_some()),
     ];
     if let Some((option, true)) = unsupported.into_iter().find(|(_, present)| *present) {
-        return Err(ProviderAgentOptionMismatch { provider, option });
+        return Err(ProviderAgentOptionMismatch { harness, option });
     }
     Ok(())
 }
@@ -300,59 +328,62 @@ pub fn normalize_personality(
     Ok(Some(normalized))
 }
 
-/// Normalize and validate a personality for a specific built-in provider.
+/// Normalize and validate a personality for a specific harness.
 /// Claude output styles remain provider-defined strings; Codex's app-server
 /// currently accepts the explicit `none`, `friendly`, and `pragmatic` enum.
-pub fn normalize_provider_personality(
-    provider: Provider,
+pub fn normalize_harness_personality(
+    harness: StepHarness,
     personality: Option<&str>,
 ) -> Result<Option<String>, ProviderPersonalityMismatch> {
     let personality = normalize_personality(personality)?;
-    if provider == Provider::Typesafe && personality.is_some() {
-        return Err(ProviderPersonalityMismatch::UnsupportedProvider { provider });
+    if harness == StepHarness::Typesafe && personality.is_some() {
+        return Err(ProviderPersonalityMismatch::UnsupportedHarness { harness });
     }
-    if provider == Provider::Openai
+    if harness == StepHarness::Codex
         && let Some(personality) = personality.as_deref()
         && !matches!(personality, "none" | "friendly" | "pragmatic")
     {
         return Err(ProviderPersonalityMismatch::UnsupportedValue {
-            provider,
+            harness,
             personality: personality.to_string(),
         });
     }
     Ok(personality)
 }
 
-/// Validate output verbosity against the provider adapter that will consume
-/// it. Codex is the first provider with a native output-detail setting.
-pub fn normalize_provider_verbosity(
-    provider: Provider,
+/// Validate output verbosity against the harness that will consume it.
+/// Codex is the first harness with a native output-detail setting.
+pub fn normalize_harness_verbosity(
+    harness: StepHarness,
     verbosity: Option<OutputVerbosity>,
 ) -> Result<Option<OutputVerbosity>, ProviderVerbosityMismatch> {
     let Some(verbosity) = verbosity else {
         return Ok(None);
     };
-    if provider == Provider::Openai {
+    if harness == StepHarness::Codex {
         Ok(Some(verbosity))
     } else {
-        Err(ProviderVerbosityMismatch::UnsupportedProvider { provider })
+        Err(ProviderVerbosityMismatch::UnsupportedHarness { harness })
     }
 }
 
-/// Reasons a `(provider, model)` pair can fail validation.
+/// Reasons a built-in `(provider, model)` pair can fail validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderModelMismatch {
     /// The model is recognized but belongs to a different provider.
     WrongProvider {
-        requested: Provider,
-        detected: Provider,
+        requested: BuiltinProvider,
+        detected: BuiltinProvider,
         model: String,
     },
     /// The model is not recognized by the built-in catalog at all.
-    UnknownModel { requested: Provider, model: String },
+    UnknownModel {
+        requested: BuiltinProvider,
+        model: String,
+    },
     /// Codex upstream provider overrides are only valid on the Codex harness.
     UnsupportedCodexModelProvider {
-        requested: Provider,
+        requested: BuiltinProvider,
         codex_model_provider: String,
     },
 }
@@ -372,7 +403,7 @@ impl fmt::Display for ProviderModelMismatch {
             ProviderModelMismatch::UnknownModel { requested, model } => write!(
                 f,
                 "Model '{}' is not recognized by the built-in {} catalog. \
-                 If this is a valid {} model, update the model catalog before using it.",
+                 If this is a valid {} model, update the model catalog or declare a custom provider under [providers.<id>] in config.toml.",
                 model, requested, requested
             ),
             ProviderModelMismatch::UnsupportedCodexModelProvider {
@@ -389,24 +420,27 @@ impl fmt::Display for ProviderModelMismatch {
 
 impl std::error::Error for ProviderModelMismatch {}
 
-/// Reasons a provider/reasoning-effort pair can fail validation.
+/// Reasons a harness/reasoning-effort pair can fail validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderReasoningEffortMismatch {
     /// The effort value is not in Codex's supported allowlist.
     UnsupportedEffort { effort: String },
-    /// The effort is valid for Codex but was attached to another provider.
-    UnsupportedProvider { provider: Provider, effort: String },
+    /// The effort is valid for Codex but was attached to another harness.
+    UnsupportedHarness {
+        harness: StepHarness,
+        effort: String,
+    },
 }
 
 /// Reasons a personality value can fail shared-contract validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderPersonalityMismatch {
     Empty,
-    UnsupportedProvider {
-        provider: Provider,
+    UnsupportedHarness {
+        harness: StepHarness,
     },
     UnsupportedValue {
-        provider: Provider,
+        harness: StepHarness,
         personality: String,
     },
 }
@@ -415,20 +449,16 @@ impl fmt::Display for ProviderPersonalityMismatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => f.write_str("personality must not be empty"),
-            Self::UnsupportedProvider { provider } => {
-                write!(
-                    f,
-                    "personality is not supported by the {} provider",
-                    provider
-                )
+            Self::UnsupportedHarness { harness } => {
+                write!(f, "personality is not supported by the {} harness", harness)
             }
             Self::UnsupportedValue {
-                provider,
+                harness,
                 personality,
             } => write!(
                 f,
-                "personality '{}' is not supported by the {} provider; supported Codex values are none, friendly, and pragmatic",
-                personality, provider
+                "personality '{}' is not supported by the {} harness; supported Codex values are none, friendly, and pragmatic",
+                personality, harness
             ),
         }
     }
@@ -438,7 +468,7 @@ impl std::error::Error for ProviderPersonalityMismatch {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderAgentOptionMismatch {
-    pub provider: Provider,
+    pub harness: StepHarness,
     pub option: &'static str,
 }
 
@@ -446,27 +476,27 @@ impl fmt::Display for ProviderAgentOptionMismatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "AgentConfig.{} is not supported by the {} provider",
-            self.option, self.provider
+            "AgentConfig.{} is not supported by the {} harness",
+            self.option, self.harness
         )
     }
 }
 
 impl std::error::Error for ProviderAgentOptionMismatch {}
 
-/// Reasons an output verbosity value can fail provider validation.
+/// Reasons an output verbosity value can fail harness validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderVerbosityMismatch {
-    UnsupportedProvider { provider: Provider },
+    UnsupportedHarness { harness: StepHarness },
 }
 
 impl fmt::Display for ProviderVerbosityMismatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedProvider { provider } => write!(
+            Self::UnsupportedHarness { harness } => write!(
                 f,
-                "output verbosity is not supported by the {} provider",
-                provider
+                "output verbosity is not supported by the {} harness",
+                harness
             ),
         }
     }
@@ -483,10 +513,10 @@ impl fmt::Display for ProviderReasoningEffortMismatch {
                 effort,
                 SUPPORTED_OPENAI_REASONING_EFFORTS.join(", ")
             ),
-            ProviderReasoningEffortMismatch::UnsupportedProvider { provider, effort } => write!(
+            ProviderReasoningEffortMismatch::UnsupportedHarness { harness, effort } => write!(
                 f,
-                "Reasoning effort '{}' is only supported with --provider openai / Codex. Current provider is {}.",
-                effort, provider
+                "Reasoning effort '{}' is only supported on the codex harness (--provider openai or a codex custom provider). Current harness is {}.",
+                effort, harness
             ),
         }
     }
@@ -500,61 +530,73 @@ mod tests {
 
     #[test]
     fn classify_anthropic_aliases() {
-        assert_eq!(classify_model("opus"), Some(Provider::Anthropic));
-        assert_eq!(classify_model("sonnet"), Some(Provider::Anthropic));
-        assert_eq!(classify_model("haiku"), Some(Provider::Anthropic));
-        assert_eq!(classify_model("fable"), Some(Provider::Anthropic));
-        assert_eq!(classify_model("Opus"), Some(Provider::Anthropic));
+        assert_eq!(classify_model("opus"), Some(BuiltinProvider::Anthropic));
+        assert_eq!(classify_model("sonnet"), Some(BuiltinProvider::Anthropic));
+        assert_eq!(classify_model("haiku"), Some(BuiltinProvider::Anthropic));
+        assert_eq!(classify_model("fable"), Some(BuiltinProvider::Anthropic));
+        assert_eq!(classify_model("Opus"), Some(BuiltinProvider::Anthropic));
     }
 
     #[test]
     fn classify_anthropic_prefixes() {
-        assert_eq!(classify_model("claude-opus-4-5"), Some(Provider::Anthropic));
-        assert_eq!(classify_model("claude-opus-5-5"), Some(Provider::Anthropic));
+        assert_eq!(
+            classify_model("claude-opus-4-5"),
+            Some(BuiltinProvider::Anthropic)
+        );
+        assert_eq!(
+            classify_model("claude-opus-5-5"),
+            Some(BuiltinProvider::Anthropic)
+        );
         assert_eq!(
             classify_model("claude-3-5-sonnet"),
-            Some(Provider::Anthropic)
+            Some(BuiltinProvider::Anthropic)
         );
         assert_eq!(
             classify_model("claude-haiku-4-5"),
-            Some(Provider::Anthropic)
+            Some(BuiltinProvider::Anthropic)
         );
-        assert_eq!(classify_model("claude"), Some(Provider::Anthropic));
+        assert_eq!(classify_model("claude"), Some(BuiltinProvider::Anthropic));
     }
 
     #[test]
     fn classify_openai_gpt() {
-        assert_eq!(classify_model("gpt-4"), Some(Provider::Openai));
-        assert_eq!(classify_model("gpt-4o"), Some(Provider::Openai));
-        assert_eq!(classify_model("gpt-4o-mini"), Some(Provider::Openai));
-        assert_eq!(classify_model("GPT-5"), Some(Provider::Openai));
+        assert_eq!(classify_model("gpt-4"), Some(BuiltinProvider::Openai));
+        assert_eq!(classify_model("gpt-4o"), Some(BuiltinProvider::Openai));
+        assert_eq!(classify_model("gpt-4o-mini"), Some(BuiltinProvider::Openai));
+        assert_eq!(classify_model("GPT-5"), Some(BuiltinProvider::Openai));
     }
 
     #[test]
     fn classify_openai_reasoning() {
-        assert_eq!(classify_model("o1"), Some(Provider::Openai));
-        assert_eq!(classify_model("o1-mini"), Some(Provider::Openai));
-        assert_eq!(classify_model("o3"), Some(Provider::Openai));
-        assert_eq!(classify_model("o3-mini"), Some(Provider::Openai));
-        assert_eq!(classify_model("o4-mini"), Some(Provider::Openai));
+        assert_eq!(classify_model("o1"), Some(BuiltinProvider::Openai));
+        assert_eq!(classify_model("o1-mini"), Some(BuiltinProvider::Openai));
+        assert_eq!(classify_model("o3"), Some(BuiltinProvider::Openai));
+        assert_eq!(classify_model("o3-mini"), Some(BuiltinProvider::Openai));
+        assert_eq!(classify_model("o4-mini"), Some(BuiltinProvider::Openai));
     }
 
     #[test]
     fn classify_openai_codex() {
-        assert_eq!(classify_model("codex-mini-latest"), Some(Provider::Openai));
-        assert_eq!(classify_model("codex"), Some(Provider::Openai));
+        assert_eq!(
+            classify_model("codex-mini-latest"),
+            Some(BuiltinProvider::Openai)
+        );
+        assert_eq!(classify_model("codex"), Some(BuiltinProvider::Openai));
     }
 
     #[test]
     fn classify_typesafe_models_and_default() {
         assert_eq!(
             classify_model(DEFAULT_TYPESAFE_MODEL),
-            Some(Provider::Typesafe)
+            Some(BuiltinProvider::Typesafe)
         );
-        assert_eq!(classify_model("jev"), Some(Provider::Typesafe));
-        assert_eq!(classify_model("JEV-preview"), Some(Provider::Typesafe));
+        assert_eq!(classify_model("jev"), Some(BuiltinProvider::Typesafe));
         assert_eq!(
-            Provider::Typesafe.default_model(),
+            classify_model("JEV-preview"),
+            Some(BuiltinProvider::Typesafe)
+        );
+        assert_eq!(
+            BuiltinProvider::Typesafe.default_model(),
             Some(DEFAULT_TYPESAFE_MODEL)
         );
     }
@@ -571,65 +613,85 @@ mod tests {
     #[test]
     fn classify_does_not_confuse_opus_with_o_prefix() {
         // 'opus' starts with 'o' but is not o<digit>, so it must be Anthropic.
-        assert_eq!(classify_model("opus"), Some(Provider::Anthropic));
+        assert_eq!(classify_model("opus"), Some(BuiltinProvider::Anthropic));
         // 'other' starts with 'o' but second char isn't a digit -> not openai.
         assert_eq!(classify_model("other-model"), None);
     }
 
     #[test]
-    fn provider_parse_canonical() {
-        assert_eq!(Provider::parse("anthropic"), Ok(Provider::Anthropic));
-        assert_eq!(Provider::parse("openai"), Ok(Provider::Openai));
-        assert_eq!(Provider::parse("Anthropic"), Ok(Provider::Anthropic));
-        assert_eq!(Provider::parse("OPENAI"), Ok(Provider::Openai));
+    fn builtin_provider_parse_alias_accepts_canonical_names_and_aliases() {
+        assert_eq!(
+            BuiltinProvider::parse_alias("Anthropic"),
+            Some(BuiltinProvider::Anthropic)
+        );
+        assert_eq!(
+            BuiltinProvider::parse_alias("OPENAI"),
+            Some(BuiltinProvider::Openai)
+        );
+        assert_eq!(
+            BuiltinProvider::parse_alias("claude"),
+            Some(BuiltinProvider::Anthropic)
+        );
+        assert_eq!(
+            BuiltinProvider::parse_alias("codex"),
+            Some(BuiltinProvider::Openai)
+        );
+        assert_eq!(
+            BuiltinProvider::parse_alias("type-safe"),
+            Some(BuiltinProvider::Typesafe)
+        );
+        assert_eq!(
+            BuiltinProvider::parse_alias("system_one"),
+            Some(BuiltinProvider::Typesafe)
+        );
+        assert_eq!(BuiltinProvider::parse_alias("bedrock"), None);
+        assert_eq!(BuiltinProvider::from_id("claude"), None);
     }
 
     #[test]
-    fn provider_parse_aliases() {
-        assert_eq!(Provider::parse("claude"), Ok(Provider::Anthropic));
-        assert_eq!(Provider::parse("codex"), Ok(Provider::Openai));
-        assert_eq!(Provider::parse("type-safe"), Ok(Provider::Typesafe));
-        assert_eq!(Provider::parse("system_one"), Ok(Provider::Typesafe));
-    }
-
-    #[test]
-    fn provider_parse_unknown() {
-        let err = Provider::parse("bedrock").unwrap_err();
-        assert!(err.contains("bedrock"));
-        assert!(err.contains("anthropic"));
-        assert!(err.contains("openai"));
-        assert!(err.contains("typesafe"));
+    fn builtin_providers_map_one_to_one_onto_harnesses() {
+        for builtin in BuiltinProvider::ALL {
+            assert_eq!(BuiltinProvider::for_harness(builtin.harness()), builtin);
+            assert_eq!(builtin.id().builtin(), Some(builtin));
+        }
     }
 
     #[test]
     fn validate_accepts_matching_pair() {
-        assert!(validate_provider_model(Provider::Anthropic, Some("opus")).is_ok());
-        assert!(validate_provider_model(Provider::Anthropic, Some("claude-opus-4-5")).is_ok());
-        assert!(validate_provider_model(Provider::Anthropic, Some("claude-opus-5-5")).is_ok());
-        assert!(validate_provider_model(Provider::Anthropic, Some("fable")).is_ok());
-        assert!(validate_provider_model(Provider::Openai, Some("gpt-4o")).is_ok());
-        assert!(validate_provider_model(Provider::Openai, Some("o3-mini")).is_ok());
-        assert!(validate_provider_model(Provider::Typesafe, Some(DEFAULT_TYPESAFE_MODEL)).is_ok());
+        assert!(validate_provider_model(BuiltinProvider::Anthropic, Some("opus")).is_ok());
+        assert!(
+            validate_provider_model(BuiltinProvider::Anthropic, Some("claude-opus-4-5")).is_ok()
+        );
+        assert!(
+            validate_provider_model(BuiltinProvider::Anthropic, Some("claude-opus-5-5")).is_ok()
+        );
+        assert!(validate_provider_model(BuiltinProvider::Anthropic, Some("fable")).is_ok());
+        assert!(validate_provider_model(BuiltinProvider::Openai, Some("gpt-4o")).is_ok());
+        assert!(validate_provider_model(BuiltinProvider::Openai, Some("o3-mini")).is_ok());
+        assert!(
+            validate_provider_model(BuiltinProvider::Typesafe, Some(DEFAULT_TYPESAFE_MODEL))
+                .is_ok()
+        );
     }
 
     #[test]
     fn validate_accepts_no_model() {
-        assert!(validate_provider_model(Provider::Openai, None).is_ok());
-        assert!(validate_provider_model(Provider::Anthropic, Some("")).is_ok());
+        assert!(validate_provider_model(BuiltinProvider::Openai, None).is_ok());
+        assert!(validate_provider_model(BuiltinProvider::Anthropic, Some("")).is_ok());
     }
 
     #[test]
     fn validate_rejects_wrong_provider() {
-        let err =
-            validate_provider_model(Provider::Openai, Some("claude-opus")).expect_err("must err");
+        let err = validate_provider_model(BuiltinProvider::Openai, Some("claude-opus"))
+            .expect_err("must err");
         match err {
             ProviderModelMismatch::WrongProvider {
                 requested,
                 detected,
                 ref model,
             } => {
-                assert_eq!(requested, Provider::Openai);
-                assert_eq!(detected, Provider::Anthropic);
+                assert_eq!(requested, BuiltinProvider::Openai);
+                assert_eq!(detected, BuiltinProvider::Anthropic);
                 assert_eq!(model, "claude-opus");
             }
             other => panic!("expected WrongProvider, got {:?}", other),
@@ -642,13 +704,14 @@ mod tests {
 
     #[test]
     fn validate_rejects_unknown_model() {
-        let err = validate_provider_model(Provider::Openai, Some("kimi2.6")).expect_err("must err");
+        let err = validate_provider_model(BuiltinProvider::Openai, Some("kimi2.6"))
+            .expect_err("must err");
         match err {
             ProviderModelMismatch::UnknownModel {
                 requested,
                 ref model,
             } => {
-                assert_eq!(requested, Provider::Openai);
+                assert_eq!(requested, BuiltinProvider::Openai);
                 assert_eq!(model, "kimi2.6");
             }
             other => panic!("expected UnknownModel, got {:?}", other),
@@ -662,7 +725,7 @@ mod tests {
     fn validate_accepts_openai_unknown_model_with_codex_provider_override() {
         assert!(
             validate_provider_model_with_codex_provider(
-                Provider::Openai,
+                BuiltinProvider::Openai,
                 Some("deepseek/deepseek-v4-flash"),
                 Some("openrouter"),
             )
@@ -670,7 +733,7 @@ mod tests {
         );
         assert!(
             validate_provider_model_with_codex_provider(
-                Provider::Openai,
+                BuiltinProvider::Openai,
                 Some("glm-5.1"),
                 Some("zai"),
             )
@@ -681,7 +744,7 @@ mod tests {
     #[test]
     fn validate_rejects_codex_provider_override_with_anthropic() {
         let err = validate_provider_model_with_codex_provider(
-            Provider::Anthropic,
+            BuiltinProvider::Anthropic,
             Some("claude-opus-4-5"),
             Some("openrouter"),
         )
@@ -689,7 +752,7 @@ mod tests {
         assert!(matches!(
             err,
             ProviderModelMismatch::UnsupportedCodexModelProvider {
-                requested: Provider::Anthropic,
+                requested: BuiltinProvider::Anthropic,
                 ..
             }
         ));
@@ -702,7 +765,7 @@ mod tests {
     #[test]
     fn validate_rejects_wrong_provider_even_with_codex_provider_override() {
         let err = validate_provider_model_with_codex_provider(
-            Provider::Openai,
+            BuiltinProvider::Openai,
             Some("claude-opus-4-5"),
             Some("openrouter"),
         )
@@ -710,8 +773,8 @@ mod tests {
         assert!(matches!(
             err,
             ProviderModelMismatch::WrongProvider {
-                requested: Provider::Openai,
-                detected: Provider::Anthropic,
+                requested: BuiltinProvider::Openai,
+                detected: BuiltinProvider::Anthropic,
                 ..
             }
         ));
@@ -719,12 +782,12 @@ mod tests {
 
     #[test]
     fn validate_rejects_anthropic_with_gpt() {
-        let err =
-            validate_provider_model(Provider::Anthropic, Some("gpt-4o")).expect_err("must err");
+        let err = validate_provider_model(BuiltinProvider::Anthropic, Some("gpt-4o"))
+            .expect_err("must err");
         assert!(matches!(
             err,
             ProviderModelMismatch::WrongProvider {
-                detected: Provider::Openai,
+                detected: BuiltinProvider::Openai,
                 ..
             }
         ));
@@ -734,24 +797,24 @@ mod tests {
     fn validate_reasoning_effort_accepts_openai_allowlist() {
         for effort in SUPPORTED_OPENAI_REASONING_EFFORTS {
             assert!(
-                validate_provider_reasoning_effort(Provider::Openai, Some(effort)).is_ok(),
+                validate_harness_reasoning_effort(StepHarness::Codex, Some(effort)).is_ok(),
                 "{effort} should be accepted"
             );
         }
-        assert!(validate_provider_reasoning_effort(Provider::Openai, None).is_ok());
+        assert!(validate_harness_reasoning_effort(StepHarness::Codex, None).is_ok());
     }
 
     #[test]
     fn normalize_reasoning_effort_trims_and_lowercases() {
         assert_eq!(
-            normalize_provider_reasoning_effort(Provider::Openai, Some(" HIGH ")).unwrap(),
+            normalize_harness_reasoning_effort(StepHarness::Codex, Some(" HIGH ")).unwrap(),
             Some("high".to_string())
         );
     }
 
     #[test]
     fn validate_reasoning_effort_rejects_unknown_values() {
-        let err = validate_provider_reasoning_effort(Provider::Openai, Some("minimal"))
+        let err = validate_harness_reasoning_effort(StepHarness::Codex, Some("minimal"))
             .expect_err("unsupported effort must fail");
         assert!(matches!(
             err,
@@ -765,19 +828,19 @@ mod tests {
 
     #[test]
     fn validate_reasoning_effort_rejects_anthropic_provider() {
-        let err = validate_provider_reasoning_effort(Provider::Anthropic, Some("high"))
+        let err = validate_harness_reasoning_effort(StepHarness::Claude, Some("high"))
             .expect_err("anthropic reasoning effort must fail");
         assert!(matches!(
             err,
-            ProviderReasoningEffortMismatch::UnsupportedProvider {
-                provider: Provider::Anthropic,
+            ProviderReasoningEffortMismatch::UnsupportedHarness {
+                harness: StepHarness::Claude,
                 ..
             }
         ));
         let msg = err.to_string();
         assert!(msg.contains("high"));
-        assert!(msg.contains("openai"));
-        assert!(msg.contains("anthropic"));
+        assert!(msg.contains("codex"));
+        assert!(msg.contains("claude"));
     }
 
     #[test]
@@ -787,11 +850,11 @@ mod tests {
             Some("friendly".into())
         );
         assert_eq!(
-            normalize_provider_personality(Provider::Anthropic, Some("Explanatory")).unwrap(),
+            normalize_harness_personality(StepHarness::Claude, Some("Explanatory")).unwrap(),
             Some("explanatory".into())
         );
         assert!(matches!(
-            normalize_provider_personality(Provider::Openai, Some("explanatory")),
+            normalize_harness_personality(StepHarness::Codex, Some("explanatory")),
             Err(ProviderPersonalityMismatch::UnsupportedValue { .. })
         ));
         assert!(matches!(
@@ -799,13 +862,13 @@ mod tests {
             Err(ProviderPersonalityMismatch::Empty)
         ));
         assert_eq!(
-            normalize_provider_verbosity(Provider::Openai, Some(OutputVerbosity::High)).unwrap(),
+            normalize_harness_verbosity(StepHarness::Codex, Some(OutputVerbosity::High)).unwrap(),
             Some(OutputVerbosity::High)
         );
-        let error = normalize_provider_verbosity(Provider::Anthropic, Some(OutputVerbosity::Low))
+        let error = normalize_harness_verbosity(StepHarness::Claude, Some(OutputVerbosity::Low))
             .expect_err("Claude must reject unsupported verbosity");
-        assert!(error.to_string().contains("anthropic"));
-        let error = normalize_provider_personality(Provider::Typesafe, Some("friendly"))
+        assert!(error.to_string().contains("claude"));
+        let error = normalize_harness_personality(StepHarness::Typesafe, Some("friendly"))
             .expect_err("TypeSafe must reject chat personality");
         assert!(error.to_string().contains("typesafe"));
     }
@@ -813,19 +876,19 @@ mod tests {
     #[test]
     fn validate_typesafe_agent_options_without_affecting_chat_providers() {
         assert!(
-            validate_provider_agent_config(Provider::Anthropic, &AgentConfig::default()).is_ok()
+            validate_harness_agent_config(StepHarness::Claude, &AgentConfig::default()).is_ok()
         );
-        assert!(validate_provider_agent_config(Provider::Openai, &AgentConfig::default()).is_ok());
+        assert!(validate_harness_agent_config(StepHarness::Codex, &AgentConfig::default()).is_ok());
 
         let config = AgentConfig::new()
-            .with_provider(Provider::Typesafe)
+            .with_provider(ProviderId::typesafe())
             .with_model(DEFAULT_TYPESAFE_MODEL);
-        assert!(validate_provider_agent_config(Provider::Typesafe, &config).is_ok());
+        assert!(validate_harness_agent_config(StepHarness::Typesafe, &config).is_ok());
 
         let config = AgentConfig::new()
-            .with_provider(Provider::Typesafe)
+            .with_provider(ProviderId::typesafe())
             .with_tools(vec!["Bash".into()]);
-        let error = validate_provider_agent_config(Provider::Typesafe, &config)
+        let error = validate_harness_agent_config(StepHarness::Typesafe, &config)
             .expect_err("TypeSafe must reject tools");
         assert_eq!(error.option, "tools");
         assert!(error.to_string().contains("typesafe"));
@@ -833,13 +896,13 @@ mod tests {
 
     #[test]
     fn provider_serializes_lowercase() {
-        let json = serde_json::to_string(&Provider::Anthropic).unwrap();
+        let json = serde_json::to_string(&BuiltinProvider::Anthropic).unwrap();
         assert_eq!(json, "\"anthropic\"");
-        let json = serde_json::to_string(&Provider::Openai).unwrap();
+        let json = serde_json::to_string(&BuiltinProvider::Openai).unwrap();
         assert_eq!(json, "\"openai\"");
-        let json = serde_json::to_string(&Provider::Typesafe).unwrap();
+        let json = serde_json::to_string(&BuiltinProvider::Typesafe).unwrap();
         assert_eq!(json, "\"typesafe\"");
-        let parsed: Provider = serde_json::from_str("\"openai\"").unwrap();
-        assert_eq!(parsed, Provider::Openai);
+        let parsed: BuiltinProvider = serde_json::from_str("\"openai\"").unwrap();
+        assert_eq!(parsed, BuiltinProvider::Openai);
     }
 }

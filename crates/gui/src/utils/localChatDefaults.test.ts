@@ -1,12 +1,15 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import type { LocalChatHarnessInfo } from "../bindings";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { LocalChatHarnessInfo, LocalChatProviderInfo } from "../bindings";
 import {
   hasStaleModelDefault,
   hasStalePermissionDefault,
   hasStalePersonalityDefault,
   hasStaleReasoningEffort,
+  LEGACY_LOCAL_CHAT_DEFAULTS_STORAGE_KEY,
   LOCAL_CHAT_DEFAULTS_STORAGE_KEY,
   personalityOptionsForModel,
+  providerHarnessInfo,
+  resolveDefaultProvider,
   resolveModelDefaultId,
   resolvePersonalityDefault,
   resolvePermissionDefault,
@@ -78,47 +81,117 @@ describe("local chat defaults", () => {
     window.localStorage.clear();
     useLocalChatDefaultsStore.setState({
       defaults: {},
-      defaultHarness: null,
+      defaultProvider: null,
       storageWarning: null,
     });
   });
 
-  it("persists harness, model, effort, speed, and permission overrides", () => {
-    useLocalChatDefaultsStore.getState().setDefaultHarness("codex");
-    useLocalChatDefaultsStore.getState().setModelDefault("claude", "opus");
+  it("persists provider-keyed model, effort, speed, and permission overrides", () => {
     useLocalChatDefaultsStore
       .getState()
-      .setReasoningEffortDefault("codex", "high");
-    useLocalChatDefaultsStore.getState().setSpeedTierDefault("codex", "fast");
-    useLocalChatDefaultsStore.getState().setPermissionDefault("claude", "plan");
+      .setDefaultProvider({ id: "openrouter", harness: "claude" });
+    useLocalChatDefaultsStore.getState().setModelDefault("anthropic", "opus");
     useLocalChatDefaultsStore
       .getState()
-      .setPersonalityDefault("claude", "Explanatory");
+      .setReasoningEffortDefault("openai", "high");
+    useLocalChatDefaultsStore.getState().setSpeedTierDefault("openai", "fast");
+    useLocalChatDefaultsStore
+      .getState()
+      .setPermissionDefault("anthropic", "plan");
+    useLocalChatDefaultsStore
+      .getState()
+      .setPersonalityDefault("anthropic", "Explanatory");
+    useLocalChatDefaultsStore
+      .getState()
+      .setModelDefault("openrouter", "moonshotai/kimi-k2");
 
-    expect(useLocalChatDefaultsStore.getState().defaults).toEqual({
-      claude: {
+    const expectedDefaults = {
+      anthropic: {
         modelId: "opus",
         permissionMode: "plan",
         personality: "Explanatory",
       },
-      codex: { reasoningEffort: "high", speedTier: "fast" },
+      openai: { reasoningEffort: "high", speedTier: "fast" },
+      openrouter: { modelId: "moonshotai/kimi-k2" },
+    };
+    expect(useLocalChatDefaultsStore.getState().defaults).toEqual(
+      expectedDefaults
+    );
+    expect(useLocalChatDefaultsStore.getState().defaultProvider).toEqual({
+      id: "openrouter",
+      harness: "claude",
     });
-    expect(useLocalChatDefaultsStore.getState().defaultHarness).toBe("codex");
     expect(
       JSON.parse(
         window.localStorage.getItem(LOCAL_CHAT_DEFAULTS_STORAGE_KEY) ?? "{}"
       )
     ).toEqual({
-      defaultHarness: "codex",
-      harnesses: {
-        claude: {
-          modelId: "opus",
-          permissionMode: "plan",
-          personality: "Explanatory",
-        },
-        codex: { reasoningEffort: "high", speedTier: "fast" },
-      },
+      defaultProvider: { id: "openrouter", harness: "claude" },
+      providers: expectedDefaults,
     });
+  });
+
+  it("migrates harness-keyed v1 defaults onto the built-in providers", async () => {
+    window.localStorage.setItem(
+      LEGACY_LOCAL_CHAT_DEFAULTS_STORAGE_KEY,
+      JSON.stringify({
+        defaultHarness: "codex",
+        harnesses: {
+          claude: { modelId: "opus" },
+          codex: { reasoningEffort: "high" },
+        },
+      })
+    );
+    vi.resetModules();
+    const fresh = await import("./localChatDefaults");
+
+    expect(fresh.useLocalChatDefaultsStore.getState().defaults).toEqual({
+      anthropic: { modelId: "opus" },
+      openai: { reasoningEffort: "high" },
+    });
+    expect(fresh.useLocalChatDefaultsStore.getState().defaultProvider).toEqual({
+      id: "openai",
+      harness: "codex",
+    });
+  });
+
+  it("projects custom providers onto their harness with only their models", () => {
+    const custom: LocalChatProviderInfo = {
+      id: "openrouter",
+      label: "openrouter",
+      harness: "claude",
+      custom: true,
+      available: true,
+      unavailable_reason: null,
+      models: [{ id: "moonshotai/kimi-k2", label: "moonshotai/kimi-k2" }],
+      default_model_id: "moonshotai/kimi-k2",
+    };
+    const builtin: LocalChatProviderInfo = {
+      ...custom,
+      id: "anthropic",
+      label: "Anthropic",
+      custom: false,
+      models: null,
+      default_model_id: "sonnet",
+    };
+    const catalog = {
+      default_provider: "anthropic",
+      providers: [builtin, custom],
+      harnesses: [claudeInfo, codexInfo],
+    };
+
+    const projected = providerHarnessInfo(catalog, custom);
+    expect(projected?.models.map((model) => model.id)).toEqual([
+      "moonshotai/kimi-k2",
+    ]);
+    expect(projected?.default_model_id).toBe("moonshotai/kimi-k2");
+    expect(projected?.label).toBe("openrouter");
+    expect(projected?.permission_modes).toEqual(claudeInfo.permission_modes);
+    expect(providerHarnessInfo(catalog, builtin)?.models).toEqual(
+      claudeInfo.models
+    );
+    expect(resolveDefaultProvider(catalog, "openrouter")?.id).toBe("openrouter");
+    expect(resolveDefaultProvider(catalog, "missing")?.id).toBe("anthropic");
   });
 
   it("resolves stale overrides to the provider defaults", () => {
@@ -175,13 +248,13 @@ describe("local chat defaults", () => {
   });
 
   it("removes an override when reset or cleared", () => {
-    useLocalChatDefaultsStore.getState().setModelDefault("claude", "opus");
-    useLocalChatDefaultsStore.getState().resetHarness("claude");
+    useLocalChatDefaultsStore.getState().setModelDefault("anthropic", "opus");
+    useLocalChatDefaultsStore.getState().resetProvider("anthropic");
     expect(useLocalChatDefaultsStore.getState().defaults).toEqual({});
     expect(
       JSON.parse(
         window.localStorage.getItem(LOCAL_CHAT_DEFAULTS_STORAGE_KEY) ?? "{}"
       )
-    ).toEqual({ defaultHarness: null, harnesses: {} });
+    ).toEqual({ defaultProvider: null, providers: {} });
   });
 });

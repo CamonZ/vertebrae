@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -6,6 +6,7 @@ use std::sync::{
 use std::time::Duration;
 
 use tokio::sync::RwLock;
+use vertebrae_core::{BuiltinProvider, ProviderId, ProviderProfile, StepHarness};
 
 use crate::local_chat::harnesses::claude::{ClaudeLocalChatHarness, ClaudeStartupCapabilities};
 use crate::local_chat::harnesses::codex::CodexLocalChatHarness;
@@ -13,7 +14,8 @@ use crate::local_chat::permissions::{
     LocalPermissionDecision, PermissionBridge, PermissionBridgeError,
 };
 use crate::local_chat::{
-    CreateLocalChatSessionInput, LocalChatHarness, LocalChatHarnessCatalog, LocalChatHarnessKind,
+    CreateLocalChatSessionInput, LocalChatHarness, LocalChatHarnessCatalog, LocalChatHarnessInfo,
+    LocalChatHarnessKind, LocalChatModelOption, LocalChatProviderInfo, LocalChatProviderSelection,
     LocalChatRuntime, LocalChatSessionError,
 };
 
@@ -23,6 +25,8 @@ pub struct LocalChatSessionManager {
     lifecycle_gate: RwLock<()>,
     permission_bridge: PermissionBridge,
     shutdown_started: AtomicBool,
+    /// Custom `[providers.<id>]` profiles loaded from config.toml at startup.
+    provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
 }
 
 const LOCAL_CHAT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
@@ -44,8 +48,9 @@ impl LocalChatSessionManager {
 
     pub(crate) fn with_claude_startup_capabilities(
         startup_capabilities: ClaudeStartupCapabilities,
+        provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
     ) -> Self {
-        Self::with_harnesses_and_permission_bridge(
+        let mut manager = Self::with_harnesses_and_permission_bridge(
             vec![
                 Arc::new(ClaudeLocalChatHarness::with_startup_capabilities(
                     startup_capabilities.clone(),
@@ -55,7 +60,23 @@ impl LocalChatSessionManager {
                 )),
             ],
             PermissionBridge::new(),
-        )
+        );
+        manager.provider_profiles = provider_profiles;
+        manager
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_provider_profiles_for_tests(
+        mut self,
+        provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
+    ) -> Self {
+        self.provider_profiles = provider_profiles;
+        self
+    }
+
+    /// Custom provider profiles shared with title inference.
+    pub(crate) fn provider_profiles(&self) -> &BTreeMap<ProviderId, ProviderProfile> {
+        &self.provider_profiles
     }
 
     #[cfg(test)]
@@ -82,6 +103,7 @@ impl LocalChatSessionManager {
             lifecycle_gate: RwLock::new(()),
             permission_bridge,
             shutdown_started: AtomicBool::new(false),
+            provider_profiles: BTreeMap::new(),
         }
     }
 
@@ -98,10 +120,60 @@ impl LocalChatSessionManager {
             .or_else(|| harnesses.first().map(|info| info.harness))
             .unwrap_or(LocalChatHarnessKind::Claude);
 
+        let providers = provider_catalog(&harnesses, &self.provider_profiles);
+        let default_provider = providers
+            .iter()
+            .find(|provider| !provider.custom && provider.harness == default_harness)
+            .map(|provider| provider.id.clone())
+            .unwrap_or_else(|| BuiltinProvider::Anthropic.as_str().to_string());
+
         LocalChatHarnessCatalog {
             default_harness,
             harnesses,
+            default_provider,
+            providers,
         }
+    }
+
+    /// Resolve the picker's provider for a session on `harness`. Built-in IDs
+    /// (or none) use the harness's own provider; custom IDs must be valid
+    /// profiles bound to the same harness.
+    fn provider_selection(
+        &self,
+        harness: LocalChatHarnessKind,
+        provider_id: Option<&str>,
+    ) -> Result<Option<LocalChatProviderSelection>, LocalChatSessionError> {
+        let Some(provider_id) = provider_id.map(str::trim).filter(|id| !id.is_empty()) else {
+            return Ok(None);
+        };
+        let id = ProviderId::new(provider_id).map_err(LocalChatSessionError::StartFailed)?;
+        let expected = step_harness(harness);
+        if let Some(builtin) = id.builtin() {
+            if builtin.harness() != expected {
+                return Err(LocalChatSessionError::StartFailed(format!(
+                    "provider '{id}' does not run on the {expected} harness"
+                )));
+            }
+            return Ok(None);
+        }
+        let profile = self.provider_profiles.get(&id).ok_or_else(|| {
+            LocalChatSessionError::StartFailed(format!(
+                "provider '{id}' is not configured; add [providers.{id}] to config.toml"
+            ))
+        })?;
+        profile
+            .validate(&id)
+            .map_err(LocalChatSessionError::StartFailed)?;
+        if profile.harness != expected {
+            return Err(LocalChatSessionError::StartFailed(format!(
+                "provider '{id}' is configured for the {} harness, not {expected}",
+                profile.harness
+            )));
+        }
+        Ok(Some(LocalChatProviderSelection {
+            id,
+            profile: profile.clone(),
+        }))
     }
 
     pub async fn create_session(
@@ -126,6 +198,7 @@ impl LocalChatSessionManager {
         }
         let harness_kind = input.harness;
         let backend_session_id = input.backend_session_id.clone();
+        let provider = self.provider_selection(harness_kind, input.provider_id.as_deref())?;
         let harness = self.harness(harness_kind)?;
         let info = harness.info().await;
         if !info.available {
@@ -144,7 +217,7 @@ impl LocalChatSessionManager {
         }
 
         match harness
-            .create_session(input.into_harness_input(), runtime)
+            .create_session(input.into_harness_input(provider), runtime)
             .await
         {
             Ok(()) => Ok(()),
@@ -354,3 +427,92 @@ impl Default for LocalChatSessionManager {
 
 #[cfg(test)]
 mod tests;
+
+fn step_harness(harness: LocalChatHarnessKind) -> StepHarness {
+    match harness {
+        LocalChatHarnessKind::Claude => StepHarness::Claude,
+        LocalChatHarnessKind::Codex => StepHarness::Codex,
+    }
+}
+
+fn local_chat_harness(harness: StepHarness) -> Option<LocalChatHarnessKind> {
+    match harness {
+        StepHarness::Claude => Some(LocalChatHarnessKind::Claude),
+        StepHarness::Codex => Some(LocalChatHarnessKind::Codex),
+        StepHarness::Typesafe => None,
+    }
+}
+
+/// Built-in Anthropic/OpenAI choices followed by custom Claude/Codex
+/// providers. TypeSafe providers are step-only and never listed.
+fn provider_catalog(
+    harnesses: &[LocalChatHarnessInfo],
+    profiles: &BTreeMap<ProviderId, ProviderProfile>,
+) -> Vec<LocalChatProviderInfo> {
+    let harness_info = |kind| harnesses.iter().find(|info| info.harness == kind);
+    let mut providers = Vec::new();
+    for (builtin, label) in [
+        (BuiltinProvider::Anthropic, "Anthropic"),
+        (BuiltinProvider::Openai, "OpenAI"),
+    ] {
+        let Some(kind) = local_chat_harness(builtin.harness()) else {
+            continue;
+        };
+        let Some(info) = harness_info(kind) else {
+            continue;
+        };
+        providers.push(LocalChatProviderInfo {
+            id: builtin.as_str().to_string(),
+            label: label.to_string(),
+            harness: kind,
+            custom: false,
+            available: info.available,
+            unavailable_reason: info.unavailable_reason.clone(),
+            models: None,
+            default_model_id: info.default_model_id.clone(),
+        });
+    }
+    for (id, profile) in profiles {
+        let Some(kind) = local_chat_harness(profile.harness) else {
+            continue;
+        };
+        let harness = harness_info(kind);
+        let (available, unavailable_reason) = match (profile.validate(id), harness) {
+            (Err(error), _) => (false, Some(error)),
+            (Ok(()), Some(info)) if !info.available => (false, info.unavailable_reason.clone()),
+            (Ok(()), Some(_)) => (true, None),
+            (Ok(()), None) => (
+                false,
+                Some(format!("{} harness is unavailable", profile.harness)),
+            ),
+        };
+        let harness_speed_tiers = |model: &str| {
+            harness
+                .and_then(|info| info.models.iter().find(|option| option.id == model))
+                .and_then(|option| option.supported_speed_tier_ids.clone())
+        };
+        providers.push(LocalChatProviderInfo {
+            id: id.to_string(),
+            label: id.to_string(),
+            harness: kind,
+            custom: true,
+            available,
+            unavailable_reason,
+            models: Some(
+                profile
+                    .models
+                    .iter()
+                    .map(|model| LocalChatModelOption {
+                        id: model.clone(),
+                        label: model.clone(),
+                        supported_reasoning_effort_ids: None,
+                        supported_speed_tier_ids: harness_speed_tiers(model),
+                        supports_personality: None,
+                    })
+                    .collect(),
+            ),
+            default_model_id: profile.resolve_model(id, None).ok(),
+        });
+    }
+    providers
+}

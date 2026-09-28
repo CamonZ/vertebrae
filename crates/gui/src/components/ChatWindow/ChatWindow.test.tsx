@@ -1,3 +1,4 @@
+import { withBuiltinProviders } from "../../test/localChatCatalog";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   act,
@@ -27,7 +28,9 @@ Element.prototype.scrollIntoView = vi.fn();
 const mockedCommands = vi.mocked(commands);
 
 // Mock the bindings
-vi.mock("../../bindings", () => ({
+vi.mock("../../bindings", async () => {
+  const { withBuiltinProviders } = await import("../../test/localChatCatalog");
+  return {
   commands: {
     getCurrentProjectPath: vi.fn().mockResolvedValue({
       status: "ok",
@@ -35,7 +38,7 @@ vi.mock("../../bindings", () => ({
     }),
     getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
       status: "ok",
-      data: {
+      data: withBuiltinProviders({
         default_harness: "claude",
         harnesses: [
           {
@@ -66,7 +69,7 @@ vi.mock("../../bindings", () => ({
             models: [],
           },
         ],
-      },
+      }),
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     getLocalFileRoots: vi.fn().mockResolvedValue({
@@ -119,7 +122,8 @@ vi.mock("../../bindings", () => ({
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
   },
-}));
+};
+});
 
 function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
@@ -137,7 +141,7 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
 function mockAvailableCodexHarness() {
   mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
     status: "ok",
-    data: {
+    data: withBuiltinProviders({
       default_harness: "codex",
       harnesses: [
         {
@@ -152,7 +156,7 @@ function mockAvailableCodexHarness() {
           models: [{ id: "default", label: "Default" }],
         },
       ],
-    },
+    }),
   });
 }
 
@@ -707,7 +711,7 @@ describe("ChatWindow", () => {
   it("omits unavailable Codex from the provider picker", async () => {
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
       status: "ok",
-      data: {
+      data: withBuiltinProviders({
         default_harness: "claude",
         harnesses: [
           {
@@ -739,7 +743,7 @@ describe("ChatWindow", () => {
             models: [],
           },
         ],
-      },
+      }),
     });
     const session = createSession();
     useChatStore.setState({
@@ -753,19 +757,19 @@ describe("ChatWindow", () => {
     const providerPicker = await screen.findByTestId(
       "local-chat-provider-picker"
     );
-    expect(providerPicker).toHaveValue("claude");
+    expect(providerPicker).toHaveValue("anthropic");
     expect(
       Array.from((providerPicker as HTMLSelectElement).options).map(
         (option) => option.value
       )
-    ).toEqual(["claude"]);
+    ).toEqual(["anthropic"]);
   });
 
   it("falls back to Codex when Claude is unavailable before starting", async () => {
     const user = userEvent.setup();
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
       status: "ok",
-      data: {
+      data: withBuiltinProviders({
         default_harness: "codex",
         harnesses: [
           {
@@ -797,7 +801,7 @@ describe("ChatWindow", () => {
             ],
           },
         ],
-      },
+      }),
     });
     const session = createSession();
     useChatStore.setState({
@@ -816,12 +820,12 @@ describe("ChatWindow", () => {
         "codex"
       );
     });
-    expect(providerPicker).toHaveValue("codex");
+    expect(providerPicker).toHaveValue("openai");
     expect(
       Array.from((providerPicker as HTMLSelectElement).options).map(
         (option) => option.value
       )
-    ).toEqual(["codex"]);
+    ).toEqual(["openai"]);
 
     await user.type(screen.getByTestId("local-chat-composer"), "Start Codex");
     await user.click(screen.getByTitle("Start session"));
@@ -840,7 +844,7 @@ describe("ChatWindow", () => {
     const user = userEvent.setup();
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
       status: "ok",
-      data: {
+      data: withBuiltinProviders({
         default_harness: "claude",
         harnesses: [
           {
@@ -887,7 +891,7 @@ describe("ChatWindow", () => {
             ],
           },
         ],
-      },
+      }),
     });
     const session = createSession();
     useChatStore.setState({
@@ -900,7 +904,7 @@ describe("ChatWindow", () => {
 
     await user.selectOptions(
       await screen.findByTestId("local-chat-provider-picker"),
-      "codex"
+      "openai"
     );
     await waitFor(() => {
       expect(useChatStore.getState().sessions["test-session"].harness).toBe(
@@ -946,6 +950,90 @@ describe("ChatWindow", () => {
         personality: null,
         permission_mode: "default",
       });
+    });
+  });
+
+  it("starts a custom provider on its configured harness with only its models", async () => {
+    const user = userEvent.setup();
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+      status: "ok",
+      data: withBuiltinProviders(
+        {
+          default_harness: "claude",
+          harnesses: [
+            {
+              harness: "claude",
+              label: "Claude",
+              available: true,
+              unavailable_reason: null,
+              default_model_id: "sonnet",
+              default_reasoning_effort: null,
+              reasoning_efforts: [],
+              supports_resume: true,
+              models: [
+                { id: "sonnet", label: "Sonnet" },
+                { id: "opus", label: "Opus" },
+              ],
+            },
+          ],
+        },
+        [
+          {
+            id: "openrouter",
+            label: "openrouter",
+            harness: "claude",
+            custom: true,
+            available: true,
+            unavailable_reason: null,
+            models: [
+              { id: "moonshotai/kimi-k2", label: "moonshotai/kimi-k2" },
+              { id: "z-ai/glm-5", label: "z-ai/glm-5" },
+            ],
+            default_model_id: "z-ai/glm-5",
+          },
+        ]
+      ),
+    });
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.selectOptions(
+      await screen.findByTestId("local-chat-provider-picker"),
+      "openrouter"
+    );
+    await waitFor(() => {
+      const updated = useChatStore.getState().sessions["test-session"];
+      expect(updated.providerId).toBe("openrouter");
+      expect(updated.harness).toBe("claude");
+    });
+    expect(
+      Array.from(
+        (screen.getByTestId("local-chat-model-picker") as HTMLSelectElement)
+          .options,
+        (option) => option.value
+      )
+    ).toEqual(["", "moonshotai/kimi-k2", "z-ai/glm-5"]);
+    await user.selectOptions(
+      screen.getByTestId("local-chat-model-picker"),
+      "moonshotai/kimi-k2"
+    );
+    await user.type(screen.getByTestId("local-chat-composer"), "Start");
+    await user.click(screen.getByTitle("Start session"));
+
+    await waitFor(() => {
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          harness: "claude",
+          provider_id: "openrouter",
+          model_id: "moonshotai/kimi-k2",
+        })
+      );
     });
   });
 
@@ -1012,7 +1100,7 @@ describe("ChatWindow", () => {
         (screen.getByTestId("local-chat-provider-picker") as HTMLSelectElement)
           .options
       ).map((option) => option.value)
-    ).toEqual(["claude"]);
+    ).toEqual(["anthropic"]);
     expect(useChatStore.getState().sessions["test-session"].harness).toBe(
       "codex"
     );
@@ -1027,7 +1115,7 @@ describe("ChatWindow", () => {
   it("blocks local chat and shows the neither-installed message", async () => {
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
       status: "ok",
-      data: {
+      data: withBuiltinProviders({
         default_harness: "claude",
         harnesses: [
           {
@@ -1053,7 +1141,7 @@ describe("ChatWindow", () => {
             models: [],
           },
         ],
-      },
+      }),
     });
     const session = createSession();
     useChatStore.setState({
@@ -1082,7 +1170,7 @@ describe("ChatWindow", () => {
     const user = userEvent.setup();
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
       status: "ok",
-      data: {
+      data: withBuiltinProviders({
         default_harness: "claude",
         harnesses: [
           {
@@ -1120,7 +1208,7 @@ describe("ChatWindow", () => {
             ],
           },
         ],
-      },
+      }),
     });
     const session = createSession({
       harness: "codex",
@@ -1362,7 +1450,7 @@ describe("ChatWindow", () => {
   it("clears saved model override when selected harness has no selectable models", async () => {
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
       status: "ok",
-      data: {
+      data: withBuiltinProviders({
         default_harness: "claude",
         harnesses: [
           {
@@ -1394,7 +1482,7 @@ describe("ChatWindow", () => {
             models: [],
           },
         ],
-      },
+      }),
     });
     const session = createSession({
       harness: "codex",

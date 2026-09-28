@@ -5,7 +5,7 @@ import {
   events,
   type LocalChatHarnessCatalog,
   type LocalChatHarnessInfo,
-  type LocalChatHarnessKind,
+  type LocalChatProviderInfo,
   type LocalFileEditor,
   type PermissionMode,
 } from "../bindings";
@@ -44,7 +44,8 @@ import {
   hasStaleReasoningEffort,
   hasStaleSpeedTier,
   personalityOptionsForModel,
-  resolveDefaultHarness,
+  providerHarnessInfo,
+  resolveDefaultProvider,
   resolveModelDefaultId,
   resolvePersonalityDefault,
   resolvePermissionDefault,
@@ -128,14 +129,20 @@ function SaveIndicator({ visible }: { visible: boolean }) {
 }
 
 function HarnessDefaultsSection({
+  provider,
   info,
   onSaved,
 }: {
+  provider: LocalChatProviderInfo;
   info: LocalChatHarnessInfo;
   onSaved: () => void;
 }) {
+  // Defaults are saved per provider. Built-in providers keep their harness
+  // test IDs; custom providers are addressed by provider ID.
+  const providerId = provider.id;
+  const testIdPrefix = provider.custom ? `provider-${provider.id}` : info.harness;
   const saved = useLocalChatDefaultsStore(
-    (state) => state.defaults[info.harness]
+    (state) => state.defaults[providerId]
   );
   const setModelDefault = useLocalChatDefaultsStore(
     (state) => state.setModelDefault
@@ -152,7 +159,9 @@ function HarnessDefaultsSection({
   const setPersonalityDefault = useLocalChatDefaultsStore(
     (state) => state.setPersonalityDefault
   );
-  const resetHarness = useLocalChatDefaultsStore((state) => state.resetHarness);
+  const resetProvider = useLocalChatDefaultsStore(
+    (state) => state.resetProvider
+  );
   const permissionModes = info.permission_modes ?? [];
   const effectiveModelId = resolveModelDefaultId(info, saved?.modelId);
   const effectivePermissionMode = resolvePermissionDefault(
@@ -215,7 +224,7 @@ function HarnessDefaultsSection({
   return (
     <section
       className="border-t border-[var(--color-line)]"
-      data-testid={`harness-defaults-${info.harness}`}
+      data-testid={`harness-defaults-${testIdPrefix}`}
     >
       <div className="flex items-center justify-between gap-4 pt-7">
         <div className="flex items-center gap-2">
@@ -236,11 +245,11 @@ function HarnessDefaultsSection({
           <button
             type="button"
             onClick={() => {
-              resetHarness(info.harness);
+              resetProvider(providerId);
               onSaved();
             }}
             className="shrink-0 text-xs font-medium text-[var(--color-accent)] hover:underline"
-            data-testid={`reset-harness-defaults-${info.harness}`}
+            data-testid={`reset-harness-defaults-${testIdPrefix}`}
           >
             Reset
           </button>
@@ -254,7 +263,7 @@ function HarnessDefaultsSection({
       {!info.available && info.unavailable_reason && (
         <p
           className="mt-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
-          data-testid={`harness-unavailable-${info.harness}`}
+          data-testid={`harness-unavailable-${testIdPrefix}`}
         >
           {info.unavailable_reason}
         </p>
@@ -267,10 +276,10 @@ function HarnessDefaultsSection({
         >
           <Select
             aria-label={`${info.label} default model`}
-            data-testid={`${info.harness}-default-model`}
+            data-testid={`${testIdPrefix}-default-model`}
             value={saved?.modelId ?? ""}
             onChange={(event) => {
-              setModelDefault(info.harness, event.target.value || null);
+              setModelDefault(providerId, event.target.value || null);
               onSaved();
             }}
             disabled={!info.available || info.models.length === 0}
@@ -314,10 +323,10 @@ function HarnessDefaultsSection({
           >
             <Select
               aria-label={`${info.label} speed tier`}
-              data-testid={`${info.harness}-default-speed-tier`}
+              data-testid={`${testIdPrefix}-default-speed-tier`}
               value={saved?.speedTier ?? ""}
               onChange={(event) => {
-                setSpeedTierDefault(info.harness, event.target.value || null);
+                setSpeedTierDefault(providerId, event.target.value || null);
                 onSaved();
               }}
               disabled={!info.available}
@@ -363,10 +372,10 @@ function HarnessDefaultsSection({
         >
           <Select
             aria-label={`${info.label} ${info.harness === "claude" ? "output style" : "personality"}`}
-            data-testid={`${info.harness}-default-personality`}
+            data-testid={`${testIdPrefix}-default-personality`}
             value={saved?.personality ?? ""}
             onChange={(event) => {
-              setPersonalityDefault(info.harness, event.target.value || null);
+              setPersonalityDefault(providerId, event.target.value || null);
               onSaved();
             }}
             disabled={!info.available || personalityOptions.length === 0}
@@ -413,11 +422,11 @@ function HarnessDefaultsSection({
           >
             <Select
               aria-label={`${info.label} reasoning effort`}
-              data-testid={`${info.harness}-default-reasoning-effort`}
+              data-testid={`${testIdPrefix}-default-reasoning-effort`}
               value={saved?.reasoningEffort ?? ""}
               onChange={(event) => {
                 setReasoningEffortDefault(
-                  info.harness,
+                  providerId,
                   event.target.value || null
                 );
                 onSaved();
@@ -465,11 +474,11 @@ function HarnessDefaultsSection({
         >
           <Select
             aria-label={`${info.label} default permission`}
-            data-testid={`${info.harness}-default-permission`}
+            data-testid={`${testIdPrefix}-default-permission`}
             value={saved?.permissionMode ?? ""}
             onChange={(event) => {
               setPermissionDefault(
-                info.harness,
+                providerId,
                 (event.target.value || null) as PermissionMode | null
               );
               onSaved();
@@ -1690,11 +1699,11 @@ export function SettingsPage({
   const storageWarning = useLocalChatDefaultsStore(
     (state) => state.storageWarning
   );
-  const defaultHarness = useLocalChatDefaultsStore(
-    (state) => state.defaultHarness
+  const defaultProvider = useLocalChatDefaultsStore(
+    (state) => state.defaultProvider
   );
-  const setDefaultHarness = useLocalChatDefaultsStore(
-    (state) => state.setDefaultHarness
+  const setDefaultProvider = useLocalChatDefaultsStore(
+    (state) => state.setDefaultProvider
   );
   const theme = useUIStore((state) => state.theme);
   const setTheme = useUIStore((state) => state.setTheme);
@@ -1706,13 +1715,22 @@ export function SettingsPage({
   );
   const externalEditor = useUIStore((state) => state.externalEditor);
   const setExternalEditor = useUIStore((state) => state.setExternalEditor);
-  const harnesses = useMemo(() => catalog?.harnesses ?? [], [catalog]);
-  const availableHarnesses = useMemo(
-    () => harnesses.filter((info) => info.available),
-    [harnesses]
+  const providerSections = useMemo(
+    () =>
+      catalog
+        ? catalog.providers.flatMap((provider) => {
+            const info = providerHarnessInfo(catalog, provider);
+            return info ? [{ provider, info }] : [];
+          })
+        : [],
+    [catalog]
   );
-  const effectiveDefaultHarness = catalog
-    ? resolveDefaultHarness(catalog, defaultHarness)
+  const availableProviders = useMemo(
+    () => catalog?.providers.filter((provider) => provider.available) ?? [],
+    [catalog]
+  );
+  const effectiveDefaultProvider = catalog
+    ? resolveDefaultProvider(catalog, defaultProvider?.id)
     : null;
   const externalEditorOptions = useMemo(() => {
     const configuredEditorIsMissing =
@@ -2077,7 +2095,7 @@ export function SettingsPage({
                 >
                   {error}
                 </div>
-              ) : harnesses.length === 0 ? (
+              ) : providerSections.length === 0 ? (
                 <div className="mt-8 rounded-[var(--radius-md)] border border-dashed border-[var(--color-line-strong)] p-6 text-sm text-[var(--color-fg-mute)]">
                   No local chat harnesses are available.
                 </div>
@@ -2088,25 +2106,29 @@ export function SettingsPage({
                       New sessions
                     </p>
                     <SettingRow
-                      label="Default harness"
-                      description="The harness used for every new chat session."
+                      label="Default provider"
+                      description="The provider used for every new chat session. Custom providers come from [providers.<id>] in config.toml."
                     >
                       <Select
-                        aria-label="Default harness"
+                        aria-label="Default provider"
                         data-testid="default-harness"
-                        value={effectiveDefaultHarness ?? ""}
+                        value={effectiveDefaultProvider?.id ?? ""}
                         onChange={(event) => {
-                          setDefaultHarness(
-                            (event.target.value ||
-                              null) as LocalChatHarnessKind | null
+                          const provider = availableProviders.find(
+                            (candidate) => candidate.id === event.target.value
+                          );
+                          setDefaultProvider(
+                            provider
+                              ? { id: provider.id, harness: provider.harness }
+                              : null
                           );
                           setSavedFeedback(true);
                         }}
-                        disabled={availableHarnesses.length === 0}
-                        options={availableHarnesses.map((info) => ({
-                          value: info.harness,
-                          label: `${info.label}${
-                            info.harness === catalog?.default_harness
+                        disabled={availableProviders.length === 0}
+                        options={availableProviders.map((provider) => ({
+                          value: provider.id,
+                          label: `${provider.label}${
+                            provider.id === catalog?.default_provider
                               ? " (provider default)"
                               : ""
                           }`,
@@ -2120,10 +2142,11 @@ export function SettingsPage({
                       Harness defaults
                     </p>
                     <div className="space-y-7">
-                      {harnesses.map((info) => (
+                      {providerSections.map(({ provider, info }) => (
                         <HarnessDefaultsSection
+                          provider={provider}
                           info={info}
-                          key={info.harness}
+                          key={provider.id}
                           onSaved={() => setSavedFeedback(true)}
                         />
                       ))}

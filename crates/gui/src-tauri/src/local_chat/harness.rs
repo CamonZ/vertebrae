@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use vertebrae_core::{AgentConfig, ProviderId, ProviderProfile};
+use vertebrae_harness::HarnessFactoryConfig;
 
 use crate::local_chat::events::LocalChatEventSink;
 use crate::local_chat::permissions::PermissionBridge;
@@ -82,10 +84,29 @@ pub struct LocalChatHarnessInfo {
     pub supports_resume: bool,
 }
 
+/// A provider choice in the local chat picker. Built-in providers reuse their
+/// harness's model catalog; custom providers list exactly their configured
+/// models.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct LocalChatProviderInfo {
+    pub id: String,
+    pub label: String,
+    /// Harness that runs this provider, derived from the provider.
+    pub harness: LocalChatHarnessKind,
+    pub custom: bool,
+    pub available: bool,
+    pub unavailable_reason: Option<String>,
+    /// `None` means "use the harness's model catalog".
+    pub models: Option<Vec<LocalChatModelOption>>,
+    pub default_model_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
 pub struct LocalChatHarnessCatalog {
     pub default_harness: LocalChatHarnessKind,
     pub harnesses: Vec<LocalChatHarnessInfo>,
+    pub default_provider: String,
+    pub providers: Vec<LocalChatProviderInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -102,6 +123,59 @@ pub struct CreateLocalChatSessionInput {
     pub speed_tier: Option<String>,
     pub permission_mode: Option<PermissionMode>,
     pub personality: Option<String>,
+    /// Provider ID selected in the picker. Absent or built-in IDs use the
+    /// harness's built-in provider; custom IDs must be configured in
+    /// config.toml for `harness`.
+    #[serde(default)]
+    #[specta(optional)]
+    pub provider_id: Option<String>,
+}
+
+/// A custom provider selected for one local chat session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LocalChatProviderSelection {
+    pub(crate) id: ProviderId,
+    pub(crate) profile: ProviderProfile,
+}
+
+impl LocalChatProviderSelection {
+    /// Route the harness factory through this provider's profile.
+    pub(crate) fn apply(
+        &self,
+        factory_config: &mut HarnessFactoryConfig,
+        agent_config: &mut AgentConfig,
+    ) {
+        agent_config.provider = Some(self.id.clone());
+        factory_config
+            .provider_profiles
+            .insert(self.id.clone(), self.profile.clone());
+    }
+
+    /// Use the requested model when the provider lists it; otherwise fall
+    /// back to the provider's default model with a warning.
+    pub(crate) fn resolve_model(&self, requested: Option<&str>) -> (String, Option<String>) {
+        let fallback = || {
+            self.profile
+                .resolve_model(&self.id, None)
+                .expect("validated custom providers list at least one model")
+        };
+        match requested.map(str::trim).filter(|model| !model.is_empty()) {
+            None => (fallback(), None),
+            Some(model) => match self.profile.resolve_model(&self.id, Some(model)) {
+                Ok(model) => (model, None),
+                Err(_) => {
+                    let fallback = fallback();
+                    let warning = format!(
+                        "Model '{}' is not configured for provider '{}'; using '{}'.",
+                        model.escape_default(),
+                        self.id,
+                        fallback
+                    );
+                    (fallback, Some(warning))
+                }
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,10 +189,14 @@ pub(crate) struct HarnessCreateSessionInput {
     pub(crate) speed_tier: Option<String>,
     pub(crate) permission_mode: Option<PermissionMode>,
     pub(crate) personality: Option<String>,
+    pub(crate) provider: Option<LocalChatProviderSelection>,
 }
 
 impl CreateLocalChatSessionInput {
-    pub(crate) fn into_harness_input(self) -> HarnessCreateSessionInput {
+    pub(crate) fn into_harness_input(
+        self,
+        provider: Option<LocalChatProviderSelection>,
+    ) -> HarnessCreateSessionInput {
         HarnessCreateSessionInput {
             backend_session_id: self.backend_session_id,
             working_dir: self.working_dir,
@@ -129,6 +207,7 @@ impl CreateLocalChatSessionInput {
             speed_tier: self.speed_tier,
             permission_mode: self.permission_mode,
             personality: self.personality,
+            provider,
         }
     }
 }

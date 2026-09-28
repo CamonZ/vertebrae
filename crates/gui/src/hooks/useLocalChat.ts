@@ -173,6 +173,7 @@ function inferSessionTitleInBackground(
       harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
       initial_prompts: userMessages,
       working_dir: workingDir,
+      ...(session.providerId ? { provider_id: session.providerId } : {}),
     })
     .then((result) => {
       if (result.status === "ok") {
@@ -218,6 +219,7 @@ export async function doRegenerateSessionTitle(
       harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
       initial_prompts: transcript.entries,
       working_dir: session.projectPath ?? null,
+      ...(session.providerId ? { provider_id: session.providerId } : {}),
     });
     if (result.status === "error") {
       return commandErrorMessage(result.error);
@@ -714,6 +716,7 @@ export async function doStartSession(
       ...(speedTier ? { speed_tier: speedTier } : {}),
       permission_mode: permissionMode,
       personality,
+      ...(session.providerId ? { provider_id: session.providerId } : {}),
     });
     if (result.status === "error") {
       throw new Error(commandErrorMessage(result.error));

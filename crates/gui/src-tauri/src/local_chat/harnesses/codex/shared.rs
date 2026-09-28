@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use tokio::sync::{Mutex, OnceCell, RwLock};
-use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
+use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, ProviderId};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
     interrupt_close_and_await, EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId,
@@ -74,7 +74,7 @@ impl CodexLocalChatHarness {
             &self.shell_environment,
         ));
         let instance = match factory.create(HarnessRuntimeOptions {
-            agent_config: AgentConfig::new().with_provider(Provider::Openai),
+            agent_config: AgentConfig::new().with_provider(ProviderId::openai()),
             request_config: Default::default(),
         }) {
             Ok(instance) => instance,
@@ -120,7 +120,18 @@ impl LocalChatHarness for CodexLocalChatHarness {
             LocalChatSessionError::StartFailed(error)
         })?;
         let initial_prompt = input.initial_prompt.clone();
-        let model = requested_model_override(input.model_id.as_deref()).map(str::to_owned);
+        // Custom providers accept exactly their configured models.
+        let model = match &input.provider {
+            Some(provider) => {
+                let (model, warning) = provider.resolve_model(input.model_id.as_deref());
+                if let Some(warning) = warning {
+                    emit_warning(&runtime, &backend_session_id, warning);
+                }
+                Some(model)
+            }
+            None => requested_model_override(input.model_id.as_deref()).map(str::to_owned),
+        };
+        let sink_model = model.clone();
         let reasoning_effort =
             requested_reasoning_effort(input.reasoning_effort.as_deref()).map(str::to_owned);
         let speed_tier = input.speed_tier.as_deref().and_then(SpeedTier::parse);
@@ -130,19 +141,10 @@ impl LocalChatHarness for CodexLocalChatHarness {
             input.personality,
         );
         if let Some(warning) = personality_warning {
-            runtime.event_sink().emit(LocalChatEvent::Warning(
-                crate::local_chat::LocalChatSessionWarningEvent {
-                    backend_session_id: backend_session_id.clone(),
-                    harness: LocalChatHarnessKind::Codex,
-                    turn_id: None,
-                    thread_id: None,
-                    is_root: true,
-                    warning,
-                },
-            ));
+            emit_warning(&runtime, &backend_session_id, warning);
         }
-        let agent_config = AgentConfig {
-            provider: Some(Provider::Openai),
+        let mut agent_config = AgentConfig {
+            provider: Some(ProviderId::openai()),
             model: model.clone(),
             reasoning_effort: reasoning_effort.clone(),
             permission_mode: input.permission_mode.as_ref().map(core_permission_mode),
@@ -161,7 +163,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
             backend_session_id.clone(),
             LocalChatHarnessKind::Codex,
             runtime.event_sink(),
-            requested_model_override(input.model_id.as_deref()).map(str::to_owned),
+            sink_model,
             0,
             true,
         ));
@@ -174,20 +176,21 @@ impl LocalChatHarness for CodexLocalChatHarness {
                 emit_error(&runtime, &backend_session_id, error.clone());
                 LocalChatSessionError::StartFailed(error)
             })?;
-        let instance = HarnessRuntimeFactory::new(codex_factory_config(
-            binary,
-            vec![skills_root],
-            &self.shell_environment,
-        ))
-        .create(HarnessRuntimeOptions {
-            agent_config,
-            request_config: request.config.clone(),
-        })
-        .map_err(|error| {
-            let error = error.to_string();
-            emit_error(&runtime, &backend_session_id, error.clone());
-            LocalChatSessionError::StartFailed(error)
-        })?;
+        let mut factory_config =
+            codex_factory_config(binary, vec![skills_root], &self.shell_environment);
+        if let Some(provider) = &input.provider {
+            provider.apply(&mut factory_config, &mut agent_config);
+        }
+        let instance = HarnessRuntimeFactory::new(factory_config)
+            .create(HarnessRuntimeOptions {
+                agent_config,
+                request_config: request.config.clone(),
+            })
+            .map_err(|error| {
+                let error = error.to_string();
+                emit_error(&runtime, &backend_session_id, error.clone());
+                LocalChatSessionError::StartFailed(error)
+            })?;
         request.config = instance.request_config;
         let session = instance
             .runtime
@@ -425,6 +428,19 @@ fn codex_start_request(
             ..Default::default()
         },
     }
+}
+
+fn emit_warning(runtime: &LocalChatRuntime, backend_session_id: &str, warning: String) {
+    runtime.event_sink().emit(LocalChatEvent::Warning(
+        crate::local_chat::LocalChatSessionWarningEvent {
+            backend_session_id: backend_session_id.to_string(),
+            harness: LocalChatHarnessKind::Codex,
+            turn_id: None,
+            thread_id: None,
+            is_root: true,
+            warning,
+        },
+    ));
 }
 
 fn emit_error(runtime: &LocalChatRuntime, backend_session_id: &str, error: String) {

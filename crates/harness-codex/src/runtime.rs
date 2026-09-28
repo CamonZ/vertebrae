@@ -1786,14 +1786,7 @@ async fn setup_session(
 ) -> Result<Arc<SessionState>, HarnessError> {
     config.validate_request(&request_config)?;
     let default_output_schema = request_config.output_schema.clone();
-    let mut launch_config = (*config).clone();
-    launch_config
-        .environment
-        .extend(request_config.environment.clone());
-    if let Some(path) = request_config.environment.get("PATH") {
-        launch_config.search_path = Some(path.clone().into());
-    }
-    add_model_verbosity_override(&mut launch_config.extra_args, request_config.verbosity);
+    let launch_config = launch_config_for_request(&config, &request_config);
     let launcher: Arc<dyn CodexAppServerLauncher> = config
         .launcher
         .clone()
@@ -1894,7 +1887,7 @@ async fn setup_session(
     if let Some(personality) = &request_config.personality {
         params["personality"] = json!(personality);
     }
-    if let Some(provider) = &config.model_provider {
+    if let Some(provider) = config.effective_model_provider() {
         params["modelProvider"] = json!(provider);
     }
     add_developer_instructions(&mut params, &request_config);
@@ -2012,6 +2005,29 @@ fn add_service_tier(params: &mut Value, request_config: &vertebrae_harness_core:
         SpeedTier::Default => "default",
         SpeedTier::Fast => "priority",
     });
+}
+
+/// Per-launch App Server configuration: request environment, custom model
+/// provider overrides, and request-scoped `-c` settings.
+fn launch_config_for_request(
+    config: &CodexProviderConfig,
+    request_config: &vertebrae_harness_core::RequestConfig,
+) -> CodexProviderConfig {
+    let mut launch_config = config.clone();
+    launch_config
+        .environment
+        .extend(request_config.environment.clone());
+    if let Some(path) = request_config.environment.get("PATH") {
+        launch_config.search_path = Some(path.clone().into());
+    }
+    if let Some(provider) = &config.custom_model_provider {
+        launch_config
+            .environment
+            .extend(provider.launch_environment());
+        launch_config.extra_args.extend(provider.config_overrides());
+    }
+    add_model_verbosity_override(&mut launch_config.extra_args, request_config.verbosity);
+    launch_config
 }
 
 fn add_model_verbosity_override(extra_args: &mut Vec<String>, verbosity: Option<OutputVerbosity>) {
@@ -2271,8 +2287,10 @@ mod tests {
     use super::{
         ControlDisposition, FileChangeKind, RootTurnIdentity, SessionState, ToolStatus,
         add_developer_instructions, add_model_verbosity_override, add_service_tier,
-        control_request, file_change_event, parse_usage, tool_call, tool_output,
+        control_request, file_change_event, launch_config_for_request, parse_usage, tool_call,
+        tool_output,
     };
+    use crate::{CODEX_CUSTOM_PROVIDER_API_KEY_ENV, CodexCustomModelProvider, CodexProviderConfig};
     use vertebrae_harness_core::{
         OutputVerbosity, SessionId, SpeedTier, ThreadId, ToolCallId, TurnId,
     };
@@ -2328,6 +2346,83 @@ mod tests {
             args,
             vec!["--experimental-api", "-c", "model_verbosity=medium"]
         );
+    }
+
+    #[test]
+    fn custom_model_provider_generates_codex_overrides_and_credential_environment() {
+        let config = CodexProviderConfig {
+            extra_args: vec!["--experimental-api".into()],
+            custom_model_provider: Some(CodexCustomModelProvider {
+                id: "openrouter".into(),
+                base_url: Some("https://openrouter.ai/api/v1".into()),
+                api_key: Some("provider-secret".into()),
+                wire_api: Some("chat".into()),
+                environment: [("OPENROUTER_REFERER".to_string(), "vtb".to_string())].into(),
+            }),
+            ..Default::default()
+        };
+
+        let launch = launch_config_for_request(
+            &config,
+            &vertebrae_harness_core::RequestConfig {
+                verbosity: Some(OutputVerbosity::Low),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            launch.extra_args,
+            vec![
+                "--experimental-api",
+                "-c",
+                "model_providers.openrouter.name=\"openrouter\"",
+                "-c",
+                "model_providers.openrouter.base_url=\"https://openrouter.ai/api/v1\"",
+                "-c",
+                &format!(
+                    "model_providers.openrouter.env_key=\"{CODEX_CUSTOM_PROVIDER_API_KEY_ENV}\""
+                ),
+                "-c",
+                "model_providers.openrouter.wire_api=\"chat\"",
+                "-c",
+                "model_verbosity=low",
+            ]
+        );
+        assert_eq!(
+            launch
+                .environment
+                .get(CODEX_CUSTOM_PROVIDER_API_KEY_ENV)
+                .map(String::as_str),
+            Some("provider-secret")
+        );
+        assert_eq!(
+            launch
+                .environment
+                .get("OPENROUTER_REFERER")
+                .map(String::as_str),
+            Some("vtb")
+        );
+        assert_eq!(launch.effective_model_provider(), Some("openrouter"));
+        assert!(!format!("{config:?}").contains("provider-secret"));
+    }
+
+    #[test]
+    fn custom_model_provider_without_credential_omits_env_key() {
+        let provider = CodexCustomModelProvider {
+            id: "local".into(),
+            base_url: Some("http://localhost:8080/v1".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            provider.config_overrides(),
+            vec![
+                "-c",
+                "model_providers.local.name=\"local\"",
+                "-c",
+                "model_providers.local.base_url=\"http://localhost:8080/v1\"",
+            ]
+        );
+        assert!(provider.launch_environment().is_empty());
     }
 
     #[test]

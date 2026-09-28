@@ -42,8 +42,11 @@ pub struct UpdateExecutionStatusParams {
     pub duration_ms: Option<i64>,
     /// Optional resolved model name (e.g., `claude-sonnet-4-5`, `gpt-5`).
     pub model: Option<String>,
-    /// Optional resolved provider (e.g., `anthropic`, `openai`).
+    /// Optional resolved provider ID (built-in such as `anthropic`, or a
+    /// custom `[providers.<id>]` entry).
     pub model_provider: Option<String>,
+    /// Optional harness that ran the execution (`claude`, `codex`, `typesafe`).
+    pub harness: Option<String>,
 }
 
 /// Target used when requesting a durable TaskRun stop.
@@ -67,6 +70,7 @@ impl UpdateExecutionStatusParams {
             duration_ms: None,
             model: None,
             model_provider: None,
+            harness: None,
         }
     }
 
@@ -110,6 +114,12 @@ impl UpdateExecutionStatusParams {
     /// Blank/whitespace input is treated as unset.
     pub fn with_model_provider(mut self, provider: impl Into<String>) -> Self {
         self.model_provider = non_blank(provider.into());
+        self
+    }
+
+    /// Set the harness that ran the execution.
+    pub fn with_harness(mut self, harness: impl Into<String>) -> Self {
+        self.harness = non_blank(harness.into());
         self
     }
 }

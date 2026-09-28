@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ractor::{Actor, ActorProcessingErr, ActorRef};
-use vertebrae_core::Provider;
 use vertebrae_core::StepHarness;
 use vertebrae_core::execution_service::ExecutionService;
 use vertebrae_core::models::{AgentConfig, PermissionMode};
@@ -583,12 +582,23 @@ impl StepExecutor {
         );
 
         let harness = state.config.step_config.harness;
-        let provider = harness
-            .map(HarnessRuntimeFactory::provider_for_harness)
-            .unwrap_or_else(|| {
-                HarnessRuntimeFactory::provider_for(&state.config.step_config.agent_config)
-            });
-        let settings_guard = if provider == Provider::Anthropic {
+        let resolved = match crate::provider::resolve_provider(&state.config) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                let _ = state.parent.cast(ProjectMessage::StepFinished {
+                    execution_id: state.execution_id.clone(),
+                    task_id: state.task_id.clone(),
+                    result: StepResult::failed(
+                        None,
+                        format!("Provider resolution failed: {error}"),
+                    ),
+                });
+                myself.stop(Some("provider resolution failed".into()));
+                return Ok(());
+            }
+        };
+        let resolved_harness = resolved.harness;
+        let settings_guard = if resolved_harness == StepHarness::Claude {
             match SyntheticSettings::create(&state.execution_id) {
                 Ok(guard) => Some(guard),
                 Err(err) => {
@@ -614,10 +624,14 @@ impl StepExecutor {
         };
 
         let mut agent_config = state.config.step_config.agent_config.clone();
-        if provider == Provider::Anthropic && agent_config.model.is_none() {
+        // Custom providers pick their model from their configured list.
+        if resolved.builtin_provider().is_some()
+            && resolved_harness == StepHarness::Claude
+            && agent_config.model.is_none()
+        {
             agent_config.model = Some(DEFAULT_MODEL.into());
         }
-        if provider != Provider::Typesafe {
+        if resolved_harness != StepHarness::Typesafe {
             for skill in &state.config.step_config.skills {
                 if !agent_config.allowed_tools.contains(skill) {
                     agent_config.allowed_tools.push(skill.clone());
@@ -646,13 +660,13 @@ impl StepExecutor {
                 .config
                 .capabilities
                 .harnesses
-                .get(&Provider::Anthropic)
+                .get(&StepHarness::Claude)
                 .and_then(|capability| capability.discovery_diagnostic.clone()),
             openai_executable_diagnostic: state
                 .config
                 .capabilities
                 .harnesses
-                .get(&Provider::Openai)
+                .get(&StepHarness::Codex)
                 .and_then(|capability| capability.discovery_diagnostic.clone()),
             provider_resolution_cached: true,
             search_path: Some(state.config.capabilities.shell_path.clone().into()),
@@ -682,9 +696,9 @@ impl StepExecutor {
         state
             .config
             .capabilities
-            .configure_typesafe_harness(&mut factory_config);
+            .configure_provider_harnesses(&mut factory_config);
         let request_config = RequestConfig {
-            working_directory: (provider != Provider::Typesafe)
+            working_directory: (resolved_harness != StepHarness::Typesafe)
                 .then(|| state.config.working_dir().to_path_buf()),
             model: agent_config.model.clone(),
             reasoning_effort: agent_config.reasoning_effort.clone(),
@@ -693,7 +707,7 @@ impl StepExecutor {
             verbosity: agent_config.verbosity,
             output_schema: agent_config.json_schema.clone(),
             developer_instructions: None,
-            environment: if provider == Provider::Typesafe {
+            environment: if resolved_harness == StepHarness::Typesafe {
                 Default::default()
             } else {
                 std::iter::once(("PATH".into(), state.config.capabilities.shell_path.clone()))
@@ -755,7 +769,7 @@ impl StepExecutor {
             .clone()
             .unwrap_or_else(|| "Execute step".to_string());
         let actor_ref = myself.clone();
-        if provider == Provider::Openai {
+        if resolved_harness == StepHarness::Codex {
             let session = match instance
                 .runtime
                 .start_session(

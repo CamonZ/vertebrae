@@ -4,9 +4,10 @@
 
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
-    AgentConfig, OutputVerbosity, Provider, ServiceError, SpeedTier, Step, StepConfig, StepHarness,
-    StepService, StepType, StepUpdate, VertebraeServices, normalize_provider_personality,
-    normalize_provider_reasoning_effort, validate_config_fields, validate_provider_agent_config,
+    AgentConfig, BuiltinProvider, OutputVerbosity, ProviderId, ServiceError, SpeedTier, Step,
+    StepConfig, StepHarness, StepService, StepType, StepUpdate, VertebraeServices,
+    normalize_harness_personality, normalize_harness_reasoning_effort, normalize_personality,
+    validate_config_fields, validate_harness_agent_config,
     validate_provider_model_with_codex_provider,
 };
 
@@ -179,9 +180,9 @@ fn parse_questions_flag(value: Option<&str>) -> Result<Option<serde_json::Value>
     Ok(questions)
 }
 
-fn parse_agent_provider(value: Option<&str>) -> Result<Option<Provider>, ServiceError> {
+fn parse_agent_provider(value: Option<&str>) -> Result<Option<ProviderId>, ServiceError> {
     value
-        .map(|value| Provider::parse(value).map_err(ServiceError::validation_failed))
+        .map(|value| ProviderId::parse(value).map_err(ServiceError::validation_failed))
         .transpose()
 }
 
@@ -296,8 +297,9 @@ pub struct StepAddCommand {
     ///
     /// For structured_inference steps this is `config.provider`, any
     /// non-blank provider name. Otherwise it is a convenience shortcut for
-    /// `agent_config.provider` (anthropic, openai); use `--agent-config` JSON
-    /// for any field this flag does not cover.
+    /// `agent_config.provider`: a built-in provider (anthropic, openai) or a
+    /// custom `[providers.<id>]` ID from the executing machine's config.toml;
+    /// use `--agent-config` JSON for any field this flag does not cover.
     #[arg(long, alias = "model-provider", value_name = "PROVIDER")]
     pub provider: Option<String>,
 
@@ -344,9 +346,9 @@ pub struct StepAddCommand {
     pub transitions_to: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct AgentConfigOverrides<'a> {
-    provider: Option<Provider>,
+    provider: Option<ProviderId>,
     model: Option<&'a str>,
     codex_model_provider: Option<&'a str>,
     reasoning_effort: Option<&'a str>,
@@ -355,9 +357,17 @@ struct AgentConfigOverrides<'a> {
     verbosity: Option<OutputVerbosity>,
 }
 
+/// Build the step's agent_config from an optional JSON base plus flag
+/// overrides and validate it for the harness that will run it.
+///
+/// Built-in providers are checked against the built-in model catalog and
+/// their own harness. A custom provider is validated by the executing daemon
+/// against its `[providers.<id>]` profile; here its harness is only known
+/// when the step selects one explicitly.
 fn build_overlayed_agent_config(
     base: AgentConfig,
     json: Option<&str>,
+    step_harness: Option<StepHarness>,
     overrides: AgentConfigOverrides<'_>,
 ) -> Result<AgentConfig, ServiceError> {
     let mut config = match json {
@@ -366,17 +376,32 @@ fn build_overlayed_agent_config(
         })?,
         None => base,
     };
+    let provider_overridden = overrides.provider.is_some();
     if let Some(provider) = overrides.provider {
         config = config.with_provider(provider);
-        if provider != Provider::Openai && overrides.reasoning_effort.is_none() {
-            config.reasoning_effort = None;
-        }
     }
     if let Some(model) = overrides.model {
         config = config.with_model(model);
     }
     if let Some(codex_model_provider) = overrides.codex_model_provider {
         config = config.with_codex_model_provider(codex_model_provider);
+    }
+
+    let builtin = match &config.provider {
+        None => None,
+        Some(id) => id.builtin(),
+    };
+    let custom = config.provider.is_some() && builtin.is_none();
+    let harness = match builtin {
+        Some(builtin) => Some(builtin.harness()),
+        None if custom => step_harness,
+        None => Some(step_harness.unwrap_or(StepHarness::Claude)),
+    };
+    if provider_overridden
+        && overrides.reasoning_effort.is_none()
+        && harness.is_some_and(|harness| harness != StepHarness::Codex)
+    {
+        config.reasoning_effort = None;
     }
     if let Some(reasoning_effort) = overrides.reasoning_effort {
         config = config.with_reasoning_effort(reasoning_effort);
@@ -390,32 +415,43 @@ fn build_overlayed_agent_config(
     if let Some(verbosity) = overrides.verbosity {
         config = config.with_verbosity(verbosity);
     }
-    if config.provider.is_some() || config.codex_model_provider.is_some() {
-        let provider = config.provider.unwrap_or(Provider::Anthropic);
+
+    if custom {
+        if config.codex_model_provider.is_some() {
+            return Err(ServiceError::validation_failed(format!(
+                "codex_model_provider cannot be combined with custom provider '{}'; its [providers.<id>] entry selects the upstream",
+                config.provider.as_ref().expect("custom provider")
+            )));
+        }
+    } else if config.provider.is_some() || config.codex_model_provider.is_some() {
         validate_provider_model_with_codex_provider(
-            provider,
+            builtin.unwrap_or(BuiltinProvider::Anthropic),
             config.model.as_deref(),
             config.codex_model_provider.as_deref(),
         )
         .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
     }
+
+    let Some(harness) = harness else {
+        // Harness-specific rules are enforced by the daemon once it resolves
+        // the custom provider's configured harness.
+        config.personality = normalize_personality(config.personality.as_deref())
+            .map_err(|error| ServiceError::validation_failed(error.to_string()))?;
+        return Ok(config);
+    };
     if config.reasoning_effort.is_some() {
-        let provider = config.provider.unwrap_or(Provider::Anthropic);
         config.reasoning_effort =
-            normalize_provider_reasoning_effort(provider, config.reasoning_effort.as_deref())
+            normalize_harness_reasoning_effort(harness, config.reasoning_effort.as_deref())
                 .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
     }
-    let provider = config.provider.unwrap_or(Provider::Anthropic);
-    config.personality = normalize_provider_personality(provider, config.personality.as_deref())
+    config.personality = normalize_harness_personality(harness, config.personality.as_deref())
         .map_err(|error| ServiceError::validation_failed(error.to_string()))?;
-    if config.verbosity.is_some()
-        && config.provider.unwrap_or(Provider::Anthropic) != Provider::Openai
-    {
+    if config.verbosity.is_some() && harness != StepHarness::Codex {
         return Err(ServiceError::validation_failed(
-            "verbosity is currently supported only by the openai / Codex provider",
+            "verbosity is currently supported only on the codex harness (--provider openai or a codex custom provider)",
         ));
     }
-    validate_provider_agent_config(provider, &config)
+    validate_harness_agent_config(harness, &config)
         .map_err(|error| ServiceError::validation_failed(error.to_string()))?;
     Ok(config)
 }
@@ -467,6 +503,7 @@ impl StepAddCommand {
                 config.agent_config = build_overlayed_agent_config(
                     AgentConfig::new(),
                     self.agent_config.as_deref(),
+                    self.harness.map(Into::into),
                     AgentConfigOverrides {
                         provider: parse_agent_provider(self.provider.as_deref())?,
                         model: self.model.as_deref(),
@@ -872,9 +909,9 @@ pub struct StepUpdateCommand {
     /// New provider for this step (alias: --model-provider).
     ///
     /// For structured_inference steps this is `config.provider`. Otherwise it
-    /// is a convenience shortcut for `agent_config.provider` (anthropic,
-    /// openai); use `--agent-config` JSON for any field this flag does not
-    /// cover.
+    /// is a convenience shortcut for `agent_config.provider`: a built-in
+    /// provider (anthropic, openai) or a custom `[providers.<id>]` ID; use
+    /// `--agent-config` JSON for any field this flag does not cover.
     #[arg(long, alias = "model-provider", value_name = "PROVIDER")]
     pub provider: Option<String>,
 
@@ -1105,9 +1142,15 @@ impl StepUpdateCommand {
         }
 
         if self.agent_config_flags_present(&existing.step_type) {
+            let step_harness = if self.clear_harness {
+                None
+            } else {
+                self.harness.map(Into::into).or(existing.harness)
+            };
             let mut agent_config = build_overlayed_agent_config(
                 existing.agent_config().cloned().unwrap_or_default(),
                 self.agent_config.as_deref(),
+                step_harness,
                 AgentConfigOverrides {
                     provider: parse_agent_provider(self.provider.as_deref())?,
                     model: self.model.as_deref(),

@@ -1,3 +1,4 @@
+import { withBuiltinProviders } from "../test/localChatCatalog";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { act, render, screen, waitFor } from "@testing-library/react";
@@ -42,7 +43,7 @@ vi.mock("../bindings", () => ({
   },
 }));
 
-const catalog = {
+const catalog = withBuiltinProviders({
   default_harness: "claude" as const,
   harnesses: [
     {
@@ -97,7 +98,7 @@ const catalog = {
       supports_resume: true,
     },
   ],
-};
+});
 
 describe("SettingsPage", () => {
   const availableUpdate: GuiUpdateInfo = {
@@ -132,7 +133,7 @@ describe("SettingsPage", () => {
     resetGuiUpdateState();
     useLocalChatDefaultsStore.setState({
       defaults: {},
-      defaultHarness: null,
+      defaultProvider: null,
       storageWarning: null,
     });
     useUIStore.setState({
@@ -795,10 +796,51 @@ describe("SettingsPage", () => {
     expect(screen.getByTestId("settings-nav-appearance")).toHaveTextContent(
       "Appearance"
     );
-    expect(screen.getByTestId("default-harness")).toHaveValue("claude");
+    expect(screen.getByTestId("default-harness")).toHaveValue("anthropic");
     expect(screen.getByTestId("codex-default-reasoning-effort")).toBeVisible();
     expect(screen.queryByTestId("settings-theme")).not.toBeInTheDocument();
     expect(screen.queryByText("Saved on this device")).not.toBeInTheDocument();
+  });
+
+  it("renders a defaults card for a custom provider with only its models", async () => {
+    mockGetSupportedLocalChatHarnesses.mockResolvedValue({
+      status: "ok",
+      data: withBuiltinProviders(catalog, [
+        {
+          id: "openrouter",
+          label: "openrouter",
+          harness: "claude",
+          custom: true,
+          available: true,
+          unavailable_reason: null,
+          models: [{ id: "moonshotai/kimi-k2", label: "moonshotai/kimi-k2" }],
+          default_model_id: "moonshotai/kimi-k2",
+        },
+      ]),
+    });
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    expect(
+      await screen.findByTestId("harness-defaults-provider-openrouter")
+    ).toBeVisible();
+    const modelOptions = Array.from(
+      (
+        screen.getByTestId(
+          "provider-openrouter-default-model"
+        ) as HTMLSelectElement
+      ).options
+    ).map((option) => option.value);
+    expect(modelOptions).toContain("moonshotai/kimi-k2");
+    expect(modelOptions).not.toContain("opus");
+    expect(
+      Array.from(
+        (screen.getByTestId("default-harness") as HTMLSelectElement).options
+      ).map((option) => option.value)
+    ).toEqual(["anthropic", "openai", "openrouter"]);
   });
 
   it("exposes and retains the persisted thinking indicator style", async () => {
@@ -848,7 +890,7 @@ describe("SettingsPage", () => {
       screen.getByTestId("claude-default-permission"),
       "plan"
     );
-    await user.selectOptions(screen.getByTestId("default-harness"), "codex");
+    await user.selectOptions(screen.getByTestId("default-harness"), "openai");
     await user.selectOptions(
       screen.getByTestId("settings-external-editor"),
       "app:/Applications/Visual Studio Code.app"
@@ -871,10 +913,13 @@ describe("SettingsPage", () => {
 
     await waitFor(() => {
       expect(useLocalChatDefaultsStore.getState().defaults).toEqual({
-        claude: { modelId: "opus", permissionMode: "plan" },
-        codex: { reasoningEffort: "high", speedTier: "fast" },
+        anthropic: { modelId: "opus", permissionMode: "plan" },
+        openai: { reasoningEffort: "high", speedTier: "fast" },
       });
-      expect(useLocalChatDefaultsStore.getState().defaultHarness).toBe("codex");
+      expect(useLocalChatDefaultsStore.getState().defaultProvider).toEqual({
+        id: "openai",
+        harness: "codex",
+      });
       expect(useUIStore.getState().theme).toBe("dark");
       expect(useUIStore.getState().externalEditor).toBe(
         "app:/Applications/Visual Studio Code.app"
@@ -883,14 +928,14 @@ describe("SettingsPage", () => {
     expect(
       JSON.parse(
         window.localStorage.getItem(
-          "vertebrae.local-chat-harness-defaults.v1"
+          "vertebrae.local-chat-provider-defaults.v2"
         ) ?? "{}"
       )
     ).toEqual({
-      defaultHarness: "codex",
-      harnesses: {
-        claude: { modelId: "opus", permissionMode: "plan" },
-        codex: { reasoningEffort: "high", speedTier: "fast" },
+      defaultProvider: { id: "openai", harness: "codex" },
+      providers: {
+        anthropic: { modelId: "opus", permissionMode: "plan" },
+        openai: { reasoningEffort: "high", speedTier: "fast" },
       },
     });
   });

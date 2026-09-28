@@ -17,7 +17,10 @@ Use this when: a run failed, stalled, or produced the wrong path.
 | Parent run stays `waiting` | A child is incomplete or parked | `vtb list --parent <id>`; fix or finish that child |
 | Provider 401 / auth errors, then `retry_exhausted` | Daemon holds a stale or missing key | Update config, then restart the daemon ([setup/daemon](../setup/daemon.md)) |
 | `unsupported by the selected '<h>' harness` / `'typesafe' only supports ... structured_inference` | Harness does not match the step type | `claude`/`codex` for llm_inference, `typesafe` for structured_inference ([harness](../workflows/steps/harness.md)) |
-| `step harness '<h>' conflicts with agent_config.provider` | Leftover legacy provider disagrees with the harness | Fix or remove `agent_config.provider` |
+| `step harness '<h>' conflicts with agent_config.provider` | Provider runs on a different harness | Fix the harness or `agent_config.provider` |
+| `provider '<id>' is not configured on this machine` | Custom provider missing from the daemon's config.toml | Add `[providers.<id>]` and restart the daemon ([config](../setup/config.md)) |
+| `model '<m>' is not configured for provider '<id>'` | Model not in the custom provider's `models` list | Add it to `models`, or pick a listed model |
+| `invalid agent_config in run_step payload` | Step's agent_config does not parse (e.g. malformed provider ID) | Fix the step's `--agent-config` |
 | `selected '<h>' harness is unavailable` | Harness binary or key missing on the daemon machine | Install/log in, or set the key and restart the daemon |
 | Codex rejects the output schema | Not strict (optional props, type arrays) | [Output schemas](../workflows/steps/llm_inference/output-schemas.md) |
 | "No vertebrae project found" | `vtb` run outside the project checkout | Run from the project directory |
