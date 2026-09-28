@@ -1187,6 +1187,20 @@ describe("chatStore", () => {
       expect(localStorage.getItem("local-chat-model:last-used:v1")).toBeNull();
     });
 
+    it("opens provider child threads on the parent's provider", async () => {
+      const id = await useChatStore.getState().selectProviderThreadSession({
+        harness: "claude",
+        providerId: "openrouter",
+        providerResumeId: "child-thread",
+      });
+
+      expect(useChatStore.getState().sessions[id!]).toMatchObject({
+        harness: "claude",
+        providerId: "openrouter",
+        providerResumeId: "child-thread",
+      });
+    });
+
     it("locks harness changes after a backend or provider resume id exists", () => {
       const backendId = useChatStore.getState().openSession("Task Backend");
       useChatStore.getState().setBackendSessionId(backendId, "backend-1");

@@ -565,6 +565,7 @@ interface ChatStoreActions {
   selectProviderThreadSession: (input: {
     harness: LocalChatHarnessKind;
     providerResumeId: string;
+    providerId?: string | null;
     projectPath?: string | null;
     label?: string | null;
     title?: string | null;
@@ -851,6 +852,7 @@ function providerThreadSessionId(
 function createProviderThreadSession(input: {
   harness: LocalChatHarnessKind;
   providerResumeId: string;
+  providerId?: string | null;
   projectPath?: string | null;
   label?: string | null;
   title?: string | null;
@@ -865,6 +867,7 @@ function createProviderThreadSession(input: {
     titleStatus: "manual",
     titleConfidence: 1,
     harness: input.harness,
+    providerId: input.providerId ?? null,
     providerResumeId: input.providerResumeId,
     model: input.model?.trim() || undefined,
   };
