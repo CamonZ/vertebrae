@@ -12,6 +12,7 @@ import type {
   PipelineSummary,
   PipelineWorkflow,
   Step,
+  StepHarness,
 } from "../../../bindings";
 import { commands } from "../../../bindings";
 import { buildAtlasModel } from "../adapter/buildAtlasModel";
@@ -133,6 +134,7 @@ const stepFixture = (overrides: Partial<Step> = {}): Step => ({
   workflow_id: "wf-build",
   goal: "Lay out the plan",
   step_type: "llm_inference",
+  harness: null,
   config: {
     version: 1,
     prompt: "Plan for {{ task.title }}",
@@ -204,6 +206,34 @@ describe("WorkflowInspector", () => {
       )
     );
   });
+
+  it.each(["claude", "codex", "typesafe"] as const)(
+    "creates a step with the explicit %s harness",
+    async (harness: StepHarness) => {
+      render(
+        <WorkflowInspector
+          model={MODEL}
+          workflowId="wf-build"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Add step" }));
+      fireEvent.change(screen.getByLabelText("Name"), {
+        target: { value: "Harness step" },
+      });
+      fireEvent.change(screen.getByLabelText("Step harness"), {
+        target: { value: harness },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Create step" }));
+
+      await waitFor(() =>
+        expect(commands.createStep).toHaveBeenCalledWith(
+          expect.objectContaining({ harness })
+        )
+      );
+    }
+  );
 
   it("creates structured_inference with provider, model, state, and questions", async () => {
     render(
@@ -457,6 +487,22 @@ describe("WorkflowInspector", () => {
 });
 
 describe("StepInspector", () => {
+  it("shows that an omitted harness uses the Sacrum default", () => {
+    mockUseStep(stepFixture({ harness: null }));
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("step-harness-value")).toHaveTextContent(
+      "Sacrum default"
+    );
+  });
+
   it("renders goal, prompt, agents, skills, model, and transitions from useStep", () => {
     render(
       <StepInspector
@@ -690,6 +736,55 @@ describe("StepInspector", () => {
             questions: { type: "object", required: ["label"] },
           },
         })
+      )
+    );
+  });
+
+  it.each(["claude", "codex", "typesafe"] as const)(
+    "shows and saves the %s step harness",
+    async (harness: StepHarness) => {
+      mockUseStep(stepFixture({ harness }));
+      render(
+        <StepInspector
+          model={MODEL}
+          workflowId="wf-build"
+          stepId="s1"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+
+      expect(screen.getByTestId("step-harness-value")).toHaveTextContent(harness);
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      expect(screen.getByLabelText("Step harness")).toHaveValue(harness);
+      fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+      await waitFor(() =>
+        expect(commands.updateStep).toHaveBeenCalledWith(
+          expect.objectContaining({ harness, clear_harness: false })
+        )
+      );
+    }
+  );
+
+  it("clears a selected harness back to the Sacrum default", async () => {
+    mockUseStep(stepFixture({ harness: "codex" }));
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Step harness"), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+    await waitFor(() =>
+      expect(commands.updateStep).toHaveBeenCalledWith(
+        expect.objectContaining({ harness: null, clear_harness: true })
       )
     );
   });

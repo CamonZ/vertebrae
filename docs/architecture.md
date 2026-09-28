@@ -109,10 +109,11 @@ CLI, GUI, and daemon all construct it via a `from_sacrum()` factory at startup. 
 
 ### Domain Models
 
-Key types: `Task`, `Workflow`, `Step`, `Artifact`, `Section`, `CodeRef`, `StepExecution`, `SessionLog`, `TaskFilter`, `Priority`, `Level`, `StepType`
+Key types: `Task`, `Workflow`, `Step`, `StepHarness`, `Artifact`, `Section`, `CodeRef`, `StepExecution`, `SessionLog`, `TaskFilter`, `Priority`, `Level`, `StepType`
 
 Steps carry:
-- `step_type: StepType` — `Execute` (default), `Evaluate`, or `Route`
+- `step_type: StepType` — the execution mode, such as `llm_inference` or `structured_inference`
+- `harness: Option<StepHarness>` — optional `claude`, `codex`, or `typesafe` runtime selector
 - `output_schema: Option<Value>` — JSON Schema for execute/evaluate structured output enforcement
 - `route_config: Option<Value>` — nullable opaque deterministic route program, validated and evaluated by Sacrum
 - `persistence_options: Option<Value>` — Sacrum-owned artifact persistence configuration
@@ -136,7 +137,7 @@ both live delivery and `format=harness` `SessionLog` replay.
 | `crates/harness-core` | The V1 contract: `HarnessRuntime`, `SessionHandle`/`TurnHandle`, `HarnessEventV1` + drafts, `EventSequencer`, `EventSink`, `ControlSink`, capabilities, and the canonical projection | Provider wire types, surface orchestration |
 | `crates/harness-claude` | Claude Code discovery, launch policy, live stream-json decoding, durable transcript discovery/replay, control responses, process lifetime | GUI, daemon, actor, persistence, or provider-settings code |
 | `crates/harness-codex` | Codex App Server launch/readiness, WebSocket JSON-RPC, durable rollout discovery/replay, model catalog, turn and control mapping | GUI, daemon, actor, persistence, or provider-settings code |
-| `crates/harness` | Provider **selection** only: `HarnessRuntimeFactory` maps `AgentConfig.provider` to an adapter and normalizes `RequestConfig` | Wire protocols, event decoding |
+| `crates/harness` | Runtime **selection** only: `HarnessRuntimeFactory` maps a step's explicit `harness` (`claude`, `codex`, `typesafe`) to an adapter; when absent, it preserves the legacy `AgentConfig.provider` default/backfill path | Wire protocols, event decoding |
 
 Only `crates/harness` depends on the adapter crates. Surfaces depend on
 `vertebrae-harness` (construction) and `vertebrae-harness-core` (contract), and
@@ -268,10 +269,13 @@ DaemonSupervisor
 - Receives `run_step` and `cancel_step` events on the daemon channel. Each
   payload includes a project ID, which selects the configured local project
   mapping and its `ProjectSupervisor`.
-- Passes `AgentConfig` and portable request options to the shared
-  `HarnessRuntimeFactory`, which resolves the step's provider to a built-in
-  harness: `anthropic` (default) → the Claude streaming harness,
-  `openai` → the Codex App Server streaming harness. See
+- Passes the optional step `harness`, `AgentConfig`, and portable request
+  options to the shared `HarnessRuntimeFactory`. An explicit selector chooses
+  the matching Claude, Codex, or TypeSafe runtime; when absent, Sacrum's
+  configured default/backfill and the legacy provider selection are preserved.
+  TypeSafe requires `structured_inference`; Claude and Codex handle
+  `llm_inference`. The selector remains separate from model/request settings.
+  See
   [vtb Guide — Provider Selection](vtb-guide/steps.md#provider-selection-anthropic--openai).
 - When an `llm_inference` step has an `output_schema`, passes it through the
   provider-neutral harness request to enforce structured output

@@ -71,6 +71,17 @@ The Rust backend in `src-tauri/src/` provides:
   adapters and normalized live event delivery
 - **Project config** (`project_config.rs`) — multi-project management
 
+### Workflow step harness selection
+
+The Workflow Atlas authoring form (`WorkflowInspector.tsx`) sets a step's
+optional `harness` when creating it. `StepInspector.tsx` edits the same field
+and displays the stored choice, or `Sacrum default` when it is unset. The
+selector values are the generated `StepHarness` contract: `claude`, `codex`,
+and `typesafe`. Model and request settings remain separate step configuration.
+After changing the Rust Tauri types, regenerate bindings with
+`npm run generate:types` and keep `src/bindings.ts` limited to the reviewed
+contract changes.
+
 ### Local Chat Harnesses (`src-tauri/src/local_chat/`)
 
 Local chat owns session lifecycle and UI options; it owns no provider wire

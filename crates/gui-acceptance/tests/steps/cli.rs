@@ -437,7 +437,15 @@ async fn do_create_step_in_workflow(
         .clone();
 
     world
-        .run_vtb(&["step", "add", "--workflow", &workflow_id, &step_name])
+        .run_vtb(&[
+            "step",
+            "add",
+            "--workflow",
+            &workflow_id,
+            "--harness",
+            "claude",
+            &step_name,
+        ])
         .await;
     assert_eq!(
         world.last_exit_code, 0,

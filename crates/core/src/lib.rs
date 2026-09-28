@@ -43,6 +43,7 @@ pub mod orchestrator;
 pub mod service;
 pub mod services;
 pub mod step_constraints;
+pub mod step_harness;
 pub mod step_service;
 pub mod workflow_bundle;
 pub mod workflow_service;
@@ -72,6 +73,7 @@ pub use service::{
 };
 pub use services::VertebraeServices;
 pub use step_constraints::{apply_config_patch, validate_config_fields, validate_step_config};
+pub use step_harness::StepHarness;
 pub use step_service::StepService;
 pub use workflow_bundle::{
     ManifestError, ManifestValidationError, RouteTargetRefs, StepAddress, StepEdge, StepManifest,

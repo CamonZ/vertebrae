@@ -42,7 +42,7 @@ pub async fn workflow_with_structured_inference(world: &mut DaemonWorld) {
     world
         .run_vtb(&[
             "step", "add", "classify", "--workflow", &workflow_id,
-            "--step-type", "structured_inference", "--provider", "typesafe",
+            "--step-type", "structured_inference", "--harness", "typesafe", "--provider", "typesafe",
             "--model", "jev", "--state", r#"{"title":"{{ task.title }}"}"#,
             "--questions", r#"{"priority":{"type":"noul","instructions":"Is this urgent?","criteria":{"true":"It blocks work","false":"It can wait"}}}"#,
         ])

@@ -987,6 +987,39 @@ async fn then_step_should_have_step_type(
     );
 }
 
+#[then(expr = "the step {string} in the workflow should have harness {string}")]
+async fn then_step_should_have_harness(
+    world: &mut SmokeWorld,
+    step_name: String,
+    expected: String,
+) {
+    let json = get_step_json(world, &step_name)
+        .await
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
+    assert_eq!(
+        json["harness"].as_str(),
+        Some(expected.as_str()),
+        "step '{}' harness mismatch: expected '{}', got {}\nJSON: {}",
+        step_name,
+        expected,
+        json["harness"],
+        json
+    );
+}
+
+#[then(expr = "the step {string} in the workflow should not have a harness")]
+async fn then_step_should_not_have_harness(world: &mut SmokeWorld, step_name: String) {
+    let json = get_step_json(world, &step_name)
+        .await
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
+    assert!(
+        json["harness"].is_null(),
+        "step '{}' should use the server harness default, got: {}",
+        step_name,
+        json["harness"]
+    );
+}
+
 #[then(expr = "the step show JSON should have step_type {string}")]
 async fn then_step_show_json_should_have_step_type(world: &mut SmokeWorld, expected: String) {
     assert_eq!(
@@ -1005,6 +1038,29 @@ async fn then_step_show_json_should_have_step_type(world: &mut SmokeWorld, expec
         actual, expected,
         "step show JSON step_type mismatch: expected '{}', got '{}'\nJSON: {}",
         expected, actual, json
+    );
+}
+
+#[then(expr = "the step show JSON should have harness {string}")]
+async fn then_step_show_json_should_have_harness(world: &mut SmokeWorld, expected: String) {
+    assert_eq!(
+        world.last_exit_code, 0,
+        "expected JSON step show command to succeed, but got exit {}.\nstdout: '{}'\nstderr: '{}'",
+        world.last_exit_code, world.last_stdout, world.last_stderr
+    );
+    let json: serde_json::Value = serde_json::from_str(&world.last_stdout).unwrap_or_else(|err| {
+        panic!(
+            "failed to parse step show JSON: {err}\nstdout: {}",
+            world.last_stdout
+        )
+    });
+    assert_eq!(
+        json["harness"].as_str(),
+        Some(expected.as_str()),
+        "step show JSON harness mismatch: expected '{}', got {}\nJSON: {}",
+        expected,
+        json["harness"],
+        json
     );
 }
 

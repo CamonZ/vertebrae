@@ -41,6 +41,7 @@ function createStep(overrides?: Partial<Step>): Step {
     created_at: null,
     updated_at: null,
     ...overrides,
+    harness: overrides?.harness ?? null,
   };
 }
 

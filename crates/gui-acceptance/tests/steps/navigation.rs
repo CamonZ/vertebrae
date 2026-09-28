@@ -1085,6 +1085,91 @@ async fn click_element_with_test_id(world: &mut GuiWorld, test_id: String) {
         .await;
 }
 
+#[when(expr = "I create a step {string} with harness {string} in the open workflow panel")]
+async fn create_step_with_harness_in_open_workflow_panel(
+    world: &mut GuiWorld,
+    step_name: String,
+    harness: String,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath("//button[normalize-space(.)='Add step']"),
+        "Add step button",
+    )
+    .await;
+
+    let name_input = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(5))
+        .for_element(Locator::Css(
+            "[data-testid='step-create-editor'] input[placeholder='Step name']",
+        ))
+        .await
+        .expect("step name input did not appear");
+    gui_acceptance::wait_actionable(&name_input).await;
+    name_input
+        .send_keys(&step_name)
+        .await
+        .expect("failed to enter the step name");
+
+    gui_acceptance::select_when_ready(
+        &client,
+        Locator::Css("[data-testid='step-create-editor'] select[aria-label='Step harness']"),
+        &harness,
+    )
+    .await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath("//button[normalize-space(.)='Create step']"),
+        "Create step button",
+    )
+    .await;
+    world
+        .screenshot(&client, &format!("after-create-step-harness-{harness}"))
+        .await;
+}
+
+#[when(expr = "I set the selected step harness to {string}")]
+async fn set_selected_step_harness(world: &mut GuiWorld, harness: String) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath(
+            "//div[contains(concat(' ', normalize-space(@class), ' '), ' wfd-hd-top ')]//button[normalize-space(.)='Edit']",
+        ),
+        "step Edit button",
+    )
+    .await;
+    gui_acceptance::select_when_ready(
+        &client,
+        Locator::Css("[data-testid='step-editor'] select[aria-label='Step harness']"),
+        &harness,
+    )
+    .await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath("//button[normalize-space(.)='Save step']"),
+        "Save step button",
+    )
+    .await;
+    world
+        .screenshot(&client, &format!("after-update-step-harness-{harness}"))
+        .await;
+}
+
 #[then(expr = "the GUI should not show an element with test id {string} within {int} seconds")]
 async fn gui_should_not_show_element_with_test_id_within(
     world: &mut GuiWorld,

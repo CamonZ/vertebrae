@@ -13,10 +13,12 @@ use std::time::Duration;
 
 use futures::future::join_all;
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
+use vertebrae_core::StepHarness;
 use vertebrae_core::VertebraeServices;
 use vertebrae_core::execution_service::UpdateExecutionStatusParams;
 use vertebrae_core::model_catalog::Provider;
 use vertebrae_core::models::{AgentConfig, ExecutionStatus};
+use vertebrae_harness::HarnessRuntimeFactory;
 
 use crate::actors::step_executor::{
     StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult,
@@ -213,6 +215,10 @@ pub struct RunStepPayload {
     /// channel event reaches the daemon.
     #[serde(default)]
     pub step_type: Option<String>,
+    /// Runtime harness selected on the workflow step. Absence preserves the
+    /// server's default/backfilled provider behavior on older payloads.
+    #[serde(default, deserialize_with = "deserialize_present_json_value")]
+    pub harness: Option<serde_json::Value>,
     /// Optional worktree path override for the execution directory.
     /// When present, the daemon uses this instead of the project root.
     #[serde(default)]
@@ -251,6 +257,64 @@ pub fn parse_run_step_payload(payload: &serde_json::Value) -> Result<RunStepPayl
         .map_err(|e| format!("Failed to parse run_step payload: {e}"))
 }
 
+/// Preserve the distinction between a missing harness key and an explicit
+/// `null` while retaining malformed values for project-scoped validation.
+fn deserialize_present_json_value<'de, D>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <serde_json::Value as serde::Deserialize>::deserialize(deserializer).map(Some)
+}
+
+/// Keep step type authoritative for runtime capabilities. TypeSafe only
+/// supports structured inference, while Claude and Codex handle the regular
+/// `llm_inference` path.
+pub fn validate_step_harness_compatibility(
+    step_type: Option<&str>,
+    harness: Option<StepHarness>,
+) -> Result<(), String> {
+    match (step_type, harness) {
+        (Some("structured_inference"), Some(StepHarness::Claude | StepHarness::Codex)) => {
+            Err(format!(
+                "step type 'structured_inference' is unsupported by the selected '{}' harness",
+                harness.unwrap()
+            ))
+        }
+        (Some("llm_inference"), Some(StepHarness::Typesafe)) => {
+            Err("step harness 'typesafe' only supports step type 'structured_inference'".into())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn parse_payload_harness(
+    harness: Option<&serde_json::Value>,
+) -> Result<Option<StepHarness>, String> {
+    match harness {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(value)) => match value.as_str() {
+            "claude" => Ok(Some(StepHarness::Claude)),
+            "codex" => Ok(Some(StepHarness::Codex)),
+            "typesafe" => Ok(Some(StepHarness::Typesafe)),
+            unsupported => Err(format!(
+                "unsupported step harness '{unsupported}'; expected 'claude', 'codex', or 'typesafe'"
+            )),
+        },
+        Some(value) => Err(format!(
+            "invalid step harness selector: expected a string, got {}",
+            match value {
+                serde_json::Value::Bool(_) => "boolean",
+                serde_json::Value::Number(_) => "number",
+                serde_json::Value::Array(_) => "array",
+                serde_json::Value::Object(_) => "object",
+                serde_json::Value::Null | serde_json::Value::String(_) => unreachable!(),
+            }
+        )),
+    }
+}
+
 /// Whether a parsed run-step payload represents a server-side finish step.
 ///
 /// Sacrum normally never broadcasts `run_step` for finish steps. Keeping this
@@ -274,24 +338,28 @@ pub fn parse_cancel_step_payload(payload: &serde_json::Value) -> Result<CancelSt
 /// - Carries the `prompt` only when Sacrum supplied it; structured inference has no prompt.
 /// - Parses `agent_config` JSON into an `AgentConfig` struct.
 /// - Carries `agents` and `skills` from the payload into the config.
-pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
-    let structured_inference = payload.step_type.as_deref() == Some("structured_inference")
-        || payload.state.is_some()
-        || payload.questions.is_some()
-        || payload
-            .agent_config
-            .get("provider")
-            .and_then(serde_json::Value::as_str)
-            == Some("typesafe");
+pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepConfig, String> {
+    let harness = parse_payload_harness(payload.harness.as_ref())?;
+    validate_step_harness_compatibility(payload.step_type.as_deref(), harness)?;
     let mut agent_config: AgentConfig =
         serde_json::from_value(payload.agent_config.clone()).unwrap_or_default();
+    let structured_inference = match payload.step_type.as_deref() {
+        Some("structured_inference") => true,
+        Some(_) => false,
+        None => {
+            payload.state.is_some()
+                || payload.questions.is_some()
+                || agent_config.provider == Some(Provider::Typesafe)
+        }
+    };
 
     // Step-level contract from Sacrum overrides agent_config.
     if let Some(schema) = payload.output_schema.as_ref().filter(|v| !v.is_null()) {
         agent_config = agent_config.with_json_schema(schema.clone());
     }
 
-    StepConfig {
+    Ok(StepConfig {
+        harness,
         prompt: payload.prompt.clone(),
         state: payload.state.clone(),
         questions: payload.questions.clone(),
@@ -300,7 +368,7 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
         agents: payload.agents.clone(),
         skills: payload.skills.clone(),
         verbose_daemon_logging: payload.verbose_daemon_logging,
-    }
+    })
 }
 
 /// Resolve the `(provider, model)` pair the daemon reports for an execution.
@@ -308,7 +376,16 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
 /// [`crate::provider::resolve_provider_from_agent_config`]); model is never
 /// inferred from the model string.
 pub fn resolved_execution_metadata(agent_config: &AgentConfig) -> (Provider, Option<String>) {
-    let provider = crate::provider::resolve_provider_from_agent_config(agent_config);
+    resolved_execution_metadata_for_harness(agent_config, None)
+}
+
+fn resolved_execution_metadata_for_harness(
+    agent_config: &AgentConfig,
+    harness: Option<StepHarness>,
+) -> (Provider, Option<String>) {
+    let provider = harness
+        .map(HarnessRuntimeFactory::provider_for_harness)
+        .unwrap_or_else(|| crate::provider::resolve_provider_from_agent_config(agent_config));
     let model = agent_config
         .model
         .as_deref()
@@ -321,8 +398,9 @@ pub fn resolved_execution_metadata(agent_config: &AgentConfig) -> (Provider, Opt
 fn attach_resolved_metadata(
     params: UpdateExecutionStatusParams,
     agent_config: &AgentConfig,
+    harness: Option<StepHarness>,
 ) -> UpdateExecutionStatusParams {
-    let (provider, model) = resolved_execution_metadata(agent_config);
+    let (provider, model) = resolved_execution_metadata_for_harness(agent_config, harness);
     let mut params = params.with_model_provider(provider.as_str());
     if let Some(model) = model {
         params = params.with_model(model);
@@ -332,7 +410,7 @@ fn attach_resolved_metadata(
 
 fn completed_update_params(
     output: Option<&String>,
-    agent_config: Option<&AgentConfig>,
+    metadata: Option<&PendingExecutionMetadata>,
 ) -> UpdateExecutionStatusParams {
     let mut params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed);
 
@@ -340,8 +418,8 @@ fn completed_update_params(
         params = params.with_output(text);
     }
 
-    if let Some(cfg) = agent_config {
-        params = attach_resolved_metadata(params, cfg);
+    if let Some(metadata) = metadata {
+        params = attach_resolved_metadata(params, &metadata.agent_config, metadata.harness);
     }
 
     params
@@ -373,7 +451,13 @@ pub struct ProjectState {
     /// AgentConfig captured at spawn time, keyed by execution_id, so terminal
     /// status updates can re-attach provider/model metadata after the
     /// StepExecutor (which owned the original) has stopped.
-    pending_metadata: HashMap<String, AgentConfig>,
+    pending_metadata: HashMap<String, PendingExecutionMetadata>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingExecutionMetadata {
+    agent_config: AgentConfig,
+    harness: Option<StepHarness>,
 }
 
 /// Per-project supervisor actor.
@@ -545,6 +629,38 @@ impl Actor for ProjectSupervisor {
 }
 
 impl ProjectSupervisor {
+    async fn fail_run_step_payload(
+        &self,
+        payload: &serde_json::Value,
+        error: &str,
+        state: &ProjectState,
+    ) {
+        let Some(execution_id) = payload.get("id").and_then(serde_json::Value::as_str) else {
+            tracing::error!(
+                "Cannot report malformed run_step failure without an execution id: {error}"
+            );
+            return;
+        };
+
+        let output = format!("Step harness selection failed: {error}");
+        if let Err(update_error) = state
+            .services
+            .executions()
+            .update_execution_status(
+                execution_id,
+                UpdateExecutionStatusParams::new(ExecutionStatus::Failed).with_output(output),
+            )
+            .await
+        {
+            tracing::error!(
+                "[project:{}] Failed to report invalid run_step payload for execution {}: {}",
+                state.project_id,
+                execution_id,
+                update_error
+            );
+        }
+    }
+
     /// Handle an incoming channel event by classifying and dispatching it.
     async fn handle_channel_event(
         &self,
@@ -600,7 +716,14 @@ impl ProjectSupervisor {
                         );
                     }
 
-                    let step_config = build_step_config_from_payload(&payload);
+                    let step_config = match build_step_config_from_payload(&payload) {
+                        Ok(config) => config,
+                        Err(error) => {
+                            self.fail_run_step_payload(&msg.payload, &error, state)
+                                .await;
+                            return;
+                        }
+                    };
 
                     // Verbose checkpoint 2: post build_step_config_from_payload —
                     // confirms whether output_schema merged into agent_config.json_schema.
@@ -642,6 +765,7 @@ impl ProjectSupervisor {
                     }
                 }
                 Err(e) => {
+                    self.fail_run_step_payload(&msg.payload, &e, state).await;
                     tracing::error!(
                         "[project:{}] Failed to parse run_step payload: {}",
                         state.project_id,
@@ -736,6 +860,7 @@ impl ProjectSupervisor {
         let running_params = attach_resolved_metadata(
             UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
             &step_config.agent_config,
+            step_config.harness,
         );
 
         if let Err(e) = state
@@ -753,9 +878,13 @@ impl ProjectSupervisor {
             return Ok(());
         }
 
-        state
-            .pending_metadata
-            .insert(execution_id.to_string(), step_config.agent_config.clone());
+        state.pending_metadata.insert(
+            execution_id.to_string(),
+            PendingExecutionMetadata {
+                agent_config: step_config.agent_config.clone(),
+                harness: step_config.harness,
+            },
+        );
 
         let executor_config = StepExecutorConfig {
             execution_id: execution_id.to_string(),
@@ -801,11 +930,15 @@ impl ProjectSupervisor {
                     e
                 );
 
-                let agent_config = state.pending_metadata.remove(execution_id);
+                let metadata = state.pending_metadata.remove(execution_id);
                 let mut failure_params = UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
                     .with_output(format!("Failed to spawn executor: {e}"));
-                if let Some(cfg) = agent_config.as_ref() {
-                    failure_params = attach_resolved_metadata(failure_params, cfg);
+                if let Some(metadata) = metadata.as_ref() {
+                    failure_params = attach_resolved_metadata(
+                        failure_params,
+                        &metadata.agent_config,
+                        metadata.harness,
+                    );
                 }
                 let _ = state
                     .services
@@ -858,7 +991,7 @@ impl ProjectSupervisor {
     ) {
         // Remove from running executors map (it may already be removed by cancel).
         state.running_executors.remove(execution_id);
-        let agent_config = state.pending_metadata.remove(execution_id);
+        let metadata = state.pending_metadata.remove(execution_id);
 
         match result {
             StepResult::Completed {
@@ -879,7 +1012,7 @@ impl ProjectSupervisor {
                 // Sacrum derives execution rollups from SessionLog rows. The
                 // daemon only reports terminal status, output, and resolved
                 // provider metadata here to avoid duplicating those rollups.
-                let params = completed_update_params(output.as_ref(), agent_config.as_ref());
+                let params = completed_update_params(output.as_ref(), metadata.as_ref());
 
                 // Report completed status to Sacrum via updateStepExecution.
                 if let Err(e) = state
@@ -915,8 +1048,9 @@ impl ProjectSupervisor {
 
                 let mut params = UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
                     .with_output(output_payload);
-                if let Some(cfg) = agent_config.as_ref() {
-                    params = attach_resolved_metadata(params, cfg);
+                if let Some(metadata) = metadata.as_ref() {
+                    params =
+                        attach_resolved_metadata(params, &metadata.agent_config, metadata.harness);
                 }
                 if let Err(e) = state
                     .services
@@ -1153,6 +1287,7 @@ mod tests {
             execution_id: "exec-789".to_string(),
             task_id: "task-xyz".to_string(),
             step_config: Box::new(StepConfig {
+                harness: None,
                 prompt: Some("Implement feature".to_string()),
                 state: None,
                 questions: None,
@@ -1262,6 +1397,125 @@ mod tests {
             result.agent_config.get("model").and_then(|v| v.as_str()),
             Some("claude-opus-4-20250514")
         );
+        assert_eq!(result.harness, None);
+    }
+
+    #[test]
+    fn run_step_harness_accepts_exact_values_and_preserves_missing_default() {
+        assert_eq!(parse_payload_harness(None).unwrap(), None);
+        assert_eq!(
+            parse_payload_harness(Some(&serde_json::Value::Null)).unwrap(),
+            None
+        );
+        let absent = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-no-harness",
+            "task_id": "task-1"
+        }))
+        .unwrap();
+        assert_eq!(absent.harness, None);
+        let explicit_null = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-null-harness",
+            "task_id": "task-1",
+            "harness": null
+        }))
+        .unwrap();
+        assert_eq!(explicit_null.harness, Some(serde_json::Value::Null));
+        for (wire, harness) in [
+            ("claude", StepHarness::Claude),
+            ("codex", StepHarness::Codex),
+            ("typesafe", StepHarness::Typesafe),
+        ] {
+            assert_eq!(
+                parse_payload_harness(Some(&serde_json::json!(wire))).unwrap(),
+                Some(harness)
+            );
+        }
+    }
+
+    #[test]
+    fn run_step_unknown_or_malformed_harness_is_decoded_then_rejected() {
+        // The daemon supervisor must be able to route unknown selector strings
+        // to the project supervisor so it can fail the execution explicitly.
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-invalid-harness",
+            "task_id": "task-1",
+            "harness": "openai"
+        }))
+        .expect("raw harness selectors must survive daemon routing");
+        let error = parse_payload_harness(payload.harness.as_ref()).unwrap_err();
+        assert!(
+            error.contains("unsupported step harness 'openai'"),
+            "{error}"
+        );
+        assert!(
+            error.contains("'claude', 'codex', or 'typesafe'"),
+            "{error}"
+        );
+
+        let error =
+            parse_payload_harness(Some(&serde_json::json!({"name": "claude"}))).unwrap_err();
+        assert!(error.contains("expected a string, got object"), "{error}");
+    }
+
+    #[test]
+    fn step_type_remains_authoritative_for_harness_capabilities() {
+        assert!(
+            validate_step_harness_compatibility(Some("llm_inference"), Some(StepHarness::Typesafe))
+                .unwrap_err()
+                .contains("only supports step type 'structured_inference'")
+        );
+        assert!(
+            validate_step_harness_compatibility(
+                Some("structured_inference"),
+                Some(StepHarness::Claude)
+            )
+            .unwrap_err()
+            .contains("selected 'claude' harness")
+        );
+        assert!(
+            validate_step_harness_compatibility(
+                Some("structured_inference"),
+                Some(StepHarness::Typesafe)
+            )
+            .is_ok()
+        );
+
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-mode",
+            "task_id": "task-1",
+            "step_type": "llm_inference",
+            "harness": "claude"
+        }))
+        .unwrap();
+        let config = build_step_config_from_payload(&payload).unwrap();
+        assert!(!config.structured_inference);
+        assert_eq!(config.harness, Some(StepHarness::Claude));
+
+        let unsupported = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-mode-unsupported",
+            "task_id": "task-1",
+            "step_type": "llm_inference",
+            "harness": "typesafe"
+        }))
+        .unwrap();
+        assert!(
+            build_step_config_from_payload(&unsupported)
+                .unwrap_err()
+                .contains("only supports step type 'structured_inference'")
+        );
+
+        let structured = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-mode-structured",
+            "task_id": "task-1",
+            "step_type": "structured_inference",
+            "harness": "typesafe",
+            "state": {"title": "resolved"},
+            "questions": {"ready": {"type": "noul", "instructions": "Ready?"}}
+        }))
+        .unwrap();
+        let config = build_step_config_from_payload(&structured).unwrap();
+        assert!(config.structured_inference);
+        assert_eq!(config.harness, Some(StepHarness::Typesafe));
     }
 
     #[test]
@@ -1295,7 +1549,7 @@ mod tests {
             "agent_config": {"provider": "typesafe", "model": "jev"}
         });
         let parsed = parse_run_step_payload(&payload).unwrap();
-        let config = build_step_config_from_payload(&parsed);
+        let config = build_step_config_from_payload(&parsed).unwrap();
         assert!(config.structured_inference);
         assert!(config.prompt.is_none());
         assert_eq!(config.state, Some(payload["state"].clone()));
@@ -1314,7 +1568,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
 
         assert!(config.structured_inference);
         assert!(config.state.is_none());
@@ -1447,7 +1701,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
 
         assert_eq!(
             config.prompt.as_deref(),
@@ -1484,7 +1738,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
 
         assert_eq!(
             config.agent_config.speed_tier,
@@ -1505,7 +1759,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
 
         assert_eq!(config.prompt, None);
         assert!(config.agent_config.model.is_none());
@@ -1523,7 +1777,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         assert_eq!(config.prompt.as_deref(), Some(""));
     }
 
@@ -1536,7 +1790,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         assert_eq!(config.agent_config.model, Some("haiku".to_string()));
         assert!(config.agent_config.max_budget_usd.is_none());
     }
@@ -1552,7 +1806,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         assert_eq!(
             config.agent_config.permission_mode,
             Some(vertebrae_core::models::PermissionMode::Plan)
@@ -1568,7 +1822,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         assert!(config.agent_config.is_empty());
     }
 
@@ -1624,6 +1878,7 @@ mod tests {
             execution_id: "exec-wt".to_string(),
             task_id: "task-wt".to_string(),
             step_config: Box::new(StepConfig {
+                harness: None,
                 prompt: Some("Implement in worktree".to_string()),
                 state: None,
                 questions: None,
@@ -1709,7 +1964,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         let json_schema = config
             .agent_config
             .json_schema
@@ -1726,7 +1981,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         assert!(
             config.agent_config.json_schema.is_none(),
             "json_schema should be None when output_schema is absent"
@@ -1748,10 +2003,11 @@ mod tests {
             worktree: None,
             output_schema: Some(serde_json::Value::Null),
             step_type: None,
+            harness: None,
             verbose_daemon_logging: false,
         };
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         assert!(
             config.agent_config.json_schema.is_none(),
             "Value::Null output_schema should not be merged into agent_config"
@@ -1783,7 +2039,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         let json_schema = config
             .agent_config
             .json_schema
@@ -1819,7 +2075,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         let json_schema = config
             .agent_config
             .json_schema
@@ -1991,7 +2247,7 @@ mod tests {
             "verbose_daemon_logging": true
         }))
         .unwrap();
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         assert!(
             config.verbose_daemon_logging,
             "StepConfig must carry verbose_daemon_logging=true from payload"
@@ -2005,7 +2261,7 @@ mod tests {
             "task_id": "task-vrb-5"
         }))
         .unwrap();
-        let config = build_step_config_from_payload(&payload);
+        let config = build_step_config_from_payload(&payload).unwrap();
         assert!(
             !config.verbose_daemon_logging,
             "StepConfig must default verbose_daemon_logging to false"
@@ -2045,6 +2301,21 @@ mod tests {
     }
 
     #[test]
+    fn resolved_metadata_prefers_step_harness_and_keeps_model_configuration_separate() {
+        let agent_config = AgentConfig::new().with_model("configured-model");
+        for (harness, expected_provider) in [
+            (StepHarness::Claude, Provider::Anthropic),
+            (StepHarness::Codex, Provider::Openai),
+            (StepHarness::Typesafe, Provider::Typesafe),
+        ] {
+            let (provider, model) =
+                resolved_execution_metadata_for_harness(&agent_config, Some(harness));
+            assert_eq!(provider, expected_provider);
+            assert_eq!(model.as_deref(), Some("configured-model"));
+        }
+    }
+
+    #[test]
     fn resolved_metadata_treats_blank_model_as_unset() {
         let agent_config = AgentConfig::new()
             .with_provider(Provider::Anthropic)
@@ -2079,6 +2350,7 @@ mod tests {
         let params = attach_resolved_metadata(
             UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
             &agent_config,
+            None,
         );
         assert_eq!(params.model.as_deref(), Some("gpt-5"));
         assert_eq!(params.model_provider.as_deref(), Some("openai"));
@@ -2090,6 +2362,7 @@ mod tests {
         let params = attach_resolved_metadata(
             UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
             &agent_config,
+            None,
         );
         assert_eq!(params.model_provider.as_deref(), Some("anthropic"));
         assert!(
@@ -2109,7 +2382,7 @@ mod tests {
             .with_cost("0.0123")
             .with_duration_ms(4321)
             .with_output("done");
-        let params = attach_resolved_metadata(params, &agent_config);
+        let params = attach_resolved_metadata(params, &agent_config, None);
         assert_eq!(params.input_tokens, Some(1500));
         assert_eq!(params.output_tokens, Some(800));
         assert_eq!(params.cost.as_deref(), Some("0.0123"));
@@ -2126,7 +2399,13 @@ mod tests {
             .with_provider(Provider::Openai)
             .with_model("gpt-5");
 
-        let params = completed_update_params(Some(&output), Some(&agent_config));
+        let params = completed_update_params(
+            Some(&output),
+            Some(&PendingExecutionMetadata {
+                agent_config,
+                harness: None,
+            }),
+        );
 
         assert_eq!(params.status, ExecutionStatus::Completed);
         assert_eq!(params.output.as_deref(), Some("final answer"));

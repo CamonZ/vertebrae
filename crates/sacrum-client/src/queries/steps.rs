@@ -6,6 +6,7 @@ pub const STEP_FIELDS: &str = r#"
         name
         goal
         step_type
+        harness
         config {
             ... on LlmInferenceStepConfig {
                 version prompt output_schema agents skills agent_config
@@ -35,6 +36,7 @@ pub const WORKFLOW_EXPORT_STEP_FIELDS: &str = r#"
         name
         goal
         step_type
+        harness
         config {
             ... on LlmInferenceStepConfig {
                 version prompt output_schema agents skills agent_config
@@ -112,6 +114,25 @@ pub const CREATE_STEP: &str = r#"
     }
 "#;
 
+/// Add the explicit harness input only when the caller selected one. Omitting
+/// both the variable and argument lets Sacrum apply its configured default and
+/// provider backfill behavior for legacy or defaulted steps.
+pub fn create_step_query(include_harness: bool) -> String {
+    if !include_harness {
+        return CREATE_STEP.to_string();
+    }
+
+    CREATE_STEP
+        .replace(
+            "$step_type: String,",
+            "$step_type: String,\n        $harness: String,",
+        )
+        .replace(
+            "step_type: $step_type,",
+            "step_type: $step_type,\n            harness: $harness,",
+        )
+}
+
 /// The nullable update arguments must be omitted from the GraphQL document when
 /// an update does not touch them. Passing a missing variable to an explicit
 /// nullable argument coerces it to null, which would turn an unrelated update
@@ -130,6 +151,11 @@ pub fn update_step_query(updates: &vertebrae_core::StepUpdate) -> String {
 
     add(updates.name.is_some(), "$name: String", "name: $name");
     add(updates.goal.is_some(), "$goal: String", "goal: $goal");
+    add(
+        updates.harness.is_some(),
+        "$harness: String",
+        "harness: $harness",
+    );
     add(updates.config.is_some(), "$config: Json", "config: $config");
     add(
         updates.persistence_options.is_some(),
@@ -185,6 +211,10 @@ mod tests {
         }
         assert!(CREATE_STEP.contains("$config: Json"));
         assert!(CREATE_STEP.contains("config: $config"));
+        assert!(!CREATE_STEP.contains("harness"));
+        let explicit_harness_query = create_step_query(true);
+        assert!(explicit_harness_query.contains("$harness: String"));
+        assert!(explicit_harness_query.contains("harness: $harness"));
         assert!(CREATE_STEP.contains("persistence_options: $persistence_options"));
         assert!(!CREATE_STEP.contains("$prompt"));
         assert!(!CREATE_STEP.contains("$route_config"));
@@ -207,5 +237,8 @@ mod tests {
         assert!(query.contains("config: $config"));
         assert!(query.contains("persistence_options: $persistence_options"));
         assert!(!query.contains("clear_output_schema"));
+
+        let clear_harness = update_step_query(&vertebrae_core::StepUpdate::new().clear_harness());
+        assert!(clear_harness.contains("harness: $harness"));
     }
 }

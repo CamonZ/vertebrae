@@ -14,8 +14,8 @@ use crate::api_types::{ShortIdResponse, WorkflowResponse, WorkflowStepResponse};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::error::SacrumClientError;
 use crate::queries::steps::{
-    CREATE_STEP, DELETE_STEP, GET_STEP, LIST_STEPS, RESOLVE_STEP_SHORT_ID, STEP_FIELDS,
-    SYNC_STEP_TRANSITIONS, update_step_query,
+    DELETE_STEP, GET_STEP, LIST_STEPS, RESOLVE_STEP_SHORT_ID, STEP_FIELDS, SYNC_STEP_TRANSITIONS,
+    create_step_query, update_step_query,
 };
 use crate::queries::workflows::{LIST_WORKFLOWS, WORKFLOW_FIELDS};
 
@@ -70,6 +70,7 @@ impl SacrumStepService {
             workflow_id: response.workflow_id.clone(),
             goal: response.goal.clone(),
             step_type,
+            harness: response.harness,
             config,
             persistence_options: response.persistence_options.clone(),
             transitions_to,
@@ -104,7 +105,7 @@ impl StepService for SacrumStepService {
         Self::validate_stop_transitions(&step.step_type, &step.transitions_to)?;
         validate_step_config(step)?;
 
-        let query = with_fragments(CREATE_STEP, &[STEP_FIELDS]);
+        let query = with_fragments(&create_step_query(step.harness.is_some()), &[STEP_FIELDS]);
         let mut variables = json!({
             "workflow_id": step.workflow_id,
             "name": step.name,
@@ -112,6 +113,9 @@ impl StepService for SacrumStepService {
             "step_type": step.step_type.as_str(),
             "step_order": step.order,
         });
+        if let Some(harness) = step.harness {
+            variables["harness"] = json!(harness.as_str());
+        }
         if let Some(config) = &step.config {
             variables["config"] = json!(Self::json_variable(config, "config")?);
         }
@@ -254,6 +258,11 @@ impl StepService for SacrumStepService {
         if let Some(goal) = &updates.goal {
             variables["goal"] = json!(goal);
         }
+        if let Some(harness) = updates.harness {
+            variables["harness"] = harness
+                .map(|harness| json!(harness.as_str()))
+                .unwrap_or(serde_json::Value::Null);
+        }
         if let Some(config) = &updates.config {
             variables["config"] = json!(Self::json_variable(config, "config")?);
         }
@@ -355,6 +364,7 @@ mod tests {
     use super::*;
     use crate::api_types::{StepTransitionResponse, WorkflowStepResponse};
     use crate::config::SacrumConfig;
+    use vertebrae_core::StepHarness;
 
     fn create_test_client() -> GraphqlClient {
         GraphqlClient::new(SacrumConfig::new(
@@ -376,6 +386,7 @@ mod tests {
             name: "Review".to_string(),
             goal: None,
             step_type: step_type.map(str::to_string),
+            harness: None,
             config: Some(config),
             persistence_options: None,
             step_order: 0,
@@ -434,6 +445,29 @@ mod tests {
         assert_eq!(step.workflow_id, "wf-1");
         assert_eq!(step.transitions_to, vec!["step-2"]);
         assert!(step.created_at.is_some());
+    }
+
+    #[test]
+    fn response_to_step_preserves_explicit_harness_and_legacy_omission() {
+        let legacy: WorkflowStepResponse =
+            serde_json::from_value(make_step_response("step-legacy", "Legacy", "wf-1", 0)).unwrap();
+        assert_eq!(
+            SacrumStepService::response_to_step(&legacy)
+                .unwrap()
+                .harness,
+            None
+        );
+
+        for harness in [
+            StepHarness::Claude,
+            StepHarness::Codex,
+            StepHarness::Typesafe,
+        ] {
+            let mut response = step_response(Some("llm_inference"), json!({"version": 1}));
+            response.harness = Some(harness);
+            let step = SacrumStepService::response_to_step(&response).unwrap();
+            assert_eq!(step.harness, Some(harness));
+        }
     }
 
     #[test]
@@ -615,6 +649,17 @@ mod tests {
         assert_eq!(result.id, Some("step-new".to_string()));
         assert_eq!(result.name, "Review");
         assert_eq!(result.workflow_id, "wf-1");
+        assert_eq!(result.harness, None);
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert!(body["variables"].get("harness").is_none());
+        let operation = body["query"]
+            .as_str()
+            .unwrap()
+            .split("fragment StepFields")
+            .next()
+            .unwrap();
+        assert!(!operation.contains("harness"));
     }
 
     #[tokio::test]
@@ -666,6 +711,110 @@ mod tests {
                 "skills": ["review"],
                 "agent_config": {}
             })
+        );
+    }
+
+    #[tokio::test]
+    async fn create_step_round_trips_each_explicit_harness_without_using_provider_config() {
+        for harness in [
+            StepHarness::Claude,
+            StepHarness::Codex,
+            StepHarness::Typesafe,
+        ] {
+            let server = MockServer::start().await;
+            let mut response = make_step_response("step-new", "Review", "wf-1", 0);
+            response["harness"] = json!(harness.as_str());
+            Mock::given(method("POST"))
+                .and(path("/graphql"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(graphql_response("create_workflow_step", response)),
+                )
+                .mount(&server)
+                .await;
+
+            let service = create_wiremock_service(&server.uri());
+            let step = Step::new("Review", "wf-1").with_harness(harness);
+            let created = service.create_step(&step).await.unwrap();
+            assert_eq!(created.harness, Some(harness));
+
+            let requests = server.received_requests().await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+            assert_eq!(body["variables"]["harness"], harness.as_str());
+            assert!(
+                body["query"]
+                    .as_str()
+                    .unwrap()
+                    .contains("harness: $harness")
+            );
+            assert!(body["variables"].get("provider").is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn update_step_sets_and_clears_harness_without_touching_omitted_updates() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(
+                "update_workflow_step",
+                make_step_response("step-1", "Updated", "wf-1", 0),
+            )))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        service
+            .update_step("step-1", &StepUpdate::new().with_name("Changed"))
+            .await
+            .unwrap();
+        for harness in [
+            StepHarness::Claude,
+            StepHarness::Codex,
+            StepHarness::Typesafe,
+        ] {
+            service
+                .update_step("step-1", &StepUpdate::new().with_harness(harness))
+                .await
+                .unwrap();
+        }
+        service
+            .update_step("step-1", &StepUpdate::new().clear_harness())
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 5);
+        let omitted: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert!(omitted["variables"].get("harness").is_none());
+        assert!(
+            !omitted["query"]
+                .as_str()
+                .unwrap()
+                .contains("harness: $harness")
+        );
+
+        for (request, harness) in requests[1..4].iter().zip([
+            StepHarness::Claude,
+            StepHarness::Codex,
+            StepHarness::Typesafe,
+        ]) {
+            let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            assert_eq!(body["variables"]["harness"], harness.as_str());
+            assert!(
+                body["query"]
+                    .as_str()
+                    .unwrap()
+                    .contains("harness: $harness")
+            );
+        }
+        let cleared: serde_json::Value = serde_json::from_slice(&requests[4].body).unwrap();
+        assert!(cleared["variables"]["harness"].is_null());
+        assert!(
+            cleared["query"]
+                .as_str()
+                .unwrap()
+                .contains("harness: $harness")
         );
     }
 

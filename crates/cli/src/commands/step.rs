@@ -4,8 +4,8 @@
 
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
-    AgentConfig, OutputVerbosity, Provider, ServiceError, SpeedTier, Step, StepConfig, StepService,
-    StepType, StepUpdate, VertebraeServices, normalize_provider_personality,
+    AgentConfig, OutputVerbosity, Provider, ServiceError, SpeedTier, Step, StepConfig, StepHarness,
+    StepService, StepType, StepUpdate, VertebraeServices, normalize_provider_personality,
     normalize_provider_reasoning_effort, validate_config_fields, validate_provider_agent_config,
     validate_provider_model_with_codex_provider,
 };
@@ -38,6 +38,23 @@ impl From<CliOutputVerbosity> for OutputVerbosity {
             CliOutputVerbosity::Low => Self::Low,
             CliOutputVerbosity::Medium => Self::Medium,
             CliOutputVerbosity::High => Self::High,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum CliHarness {
+    Claude,
+    Codex,
+    Typesafe,
+}
+
+impl From<CliHarness> for StepHarness {
+    fn from(value: CliHarness) -> Self {
+        match value {
+            CliHarness::Claude => Self::Claude,
+            CliHarness::Codex => Self::Codex,
+            CliHarness::Typesafe => Self::Typesafe,
         }
     }
 }
@@ -223,6 +240,10 @@ pub struct StepAddCommand {
     /// Goal describing what this step should accomplish
     #[arg(long, short)]
     pub goal: Option<String>,
+
+    /// Runtime harness for this step. Omit to use Sacrum's default.
+    #[arg(long, value_enum)]
+    pub harness: Option<CliHarness>,
 
     /// Paths to .claude/agents/ files (can be specified multiple times)
     #[arg(long, short = 'a')]
@@ -492,6 +513,10 @@ impl StepAddCommand {
             .with_order(self.order)
             .with_transitions_to(transitions_to);
 
+        if let Some(harness) = self.harness {
+            step = step.with_harness(harness.into());
+        }
+
         if let Some(options) = persistence_options {
             step = step.with_persistence_options(options);
         }
@@ -586,19 +611,25 @@ impl StepListCommand {
                 };
                 match model {
                     Some(model) => format!(
-                        "{}. {} (id: {}, type: {}, model: {})",
+                        "{}. {} (id: {}, type: {}, harness: {}, model: {})",
                         s.order + 1,
                         s.name,
                         id,
                         step_type,
+                        s.harness
+                            .map(StepHarness::as_str)
+                            .unwrap_or("server-default"),
                         model
                     ),
                     None => format!(
-                        "{}. {} (id: {}, type: {})",
+                        "{}. {} (id: {}, type: {}, harness: {})",
                         s.order + 1,
                         s.name,
                         id,
-                        step_type
+                        step_type,
+                        s.harness
+                            .map(StepHarness::as_str)
+                            .unwrap_or("server-default"),
                     ),
                 }
             })
@@ -665,9 +696,18 @@ impl StepShowCommand {
 Workflow:      {}
 Order:         {}
 Step Type:     {}
+Harness:       {}
 Goal:          {}
 "#,
-            id, s.name, workflow_id, s.order, s.step_type, goal,
+            id,
+            s.name,
+            workflow_id,
+            s.order,
+            s.step_type,
+            s.harness
+                .map(StepHarness::as_str)
+                .unwrap_or("server-default"),
+            goal,
         );
 
         match &s.config {
@@ -749,6 +789,14 @@ pub struct StepUpdateCommand {
     /// New goal for the step
     #[arg(long, short)]
     pub goal: Option<String>,
+
+    /// Select the runtime harness for this step.
+    #[arg(long, value_enum, conflicts_with = "clear_harness")]
+    pub harness: Option<CliHarness>,
+
+    /// Clear the explicit selection and restore Sacrum's default.
+    #[arg(long, conflicts_with = "harness")]
+    pub clear_harness: bool,
 
     /// New agents list (replaces existing)
     #[arg(long, short = 'a')]
@@ -939,6 +987,11 @@ impl StepUpdateCommand {
 
         for (set, clear, flags) in [
             (
+                self.harness.is_some(),
+                self.clear_harness,
+                "--harness and --clear-harness",
+            ),
+            (
                 self.prompt.is_some(),
                 self.clear_prompt,
                 "--prompt and --clear-prompt",
@@ -980,6 +1033,13 @@ impl StepUpdateCommand {
 
         if let Some(goal) = &self.goal {
             updates = updates.with_goal(goal);
+        }
+
+        if let Some(harness) = self.harness {
+            updates = updates.with_harness(harness.into());
+        }
+        if self.clear_harness {
+            updates = updates.clear_harness();
         }
 
         if let Some(prompt) = &self.prompt {

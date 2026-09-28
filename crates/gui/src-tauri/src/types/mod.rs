@@ -661,6 +661,36 @@ impl From<StepType> for vertebrae_core::StepType {
     }
 }
 
+/// Step runtime harness exposed to the GUI. The core enum remains the shared
+/// domain contract and this mirror is generated into the TypeScript bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum StepHarness {
+    Claude,
+    Codex,
+    Typesafe,
+}
+
+impl From<vertebrae_core::StepHarness> for StepHarness {
+    fn from(harness: vertebrae_core::StepHarness) -> Self {
+        match harness {
+            vertebrae_core::StepHarness::Claude => Self::Claude,
+            vertebrae_core::StepHarness::Codex => Self::Codex,
+            vertebrae_core::StepHarness::Typesafe => Self::Typesafe,
+        }
+    }
+}
+
+impl From<StepHarness> for vertebrae_core::StepHarness {
+    fn from(harness: StepHarness) -> Self {
+        match harness {
+            StepHarness::Claude => Self::Claude,
+            StepHarness::Codex => Self::Codex,
+            StepHarness::Typesafe => Self::Typesafe,
+        }
+    }
+}
+
 /// Config of an `llm_inference` step.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct LlmInferenceStepConfig {
@@ -766,6 +796,7 @@ pub struct Step {
     pub goal: Option<String>,
     /// Step type mirrored from core::StepType; fixed once the step exists.
     pub step_type: StepType,
+    pub harness: Option<StepHarness>,
     /// `step_type`-specific configuration; null for human_input, stop, and
     /// finish steps.
     pub config: Option<StepConfig>,
@@ -792,6 +823,8 @@ struct StepWire {
     goal: Option<String>,
     #[serde(default)]
     step_type: vertebrae_core::StepType,
+    #[serde(default)]
+    harness: Option<vertebrae_core::StepHarness>,
     #[serde(default)]
     config: serde_json::Value,
     #[serde(default)]
@@ -821,6 +854,7 @@ impl<'de> Deserialize<'de> for Step {
             workflow_id: wire.workflow_id,
             goal: wire.goal,
             step_type: wire.step_type.into(),
+            harness: wire.harness.map(Into::into),
             config: config.map(Into::into),
             persistence_options: wire.persistence_options,
             transitions_to: wire.transitions_to,
@@ -839,6 +873,7 @@ impl From<vertebrae_core::Step> for Step {
             workflow_id: step.workflow_id,
             goal: step.goal,
             step_type: step.step_type.into(),
+            harness: step.harness.map(Into::into),
             config: step.config.map(Into::into),
             persistence_options: step.persistence_options,
             transitions_to: step.transitions_to,
@@ -1592,6 +1627,9 @@ pub struct CreateStepOptions {
     pub transitions_to: Vec<String>,
     #[serde(default)]
     pub step_type: StepType,
+    /// Runtime harness to select; omission preserves Sacrum's default.
+    #[serde(default)]
+    pub harness: Option<StepHarness>,
     /// Config fields declared by `step_type` (snake_case keys; `agent_config`
     /// uses the GUI `AgentConfig` shape). Omitted fields take the type's
     /// defaults; must be null for human_input, stop, and finish steps.
@@ -1630,6 +1668,9 @@ impl CreateStepOptions {
                     .map(|id| id.to_lowercase())
                     .collect(),
             );
+        if let Some(harness) = self.harness {
+            step = step.with_harness(harness.into());
+        }
         if let Some(goal) = self.goal {
             step = step.with_goal(&goal);
         }
@@ -1651,6 +1692,9 @@ pub struct UpdateStepOptions {
     pub step_id: String,
     pub name: Option<String>,
     pub goal: Option<String>,
+    pub harness: Option<StepHarness>,
+    #[serde(default)]
+    pub clear_harness: bool,
     #[serde(default)]
     pub config: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default)]
@@ -1669,6 +1713,11 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
         }
         if let Some(goal) = opts.goal {
             update = update.with_goal(&goal);
+        }
+        if opts.clear_harness {
+            update = update.clear_harness();
+        } else if let Some(harness) = opts.harness {
+            update = update.with_harness(harness.into());
         }
         update.config = opts.config.map(core_config_patch);
         if let Some(order) = opts.order {
@@ -2202,6 +2251,7 @@ mod tests {
         assert_eq!(gui.workflow_id, "wf1");
         assert_eq!(gui.goal, None);
         assert_eq!(gui.step_type, StepType::LlmInference);
+        assert_eq!(gui.harness, None);
         let Some(StepConfig::LlmInference(config)) = gui.config else {
             panic!("expected llm_inference config");
         };
@@ -2249,6 +2299,47 @@ mod tests {
         let json = serde_json::to_value(&step).unwrap();
         assert_eq!(json["step_type"], "structured_inference");
         assert_eq!(json["config"]["provider"], "typesafe");
+    }
+
+    #[test]
+    fn step_wire_harness_values_round_trip_and_legacy_payload_defaults() {
+        let legacy: Step = serde_json::from_value(serde_json::json!({
+            "id": "legacy",
+            "name": "Legacy",
+            "workflow_id": "wf-1",
+            "step_type": "llm_inference",
+            "config": {"version": 1}
+        }))
+        .unwrap();
+        assert_eq!(legacy.harness, None);
+
+        for (wire, expected) in [
+            ("claude", StepHarness::Claude),
+            ("codex", StepHarness::Codex),
+            ("typesafe", StepHarness::Typesafe),
+        ] {
+            let step: Step = serde_json::from_value(serde_json::json!({
+                "id": "selected",
+                "name": "Selected",
+                "workflow_id": "wf-1",
+                "step_type": "llm_inference",
+                "harness": wire,
+                "config": {"version": 1}
+            }))
+            .unwrap();
+            assert_eq!(step.harness, Some(expected));
+            assert_eq!(serde_json::to_value(step).unwrap()["harness"], wire);
+        }
+
+        let invalid = serde_json::from_value::<Step>(serde_json::json!({
+            "id": "invalid",
+            "name": "Invalid",
+            "workflow_id": "wf-1",
+            "harness": "openai",
+            "config": null
+        }))
+        .unwrap_err();
+        assert!(invalid.to_string().contains("unknown variant"));
     }
 
     #[test]
@@ -2315,6 +2406,7 @@ mod tests {
             order: 0,
             transitions_to: vec![],
             step_type,
+            harness: None,
             config: config.as_object().cloned(),
             persistence_options: None,
         };
@@ -2346,11 +2438,84 @@ mod tests {
     }
 
     #[test]
+    fn step_harness_gui_contract_round_trips_and_preserves_clear_semantics() {
+        for (core, gui, wire) in [
+            (
+                vertebrae_core::StepHarness::Claude,
+                StepHarness::Claude,
+                "claude",
+            ),
+            (
+                vertebrae_core::StepHarness::Codex,
+                StepHarness::Codex,
+                "codex",
+            ),
+            (
+                vertebrae_core::StepHarness::Typesafe,
+                StepHarness::Typesafe,
+                "typesafe",
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(gui).unwrap(), wire);
+            assert_eq!(StepHarness::from(core), gui);
+            assert_eq!(vertebrae_core::StepHarness::from(gui), core);
+
+            let mut create = CreateStepOptions {
+                workflow_id: "wf-1".into(),
+                name: "Step".into(),
+                goal: None,
+                order: 0,
+                transitions_to: vec![],
+                step_type: StepType::LlmInference,
+                harness: Some(gui),
+                config: Some(serde_json::json!({}).as_object().unwrap().clone()),
+                persistence_options: None,
+            };
+            assert_eq!(create.clone().into_step().unwrap().harness, Some(core));
+
+            let update: vertebrae_core::StepUpdate = UpdateStepOptions {
+                step_id: "step-1".into(),
+                name: None,
+                goal: None,
+                harness: Some(gui),
+                clear_harness: false,
+                config: None,
+                persistence_options: None,
+                clear_persistence_options: false,
+                order: None,
+                transitions_to: None,
+            }
+            .into();
+            assert_eq!(update.harness, Some(Some(core)));
+
+            create.harness = None;
+            assert_eq!(create.into_step().unwrap().harness, None);
+        }
+
+        let cleared: vertebrae_core::StepUpdate = UpdateStepOptions {
+            step_id: "step-1".into(),
+            name: None,
+            goal: None,
+            harness: None,
+            clear_harness: true,
+            config: None,
+            persistence_options: None,
+            clear_persistence_options: false,
+            order: None,
+            transitions_to: None,
+        }
+        .into();
+        assert_eq!(cleared.harness, Some(None));
+    }
+
+    #[test]
     fn update_step_options_convert_gui_agent_config() {
         let update: vertebrae_core::StepUpdate = UpdateStepOptions {
             step_id: "step-1".to_string(),
             name: None,
             goal: None,
+            harness: None,
+            clear_harness: false,
             config: serde_json::json!({
                 "agent_config": {"model": "opus", "json_schema": "{\"type\":\"object\"}"}
             })
@@ -2374,6 +2539,8 @@ mod tests {
             step_id: "step-1".to_string(),
             name: None,
             goal: None,
+            harness: None,
+            clear_harness: false,
             config: serde_json::json!({"prompt": null, "skills": ["s"]})
                 .as_object()
                 .cloned(),
@@ -2443,6 +2610,8 @@ mod tests {
             step_id: "step".to_string(),
             name: None,
             goal: None,
+            harness: None,
+            clear_harness: false,
             config: None,
             persistence_options,
             clear_persistence_options,

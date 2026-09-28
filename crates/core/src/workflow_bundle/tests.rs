@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use super::*;
+use crate::StepHarness;
 
 const GOLDEN: &str = include_str!("../../tests/fixtures/workflow_bundle.json");
 type ValidationCase = (&'static str, fn(&mut WorkflowBundleManifest), &'static str);
@@ -27,6 +28,50 @@ fn golden_fixture_round_trips_without_semantic_loss() {
         structured.config.as_ref().unwrap()["state"]["title"],
         "{{ task.title }}"
     );
+    assert!(
+        manifest
+            .workflows
+            .iter()
+            .flat_map(|workflow| &workflow.steps)
+            .all(|step| step.harness.is_none())
+    );
+}
+
+#[test]
+fn explicit_step_harnesses_round_trip_through_workflow_bundles() {
+    for (harness, wire) in [
+        (StepHarness::Claude, "claude"),
+        (StepHarness::Codex, "codex"),
+        (StepHarness::Typesafe, "typesafe"),
+    ] {
+        let mut manifest = golden();
+        let workflow_ref = manifest.workflows[0].workflow_ref.clone();
+        let step_ref = manifest.workflows[0].steps[0].step_ref.clone();
+        manifest.workflows[0].steps[0].harness = Some(harness);
+
+        let canonical = manifest.canonical_json().unwrap();
+        assert!(canonical.contains(&format!("\"harness\":\"{wire}\"")));
+        let reparsed = parse_manifest(&canonical).unwrap();
+        let round_tripped_step = reparsed
+            .workflows
+            .iter()
+            .find(|workflow| workflow.workflow_ref == workflow_ref)
+            .unwrap()
+            .steps
+            .iter()
+            .find(|step| step.step_ref == step_ref)
+            .unwrap();
+        assert_eq!(round_tripped_step.harness, Some(harness));
+        assert_eq!(reparsed, manifest.canonicalize());
+    }
+}
+
+#[test]
+fn workflow_bundle_rejects_unknown_harness_values() {
+    let mut json: Value = serde_json::from_str(GOLDEN).unwrap();
+    json["workflows"][0]["steps"][0]["harness"] = Value::String("openai".into());
+    let error = parse_manifest(&json.to_string()).unwrap_err();
+    assert!(error.to_string().contains("harness"), "{error}");
 }
 
 #[test]

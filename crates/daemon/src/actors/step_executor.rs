@@ -16,6 +16,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use ractor::{Actor, ActorProcessingErr, ActorRef};
 use vertebrae_core::Provider;
+use vertebrae_core::StepHarness;
 use vertebrae_core::execution_service::ExecutionService;
 use vertebrae_core::models::{AgentConfig, PermissionMode};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
@@ -44,6 +45,9 @@ const CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT: std::time::Duration =
 
 #[derive(Debug, Clone)]
 pub struct StepConfig {
+    /// Explicit workflow-step harness selection. `None` preserves legacy
+    /// provider config/default behavior.
+    pub harness: Option<StepHarness>,
     pub prompt: Option<String>,
     pub state: Option<serde_json::Value>,
     pub questions: Option<std::collections::BTreeMap<String, serde_json::Value>>,
@@ -578,7 +582,12 @@ impl StepExecutor {
             state.config.working_dir().display()
         );
 
-        let provider = HarnessRuntimeFactory::provider_for(&state.config.step_config.agent_config);
+        let harness = state.config.step_config.harness;
+        let provider = harness
+            .map(HarnessRuntimeFactory::provider_for_harness)
+            .unwrap_or_else(|| {
+                HarnessRuntimeFactory::provider_for(&state.config.step_config.agent_config)
+            });
         let settings_guard = if provider == Provider::Anthropic {
             match SyntheticSettings::create(&state.execution_id) {
                 Ok(guard) => Some(guard),
@@ -691,25 +700,27 @@ impl StepExecutor {
                     .collect()
             },
         };
-        let instance =
-            match HarnessRuntimeFactory::new(factory_config).create(HarnessRuntimeOptions {
+        let instance = match HarnessRuntimeFactory::new(factory_config).create_for_harness(
+            harness,
+            HarnessRuntimeOptions {
                 agent_config: agent_config.clone(),
                 request_config,
-            }) {
-                Ok(instance) => instance,
-                Err(error) => {
-                    let _ = state.parent.cast(ProjectMessage::StepFinished {
-                        execution_id: state.execution_id.clone(),
-                        task_id: state.task_id.clone(),
-                        result: StepResult::failed(
-                            None,
-                            format!("Provider resolution failed: {error}"),
-                        ),
-                    });
-                    myself.stop(Some("provider resolution failed".into()));
-                    return Ok(());
-                }
-            };
+            },
+        ) {
+            Ok(instance) => instance,
+            Err(error) => {
+                let _ = state.parent.cast(ProjectMessage::StepFinished {
+                    execution_id: state.execution_id.clone(),
+                    task_id: state.task_id.clone(),
+                    result: StepResult::failed(
+                        None,
+                        format!("Provider resolution failed: {error}"),
+                    ),
+                });
+                myself.stop(Some("provider resolution failed".into()));
+                return Ok(());
+            }
+        };
         let stream_id = vertebrae_harness_core::StreamId::new(state.execution_id.clone());
         let request_config = instance.request_config;
         if state.config.step_config.verbose_daemon_logging {
@@ -1022,6 +1033,7 @@ mod tests {
     #[test]
     fn structured_inference_request_rejects_missing_state_or_questions() {
         let base = StepConfig {
+            harness: None,
             prompt: None,
             state: None,
             questions: None,

@@ -16,6 +16,7 @@ function createStep(id: string, name: string, order: number): Step {
     name,
     workflow_id: "test_workflow",
     goal: null,
+    harness: null,
     config: {
       version: 1,
       prompt: null,

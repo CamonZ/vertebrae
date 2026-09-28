@@ -312,3 +312,35 @@ Feature: Step questions: prompt and agent-config
   Scenario: Overlong persistence logical names are rejected by Sacrum
     When I add a step "LongPersistenceName" to the workflow with an overlong persistence logical name
     Then the command should fail with "logical_name"
+
+  Scenario Outline: Create and show each supported step harness
+    When I add a step "HarnessStep" to the workflow with flag "--harness" and value "<harness>"
+    Then the command should succeed
+    And the step "HarnessStep" in the workflow should have harness "<harness>"
+    When I show the step "HarnessStep" as JSON
+    Then the step show JSON should have harness "<harness>"
+    When I show the step "HarnessStep"
+    Then the output should contain "Harness:       <harness>"
+
+    Examples:
+      | harness  |
+      | claude   |
+      | codex    |
+      | typesafe |
+
+  Scenario: Update and clear a step harness
+    When I add a step "HarnessToUpdate" to the workflow
+    And I update the step "HarnessToUpdate" in the workflow with flag "--harness" and value "codex"
+    Then the command should succeed
+    And the step "HarnessToUpdate" in the workflow should have harness "codex"
+    When I show the step "HarnessToUpdate"
+    Then the output should contain "Harness:       codex"
+    When I update the step "HarnessToUpdate" in the workflow with flag "--clear-harness" and no value
+    Then the command should succeed
+    And the step "HarnessToUpdate" in the workflow should have harness "codex"
+    When I show the step "HarnessToUpdate"
+    Then the output should contain "Harness:       codex"
+
+  Scenario: Unsupported harness values are rejected by the CLI
+    When I add a step "InvalidHarness" to the workflow with flag "--harness" and value "openai"
+    Then the command should fail with "openai"

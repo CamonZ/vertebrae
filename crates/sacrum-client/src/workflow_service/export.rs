@@ -458,6 +458,7 @@ fn convert_step(
         name: step.name.clone(),
         goal: step.goal.clone(),
         step_type,
+        harness: step.harness,
         step_order: step.step_order,
         persistence_options: step.persistence_options.clone(),
         config,
@@ -556,6 +557,7 @@ mod tests {
     use super::*;
     use crate::api_types::{WorkflowExportStepTransition, WorkflowExportTransition};
     use serde_json::Value;
+    use vertebrae_core::StepHarness;
 
     fn step(id: &str, name: &str, order: i32, transitions: Vec<&str>) -> WorkflowExportStep {
         WorkflowExportStep {
@@ -563,6 +565,7 @@ mod tests {
             name: name.to_string(),
             goal: Some(format!("goal-{name}")),
             step_type: Some("llm_inference".to_string()),
+            harness: None,
             config: Some(json!({
                 "version": 1,
                 "prompt": "",
@@ -586,6 +589,34 @@ mod tests {
                 .collect(),
             inserted_at: Some("timestamp".to_string()),
             updated_at: Some("timestamp".to_string()),
+        }
+    }
+
+    #[test]
+    fn export_conversion_preserves_explicit_step_harness() {
+        for harness in [
+            StepHarness::Claude,
+            StepHarness::Codex,
+            StepHarness::Typesafe,
+        ] {
+            let mut snapshot = snapshot();
+            let step_id = snapshot.workflows[0].workflow_steps[0].id.clone();
+            snapshot.workflows[0].workflow_steps[0].harness = Some(harness);
+
+            let bundle = snapshot_to_bundle(&snapshot).unwrap();
+            let step_ref = if step_id == "second-step-id" {
+                "second"
+            } else {
+                "first"
+            };
+            let exported_step = bundle.workflows[0]
+                .steps
+                .iter()
+                .find(|step| step.step_ref == step_ref)
+                .unwrap();
+            assert_eq!(exported_step.harness, Some(harness));
+            let canonical = bundle.canonical_json().unwrap();
+            assert!(canonical.contains(&format!("\"harness\":\"{}\"", harness.as_str())));
         }
     }
 

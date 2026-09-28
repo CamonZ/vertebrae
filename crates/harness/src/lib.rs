@@ -15,7 +15,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use vertebrae_core::{AgentConfig, PermissionMode, Provider};
+use vertebrae_core::{AgentConfig, PermissionMode, Provider, StepHarness};
 use vertebrae_harness_claude::{
     ClaudePermissionMode, ClaudeProviderConfig, ClaudeProviderPrelude, ClaudeRootLocatorResolver,
     ClaudeRuntime, ClaudeTranscriptReplay,
@@ -191,11 +191,60 @@ impl HarnessRuntimeFactory {
         agent_config.provider.unwrap_or(Provider::Anthropic)
     }
 
+    /// Map the stable workflow-step harness contract to its implementation
+    /// provider. Provider-specific knowledge stays in this selection layer.
+    pub const fn provider_for_harness(harness: StepHarness) -> Provider {
+        match harness {
+            StepHarness::Claude => Provider::Anthropic,
+            StepHarness::Codex => Provider::Openai,
+            StepHarness::Typesafe => Provider::Typesafe,
+        }
+    }
+
     pub fn create(
         &self,
         options: HarnessRuntimeOptions,
     ) -> Result<HarnessRuntimeInstance, HarnessError> {
         let provider = Self::provider_for(&options.agent_config);
+        self.create_for_provider(provider, options)
+    }
+
+    /// Construct the runtime selected by a workflow step. An absent selector
+    /// deliberately retains the legacy provider config/default path.
+    pub fn create_for_harness(
+        &self,
+        harness: Option<StepHarness>,
+        options: HarnessRuntimeOptions,
+    ) -> Result<HarnessRuntimeInstance, HarnessError> {
+        let Some(harness) = harness else {
+            return self.create(options);
+        };
+
+        let provider = Self::provider_for_harness(harness);
+        if let Some(configured_provider) = options.agent_config.provider
+            && configured_provider != provider
+        {
+            return Err(HarnessError::InvalidRequest(format!(
+                "step harness '{}' conflicts with agent_config.provider '{}'",
+                harness, configured_provider
+            )));
+        }
+
+        self.create_for_provider(provider, options)
+            .map_err(|error| match error {
+                HarnessError::Unavailable(reason) => HarnessError::Unavailable(format!(
+                    "selected '{}' harness is unavailable: {reason}",
+                    harness
+                )),
+                error => error,
+            })
+    }
+
+    fn create_for_provider(
+        &self,
+        provider: Provider,
+        options: HarnessRuntimeOptions,
+    ) -> Result<HarnessRuntimeInstance, HarnessError> {
         vertebrae_core::validate_provider_agent_config(provider, &options.agent_config)
             .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
         let request_config =
@@ -614,6 +663,82 @@ mod tests {
             Some("environment-key".into())
         );
         assert_eq!(resolve_typesafe_api_key(None, Some(" ".into())), None);
+    }
+
+    #[test]
+    fn step_harness_mapping_selects_the_named_runtime_provider() {
+        assert_eq!(
+            HarnessRuntimeFactory::provider_for_harness(StepHarness::Claude),
+            Provider::Anthropic
+        );
+        assert_eq!(
+            HarnessRuntimeFactory::provider_for_harness(StepHarness::Codex),
+            Provider::Openai
+        );
+        assert_eq!(
+            HarnessRuntimeFactory::provider_for_harness(StepHarness::Typesafe),
+            Provider::Typesafe
+        );
+
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            typesafe_api_key: Some("typesafe-secret".into()),
+            typesafe_base_url: Some("https://typesafe.example.test".into()),
+            ..HarnessFactoryConfig::default()
+        });
+        let instance = factory
+            .create_for_harness(
+                Some(StepHarness::Typesafe),
+                HarnessRuntimeOptions {
+                    agent_config: AgentConfig::default(),
+                    request_config: RequestConfig::default(),
+                },
+            )
+            .expect("the explicit TypeSafe step harness should be constructed");
+        assert_eq!(instance.provider, Provider::Typesafe);
+        assert_eq!(
+            instance.request_config.model.as_deref(),
+            Some(vertebrae_core::DEFAULT_TYPESAFE_MODEL)
+        );
+    }
+
+    #[test]
+    fn explicit_harness_mismatch_and_unavailability_fail_without_fallback() {
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            search_path: Some(OsString::new()),
+            ..HarnessFactoryConfig::default()
+        });
+        let mismatch = match factory.create_for_harness(
+            Some(StepHarness::Codex),
+            HarnessRuntimeOptions {
+                agent_config: AgentConfig::new().with_provider(Provider::Anthropic),
+                request_config: RequestConfig::default(),
+            },
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("a conflicting agent_config.provider must fail"),
+        };
+        assert!(
+            mismatch
+                .to_string()
+                .contains("step harness 'codex' conflicts")
+        );
+
+        let unavailable = match factory.create_for_harness(
+            Some(StepHarness::Codex),
+            HarnessRuntimeOptions {
+                agent_config: AgentConfig::default(),
+                request_config: RequestConfig::default(),
+            },
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("Codex must not silently fall back when unavailable"),
+        };
+        assert!(matches!(unavailable, HarnessError::Unavailable(_)));
+        assert!(
+            unavailable
+                .to_string()
+                .contains("selected 'codex' harness is unavailable")
+        );
     }
 
     #[test]
