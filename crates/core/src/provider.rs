@@ -39,7 +39,6 @@ impl ProviderId {
         BuiltinProvider::Typesafe.id()
     }
 
-    /// Validate an exact provider identifier (trimmed and lowercased).
     pub fn new(input: impl AsRef<str>) -> Result<Self, String> {
         let normalized = input.as_ref().trim().to_ascii_lowercase();
         let valid_start = normalized
@@ -72,7 +71,6 @@ impl ProviderId {
         &self.0
     }
 
-    /// The built-in provider this ID names, if any.
     pub fn builtin(&self) -> Option<BuiltinProvider> {
         BuiltinProvider::from_id(&self.0)
     }
@@ -108,7 +106,6 @@ impl fmt::Display for ProviderId {
     }
 }
 
-/// Codex wire API used by a custom Codex model provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderWireApi {
@@ -133,31 +130,25 @@ impl ProviderWireApi {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderProfile {
-    /// Harness that runs this provider: `claude`, `codex`, or `typesafe`.
     pub harness: StepHarness,
-    /// API base URL for Claude/Codex providers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     /// Full System One endpoint URL for TypeSafe providers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    /// Environment variable holding the API credential (preferred).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_env: Option<String>,
     /// Literal API credential, used when `api_key_env` is unset or blank.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
-    /// Extra environment for the harness process (Claude/Codex only).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
-    /// The exact models this provider serves.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub models: Vec<String>,
     /// Model used when a step or chat does not pick one; defaults to the
     /// first entry of `models`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
-    /// Codex wire API (`chat` or `responses`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wire_api: Option<ProviderWireApi>,
 }
@@ -206,7 +197,6 @@ impl ProviderProfile {
         }
     }
 
-    /// Check that the profile is internally consistent for its harness.
     pub fn validate(&self, id: &ProviderId) -> Result<(), String> {
         if let Some(builtin) = BuiltinProvider::parse_alias(id.as_str()) {
             return Err(format!(

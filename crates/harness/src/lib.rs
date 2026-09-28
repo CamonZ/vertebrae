@@ -70,8 +70,6 @@ pub struct HarnessFactoryConfig {
     pub typesafe_base_url: Option<String>,
     /// Optional server-owned full TypeSafe System One endpoint URL.
     pub typesafe_url: Option<String>,
-    /// Custom `[providers.<id>]` profiles from this machine's config.toml.
-    /// Built-in providers never need an entry.
     pub provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
 }
 
@@ -289,8 +287,6 @@ impl HarnessRuntimeFactory {
         Self { config }
     }
 
-    /// Resolve the provider and harness for a request against this factory's
-    /// configured provider profiles.
     pub fn resolve_provider(
         &self,
         harness: Option<StepHarness>,

@@ -375,7 +375,6 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepCo
     })
 }
 
-/// Provider, harness, and model the daemon reports for an execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionMetadata {
     pub provider: ProviderId,

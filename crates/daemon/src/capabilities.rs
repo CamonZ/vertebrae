@@ -38,7 +38,6 @@ pub struct DaemonCapabilities {
     pub typesafe_api_key: Option<String>,
     pub typesafe_base_url: Option<String>,
     pub typesafe_url: Option<String>,
-    /// Custom `[providers.<id>]` profiles loaded from config.toml at startup.
     pub provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
 }
 
@@ -159,7 +158,6 @@ impl DaemonCapabilities {
         }
     }
 
-    /// Attach the custom `[providers.<id>]` profiles loaded at startup.
     pub fn with_provider_profiles(
         mut self,
         provider_profiles: BTreeMap<ProviderId, ProviderProfile>,

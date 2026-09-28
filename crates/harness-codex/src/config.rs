@@ -65,14 +65,11 @@ pub struct CodexCustomModelProvider {
     /// Resolved credential, exported under
     /// [`CODEX_CUSTOM_PROVIDER_API_KEY_ENV`]. `None` sends no credential.
     pub api_key: Option<String>,
-    /// Codex wire API (`chat` or `responses`).
     pub wire_api: Option<String>,
-    /// Additional launch environment for the App Server process.
     pub environment: BTreeMap<String, String>,
 }
 
 impl CodexCustomModelProvider {
-    /// `-c` overrides defining this provider for one App Server launch.
     pub fn config_overrides(&self) -> Vec<String> {
         let key = format!("model_providers.{}", self.id);
         let mut entries = vec![("name", self.id.clone())];
@@ -200,7 +197,6 @@ impl Default for CodexProviderConfig {
 }
 
 impl CodexProviderConfig {
-    /// The `modelProvider` sent on thread start.
     pub fn effective_model_provider(&self) -> Option<&str> {
         self.custom_model_provider
             .as_ref()

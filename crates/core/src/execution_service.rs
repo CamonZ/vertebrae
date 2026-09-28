@@ -117,7 +117,6 @@ impl UpdateExecutionStatusParams {
         self
     }
 
-    /// Set the harness that ran the execution.
     pub fn with_harness(mut self, harness: impl Into<String>) -> Self {
         self.harness = non_blank(harness.into());
         self

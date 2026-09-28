@@ -25,7 +25,6 @@ pub struct LocalChatSessionManager {
     lifecycle_gate: RwLock<()>,
     permission_bridge: PermissionBridge,
     shutdown_started: AtomicBool,
-    /// Custom `[providers.<id>]` profiles loaded from config.toml at startup.
     provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
 }
 
@@ -74,7 +73,6 @@ impl LocalChatSessionManager {
         self
     }
 
-    /// Custom provider profiles shared with title inference.
     pub(crate) fn provider_profiles(&self) -> &BTreeMap<ProviderId, ProviderProfile> {
         &self.provider_profiles
     }

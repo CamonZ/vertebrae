@@ -78,7 +78,6 @@ where
 /// Claude Code's launch environment; secrets never appear in Debug output.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct ClaudeProviderEndpoint {
-    /// Exported as `ANTHROPIC_BASE_URL`.
     pub base_url: Option<String>,
     /// Exported as `ANTHROPIC_AUTH_TOKEN`. `ANTHROPIC_API_KEY` is cleared so
     /// an ambient Anthropic key is never sent to the custom endpoint.

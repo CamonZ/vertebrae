@@ -56,7 +56,6 @@ impl BuiltinProvider {
         ProviderId::new(self.as_str()).expect("built-in provider IDs are valid")
     }
 
-    /// Exact canonical-name lookup.
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|builtin| builtin.as_str() == id)
     }
@@ -73,7 +72,6 @@ impl BuiltinProvider {
         }
     }
 
-    /// The harness that runs this built-in provider.
     pub const fn harness(self) -> StepHarness {
         match self {
             BuiltinProvider::Anthropic => StepHarness::Claude,
@@ -82,7 +80,6 @@ impl BuiltinProvider {
         }
     }
 
-    /// The built-in provider served by a harness when no provider is named.
     pub const fn for_harness(harness: StepHarness) -> Self {
         match harness {
             StepHarness::Claude => BuiltinProvider::Anthropic,

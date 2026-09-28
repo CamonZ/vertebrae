@@ -91,7 +91,6 @@ pub struct LocalChatHarnessInfo {
 pub struct LocalChatProviderInfo {
     pub id: String,
     pub label: String,
-    /// Harness that runs this provider, derived from the provider.
     pub harness: LocalChatHarnessKind,
     pub custom: bool,
     pub available: bool,
@@ -131,7 +130,6 @@ pub struct CreateLocalChatSessionInput {
     pub provider_id: Option<String>,
 }
 
-/// A custom provider selected for one local chat session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LocalChatProviderSelection {
     pub(crate) id: ProviderId,
@@ -139,7 +137,6 @@ pub(crate) struct LocalChatProviderSelection {
 }
 
 impl LocalChatProviderSelection {
-    /// Route the harness factory through this provider's profile.
     pub(crate) fn apply(
         &self,
         factory_config: &mut HarnessFactoryConfig,

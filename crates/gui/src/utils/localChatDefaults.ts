@@ -13,7 +13,6 @@ export const LOCAL_CHAT_DEFAULTS_STORAGE_KEY =
 export const LEGACY_LOCAL_CHAT_DEFAULTS_STORAGE_KEY =
   "vertebrae.local-chat-harness-defaults.v1";
 
-/** Built-in provider that runs on each local chat harness. */
 export const BUILTIN_PROVIDER_BY_HARNESS: Record<LocalChatHarnessKind, string> =
   {
     claude: "anthropic",
@@ -28,13 +27,11 @@ export interface LocalChatHarnessDefaults {
   personality?: string;
 }
 
-/** A provider choice plus the harness it runs on. */
 export interface LocalChatProviderRef {
   id: string;
   harness: LocalChatHarnessKind;
 }
 
-/** Saved chat defaults keyed by provider ID. */
 export type LocalChatDefaults = Partial<
   Record<string, LocalChatHarnessDefaults>
 >;
@@ -94,7 +91,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-/** The provider a session or saved preference refers to. */
 export function sessionProviderId(session: {
   harness: LocalChatHarnessKind;
   providerId?: string | null;

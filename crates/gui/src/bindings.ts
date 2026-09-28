@@ -1503,11 +1503,7 @@ export type LocalChatPersonalityOption = { id: string; label: string; is_default
  * harness's model catalog; custom providers list exactly their configured
  * models.
  */
-export type LocalChatProviderInfo = { id: string; label: string;
-/**
- * Harness that runs this provider, derived from the provider.
- */
-harness: LocalChatHarnessKind; custom: boolean; available: boolean; unavailable_reason: string | null;
+export type LocalChatProviderInfo = { id: string; label: string; harness: LocalChatHarnessKind; custom: boolean; available: boolean; unavailable_reason: string | null;
 /**
  * `None` means "use the harness's model catalog".
  */
