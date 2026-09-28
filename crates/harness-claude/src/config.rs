@@ -22,6 +22,7 @@ pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
     ("claude-opus-5", "Claude Opus 5"),
     ("claude-opus-5-5", "Claude Opus 5.5"),
     ("claude-opus-4-8", "Claude Opus 4.8"),
+    ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
 ];
 
 pub(crate) fn claude_model_supports_fast_mode(model: &str) -> bool {
@@ -367,6 +368,11 @@ mod tests {
     }
 
     #[test]
+    fn default_model_catalog_includes_sonnet_5_5() {
+        assert!(DEFAULT_CLAUDE_MODELS.contains(&("claude-sonnet-5-5", "Claude Sonnet 5.5")));
+    }
+
+    #[test]
     fn fast_mode_only_matches_current_supported_opus_models() {
         for model in [
             "opus",
@@ -378,7 +384,12 @@ mod tests {
         ] {
             assert!(claude_model_supports_fast_mode(model), "{model}");
         }
-        for model in ["sonnet", "claude-opus-4-6", "claude-opus-4-7"] {
+        for model in [
+            "sonnet",
+            "claude-sonnet-5-5",
+            "claude-opus-4-6",
+            "claude-opus-4-7",
+        ] {
             assert!(!claude_model_supports_fast_mode(model), "{model}");
         }
     }
@@ -440,5 +451,36 @@ mod tests {
             .position(|arg| arg == "--model")
             .expect("model flag");
         assert_eq!(spec.args[model_flag + 1], "claude-opus-5-5");
+    }
+
+    #[test]
+    fn command_spec_forwards_sonnet_5_5_for_one_shot_execution() {
+        let directory = tempdir().expect("temporary directory");
+        let executable = directory.path().join("claude");
+        File::create(&executable).expect("placeholder executable");
+        let config = ClaudeProviderConfig {
+            executable: Some(executable),
+            ..Default::default()
+        };
+        let request = RequestConfig {
+            model: Some("claude-sonnet-5-5".into()),
+            ..Default::default()
+        };
+
+        let spec = config
+            .command_spec(
+                ClaudeLaunchMode::OneShot {
+                    prompt: "do work".into(),
+                },
+                &request,
+            )
+            .expect("command spec");
+
+        let model_flag = spec
+            .args
+            .iter()
+            .position(|arg| arg == "--model")
+            .expect("model flag");
+        assert_eq!(spec.args[model_flag + 1], "claude-sonnet-5-5");
     }
 }
