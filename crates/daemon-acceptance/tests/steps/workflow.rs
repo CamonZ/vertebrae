@@ -7,6 +7,80 @@ pub async fn given_workflow_with_one_execute_step(world: &mut DaemonWorld) {
     create_workflow_and_step(world, None).await;
 }
 
+#[given(expr = "a workflow with one execute step using harness {string} and model {string}")]
+pub async fn given_workflow_with_explicit_harness(
+    world: &mut DaemonWorld,
+    harness: String,
+    model: String,
+) {
+    let wf_name = format!("daemon-acc-harness-{}", uuid::Uuid::new_v4().simple());
+    world.run_vtb(&["workflow", "add", &wf_name]).await;
+    world.assert_vtb_ok("workflow add");
+    let workflow_id = world
+        .last_stdout
+        .trim()
+        .strip_prefix("Created workflow: ")
+        .unwrap_or_else(|| panic!("unexpected workflow output: {}", world.last_stdout))
+        .trim()
+        .to_string();
+    world.workflow_id = Some(workflow_id.clone());
+    world.created_workflow_ids.push(workflow_id.clone());
+
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            "run",
+            "--workflow",
+            &workflow_id,
+            "--harness",
+            &harness,
+            "--model",
+            &model,
+        ])
+        .await;
+    world.assert_vtb_ok("step add selected harness");
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            "finish",
+            "--workflow",
+            &workflow_id,
+            "--step-type",
+            "finish",
+            "--order",
+            "1",
+        ])
+        .await;
+    world.assert_vtb_ok("step add finish");
+
+    let steps = world
+        .run_vtb_json(&["step", "list", &workflow_id])
+        .await
+        .expect("step list JSON");
+    let steps = steps.as_array().expect("step list is an array");
+    let run_id = steps
+        .iter()
+        .find(|step| step["name"] == "run")
+        .expect("execute step exists")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let finish_id = steps
+        .iter()
+        .find(|step| step["name"] == "finish")
+        .expect("finish step exists")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    world
+        .run_vtb(&["step", "update", &run_id, "--transition-to", &finish_id])
+        .await;
+    world.assert_vtb_ok("step update harness transition");
+    world.step_id = Some(run_id);
+}
+
 #[given("a workflow with one execute step using openai")]
 pub async fn given_workflow_with_codex_step(world: &mut DaemonWorld) {
     create_workflow_and_step(world, None).await;
@@ -42,6 +116,8 @@ pub async fn given_workflow_with_codex_step_and_model_settings(
             &step_id,
             "--provider",
             "openai",
+            "--harness",
+            "codex",
             "--model",
             "gpt-5.5",
             "--speed-tier",
@@ -72,6 +148,8 @@ pub async fn given_workflow_with_claude_step_and_model_settings(
             &step_id,
             "--provider",
             "anthropic",
+            "--harness",
+            "claude",
             "--model",
             "claude-sonnet-4-6",
             "--speed-tier",
@@ -180,6 +258,8 @@ async fn update_current_step_openai(
         step_id.as_str(),
         "--provider",
         "openai",
+        "--harness",
+        "codex",
         "--model",
         model,
     ];
@@ -203,6 +283,8 @@ async fn update_current_step_openai_with_codex_model_provider(
         step_id.as_str(),
         "--provider",
         "openai",
+        "--harness",
+        "codex",
         "--codex-model-provider",
         codex_model_provider,
         "--model",
@@ -281,6 +363,11 @@ async fn create_workflow_and_step(world: &mut DaemonWorld, output_schema: Option
         .unwrap_or_else(|| panic!("step 'run' not found in list: {arr:?}"));
     let step_id = step["id"].as_str().unwrap().to_string();
     world.step_id = Some(step_id.clone());
+
+    world
+        .run_vtb(&["step", "update", &step_id, "--harness", "claude"])
+        .await;
+    world.assert_vtb_ok("step update --harness claude");
 
     if let Some(schema_json) = output_schema {
         world

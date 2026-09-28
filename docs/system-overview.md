@@ -13,9 +13,9 @@ The system solves a fundamental problem with LLM-driven development: **context i
 The platform has two components:
 
 - **Sacrum** — an Elixir/Phoenix server (GraphQL API + PostgreSQL + Phoenix Channels) that stores all state and orchestrates workflow execution
-- **Vertebrae** — a Rust client ecosystem (CLI `vtb`, desktop GUI, background daemon) that interacts with Sacrum and executes workflow steps by spawning a local harness CLI (Claude Code or Codex; see [vtb Guide — Provider Selection](vtb-guide/steps.md#provider-selection-anthropic--openai))
+- **Vertebrae** — a Rust client ecosystem (CLI `vtb`, desktop GUI, background daemon) that interacts with Sacrum and executes workflow steps through shared Claude, Codex, or TypeSafe harness runtimes (see [vtb Guide — Steps](vtb-guide/steps.md#steps))
 
-> The sections below describe the Claude-Code execution path in detail because that was the original and remains the default harness. With provider selection in place, a step whose `agent_config.provider` is `openai` is run through Codex's streaming App Server instead, following the same actor/streaming model.
+> Claude remains the legacy default when a step has no explicit harness. A step may select `claude`, `codex`, or `typesafe`; TypeSafe supports `structured_inference`, while Claude and Codex support `llm_inference`.
 
 ---
 
@@ -140,8 +140,11 @@ Workflows can chain: when a workflow completes, it can hand off to another workf
 
 ### WorkflowStep
 
-A workflow step has a fixed `step_type`, a `goal`, ordering and transition
-fields, optional `persistence_options`, and a type-specific `config`.
+A workflow step has a fixed `step_type`, an optional `harness` selector, a
+`goal`, ordering and transition fields, optional `persistence_options`, and a
+type-specific `config`. The selector accepts `claude`, `codex`, or `typesafe`
+and remains separate from model and request configuration. When omitted, the
+step keeps Sacrum's default and provider-backfill behavior.
 
 | Type | `config` | Behavior |
 |------|----------|----------|
@@ -231,7 +234,7 @@ This is the core loop: a task moves through a workflow, and each step is execute
 
 5. Daemon (vtb-daemon) receives "run_step"
    ├── DaemonSupervisor → ProjectSupervisor → StepExecutor (actor)
-   ├── Builds a provider-neutral request for the selected shared harness
+   ├── Resolves optional step harness and builds a provider-neutral request
    ├── Runs in: project root or task.worktree (git worktree)
    └── Persists normalized HarnessEventV1 payloads as SessionLog records
 
@@ -298,7 +301,7 @@ Client type "default" receives:
   section_created, section_updated, section_deleted
 
 Client type "daemon" receives ONLY:
-  run_step  (with prompt + agent_config payload)
+  run_step  (with prompt + agent_config and optional harness payload)
   cancel_step
 
 The GUI also joins the authenticated `accounts:me` channel for account-scoped
@@ -341,8 +344,8 @@ DaemonSupervisor
 
 When the daemon receives a `run_step` event, `StepExecutor`:
 
-1. Builds a provider-neutral harness request from the step's `prompt` and `agent_config`
-2. Starts the selected Claude or Codex shared harness
+1. Builds a provider-neutral harness request from the step's `prompt` and request configuration
+2. Starts the selected Claude, Codex, or TypeSafe shared harness according to the step's `harness` (or Sacrum's default/backfill)
 3. Persists normalized `HarnessEventV1` payloads to Sacrum as `format=harness` `SessionLog`s
 4. On exit, derives token counts, cost, and model from normalized harness data
 5. Reports `StepCompleted` or `StepFailed` back to `ProjectSupervisor`

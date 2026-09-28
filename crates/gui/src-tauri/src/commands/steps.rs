@@ -249,6 +249,7 @@ mod tests {
                 order: 0,
                 transitions_to: vec![],
                 step_type: Default::default(),
+                harness: None,
                 config: serde_json::json!({
                     "prompt": "Review the code carefully",
                     "agents": ["sonnet"]
@@ -293,6 +294,7 @@ mod tests {
                 order: 0,
                 transitions_to: vec![],
                 step_type: crate::types::StepType::Route,
+                harness: None,
                 config: serde_json::json!({"prompt": "route prompt"})
                     .as_object()
                     .cloned(),
@@ -320,6 +322,7 @@ mod tests {
                 order: 0,
                 transitions_to: vec![],
                 step_type: crate::types::StepType::Finish,
+                harness: None,
                 persistence_options: None,
                 config: None,
             },
@@ -344,6 +347,7 @@ mod tests {
                 order: 1,
                 transitions_to: vec!["next-step".to_string()],
                 step_type: crate::types::StepType::Stop,
+                harness: None,
                 config: None,
                 persistence_options: None,
             },
@@ -377,6 +381,7 @@ mod tests {
                 order: 0,
                 transitions_to: vec![],
                 step_type: Default::default(),
+                harness: None,
                 persistence_options: None,
                 config: None,
             },
@@ -392,6 +397,7 @@ mod tests {
                 order: 1,
                 transitions_to: vec![],
                 step_type: Default::default(),
+                harness: None,
                 persistence_options: None,
                 config: None,
             },

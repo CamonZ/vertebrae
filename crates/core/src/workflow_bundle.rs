@@ -4,6 +4,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::StepHarness;
 use crate::models::{StepType, Workflow};
 
 mod route;
@@ -82,6 +83,8 @@ pub struct StepManifest {
     pub name: String,
     pub goal: Option<String>,
     pub step_type: StepType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<StepHarness>,
     pub step_order: i32,
     pub persistence_options: Option<Value>,
     pub config: Option<Value>,
@@ -94,6 +97,7 @@ impl StepManifest {
             name: name.into(),
             goal: None,
             step_type: StepType::default(),
+            harness: None,
             step_order: 0,
             persistence_options: None,
             config: Some(serde_json::json!({"version": crate::models::STEP_CONFIG_VERSION})),

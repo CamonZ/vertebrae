@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+use vertebrae_core::StepHarness;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{Artifact, ArtifactLinkMetadata};
 
@@ -427,6 +428,8 @@ pub struct WorkflowExportStep {
     pub name: String,
     pub goal: Option<String>,
     pub step_type: Option<String>,
+    #[serde(default)]
+    pub harness: Option<StepHarness>,
     /// `step_type`-specific config object; null for config-less types.
     pub config: Option<serde_json::Value>,
     pub persistence_options: Option<serde_json::Value>,
@@ -520,6 +523,10 @@ pub struct WorkflowStepResponse {
     pub goal: Option<String>,
     #[serde(default)]
     pub step_type: Option<String>,
+    /// Runtime harness selected for this step. Missing values are preserved
+    /// as `None` so Sacrum's default/backfill remains authoritative.
+    #[serde(default)]
+    pub harness: Option<StepHarness>,
     /// `step_type`-specific config object; null for config-less types.
     #[serde(default)]
     pub config: Option<serde_json::Value>,

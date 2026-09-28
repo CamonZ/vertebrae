@@ -3,7 +3,7 @@
 //! These are the canonical domain models for the Vertebrae task management system.
 //! All IDs are plain strings rather than database-specific record types.
 
-use crate::{OutputVerbosity, SpeedTier, model_catalog::Provider};
+use crate::{OutputVerbosity, SpeedTier, StepHarness, model_catalog::Provider};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -1890,6 +1890,11 @@ pub struct Step {
     /// The type of this step; immutable once the step exists.
     pub step_type: StepType,
 
+    /// Runtime harness selected for this step. `None` preserves Sacrum's
+    /// configured default or provider backfill for existing workflows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<StepHarness>,
+
     /// `step_type`-specific configuration; `None` for human_input, stop, and
     /// finish steps.
     pub config: Option<StepConfig>,
@@ -1924,6 +1929,7 @@ impl Step {
             goal: None,
             config: StepConfig::default_for(&step_type),
             step_type,
+            harness: None,
             persistence_options: None,
             transitions_to: Vec::new(),
             order: 0,
@@ -2064,6 +2070,12 @@ impl Step {
     /// Set the order
     pub fn with_order(mut self, order: i32) -> Self {
         self.order = order;
+        self
+    }
+
+    /// Select the shared runtime harness for this step.
+    pub fn with_harness(mut self, harness: StepHarness) -> Self {
+        self.harness = Some(harness);
         self
     }
 }
@@ -2777,6 +2789,9 @@ pub struct StepUpdate {
     pub name: Option<String>,
     /// New goal
     pub goal: Option<String>,
+    /// Harness update (`None` leaves unchanged, `Some(None)` clears to the
+    /// Sacrum default, and `Some(Some(harness))` selects one explicitly).
+    pub harness: Option<Option<StepHarness>>,
     /// Config fields to write
     pub config: Option<serde_json::Map<String, serde_json::Value>>,
     /// New orchestrator-owned persistence configuration (Some(None) clears it)
@@ -2802,6 +2817,18 @@ impl StepUpdate {
     /// Set a new goal
     pub fn with_goal(mut self, goal: impl Into<String>) -> Self {
         self.goal = Some(goal.into());
+        self
+    }
+
+    /// Select a harness for this step.
+    pub fn with_harness(mut self, harness: StepHarness) -> Self {
+        self.harness = Some(Some(harness));
+        self
+    }
+
+    /// Clear an explicit harness selection and restore Sacrum's default.
+    pub fn clear_harness(mut self) -> Self {
+        self.harness = Some(None);
         self
     }
 
@@ -3574,6 +3601,33 @@ mod tests {
     }
 
     // ─── StepUpdate ─────────────────────────────────────────────────
+
+    #[test]
+    fn step_harness_is_optional_and_round_trips_exact_values() {
+        let legacy = Step::new("Legacy", "wf-1");
+        let legacy_json = serde_json::to_value(&legacy).unwrap();
+        assert!(legacy_json.get("harness").is_none());
+
+        for (harness, wire) in [
+            (StepHarness::Claude, "claude"),
+            (StepHarness::Codex, "codex"),
+            (StepHarness::Typesafe, "typesafe"),
+        ] {
+            let step = Step::new("Selected", "wf-1").with_harness(harness);
+            let encoded = serde_json::to_value(&step).unwrap();
+            assert_eq!(encoded["harness"], wire);
+        }
+    }
+
+    #[test]
+    fn step_update_harness_patch_distinguishes_omission_set_and_clear() {
+        assert_eq!(StepUpdate::new().harness, None);
+        assert_eq!(
+            StepUpdate::new().with_harness(StepHarness::Codex).harness,
+            Some(Some(StepHarness::Codex))
+        );
+        assert_eq!(StepUpdate::new().clear_harness().harness, Some(None));
+    }
 
     #[test]
     fn step_update_builders() {

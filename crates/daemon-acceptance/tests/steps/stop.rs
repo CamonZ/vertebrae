@@ -78,6 +78,8 @@ pub async fn stop_boundary_workflow(world: &mut DaemonWorld) {
             "step",
             "update",
             &work_id,
+            "--harness",
+            "claude",
             "--prompt",
             &prompt,
             "--transition-to",

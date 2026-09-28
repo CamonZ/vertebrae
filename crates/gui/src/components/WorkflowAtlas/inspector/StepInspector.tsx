@@ -20,6 +20,7 @@ import {
   type JsonValue,
   type LlmInferenceStepConfig,
   type RouteStepConfig,
+  type StepHarness,
   type StructuredInferenceStepConfig,
   type WaitChildrenStepConfig,
 } from "../../../bindings";
@@ -114,6 +115,7 @@ export function StepInspector({
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
+  const [harness, setHarness] = useState<StepHarness | null>(null);
   const [prompt, setPrompt] = useState("");
   const [agentsText, setAgentsText] = useState("");
   const [skillsText, setSkillsText] = useState("");
@@ -135,6 +137,7 @@ export function StepInspector({
     if (!cfg || editing) return;
     setName(cfg.name);
     setGoal(cfg.goal ?? "");
+    setHarness(cfg.harness ?? null);
     const inferenceConfig =
       cfg.step_type === "llm_inference"
         ? (cfg.config as LlmInferenceStepConfig | null)
@@ -384,6 +387,8 @@ export function StepInspector({
           step_id: stepId,
           name,
           goal,
+          harness,
+          clear_harness: harness === null,
           config,
           persistence_options: parsedPersistence,
           clear_persistence_options: clearPersistenceOptions,
@@ -459,6 +464,21 @@ export function StepInspector({
           <label>
             Goal
             <textarea value={goal} onChange={(e) => setGoal(e.target.value)} />
+          </label>
+          <label>
+            Harness
+            <select
+              aria-label="Step harness"
+              value={harness ?? ""}
+              onChange={(event) =>
+                setHarness((event.target.value || null) as StepHarness | null)
+              }
+            >
+              <option value="">Use Sacrum default</option>
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+              <option value="typesafe">TypeSafe</option>
+            </select>
           </label>
           {isInference ? (
             <>
@@ -568,6 +588,13 @@ export function StepInspector({
               {isLoading ? "Loading…" : "No goal set"}
             </div>
           )}
+        </section>
+
+        <section className="wfd-sec" data-testid="step-harness-section">
+          <div className="wfd-lbl">Harness</div>
+          <div className="wfd-text" data-testid="step-harness-value">
+            {cfg?.harness ?? "Sacrum default"}
+          </div>
         </section>
 
         {isStructured ? (

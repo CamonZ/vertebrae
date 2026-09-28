@@ -80,6 +80,8 @@ pub async fn child_execute_workflow(world: &mut DaemonWorld) {
             "step",
             "update",
             &step_id,
+            "--harness",
+            "claude",
             "--prompt",
             &envelope,
             "--transition-to",
@@ -410,6 +412,8 @@ async fn create_wait_children_workflow(world: &mut DaemonWorld, label: &str) -> 
             &wf_id,
             "--model",
             "claude-sonnet-4-6",
+            "--harness",
+            "claude",
             "--order",
             "1",
         ])

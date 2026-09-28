@@ -26,6 +26,7 @@ vtb step add "Coding" -w <workflow-id> \
 
 # Add provider execution settings
 vtb step add "Codex review" -w <workflow-id> \
+  --harness codex \
   --provider openai \
   --model gpt-5.5 \
   --speed-tier fast \
@@ -114,6 +115,13 @@ answer validation schema from the questions. For every other type `--provider`
 and `--model` remain `agent_config` shortcuts, and `--state` and `--questions` are rejected with
 `config: $.<field>: is not supported for <type> steps`.
 
+`--harness` selects the step runtime independently of model and request
+settings. It accepts `claude`, `codex`, or `typesafe`; omitting it keeps
+Sacrum's configured default and provider backfill behavior. TypeSafe supports
+`structured_inference` steps. Claude and Codex run `llm_inference` steps.
+`--provider` and `--model` continue to configure the request, and do not set
+the step harness.
+
 `vtb step list` takes exactly one required `<workflow>` argument and no
 command-specific flags. `vtb step list --help` shows only the global `--json`
 flag plus `-h` / `--help`. Human-readable output is ordered by each step's
@@ -121,13 +129,14 @@ flag plus `-h` / `--help`. Human-readable output is ordered by each step's
 
 ```text
 Steps for workflow '<workflow-id>':
-1. coding (id: a1b2c3d4, type: llm_inference, model: sonnet)
-2. testing (id: e5f6a7b8, type: llm_inference, model: haiku)
-3. approved (id: c9d0e1f2, type: finish)
+1. coding (id: a1b2c3d4, type: llm_inference, harness: claude, model: sonnet)
+2. testing (id: e5f6a7b8, type: llm_inference, harness: codex, model: gpt-5.5)
+3. approved (id: c9d0e1f2, type: finish, harness: server-default)
 ```
 
 The model is `agent_config.model` for `llm_inference` steps and `config.model`
-for `structured_inference` steps; other types omit it.
+for `structured_inference` steps; other types omit it. Missing harness values
+are displayed as `server-default` and defer to Sacrum's default/backfill.
 
 When the workflow has no steps, it prints `No steps found for workflow
 '<workflow-id>'`. With the global `--json` flag, `step list` returns the raw
@@ -149,6 +158,7 @@ Step: 925c50ac-a1ed-4f5b-82c3-9dcb0773597b - implement
 Workflow:      84b28cbb-9c65-4d64-9ea0-b74587f9d056
 Order:         1
 Step Type:     llm_inference
+Harness:       codex
 Goal:          Implement the ticket in the assigned worktree.
 Agents:        (none)
 Skills:        (none)
@@ -194,6 +204,8 @@ request with no property changes before reporting success.
 | Flag | Short | Behavior |
 |------|-------|----------|
 | `--name <NAME>` | | Replace the step name |
+| `--harness <HARNESS>` | | Select `claude`, `codex`, or `typesafe` for this step |
+| `--clear-harness` | | Clear the explicit selection and use Sacrum's default/backfill |
 | `--goal <GOAL>` | `-g` | Replace the step goal |
 | `--agent <AGENT>` | `-a` | Replace the full agents list; repeat for multiple agents |
 | `--clear-agents` | | Replace the agents list with an empty list |
@@ -482,26 +494,31 @@ writes upsert the task's
 `<logical_name>.json` artifact. The daemon only executes and validates output;
 it does not interpret this setting or create artifacts.
 
-### Provider Selection (Anthropic / OpenAI)
+### Harness and Provider Settings
 
-Each step picks the harness (the local CLI) that will run its prompt via
-`agent_config.provider`. The MVP ships with two built-in providers:
+`--harness` selects the runtime for a step. Its exact values are `claude`,
+`codex`, and `typesafe`. When the field is omitted, Sacrum's configured default
+and provider-backfill behavior remain in effect; the daemon also retains its
+legacy `agent_config.provider` fallback for old payloads. `--provider` and
+`--model` configure the request and model separately. Explicit provider/request
+settings must be compatible with the selected runtime.
 
-| Provider | Harness | Binary | Transport | Provider-binary lookup env var |
-|----------|---------|--------|-----------|--------------------------------|
-| `anthropic` (default) | Claude Code streaming harness | `claude` | persistent stream-json session | `CLAUDE_CODE_PATH` |
-| `openai` | Codex App Server streaming harness | `codex` | App Server WebSocket | `CODEX_PATH` |
+| `--harness` | Runtime | Binary/transport | Provider-binary lookup env var |
+|-----------|---------|------------------|--------------------------------|
+| `claude` | Claude Code streaming harness | `claude`, persistent stream-json session | `CLAUDE_CODE_PATH` |
+| `codex` | Codex App Server streaming harness | `codex`, App Server WebSocket | `CODEX_PATH` |
+| `typesafe` | TypeSafe structured-inference runtime | System One API | `TYPESAFE_API_KEY` or `[typesafe].api_key` |
 
-Both harnesses emit the same normalized `HarnessEventV1` stream, which the
-daemon persists as `format=harness` session logs and the GUI replays through
-one projection — so a step's provider changes which CLI runs, not how its
-output is stored or rendered. See
+The harnesses emit normalized events through the shared runtime contract. The
+daemon persists those events as `format=harness` session logs and the GUI
+replays them through one projection. TypeSafe is supported for
+`structured_inference`; Claude and Codex support `llm_inference`. See
 [Architecture — Harness Crates](../architecture.md#harness-crates) for crate
-ownership and how to add a third provider.
+ownership and runtime selection.
 
-When `provider` is unset on a step, the daemon defaults to **Anthropic** to
-preserve pre-refactor behavior. The daemon resolves the harness binary by
-checking the provider-specific env var first, then the user's login-shell
+When no explicit harness is present, the daemon defaults to **Anthropic** if
+the legacy provider setting is also unset. It resolves the harness binary by
+checking the provider-specific environment variable first, then the user's login-shell
 `PATH`, then well-known install locations (`~/.local/bin`, `/usr/local/bin`,
 `/opt/homebrew/bin`).
 
@@ -513,24 +530,28 @@ checking the provider-specific env var first, then the user's login-shell
 > harness once interactively, confirm it works standalone, then point
 > Vertebrae at it.
 
-#### Setting the provider on a step
+#### Setting the harness and request settings on a step
 
-`vtb step add` and `vtb step update` accept `--provider` (alias:
+`vtb step add` accepts `--harness`; `vtb step update` accepts `--harness` and
+`--clear-harness`. To configure a Codex request as well, use `--provider`
+(alias:
 `--model-provider`), `--model`, `--codex-model-provider` (alias:
-`--codex-provider`), and `--reasoning-effort` as convenience shortcuts that
-overlay the step's `agent_config`:
+`--codex-provider`), and `--reasoning-effort`. These flags set request
+configuration and do not choose the step runtime:
 
 ```bash
-# Default behavior — provider unset, daemon uses Anthropic / Claude Code
+# Default behavior — no harness selector; Sacrum and daemon use the default
 vtb step add "Coding" -w <wf-id> --model sonnet
 
-# Explicit Anthropic with a Claude model
+# Select Claude and configure a Claude model
 vtb step add "Coding" -w <wf-id> \
+  --harness claude \
   --provider anthropic \
   --model claude-sonnet-4-20250514
 
-# OpenAI / Codex with a GPT model (alias --model-provider also works)
+# Select Codex and configure a GPT model (alias --model-provider also works)
 vtb step add "Coding" -w <wf-id> \
+  --harness codex \
   --model-provider openai \
   --model gpt-5.5 \
   --reasoning-effort high

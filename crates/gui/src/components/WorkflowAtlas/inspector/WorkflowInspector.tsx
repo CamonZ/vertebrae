@@ -15,7 +15,12 @@
    ────────────────────────────────────────────────────────────────── */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CloseIcon, IconButton } from "../../panels";
-import { commands, type JsonValue, type StepType } from "../../../bindings";
+import {
+  commands,
+  type JsonValue,
+  type StepHarness,
+  type StepType,
+} from "../../../bindings";
 import { unwrapCommand } from "../../../query";
 import { splitRef } from "../layout/geometry";
 import type { AtlasModel, AtlasWorkflow } from "../layout/types";
@@ -67,6 +72,7 @@ export function WorkflowInspector({
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<StepType>("llm_inference");
+  const [newHarness, setNewHarness] = useState<StepHarness | null>(null);
   const [newTransition, setNewTransition] = useState("");
   const [newStructured, setNewStructured] = useState<StructuredInferenceInput>(
     EMPTY_STRUCTURED_INPUT
@@ -170,10 +176,12 @@ export function WorkflowInspector({
           order: wf.stepIds.length,
           transitions_to: transition ? [transition] : [],
           step_type: newType,
+          harness: newHarness,
         })
       );
       setNewName("");
       setNewTransition("");
+      setNewHarness(null);
       setNewStructured(EMPTY_STRUCTURED_INPUT);
       setAdding(false);
       if (created.id)
@@ -382,6 +390,23 @@ export function WorkflowInspector({
                   <option value="human_input">human_input</option>
                   <option value="stop">stop</option>
                   <option value="finish">finish</option>
+                </select>
+              </label>
+              <label>
+                Harness
+                <select
+                  aria-label="Step harness"
+                  value={newHarness ?? ""}
+                  onChange={(event) =>
+                    setNewHarness(
+                      (event.target.value || null) as StepHarness | null
+                    )
+                  }
+                >
+                  <option value="">Use Sacrum default</option>
+                  <option value="claude">Claude</option>
+                  <option value="codex">Codex</option>
+                  <option value="typesafe">TypeSafe</option>
                 </select>
               </label>
               {newType === "structured_inference" ? (

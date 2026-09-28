@@ -89,6 +89,7 @@ export function createMockStep(overrides?: Partial<Step>): Step {
     updated_at: null,
     persistence_options: null,
     ...overrides,
+    harness: overrides?.harness ?? null,
   };
 }
 

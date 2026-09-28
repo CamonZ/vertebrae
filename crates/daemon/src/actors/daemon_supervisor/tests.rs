@@ -60,6 +60,25 @@ fn classify_daemon_run_step_routes_by_payload_project() {
 }
 
 #[test]
+fn classify_run_step_routes_unknown_harness_to_project_for_execution_failure() {
+    let projects = known_projects(&["proj-1"]);
+    let m = msg(
+        "daemon:33333333-3333-3333-3333-333333333333",
+        "run_step",
+        serde_json::json!({
+            "project_id": "proj-1",
+            "id": "execution-1",
+            "task_id": "task-1",
+            "harness": "openai"
+        }),
+    );
+    assert_eq!(
+        classify_channel_message(&m, &projects),
+        ChannelAction::RouteDaemonToProject("proj-1".to_string())
+    );
+}
+
+#[test]
 fn classify_daemon_cancel_step_routes_by_payload_project() {
     let projects = known_projects(&["proj-1"]);
     let m = msg(

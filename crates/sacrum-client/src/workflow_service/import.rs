@@ -328,10 +328,17 @@ mod tests {
             .mount(&server)
             .await;
 
-        let bundle: WorkflowBundleManifest = serde_json::from_str(include_str!(
+        let mut bundle: WorkflowBundleManifest = serde_json::from_str(include_str!(
             "../../../core/tests/fixtures/workflow_bundle.json"
         ))
         .unwrap();
+        for (step, harness) in bundle.workflows[0].steps.iter_mut().zip([
+            vertebrae_core::StepHarness::Claude,
+            vertebrae_core::StepHarness::Codex,
+            vertebrae_core::StepHarness::Typesafe,
+        ]) {
+            step.harness = Some(harness);
+        }
         bundle.validate().unwrap();
 
         let service = service(&server.uri());
@@ -368,6 +375,12 @@ mod tests {
         );
         assert!(sent_bundle["workflows"][0]["metadata"].is_object());
         assert!(sent_bundle["workflows"][0]["steps"][1]["config"]["route_config"].is_object());
+        for (index, harness) in ["claude", "codex", "typesafe"].into_iter().enumerate() {
+            assert_eq!(
+                sent_bundle["workflows"][0]["steps"][index]["harness"],
+                harness
+            );
+        }
     }
 
     #[tokio::test]

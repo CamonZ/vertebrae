@@ -1351,6 +1351,7 @@ export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backe
  * Options for creating a workflow step.
  */
 export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; order: number; transitions_to: string[]; step_type?: StepType;
+ harness?: StepHarness | null;
 /**
  * Config fields declared by `step_type` (snake_case keys; `agent_config`
  * uses the GUI `AgentConfig` shape). Omitted fields take the type's
@@ -1734,6 +1735,10 @@ goal: string | null;
  */
 step_type: StepType;
 /**
+ * Optional per-step harness selection; null preserves the Sacrum default.
+ */
+harness: StepHarness | null;
+/**
  * `step_type`-specific configuration; null for human_input, stop, and
  * finish steps.
  */
@@ -1909,6 +1914,8 @@ export type StepTransitionChangedEvent = { transition_id: string; from_step_id: 
  * Step type - mirrors core::StepType
  */
 export type StepType = "llm_inference" | "structured_inference" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
+/** Harness selected for an individual workflow step. */
+export type StepHarness = "claude" | "codex" | "typesafe"
 /**
  * StopRun command input. Provide either `task_run_id` or `task_id`.
  */
@@ -2225,7 +2232,7 @@ export type UpdateComponentState = "pending" | "downloaded" | "verified" | "stag
  * Only fields that are Some will be updated. `config` is a partial patch:
  * only its keys are written, and a null value clears that field.
  */
-export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; config?: Partial<{ [key in string]: JsonValue }> | null; persistence_options?: JsonValue | null; clear_persistence_options?: boolean; order: number | null; transitions_to: string[] | null }
+export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; harness: StepHarness | null; clear_harness?: boolean; config?: Partial<{ [key in string]: JsonValue }> | null; persistence_options?: JsonValue | null; clear_persistence_options?: boolean; order: number | null; transitions_to: string[] | null }
 /**
  * Options for updating a task - allows updating multiple fields at once
  */
