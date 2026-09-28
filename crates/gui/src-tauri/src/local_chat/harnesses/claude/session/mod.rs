@@ -30,9 +30,9 @@ use crate::helpers::{
 use crate::local_chat::harnesses::claude::args::builtin_claude_output_styles;
 use crate::local_chat::harnesses::claude::args::resolve_requested_claude_model;
 use crate::local_chat::{
-    HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind,
-    LocalChatPersonalityOption, LocalChatRuntime, LocalChatSessionError,
-    LocalChatSessionErrorEvent, LocalChatSessionWarningEvent, CHAT_REFERENCE_INSTRUCTIONS,
+    chat_developer_instructions, HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink,
+    LocalChatHarnessKind, LocalChatPersonalityOption, LocalChatRuntime, LocalChatSessionError,
+    LocalChatSessionErrorEvent, LocalChatSessionWarningEvent,
 };
 use crate::shell_environment::{user_shell_environment, ShellEnvironment};
 use crate::telemetry;
@@ -814,7 +814,7 @@ impl ClaudeSessionRuntime {
                 reasoning_effort: input.reasoning_effort,
                 speed_tier: input.speed_tier.as_deref().and_then(SpeedTier::parse),
                 personality,
-                developer_instructions: Some(CHAT_REFERENCE_INSTRUCTIONS.to_string()),
+                developer_instructions: Some(chat_developer_instructions()),
                 ..RequestConfig::default()
             },
         };

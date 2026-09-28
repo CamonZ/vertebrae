@@ -11,9 +11,9 @@ use vertebrae_harness_core::{
 
 use crate::helpers::{build_augmented_path_from, find_codex_binary_with_shell_environment};
 use crate::local_chat::{
-    HarnessCreateSessionInput, LocalChatEvent, LocalChatHarness, LocalChatHarnessInfo,
-    LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionError, LocalChatSessionErrorEvent,
-    CHAT_REFERENCE_INSTRUCTIONS,
+    chat_developer_instructions, HarnessCreateSessionInput, LocalChatEvent, LocalChatHarness,
+    LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionError,
+    LocalChatSessionErrorEvent,
 };
 use crate::shell_environment::{user_shell_environment, ShellEnvironment};
 
@@ -148,21 +148,15 @@ impl LocalChatHarness for CodexLocalChatHarness {
             permission_mode: input.permission_mode.as_ref().map(core_permission_mode),
             ..AgentConfig::default()
         };
-        let mut request = StartSessionRequest {
-            session_id: SessionId::new(backend_session_id.clone()),
-            stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
-            resume_id: input.provider_resume_id.map(Into::into),
-            config: vertebrae_harness_core::RequestConfig {
-                verbosity: None,
-                working_directory: input.working_dir.map(PathBuf::from),
-                model,
-                reasoning_effort,
-                speed_tier,
-                personality,
-                developer_instructions: Some(CHAT_REFERENCE_INSTRUCTIONS.to_string()),
-                ..Default::default()
-            },
-        };
+        let mut request = codex_start_request(
+            &backend_session_id,
+            input.provider_resume_id,
+            input.working_dir,
+            model,
+            reasoning_effort,
+            speed_tier,
+            personality,
+        );
         let adapter = Arc::new(LocalChatHarnessEventSink::new(
             backend_session_id.clone(),
             LocalChatHarnessKind::Codex,
@@ -405,6 +399,34 @@ fn resolve_codex_personality(
     )
 }
 
+/// Builds the Codex session start request. Every new session carries the
+/// shared local-chat developer instructions, including the agent-context index.
+fn codex_start_request(
+    backend_session_id: &str,
+    resume_id: Option<String>,
+    working_dir: Option<String>,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+    speed_tier: Option<SpeedTier>,
+    personality: Option<String>,
+) -> StartSessionRequest {
+    StartSessionRequest {
+        session_id: SessionId::new(backend_session_id),
+        stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
+        resume_id: resume_id.map(Into::into),
+        config: vertebrae_harness_core::RequestConfig {
+            verbosity: None,
+            working_directory: working_dir.map(PathBuf::from),
+            model,
+            reasoning_effort,
+            speed_tier,
+            personality,
+            developer_instructions: Some(chat_developer_instructions()),
+            ..Default::default()
+        },
+    }
+}
+
 fn emit_error(runtime: &LocalChatRuntime, backend_session_id: &str, error: String) {
     runtime
         .event_sink()
@@ -422,6 +444,42 @@ fn emit_error(runtime: &LocalChatRuntime, backend_session_id: &str, error: Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn start_request_carries_reference_instructions_and_agent_context_index() {
+        let request = codex_start_request(
+            "backend-codex",
+            Some("resume-1".into()),
+            Some("/tmp/codex-work".into()),
+            Some("gpt-test".into()),
+            Some("high".into()),
+            Some(SpeedTier::Fast),
+            None,
+        );
+
+        assert_eq!(request.session_id.as_str(), "backend-codex");
+        assert_eq!(request.stream_id.as_str(), "local-chat:backend-codex");
+        assert_eq!(
+            request.resume_id.as_ref().map(|id| id.as_str()),
+            Some("resume-1")
+        );
+        assert_eq!(
+            request.config.working_directory.as_deref(),
+            Some(std::path::Path::new("/tmp/codex-work"))
+        );
+        let instructions = request
+            .config
+            .developer_instructions
+            .expect("Codex sessions receive developer instructions");
+        assert!(instructions.starts_with(crate::local_chat::CHAT_REFERENCE_INSTRUCTIONS));
+        assert!(instructions.contains("# Vertebrae agent context"));
+        let docs_root = vertebrae_installer::installed_agent_context_dir()
+            .expect("home dir resolvable in tests");
+        assert!(instructions.contains(&format!(
+            "(<{}>)",
+            docs_root.join("permissions.md").display()
+        )));
+    }
 
     #[test]
     fn codex_factory_config_pins_binary_and_augments_gui_path() {

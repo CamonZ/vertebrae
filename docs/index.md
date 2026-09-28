@@ -17,6 +17,7 @@ This index is the source of truth for project documentation entrypoints.
 | [Skills Audit](skills-audit.md) | Installed skill inventory, live-help validation policy, and Sacrum parity findings |
 | [Agent Session Contract](agent-session-contract.md) | Assignment scope, authorization, verification, and handoff |
 | [Agent Guidelines](agent-guidelines.md) | Selective project-scoped guideline retrieval and provenance |
+| [Agent Context](agent-context/index.md) | Progressive-disclosure docs embedded in the GUI; the root index is injected into local chat developer instructions |
 
 ## Fast Paths
 
@@ -28,5 +29,8 @@ This index is the source of truth for project documentation entrypoints.
   then [Agent Guidelines](agent-guidelines.md).
 - Need to work on providers or replay: read [Architecture](architecture.md) and the
   relevant `crates/harness-*` adapter README.
+- Need to change what local chat agents know about Vertebrae: edit `docs/agent-context/`
+  (keep docs short, add sub-indexes instead of growing a doc); `crates/agent-context`
+  embeds it and its tests enforce links, reachability, size, and index hints.
 - Need packaging/update behavior: read [Project Overview](project-overview.md) and
   [Updates](updates.md).
