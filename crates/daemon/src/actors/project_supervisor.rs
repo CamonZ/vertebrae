@@ -13,17 +13,14 @@ use std::time::Duration;
 
 use futures::future::join_all;
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
-use vertebrae_core::StepHarness;
-use vertebrae_core::VertebraeServices;
 use vertebrae_core::execution_service::UpdateExecutionStatusParams;
-use vertebrae_core::model_catalog::Provider;
 use vertebrae_core::models::{AgentConfig, ExecutionStatus};
-use vertebrae_harness::HarnessRuntimeFactory;
+use vertebrae_core::{ProviderId, StepHarness, VertebraeServices};
 
 use crate::actors::step_executor::{
     StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult,
 };
-use crate::capabilities::SharedDaemonCapabilities;
+use crate::capabilities::{DaemonCapabilities, SharedDaemonCapabilities};
 use crate::output_validator::SchemaValidationError;
 use crate::phoenix::PhoenixMessage;
 
@@ -341,15 +338,22 @@ pub fn parse_cancel_step_payload(payload: &serde_json::Value) -> Result<CancelSt
 pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepConfig, String> {
     let harness = parse_payload_harness(payload.harness.as_ref())?;
     validate_step_harness_compatibility(payload.step_type.as_deref(), harness)?;
-    let mut agent_config: AgentConfig =
-        serde_json::from_value(payload.agent_config.clone()).unwrap_or_default();
+    // A null/absent agent_config means "use defaults"; anything else must
+    // parse. Silently defaulting would run an unknown provider or a malformed
+    // configuration on the wrong runtime.
+    let mut agent_config: AgentConfig = if payload.agent_config.is_null() {
+        AgentConfig::default()
+    } else {
+        serde_json::from_value(payload.agent_config.clone())
+            .map_err(|error| format!("invalid agent_config in run_step payload: {error}"))?
+    };
     let structured_inference = match payload.step_type.as_deref() {
         Some("structured_inference") => true,
         Some(_) => false,
         None => {
             payload.state.is_some()
                 || payload.questions.is_some()
-                || agent_config.provider == Some(Provider::Typesafe)
+                || agent_config.provider == Some(ProviderId::typesafe())
         }
     };
 
@@ -371,46 +375,54 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepCo
     })
 }
 
-/// Resolve the `(provider, model)` pair the daemon reports for an execution.
-/// Provider comes verbatim from `agent_config` (defaulting to Anthropic via
-/// [`crate::provider::resolve_provider_from_agent_config`]); model is never
-/// inferred from the model string.
-pub fn resolved_execution_metadata(agent_config: &AgentConfig) -> (Provider, Option<String>) {
-    resolved_execution_metadata_for_harness(agent_config, None)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionMetadata {
+    pub provider: ProviderId,
+    pub harness: Option<StepHarness>,
+    pub model: Option<String>,
 }
 
-fn resolved_execution_metadata_for_harness(
+/// Resolve the metadata the daemon reports for an execution. The provider is
+/// the real provider ID (built-in or custom) and the harness is the one that
+/// runs it, resolved against the daemon's startup provider profiles; the
+/// model is never inferred from the model string.
+pub fn resolved_execution_metadata(
     agent_config: &AgentConfig,
     harness: Option<StepHarness>,
-) -> (Provider, Option<String>) {
-    let provider = harness
-        .map(HarnessRuntimeFactory::provider_for_harness)
-        .unwrap_or_else(|| crate::provider::resolve_provider_from_agent_config(agent_config));
+    capabilities: &DaemonCapabilities,
+) -> ExecutionMetadata {
+    let (provider, harness) =
+        crate::provider::reported_provider_and_harness(harness, agent_config, capabilities);
     let model = agent_config
         .model
         .as_deref()
         .map(str::trim)
         .filter(|m| !m.is_empty())
         .map(|m| m.to_string());
-    (provider, model)
+    ExecutionMetadata {
+        provider,
+        harness,
+        model,
+    }
 }
 
 fn attach_resolved_metadata(
     params: UpdateExecutionStatusParams,
-    agent_config: &AgentConfig,
-    harness: Option<StepHarness>,
+    metadata: &ExecutionMetadata,
 ) -> UpdateExecutionStatusParams {
-    let (provider, model) = resolved_execution_metadata_for_harness(agent_config, harness);
-    let mut params = params.with_model_provider(provider.as_str());
-    if let Some(model) = model {
-        params = params.with_model(model);
+    let mut params = params.with_model_provider(metadata.provider.as_str());
+    if let Some(harness) = metadata.harness {
+        params = params.with_harness(harness.as_str());
+    }
+    if let Some(model) = &metadata.model {
+        params = params.with_model(model.clone());
     }
     params
 }
 
 fn completed_update_params(
     output: Option<&String>,
-    metadata: Option<&PendingExecutionMetadata>,
+    metadata: Option<&ExecutionMetadata>,
 ) -> UpdateExecutionStatusParams {
     let mut params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed);
 
@@ -419,7 +431,7 @@ fn completed_update_params(
     }
 
     if let Some(metadata) = metadata {
-        params = attach_resolved_metadata(params, &metadata.agent_config, metadata.harness);
+        params = attach_resolved_metadata(params, metadata);
     }
 
     params
@@ -451,13 +463,7 @@ pub struct ProjectState {
     /// AgentConfig captured at spawn time, keyed by execution_id, so terminal
     /// status updates can re-attach provider/model metadata after the
     /// StepExecutor (which owned the original) has stopped.
-    pending_metadata: HashMap<String, PendingExecutionMetadata>,
-}
-
-#[derive(Debug, Clone)]
-struct PendingExecutionMetadata {
-    agent_config: AgentConfig,
-    harness: Option<StepHarness>,
+    pending_metadata: HashMap<String, ExecutionMetadata>,
 }
 
 /// Per-project supervisor actor.
@@ -857,10 +863,14 @@ impl ProjectSupervisor {
             task_id
         );
 
-        let running_params = attach_resolved_metadata(
-            UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
+        let metadata = resolved_execution_metadata(
             &step_config.agent_config,
             step_config.harness,
+            &state.capabilities,
+        );
+        let running_params = attach_resolved_metadata(
+            UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
+            &metadata,
         );
 
         if let Err(e) = state
@@ -878,13 +888,9 @@ impl ProjectSupervisor {
             return Ok(());
         }
 
-        state.pending_metadata.insert(
-            execution_id.to_string(),
-            PendingExecutionMetadata {
-                agent_config: step_config.agent_config.clone(),
-                harness: step_config.harness,
-            },
-        );
+        state
+            .pending_metadata
+            .insert(execution_id.to_string(), metadata);
 
         let executor_config = StepExecutorConfig {
             execution_id: execution_id.to_string(),
@@ -934,11 +940,7 @@ impl ProjectSupervisor {
                 let mut failure_params = UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
                     .with_output(format!("Failed to spawn executor: {e}"));
                 if let Some(metadata) = metadata.as_ref() {
-                    failure_params = attach_resolved_metadata(
-                        failure_params,
-                        &metadata.agent_config,
-                        metadata.harness,
-                    );
+                    failure_params = attach_resolved_metadata(failure_params, metadata);
                 }
                 let _ = state
                     .services
@@ -1049,8 +1051,7 @@ impl ProjectSupervisor {
                 let mut params = UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
                     .with_output(output_payload);
                 if let Some(metadata) = metadata.as_ref() {
-                    params =
-                        attach_resolved_metadata(params, &metadata.agent_config, metadata.harness);
+                    params = attach_resolved_metadata(params, metadata);
                 }
                 if let Err(e) = state
                     .services
@@ -1261,6 +1262,7 @@ mod tests {
                 typesafe_api_key: None,
                 typesafe_base_url: None,
                 typesafe_url: None,
+                provider_profiles: Default::default(),
             }),
         };
         let debug = format!("{:?}", config);
@@ -1556,6 +1558,45 @@ mod tests {
         assert_eq!(
             config.questions,
             Some(serde_json::from_value(payload["questions"].clone()).unwrap())
+        );
+    }
+
+    #[test]
+    fn unparseable_agent_config_fails_instead_of_defaulting() {
+        for agent_config in [
+            serde_json::json!({"provider": "not a provider id"}),
+            serde_json::json!({"model": 42}),
+            serde_json::json!("opaque"),
+        ] {
+            let payload = parse_run_step_payload(&serde_json::json!({
+                "id": "exec-bad-config",
+                "task_id": "task-bad-config",
+                "prompt": "work",
+                "agent_config": agent_config
+            }))
+            .unwrap();
+
+            let error = build_step_config_from_payload(&payload)
+                .expect_err("malformed agent_config must fail the execution");
+            assert!(error.contains("invalid agent_config"), "{error}");
+        }
+    }
+
+    #[test]
+    fn custom_provider_id_survives_payload_parsing() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-custom",
+            "task_id": "task-custom",
+            "prompt": "work",
+            "harness": "claude",
+            "agent_config": {"provider": "openrouter", "model": "moonshotai/kimi-k2"}
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload).unwrap();
+        assert_eq!(
+            config.agent_config.provider,
+            Some(ProviderId::new("openrouter").unwrap())
         );
     }
 
@@ -2272,58 +2313,102 @@ mod tests {
     // resolved_execution_metadata tests
     // =========================================================================
 
+    fn metadata_capabilities() -> crate::capabilities::DaemonCapabilities {
+        crate::capabilities::DaemonCapabilities {
+            harnesses: HashMap::new(),
+            provider_binaries: crate::helpers::ProviderBinaries::default(),
+            shell_path: String::new(),
+            installed_skills_roots: Vec::new(),
+            installed_skills_diagnostic: None,
+            claude_plugin_dir: vertebrae_installer::ClaudePluginDirResolution {
+                plugin_root: None,
+                warning: None,
+            },
+            typesafe_api_key: None,
+            typesafe_base_url: None,
+            typesafe_url: None,
+            provider_profiles: std::collections::BTreeMap::from([(
+                ProviderId::new("openrouter").unwrap(),
+                vertebrae_core::ProviderProfile {
+                    models: vec!["moonshotai/kimi-k2".into()],
+                    ..vertebrae_core::ProviderProfile::new(StepHarness::Claude)
+                },
+            )]),
+        }
+    }
+
+    fn metadata(agent_config: &AgentConfig, harness: Option<StepHarness>) -> ExecutionMetadata {
+        resolved_execution_metadata(agent_config, harness, &metadata_capabilities())
+    }
+
     #[test]
     fn resolved_metadata_defaults_provider_to_anthropic_when_unset() {
-        let agent_config = AgentConfig::default();
-        let (provider, model) = resolved_execution_metadata(&agent_config);
-        assert_eq!(provider, Provider::Anthropic);
-        assert!(model.is_none());
+        let metadata = metadata(&AgentConfig::default(), None);
+        assert_eq!(metadata.provider, ProviderId::anthropic());
+        assert_eq!(metadata.harness, Some(StepHarness::Claude));
+        assert!(metadata.model.is_none());
     }
 
     #[test]
-    fn resolved_metadata_uses_explicit_openai_provider_with_codex_model() {
-        let agent_config = AgentConfig::new()
-            .with_provider(Provider::Openai)
-            .with_model("gpt-5");
-        let (provider, model) = resolved_execution_metadata(&agent_config);
-        assert_eq!(provider, Provider::Openai);
-        assert_eq!(model.as_deref(), Some("gpt-5"));
+    fn resolved_metadata_uses_explicit_builtin_provider_and_its_harness() {
+        let metadata = metadata(
+            &AgentConfig::new()
+                .with_provider(ProviderId::openai())
+                .with_model("gpt-5"),
+            None,
+        );
+        assert_eq!(metadata.provider, ProviderId::openai());
+        assert_eq!(metadata.harness, Some(StepHarness::Codex));
+        assert_eq!(metadata.model.as_deref(), Some("gpt-5"));
     }
 
     #[test]
-    fn resolved_metadata_uses_explicit_anthropic_provider_with_claude_model() {
-        let agent_config = AgentConfig::new()
-            .with_provider(Provider::Anthropic)
-            .with_model("claude-sonnet-4-5");
-        let (provider, model) = resolved_execution_metadata(&agent_config);
-        assert_eq!(provider, Provider::Anthropic);
-        assert_eq!(model.as_deref(), Some("claude-sonnet-4-5"));
+    fn resolved_metadata_reports_custom_provider_id_and_configured_harness() {
+        let metadata = metadata(
+            &AgentConfig::new()
+                .with_provider(ProviderId::new("openrouter").unwrap())
+                .with_model("moonshotai/kimi-k2"),
+            None,
+        );
+        assert_eq!(metadata.provider.as_str(), "openrouter");
+        assert_eq!(metadata.harness, Some(StepHarness::Claude));
+    }
+
+    #[test]
+    fn resolved_metadata_reports_requested_provider_when_unconfigured() {
+        let metadata = metadata(
+            &AgentConfig::new().with_provider(ProviderId::new("bedrock").unwrap()),
+            Some(StepHarness::Claude),
+        );
+        assert_eq!(metadata.provider.as_str(), "bedrock");
+        assert_eq!(metadata.harness, Some(StepHarness::Claude));
     }
 
     #[test]
     fn resolved_metadata_prefers_step_harness_and_keeps_model_configuration_separate() {
         let agent_config = AgentConfig::new().with_model("configured-model");
         for (harness, expected_provider) in [
-            (StepHarness::Claude, Provider::Anthropic),
-            (StepHarness::Codex, Provider::Openai),
-            (StepHarness::Typesafe, Provider::Typesafe),
+            (StepHarness::Claude, ProviderId::anthropic()),
+            (StepHarness::Codex, ProviderId::openai()),
+            (StepHarness::Typesafe, ProviderId::typesafe()),
         ] {
-            let (provider, model) =
-                resolved_execution_metadata_for_harness(&agent_config, Some(harness));
-            assert_eq!(provider, expected_provider);
-            assert_eq!(model.as_deref(), Some("configured-model"));
+            let metadata = metadata(&agent_config, Some(harness));
+            assert_eq!(metadata.provider, expected_provider);
+            assert_eq!(metadata.harness, Some(harness));
+            assert_eq!(metadata.model.as_deref(), Some("configured-model"));
         }
     }
 
     #[test]
     fn resolved_metadata_treats_blank_model_as_unset() {
-        let agent_config = AgentConfig::new()
-            .with_provider(Provider::Anthropic)
-            .with_model("   ");
-        let (provider, model) = resolved_execution_metadata(&agent_config);
-        assert_eq!(provider, Provider::Anthropic);
+        let metadata = metadata(
+            &AgentConfig::new()
+                .with_provider(ProviderId::anthropic())
+                .with_model("   "),
+            None,
+        );
         assert!(
-            model.is_none(),
+            metadata.model.is_none(),
             "blank/whitespace-only model must be treated as unset"
         );
     }
@@ -2332,37 +2417,36 @@ mod tests {
     fn resolved_metadata_does_not_infer_provider_from_model_name() {
         // Provider must come from agent_config.provider, not from a model-name
         // classifier. Default-to-Anthropic applies even for Codex-shaped names.
-        let agent_config = AgentConfig::new().with_model("gpt-5");
-        let (provider, model) = resolved_execution_metadata(&agent_config);
+        let metadata = metadata(&AgentConfig::new().with_model("gpt-5"), None);
         assert_eq!(
-            provider,
-            Provider::Anthropic,
+            metadata.provider,
+            ProviderId::anthropic(),
             "provider must come from agent_config, not from the model string"
         );
-        assert_eq!(model.as_deref(), Some("gpt-5"));
+        assert_eq!(metadata.model.as_deref(), Some("gpt-5"));
     }
 
     #[test]
-    fn attach_resolved_metadata_sets_provider_and_model_on_params() {
-        let agent_config = AgentConfig::new()
-            .with_provider(Provider::Openai)
-            .with_model("gpt-5");
+    fn attach_resolved_metadata_sets_provider_harness_and_model_on_params() {
         let params = attach_resolved_metadata(
             UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
-            &agent_config,
-            None,
+            &metadata(
+                &AgentConfig::new()
+                    .with_provider(ProviderId::openai())
+                    .with_model("gpt-5"),
+                None,
+            ),
         );
         assert_eq!(params.model.as_deref(), Some("gpt-5"));
         assert_eq!(params.model_provider.as_deref(), Some("openai"));
+        assert_eq!(params.harness.as_deref(), Some("codex"));
     }
 
     #[test]
     fn attach_resolved_metadata_sets_default_provider_without_model() {
-        let agent_config = AgentConfig::default();
         let params = attach_resolved_metadata(
             UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
-            &agent_config,
-            None,
+            &metadata(&AgentConfig::default(), None),
         );
         assert_eq!(params.model_provider.as_deref(), Some("anthropic"));
         assert!(
@@ -2374,7 +2458,7 @@ mod tests {
     #[test]
     fn attach_resolved_metadata_preserves_existing_metric_fields() {
         let agent_config = AgentConfig::new()
-            .with_provider(Provider::Anthropic)
+            .with_provider(ProviderId::anthropic())
             .with_model("claude-sonnet-4-5");
         let params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed)
             .with_input_tokens(1500)
@@ -2382,7 +2466,7 @@ mod tests {
             .with_cost("0.0123")
             .with_duration_ms(4321)
             .with_output("done");
-        let params = attach_resolved_metadata(params, &agent_config, None);
+        let params = attach_resolved_metadata(params, &metadata(&agent_config, None));
         assert_eq!(params.input_tokens, Some(1500));
         assert_eq!(params.output_tokens, Some(800));
         assert_eq!(params.cost.as_deref(), Some("0.0123"));
@@ -2396,16 +2480,10 @@ mod tests {
     fn completed_update_params_do_not_emit_execution_rollup_metrics() {
         let output = "final answer".to_string();
         let agent_config = AgentConfig::new()
-            .with_provider(Provider::Openai)
+            .with_provider(ProviderId::openai())
             .with_model("gpt-5");
 
-        let params = completed_update_params(
-            Some(&output),
-            Some(&PendingExecutionMetadata {
-                agent_config,
-                harness: None,
-            }),
-        );
+        let params = completed_update_params(Some(&output), Some(&metadata(&agent_config, None)));
 
         assert_eq!(params.status, ExecutionStatus::Completed);
         assert_eq!(params.output.as_deref(), Some("final answer"));

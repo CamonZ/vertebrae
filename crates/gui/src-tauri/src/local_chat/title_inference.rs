@@ -13,6 +13,7 @@ use crate::helpers::{
 };
 use crate::local_chat::LocalChatHarnessKind;
 use crate::shell_environment::user_shell_environment;
+use vertebrae_harness::CustomProviderProcessLaunch;
 
 const CLAUDE_TITLE_MODEL: &str = "haiku";
 const CODEX_TITLE_MODEL: &str = "gpt-5.6-luna";
@@ -23,6 +24,11 @@ pub struct InferLocalChatSessionTitleInput {
     pub harness: LocalChatHarnessKind,
     pub initial_prompts: Vec<String>,
     pub working_dir: Option<String>,
+    /// Provider the chat runs on. Custom providers infer titles through
+    /// their own endpoint and default model.
+    #[serde(default)]
+    #[specta(optional)]
+    pub provider_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
@@ -32,8 +38,11 @@ pub struct InferLocalChatSessionTitleOutput {
     pub sufficient_signal: bool,
 }
 
+/// `custom_provider` carries the translated launch settings when the chat
+/// runs on a custom provider; built-in providers pass `None`.
 pub async fn infer_session_title(
     input: InferLocalChatSessionTitleInput,
+    custom_provider: Option<CustomProviderProcessLaunch>,
 ) -> Result<InferLocalChatSessionTitleOutput, String> {
     let prompts = input
         .initial_prompts
@@ -47,8 +56,12 @@ pub async fn infer_session_title(
     }
 
     match input.harness {
-        LocalChatHarnessKind::Claude => infer_with_claude(&prompts, input.working_dir).await,
-        LocalChatHarnessKind::Codex => infer_with_codex(&prompts, input.working_dir).await,
+        LocalChatHarnessKind::Claude => {
+            infer_with_claude(&prompts, input.working_dir, custom_provider).await
+        }
+        LocalChatHarnessKind::Codex => {
+            infer_with_codex(&prompts, input.working_dir, custom_provider).await
+        }
     }
 }
 
@@ -99,11 +112,11 @@ Conversation transcript:\n{messages}"
     )
 }
 
-fn claude_title_args(schema: &str) -> Vec<String> {
+fn claude_title_args(schema: &str, model: &str) -> Vec<String> {
     vec![
         "--print".to_string(),
         "--model".to_string(),
-        CLAUDE_TITLE_MODEL.to_string(),
+        model.to_string(),
         "--output-format".to_string(),
         "json".to_string(),
         "--json-schema".to_string(),
@@ -115,6 +128,7 @@ fn claude_title_args(schema: &str) -> Vec<String> {
 async fn infer_with_claude(
     initial_prompts: &[String],
     working_dir: Option<String>,
+    custom_provider: Option<CustomProviderProcessLaunch>,
 ) -> Result<InferLocalChatSessionTitleOutput, String> {
     let shell_environment = user_shell_environment();
     let binary = find_claude_binary_with_shell_environment(&shell_environment)?;
@@ -124,8 +138,15 @@ async fn infer_with_claude(
     command
         .envs(&shell_environment.variables)
         .env("PATH", build_augmented_path_from(&shell_environment.path));
+    let model = match &custom_provider {
+        Some(launch) => {
+            command.envs(&launch.environment).args(&launch.args);
+            launch.model.as_str()
+        }
+        None => CLAUDE_TITLE_MODEL,
+    };
     command
-        .args(claude_title_args(&schema))
+        .args(claude_title_args(&schema, model))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -158,6 +179,7 @@ async fn infer_with_claude(
 async fn infer_with_codex(
     initial_prompts: &[String],
     working_dir: Option<String>,
+    custom_provider: Option<CustomProviderProcessLaunch>,
 ) -> Result<InferLocalChatSessionTitleOutput, String> {
     let shell_environment = user_shell_environment();
     let binary = find_codex_binary_with_shell_environment(&shell_environment)?;
@@ -170,8 +192,16 @@ async fn infer_with_codex(
     let mut command = Command::new(binary);
     command
         .envs(&shell_environment.variables)
-        .env("PATH", build_augmented_path_from(&shell_environment.path))
-        .args(codex_title_args(&schema_path, &output_path))
+        .env("PATH", build_augmented_path_from(&shell_environment.path));
+    let args = match &custom_provider {
+        Some(launch) => {
+            command.envs(&launch.environment);
+            custom_codex_title_args(&schema_path, &output_path, launch)
+        }
+        None => codex_title_args(&schema_path, &output_path),
+    };
+    command
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -230,6 +260,34 @@ fn codex_title_args(schema_path: &Path, output_path: &Path) -> Vec<String> {
         "--skip-git-repo-check".to_string(),
         "-".to_string(),
     ]
+}
+
+/// `codex exec` title args for a custom provider: the provider's `-c`
+/// overrides and default model, without the built-in model's reasoning
+/// setting (custom models may not support it).
+fn custom_codex_title_args(
+    schema_path: &Path,
+    output_path: &Path,
+    launch: &CustomProviderProcessLaunch,
+) -> Vec<String> {
+    let mut args = vec![
+        "exec".to_string(),
+        "--model".to_string(),
+        launch.model.clone(),
+    ];
+    args.extend(launch.args.iter().cloned());
+    args.extend([
+        "--output-schema".to_string(),
+        schema_path.to_string_lossy().into_owned(),
+        "--output-last-message".to_string(),
+        output_path.to_string_lossy().into_owned(),
+        "--ephemeral".to_string(),
+        "--sandbox".to_string(),
+        "read-only".to_string(),
+        "--skip-git-repo-check".to_string(),
+        "-".to_string(),
+    ]);
+    args
 }
 
 fn temp_json_path(prefix: &str) -> PathBuf {
@@ -453,7 +511,7 @@ mod tests {
     #[test]
     fn builds_claude_title_command_with_stdin_prompt_and_no_tool_flags() {
         let schema = title_schema().to_string();
-        let args = claude_title_args(&schema);
+        let args = claude_title_args(&schema, CLAUDE_TITLE_MODEL);
 
         assert_eq!(args[0], "--print");
         assert!(args.contains(&"--model".to_string()));

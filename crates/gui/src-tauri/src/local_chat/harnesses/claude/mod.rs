@@ -331,6 +331,7 @@ mod tests {
             speed_tier: None,
             permission_mode: Some(PermissionMode::Plan),
             personality: Some("Explanatory".to_string()),
+            provider: None,
         };
 
         assert_eq!(input.backend_session_id, "backend-1");

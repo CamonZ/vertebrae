@@ -9,6 +9,8 @@ use vertebrae_harness_core::{
 use super::*;
 use crate::local_chat::{HarnessCreateSessionInput, LocalChatHarnessInfo, LocalChatModelOption};
 
+// Test-only call log; boxing the create input would only obscure assertions.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MockCall {
     Create(HarnessCreateSessionInput),
@@ -156,6 +158,7 @@ fn create_input(
         speed_tier: None,
         permission_mode: None,
         personality: None,
+        provider_id: None,
     }
 }
 
@@ -216,6 +219,159 @@ async fn catalog_falls_back_to_claude_kind_when_neither_harness_is_available() {
     );
 }
 
+fn custom_profiles() -> std::collections::BTreeMap<ProviderId, ProviderProfile> {
+    let profile = |harness, models: &[&str]| ProviderProfile {
+        models: models.iter().map(|model| model.to_string()).collect(),
+        ..ProviderProfile::new(harness)
+    };
+    std::collections::BTreeMap::from([
+        (
+            ProviderId::new("openrouter").unwrap(),
+            ProviderProfile {
+                default_model: Some("z-ai/glm-5".into()),
+                ..profile(StepHarness::Claude, &["moonshotai/kimi-k2", "z-ai/glm-5"])
+            },
+        ),
+        (
+            ProviderId::new("local").unwrap(),
+            profile(StepHarness::Codex, &["qwen3-coder"]),
+        ),
+        (
+            ProviderId::new("staging").unwrap(),
+            profile(StepHarness::Typesafe, &["jev-staging"]),
+        ),
+    ])
+}
+
+#[tokio::test]
+async fn catalog_lists_builtin_and_custom_providers_but_not_typesafe_profiles() {
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![
+        Arc::new(MockHarness::new(LocalChatHarnessKind::Claude)),
+        Arc::new(MockHarness::new(LocalChatHarnessKind::Codex)),
+    ])
+    .with_provider_profiles_for_tests(custom_profiles());
+
+    let catalog = manager.catalog().await;
+
+    let ids = catalog
+        .providers
+        .iter()
+        .map(|provider| (provider.id.as_str(), provider.harness, provider.custom))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        vec![
+            ("anthropic", LocalChatHarnessKind::Claude, false),
+            ("openai", LocalChatHarnessKind::Codex, false),
+            ("local", LocalChatHarnessKind::Codex, true),
+            ("openrouter", LocalChatHarnessKind::Claude, true),
+        ]
+    );
+    assert_eq!(catalog.default_provider, "anthropic");
+    let openrouter = catalog
+        .providers
+        .iter()
+        .find(|provider| provider.id == "openrouter")
+        .unwrap();
+    assert!(openrouter.available);
+    assert_eq!(
+        openrouter
+            .models
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["moonshotai/kimi-k2", "z-ai/glm-5"]
+    );
+    assert_eq!(openrouter.default_model_id.as_deref(), Some("z-ai/glm-5"));
+    assert!(catalog
+        .providers
+        .iter()
+        .find(|provider| provider.id == "anthropic")
+        .unwrap()
+        .models
+        .is_none());
+}
+
+#[tokio::test]
+async fn custom_provider_session_runs_on_its_configured_harness() {
+    let claude = MockHarness::new(LocalChatHarnessKind::Claude);
+    let codex = MockHarness::new(LocalChatHarnessKind::Codex);
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![
+        Arc::new(claude.clone()),
+        Arc::new(codex.clone()),
+    ])
+    .with_provider_profiles_for_tests(custom_profiles());
+
+    let mut input = create_input(LocalChatHarnessKind::Codex, "backend-local");
+    input.provider_id = Some("local".into());
+    manager
+        .create_session_with_runtime(input, LocalChatRuntime::inert_for_tests())
+        .await
+        .expect("custom Codex provider should route to Codex");
+
+    let MockCall::Create(created) = &codex.calls()[0] else {
+        panic!("expected a create call");
+    };
+    let provider = created
+        .provider
+        .as_ref()
+        .expect("custom provider selection");
+    assert_eq!(provider.id.as_str(), "local");
+    assert_eq!(provider.profile.harness, StepHarness::Codex);
+    assert!(claude.calls().is_empty());
+
+    for (harness, provider_id, expected) in [
+        (
+            LocalChatHarnessKind::Claude,
+            "local",
+            "configured for the codex harness",
+        ),
+        (
+            LocalChatHarnessKind::Claude,
+            "staging",
+            "configured for the typesafe harness",
+        ),
+        (LocalChatHarnessKind::Claude, "bedrock", "not configured"),
+        (
+            LocalChatHarnessKind::Claude,
+            "openai",
+            "does not run on the claude harness",
+        ),
+    ] {
+        let mut input = create_input(harness, &format!("backend-{provider_id}"));
+        input.provider_id = Some(provider_id.into());
+        let error = manager
+            .create_session_with_runtime(input, LocalChatRuntime::inert_for_tests())
+            .await
+            .expect_err("mismatched provider must fail");
+        assert!(
+            error.to_string().contains(expected),
+            "{provider_id}: {error}"
+        );
+    }
+}
+
+#[test]
+fn provider_selection_falls_back_to_default_model_with_warning() {
+    let selection = LocalChatProviderSelection {
+        id: ProviderId::new("openrouter").unwrap(),
+        profile: custom_profiles()[&ProviderId::new("openrouter").unwrap()].clone(),
+    };
+    assert_eq!(
+        selection.resolve_model(Some("moonshotai/kimi-k2")),
+        ("moonshotai/kimi-k2".to_string(), None)
+    );
+    assert_eq!(
+        selection.resolve_model(None),
+        ("z-ai/glm-5".to_string(), None)
+    );
+    let (model, warning) = selection.resolve_model(Some("sonnet"));
+    assert_eq!(model, "z-ai/glm-5");
+    assert!(warning.unwrap().contains("sonnet"));
+}
+
 #[tokio::test]
 async fn manager_routes_create_send_and_close_through_registry() {
     let claude = MockHarness::new(LocalChatHarnessKind::Claude);
@@ -267,6 +423,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
                 speed_tier: None,
                 permission_mode: None,
                 personality: None,
+                provider: None,
             }),
             MockCall::Send {
                 backend_session_id: "backend-claude".to_string(),
@@ -292,6 +449,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
                 speed_tier: None,
                 permission_mode: None,
                 personality: None,
+                provider: None,
             }),
             MockCall::Send {
                 backend_session_id: "backend-codex".to_string(),

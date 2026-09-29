@@ -4,6 +4,7 @@ import { formatTokenCount } from "../../utils/modelContextWindow";
 import type {
   LocalChatHarnessCatalog,
   LocalChatHarnessInfo,
+  LocalChatProviderInfo,
   PermissionMode,
 } from "../../bindings";
 import type { ChatSession } from "../../stores/chatStore";
@@ -149,7 +150,12 @@ interface ChatComposerProps {
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   harnessCatalog: LocalChatHarnessCatalog | null;
   visibleHarness: LocalChatHarnessInfo | null;
-  providerOptions: Array<{ info: LocalChatHarnessInfo }>;
+  providerOptions: Array<{
+    provider: LocalChatProviderInfo;
+    info: LocalChatHarnessInfo;
+  }>;
+  /** Provider selected for the session; the harness is derived from it. */
+  selectedProviderId: string;
   supportedModelIds: Set<string>;
   reasoningEfforts?: LocalChatHarnessInfo["reasoning_efforts"];
   supportedReasoningEffortIds: Set<string>;
@@ -191,6 +197,7 @@ export function ChatComposer({
   harnessCatalog,
   visibleHarness,
   providerOptions,
+  selectedProviderId,
   supportedModelIds,
   reasoningEfforts,
   supportedReasoningEffortIds,
@@ -594,13 +601,13 @@ export function ChatComposer({
                   <select
                     aria-label="Local chat provider"
                     data-testid="local-chat-provider-picker"
-                    value={session.harness}
+                    value={selectedProviderId}
                     onChange={onHarnessChange}
                     disabled={isBusy || isActive || lockedHarness}
                   >
-                    {providerOptions.map(({ info }) => (
-                      <option key={info.harness} value={info.harness}>
-                        {info.label}
+                    {providerOptions.map(({ provider }) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.label}
                       </option>
                     ))}
                   </select>

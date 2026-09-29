@@ -37,7 +37,9 @@ import { useShellStore } from "../../stores/shellStore";
 Element.prototype.scrollIntoView = vi.fn();
 
 // Mock the bindings (needed by useLocalChat + useCurrentProject inside ChatWindow)
-vi.mock("../../bindings", () => ({
+vi.mock("../../bindings", async () => {
+  const { withBuiltinProviders } = await import("../../test/localChatCatalog");
+  return {
   commands: {
     getCurrentProject: vi.fn().mockResolvedValue({
       status: "ok",
@@ -57,7 +59,7 @@ vi.mock("../../bindings", () => ({
     }),
     getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
       status: "ok",
-      data: {
+      data: withBuiltinProviders({
         default_harness: "claude",
         harnesses: [
           {
@@ -92,7 +94,7 @@ vi.mock("../../bindings", () => ({
             ],
           },
         ],
-      },
+      }),
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
@@ -131,7 +133,8 @@ vi.mock("../../bindings", () => ({
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
   },
-}));
+};
+});
 
 function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {

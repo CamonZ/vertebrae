@@ -185,7 +185,8 @@ pub const UPDATE_EXECUTION: &str = r#"
         $cost: Decimal,
         $duration_ms: Int,
         $model: String,
-        $model_provider: String
+        $model_provider: String,
+        $harness: String
     ) {
         update_step_execution(
             id: $id,
@@ -197,7 +198,8 @@ pub const UPDATE_EXECUTION: &str = r#"
             cost: $cost,
             duration_ms: $duration_ms,
             model: $model,
-            model_provider: $model_provider
+            model_provider: $model_provider,
+            harness: $harness
         ) {
             id
         }

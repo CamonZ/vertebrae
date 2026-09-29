@@ -3,7 +3,7 @@
 //! These are the canonical domain models for the Vertebrae task management system.
 //! All IDs are plain strings rather than database-specific record types.
 
-use crate::{OutputVerbosity, SpeedTier, StepHarness, model_catalog::Provider};
+use crate::{OutputVerbosity, ProviderId, SpeedTier, StepHarness};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -682,9 +682,12 @@ impl TaskFilter {
 /// Configuration for an agent execution.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentConfig {
-    /// Built-in execution provider. `None` means the implicit Anthropic default.
+    /// Provider ID: a built-in provider (`anthropic`, `openai`, `typesafe`)
+    /// or a custom `[providers.<id>]` entry from the executing machine's
+    /// config.toml. `None` means the step harness's built-in provider, or
+    /// Anthropic when no harness is selected.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<Provider>,
+    pub provider: Option<ProviderId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -731,7 +734,7 @@ impl AgentConfig {
         Self::default()
     }
 
-    pub fn with_provider(mut self, provider: Provider) -> Self {
+    pub fn with_provider(mut self, provider: ProviderId) -> Self {
         self.provider = Some(provider);
         self
     }
@@ -4457,7 +4460,7 @@ mod tests {
     #[test]
     fn agent_config_reasoning_effort_round_trips_json() {
         let config = AgentConfig::new()
-            .with_provider(Provider::Openai)
+            .with_provider(ProviderId::openai())
             .with_model("gpt-5.5")
             .with_reasoning_effort("xhigh");
         let json = serde_json::to_string(&config).expect("serialize agent config");
@@ -4471,7 +4474,7 @@ mod tests {
     #[test]
     fn agent_config_codex_model_provider_round_trips_json() {
         let config = AgentConfig::new()
-            .with_provider(Provider::Openai)
+            .with_provider(ProviderId::openai())
             .with_model("deepseek/deepseek-v4-flash")
             .with_codex_model_provider(" OpenRouter ");
         let json = serde_json::to_string(&config).expect("serialize agent config");
@@ -4651,13 +4654,13 @@ mod tests {
     #[test]
     fn agent_config_merge_overlays_codex_model_provider() {
         let config1 = AgentConfig::new()
-            .with_provider(Provider::Openai)
+            .with_provider(ProviderId::openai())
             .with_model("gpt-5.5")
             .with_codex_model_provider("openrouter");
         let config2 = AgentConfig::new().with_codex_model_provider("zai");
 
         let merged = config1.merge(config2);
-        assert_eq!(merged.provider, Some(Provider::Openai));
+        assert_eq!(merged.provider, Some(ProviderId::openai()));
         assert_eq!(merged.model.as_deref(), Some("gpt-5.5"));
         assert_eq!(merged.codex_model_provider.as_deref(), Some("zai"));
     }

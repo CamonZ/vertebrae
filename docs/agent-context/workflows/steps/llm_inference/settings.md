@@ -6,16 +6,21 @@ Use this when: the user names a model, or wants faster, deeper or cheaper runs.
 ## How it works
 - The runtime is chosen by the step's [harness](../harness.md) (`claude` or
   `codex`). The settings below shape the request that runtime sends.
-- `model`: any model the harness accepts. When `--provider` is also given, the
-  CLI checks the pair. Do not hard-code model IDs; ask, or check `vtb step add --help`.
+- `model`: for built-in providers, any model the harness accepts (the CLI
+  checks the pair when `--provider` is given); for a custom provider, only the
+  models in its `[providers.<id>]` `models` list. Do not hard-code model IDs;
+  ask, or check `vtb step add --help`.
 - `speed_tier`: `default` or `fast` (Codex priority tier / Claude fast mode).
 - `reasoning_effort` (Codex only): `low`, `medium`, `high`, `xhigh`.
 - `verbosity` (Codex only), `personality` (model-dependent), and
-  `codex_model_provider` for a custom Codex upstream from `~/.codex/config.toml`.
-- `agent_config.provider` (`anthropic`/`openai`) is the legacy runtime
-  selector. With a harness set it is optional, but if present it must match.
-- Harness CLIs authenticate themselves (`claude login`, `codex login`);
-  Vertebrae stores no provider secrets.
+  `codex_model_provider` for an upstream from `~/.codex/config.toml` (built-in
+  `openai` only; prefer a custom provider).
+- `agent_config.provider` (`--provider`): `anthropic`, `openai`, or a custom
+  `[providers.<id>]` ID from the daemon machine's config.toml. With a harness
+  set it is optional, but if present its harness must match.
+- Built-in providers authenticate through the harness CLIs (`claude login`,
+  `codex login`); custom providers use the credential their config entry names
+  ([config](../../../setup/config.md)).
 
 ## Doing it
 `vtb step update <id> --harness codex --model <m> --speed-tier fast --reasoning-effort high`.

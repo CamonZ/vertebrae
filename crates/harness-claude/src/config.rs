@@ -73,6 +73,48 @@ where
     }
 }
 
+/// A custom Anthropic-compatible endpoint that Claude Code should talk to
+/// instead of its default account. The adapter owns the translation into
+/// Claude Code's launch environment; secrets never appear in Debug output.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ClaudeProviderEndpoint {
+    pub base_url: Option<String>,
+    /// Exported as `ANTHROPIC_AUTH_TOKEN`. `ANTHROPIC_API_KEY` is cleared so
+    /// an ambient Anthropic key is never sent to the custom endpoint.
+    pub auth_token: Option<String>,
+    /// Additional launch environment, applied after the translated values.
+    pub environment: BTreeMap<String, String>,
+}
+
+impl ClaudeProviderEndpoint {
+    pub fn launch_environment(&self) -> BTreeMap<String, String> {
+        let mut environment = BTreeMap::new();
+        if let Some(base_url) = &self.base_url {
+            environment.insert("ANTHROPIC_BASE_URL".into(), base_url.clone());
+        }
+        if let Some(auth_token) = &self.auth_token {
+            environment.insert("ANTHROPIC_AUTH_TOKEN".into(), auth_token.clone());
+            environment.insert("ANTHROPIC_API_KEY".into(), String::new());
+        }
+        environment.extend(self.environment.clone());
+        environment
+    }
+}
+
+impl fmt::Debug for ClaudeProviderEndpoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ClaudeProviderEndpoint")
+            .field("base_url", &self.base_url)
+            .field(
+                "auth_token",
+                &self.auth_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("environment", &self.environment.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
 /// Provider arguments which must precede request/config overrides.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClaudeProviderPrelude {
@@ -91,6 +133,8 @@ pub struct ClaudeProviderConfig {
     /// PATH used for both executable lookup and the child process.
     pub search_path: Option<OsString>,
     pub environment: BTreeMap<String, String>,
+    /// Custom endpoint profile; `None` uses Claude Code's own account.
+    pub endpoint: Option<ClaudeProviderEndpoint>,
     pub prelude: ClaudeProviderPrelude,
     /// Provider arguments appended after all structured configuration.
     pub extra_args: Vec<String>,
@@ -122,6 +166,7 @@ impl fmt::Debug for ClaudeProviderConfig {
             )
             .field("search_path", &self.search_path)
             .field("environment", &self.environment)
+            .field("endpoint", &self.endpoint)
             .field("prelude", &self.prelude)
             .field("extra_args", &self.extra_args)
             .field("plugin_roots", &self.plugin_roots)
@@ -148,6 +193,7 @@ impl Default for ClaudeProviderConfig {
             executable_environment_key: "CLAUDE_CODE_PATH".to_string(),
             search_path: env::var_os("PATH"),
             environment: BTreeMap::new(),
+            endpoint: None,
             prelude: ClaudeProviderPrelude::default(),
             extra_args: Vec::new(),
             plugin_roots: Vec::new(),
@@ -170,12 +216,24 @@ pub enum ClaudeLaunchMode<'a> {
     OneShot { prompt: &'a str },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ClaudeCommandSpec {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub current_dir: Option<PathBuf>,
     pub environment: BTreeMap<String, String>,
+}
+
+impl fmt::Debug for ClaudeCommandSpec {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ClaudeCommandSpec")
+            .field("program", &self.program)
+            .field("args", &self.args)
+            .field("current_dir", &self.current_dir)
+            .field("environment", &self.environment.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 impl ClaudeProviderConfig {
@@ -316,6 +374,9 @@ impl ClaudeProviderConfig {
         }
         args.extend(self.extra_args.clone());
         let mut environment = self.environment.clone();
+        if let Some(endpoint) = &self.endpoint {
+            environment.extend(endpoint.launch_environment());
+        }
         if let Some(search_path) = &self.search_path {
             environment.insert("PATH".into(), search_path.to_string_lossy().into_owned());
         }
@@ -358,7 +419,7 @@ mod tests {
     use vertebrae_harness_core::RequestConfig;
 
     use super::{
-        ClaudeLaunchMode, ClaudeProviderConfig, DEFAULT_CLAUDE_MODELS,
+        ClaudeLaunchMode, ClaudeProviderConfig, ClaudeProviderEndpoint, DEFAULT_CLAUDE_MODELS,
         claude_model_supports_fast_mode,
     };
 
@@ -392,6 +453,55 @@ mod tests {
         ] {
             assert!(!claude_model_supports_fast_mode(model), "{model}");
         }
+    }
+
+    #[test]
+    fn custom_endpoint_exports_base_url_auth_token_and_environment() {
+        let directory = tempdir().expect("temporary directory");
+        let executable = directory.path().join("claude");
+        File::create(&executable).expect("placeholder executable");
+        let config = ClaudeProviderConfig {
+            executable: Some(executable),
+            environment: [("ANTHROPIC_API_KEY".to_string(), "ambient-key".to_string())].into(),
+            endpoint: Some(ClaudeProviderEndpoint {
+                base_url: Some("https://openrouter.ai/api".into()),
+                auth_token: Some("provider-secret".into()),
+                environment: [("API_TIMEOUT_MS".to_string(), "600000".to_string())].into(),
+            }),
+            ..Default::default()
+        };
+
+        let spec = config
+            .command_spec(
+                ClaudeLaunchMode::OneShot { prompt: "hi" },
+                &RequestConfig::default(),
+            )
+            .expect("command spec");
+
+        assert_eq!(
+            spec.environment
+                .get("ANTHROPIC_BASE_URL")
+                .map(String::as_str),
+            Some("https://openrouter.ai/api")
+        );
+        assert_eq!(
+            spec.environment
+                .get("ANTHROPIC_AUTH_TOKEN")
+                .map(String::as_str),
+            Some("provider-secret")
+        );
+        assert_eq!(
+            spec.environment
+                .get("ANTHROPIC_API_KEY")
+                .map(String::as_str),
+            Some("")
+        );
+        assert_eq!(
+            spec.environment.get("API_TIMEOUT_MS").map(String::as_str),
+            Some("600000")
+        );
+        assert!(!format!("{spec:?}").contains("provider-secret"));
+        assert!(!format!("{config:?}").contains("provider-secret"));
     }
 
     #[test]

@@ -404,6 +404,7 @@ export function ChatWindowManager({
       setDeleteError(null);
       return selectProviderThreadSession({
         harness: parent.harness,
+        providerId: parent.providerId ?? null,
         providerResumeId: agent.threadId,
         projectPath: parent.projectPath ?? null,
         label: agent.label,

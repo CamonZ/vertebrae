@@ -229,13 +229,26 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
 
-            let observability_config = match vertebrae_sacrum_client::load_config_file() {
-                Ok(config) => config.observability,
-                Err(error) => {
-                    log::warn!("Failed to load OpenTelemetry settings; collection is disabled: {error}");
-                    vertebrae_sacrum_client::ObservabilityConfig::default()
+            let (observability_config, provider_profiles) =
+                match vertebrae_sacrum_client::load_config_file() {
+                    Ok(config) => (config.observability, config.providers),
+                    Err(error) => {
+                        log::warn!("Failed to load config.toml; OpenTelemetry collection and custom providers are disabled: {error}");
+                        (
+                            vertebrae_sacrum_client::ObservabilityConfig::default(),
+                            Default::default(),
+                        )
+                    }
+                };
+            for (id, profile) in &provider_profiles {
+                match profile.validate(id) {
+                    Ok(()) => log::info!(
+                        "[STARTUP] Custom provider '{id}' configured for the {} harness",
+                        profile.harness
+                    ),
+                    Err(error) => log::warn!("[STARTUP] Ignoring invalid custom provider: {error}"),
                 }
-            };
+            }
             let telemetry_guard = tauri::async_runtime::block_on(async move {
                 telemetry::TelemetryGuard::initialize(observability_config)
             });
@@ -349,6 +362,7 @@ pub fn run() {
             let local_chat_manager =
                 LocalChatSessionManager::with_claude_startup_capabilities(
                     claude_startup_capabilities,
+                    provider_profiles,
                 );
             app.manage(local_chat_manager);
             log::info!("[STARTUP] Local chat session manager initialized");

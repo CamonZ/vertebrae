@@ -6,13 +6,13 @@
 //! resolution error when it attempts to use the missing binary.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-use vertebrae_core::Provider;
+use vertebrae_core::{ProviderId, ProviderProfile, StepHarness};
 use vertebrae_harness::HarnessFactoryConfig;
 use vertebrae_installer::ClaudePluginDirResolution;
 
@@ -29,7 +29,7 @@ pub struct HarnessCapability {
 
 #[derive(Clone)]
 pub struct DaemonCapabilities {
-    pub harnesses: HashMap<Provider, HarnessCapability>,
+    pub harnesses: HashMap<StepHarness, HarnessCapability>,
     pub provider_binaries: ProviderBinaries,
     pub shell_path: String,
     pub installed_skills_roots: Vec<PathBuf>,
@@ -38,6 +38,7 @@ pub struct DaemonCapabilities {
     pub typesafe_api_key: Option<String>,
     pub typesafe_base_url: Option<String>,
     pub typesafe_url: Option<String>,
+    pub provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
 }
 
 impl fmt::Debug for DaemonCapabilities {
@@ -65,6 +66,7 @@ impl fmt::Debug for DaemonCapabilities {
                 "typesafe_url",
                 &self.typesafe_url.as_ref().map(|_| "<redacted>"),
             )
+            .field("provider_profiles", &self.provider_profiles)
             .finish()
     }
 }
@@ -99,21 +101,21 @@ impl DaemonCapabilities {
 
         let harnesses = [
             (
-                Provider::Anthropic,
+                StepHarness::Claude,
                 HarnessCapability {
                     executable: provider_binaries.anthropic.clone(),
                     discovery_diagnostic: provider_diagnostics.anthropic.clone(),
                 },
             ),
             (
-                Provider::Openai,
+                StepHarness::Codex,
                 HarnessCapability {
                     executable: provider_binaries.openai.clone(),
                     discovery_diagnostic: provider_diagnostics.openai.clone(),
                 },
             ),
             (
-                Provider::Typesafe,
+                StepHarness::Typesafe,
                 HarnessCapability {
                     executable: None,
                     discovery_diagnostic: (!typesafe_api_key
@@ -152,21 +154,60 @@ impl DaemonCapabilities {
             typesafe_api_key,
             typesafe_base_url,
             typesafe_url,
+            provider_profiles: BTreeMap::new(),
         }
     }
 
-    pub(crate) fn configure_typesafe_harness(&self, config: &mut HarnessFactoryConfig) {
+    pub fn with_provider_profiles(
+        mut self,
+        provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
+    ) -> Self {
+        self.provider_profiles = provider_profiles;
+        self
+    }
+
+    /// Copy server-owned provider settings (the `[typesafe]` section and
+    /// custom provider profiles) into a harness factory configuration.
+    pub(crate) fn configure_provider_harnesses(&self, config: &mut HarnessFactoryConfig) {
         config.typesafe_api_key = self.typesafe_api_key.clone();
         config.typesafe_base_url = self.typesafe_base_url.clone();
         config.typesafe_url = self.typesafe_url.clone();
+        config.provider_profiles = self.provider_profiles.clone();
+    }
+
+    /// Whether a configured custom provider can currently run: its profile is
+    /// valid and its harness executable was resolved at startup.
+    pub fn custom_provider_available(&self, id: &ProviderId, profile: &ProviderProfile) -> bool {
+        profile.validate(id).is_ok()
+            && match profile.harness {
+                StepHarness::Claude | StepHarness::Codex => {
+                    self.provider_binaries.get(profile.harness).is_some()
+                }
+                StepHarness::Typesafe => true,
+            }
     }
 
     /// Log the cached compatibility result once during daemon startup.
     pub fn log_startup_diagnostics(&self) {
-        for (provider, capability) in &self.harnesses {
+        for (id, profile) in &self.provider_profiles {
+            match profile.validate(id) {
+                Ok(()) => tracing::info!(
+                    provider = %id,
+                    harness = %profile.harness,
+                    models = profile.models.len(),
+                    "Custom provider configured"
+                ),
+                Err(error) => tracing::warn!(
+                    provider = %id,
+                    error = %error,
+                    "Custom provider profile is invalid; steps selecting it will fail"
+                ),
+            }
+        }
+        for (harness, capability) in &self.harnesses {
             if let Some(diagnostic) = &capability.discovery_diagnostic {
                 tracing::warn!(
-                    provider = %provider,
+                    harness = %harness,
                     error = %diagnostic,
                     "Provider discovery diagnostic retained in startup capabilities"
                 );
@@ -244,20 +285,20 @@ mod tests {
         assert_eq!(
             capabilities
                 .harnesses
-                .get(&Provider::Anthropic)
+                .get(&StepHarness::Claude)
                 .and_then(|capability| capability.discovery_diagnostic.as_deref()),
             Some("Claude Code CLI not found")
         );
         assert!(
             capabilities
                 .harnesses
-                .get(&Provider::Openai)
+                .get(&StepHarness::Codex)
                 .is_some_and(|capability| capability.executable.is_none())
         );
         assert_eq!(
             capabilities
                 .harnesses
-                .get(&Provider::Typesafe)
+                .get(&StepHarness::Typesafe)
                 .and_then(|capability| capability.discovery_diagnostic.as_deref()),
             Some(
                 "TypeSafe provider API key is not configured; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY"
@@ -325,13 +366,14 @@ url = "{endpoint}"
             resolved.typesafe_api_key,
             None,
             resolved.typesafe_url,
-        );
+        )
+        .with_provider_profiles(resolved.provider_profiles);
         let mut factory_config = HarnessFactoryConfig::default();
-        capabilities.configure_typesafe_harness(&mut factory_config);
+        capabilities.configure_provider_harnesses(&mut factory_config);
         let instance = HarnessRuntimeFactory::new(factory_config)
             .create(HarnessRuntimeOptions {
                 agent_config: vertebrae_core::AgentConfig::new()
-                    .with_provider(Provider::Typesafe)
+                    .with_provider(ProviderId::typesafe())
                     .with_model("jev-custom"),
                 request_config: Default::default(),
             })
@@ -370,6 +412,105 @@ url = "{endpoint}"
         assert_eq!(body["state"], json!({"ticket": {"title": "Example"}}));
         assert_eq!(body["model"], "jev-custom");
         assert_eq!(body["questions"]["is_urgent"]["type"], "noul");
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn custom_typesafe_provider_uses_its_own_url_and_key_while_builtin_keeps_section() {
+        let server = MockServer::start().await;
+        let config: vertebrae_sacrum_client::VertebraeConfigFile = toml::from_str(&format!(
+            r#"
+[sacrum]
+token = "test-sacrum-token"
+
+[typesafe]
+api_key = "section-typesafe-key"
+url = "{uri}/section/system-one"
+
+[providers.staging]
+harness = "typesafe"
+url = "{uri}/staging/system-one"
+api_key_env = "VTB_TEST_UNSET_STAGING_TYPESAFE_KEY_91C2"
+api_key = "staging-typesafe-key"
+models = ["jev-staging"]
+"#,
+            uri = server.uri()
+        ))
+        .unwrap();
+        let resolved = crate::config::ResolvedConfig::from_config_file(&config).unwrap();
+        for (path, key, model) in [
+            ("/staging/system-one", "staging-typesafe-key", "jev-staging"),
+            ("/section/system-one", "section-typesafe-key", "jev-latest"),
+        ] {
+            Mock::given(matchers::method("POST"))
+                .and(matchers::path(path))
+                .and(matchers::header("authorization", format!("Bearer {key}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "model": model,
+                    "answers": {"is_urgent": {"type": "noul", "noul": 0.5}},
+                    "usage": {"input_tokens": 3, "output_tokens": 1}
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+
+        let capabilities = DaemonCapabilities::new(
+            "/usr/bin:/bin".to_string(),
+            ProviderBinaries::default(),
+            ProviderDiscoveryDiagnostics::default(),
+            Path::new("/tmp/project"),
+            resolved.typesafe_api_key,
+            None,
+            resolved.typesafe_url,
+        )
+        .with_provider_profiles(resolved.provider_profiles);
+        let debug = format!("{capabilities:?}");
+        assert!(!debug.contains("staging-typesafe-key"), "{debug}");
+        assert!(!debug.contains("/staging/system-one"), "{debug}");
+        let mut factory_config = HarnessFactoryConfig::default();
+        capabilities.configure_provider_harnesses(&mut factory_config);
+        let factory = HarnessRuntimeFactory::new(factory_config);
+
+        for provider in [ProviderId::new("staging").unwrap(), ProviderId::typesafe()] {
+            let instance = factory
+                .create_for_harness(
+                    Some(StepHarness::Typesafe),
+                    HarnessRuntimeOptions {
+                        agent_config: vertebrae_core::AgentConfig::new()
+                            .with_provider(provider.clone()),
+                        request_config: Default::default(),
+                    },
+                )
+                .unwrap_or_else(|error| panic!("{provider} should construct: {error}"));
+            let run = instance
+                .runtime
+                .run_structured_inference(
+                    StructuredInferenceRequest {
+                        run_id: RunId::from(format!("run-{provider}")),
+                        stream_id: StreamId::from(format!("stream-{provider}")),
+                        state: json!({"ticket": {"title": "Example"}}),
+                        model: instance.request_config.model.clone(),
+                        questions: std::collections::BTreeMap::from([(
+                            "is_urgent".into(),
+                            json!({"type": "noul", "instructions": "Urgent?"}),
+                        )]),
+                    },
+                    Arc::new(DiscardEvents),
+                )
+                .await
+                .expect("structured inference should be accepted");
+            let outcome =
+                tokio::time::timeout(std::time::Duration::from_secs(2), run.await_outcome())
+                    .await
+                    .expect("stub response should complete promptly")
+                    .expect("TypeSafe run should complete");
+            assert_eq!(
+                outcome.status,
+                CompletionStatus::Completed,
+                "{provider}: {outcome:?}"
+            );
+        }
         server.verify().await;
     }
 }

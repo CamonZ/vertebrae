@@ -12,7 +12,8 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use vertebrae_harness_codex::{
-    CodexAppServerLauncher, CodexProviderConfig, CodexRuntime, LaunchedCodexAppServer,
+    CodexAppServerLauncher, CodexCustomModelProvider, CodexProviderConfig, CodexRuntime,
+    LaunchedCodexAppServer,
 };
 use vertebrae_harness_core::{
     CompletionStatus, ControlResolution, ControlSink, EventSink, HarnessError,
@@ -545,6 +546,64 @@ async fn persistent_session_satisfies_shared_lifecycle_ordering() {
         .await
         .unwrap()
         .unwrap();
+}
+
+#[tokio::test]
+async fn custom_model_provider_is_selected_on_thread_start() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (thread_start_tx, thread_start_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        let mut thread_start_tx = Some(thread_start_tx);
+        while let Some(frame) = socket.next().await {
+            let Ok(Message::Text(text)) = frame else {
+                break;
+            };
+            let request: Value = serde_json::from_str(&text).unwrap();
+            let (Some(method), Some(id)) = (
+                request.get("method").and_then(Value::as_str),
+                request.get("id"),
+            ) else {
+                continue;
+            };
+            let result = match method {
+                "initialize" => json!({"capabilities": {}}),
+                "thread/start" => {
+                    if let Some(sender) = thread_start_tx.take() {
+                        let _ = sender.send(request["params"].clone());
+                    }
+                    json!({"thread": {"id": "root-thread"}})
+                }
+                _ => json!({}),
+            };
+            socket
+                .send(Message::Text(
+                    json!({"id": id, "result": result}).to_string(),
+                ))
+                .await
+                .unwrap();
+        }
+    });
+    let runtime = CodexRuntime::new(CodexProviderConfig {
+        launcher: Some(Arc::new(TestLauncher {
+            url: format!("ws://{address}"),
+        })),
+        model_provider: Some("ignored-upstream".into()),
+        custom_model_provider: Some(CodexCustomModelProvider {
+            id: "openrouter".into(),
+            base_url: Some("https://openrouter.ai/api/v1".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let session = start_test_session(&runtime, Arc::new(CapturingSink::default())).await;
+    let params = thread_start_rx.await.unwrap();
+    assert_eq!(params["modelProvider"], "openrouter");
+    let _ = session.close().await;
+    server.abort();
 }
 
 #[tokio::test]

@@ -3,7 +3,8 @@ import { useLocalChat } from "./useLocalChat";
 import { commands } from "../bindings";
 import type {
   LocalChatHarnessCatalog,
-  LocalChatHarnessKind,
+  LocalChatHarnessInfo,
+  LocalChatProviderInfo,
   PermissionMode,
 } from "../bindings";
 import {
@@ -21,7 +22,10 @@ import {
   hasStaleModelDefault,
   hasStaleReasoningEffort,
   hasStaleSpeedTier,
+  providerHarnessInfo,
+  resolveDefaultProvider,
   resolvePersonalityDefault,
+  sessionProviderId,
   resolvePermissionDefault,
   speedTiersForModel,
   useLocalChatDefaultsStore,
@@ -91,32 +95,40 @@ export function useChatSession(sessionId: string) {
     };
   }, []);
 
-  // --- Derived harness state ---
+  // --- Derived provider/harness state ---
+  // The picker selects a provider; its harness is derived from it. Built-in
+  // providers (Anthropic, OpenAI) use their harness's model catalog, custom
+  // providers list exactly their configured models.
   const selectedHarness = session?.harness ?? DEFAULT_LOCAL_CHAT_HARNESS;
-  const savedHarnessDefaults = localChatDefaults[selectedHarness];
+  const selectedProviderId = sessionProviderId({
+    harness: selectedHarness,
+    providerId: session?.providerId,
+  });
+  const savedHarnessDefaults = localChatDefaults[selectedProviderId];
   const lockedHarness = session ? isSessionHarnessLocked(session) : false;
-  const selectedHarnessInfo = useMemo(
-    () =>
-      harnessCatalog?.harnesses.find(
-        (item) => item.harness === selectedHarness
-      ) ?? null,
-    [harnessCatalog, selectedHarness]
-  );
-  const availableHarnesses = useMemo(
-    () => harnessCatalog?.harnesses.filter((info) => info.available) ?? [],
-    [harnessCatalog]
-  );
-  const fallbackHarness = useMemo(() => {
+  const selectedHarnessInfo = useMemo((): LocalChatHarnessInfo | null => {
     if (!harnessCatalog) return null;
-    return (
-      harnessCatalog.harnesses.find(
-        (item) =>
-          item.harness === harnessCatalog.default_harness && item.available
-      ) ??
-      availableHarnesses[0] ??
-      null
+    const provider = harnessCatalog.providers.find(
+      (item) => item.id === selectedProviderId
     );
-  }, [availableHarnesses, harnessCatalog]);
+    if (provider) return providerHarnessInfo(harnessCatalog, provider);
+    const harnessInfo =
+      harnessCatalog.harnesses.find((item) => item.harness === selectedHarness) ??
+      null;
+    // A custom provider removed from config.toml cannot start or resume.
+    return harnessInfo && session?.providerId
+      ? {
+          ...harnessInfo,
+          label: session.providerId,
+          available: false,
+          unavailable_reason: `Provider '${session.providerId}' is not configured.`,
+        }
+      : harnessInfo;
+  }, [harnessCatalog, selectedHarness, selectedProviderId, session?.providerId]);
+  const fallbackProvider = useMemo((): LocalChatProviderInfo | null => {
+    if (!harnessCatalog) return null;
+    return resolveDefaultProvider(harnessCatalog);
+  }, [harnessCatalog]);
   const visibleHarness = useMemo(() => {
     if (!harnessCatalog) return null;
     if (lockedHarness || selectedHarnessInfo?.available) {
@@ -124,14 +136,16 @@ export function useChatSession(sessionId: string) {
     }
 
     return (
-      fallbackHarness ??
+      (fallbackProvider
+        ? providerHarnessInfo(harnessCatalog, fallbackProvider)
+        : null) ??
       selectedHarnessInfo ??
       harnessCatalog.harnesses.find(
         (item) => item.harness === harnessCatalog.default_harness
       ) ??
       null
     );
-  }, [fallbackHarness, harnessCatalog, lockedHarness, selectedHarnessInfo]);
+  }, [fallbackProvider, harnessCatalog, lockedHarness, selectedHarnessInfo]);
 
   // A saved/default provider is only a preference until a session is started.
   // Keep locked sessions on their original provider so an unavailable harness
@@ -140,18 +154,22 @@ export function useChatSession(sessionId: string) {
     if (!session || !harnessCatalog || lockedHarness) return;
     if (
       selectedHarnessInfo?.available ||
-      !fallbackHarness ||
-      fallbackHarness.harness === selectedHarness
+      !fallbackProvider ||
+      fallbackProvider.id === selectedProviderId
     ) {
       return;
     }
-    setSessionHarness(sessionId, fallbackHarness.harness);
+    setSessionHarness(
+      sessionId,
+      fallbackProvider.harness,
+      fallbackProvider.custom ? fallbackProvider.id : null
+    );
   }, [
-    fallbackHarness,
+    fallbackProvider,
     harnessCatalog,
     lockedHarness,
-    selectedHarness,
     selectedHarnessInfo,
+    selectedProviderId,
     session,
     sessionId,
     setSessionHarness,
@@ -159,9 +177,12 @@ export function useChatSession(sessionId: string) {
 
   const providerOptions = useMemo(() => {
     if (!harnessCatalog) return [];
-    return harnessCatalog.harnesses
-      .filter((info) => info.available)
-      .map((info) => ({ info }));
+    return harnessCatalog.providers
+      .filter((provider) => provider.available)
+      .flatMap((provider) => {
+        const info = providerHarnessInfo(harnessCatalog, provider);
+        return info ? [{ provider, info }] : [];
+      });
   }, [harnessCatalog]);
 
   const supportedModelIds = useMemo(
@@ -221,7 +242,7 @@ export function useChatSession(sessionId: string) {
   const hasSession = !!session;
   const hasConversation = !!session?.providerResumeId;
   const messageCount = session?.messages.length ?? 0;
-  const hasAvailableHarness = !harnessCatalog || fallbackHarness !== null;
+  const hasAvailableHarness = !harnessCatalog || fallbackProvider !== null;
 
   // --- Persistence / sync effects ---
   useEffect(() => {
@@ -512,9 +533,17 @@ export function useChatSession(sessionId: string) {
   );
   const handleHarnessChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
-      setSessionHarness(sessionId, event.target.value as LocalChatHarnessKind);
+      const provider = harnessCatalog?.providers.find(
+        (item) => item.id === event.target.value
+      );
+      if (!provider) return;
+      setSessionHarness(
+        sessionId,
+        provider.harness,
+        provider.custom ? provider.id : null
+      );
     },
-    [sessionId, setSessionHarness]
+    [harnessCatalog, sessionId, setSessionHarness]
   );
   const handlePermissionModeChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -586,6 +615,7 @@ export function useChatSession(sessionId: string) {
 
     // harness catalog
     harnessCatalog,
+    selectedProviderId,
     visibleHarness,
     providerOptions,
     hasAvailableHarness,

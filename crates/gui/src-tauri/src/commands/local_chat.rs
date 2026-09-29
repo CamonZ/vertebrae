@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
-use vertebrae_core::Provider;
+use vertebrae_core::StepHarness;
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory};
 use vertebrae_harness_core::{
     HarnessEventPayloadV1, ProviderResumeId, StreamId, TranscriptReplayPageRequest,
@@ -142,6 +142,11 @@ pub struct LocalChatSessionIndexEntry {
     pub title_confidence: Option<f64>,
     pub title_user_message_count: u32,
     pub harness: LocalChatHarnessKind,
+    /// Provider the session was started with; absent means the harness's
+    /// built-in provider.
+    #[serde(default)]
+    #[specta(optional)]
+    pub provider_id: Option<String>,
     pub model: Option<String>,
     pub selected_model_id: Option<String>,
     pub selected_reasoning_effort: Option<String>,
@@ -273,6 +278,7 @@ pub async fn close_local_chat_session(
 #[tauri::command]
 #[specta::specta]
 pub async fn infer_local_chat_session_title(
+    local_chat_manager: State<'_, LocalChatSessionManager>,
     input: InferLocalChatSessionTitleInput,
 ) -> Result<InferLocalChatSessionTitleOutput, CommandError> {
     let harness = input.harness;
@@ -285,7 +291,18 @@ pub async fn infer_local_chat_session_title(
         working_dir
     );
 
-    match infer_session_title(input).await {
+    let custom_provider = match custom_title_provider(
+        local_chat_manager.provider_profiles(),
+        input.provider_id.as_deref(),
+    ) {
+        Ok(custom_provider) => custom_provider,
+        Err(message) => {
+            log::warn!("infer_local_chat_session_title failed: {message}");
+            return Err(CommandError { message });
+        }
+    };
+
+    match infer_session_title(input, custom_provider).await {
         Ok(output) => {
             log::info!(
                 "infer_local_chat_session_title succeeded: harness={:?}, title_present={}, confidence={:.2}, sufficient_signal={}",
@@ -364,6 +381,32 @@ pub async fn save_local_chat_session_index(
     Ok(())
 }
 
+/// Launch settings for title inference on a custom provider; `None` for
+/// built-in providers.
+fn custom_title_provider(
+    profiles: &std::collections::BTreeMap<
+        vertebrae_core::ProviderId,
+        vertebrae_core::ProviderProfile,
+    >,
+    provider_id: Option<&str>,
+) -> Result<Option<vertebrae_harness::CustomProviderProcessLaunch>, String> {
+    let Some(provider_id) = provider_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return Ok(None);
+    };
+    let id = vertebrae_core::ProviderId::new(provider_id)?;
+    if id.is_builtin() {
+        return Ok(None);
+    }
+    HarnessRuntimeFactory::new(HarnessFactoryConfig {
+        environment: crate::shell_environment::user_shell_environment().variables,
+        provider_profiles: profiles.clone(),
+        ..HarnessFactoryConfig::default()
+    })
+    .custom_provider_process_launch(&id)
+    .map(Some)
+    .map_err(|error| error.to_string())
+}
+
 /// Discover and replay a persisted provider transcript through the
 /// provider-owned harness adapter. The GUI receives only normalized V1 event
 /// JSON and never needs to know the Claude or Codex file layout.
@@ -383,9 +426,9 @@ pub async fn load_local_chat_session_replay(
             has_more: false,
         });
     };
-    let provider = match input.harness {
-        LocalChatHarnessKind::Claude => Provider::Anthropic,
-        LocalChatHarnessKind::Codex => Provider::Openai,
+    let harness = match input.harness {
+        LocalChatHarnessKind::Claude => StepHarness::Claude,
+        LocalChatHarnessKind::Codex => StepHarness::Codex,
     };
     let claude_local_chat = input.harness == LocalChatHarnessKind::Claude;
     let session_id = input.session_id.clone();
@@ -401,7 +444,7 @@ pub async fn load_local_chat_session_replay(
     };
     let replay = tauri::async_runtime::spawn_blocking(move || {
         HarnessRuntimeFactory::new(HarnessFactoryConfig::default()).replay_transcript_page(
-            provider,
+            harness,
             &request,
             &page_request,
         )

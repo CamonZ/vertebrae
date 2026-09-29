@@ -1197,7 +1197,12 @@ workflowTransitionChangedEvent: "workflow-transition-changed-event"
 /**
  * Agent configuration for workflow steps - mirrors db::AgentConfig
  */
-export type AgentConfig = { provider?: AgentProvider | null;
+export type AgentConfig = {
+/**
+ * Provider ID: built-in (`anthropic`, `openai`, `typesafe`) or a custom
+ * `[providers.<id>]` entry from the executing machine's config.toml.
+ */
+provider?: string | null;
 /**
  * Model for the current session
  */
@@ -1270,7 +1275,6 @@ plugin_dirs?: string[];
  * JSON Schema for structured output validation (serialized as JSON string)
  */
 json_schema: string | null }
-export type AgentProvider = "anthropic" | "openai" | "typesafe"
 /**
  * A file projection returned from the project artifact list or Task.artifacts.
  */
@@ -1346,7 +1350,13 @@ symlink_path: string;
  * avoid pestering users who already have `vtb` from `cargo install`.
  */
 on_path: boolean }
-export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backend_session_id: string; working_dir: string | null; initial_prompt: string | null; provider_resume_id: string | null; model_id: string | null; reasoning_effort: string | null; speed_tier?: string | null; permission_mode: PermissionMode | null; personality: string | null }
+export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backend_session_id: string; working_dir: string | null; initial_prompt: string | null; provider_resume_id: string | null; model_id: string | null; reasoning_effort: string | null; speed_tier?: string | null; permission_mode: PermissionMode | null; personality: string | null;
+/**
+ * Provider ID selected in the picker. Absent or built-in IDs use the
+ * harness's built-in provider; custom IDs must be configured in
+ * config.toml for `harness`.
+ */
+provider_id?: string | null }
 /**
  * Options for creating a workflow step.
  */
@@ -1394,7 +1404,12 @@ export type DaemonNameUpdate = { kind: "unchanged" } | { kind: "clear" } | { kin
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
 export type GuiUpdateChannelStatus = { channel: string; endpoint: string; available: boolean; release: GuiUpdateChannelRelease | null; error: string | null }
-export type InferLocalChatSessionTitleInput = { harness: LocalChatHarnessKind; initial_prompts: string[]; working_dir: string | null }
+export type InferLocalChatSessionTitleInput = { harness: LocalChatHarnessKind; initial_prompts: string[]; working_dir: string | null;
+/**
+ * Provider the chat runs on. Custom providers infer titles through
+ * their own endpoint and default model.
+ */
+provider_id?: string | null }
 export type InferLocalChatSessionTitleOutput = { title: string | null; confidence: number; sufficient_signal: boolean }
 /**
  * Result returned after GUI-native project initialization.
@@ -1477,17 +1492,32 @@ export type LocalBackendUpdateStatus = { management: string; configured: boolean
 export type LocalChatCompactionEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; state: string; trigger?: string | null; pre_tokens?: number | null }
 export type LocalChatFileChange = { path: string; kind: string; diff: string | null }
 export type LocalChatFileChangeEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; status: string; changes: LocalChatFileChange[]; parent_tool_use_id: string | null }
-export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[] }
+export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[]; default_provider: string; providers: LocalChatProviderInfo[] }
 export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; default_reasoning_effort: string | null; reasoning_efforts: LocalChatReasoningEffortOption[]; speed_tiers?: LocalChatSpeedTierOption[]; permission_modes?: LocalChatPermissionModeOption[] | null; personality_options?: LocalChatPersonalityOption[] | null; supports_resume: boolean }
 export type LocalChatHarnessKind = "claude" | "codex"
 export type LocalChatModelOption = { id: string; label: string; supported_reasoning_effort_ids?: string[] | null; supported_speed_tier_ids?: string[] | null; supports_personality?: boolean | null }
 export type LocalChatPermissionModeOption = { id: PermissionMode; label: string; is_default?: boolean }
 export type LocalChatPersonalityOption = { id: string; label: string; is_default?: boolean }
+/**
+ * A provider choice in the local chat picker. Built-in providers reuse their
+ * harness's model catalog; custom providers list exactly their configured
+ * models.
+ */
+export type LocalChatProviderInfo = { id: string; label: string; harness: LocalChatHarnessKind; custom: boolean; available: boolean; unavailable_reason: string | null;
+/**
+ * `None` means "use the harness's model catalog".
+ */
+models: LocalChatModelOption[] | null; default_model_id: string | null }
 export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id: string; thread_id?: string | null; is_root: boolean; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number; item_id?: string | null; completion_status?: string | null }
 export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }
 export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; error: string; item_id?: string | null }
-export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; selectedPersonality: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; threadTotalTokens: number | null; messageCount: number; lifecycle: string; status: string }
+export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind;
+/**
+ * Provider the session was started with; absent means the harness's
+ * built-in provider.
+ */
+providerId?: string | null; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; selectedPersonality: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; threadTotalTokens: number | null; messageCount: number; lifecycle: string; status: string }
 export type LocalChatSessionInitEvent = { backend_session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; model: string; tools: string[]; speed_tier_status?: LocalChatSpeedTierStatus | null }
 export type LocalChatSessionTitleEvent = { backend_session_id: string; harness: LocalChatHarnessKind; title: string }
 export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; model: string; context_tokens: number; context_window: number;

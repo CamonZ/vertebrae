@@ -85,7 +85,13 @@ contract changes.
 ### Local Chat Harnesses (`src-tauri/src/local_chat/`)
 
 Local chat owns session lifecycle and UI options; it owns no provider wire
-protocol. Both providers are built through the shared `HarnessRuntimeFactory`
+protocol. The composer picker is provider → model: the built-in Anthropic and
+OpenAI choices run on the `claude` and `codex` harnesses, and each
+`[providers.<id>]` entry on those harnesses (loaded from config.toml at
+startup) is an extra choice whose model list is exactly its configured
+`models`. `LocalChatHarnessCatalog.providers` carries these choices, the
+session stores `providerId`, `create_local_chat_session` and title inference
+receive `provider_id`, and saved chat defaults are keyed by provider. Both providers are built through the shared `HarnessRuntimeFactory`
 from `vertebrae-harness` (see
 [Architecture — Harness Crates](architecture.md#harness-crates)), so
 `src-tauri` depends on `vertebrae-harness` and `vertebrae-harness-core` and

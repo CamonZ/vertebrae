@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use tauri::Manager;
 use tokio::sync::RwLock;
 use tracing::Instrument;
-use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
+use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, ProviderId};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
     interrupt_close_and_await, CompletionStatus, EventSink, HarnessError, HarnessEventPayloadV1,
@@ -28,7 +28,9 @@ use crate::helpers::{
     find_vtb_gate_binary_with_shell_environment,
 };
 use crate::local_chat::harnesses::claude::args::builtin_claude_output_styles;
-use crate::local_chat::harnesses::claude::args::resolve_requested_claude_model;
+use crate::local_chat::harnesses::claude::args::{
+    resolve_requested_claude_model, ResolvedClaudeModel,
+};
 use crate::local_chat::{
     chat_developer_instructions, HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink,
     LocalChatHarnessKind, LocalChatPersonalityOption, LocalChatRuntime, LocalChatSessionError,
@@ -798,7 +800,12 @@ impl ClaudeSessionRuntime {
             ),
         );
         let agent_config = AgentConfig {
-            provider: Some(Provider::Anthropic),
+            provider: Some(
+                input
+                    .provider
+                    .as_ref()
+                    .map_or_else(ProviderId::anthropic, |provider| provider.id.clone()),
+            ),
             model: model.clone(),
             permission_mode: input.permission_mode.as_ref().map(core_permission_mode),
             ..AgentConfig::default()
@@ -1105,10 +1112,21 @@ impl PreparedSession {
             .start_socket(&input.backend_session_id, app_handle)
             .map_err(LocalChatSessionError::StartFailed)?;
 
-        let resolved_model = resolve_requested_claude_model(
-            input.model_id.clone(),
-            input.provider_resume_id.is_some(),
-        );
+        // Custom providers accept exactly their configured models; the
+        // built-in Claude catalog applies only to the Anthropic provider.
+        let resolved_model = match &input.provider {
+            Some(provider) => {
+                let (model_id, warning) = provider.resolve_model(input.model_id.as_deref());
+                ResolvedClaudeModel {
+                    model_id: Some(model_id),
+                    warning,
+                }
+            }
+            None => resolve_requested_claude_model(
+                input.model_id.clone(),
+                input.provider_resume_id.is_some(),
+            ),
+        };
         let output_styles =
             discover_claude_output_styles(&working_dir, plugin_resolution.plugin_root.as_deref());
         let (style, style_warning) = resolve_requested_claude_output_style(
@@ -1117,7 +1135,7 @@ impl PreparedSession {
             input.provider_resume_id.is_some(),
         );
         let root_locator_dir = claude_project_directory(&working_dir);
-        let factory_config = build_factory_config(
+        let mut factory_config = build_factory_config(
             claude_binary,
             &augmented_path,
             &plugin_resolution,
@@ -1130,6 +1148,11 @@ impl PreparedSession {
             #[cfg(not(unix))]
             None,
         );
+        if let Some(provider) = &input.provider {
+            factory_config
+                .provider_profiles
+                .insert(provider.id.clone(), provider.profile.clone());
+        }
 
         Ok(Self {
             working_dir,

@@ -24,6 +24,9 @@ pub use config::{
     daemon_config_path, load_daemon_identity, retire_daemon_identity, save_daemon_identity,
 };
 pub use enrollment::{DaemonEnrollmentClient, EnrollmentError, EnrollmentResult};
-pub use provider::{ProviderResolutionError, resolve_provider, resolve_provider_from_agent_config};
+pub use provider::{
+    ProviderResolutionError, reported_provider_and_harness, resolve_provider,
+    resolve_provider_from_agent_config,
+};
 pub use session_log_event_sink::SessionLogEventSink;
 pub use telemetry::{CapabilityReport, DaemonReport, HEARTBEAT_INTERVAL, REPORT_VERSION};

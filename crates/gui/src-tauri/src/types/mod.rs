@@ -449,14 +449,6 @@ pub enum PermissionMode {
     Plan,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentProvider {
-    Anthropic,
-    Openai,
-    Typesafe,
-}
-
 impl PermissionMode {
     pub fn as_claude_arg(&self) -> &'static str {
         match self {
@@ -499,8 +491,10 @@ impl From<PermissionMode> for vertebrae_core::PermissionMode {
 /// Agent configuration for workflow steps - mirrors db::AgentConfig
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct AgentConfig {
+    /// Provider ID: built-in (`anthropic`, `openai`, `typesafe`) or a custom
+    /// `[providers.<id>]` entry from the executing machine's config.toml.
     #[serde(default)]
-    pub provider: Option<AgentProvider>,
+    pub provider: Option<String>,
     /// Model for the current session
     pub model: Option<String>,
     /// Codex upstream model provider configured in ~/.codex/config.toml
@@ -547,11 +541,7 @@ pub struct AgentConfig {
 impl From<vertebrae_core::AgentConfig> for AgentConfig {
     fn from(config: vertebrae_core::AgentConfig) -> Self {
         AgentConfig {
-            provider: config.provider.map(|provider| match provider {
-                vertebrae_core::Provider::Anthropic => AgentProvider::Anthropic,
-                vertebrae_core::Provider::Openai => AgentProvider::Openai,
-                vertebrae_core::Provider::Typesafe => AgentProvider::Typesafe,
-            }),
+            provider: config.provider.map(String::from),
             model: config.model,
             codex_model_provider: config.codex_model_provider,
             fallback_model: config.fallback_model,
@@ -577,10 +567,10 @@ impl From<vertebrae_core::AgentConfig> for AgentConfig {
 impl From<AgentConfig> for vertebrae_core::AgentConfig {
     fn from(config: AgentConfig) -> Self {
         vertebrae_core::AgentConfig {
-            provider: config.provider.map(|provider| match provider {
-                AgentProvider::Anthropic => vertebrae_core::Provider::Anthropic,
-                AgentProvider::Openai => vertebrae_core::Provider::Openai,
-                AgentProvider::Typesafe => vertebrae_core::Provider::Typesafe,
+            provider: config.provider.and_then(|provider| {
+                vertebrae_core::ProviderId::parse(&provider)
+                    .inspect_err(|error| log::warn!("Dropping agent_config.provider: {error}"))
+                    .ok()
             }),
             model: config.model,
             codex_model_provider: config.codex_model_provider,
@@ -2584,14 +2574,14 @@ mod tests {
     #[test]
     fn agent_config_round_trips_provider_and_json_fields() {
         let gui = AgentConfig {
-            provider: Some(AgentProvider::Openai),
+            provider: Some("openai".into()),
             model: Some("gpt-5.5".to_string()),
             agents: Some(r#"{"reviewer":"strict"}"#.to_string()),
             json_schema: Some(r#"{"type":"object"}"#.to_string()),
             ..Default::default()
         };
         let core: vertebrae_core::AgentConfig = gui.clone().into();
-        assert_eq!(core.provider, Some(vertebrae_core::Provider::Openai));
+        assert_eq!(core.provider, Some(vertebrae_core::ProviderId::openai()));
         assert_eq!(core.agents, Some(serde_json::json!({"reviewer": "strict"})));
         assert_eq!(
             core.json_schema,

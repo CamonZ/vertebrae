@@ -6,6 +6,7 @@
 //! - `[sacrum].token` in config file for API token
 //! - `[sacrum].url` in config file for base URL (default: https://vertebrae.dev)
 //! - `[projects.<name>]` entries matched by CWD longest-prefix (CLI) or by name (GUI)
+//! - `[providers.<id>]` custom provider profiles used by steps and local chat
 
 use crate::error::{SacrumClientError, SacrumClientResult};
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use vertebrae_core::{ProviderId, ProviderProfile};
 
 /// Configuration for Sacrum client
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +39,11 @@ pub struct VertebraeConfigFile {
     /// Optional server-owned provider configuration.
     #[serde(default, skip_serializing_if = "TypeSafeSection::is_default")]
     pub typesafe: TypeSafeSection,
+    /// Per-machine custom providers keyed by provider ID. Built-in providers
+    /// (anthropic, openai, typesafe) need no entry. Profile Debug output
+    /// redacts credentials.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub providers: BTreeMap<ProviderId, ProviderProfile>,
     #[serde(default, skip_serializing_if = "ObservabilityConfig::is_default")]
     pub observability: ObservabilityConfig,
 }
@@ -636,6 +643,7 @@ mod tests {
             ]),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         };
 
@@ -665,6 +673,7 @@ mod tests {
             )]),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         };
 
@@ -692,6 +701,7 @@ mod tests {
             )]),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         };
 
@@ -760,6 +770,71 @@ url = "https://url-user:url-secret@example.test/v1/systemone"
     }
 
     #[test]
+    fn config_file_loads_custom_providers_and_redacts_debug_output() {
+        let config: VertebraeConfigFile = toml::from_str(
+            r#"
+[providers.OpenRouter]
+harness = "claude"
+base_url = "https://openrouter.ai/api"
+api_key_env = "OPENROUTER_API_KEY"
+api_key = "literal-provider-secret"
+models = ["anthropic/claude-sonnet-4.5", "moonshotai/kimi-k2"]
+default_model = "moonshotai/kimi-k2"
+
+[providers.OpenRouter.env]
+EXTRA_TOKEN = "env-provider-secret"
+
+[providers.local]
+harness = "codex"
+base_url = "http://localhost:8080/v1"
+wire_api = "chat"
+models = ["qwen3-coder"]
+"#,
+        )
+        .unwrap();
+
+        let openrouter = ProviderId::new("openrouter").unwrap();
+        let profile = &config.providers[&openrouter];
+        assert_eq!(profile.harness, vertebrae_core::StepHarness::Claude);
+        assert_eq!(profile.api_key_env.as_deref(), Some("OPENROUTER_API_KEY"));
+        assert_eq!(profile.default_model.as_deref(), Some("moonshotai/kimi-k2"));
+        assert_eq!(profile.env["EXTRA_TOKEN"], "env-provider-secret");
+        let local = &config.providers[&ProviderId::new("local").unwrap()];
+        assert_eq!(local.wire_api, Some(vertebrae_core::ProviderWireApi::Chat));
+
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("literal-provider-secret"), "{debug}");
+        assert!(!debug.contains("env-provider-secret"), "{debug}");
+
+        let round_tripped: VertebraeConfigFile =
+            toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(round_tripped.providers, config.providers);
+    }
+
+    #[test]
+    fn config_file_rejects_custom_provider_without_harness() {
+        let error = toml::from_str::<VertebraeConfigFile>(
+            r#"
+[providers.openrouter]
+base_url = "https://openrouter.ai/api"
+models = ["kimi-k2"]
+"#,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("harness"), "{error}");
+
+        let error = toml::from_str::<VertebraeConfigFile>(
+            r#"
+[providers."bad id"]
+harness = "codex"
+models = ["kimi-k2"]
+"#,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("Invalid provider ID"), "{error}");
+    }
+
+    #[test]
     fn test_vertebrae_config_file_roundtrip() {
         let config = VertebraeConfigFile {
             sacrum: GlobalSacrumSection {
@@ -775,6 +850,7 @@ url = "https://url-user:url-secret@example.test/v1/systemone"
             )]),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         };
 
@@ -874,6 +950,7 @@ path = "/Users/test/other"
             )]),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         }
     }
@@ -963,6 +1040,7 @@ path = "/Users/test/other"
             projects: BTreeMap::new(),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
@@ -989,6 +1067,7 @@ path = "/Users/test/other"
             projects: BTreeMap::new(),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
@@ -1279,6 +1358,7 @@ path = "/Users/test/other"
             )]),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         };
 
@@ -1309,6 +1389,7 @@ path = "/Users/test/other"
             )]),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         }
     }
@@ -1372,6 +1453,7 @@ path = "/Users/test/other"
             projects: BTreeMap::new(),
 
             typesafe: Default::default(),
+            providers: Default::default(),
             observability: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config);

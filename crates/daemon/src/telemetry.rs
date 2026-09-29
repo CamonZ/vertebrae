@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
-use vertebrae_core::Provider;
+use vertebrae_core::StepHarness;
 
 use crate::capabilities::DaemonCapabilities;
 
@@ -85,17 +85,25 @@ fn capability_report(capabilities: &DaemonCapabilities) -> CapabilityReport {
     let mut providers = BTreeMap::new();
     let mut harnesses = BTreeMap::new();
 
-    for (provider, provider_name, harness_name) in [
-        (Provider::Anthropic, "anthropic", "claude_code"),
-        (Provider::Openai, "openai", "codex"),
+    for (harness, provider_name, harness_name) in [
+        (StepHarness::Claude, "anthropic", "claude_code"),
+        (StepHarness::Codex, "openai", "codex"),
     ] {
-        if let Some(capability) = capabilities.harnesses.get(&provider) {
+        if let Some(capability) = capabilities.harnesses.get(&harness) {
             providers.insert(provider_name.to_owned(), capability.executable.is_some());
             harnesses.insert(harness_name.to_owned(), capability.executable.is_some());
-        } else if capabilities.provider_binaries.get(provider).is_some() {
+        } else if capabilities.provider_binaries.get(harness).is_some() {
             providers.insert(provider_name.to_owned(), true);
             harnesses.insert(harness_name.to_owned(), true);
         }
+    }
+    // Custom providers are advertised by ID only; endpoints and credentials
+    // never leave the daemon.
+    for (id, profile) in &capabilities.provider_profiles {
+        providers.insert(
+            id.to_string(),
+            capabilities.custom_provider_available(id, profile),
+        );
     }
 
     CapabilityReport {
@@ -136,14 +144,14 @@ mod tests {
         DaemonCapabilities {
             harnesses: HashMap::from([
                 (
-                    Provider::Anthropic,
+                    StepHarness::Claude,
                     HarnessCapability {
                         executable: anthropic.map(PathBuf::from),
                         discovery_diagnostic: None,
                     },
                 ),
                 (
-                    Provider::Openai,
+                    StepHarness::Codex,
                     HarnessCapability {
                         executable: openai.map(PathBuf::from),
                         discovery_diagnostic: None,
@@ -164,6 +172,7 @@ mod tests {
             typesafe_api_key: None,
             typesafe_base_url: None,
             typesafe_url: None,
+            provider_profiles: Default::default(),
         }
     }
 
@@ -185,6 +194,33 @@ mod tests {
         assert_eq!(payload["capabilities"]["harnesses"]["codex"], false);
         assert!(!payload.to_string().contains("/usr/local/bin"));
         assert!(!payload.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn report_advertises_custom_provider_ids_without_secrets() {
+        let mut caps = capabilities(Some("/usr/local/bin/claude"), None);
+        for (id, harness) in [
+            ("openrouter", StepHarness::Claude),
+            ("local", StepHarness::Codex),
+        ] {
+            caps.provider_profiles.insert(
+                vertebrae_core::ProviderId::new(id).unwrap(),
+                vertebrae_core::ProviderProfile {
+                    base_url: Some("https://secret-endpoint.example".into()),
+                    api_key: Some("provider-secret".into()),
+                    models: vec!["model-a".into()],
+                    ..vertebrae_core::ProviderProfile::new(harness)
+                },
+            );
+        }
+
+        let payload = DaemonReport::from_capabilities("daemon", &caps, Utc::now())
+            .payload()
+            .unwrap();
+        assert_eq!(payload["capabilities"]["providers"]["openrouter"], true);
+        assert_eq!(payload["capabilities"]["providers"]["local"], false);
+        assert!(!payload.to_string().contains("provider-secret"));
+        assert!(!payload.to_string().contains("secret-endpoint"));
     }
 
     #[test]

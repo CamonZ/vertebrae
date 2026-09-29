@@ -447,6 +447,11 @@ export interface ChatSession {
   status: "open" | "closed";
   /** Local chat harness that owns the runtime session. */
   harness: LocalChatHarnessKind;
+  /**
+   * Provider selected for this session. Absent means the harness's built-in
+   * provider; custom providers come from config.toml and fix the harness.
+   */
+  providerId?: string | null;
   /** Runtime backend session ID for the active local harness process. */
   backendSessionId: string | null;
   /** Provider-specific durable resume ID for this conversation. */
@@ -560,6 +565,7 @@ interface ChatStoreActions {
   selectProviderThreadSession: (input: {
     harness: LocalChatHarnessKind;
     providerResumeId: string;
+    providerId?: string | null;
     projectPath?: string | null;
     label?: string | null;
     title?: string | null;
@@ -661,8 +667,16 @@ interface ChatStoreActions {
   ) => void;
   /** Set the model reported by the Claude CLI for a session */
   setSessionModel: (sessionId: string, model: string) => void;
-  /** Set the local chat harness for this session before it starts */
-  setSessionHarness: (sessionId: string, harness: LocalChatHarnessKind) => void;
+  /**
+   * Set the local chat provider (and the harness it runs on) for this
+   * session before it starts. A null provider means the harness's built-in
+   * provider.
+   */
+  setSessionHarness: (
+    sessionId: string,
+    harness: LocalChatHarnessKind,
+    providerId?: string | null
+  ) => void;
   /** Set the user-selected provider model for this session */
   setSessionSelectedModel: (sessionId: string, modelId: string | null) => void;
   /** Set the user-selected provider reasoning effort for this session */
@@ -806,8 +820,9 @@ function createLocalSession(
     hasUserMessage: false,
     status: "open",
     harness:
-      useLocalChatDefaultsStore.getState().defaultHarness ??
+      useLocalChatDefaultsStore.getState().defaultProvider?.harness ??
       DEFAULT_LOCAL_CHAT_HARNESS,
+    providerId: useLocalChatDefaultsStore.getState().defaultProvider?.id ?? null,
     backendSessionId: null,
     providerResumeId: null,
     projectPath,
@@ -837,6 +852,7 @@ function providerThreadSessionId(
 function createProviderThreadSession(input: {
   harness: LocalChatHarnessKind;
   providerResumeId: string;
+  providerId?: string | null;
   projectPath?: string | null;
   label?: string | null;
   title?: string | null;
@@ -851,6 +867,7 @@ function createProviderThreadSession(input: {
     titleStatus: "manual",
     titleConfidence: 1,
     harness: input.harness,
+    providerId: input.providerId ?? null,
     providerResumeId: input.providerResumeId,
     model: input.model?.trim() || undefined,
   };
@@ -2952,15 +2969,21 @@ export const useChatStore = create<ChatStore>((set, get) => {
       );
     },
 
-    setSessionHarness: (sessionId, harness) => {
+    setSessionHarness: (sessionId, harness, providerId = null) => {
       updateSession(sessionId, (session) => {
         if (session.backendSessionId || session.providerResumeId) {
           return session;
         }
-        if (session.harness === harness) return session;
+        if (
+          session.harness === harness &&
+          (session.providerId ?? null) === providerId
+        ) {
+          return session;
+        }
         return {
           ...session,
           harness,
+          providerId,
           permissionMode: "default",
           selectedModelId: undefined,
           selectedReasoningEffort: undefined,

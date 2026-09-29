@@ -50,6 +50,71 @@ impl CodexPermissionConfig {
     }
 }
 
+/// Environment variable the adapter exports a custom provider's resolved
+/// credential under; the generated `model_providers.<id>.env_key` names it.
+pub const CODEX_CUSTOM_PROVIDER_API_KEY_ENV: &str = "VERTEBRAE_MODEL_PROVIDER_API_KEY";
+
+/// A custom Codex model provider declared outside `~/.codex/config.toml`.
+/// The adapter translates it into `-c model_providers.<id>.*` launch
+/// overrides plus `modelProvider=<id>` on thread start.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct CodexCustomModelProvider {
+    /// Provider ID used as the `model_providers` key and `modelProvider`.
+    pub id: String,
+    pub base_url: Option<String>,
+    /// Resolved credential, exported under
+    /// [`CODEX_CUSTOM_PROVIDER_API_KEY_ENV`]. `None` sends no credential.
+    pub api_key: Option<String>,
+    pub wire_api: Option<String>,
+    pub environment: BTreeMap<String, String>,
+}
+
+impl CodexCustomModelProvider {
+    pub fn config_overrides(&self) -> Vec<String> {
+        let key = format!("model_providers.{}", self.id);
+        let mut entries = vec![("name", self.id.clone())];
+        if let Some(base_url) = &self.base_url {
+            entries.push(("base_url", base_url.clone()));
+        }
+        if self.api_key.is_some() {
+            entries.push(("env_key", CODEX_CUSTOM_PROVIDER_API_KEY_ENV.to_string()));
+        }
+        if let Some(wire_api) = &self.wire_api {
+            entries.push(("wire_api", wire_api.clone()));
+        }
+        entries
+            .into_iter()
+            .flat_map(|(field, value)| {
+                // A JSON string literal is a valid TOML basic string, so the
+                // value is never reinterpreted by Codex's TOML override parser.
+                let value = Value::String(value).to_string();
+                ["-c".to_string(), format!("{key}.{field}={value}")]
+            })
+            .collect()
+    }
+
+    pub fn launch_environment(&self) -> BTreeMap<String, String> {
+        let mut environment = self.environment.clone();
+        if let Some(api_key) = &self.api_key {
+            environment.insert(CODEX_CUSTOM_PROVIDER_API_KEY_ENV.into(), api_key.clone());
+        }
+        environment
+    }
+}
+
+impl std::fmt::Debug for CodexCustomModelProvider {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CodexCustomModelProvider")
+            .field("id", &self.id)
+            .field("base_url", &self.base_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("wire_api", &self.wire_api)
+            .field("environment", &self.environment.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
 /// Construction policy for the Codex App Server adapter.
 #[derive(Clone)]
 pub struct CodexProviderConfig {
@@ -62,6 +127,9 @@ pub struct CodexProviderConfig {
     pub client_title: String,
     pub client_version: String,
     pub model_provider: Option<String>,
+    /// Custom provider defined for this launch; takes precedence over
+    /// `model_provider` for thread start.
+    pub custom_model_provider: Option<CodexCustomModelProvider>,
     pub permission: CodexPermissionConfig,
     pub installed_skills_roots: Vec<PathBuf>,
     pub cleanup_timeout: Duration,
@@ -90,6 +158,7 @@ impl std::fmt::Debug for CodexProviderConfig {
             .field("client_title", &self.client_title)
             .field("client_version", &self.client_version)
             .field("model_provider", &self.model_provider)
+            .field("custom_model_provider", &self.custom_model_provider)
             .field("permission", &self.permission)
             .field("installed_skills_roots", &self.installed_skills_roots)
             .field("cleanup_timeout", &self.cleanup_timeout)
@@ -114,6 +183,7 @@ impl Default for CodexProviderConfig {
             client_title: "Vertebrae".into(),
             client_version: env!("CARGO_PKG_VERSION").into(),
             model_provider: None,
+            custom_model_provider: None,
             permission: CodexPermissionConfig::default(),
             installed_skills_roots: Vec::new(),
             cleanup_timeout: Duration::from_secs(3),
@@ -127,6 +197,13 @@ impl Default for CodexProviderConfig {
 }
 
 impl CodexProviderConfig {
+    pub fn effective_model_provider(&self) -> Option<&str> {
+        self.custom_model_provider
+            .as_ref()
+            .map(|provider| provider.id.as_str())
+            .or(self.model_provider.as_deref())
+    }
+
     pub async fn discover_capabilities(&self) -> Result<HarnessCapabilities, HarnessError> {
         crate::models::discover_capabilities(self).await
     }

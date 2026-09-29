@@ -40,6 +40,7 @@ pub mod id_generator;
 pub mod model_catalog;
 pub mod models;
 pub mod orchestrator;
+pub mod provider;
 pub mod service;
 pub mod services;
 pub mod step_constraints;
@@ -57,17 +58,18 @@ pub use execution_service::{
 };
 pub use execution_settings::{OutputVerbosity, SpeedTier};
 pub use model_catalog::{
-    DEFAULT_TYPESAFE_MODEL, Provider, ProviderAgentOptionMismatch, ProviderModelMismatch,
+    BuiltinProvider, DEFAULT_TYPESAFE_MODEL, ProviderAgentOptionMismatch, ProviderModelMismatch,
     ProviderPersonalityMismatch, ProviderReasoningEffortMismatch, ProviderVerbosityMismatch,
-    SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model, normalize_personality,
-    normalize_provider_personality, normalize_provider_reasoning_effort,
-    normalize_provider_verbosity, validate_provider_agent_config, validate_provider_model,
-    validate_provider_model_with_codex_provider, validate_provider_reasoning_effort,
+    SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model, normalize_harness_personality,
+    normalize_harness_reasoning_effort, normalize_harness_verbosity, normalize_personality,
+    validate_harness_agent_config, validate_harness_reasoning_effort, validate_provider_model,
+    validate_provider_model_with_codex_provider,
 };
 pub use orchestrator::{
     ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_MODEL, ORCHESTRATOR_PROMPT_TEMPLATE, OrchestratorOutput,
     orchestrator_agent_config, orchestrator_output_schema, orchestrator_prompt,
 };
+pub use provider::{ProviderId, ProviderProfile, ProviderWireApi};
 pub use service::{
     CreateTaskOptions, MutationCallback, MutationEvent, TaskService, UpdateTaskOptions,
 };

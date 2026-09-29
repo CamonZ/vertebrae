@@ -69,6 +69,7 @@ export interface LocalChatSessionSummary {
   titleConfidence?: number | null;
   titleUserMessageCount?: number;
   harness: LocalChatHarnessKind;
+  providerId?: string | null;
   model?: string;
   selectedModelId?: string | null;
   selectedReasoningEffort?: string | null;
@@ -179,6 +180,10 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     providerResumeId,
     projectPath:
       typeof candidate.projectPath === "string" ? candidate.projectPath : null,
+    providerId:
+      typeof candidate.providerId === "string" && candidate.providerId.trim()
+        ? candidate.providerId.trim()
+        : null,
     selectedModelId:
       typeof candidate.selectedModelId === "string"
         ? candidate.selectedModelId
@@ -374,6 +379,7 @@ function serializeSession(
     hasUserMessage: hasLocalChatUserMessage(session),
     status: session.status,
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+    providerId: session.providerId ?? null,
     backendSessionId: null,
     providerResumeId: session.providerResumeId ?? null,
     threadTotalTokens: session.threadTotalTokens,
@@ -409,6 +415,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
       session.titleConfidence ?? (session.title?.trim() ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+    providerId: session.providerId ?? null,
     model: session.model,
     selectedModelId: session.selectedModelId,
     selectedReasoningEffort: session.selectedReasoningEffort,
@@ -624,6 +631,7 @@ export function summarizeLocalChatSession(
       session.titleConfidence ?? (session.title?.trim() ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+    providerId: session.providerId ?? null,
     model: session.model,
     selectedModelId: session.selectedModelId,
     selectedReasoningEffort: session.selectedReasoningEffort,

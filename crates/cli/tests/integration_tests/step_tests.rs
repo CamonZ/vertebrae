@@ -2734,7 +2734,7 @@ mod step_prompt_and_agent_config_tests {
 #[cfg(test)]
 mod provider_tests {
     use super::*;
-    use vertebrae_core::{AgentConfig, PermissionMode, Provider};
+    use vertebrae_core::{AgentConfig, PermissionMode, ProviderId};
 
     fn add_cmd_with(
         name: &str,
@@ -2742,7 +2742,7 @@ mod provider_tests {
         id: &str,
         agent_config: Option<String>,
         model: Option<String>,
-        provider: Option<Provider>,
+        provider: Option<ProviderId>,
     ) -> StepAddCommand {
         StepAddCommand {
             speed_tier: None,
@@ -2776,7 +2776,7 @@ mod provider_tests {
         id: &str,
         agent_config: Option<String>,
         model: Option<String>,
-        provider: Option<Provider>,
+        provider: Option<ProviderId>,
     ) -> StepUpdateCommand {
         StepUpdateCommand {
             speed_tier: None,
@@ -2888,7 +2888,7 @@ mod provider_tests {
             "ovl-1",
             Some(agent_config_json.to_string()),
             Some("opus".to_string()),
-            Some(Provider::Anthropic),
+            Some(ProviderId::anthropic()),
         );
 
         cmd.execute(services.steps()).await.unwrap();
@@ -2897,7 +2897,7 @@ mod provider_tests {
         let cfg: &AgentConfig = step.agent_config().unwrap();
 
         assert_eq!(cfg.model.as_deref(), Some("opus"));
-        assert_eq!(cfg.provider, Some(Provider::Anthropic));
+        assert_eq!(cfg.provider, Some(ProviderId::anthropic()));
         assert_eq!(cfg.system_prompt.as_deref(), Some("Be helpful"));
         assert_eq!(cfg.permission_mode, Some(PermissionMode::Plan));
         assert_eq!(cfg.max_budget_usd, Some(7.5));
@@ -2917,7 +2917,7 @@ mod provider_tests {
             "reason-1",
             None,
             Some("gpt-5.5".to_string()),
-            Some(Provider::Openai),
+            Some(ProviderId::openai()),
         );
         cmd.reasoning_effort = Some(" HIGH ".to_string());
 
@@ -2931,7 +2931,7 @@ mod provider_tests {
             .unwrap();
         assert_eq!(
             step.agent_config().unwrap().provider,
-            Some(Provider::Openai)
+            Some(ProviderId::openai())
         );
         assert_eq!(
             step.agent_config().unwrap().model.as_deref(),
@@ -2953,7 +2953,7 @@ mod provider_tests {
             "codex-provider-1",
             None,
             Some("deepseek/deepseek-v4-flash".to_string()),
-            Some(Provider::Openai),
+            Some(ProviderId::openai()),
         );
         cmd.codex_model_provider = Some(" OpenRouter ".to_string());
 
@@ -2967,7 +2967,7 @@ mod provider_tests {
             .unwrap();
         assert_eq!(
             step.agent_config().unwrap().provider,
-            Some(Provider::Openai)
+            Some(ProviderId::openai())
         );
         assert_eq!(
             step.agent_config().unwrap().model.as_deref(),
@@ -2989,7 +2989,7 @@ mod provider_tests {
             "bad-reason-1",
             None,
             Some("gpt-5.5".to_string()),
-            Some(Provider::Openai),
+            Some(ProviderId::openai()),
         );
         cmd.reasoning_effort = Some("minimal".to_string());
 
@@ -3008,6 +3008,58 @@ mod provider_tests {
     }
 
     #[tokio::test]
+    async fn add_accepts_custom_provider_with_its_own_model_names() {
+        let (services, workflow_id) = mk_workflow().await;
+        let mut cmd = add_cmd_with(
+            "Custom",
+            workflow_id,
+            "custom-1",
+            None,
+            Some("moonshotai/kimi-k2".to_string()),
+            None,
+        );
+        cmd.provider = Some("OpenRouter".to_string());
+
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services
+            .steps()
+            .get_step("custom-1")
+            .await
+            .unwrap()
+            .unwrap();
+        let cfg: &AgentConfig = step.agent_config().unwrap();
+        assert_eq!(cfg.provider, Some(ProviderId::new("openrouter").unwrap()));
+        assert_eq!(cfg.model.as_deref(), Some("moonshotai/kimi-k2"));
+    }
+
+    #[tokio::test]
+    async fn add_rejects_invalid_provider_ids_and_custom_codex_model_provider() {
+        let (services, workflow_id) = mk_workflow().await;
+        let mut cmd = add_cmd_with("Bad", workflow_id.clone(), "custom-bad-1", None, None, None);
+        cmd.provider = Some("open router".to_string());
+        let err = cmd.execute(services.steps()).await.expect_err("must fail");
+        assert!(err.to_string().contains("Invalid provider ID"), "{err}");
+
+        let mut cmd = add_cmd_with("Bad", workflow_id, "custom-bad-2", None, None, None);
+        cmd.provider = Some("local".to_string());
+        cmd.codex_model_provider = Some("openrouter".to_string());
+        let err = cmd.execute(services.steps()).await.expect_err("must fail");
+        assert!(err.to_string().contains("codex_model_provider"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn add_applies_harness_rules_to_custom_provider_with_explicit_harness() {
+        let (services, workflow_id) = mk_workflow().await;
+        let mut cmd = add_cmd_with("Bad", workflow_id, "custom-bad-3", None, None, None);
+        cmd.provider = Some("openrouter".to_string());
+        cmd.harness = Some(CliHarness::Claude);
+        cmd.reasoning_effort = Some("high".to_string());
+        let err = cmd.execute(services.steps()).await.expect_err("must fail");
+        assert!(err.to_string().contains("codex harness"), "{err}");
+    }
+
+    #[tokio::test]
     async fn add_rejects_anthropic_reasoning_effort() {
         let (services, workflow_id) = mk_workflow().await;
 
@@ -3017,14 +3069,14 @@ mod provider_tests {
             "bad-reason-2",
             None,
             Some("opus".to_string()),
-            Some(Provider::Anthropic),
+            Some(ProviderId::anthropic()),
         );
         cmd.reasoning_effort = Some("high".to_string());
 
         let err = cmd.execute(services.steps()).await.expect_err("must fail");
         let msg = err.to_string();
-        assert!(msg.contains("openai"), "got: {msg}");
-        assert!(msg.contains("anthropic"), "got: {msg}");
+        assert!(msg.contains("codex harness"), "got: {msg}");
+        assert!(msg.contains("claude"), "got: {msg}");
         assert!(
             services
                 .steps()
@@ -3058,7 +3110,7 @@ mod provider_tests {
         .await
         .unwrap();
 
-        update_cmd_with("upd-1", None, None, Some(Provider::Anthropic))
+        update_cmd_with("upd-1", None, None, Some(ProviderId::anthropic()))
             .execute(services.steps())
             .await
             .unwrap();
@@ -3066,7 +3118,7 @@ mod provider_tests {
         let step = services.steps().get_step("upd-1").await.unwrap().unwrap();
         let cfg = step.agent_config().unwrap();
 
-        assert_eq!(cfg.provider, Some(Provider::Anthropic));
+        assert_eq!(cfg.provider, Some(ProviderId::anthropic()));
         assert_eq!(cfg.model.as_deref(), Some("claude-opus-4-5"));
         assert_eq!(cfg.system_prompt.as_deref(), Some("Original prompt"));
         assert_eq!(cfg.permission_mode, Some(PermissionMode::Auto));
@@ -3102,7 +3154,7 @@ mod provider_tests {
             .unwrap();
         assert_eq!(
             step.agent_config().unwrap().provider,
-            Some(Provider::Openai)
+            Some(ProviderId::openai())
         );
         assert_eq!(
             step.agent_config().unwrap().model.as_deref(),
@@ -3134,7 +3186,7 @@ mod provider_tests {
             "codex-provider-upd-1",
             None,
             Some("glm-5.1".to_string()),
-            Some(Provider::Openai),
+            Some(ProviderId::openai()),
         );
         cmd.codex_model_provider = Some("zai".to_string());
         cmd.execute(services.steps()).await.unwrap();
@@ -3147,7 +3199,7 @@ mod provider_tests {
             .unwrap();
         assert_eq!(
             step.agent_config().unwrap().provider,
-            Some(Provider::Openai)
+            Some(ProviderId::openai())
         );
         assert_eq!(
             step.agent_config().unwrap().model.as_deref(),
@@ -3213,7 +3265,7 @@ mod provider_tests {
             "reason-upd-3",
             None,
             Some("opus".to_string()),
-            Some(Provider::Anthropic),
+            Some(ProviderId::anthropic()),
         )
         .execute(services.steps())
         .await
@@ -3227,7 +3279,7 @@ mod provider_tests {
             .unwrap();
         assert_eq!(
             step.agent_config().unwrap().provider,
-            Some(Provider::Anthropic)
+            Some(ProviderId::anthropic())
         );
         assert_eq!(step.agent_config().unwrap().model.as_deref(), Some("opus"));
         assert_eq!(step.agent_config().unwrap().reasoning_effort, None);
@@ -3263,7 +3315,7 @@ mod provider_tests {
         let step = services.steps().get_step("upd-2").await.unwrap().unwrap();
         let cfg = step.agent_config().unwrap();
 
-        assert_eq!(cfg.provider, Some(Provider::Anthropic));
+        assert_eq!(cfg.provider, Some(ProviderId::anthropic()));
         assert_eq!(cfg.model.as_deref(), Some("opus"));
         assert_eq!(cfg.system_prompt.as_deref(), Some("Stay focused"));
         assert_eq!(cfg.max_budget_usd, Some(4.0));
@@ -3279,7 +3331,7 @@ mod provider_tests {
             "bad-1",
             None,
             Some("claude-opus".to_string()),
-            Some(Provider::Openai),
+            Some(ProviderId::openai()),
         );
 
         let err = cmd.execute(services.steps()).await.expect_err("must fail");
@@ -3313,7 +3365,7 @@ mod provider_tests {
             "bad-2",
             None,
             Some("kimi2.6".to_string()),
-            Some(Provider::Openai),
+            Some(ProviderId::openai()),
         );
 
         let err = cmd.execute(services.steps()).await.expect_err("must fail");
@@ -3342,7 +3394,7 @@ mod provider_tests {
             "bad-codex-provider-1",
             None,
             Some("opus".to_string()),
-            Some(Provider::Anthropic),
+            Some(ProviderId::anthropic()),
         );
         cmd.codex_model_provider = Some("openrouter".to_string());
 
@@ -3410,7 +3462,7 @@ mod provider_tests {
             "upd-bad-1",
             None,
             Some("claude-opus".to_string()),
-            Some(Provider::Openai),
+            Some(ProviderId::openai()),
         )
         .execute(services.steps())
         .await
@@ -3427,7 +3479,7 @@ mod provider_tests {
             .unwrap();
         assert_eq!(
             step.agent_config().unwrap().provider,
-            Some(Provider::Anthropic)
+            Some(ProviderId::anthropic())
         );
         assert_eq!(
             step.agent_config().unwrap().model.as_deref(),
@@ -3467,7 +3519,7 @@ mod provider_tests {
             "ok-1",
             None,
             Some("gpt-4o".to_string()),
-            Some(Provider::Openai),
+            Some(ProviderId::openai()),
         )
         .execute(services.steps())
         .await
@@ -3476,7 +3528,7 @@ mod provider_tests {
         let step = services.steps().get_step("ok-1").await.unwrap().unwrap();
         assert_eq!(
             step.agent_config().unwrap().provider,
-            Some(Provider::Openai)
+            Some(ProviderId::openai())
         );
         assert_eq!(
             step.agent_config().unwrap().model.as_deref(),

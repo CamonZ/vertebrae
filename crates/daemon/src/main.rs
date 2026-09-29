@@ -85,6 +85,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         projects,
         typesafe_api_key,
         typesafe_url,
+        provider_profiles,
         ..
     } = match ResolvedConfig::load() {
         Ok(config) => config,
@@ -127,15 +128,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|project| PathBuf::from(&project.path))
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let capabilities = Arc::new(DaemonCapabilities::new(
-        shell_path,
-        provider_binaries,
-        provider_diagnostics,
-        &compatibility_working_dir,
-        typesafe_factory_config.typesafe_api_key,
-        typesafe_factory_config.typesafe_base_url,
-        typesafe_factory_config.typesafe_url,
-    ));
+    let capabilities = Arc::new(
+        DaemonCapabilities::new(
+            shell_path,
+            provider_binaries,
+            provider_diagnostics,
+            &compatibility_working_dir,
+            typesafe_factory_config.typesafe_api_key,
+            typesafe_factory_config.typesafe_base_url,
+            typesafe_factory_config.typesafe_url,
+        )
+        .with_provider_profiles(provider_profiles),
+    );
     capabilities.log_startup_diagnostics();
 
     let identity = daemon_identity.ok_or(

@@ -22,6 +22,13 @@ url = "https://api.typesafe.ai/v1/systemone"
 [projects.vertebrae]
 id = "my-project-id"
 path = "/Users/example/Code/vertebrae"
+
+[providers.openrouter]
+harness = "claude"
+base_url = "https://openrouter.ai/api"
+api_key_env = "OPENROUTER_API_KEY"
+models = ["moonshotai/kimi-k2", "z-ai/glm-5"]
+default_model = "moonshotai/kimi-k2"
 ```
 
 ### Fields
@@ -54,6 +61,44 @@ path = "/Users/example/Code/vertebrae"
 
 - **path** (required for CLI path matching): The git root path for the project
   - Example: `/Users/example/Code/vertebrae`
+
+`[providers.<id>]`
+
+Custom providers for workflow steps and local chat on this machine. The
+built-in providers (`anthropic`, `openai`, `typesafe`) need no entry. IDs use
+lowercase letters, digits, `-`, and `_`; built-in names and their aliases
+(`claude`, `codex`, `system-one`, …) are reserved.
+
+- **harness** (required): `claude`, `codex`, or `typesafe` — the runtime that
+  talks to this provider.
+- **models** (required): The exact model IDs this provider serves. Steps and
+  chats using the provider may only select these; built-in catalog prefix rules
+  never apply.
+- **default_model** (optional): Used when no model is selected; must be listed
+  in `models`. Defaults to the first entry.
+- **base_url** (`claude`/`codex`): API base URL. Claude receives it as
+  `ANTHROPIC_BASE_URL`; Codex receives it as
+  `model_providers.<id>.base_url`.
+- **url** (`typesafe`): Full System One endpoint URL, with the same semantics
+  as `[typesafe].url`.
+- **api_key_env** (preferred) / **api_key**: The credential. A nonblank value
+  of the named environment variable (read from the daemon's or GUI's process
+  environment) wins over the literal `api_key`; a configured but missing
+  `api_key_env` without an `api_key` fails the run. Claude receives it as
+  `ANTHROPIC_AUTH_TOKEN` (with `ANTHROPIC_API_KEY` cleared); Codex reads it
+  through a generated `env_key`; TypeSafe sends it as its bearer key instead of
+  the `[typesafe]` section. Debug output and diagnostics redact it.
+- **env** (`claude`/`codex`, optional table): Extra environment for the
+  harness process. Values are redacted from Debug output.
+- **wire_api** (`codex`, optional): `chat` or `responses`.
+
+Codex custom providers are defined entirely here; Vertebrae passes them as
+`-c model_providers.<id>.*` overrides, so `~/.codex/config.toml` needs no
+edits. `claude`/`codex` providers appear in the local chat provider picker;
+`typesafe` providers are step-only. A step whose provider is not configured on
+the executing daemon, or whose explicit harness disagrees with the provider's,
+fails with a descriptive error. Like `[typesafe]`, provider profiles are
+snapshotted at daemon and GUI startup.
 
 ## Environment Variables
 

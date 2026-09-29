@@ -195,18 +195,47 @@ normalization — lives in the one shared driver. Codex keeps its rollout record
 parsing in `harness-codex/src/rollout.rs`; the GUI keeps replay bookkeeping
 in `gui/src/stores/providerReplay.ts` beside the chat store.
 
-### Adding a provider
+### Harnesses and providers
 
-1. Add the variant to `Provider` in `crates/core/src/model_catalog.rs` and its
-   models to the catalog.
-2. Create `crates/harness-<provider>` implementing `HarnessRuntime` from
+A **harness** (`StepHarness`: `claude`, `codex`, `typesafe`) is the runtime
+adapter; a **provider** (`ProviderId`, carried on `AgentConfig.provider`) is
+the endpoint and credential set it talks to. The built-in providers
+`anthropic`, `openai`, and `typesafe` (`BuiltinProvider`) run on the matching
+harness and need no configuration. Custom providers are per-machine
+`[providers.<id>]` entries in config.toml (`ProviderProfile`, see
+[SACRUM_CONFIG.md](SACRUM_CONFIG.md)) bound to one harness.
+
+- `vertebrae_harness::resolve_provider` selects: no provider means the step
+  harness's built-in provider (Anthropic when no harness is set); a custom ID
+  must have a valid profile, and an explicit step harness must match the
+  provider's harness.
+- Capability rules (reasoning effort, personality, verbosity, TypeSafe-only
+  option limits) key on the harness. Built-in providers validate models against
+  the built-in catalog; custom providers accept only their profile's `models`.
+- Each adapter translates a profile into its own launch settings:
+  `ClaudeProviderEndpoint` (environment), `CodexCustomModelProvider`
+  (`-c model_providers.<id>.*` plus `modelProvider`), and the TypeSafe client
+  config. Normalized events are unchanged.
+- The daemon reports the resolved provider ID and harness on execution status
+  updates and advertises configured custom provider IDs (never endpoints or
+  credentials) in its capability report.
+
+### Adding a harness
+
+1. Add the variant to `StepHarness` and a `BuiltinProvider` for it (with its
+   models) in `crates/core/src/model_catalog.rs`.
+2. Create `crates/harness-<name>` implementing `HarnessRuntime` from
    `harness-core`. Emit `HarnessEventDraftV1` — never a provider-shaped event —
-   and map provider approvals onto `ControlRequestEnvelope`.
+   map provider approvals onto `ControlRequestEnvelope`, and own the
+   translation of a `ProviderProfile` into launch settings.
 3. Add the crate as a dependency of `crates/harness` only, and extend
-   `HarnessRuntimeFactory::create` plus `normalized_request_config` with the
-   new match arm.
+   `HarnessRuntimeFactory::create_for_resolved` plus
+   `normalized_request_config` with the new match arm.
 4. Surfaces need no provider-specific code: the daemon persists the normalized
    events unchanged, and the GUI renders them through the existing projection.
+
+Adding a provider for an existing harness needs no code: declare it under
+`[providers.<id>]`.
 
 ## Sacrum Client (`crates/sacrum-client`)
 
