@@ -178,7 +178,9 @@ async fn given_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_s
         if let Some(next_id) = &next_id {
             add_args.extend(["--transition-to", next_id.as_str()]);
         }
-        world.run_vtb(&add_args).await;
+        world
+            .run_vtb(&super::step::with_step_harness(&add_args))
+            .await;
         assert_eq!(
             world.last_exit_code, 0,
             "failed to add {} step '{}': {}{}",

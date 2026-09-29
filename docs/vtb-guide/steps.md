@@ -4,23 +4,23 @@
 
 ```bash
 # Add a step to an existing workflow
-vtb step add "Testing" -w <workflow-id> \
+vtb step add "Testing" -w <workflow-id> --harness claude \
   --goal "Verify implementation" \
   --model sonnet \
   --order 1
 
 # Add a finish step (completes the task when reached)
-vtb step add "Approved" -w <workflow-id> --step-type finish
+vtb step add "Approved" -w <workflow-id> --harness claude --step-type finish
 
 # Add a stop boundary (ends this run and continues to the one target later)
-vtb step add "Pause Run" -w <workflow-id> --step-type stop \
+vtb step add "Pause Run" -w <workflow-id> --harness claude --step-type stop \
   --transition-to <next-step-id>
 
 # Add step with transition restrictions
-vtb step add "Needs Work" -w <workflow-id> --transition-to <step-id>
+vtb step add "Needs Work" -w <workflow-id> --harness claude --transition-to <step-id>
 
 # Add step with prompt and agent config
-vtb step add "Coding" -w <workflow-id> \
+vtb step add "Coding" -w <workflow-id> --harness claude \
   --prompt "Implement the task described in {{task.id}}" \
   --agent-config '{"model":"opus","max_budget_usd":5.0}'
 
@@ -34,25 +34,25 @@ vtb step add "Codex review" -w <workflow-id> \
   --verbosity high
 
 # Add step with agents and skills
-vtb step add "Review" -w <workflow-id> \
+vtb step add "Review" -w <workflow-id> --harness claude \
   --agent .claude/agents/reviewer.md \
   --skill review \
   --skill simplify
 
 # Add step with step type and output schema
-vtb step add "Evaluate" -w <workflow-id> \
+vtb step add "Evaluate" -w <workflow-id> --harness claude \
   --step-type llm_inference \
   --output-schema '{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}'
 
 # Persist validated structured output as a task artifact (Sacrum-owned)
-vtb step add "Evaluate" -w <workflow-id> \
+vtb step add "Evaluate" -w <workflow-id> --harness claude \
   --step-type llm_inference \
   --output-schema '{"type":"object","required":["passed"]}' \
   --persistence-options '{"artifact":{"logical_name":"step_result"}}'
 
 # Add a structured_inference step: provider, model, state, and questions are
 # required; state may be JSON or a string template, questions may be @file
-vtb step add "Classify" -w <workflow-id> \
+vtb step add "Classify" -w <workflow-id> --harness typesafe \
   --step-type structured_inference \
   --provider typesafe \
   --model <model> \
@@ -60,19 +60,19 @@ vtb step add "Classify" -w <workflow-id> \
   --questions @classify-questions.json
 
 # Add a human-input gate
-vtb step add "Needs Input" -w <workflow-id> --step-type human_input
+vtb step add "Needs Input" -w <workflow-id> --harness claude --step-type human_input
 
 # Add a routing step
-vtb step add "Router" -w <workflow-id> --step-type route
+vtb step add "Router" -w <workflow-id> --harness claude --step-type route
 
 # Configure a route after its graph and predecessor contracts exist
 vtb step update <step-id> --route-config '<route-config-json>'
 
 # Add a promptless terminal step
-vtb step add "Complete" -w <workflow-id> --step-type finish
+vtb step add "Complete" -w <workflow-id> --harness claude --step-type finish
 
 # Machine-readable creation result
-vtb --json step add "Review" -w <workflow-id>
+vtb --json step add "Review" -w <workflow-id> --harness claude
 
 # List, show, update, delete steps
 vtb step list <workflow-id>
@@ -97,7 +97,7 @@ vtb --json step delete <step-id>
 ```
 
 `vtb step add` takes a required `<name>` positional argument plus required
-`--workflow` / `-w`; run `vtb step add --help` for the complete creation flag list.
+`--workflow` / `-w` and `--harness`; run `vtb step add --help` for the complete creation flag list.
 `--transition-to` accepts full UUIDs or 8-character short IDs. The global
 `--json` flag returns a creation envelope with `command`, `status`, `step_id`,
 and `workflow_id`.
@@ -132,7 +132,7 @@ flag plus `-h` / `--help`. Human-readable output is ordered by each step's
 Steps for workflow '<workflow-id>':
 1. coding (id: a1b2c3d4, type: llm_inference, harness: claude, model: sonnet)
 2. testing (id: e5f6a7b8, type: llm_inference, harness: codex, model: gpt-5.5)
-3. approved (id: c9d0e1f2, type: finish, harness: server-default)
+3. approved (id: c9d0e1f2, type: finish, harness: claude)
 ```
 
 The model is `agent_config.model` for `llm_inference` steps and `config.model`
@@ -206,7 +206,6 @@ request with no property changes before reporting success.
 |------|-------|----------|
 | `--name <NAME>` | | Replace the step name |
 | `--harness <HARNESS>` | | Select `claude`, `codex`, or `typesafe` for this step |
-| `--clear-harness` | | Clear the explicit selection and use Sacrum's default/backfill |
 | `--goal <GOAL>` | `-g` | Replace the step goal |
 | `--agent <AGENT>` | `-a` | Replace the full agents list; repeat for multiple agents |
 | `--clear-agents` | | Replace the agents list with an empty list |
@@ -345,16 +344,16 @@ Each step has a `--step-type` that determines its role in the workflow:
 
 ```bash
 # Set step type on creation
-vtb step add "Eval" -w <wf-id> --step-type llm_inference
+vtb step add "Eval" -w <wf-id> --harness claude --step-type llm_inference
 
 # Create a human-input gate
-vtb step add "Needs Input" -w <wf-id> --step-type human_input
+vtb step add "Needs Input" -w <wf-id> --harness claude --step-type human_input
 
 # Create a promptless terminal step
-vtb step add "Complete" -w <wf-id> --step-type finish
+vtb step add "Complete" -w <wf-id> --harness claude --step-type finish
 
 # Create a stop boundary with one continuation
-vtb step add "Pause Run" -w <wf-id> --step-type stop --transition-to <next-step-id>
+vtb step add "Pause Run" -w <wf-id> --harness claude --step-type stop --transition-to <next-step-id>
 
 ```
 
@@ -471,7 +470,7 @@ describing the expected structured output from the selected harness. When presen
 
 ```bash
 # Set output schema on creation
-vtb step add "Eval" -w <wf-id> --step-type llm_inference \
+vtb step add "Eval" -w <wf-id> --harness claude --step-type llm_inference \
   --output-schema '{"type":"object","required":["summary","passed"],"properties":{"summary":{"type":"string"},"passed":{"type":"boolean"}}}'
 
 # Update output schema
@@ -562,16 +561,18 @@ checking the provider-specific environment variable first, then the user's login
 
 #### Setting the harness and request settings on a step
 
-`vtb step add` accepts `--harness`; `vtb step update` accepts `--harness` and
-`--clear-harness`. To configure a Codex request as well, use `--provider`
+`vtb step add` requires `--harness`; `vtb step update` accepts it and requires
+it whenever the update sets the provider (`--provider` or a `provider` in
+`--agent-config`). A built-in provider must match the harness (`anthropic` →
+`claude`, `openai` → `codex`). A harness can be changed but not cleared. To configure a Codex request as well, use `--provider`
 (alias:
 `--model-provider`), `--model`, `--codex-model-provider` (alias:
 `--codex-provider`), and `--reasoning-effort`. These flags set request
 configuration and do not choose the step runtime:
 
 ```bash
-# Default behavior — no harness selector; Sacrum and daemon use the default
-vtb step add "Coding" -w <wf-id> --model sonnet
+# Claude harness with the default Anthropic provider
+vtb step add "Coding" -w <wf-id> --harness claude --model sonnet
 
 # Select Claude and configure a Claude model
 vtb step add "Coding" -w <wf-id> \
@@ -587,22 +588,22 @@ vtb step add "Coding" -w <wf-id> \
   --reasoning-effort high
 
 # Codex harness with an OpenRouter upstream provider configured in ~/.codex/config.toml
-vtb step add "Coding" -w <wf-id> \
+vtb step add "Coding" -w <wf-id> --harness codex \
   --provider openai \
   --codex-model-provider openrouter \
   --model deepseek/deepseek-v4-flash
 
 # Codex harness with a Z.ai upstream provider configured in ~/.codex/config.toml
-vtb step add "Coding" -w <wf-id> \
+vtb step add "Coding" -w <wf-id> --harness codex \
   --provider openai \
   --codex-provider zai \
   --model glm-5.1
 
 # Switch an existing step over to Codex
-vtb step update <step-id> --provider openai --model o3-mini --reasoning-effort high
+vtb step update <step-id> --harness codex --provider openai --model o3-mini --reasoning-effort high
 
 # Drop back to Anthropic
-vtb step update <step-id> --provider anthropic --model opus
+vtb step update <step-id> --harness claude --provider anthropic --model opus
 ```
 
 Accepted provider names (case-insensitive): `anthropic` / `claude`,
@@ -684,7 +685,7 @@ vtb start-taskrun <task-id>
 # 2. OpenAI / Codex provider selection.
 #    Separate workflow whose single step targets Codex/gpt-5.5.
 vtb workflow add "Smoke-Codex"
-vtb step add "Hello" -w <smoke-codex-wf-id> \
+vtb step add "Hello" -w <smoke-codex-wf-id> --harness codex \
   --provider openai \
   --model gpt-5.5 \
   --reasoning-effort high \

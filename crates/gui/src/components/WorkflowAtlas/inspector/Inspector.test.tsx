@@ -760,34 +760,11 @@ describe("StepInspector", () => {
       fireEvent.click(screen.getByRole("button", { name: "Save step" }));
       await waitFor(() =>
         expect(commands.updateStep).toHaveBeenCalledWith(
-          expect.objectContaining({ harness, clear_harness: false })
+          expect.objectContaining({ harness })
         )
       );
     }
   );
-
-  it("clears a selected harness back to the Sacrum default", async () => {
-    mockUseStep(stepFixture({ harness: "codex" }));
-    render(
-      <StepInspector
-        model={MODEL}
-        workflowId="wf-build"
-        stepId="s1"
-        onSelect={vi.fn()}
-        onClose={vi.fn()}
-      />
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Step harness"), {
-      target: { value: "" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
-    await waitFor(() =>
-      expect(commands.updateStep).toHaveBeenCalledWith(
-        expect.objectContaining({ harness: null, clear_harness: true })
-      )
-    );
-  });
 
   it("rejects invalid structured_inference questions without saving", () => {
     mockUseStep(

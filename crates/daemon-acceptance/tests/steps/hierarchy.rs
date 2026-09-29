@@ -53,6 +53,8 @@ pub async fn child_execute_workflow(world: &mut DaemonWorld) {
             "finish",
             "--order",
             "1",
+            "--harness",
+            "claude",
         ])
         .await;
     world.assert_vtb_ok("child finish step add");
@@ -400,6 +402,8 @@ async fn create_wait_children_workflow(world: &mut DaemonWorld, label: &str) -> 
             "wait_children",
             "--order",
             "0",
+            "--harness",
+            "claude",
         ])
         .await;
     world.assert_vtb_ok("step add wait_children");
@@ -430,6 +434,8 @@ async fn create_wait_children_workflow(world: &mut DaemonWorld, label: &str) -> 
             "finish",
             "--order",
             "2",
+            "--harness",
+            "claude",
         ])
         .await;
     world.assert_vtb_ok("step add finish");

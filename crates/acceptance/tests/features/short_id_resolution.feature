@@ -370,14 +370,14 @@ Feature: Short ID resolution across all commands
   Scenario: step add resolves --workflow short ID
     Given a workflow "sa-wf" with steps "first"
     And I store the workflow short ID as "w"
-    When I run vtb "step add new-step --workflow <w>"
+    When I run vtb "step add new-step --workflow <w> --harness claude"
     Then the command should succeed
 
   Scenario: step add resolves --transition-to short ID
     Given a workflow "satr-wf" with steps "first, second"
     And I store the workflow short ID as "w"
     And I store the short ID of step "second" as "s2"
-    When I run vtb "step add gateway --workflow <w> --transition-to <s2>"
+    When I run vtb "step add gateway --workflow <w> --harness claude --transition-to <s2>"
     Then the command should succeed
 
   Scenario: step list resolves workflow short ID

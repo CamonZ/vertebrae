@@ -1684,8 +1684,6 @@ pub struct UpdateStepOptions {
     pub goal: Option<String>,
     pub harness: Option<StepHarness>,
     #[serde(default)]
-    pub clear_harness: bool,
-    #[serde(default)]
     pub config: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default)]
     pub persistence_options: Option<serde_json::Value>,
@@ -1704,9 +1702,7 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
         if let Some(goal) = opts.goal {
             update = update.with_goal(&goal);
         }
-        if opts.clear_harness {
-            update = update.clear_harness();
-        } else if let Some(harness) = opts.harness {
+        if let Some(harness) = opts.harness {
             update = update.with_harness(harness.into());
         }
         update.config = opts.config.map(core_config_patch);
@@ -2468,7 +2464,6 @@ mod tests {
                 name: None,
                 goal: None,
                 harness: Some(gui),
-                clear_harness: false,
                 config: None,
                 persistence_options: None,
                 clear_persistence_options: false,
@@ -2476,26 +2471,11 @@ mod tests {
                 transitions_to: None,
             }
             .into();
-            assert_eq!(update.harness, Some(Some(core)));
+            assert_eq!(update.harness, Some(core));
 
             create.harness = None;
             assert_eq!(create.into_step().unwrap().harness, None);
         }
-
-        let cleared: vertebrae_core::StepUpdate = UpdateStepOptions {
-            step_id: "step-1".into(),
-            name: None,
-            goal: None,
-            harness: None,
-            clear_harness: true,
-            config: None,
-            persistence_options: None,
-            clear_persistence_options: false,
-            order: None,
-            transitions_to: None,
-        }
-        .into();
-        assert_eq!(cleared.harness, Some(None));
     }
 
     #[test]
@@ -2505,7 +2485,6 @@ mod tests {
             name: None,
             goal: None,
             harness: None,
-            clear_harness: false,
             config: serde_json::json!({
                 "agent_config": {"model": "opus", "json_schema": "{\"type\":\"object\"}"}
             })
@@ -2530,7 +2509,6 @@ mod tests {
             name: None,
             goal: None,
             harness: None,
-            clear_harness: false,
             config: serde_json::json!({"prompt": null, "skills": ["s"]})
                 .as_object()
                 .cloned(),
@@ -2601,7 +2579,6 @@ mod tests {
             name: None,
             goal: None,
             harness: None,
-            clear_harness: false,
             config: None,
             persistence_options,
             clear_persistence_options,

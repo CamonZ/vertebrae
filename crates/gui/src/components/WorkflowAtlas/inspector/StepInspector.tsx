@@ -388,7 +388,6 @@ export function StepInspector({
           name,
           goal,
           harness,
-          clear_harness: harness === null,
           config,
           persistence_options: parsedPersistence,
           clear_persistence_options: clearPersistenceOptions,
@@ -474,7 +473,6 @@ export function StepInspector({
                 setHarness((event.target.value || null) as StepHarness | null)
               }
             >
-              <option value="">Use Sacrum default</option>
               <option value="claude">Claude</option>
               <option value="codex">Codex</option>
               <option value="typesafe">TypeSafe</option>

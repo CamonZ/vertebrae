@@ -55,7 +55,7 @@ Feature: Step questions: prompt and agent-config
 
   Scenario: Anthropic step with reasoning effort is rejected
     When I add a step "BadClaude" to the workflow with provider "anthropic", model "opus", and reasoning effort "high"
-    Then the command should fail with "only supported with --provider openai"
+    Then the command should fail with "only supported on the codex harness"
 
   Scenario: Create a Codex step with speed tier, personality, and verbosity
     When I add a step "ConfiguredCodex" to the workflow with provider "openai", model "gpt-5.5", speed tier "fast", personality "friendly", and verbosity "high"
@@ -328,18 +328,13 @@ Feature: Step questions: prompt and agent-config
       | codex    |
       | typesafe |
 
-  Scenario: Update and clear a step harness
+  Scenario: Update a step harness
     When I add a step "HarnessToUpdate" to the workflow
-    And I update the step "HarnessToUpdate" in the workflow with flag "--harness" and value "codex"
+    And I update the step "HarnessToUpdate" in the workflow with flag "--harness" and value "claude"
     Then the command should succeed
-    And the step "HarnessToUpdate" in the workflow should have harness "codex"
+    And the step "HarnessToUpdate" in the workflow should have harness "claude"
     When I show the step "HarnessToUpdate"
-    Then the output should contain "Harness:       codex"
-    When I update the step "HarnessToUpdate" in the workflow with flag "--clear-harness" and no value
-    Then the command should succeed
-    And the step "HarnessToUpdate" in the workflow should have harness "codex"
-    When I show the step "HarnessToUpdate"
-    Then the output should contain "Harness:       codex"
+    Then the output should contain "Harness:       claude"
 
   Scenario: Unsupported harness values are rejected by the CLI
     When I add a step "InvalidHarness" to the workflow with flag "--harness" and value "openai"

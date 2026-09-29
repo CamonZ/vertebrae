@@ -6,6 +6,34 @@ use crate::SmokeWorld;
 // Helpers
 // ============================================================================
 
+/// Add the `--harness` that `vtb step add` requires (and `vtb step update`
+/// requires when setting a provider), matching the step's provider or type,
+/// unless the scenario passes one itself.
+pub(crate) fn with_step_harness<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    let mut args = args.to_vec();
+    let value_of = |flag: &str| {
+        args.iter()
+            .position(|arg| *arg == flag)
+            .and_then(|index| args.get(index + 1).copied())
+    };
+    let provider = value_of("--provider");
+    if args.contains(&"--harness") || (args[1] == "update" && provider.is_none()) {
+        return args;
+    }
+    let agent_config = value_of("--agent-config").unwrap_or_default();
+    let harness = if value_of("--step-type") == Some("structured_inference")
+        || provider == Some("typesafe")
+    {
+        "typesafe"
+    } else if matches!(provider, Some("openai" | "codex")) || agent_config.contains("\"openai\"") {
+        "codex"
+    } else {
+        "claude"
+    };
+    args.extend(["--harness", harness]);
+    args
+}
+
 fn extract_step_id(stdout: &str) -> Option<String> {
     stdout
         .trim()
@@ -123,7 +151,13 @@ fn assert_command_succeeded(world: &SmokeWorld, action: &str) {
 async fn when_add_step_to_workflow(world: &mut SmokeWorld, name: String) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&["step", "add", &name, "--workflow", &wf_id])
+        .run_vtb(&with_step_harness(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -140,7 +174,7 @@ async fn when_add_stop_step_with_continuation(
         .and_then(|step| step["id"].as_str().map(str::to_owned))
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", target_name));
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -150,7 +184,7 @@ async fn when_add_stop_step_with_continuation(
             "stop",
             "--transition-to",
             &target_id,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -174,7 +208,7 @@ async fn when_add_stop_step_with_two_continuations(
         .and_then(|step| step["id"].as_str().map(str::to_owned))
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", second_target_name));
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -186,7 +220,7 @@ async fn when_add_stop_step_with_two_continuations(
             &first_target_id,
             "--transition-to",
             &second_target_id,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -200,7 +234,15 @@ async fn when_add_step_with_flag(
 ) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&["step", "add", &name, "--workflow", &wf_id, &flag, &value])
+        .run_vtb(&with_step_harness(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            &flag,
+            &value,
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -213,7 +255,7 @@ const REPLACEMENT_STRUCTURED_QUESTIONS: &str = r#"{"score":{"type":"score","inst
 async fn when_add_structured_inference_step(world: &mut SmokeWorld, name: String) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -229,7 +271,7 @@ async fn when_add_structured_inference_step(world: &mut SmokeWorld, name: String
             STRUCTURED_STATE,
             "--questions",
             STRUCTURED_QUESTIONS,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -238,13 +280,13 @@ async fn when_add_structured_inference_step(world: &mut SmokeWorld, name: String
 async fn when_replace_structured_inference_fields(world: &mut SmokeWorld, name: String) {
     let step_id = stored_step_id(world, &name);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "update",
             &step_id,
             "--questions",
             REPLACEMENT_STRUCTURED_QUESTIONS,
-        ])
+        ]))
         .await;
 }
 
@@ -252,7 +294,7 @@ async fn when_replace_structured_inference_fields(world: &mut SmokeWorld, name: 
 async fn when_add_structured_inference_step_without_provider(world: &mut SmokeWorld, name: String) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -266,7 +308,7 @@ async fn when_add_structured_inference_step_without_provider(world: &mut SmokeWo
             STRUCTURED_STATE,
             "--questions",
             STRUCTURED_QUESTIONS,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -282,7 +324,7 @@ async fn when_add_step_with_persistence_name(
         r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"#;
     let persistence = format!(r#"{{"artifact":{{"logical_name":"{}"}}}}"#, logical_name);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -292,7 +334,7 @@ async fn when_add_step_with_persistence_name(
             schema,
             "--persistence-options",
             &persistence,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -310,13 +352,13 @@ async fn when_update_step_with_persistence_name(
         .unwrap_or_else(|| panic!("no stored ID for step '{name}'"));
     let persistence = format!(r#"{{"artifact":{{"logical_name":"{}"}}}}"#, logical_name);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "update",
             &step_id,
             "--persistence-options",
             &persistence,
-        ])
+        ]))
         .await;
 }
 
@@ -325,7 +367,7 @@ async fn when_add_step_with_persistence_without_schema(world: &mut SmokeWorld, n
     let wf_id = workflow_id(world);
     let persistence = r#"{"artifact":{"logical_name":"missing-schema"}}"#;
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -333,7 +375,7 @@ async fn when_add_step_with_persistence_without_schema(world: &mut SmokeWorld, n
             &wf_id,
             "--persistence-options",
             persistence,
-        ])
+        ]))
         .await;
 }
 
@@ -344,7 +386,7 @@ async fn when_add_step_with_unknown_persistence_key(world: &mut SmokeWorld, name
         r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"#;
     let persistence = r#"{"artifact":{"logical_name":"unknown-key"},"unknown":true}"#;
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -354,7 +396,7 @@ async fn when_add_step_with_unknown_persistence_key(world: &mut SmokeWorld, name
             schema,
             "--persistence-options",
             persistence,
-        ])
+        ]))
         .await;
 }
 
@@ -365,7 +407,7 @@ async fn when_add_step_with_blank_persistence_name(world: &mut SmokeWorld, name:
         r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"#;
     let persistence = r#"{"artifact":{"logical_name":""}}"#;
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -375,7 +417,7 @@ async fn when_add_step_with_blank_persistence_name(world: &mut SmokeWorld, name:
             schema,
             "--persistence-options",
             persistence,
-        ])
+        ]))
         .await;
 }
 
@@ -387,7 +429,7 @@ async fn when_add_step_with_overlong_persistence_name(world: &mut SmokeWorld, na
     let logical_name = "x".repeat(256);
     let persistence = format!(r#"{{"artifact":{{"logical_name":"{}"}}}}"#, logical_name);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -397,7 +439,7 @@ async fn when_add_step_with_overlong_persistence_name(world: &mut SmokeWorld, na
             schema,
             "--persistence-options",
             &persistence,
-        ])
+        ]))
         .await;
 }
 
@@ -412,7 +454,7 @@ async fn when_add_step_with_agent_config_model(
     let json = format!(r#"{{"model":"{}"}}"#, model);
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -420,7 +462,7 @@ async fn when_add_step_with_agent_config_model(
             &wf_id,
             "--agent-config",
             &json,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -439,7 +481,7 @@ async fn when_add_step_with_agent_config_and_model_override(
     let json = format!(r#"{{"model":"{}"}}"#, config_model);
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -449,7 +491,7 @@ async fn when_add_step_with_agent_config_and_model_override(
             &json,
             "--model",
             &override_model,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -466,7 +508,7 @@ async fn when_add_step_with_provider_model_reasoning_effort(
 ) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -478,7 +520,7 @@ async fn when_add_step_with_provider_model_reasoning_effort(
             &model,
             "--reasoning-effort",
             &reasoning_effort,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -497,7 +539,7 @@ async fn when_add_step_with_provider_model_settings(
 ) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -513,7 +555,7 @@ async fn when_add_step_with_provider_model_settings(
             &personality,
             "--verbosity",
             &verbosity,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -530,7 +572,7 @@ async fn when_add_step_with_provider_model_verbosity(
 ) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -542,7 +584,7 @@ async fn when_add_step_with_provider_model_verbosity(
             &model,
             "--verbosity",
             &verbosity,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -559,7 +601,7 @@ async fn when_add_step_with_provider_model_personality(
 ) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -571,7 +613,7 @@ async fn when_add_step_with_provider_model_personality(
             &model,
             "--personality",
             &personality,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -588,7 +630,7 @@ async fn when_add_step_with_provider_codex_model_provider_and_model(
 ) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -600,7 +642,7 @@ async fn when_add_step_with_provider_codex_model_provider_and_model(
             &codex_model_provider,
             "--model",
             &model,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -614,7 +656,7 @@ async fn when_add_step_with_provider_and_model(
 ) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -624,7 +666,7 @@ async fn when_add_step_with_provider_and_model(
             &provider,
             "--model",
             &model,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -634,7 +676,7 @@ async fn when_add_step_with_provider_and_model(
 async fn when_add_step_with_invalid_agent_config(world: &mut SmokeWorld, name: String) {
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -642,7 +684,7 @@ async fn when_add_step_with_invalid_agent_config(world: &mut SmokeWorld, name: S
             &wf_id,
             "--agent-config",
             "{bad json}",
-        ])
+        ]))
         .await;
 }
 
@@ -659,7 +701,9 @@ async fn when_update_step_with_flag(
         .cloned()
         .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
     world
-        .run_vtb(&["step", "update", &step_id, &flag, &value])
+        .run_vtb(&with_step_harness(&[
+            "step", "update", &step_id, &flag, &value,
+        ]))
         .await;
 }
 
@@ -679,7 +723,7 @@ async fn when_update_step_with_provider_codex_model_provider_and_model(
         .cloned()
         .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "update",
             &step_id,
@@ -689,7 +733,7 @@ async fn when_update_step_with_provider_codex_model_provider_and_model(
             &codex_model_provider,
             "--model",
             &model,
-        ])
+        ]))
         .await;
 }
 
@@ -709,7 +753,7 @@ async fn when_update_step_with_model_settings(
         .cloned()
         .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "update",
             &step_id,
@@ -719,7 +763,7 @@ async fn when_update_step_with_model_settings(
             &personality,
             "--verbosity",
             &verbosity,
-        ])
+        ]))
         .await;
 }
 
@@ -736,7 +780,7 @@ async fn when_add_step_with_step_type_and_output_schema(
     let schema = r#"{"type":"object","properties":{"score":{"type":"number"}}}"#;
     let wf_id = workflow_id(world);
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -746,7 +790,7 @@ async fn when_add_step_with_step_type_and_output_schema(
             &step_type,
             "--output-schema",
             schema,
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 }
@@ -756,7 +800,7 @@ async fn when_add_and_configure_route_step(world: &mut SmokeWorld, name: String)
     let wf_id = workflow_id(world);
     let done_id = stored_step_id(world, "done");
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "add",
             &name,
@@ -764,7 +808,7 @@ async fn when_add_and_configure_route_step(world: &mut SmokeWorld, name: String)
             &wf_id,
             "--step-type",
             "route",
-        ])
+        ]))
         .await;
     store_step_id_if_created(world, &name);
 
@@ -773,7 +817,7 @@ async fn when_add_and_configure_route_step(world: &mut SmokeWorld, name: String)
     let backlog_id = stored_step_id(world, "backlog");
 
     world
-        .run_vtb(&[
+        .run_vtb(&with_step_harness(&[
             "step",
             "update",
             &backlog_id,
@@ -781,18 +825,30 @@ async fn when_add_and_configure_route_step(world: &mut SmokeWorld, name: String)
             route_predecessor_schema(),
             "--transition-to",
             &route_id,
-        ])
+        ]))
         .await;
     assert_command_succeeded(world, "configure the route predecessor");
 
     world
-        .run_vtb(&["step", "update", &route_id, "--transition-to", &done_id])
+        .run_vtb(&with_step_harness(&[
+            "step",
+            "update",
+            &route_id,
+            "--transition-to",
+            &done_id,
+        ]))
         .await;
     assert_command_succeeded(world, "configure the route destination");
 
     let route_config = route_config_for(&done_id);
     world
-        .run_vtb(&["step", "update", &route_id, "--route-config", &route_config])
+        .run_vtb(&with_step_harness(&[
+            "step",
+            "update",
+            &route_id,
+            "--route-config",
+            &route_config,
+        ]))
         .await;
     assert_command_succeeded(world, "configure the deterministic route");
 }
@@ -803,7 +859,13 @@ async fn when_replace_route_config(world: &mut SmokeWorld, name: String) {
     let done_id = stored_step_id(world, "done");
     let route_config = replacement_route_config_for(&done_id);
     world
-        .run_vtb(&["step", "update", &route_id, "--route-config", &route_config])
+        .run_vtb(&with_step_harness(&[
+            "step",
+            "update",
+            &route_id,
+            "--route-config",
+            &route_config,
+        ]))
         .await;
 }
 
@@ -813,7 +875,13 @@ async fn when_update_configured_route_with_invalid_reference(world: &mut SmokeWo
     let done_id = stored_step_id(world, "done");
     let route_config = invalid_route_config_for(&done_id);
     world
-        .run_vtb(&["step", "update", &route_id, "--route-config", &route_config])
+        .run_vtb(&with_step_harness(&[
+            "step",
+            "update",
+            &route_id,
+            "--route-config",
+            &route_config,
+        ]))
         .await;
 }
 
@@ -825,7 +893,9 @@ async fn when_update_step_with_flag_no_value(world: &mut SmokeWorld, name: Strin
         .get(&format!("step:{}", name))
         .cloned()
         .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
-    world.run_vtb(&["step", "update", &step_id, &flag]).await;
+    world
+        .run_vtb(&with_step_harness(&["step", "update", &step_id, &flag]))
+        .await;
 }
 
 /// Show a specific step by name (looks up the stored step ID)

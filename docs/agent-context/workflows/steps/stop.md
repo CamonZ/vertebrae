@@ -12,7 +12,7 @@ Use this when: work should pause (for review, a schedule, or a human) and resume
   empty. Carry anything needed across the boundary in artifacts or task content.
 
 ## Doing it
-`vtb step add "Pause" -w <wf> --step-type stop --transition-to <next>`.
+`vtb step add "Pause" -w <wf> --harness claude --step-type stop --transition-to <next>`.
 Resume later with `vtb start-taskrun <task>` (with consent).
 
 ## Gotchas

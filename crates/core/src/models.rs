@@ -2792,9 +2792,8 @@ pub struct StepUpdate {
     pub name: Option<String>,
     /// New goal
     pub goal: Option<String>,
-    /// Harness update (`None` leaves unchanged, `Some(None)` clears to the
-    /// Sacrum default, and `Some(Some(harness))` selects one explicitly).
-    pub harness: Option<Option<StepHarness>>,
+    /// New harness selection
+    pub harness: Option<StepHarness>,
     /// Config fields to write
     pub config: Option<serde_json::Map<String, serde_json::Value>>,
     /// New orchestrator-owned persistence configuration (Some(None) clears it)
@@ -2825,13 +2824,7 @@ impl StepUpdate {
 
     /// Select a harness for this step.
     pub fn with_harness(mut self, harness: StepHarness) -> Self {
-        self.harness = Some(Some(harness));
-        self
-    }
-
-    /// Clear an explicit harness selection and restore Sacrum's default.
-    pub fn clear_harness(mut self) -> Self {
-        self.harness = Some(None);
+        self.harness = Some(harness);
         self
     }
 
@@ -3623,13 +3616,12 @@ mod tests {
     }
 
     #[test]
-    fn step_update_harness_patch_distinguishes_omission_set_and_clear() {
+    fn step_update_harness_patch_distinguishes_omission_and_set() {
         assert_eq!(StepUpdate::new().harness, None);
         assert_eq!(
             StepUpdate::new().with_harness(StepHarness::Codex).harness,
-            Some(Some(StepHarness::Codex))
+            Some(StepHarness::Codex)
         );
-        assert_eq!(StepUpdate::new().clear_harness().harness, Some(None));
     }
 
     #[test]

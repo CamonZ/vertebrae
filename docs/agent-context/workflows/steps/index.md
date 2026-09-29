@@ -5,7 +5,7 @@ Each step's type decides who handles it: the daemon (AI work) or the backend (co
 - [Step types](step-types.md): pick a type by intent; comparison of all seven.
   Load when: "which step type should I use", explaining what a step does.
 - [Harness](harness.md): the `claude`/`codex`/`typesafe` runtime selector for daemon-run steps.
-  Load when: `--harness`, "run it on Codex/Claude/TypeSafe", `server-default`, harness errors at run time.
+  Load when: `--harness`, "run it on Codex/Claude/TypeSafe", `--harness is required`, harness errors at save or run time.
 - [llm_inference](llm_inference/index.md): an agent (`claude` or `codex` harness) does open-ended work.
   Load when: prompts, agent config, model/speed tier, output schemas, tool restrictions.
 - [structured_inference](structured_inference/index.md): the `typesafe` harness answers fixed questions.

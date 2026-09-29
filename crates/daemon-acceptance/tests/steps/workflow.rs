@@ -51,6 +51,8 @@ pub async fn given_workflow_with_explicit_harness(
             "finish",
             "--order",
             "1",
+            "--harness",
+            "claude",
         ])
         .await;
     world.assert_vtb_ok("step add finish");
@@ -348,6 +350,8 @@ async fn create_workflow_and_step(world: &mut DaemonWorld, output_schema: Option
             "finish",
             "--order",
             "1",
+            "--harness",
+            "claude",
         ])
         .await;
     world.assert_vtb_ok("step add finish");

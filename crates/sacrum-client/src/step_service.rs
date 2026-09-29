@@ -259,9 +259,7 @@ impl StepService for SacrumStepService {
             variables["goal"] = json!(goal);
         }
         if let Some(harness) = updates.harness {
-            variables["harness"] = harness
-                .map(|harness| json!(harness.as_str()))
-                .unwrap_or(serde_json::Value::Null);
+            variables["harness"] = json!(harness.as_str());
         }
         if let Some(config) = &updates.config {
             variables["config"] = json!(Self::json_variable(config, "config")?);
@@ -752,7 +750,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_step_sets_and_clears_harness_without_touching_omitted_updates() {
+    async fn update_step_sets_harness_without_touching_omitted_updates() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/graphql"))
@@ -778,13 +776,9 @@ mod tests {
                 .await
                 .unwrap();
         }
-        service
-            .update_step("step-1", &StepUpdate::new().clear_harness())
-            .await
-            .unwrap();
 
         let requests = server.received_requests().await.unwrap();
-        assert_eq!(requests.len(), 5);
+        assert_eq!(requests.len(), 4);
         let omitted: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
         assert!(omitted["variables"].get("harness").is_none());
         assert!(
@@ -808,14 +802,6 @@ mod tests {
                     .contains("harness: $harness")
             );
         }
-        let cleared: serde_json::Value = serde_json::from_slice(&requests[4].body).unwrap();
-        assert!(cleared["variables"]["harness"].is_null());
-        assert!(
-            cleared["query"]
-                .as_str()
-                .unwrap()
-                .contains("harness: $harness")
-        );
     }
 
     #[tokio::test]
