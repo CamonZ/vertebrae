@@ -237,8 +237,5 @@ mod tests {
         assert!(query.contains("config: $config"));
         assert!(query.contains("persistence_options: $persistence_options"));
         assert!(!query.contains("clear_output_schema"));
-
-        let clear_harness = update_step_query(&vertebrae_core::StepUpdate::new().clear_harness());
-        assert!(clear_harness.contains("harness: $harness"));
     }
 }

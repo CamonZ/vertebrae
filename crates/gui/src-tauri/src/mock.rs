@@ -1279,7 +1279,7 @@ impl StepService for MockStepService {
             step.goal = Some(goal.clone());
         }
         if let Some(harness) = updates.harness {
-            step.harness = harness;
+            step.harness = Some(harness);
         }
         step.config = updated.config;
         if let Some(order) = updates.order {

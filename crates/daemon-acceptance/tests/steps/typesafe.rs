@@ -59,6 +59,8 @@ pub async fn workflow_with_structured_inference(world: &mut DaemonWorld) {
             "finish",
             "--order",
             "1",
+            "--harness",
+            "claude",
         ])
         .await;
     world.assert_vtb_ok("step add finish");

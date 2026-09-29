@@ -2262,7 +2262,7 @@ export type UpdateComponentState = "pending" | "downloaded" | "verified" | "stag
  * Only fields that are Some will be updated. `config` is a partial patch:
  * only its keys are written, and a null value clears that field.
  */
-export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; harness: StepHarness | null; clear_harness?: boolean; config?: Partial<{ [key in string]: JsonValue }> | null; persistence_options?: JsonValue | null; clear_persistence_options?: boolean; order: number | null; transitions_to: string[] | null }
+export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; harness: StepHarness | null; config?: Partial<{ [key in string]: JsonValue }> | null; persistence_options?: JsonValue | null; clear_persistence_options?: boolean; order: number | null; transitions_to: string[] | null }
 /**
  * Options for updating a task - allows updating multiple fields at once
  */

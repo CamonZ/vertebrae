@@ -29,19 +29,19 @@ Create a new step for a workflow.
 
 ```bash
 # Basic step
-vtb step add "Review" -w <workflow-id>
+vtb step add "Review" -w <workflow-id> --harness claude
 
 # With goal and model
-vtb step add "Coding" -w <workflow-id> --goal "Implement the feature" --model sonnet
+vtb step add "Coding" -w <workflow-id> --harness claude --goal "Implement the feature" --model sonnet
 
 # Codex/OpenAI with per-step reasoning effort
-vtb step add "Coding" -w <workflow-id> \
+vtb step add "Coding" -w <workflow-id> --harness codex \
   --provider openai \
   --model gpt-5.5 \
   --reasoning-effort high
 
 # Codex with serving speed, personality, and output detail
-vtb step add "Codex review" -w <workflow-id> \
+vtb step add "Codex review" -w <workflow-id> --harness codex \
   --provider openai \
   --model gpt-5.5 \
   --speed-tier fast \
@@ -49,34 +49,34 @@ vtb step add "Codex review" -w <workflow-id> \
   --verbosity high
 
 # Codex/OpenAI with a configured upstream provider
-vtb step add "Coding" -w <workflow-id> \
+vtb step add "Coding" -w <workflow-id> --harness codex \
   --provider openai \
   --codex-model-provider openrouter \
   --model deepseek/deepseek-v4-flash
 
 # With prompt and full agent config JSON
-vtb step add "Coding" -w <workflow-id> \
+vtb step add "Coding" -w <workflow-id> --harness claude \
   --prompt "Implement the task described in {{task.id}}" \
   --agent-config '{"model":"opus","max_budget_usd":5.0}'
 
 # With agents and skills
-vtb step add "Testing" -w <workflow-id> \
+vtb step add "Testing" -w <workflow-id> --harness claude \
   --agent .claude/agents/test-runner.md \
   --skill run-tests \
   --skill check-coverage
 
 # With transitions and a finish step
-vtb step add "Approved" -w <workflow-id> --step-type finish
-vtb step add "Needs Work" -w <workflow-id> --transition-to <step-id>
+vtb step add "Approved" -w <workflow-id> --harness claude --step-type finish
+vtb step add "Needs Work" -w <workflow-id> --harness claude --transition-to <step-id>
 
 # With step type and structured output schema
-vtb step add "Evaluate" -w <workflow-id> \
+vtb step add "Evaluate" -w <workflow-id> --harness claude \
   --step-type llm_inference \
   --output-schema '{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}'
 
 # Add a structured_inference step: provider, model, state, and fields are
 # required; state may be JSON or a string template, fields may be @file
-vtb step add "Classify" -w <workflow-id> \
+vtb step add "Classify" -w <workflow-id> --harness typesafe \
   --step-type structured_inference \
   --provider typesafe \
   --model <model> \
@@ -84,17 +84,17 @@ vtb step add "Classify" -w <workflow-id> \
   --fields @classify-schema.json
 
 # Create a deterministic route draft, then configure it after graph targets exist
-vtb step add "Router" -w <workflow-id> --step-type route
+vtb step add "Router" -w <workflow-id> --harness claude --step-type route
 vtb step update <step-id> --route-config '<route-config-json>'
 
 # Persist validated structured output as a task artifact (Sacrum-owned)
-vtb step add "Evaluate" -w <workflow-id> \
+vtb step add "Evaluate" -w <workflow-id> --harness claude \
   --step-type llm_inference \
   --output-schema '{"type":"object","required":["passed"]}' \
   --persistence-options '{"artifact":{"logical_name":"step_result"}}'
 
 # Machine-readable creation result
-vtb --json step add "Review" -w <workflow-id>
+vtb --json step add "Review" -w <workflow-id> --harness claude
 ```
 
 ### Options
@@ -268,7 +268,7 @@ vtb step update <step-id> \
   --clear-verbosity
 
 # Move a step to Codex and set reasoning effort
-vtb step update <step-id> --provider openai --model gpt-5.5 --reasoning-effort high
+vtb step update <step-id> --harness codex --provider openai --model gpt-5.5 --reasoning-effort high
 
 # Use provider aliases
 vtb step update <step-id> --model-provider openai --codex-provider openrouter

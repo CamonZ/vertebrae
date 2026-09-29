@@ -35,7 +35,7 @@ mod step_create_tests {
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: None,
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -77,7 +77,7 @@ mod step_create_tests {
             name: "Persisted".to_string(),
             workflow: workflow_id,
             id: Some("persisted-step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -117,7 +117,6 @@ mod step_create_tests {
             clear_verbosity: false,
             id: "persisted-step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -168,7 +167,6 @@ mod step_create_tests {
             clear_verbosity: false,
             id: "persisted-step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -225,7 +223,7 @@ mod step_create_tests {
             name: "Finish".to_string(),
             workflow: workflow_id,
             id: Some("finish-step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -274,7 +272,7 @@ mod step_create_tests {
             name: "Invalid Finish".to_string(),
             workflow: workflow_id,
             id: Some("invalid-finish".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -318,7 +316,7 @@ mod step_create_tests {
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("review-step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -373,7 +371,7 @@ mod step_create_tests {
             name: "Code Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("code-review".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: Some("Review code for quality and best practices".to_string()),
             agent: vec![],
             skill: vec![],
@@ -428,7 +426,7 @@ mod step_create_tests {
             name: "Deploy".to_string(),
             workflow: workflow_id.clone(),
             id: Some("deploy".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -475,7 +473,7 @@ mod step_create_tests {
             name: "Complete".to_string(),
             workflow: workflow_id.clone(),
             id: Some("complete".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -526,7 +524,7 @@ mod step_create_tests {
             name: "Analysis".to_string(),
             workflow: workflow_id.clone(),
             id: Some("analysis".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![
                 ".claude/agents/reviewer.md".to_string(),
@@ -589,7 +587,7 @@ mod step_create_tests {
             name: "Testing".to_string(),
             workflow: workflow_id.clone(),
             id: Some("testing".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec!["test-writing".to_string(), "debugging".to_string()],
@@ -638,7 +636,7 @@ mod step_create_tests {
             name: "Decision".to_string(),
             workflow: workflow_id.clone(),
             id: Some("decision".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -697,7 +695,7 @@ mod step_create_tests {
             name: "LegacyStep".to_string(),
             workflow: workflow_id.clone(),
             id: Some("legacy-step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -762,7 +760,7 @@ mod step_list_tests {
                 name: format!("Step {}", i + 1),
                 workflow: workflow_id.clone(),
                 id: Some(format!("step-{}", i)),
-                harness: None,
+                harness: CliHarness::Claude,
                 goal: None,
                 agent: vec![],
                 skill: vec![],
@@ -797,12 +795,12 @@ mod step_list_tests {
         // Verify output contains steps
         assert!(result.contains("Steps for workflow"));
         assert!(result.contains(
-            "1. Step 1 (id: step-0, type: llm_inference, harness: server-default, model: default)"
+            "1. Step 1 (id: step-0, type: llm_inference, harness: claude, model: default)"
         ));
         assert!(result.contains(
-            "2. Step 2 (id: step-1, type: llm_inference, harness: server-default, model: default)"
+            "2. Step 2 (id: step-1, type: llm_inference, harness: claude, model: default)"
         ));
-        assert!(result.contains("3. Step 3 (id: step-2, type: finish, harness: server-default)"));
+        assert!(result.contains("3. Step 3 (id: step-2, type: finish, harness: claude)"));
     }
 
     #[tokio::test]
@@ -823,7 +821,7 @@ mod step_list_tests {
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("review-step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: Some("Review implementation".to_string()),
             agent: vec![],
             skill: vec![],
@@ -907,7 +905,7 @@ mod step_list_tests {
             name: "MyStep".to_string(),
             workflow: workflow_id.clone(),
             id: Some("mystep".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -966,7 +964,7 @@ mod step_show_tests {
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("review".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: Some("Review code quality".to_string()),
             agent: vec![],
             skill: vec![],
@@ -1020,7 +1018,7 @@ mod step_show_tests {
             name: "Analysis".to_string(),
             workflow: workflow_id,
             id: Some("analysis".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![".claude/agents/reviewer.md".to_string()],
             skill: vec!["code-review".to_string(), "lint".to_string()],
@@ -1072,7 +1070,7 @@ mod step_show_tests {
             name: "Complete".to_string(),
             workflow: workflow_id,
             id: Some("complete".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1133,7 +1131,7 @@ mod step_show_tests {
             name: "MyStep".to_string(),
             workflow: workflow_id,
             id: Some("mystep".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1181,7 +1179,7 @@ mod step_show_tests {
             name: "Ask human".to_string(),
             workflow: workflow_id.clone(),
             id: Some("human-gate".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: Some("Collect reviewer decision".to_string()),
             agent: vec![],
             skill: vec![],
@@ -1258,7 +1256,7 @@ mod step_update_tests {
             name: "Original".to_string(),
             workflow: workflow_id,
             id: Some("step1".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1289,7 +1287,6 @@ mod step_update_tests {
             clear_verbosity: false,
             id: "step1".to_string(),
             harness: None,
-            clear_harness: false,
             name: Some("Updated".to_string()),
             goal: None,
             agent: vec![],
@@ -1337,7 +1334,7 @@ mod step_update_tests {
             name: "Done".to_string(),
             workflow: workflow_id,
             id: Some("done".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1399,7 +1396,7 @@ mod step_update_tests {
             name: "Analysis".to_string(),
             workflow: workflow_id,
             id: Some("analysis".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: Some("Old goal".to_string()),
             agent: vec![],
             skill: vec![],
@@ -1430,7 +1427,6 @@ mod step_update_tests {
             clear_verbosity: false,
             id: "analysis".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: Some("New goal".to_string()),
             agent: vec![],
@@ -1481,7 +1477,7 @@ mod step_update_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1512,7 +1508,6 @@ mod step_update_tests {
             clear_verbosity: false,
             id: "step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -1563,7 +1558,7 @@ mod step_update_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1594,7 +1589,6 @@ mod step_update_tests {
             clear_verbosity: false,
             id: "step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![".claude/agents/new.md".to_string()],
@@ -1653,7 +1647,7 @@ mod step_update_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![".claude/agents/old.md".to_string()],
             skill: vec![],
@@ -1684,7 +1678,6 @@ mod step_update_tests {
             clear_verbosity: false,
             id: "step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -1735,7 +1728,7 @@ mod step_update_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1766,7 +1759,6 @@ mod step_update_tests {
             clear_verbosity: false,
             id: "step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -1830,7 +1822,7 @@ mod step_update_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1861,7 +1853,6 @@ mod step_update_tests {
             clear_verbosity: false,
             id: "step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -1911,7 +1902,7 @@ mod step_update_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1941,7 +1932,6 @@ mod step_update_tests {
             clear_verbosity: false,
             id: "step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -2013,7 +2003,7 @@ mod step_dispatcher_tests {
             name: "Dispatched".to_string(),
             workflow: workflow_id,
             id: Some("dispatched".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2070,7 +2060,7 @@ mod step_delete_tests {
             name: "ToDelete".to_string(),
             workflow: workflow_id,
             id: Some("todelete".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2141,7 +2131,7 @@ mod step_delete_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2191,7 +2181,7 @@ mod step_delete_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("mystep".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2249,7 +2239,7 @@ mod step_prompt_and_agent_config_tests {
             name: "Review".to_string(),
             workflow: workflow_id,
             id: Some("review".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2297,7 +2287,7 @@ mod step_prompt_and_agent_config_tests {
             name: "Deploy".to_string(),
             workflow: workflow_id,
             id: Some("deploy".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2343,7 +2333,7 @@ mod step_prompt_and_agent_config_tests {
             name: "Override".to_string(),
             workflow: workflow_id,
             id: Some("override".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2401,7 +2391,7 @@ mod step_prompt_and_agent_config_tests {
             name: "Bad".to_string(),
             workflow: workflow_id,
             id: None,
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2449,7 +2439,7 @@ mod step_prompt_and_agent_config_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2479,7 +2469,6 @@ mod step_prompt_and_agent_config_tests {
             clear_verbosity: false,
             id: "step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -2528,7 +2517,7 @@ mod step_prompt_and_agent_config_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2559,7 +2548,6 @@ mod step_prompt_and_agent_config_tests {
             clear_verbosity: false,
             id: "step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -2608,7 +2596,7 @@ mod step_prompt_and_agent_config_tests {
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2638,7 +2626,6 @@ mod step_prompt_and_agent_config_tests {
             clear_verbosity: false,
             id: "step".to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -2693,7 +2680,7 @@ mod step_prompt_and_agent_config_tests {
             name: "FullStep".to_string(),
             workflow: workflow_id,
             id: Some("full".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: Some("Complete review".to_string()),
             agent: vec![],
             skill: vec![],
@@ -2736,6 +2723,14 @@ mod provider_tests {
     use super::*;
     use vertebrae_core::{AgentConfig, PermissionMode, ProviderId};
 
+    fn harness_for(provider: Option<&ProviderId>) -> Option<CliHarness> {
+        match provider?.builtin()?.harness() {
+            vertebrae_core::StepHarness::Claude => Some(CliHarness::Claude),
+            vertebrae_core::StepHarness::Codex => Some(CliHarness::Codex),
+            vertebrae_core::StepHarness::Typesafe => Some(CliHarness::Typesafe),
+        }
+    }
+
     fn add_cmd_with(
         name: &str,
         workflow_id: String,
@@ -2744,6 +2739,11 @@ mod provider_tests {
         model: Option<String>,
         provider: Option<ProviderId>,
     ) -> StepAddCommand {
+        let config_provider = agent_config
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+            .and_then(|config| config["provider"].as_str().map(ProviderId::parse))
+            .and_then(Result::ok);
         StepAddCommand {
             speed_tier: None,
             personality: None,
@@ -2751,7 +2751,8 @@ mod provider_tests {
             name: name.to_string(),
             workflow: workflow_id,
             id: Some(id.to_string()),
-            harness: None,
+            harness: harness_for(provider.as_ref().or(config_provider.as_ref()))
+                .unwrap_or(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2786,8 +2787,7 @@ mod provider_tests {
             clear_personality: false,
             clear_verbosity: false,
             id: id.to_string(),
-            harness: None,
-            clear_harness: false,
+            harness: harness_for(provider.as_ref()),
             name: None,
             goal: None,
             agent: vec![],
@@ -2836,7 +2836,7 @@ mod provider_tests {
         ] {
             let id = format!("step-{wire}");
             let mut add = add_cmd_with("Harness", workflow_id.clone(), &id, None, None, None);
-            add.harness = Some(harness);
+            add.harness = harness;
             add.execute(services.steps()).await.unwrap();
 
             let mut update = update_cmd_with(&id, None, None, None);
@@ -2856,17 +2856,6 @@ mod provider_tests {
             .await
             .unwrap();
             assert!(listed.contains(&format!("harness: {wire}")), "{listed}");
-
-            let mut clear = update_cmd_with(&id, None, None, None);
-            clear.clear_harness = true;
-            clear.execute(services.steps()).await.unwrap();
-            let stored = services.steps().get_step(&id).await.unwrap().unwrap();
-            assert_eq!(stored.harness, None);
-            let shown = StepShowCommand { id }
-                .execute(services.steps())
-                .await
-                .unwrap();
-            assert!(shown.contains("Harness:       server-default"), "{shown}");
         }
     }
 
@@ -3053,10 +3042,73 @@ mod provider_tests {
         let (services, workflow_id) = mk_workflow().await;
         let mut cmd = add_cmd_with("Bad", workflow_id, "custom-bad-3", None, None, None);
         cmd.provider = Some("openrouter".to_string());
-        cmd.harness = Some(CliHarness::Claude);
+        cmd.harness = CliHarness::Claude;
         cmd.reasoning_effort = Some("high".to_string());
         let err = cmd.execute(services.steps()).await.expect_err("must fail");
         assert!(err.to_string().contains("codex harness"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn add_rejects_builtin_provider_on_another_harness() {
+        let (services, workflow_id) = mk_workflow().await;
+        let mut cmd = add_cmd_with(
+            "Mismatch",
+            workflow_id,
+            "mismatch-1",
+            None,
+            Some("opus".to_string()),
+            Some(ProviderId::anthropic()),
+        );
+        cmd.harness = CliHarness::Codex;
+        let err = cmd.execute(services.steps()).await.expect_err("must fail");
+        assert!(
+            err.to_string()
+                .contains("provider 'anthropic' runs on the claude harness"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_requires_harness_when_setting_provider() {
+        let (services, workflow_id) = mk_workflow().await;
+        add_cmd_with("Step", workflow_id, "needs-harness", None, None, None)
+            .execute(services.steps())
+            .await
+            .unwrap();
+
+        let mut flag = update_cmd_with("needs-harness", None, None, None);
+        flag.provider = Some("openai".to_string());
+        let err = flag.execute(services.steps()).await.expect_err("must fail");
+        assert!(
+            err.to_string()
+                .contains("--harness is required when setting the provider"),
+            "{err}"
+        );
+
+        let json = update_cmd_with(
+            "needs-harness",
+            Some(r#"{"provider":"openai"}"#.to_string()),
+            None,
+            None,
+        );
+        let err = json.execute(services.steps()).await.expect_err("must fail");
+        assert!(err.to_string().contains("--harness is required"), "{err}");
+
+        let mut with_harness = update_cmd_with("needs-harness", None, None, None);
+        with_harness.provider = Some("openai".to_string());
+        with_harness.harness = Some(CliHarness::Codex);
+        with_harness.execute(services.steps()).await.unwrap();
+        let step = services
+            .steps()
+            .get_step("needs-harness")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.harness, Some(vertebrae_core::StepHarness::Codex));
+        assert_eq!(
+            step.agent_config().unwrap().provider,
+            Some(ProviderId::openai())
+        );
     }
 
     #[tokio::test]
@@ -3583,7 +3635,7 @@ mod route_config_tests {
             name: "Router".to_string(),
             workflow: workflow.to_string(),
             id: Some(id.to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -3614,7 +3666,6 @@ mod route_config_tests {
             clear_verbosity: false,
             id: id.to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -3863,7 +3914,7 @@ mod route_config_tests {
             name: "Implement".to_string(),
             workflow: workflow_id,
             id: Some("implement".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec!["rust".to_string()],
@@ -3953,7 +4004,7 @@ mod structured_inference_tests {
             name: "Classify".to_string(),
             workflow: workflow_id,
             id: Some("classify".to_string()),
-            harness: None,
+            harness: CliHarness::Claude,
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -3984,7 +4035,6 @@ mod structured_inference_tests {
             clear_verbosity: false,
             id: id.to_string(),
             harness: None,
-            clear_harness: false,
             name: None,
             goal: None,
             agent: vec![],
@@ -4145,6 +4195,7 @@ mod structured_inference_tests {
 
         let mut update = update_cmd("classify");
         update.provider = Some("other".to_string());
+        update.harness = Some(CliHarness::Typesafe);
         update.model = Some("m2".to_string());
         update.execute(services.steps()).await.unwrap();
         let step = services
@@ -4194,6 +4245,7 @@ mod structured_inference_tests {
 
         let mut add = add_cmd(workflow_id, CliStepType::LlmInference);
         add.provider = Some("openai".to_string());
+        add.harness = CliHarness::Codex;
         add.execute(services.steps()).await.unwrap();
         let mut update = update_cmd("classify");
         update.questions = Some(

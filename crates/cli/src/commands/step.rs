@@ -242,9 +242,9 @@ pub struct StepAddCommand {
     #[arg(long, short)]
     pub goal: Option<String>,
 
-    /// Runtime harness for this step. Omit to use Sacrum's default.
+    /// Runtime harness for this step.
     #[arg(long, value_enum)]
-    pub harness: Option<CliHarness>,
+    pub harness: CliHarness,
 
     /// Paths to .claude/agents/ files (can be specified multiple times)
     #[arg(long, short = 'a')]
@@ -360,10 +360,9 @@ struct AgentConfigOverrides<'a> {
 /// Build the step's agent_config from an optional JSON base plus flag
 /// overrides and validate it for the harness that will run it.
 ///
-/// Built-in providers are checked against the built-in model catalog and
-/// their own harness. A custom provider is validated by the executing daemon
-/// against its `[providers.<id>]` profile; here its harness is only known
-/// when the step selects one explicitly.
+/// Built-in providers are checked against the built-in model catalog and must
+/// match the step harness. A custom provider's models are validated by the
+/// executing daemon against its `[providers.<id>]` profile.
 fn build_overlayed_agent_config(
     base: AgentConfig,
     json: Option<&str>,
@@ -392,10 +391,19 @@ fn build_overlayed_agent_config(
         Some(id) => id.builtin(),
     };
     let custom = config.provider.is_some() && builtin.is_none();
-    let harness = match builtin {
-        Some(builtin) => Some(builtin.harness()),
-        None if custom => step_harness,
-        None => Some(step_harness.unwrap_or(StepHarness::Claude)),
+    let harness = match (builtin, step_harness) {
+        (Some(builtin), Some(step_harness)) if builtin.harness() != step_harness => {
+            return Err(ServiceError::validation_failed(format!(
+                "provider '{}' runs on the {} harness, but the step harness is {step_harness}; pass --harness {}",
+                builtin.id(),
+                builtin.harness(),
+                builtin.harness(),
+            )));
+        }
+        (Some(builtin), _) => Some(builtin.harness()),
+        (None, Some(step_harness)) => Some(step_harness),
+        (None, None) if custom => None,
+        (None, None) => Some(StepHarness::Claude),
     };
     if provider_overridden
         && overrides.reasoning_effort.is_none()
@@ -503,7 +511,7 @@ impl StepAddCommand {
                 config.agent_config = build_overlayed_agent_config(
                     AgentConfig::new(),
                     self.agent_config.as_deref(),
-                    self.harness.map(Into::into),
+                    Some(self.harness.into()),
                     AgentConfigOverrides {
                         provider: parse_agent_provider(self.provider.as_deref())?,
                         model: self.model.as_deref(),
@@ -548,11 +556,8 @@ impl StepAddCommand {
             .with_step_type(step_type)
             .with_config(config)
             .with_order(self.order)
-            .with_transitions_to(transitions_to);
-
-        if let Some(harness) = self.harness {
-            step = step.with_harness(harness.into());
-        }
+            .with_transitions_to(transitions_to)
+            .with_harness(self.harness.into());
 
         if let Some(options) = persistence_options {
             step = step.with_persistence_options(options);
@@ -828,12 +833,8 @@ pub struct StepUpdateCommand {
     pub goal: Option<String>,
 
     /// Select the runtime harness for this step.
-    #[arg(long, value_enum, conflicts_with = "clear_harness")]
+    #[arg(long, value_enum)]
     pub harness: Option<CliHarness>,
-
-    /// Clear the explicit selection and restore Sacrum's default.
-    #[arg(long, conflicts_with = "harness")]
-    pub clear_harness: bool,
 
     /// New agents list (replaces existing)
     #[arg(long, short = 'a')]
@@ -988,6 +989,15 @@ impl StepUpdateCommand {
             || self.clear_verbosity
     }
 
+    fn sets_provider(&self) -> bool {
+        self.provider.is_some()
+            || self
+                .agent_config
+                .as_deref()
+                .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+                .is_some_and(|config| config.get("provider").is_some_and(|p| !p.is_null()))
+    }
+
     /// Config fields written (set or cleared) by the given flags.
     fn config_fields(&self, step_type: &StepType) -> Vec<&'static str> {
         let structured = *step_type == StepType::StructuredInference;
@@ -1022,12 +1032,13 @@ impl StepUpdateCommand {
                 ServiceError::validation_failed(format!("Step not found: {}", self.id))
             })?;
 
+        if self.harness.is_none() && self.sets_provider() {
+            return Err(ServiceError::validation_failed(
+                "--harness is required when setting the provider",
+            ));
+        }
+
         for (set, clear, flags) in [
-            (
-                self.harness.is_some(),
-                self.clear_harness,
-                "--harness and --clear-harness",
-            ),
             (
                 self.prompt.is_some(),
                 self.clear_prompt,
@@ -1074,9 +1085,6 @@ impl StepUpdateCommand {
 
         if let Some(harness) = self.harness {
             updates = updates.with_harness(harness.into());
-        }
-        if self.clear_harness {
-            updates = updates.clear_harness();
         }
 
         if let Some(prompt) = &self.prompt {
@@ -1142,11 +1150,7 @@ impl StepUpdateCommand {
         }
 
         if self.agent_config_flags_present(&existing.step_type) {
-            let step_harness = if self.clear_harness {
-                None
-            } else {
-                self.harness.map(Into::into).or(existing.harness)
-            };
+            let step_harness = self.harness.map(Into::into).or(existing.harness);
             let mut agent_config = build_overlayed_agent_config(
                 existing.agent_config().cloned().unwrap_or_default(),
                 self.agent_config.as_deref(),
@@ -1252,6 +1256,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Review",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1272,6 +1278,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Deploy",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000007",
@@ -1314,6 +1322,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "codex",
             "Coding",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000007",
@@ -1340,6 +1350,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "codex",
             "Review",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000007",
@@ -1368,6 +1380,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "codex",
             "Coding",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000007",
@@ -1394,6 +1408,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Code Review",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1428,6 +1444,8 @@ mod tests {
         let result = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
         ]);
@@ -1691,6 +1709,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Test Step",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1708,6 +1728,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Review",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1728,6 +1750,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Router",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1753,6 +1777,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Deploy",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1776,6 +1802,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Deploy",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1880,6 +1908,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Review",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1899,6 +1929,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Router",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1921,6 +1953,8 @@ mod tests {
             let result = TestCli::try_parse_from([
                 "test",
                 "add",
+                "--harness",
+                "claude",
                 "Checker",
                 "--workflow",
                 "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1936,6 +1970,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Waiter",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1957,6 +1993,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Human Approval",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -1978,6 +2016,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Stop",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -2002,6 +2042,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Finish",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -2051,6 +2093,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Evaluator",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -2076,6 +2120,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Persisted",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -2097,6 +2143,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Evaluator",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -2121,6 +2169,8 @@ mod tests {
         let result = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "claude",
             "Bad",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -2223,6 +2273,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "typesafe",
             "Review",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -2246,6 +2298,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "typesafe",
             "Review",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -2266,6 +2320,8 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "typesafe",
             "Classify",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",
@@ -2302,6 +2358,8 @@ mod tests {
         let result = TestCli::try_parse_from([
             "test",
             "add",
+            "--harness",
+            "typesafe",
             "Classify",
             "--workflow",
             "a1b2c3d4-0000-4000-8000-000000000006",

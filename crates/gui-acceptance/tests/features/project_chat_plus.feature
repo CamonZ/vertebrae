@@ -41,8 +41,8 @@ Feature: Project chat plus actions
     When I click on the element with title "Toggle chat history"
     And I click the local chat plus action for the "primary" project
     Then the active local chat should use the "primary" project directory within 5 seconds
-    When I choose local chat provider "codex"
-    Then the local chat provider should be "codex" within 5 seconds
+    When I choose local chat provider "openai"
+    Then the local chat provider should be "openai" within 5 seconds
     When I type "hello from codex project" into the element with test id "local-chat-composer"
     And I press the "Enter" key
     Then the active local chat should use the "primary" project directory within 10 seconds

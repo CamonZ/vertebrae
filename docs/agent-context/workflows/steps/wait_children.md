@@ -22,7 +22,7 @@ Use this when: an epic or ticket should run its children and continue after them
 - Child runs share the root run's `max_concurrency` and daemon.
 
 ## Doing it
-`vtb step add "Run children" -w <wf> --step-type wait_children --transition-to <next>`.
+`vtb step add "Run children" -w <wf> --harness claude --step-type wait_children --transition-to <next>`.
 It may take an output schema and `persistence_options` to store the snapshot as an artifact.
 
 ## Gotchas

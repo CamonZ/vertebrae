@@ -43,6 +43,8 @@ pub async fn stop_boundary_workflow(world: &mut DaemonWorld) {
             "finish",
             "--order",
             "2",
+            "--harness",
+            "claude",
         ])
         .await;
     world.assert_vtb_ok("step add finish continuation");
@@ -60,6 +62,8 @@ pub async fn stop_boundary_workflow(world: &mut DaemonWorld) {
             "1",
             "--transition-to",
             &finish_id,
+            "--harness",
+            "claude",
         ])
         .await;
     world.assert_vtb_ok("step add stop boundary");

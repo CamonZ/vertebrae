@@ -502,6 +502,8 @@ async fn given_create_step_with_type_in_workflow_via_cli(
             "--step-type",
             &step_type,
             &step_name,
+            "--harness",
+            "claude",
         ])
         .await;
     assert_eq!(

@@ -11,7 +11,7 @@ Use this when: a workflow path is done.
 - Prompt, agent config, output schema, transitions and `persistence_options` must be empty.
 
 ## Doing it
-`vtb step add "Done" -w <wf> --step-type finish`. Every path should end in a
+`vtb step add "Done" -w <wf> --harness claude --step-type finish`. Every path should end in a
 finish (or a stop) so runs and parents do not hang.
 
 ## Gotchas
