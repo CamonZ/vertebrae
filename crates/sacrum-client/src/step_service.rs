@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 use serde_json::json;
+use vertebrae_core::StepHarness;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{Step, StepConfig, StepType, StepUpdate};
 use vertebrae_core::step_service::StepService;
@@ -14,8 +15,8 @@ use crate::api_types::{ShortIdResponse, WorkflowResponse, WorkflowStepResponse};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::error::SacrumClientError;
 use crate::queries::steps::{
-    DELETE_STEP, GET_STEP, LIST_STEPS, RESOLVE_STEP_SHORT_ID, STEP_FIELDS, SYNC_STEP_TRANSITIONS,
-    create_step_query, update_step_query,
+    CREATE_STEP, DELETE_STEP, GET_STEP, LIST_STEPS, RESOLVE_STEP_SHORT_ID, STEP_FIELDS,
+    SYNC_STEP_TRANSITIONS, update_step_query,
 };
 use crate::queries::workflows::{LIST_WORKFLOWS, WORKFLOW_FIELDS};
 
@@ -105,17 +106,18 @@ impl StepService for SacrumStepService {
         Self::validate_stop_transitions(&step.step_type, &step.transitions_to)?;
         validate_step_config(step)?;
 
-        let query = with_fragments(&create_step_query(step.harness.is_some()), &[STEP_FIELDS]);
+        let query = with_fragments(CREATE_STEP, &[STEP_FIELDS]);
+        // Sacrum requires an explicit harness for every new step. Preserve
+        // legacy callers by defaulting steps without a selection to Claude.
+        let harness = step.harness.unwrap_or(StepHarness::Claude);
         let mut variables = json!({
             "workflow_id": step.workflow_id,
             "name": step.name,
             "goal": step.goal,
             "step_type": step.step_type.as_str(),
+            "harness": harness.as_str(),
             "step_order": step.order,
         });
-        if let Some(harness) = step.harness {
-            variables["harness"] = json!(harness.as_str());
-        }
         if let Some(config) = &step.config {
             variables["config"] = json!(Self::json_variable(config, "config")?);
         }
@@ -650,14 +652,10 @@ mod tests {
         assert_eq!(result.harness, None);
         let requests = server.received_requests().await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-        assert!(body["variables"].get("harness").is_none());
-        let operation = body["query"]
-            .as_str()
-            .unwrap()
-            .split("fragment StepFields")
-            .next()
-            .unwrap();
-        assert!(!operation.contains("harness"));
+        assert_eq!(body["variables"]["harness"], "claude");
+        let operation = body["query"].as_str().unwrap();
+        assert!(operation.contains("$harness: String!"));
+        assert!(operation.contains("harness: $harness"));
     }
 
     #[tokio::test]

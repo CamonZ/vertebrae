@@ -40,6 +40,12 @@ pub struct GuiWorld {
     /// Temp directory backing the second project's config.toml entry.
     second_temp_dir: Option<PathBuf>,
 
+    /// Directory selected by the project-creation acceptance scenario.
+    project_creation_dir: Option<PathBuf>,
+
+    /// Slug expected from creating `project_creation_dir` through the GUI.
+    gui_created_project_slug: Option<String>,
+
     /// Path to the vtb binary used for CLI mutations.
     vtb_binary: PathBuf,
 
@@ -134,6 +140,8 @@ impl GuiWorld {
             temp_dir: None,
             second_project_slug: None,
             second_temp_dir: None,
+            project_creation_dir: None,
+            gui_created_project_slug: None,
             vtb_binary: PathBuf::new(),
             env: HashMap::new(),
             task_id: None,

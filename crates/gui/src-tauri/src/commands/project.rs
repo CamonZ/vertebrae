@@ -82,15 +82,41 @@ pub async fn save_sacrum_settings(
 #[tauri::command]
 #[specta::specta]
 pub async fn initialize_project(
+    local_chat_manager: State<'_, LocalChatSessionManager>,
     path: String,
     name: Option<String>,
 ) -> Result<InitializeProjectResult, CommandError> {
-    initialize_project_inner(path, name).await
+    let capabilities = installed_harness_capabilities(&local_chat_manager.catalog().await);
+    initialize_project_inner(path, name, capabilities).await
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct InstalledHarnessCapabilities {
+    codex_installed: bool,
+    claude_installed: bool,
+}
+
+fn installed_harness_capabilities(
+    catalog: &LocalChatHarnessCatalog,
+) -> InstalledHarnessCapabilities {
+    let mut capabilities = InstalledHarnessCapabilities::default();
+    for harness in &catalog.harnesses {
+        match harness.harness {
+            crate::local_chat::LocalChatHarnessKind::Codex => {
+                capabilities.codex_installed = harness.available;
+            }
+            crate::local_chat::LocalChatHarnessKind::Claude => {
+                capabilities.claude_installed = harness.available;
+            }
+        }
+    }
+    capabilities
 }
 
 pub(crate) async fn initialize_project_inner(
     path: String,
     name: Option<String>,
+    capabilities: InstalledHarnessCapabilities,
 ) -> Result<InitializeProjectResult, CommandError> {
     log::info!("initialize_project called with path: {}", path);
 
@@ -131,7 +157,7 @@ pub(crate) async fn initialize_project_inner(
     let client = vertebrae_sacrum_client::GraphqlClient::new(temp_config);
 
     let (project, project_created) =
-        get_or_create_project(&client, &project_name, &project_slug).await?;
+        get_or_create_project(&client, &project_name, &project_slug, capabilities).await?;
     let project_path = project_root.to_string_lossy().to_string();
     vertebrae_sacrum_client::register_project(&project_slug, &project.id, &project_path).map_err(
         |e| CommandError {
@@ -154,9 +180,13 @@ pub(crate) async fn initialize_project_inner(
 /// creates the project in Sacrum API if needed, and registers in global config.
 #[tauri::command]
 #[specta::specta]
-pub async fn add_project(path: String) -> Result<SavedProject, CommandError> {
+pub async fn add_project(
+    local_chat_manager: State<'_, LocalChatSessionManager>,
+    path: String,
+) -> Result<SavedProject, CommandError> {
     log::info!("add_project called with path: {}", path);
-    let result = initialize_project_inner(path, None).await?;
+    let capabilities = installed_harness_capabilities(&local_chat_manager.catalog().await);
+    let result = initialize_project_inner(path, None, capabilities).await?;
 
     Ok(SavedProject {
         slug: result.slug,
@@ -259,6 +289,7 @@ async fn get_or_create_project(
     client: &vertebrae_sacrum_client::GraphqlClient,
     name: &str,
     slug: &str,
+    capabilities: InstalledHarnessCapabilities,
 ) -> Result<(vertebrae_sacrum_client::ProjectResponse, bool), CommandError> {
     let projects = client
         .execute::<Vec<vertebrae_sacrum_client::ProjectResponse>>(
@@ -278,11 +309,16 @@ async fn get_or_create_project(
     let project = client
         .execute::<vertebrae_sacrum_client::ProjectResponse>(
             vertebrae_sacrum_client::queries::projects::CREATE_PROJECT,
-            json!({
-                "name": name,
-                "slug": slug,
-            }),
-            "create_project",
+            serde_json::to_value(vertebrae_sacrum_client::CreateProjectRequest {
+                name: name.to_string(),
+                slug: slug.to_string(),
+                codex_installed: capabilities.codex_installed,
+                claude_installed: capabilities.claude_installed,
+            })
+            .map_err(|error| CommandError {
+                message: format!("Failed to encode project creation request: {error}"),
+            })?,
+            "createProject",
         )
         .await
         .map_err(|e| CommandError {
@@ -532,6 +568,7 @@ mod tests {
     struct MockSacrumServer {
         url: String,
         shutdown_tx: mpsc::Sender<()>,
+        request_rx: mpsc::Receiver<String>,
         handle: thread::JoinHandle<()>,
     }
 
@@ -540,20 +577,31 @@ mod tests {
             let _ = self.shutdown_tx.send(());
         }
 
-        fn join(self) {
-            self.handle
-                .join()
-                .expect("mock Sacrum server thread panicked");
+        fn join(self) -> Vec<String> {
+            let Self {
+                request_rx, handle, ..
+            } = self;
+            handle.join().expect("mock Sacrum server thread panicked");
+            request_rx.try_iter().collect()
         }
     }
 
     fn start_mock_sacrum_server() -> MockSacrumServer {
+        start_mock_sacrum_server_with_create_response(
+            r#"{"data":{"createProject":{"id":"proj-123","name":"Temp Project","slug":"temp-project","description":null}}}"#,
+        )
+    }
+
+    fn start_mock_sacrum_server_with_create_response(
+        create_response: &'static str,
+    ) -> MockSacrumServer {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
         listener
             .set_nonblocking(true)
             .expect("configure mock server listener");
         let url = format!("http://{}", listener.local_addr().expect("local addr"));
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
+        let (request_tx, request_rx) = mpsc::channel();
 
         let handle = thread::spawn(move || {
             let mut handled_requests = 0;
@@ -576,6 +624,7 @@ mod tests {
                     .expect("configure mock request stream");
 
                 let request = read_http_request(&mut stream);
+                request_tx.send(request.clone()).expect("record request");
                 let body = if handled_requests == 0 {
                     assert!(
                         request.contains("ListProjects"),
@@ -587,8 +636,7 @@ mod tests {
                         request.contains("CreateProject"),
                         "second request should create project, got {request}"
                     );
-                    r#"{"data":{"create_project":{"id":"proj-123","name":"Temp Project","slug":"temp-project","description":null}}}"#
-                        .to_string()
+                    create_response.to_string()
                 };
                 handled_requests += 1;
 
@@ -606,7 +654,50 @@ mod tests {
         MockSacrumServer {
             url,
             shutdown_tx,
+            request_rx,
             handle,
+        }
+    }
+
+    fn local_chat_harness_info(
+        harness: crate::local_chat::LocalChatHarnessKind,
+        available: bool,
+    ) -> crate::local_chat::LocalChatHarnessInfo {
+        crate::local_chat::LocalChatHarnessInfo {
+            harness,
+            label: format!("{harness:?}"),
+            available,
+            unavailable_reason: None,
+            default_model_id: None,
+            models: Vec::new(),
+            default_reasoning_effort: None,
+            reasoning_efforts: Vec::new(),
+            speed_tiers: Vec::new(),
+            permission_modes: None,
+            personality_options: None,
+            supports_resume: false,
+        }
+    }
+
+    #[test]
+    fn project_capabilities_follow_local_chat_harness_availability() {
+        use crate::local_chat::LocalChatHarnessKind::{Claude, Codex};
+
+        for (codex_available, claude_available) in
+            [(true, false), (false, true), (true, true), (false, false)]
+        {
+            let capabilities = installed_harness_capabilities(&LocalChatHarnessCatalog {
+                default_harness: Codex,
+                harnesses: vec![
+                    local_chat_harness_info(Codex, codex_available),
+                    local_chat_harness_info(Claude, claude_available),
+                ],
+                default_provider: "openai".to_string(),
+                providers: Vec::new(),
+            });
+
+            assert_eq!(capabilities.codex_installed, codex_available);
+            assert_eq!(capabilities.claude_installed, claude_available);
         }
     }
 
@@ -632,6 +723,13 @@ mod tests {
         }
 
         String::from_utf8(request).expect("mock request is utf8")
+    }
+
+    fn read_request_body(request: &str) -> &str {
+        request
+            .split_once("\r\n\r\n")
+            .expect("HTTP request body separator")
+            .1
     }
 
     fn find_header_end(request: &[u8]) -> Option<usize> {
@@ -826,6 +924,7 @@ mod tests {
         let err = initialize_project_inner(
             other.to_string_lossy().to_string(),
             Some("Duplicate".to_string()),
+            InstalledHarnessCapabilities::default(),
         )
         .await
         .unwrap_err();
@@ -864,11 +963,33 @@ mod tests {
         })
         .unwrap();
 
-        let result = initialize_project_inner(project_path.to_string_lossy().to_string(), None)
-            .await
-            .unwrap();
+        let result = initialize_project_inner(
+            project_path.to_string_lossy().to_string(),
+            None,
+            InstalledHarnessCapabilities {
+                codex_installed: true,
+                claude_installed: false,
+            },
+        )
+        .await
+        .unwrap();
         server.stop();
-        server.join();
+        let requests = server.join();
+        let create_request: serde_json::Value =
+            serde_json::from_str(read_request_body(&requests[1])).unwrap();
+        let query = create_request["query"].as_str().unwrap();
+        assert!(query.contains("createProject("));
+        assert!(query.contains("codexInstalled: $codexInstalled"));
+        assert!(query.contains("claudeInstalled: $claudeInstalled"));
+        assert_eq!(
+            create_request["variables"],
+            serde_json::json!({
+                "name": "Temp Project",
+                "slug": "temp-project",
+                "codexInstalled": true,
+                "claudeInstalled": false,
+            })
+        );
 
         assert_eq!(result.slug, "temp-project");
         assert_eq!(result.project_id, "proj-123");
@@ -920,11 +1041,15 @@ mod tests {
         })
         .unwrap();
 
-        let result = initialize_project_inner(project_path.to_string_lossy().to_string(), None)
-            .await
-            .unwrap();
+        let result = initialize_project_inner(
+            project_path.to_string_lossy().to_string(),
+            None,
+            InstalledHarnessCapabilities::default(),
+        )
+        .await
+        .unwrap();
         server.stop();
-        server.join();
+        let _requests = server.join();
 
         assert_eq!(result.slug, "temp-project");
         assert_eq!(
@@ -940,6 +1065,48 @@ mod tests {
         assert!(!vertebrae_installer::installed_skills_dir()
             .unwrap()
             .exists());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn initialize_project_surfaces_no_supported_harness_error_without_registering_project() {
+        let temp_home = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::new(temp_home.path());
+        let project_parent = tempfile::tempdir().unwrap();
+        let project_path = project_parent.path().join("Temp Project");
+        fs::create_dir_all(&project_path).unwrap();
+        let server = start_mock_sacrum_server_with_create_response(
+            r#"{"errors":[{"message":"At least one supported harness must be installed"}]}"#,
+        );
+
+        vertebrae_sacrum_client::save_config_file(&vertebrae_sacrum_client::VertebraeConfigFile {
+            sacrum: vertebrae_sacrum_client::GlobalSacrumSection {
+                url: server.url.clone(),
+                token: Some("sac_valid-token".to_string()),
+            },
+            projects: BTreeMap::new(),
+            typesafe: Default::default(),
+            providers: Default::default(),
+            observability: Default::default(),
+        })
+        .unwrap();
+
+        let error = initialize_project_inner(
+            project_path.to_string_lossy().to_string(),
+            None,
+            InstalledHarnessCapabilities::default(),
+        )
+        .await
+        .unwrap_err();
+        server.stop();
+        let requests = server.join();
+
+        assert!(error.message.contains("At least one supported harness"));
+        assert_eq!(requests.len(), 2);
+        assert!(vertebrae_sacrum_client::load_config_file()
+            .unwrap()
+            .projects
+            .is_empty());
     }
 
     #[tokio::test]

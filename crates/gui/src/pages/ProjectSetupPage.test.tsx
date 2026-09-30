@@ -290,6 +290,28 @@ describe("ProjectSetupPage", () => {
     );
   });
 
+  it("surfaces the backend no-supported-harness error without presenting the project as created", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockInitializeProject.mockResolvedValue({
+      status: "error",
+      error: {
+        message: "At least one supported harness must be installed",
+      },
+    });
+
+    render(<ProjectSetupPage />);
+
+    await chooseRemoteBackend();
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
+      "At least one supported harness must be installed"
+    );
+    expect(screen.queryByTestId("ignition-screen")).not.toBeInTheDocument();
+    expect(mockSetCurrentProject).not.toHaveBeenCalled();
+  });
+
   it("provisions a local backend without collecting account credentials", async () => {
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockLocalBackendProgressListen.mockImplementation(async (callback) => {

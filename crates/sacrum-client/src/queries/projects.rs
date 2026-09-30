@@ -12,8 +12,18 @@ pub const LIST_PROJECTS: &str = r#"
 
 /// Create a new project
 pub const CREATE_PROJECT: &str = r#"
-    mutation CreateProject($name: String!, $slug: String!) {
-        create_project(name: $name, slug: $slug) {
+    mutation CreateProject(
+        $name: String!,
+        $slug: String!,
+        $codexInstalled: Boolean!,
+        $claudeInstalled: Boolean!
+    ) {
+        createProject(
+            name: $name,
+            slug: $slug,
+            codexInstalled: $codexInstalled,
+            claudeInstalled: $claudeInstalled
+        ) {
             id
             name
             slug

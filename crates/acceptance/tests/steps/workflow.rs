@@ -146,8 +146,13 @@ async fn switch_acceptance_client_to_fresh_project(world: &mut SmokeWorld) {
     let project: vertebrae_sacrum_client::ProjectResponse = client
         .execute(
             vertebrae_sacrum_client::queries::projects::CREATE_PROJECT,
-            json!({ "name": slug, "slug": slug }),
-            "create_project",
+            json!({
+                "name": slug,
+                "slug": slug,
+                "codexInstalled": true,
+                "claudeInstalled": true,
+            }),
+            "createProject",
         )
         .await
         .expect("failed to create destination project");

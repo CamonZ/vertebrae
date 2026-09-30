@@ -10,12 +10,9 @@ Feature: Sidebar project switcher popover
   config.toml via getProjects() on open, so the second project appears as a
   switchable entry.
 
-  # NOTE: The "+" add-project flow (testing criterion #2) opens a NATIVE OS
-  # directory picker via the Tauri `open({ directory: true })` dialog. fantoccini
-  # drives the WebView only and CANNOT interact with native OS dialogs, so we do
-  # NOT automate the picker here — we only assert the add-project button is
-  # present/visible. The full add-project flow is covered by the Vitest unit
-  # test in crates/gui/src/components/Sidebar.test.tsx.
+  # The Tauri project initialization commands are exercised end-to-end in
+  # project_creation.feature; the frontend dialog interaction remains covered
+  # by the Sidebar component tests.
 
   Background:
     Given the GUI is showing the task list

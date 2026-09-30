@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use serde_json::json;
 use uuid::Uuid;
 use vertebrae_core::error::{ServiceError, ServiceResult};
+use vertebrae_core::models::StepType;
 use vertebrae_core::{
-    StepAddress, WorkflowBundleImportResult, WorkflowBundleManifest, WorkflowRef,
+    StepAddress, StepHarness, WorkflowBundleImportResult, WorkflowBundleManifest, WorkflowRef,
 };
 
 use crate::api_types::WorkflowBundleImportResponse;
@@ -22,9 +23,23 @@ impl SacrumWorkflowService {
             ServiceError::invalid_input(format!("workflow bundle validation failed: {error}"))
         })?;
 
+        // Sacrum requires a harness on every imported step. Older manifests
+        // omitted it, so choose the legacy default before sending the bundle.
+        let mut bundle_for_import = bundle.clone();
+        for workflow in &mut bundle_for_import.workflows {
+            for step in &mut workflow.steps {
+                if step.harness.is_none() {
+                    step.harness = Some(default_import_harness(
+                        &step.step_type,
+                        step.config.as_ref(),
+                    ));
+                }
+            }
+        }
+
         // Sacrum's Json scalar expects one JSON-encoded string, preserving the
         // manifest's nested metadata and step configuration as JSON objects.
-        let encoded_bundle = serde_json::to_string(&bundle).map_err(|error| {
+        let encoded_bundle = serde_json::to_string(&bundle_for_import).map_err(|error| {
             ServiceError::invalid_input(format!("could not encode workflow bundle: {error}"))
         })?;
 
@@ -42,6 +57,21 @@ impl SacrumWorkflowService {
             .map_err(map_import_client_error)?;
 
         validate_import_response(&bundle, response)
+    }
+}
+
+fn default_import_harness(step_type: &StepType, config: Option<&serde_json::Value>) -> StepHarness {
+    if *step_type == StepType::StructuredInference {
+        return StepHarness::Typesafe;
+    }
+
+    match config
+        .and_then(|config| config.get("agent_config"))
+        .and_then(|agent_config| agent_config.get("provider"))
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("openai" | "codex") => StepHarness::Codex,
+        _ => StepHarness::Claude,
     }
 }
 
@@ -363,8 +393,28 @@ mod tests {
 
         let encoded = request["variables"]["bundle"].as_str().unwrap();
         let sent_bundle: Value = serde_json::from_str(encoded).unwrap();
-        let original_bundle = serde_json::to_value(bundle).unwrap();
+        let mut expected_bundle = bundle;
+        for workflow in &mut expected_bundle.workflows {
+            for step in &mut workflow.steps {
+                if step.harness.is_none() {
+                    step.harness = Some(default_import_harness(
+                        &step.step_type,
+                        step.config.as_ref(),
+                    ));
+                }
+            }
+        }
+        let original_bundle = serde_json::to_value(expected_bundle).unwrap();
         assert_eq!(sent_bundle, original_bundle);
+        for workflow in sent_bundle["workflows"].as_array().unwrap() {
+            for step in workflow["steps"].as_array().unwrap() {
+                assert!(step["harness"].is_string());
+            }
+        }
+        assert_eq!(
+            sent_bundle["workflows"][1]["steps"][2]["harness"],
+            "typesafe"
+        );
         assert_eq!(
             sent_bundle["workflows"][0]["steps"][2]["config"]["prompt"],
             ""

@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use serde_json::json;
 use std::collections::HashMap;
+use vertebrae_core::StepHarness;
 use vertebrae_core::WorkflowSummary;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{StepType, Workflow, WorkflowTransition};
@@ -249,6 +250,7 @@ impl WorkflowService for SacrumWorkflowService {
                     "workflow_id": workflow_id,
                     "name": step.name,
                     "step_type": StepType::LlmInference.as_str(),
+                    "harness": StepHarness::Claude.as_str(),
                     "config": config,
                     "step_order": i as i32,
                 });
@@ -1488,6 +1490,21 @@ mod tests {
         assert_eq!(id, "wf-with-steps");
 
         let requests = server.received_requests().await.unwrap();
+        let create_step_requests = requests
+            .iter()
+            .filter(|request| String::from_utf8_lossy(&request.body).contains("CreateStep"))
+            .collect::<Vec<_>>();
+        assert_eq!(create_step_requests.len(), 2);
+        for request in create_step_requests {
+            let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            assert_eq!(body["variables"]["harness"], "claude");
+            assert!(
+                body["query"]
+                    .as_str()
+                    .unwrap()
+                    .contains("$harness: String!")
+            );
+        }
         let update_request = requests
             .iter()
             .find(|request| String::from_utf8_lossy(&request.body).contains("UpdateWorkflow"))

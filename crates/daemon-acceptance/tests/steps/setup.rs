@@ -23,8 +23,13 @@ pub async fn configured_daemon_environment(world: &mut DaemonWorld) {
     let project: vertebrae_sacrum_client::ProjectResponse = bootstrap_client
         .execute(
             vertebrae_sacrum_client::queries::projects::CREATE_PROJECT,
-            serde_json::json!({ "name": name, "slug": slug }),
-            "create_project",
+            serde_json::json!({
+                "name": name,
+                "slug": slug,
+                "codexInstalled": true,
+                "claudeInstalled": true,
+            }),
+            "createProject",
         )
         .await
         .expect("failed to create sacrum project");
