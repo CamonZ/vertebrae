@@ -12,6 +12,106 @@ fn second_project_slug(world: &GuiWorld) -> String {
         .expect("no second project slug — tag the scenario @multi_project so the setup hook provisions a second project")
 }
 
+#[when("I initialize the prepared project directory through the GUI command")]
+async fn initialize_prepared_project_directory(world: &mut GuiWorld) {
+    let dir = tempfile::Builder::new()
+        .prefix("gui-add-project-")
+        .tempdir()
+        .expect("failed to create project directory for GUI acceptance");
+    let path = dir.path().to_path_buf();
+    let slug = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("temporary project directory should have a UTF-8 name")
+        .to_ascii_lowercase()
+        .to_string();
+    std::mem::forget(dir);
+    world.project_creation_dir = Some(path.clone());
+    world.gui_created_project_slug = Some(slug);
+
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    // The native directory picker cannot be driven through WebDriver. Invoke
+    // the same Tauri commands used by the GUI add-project path, then reload the
+    // app so its active-project indicator reflects the selection.
+    let result = client
+        .execute_async(
+            r#"
+                const done = arguments[arguments.length - 1];
+                const internals = window.__TAURI_INTERNALS__;
+                if (!internals || typeof internals.invoke !== "function") {
+                    done({ error: "Tauri invoke API was not available" });
+                    return;
+                }
+                internals.invoke("initialize_project", { path: arguments[0], name: null })
+                    .then(async project => {
+                        await internals.invoke("set_current_project", { slug: project.slug });
+                        done({ slug: project.slug });
+                    })
+                    .catch(error => done({ error: String(error) }));
+            "#,
+            vec![serde_json::Value::String(
+                path.to_string_lossy().into_owned(),
+            )],
+        )
+        .await
+        .expect("failed to invoke GUI project commands");
+    assert_eq!(
+        result.get("slug").and_then(serde_json::Value::as_str),
+        Some(world.gui_created_project_slug.as_deref().unwrap()),
+        "GUI project command failed: {result}"
+    );
+    client
+        .goto(&gui_acceptance::tauri_base_url())
+        .await
+        .expect("failed to reload GUI after selecting the new project");
+}
+
+#[then(expr = "the GUI-created project should be active within {int} seconds")]
+async fn gui_created_project_should_be_active(world: &mut GuiWorld, timeout: u64) {
+    let slug = world
+        .gui_created_project_slug
+        .as_deref()
+        .expect("project-creation step did not prepare a directory")
+        .to_string();
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    gui_acceptance::wait_for_js(
+        &client,
+        "GUI-created project selected",
+        "return document.querySelector('[data-testid=\"sidebar-project-avatar\"]')?.getAttribute('aria-label') === 'Switch project · ' + arguments[0];",
+        vec![slug.clone().into()],
+        std::time::Duration::from_secs(timeout),
+    )
+    .await;
+
+    let projects: Vec<vertebrae_sacrum_client::ProjectResponse> = world
+        .graphql_client
+        .as_ref()
+        .expect("configured Sacrum client not initialized")
+        .execute(
+            vertebrae_sacrum_client::queries::projects::LIST_PROJECTS,
+            serde_json::json!({}),
+            "projects",
+        )
+        .await
+        .expect("failed to list projects after GUI creation");
+    assert!(
+        projects.iter().any(|project| project.slug == slug),
+        "GUI did not create project {slug} in Sacrum"
+    );
+    world.screenshot(&client, "after-gui-project-created").await;
+}
+
 /// Resolve the slug of the primary (active) project, panicking if the setup
 /// hook did not register one (i.e. a non-project scenario like @first_run).
 fn active_project_slug(world: &GuiWorld) -> String {

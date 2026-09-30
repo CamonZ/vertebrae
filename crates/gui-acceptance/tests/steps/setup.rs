@@ -86,8 +86,13 @@ async fn create_and_register_project(base_url: &str, api_token: &str) -> (String
     let project: vertebrae_sacrum_client::ProjectResponse = client
         .execute(
             vertebrae_sacrum_client::queries::projects::CREATE_PROJECT,
-            serde_json::json!({ "name": name, "slug": slug }),
-            "create_project",
+            serde_json::json!({
+                "name": name,
+                "slug": slug,
+                "codexInstalled": true,
+                "claudeInstalled": true,
+            }),
+            "createProject",
         )
         .await
         .expect("failed to create test project via GraphQL");
@@ -267,6 +272,13 @@ pub async fn after_scenario(world: &mut GuiWorld, first_run: bool) {
         let _ = vertebrae_sacrum_client::unregister_project(slug);
     }
     if let Some(path) = &world.second_temp_dir {
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    if let Some(slug) = &world.gui_created_project_slug {
+        let _ = vertebrae_sacrum_client::unregister_project(slug);
+    }
+    if let Some(path) = &world.project_creation_dir {
         let _ = std::fs::remove_dir_all(path);
     }
 

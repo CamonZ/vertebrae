@@ -321,14 +321,18 @@ impl InitCommand {
         }
 
         // Project not found, create it
+        let codex_installed = harness_binary_available("CODEX_PATH", "codex");
+        let claude_installed = harness_binary_available("CLAUDE_CODE_PATH", "claude");
         match client
             .execute::<vertebrae_sacrum_client::ProjectResponse>(
                 projects::CREATE_PROJECT,
                 serde_json::json!({
                     "name": name,
                     "slug": slug,
+                    "codexInstalled": codex_installed,
+                    "claudeInstalled": claude_installed,
                 }),
-                "create_project",
+                "createProject",
             )
             .await
         {
@@ -338,6 +342,15 @@ impl InitCommand {
             }),
         }
     }
+}
+
+fn harness_binary_available(override_variable: &str, binary_name: &str) -> bool {
+    if let Some(path) = std::env::var_os(override_variable).map(PathBuf::from) {
+        return path.is_file();
+    }
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|directory| directory.join(binary_name).is_file())
+    })
 }
 
 #[cfg(test)]
@@ -472,7 +485,9 @@ mod tests {
                         request.contains("CreateProject"),
                         "second init request should create project, got {request}"
                     );
-                    r#"{"data":{"create_project":{"id":"proj-123","name":"Temp Project","slug":"temp-project","description":null}}}"#
+                    assert!(request.contains("codexInstalled"));
+                    assert!(request.contains("claudeInstalled"));
+                    r#"{"data":{"createProject":{"id":"proj-123","name":"Temp Project","slug":"temp-project","description":null}}}"#
                         .to_string()
                 };
                 handled_requests += 1;

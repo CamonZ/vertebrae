@@ -929,9 +929,12 @@ pub struct ProjectResponse {
 
 /// Request to create a new project
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateProjectRequest {
     pub name: String,
     pub slug: String,
+    pub codex_installed: bool,
+    pub claude_installed: bool,
 }
 
 /// Project list response from Sacrum API
@@ -1561,11 +1564,20 @@ mod tests {
         let request = CreateProjectRequest {
             name: "New Project".to_string(),
             slug: "new-project".to_string(),
+            codex_installed: true,
+            claude_installed: false,
         };
 
-        let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("New Project"));
-        assert!(json.contains("new-project"));
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "name": "New Project",
+                "slug": "new-project",
+                "codexInstalled": true,
+                "claudeInstalled": false,
+            })
+        );
     }
 
     #[test]

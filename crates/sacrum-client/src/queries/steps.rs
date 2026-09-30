@@ -96,6 +96,7 @@ pub const CREATE_STEP: &str = r#"
         $name: String!,
         $goal: String,
         $step_type: String,
+        $harness: String!,
         $config: Json,
         $persistence_options: Json,
         $step_order: Int
@@ -105,6 +106,7 @@ pub const CREATE_STEP: &str = r#"
             name: $name,
             goal: $goal,
             step_type: $step_type,
+            harness: $harness,
             config: $config,
             persistence_options: $persistence_options,
             step_order: $step_order
@@ -113,25 +115,6 @@ pub const CREATE_STEP: &str = r#"
         }
     }
 "#;
-
-/// Add the explicit harness input only when the caller selected one. Omitting
-/// both the variable and argument lets Sacrum apply its configured default and
-/// provider backfill behavior for legacy or defaulted steps.
-pub fn create_step_query(include_harness: bool) -> String {
-    if !include_harness {
-        return CREATE_STEP.to_string();
-    }
-
-    CREATE_STEP
-        .replace(
-            "$step_type: String,",
-            "$step_type: String,\n        $harness: String,",
-        )
-        .replace(
-            "step_type: $step_type,",
-            "step_type: $step_type,\n            harness: $harness,",
-        )
-}
 
 /// The nullable update arguments must be omitted from the GraphQL document when
 /// an update does not touch them. Passing a missing variable to an explicit
@@ -211,10 +194,8 @@ mod tests {
         }
         assert!(CREATE_STEP.contains("$config: Json"));
         assert!(CREATE_STEP.contains("config: $config"));
-        assert!(!CREATE_STEP.contains("harness"));
-        let explicit_harness_query = create_step_query(true);
-        assert!(explicit_harness_query.contains("$harness: String"));
-        assert!(explicit_harness_query.contains("harness: $harness"));
+        assert!(CREATE_STEP.contains("$harness: String!"));
+        assert!(CREATE_STEP.contains("harness: $harness"));
         assert!(CREATE_STEP.contains("persistence_options: $persistence_options"));
         assert!(!CREATE_STEP.contains("$prompt"));
         assert!(!CREATE_STEP.contains("$route_config"));
