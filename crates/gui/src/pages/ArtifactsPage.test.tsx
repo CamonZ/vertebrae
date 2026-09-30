@@ -141,6 +141,22 @@ describe("ArtifactsPage", () => {
     );
   });
 
+  it("renders a 60-item project artifact list", () => {
+    const artifacts = Array.from({ length: 60 }, (_, index) =>
+      artifact(`a-${index + 1}`, `artifact-${index + 1}`)
+    );
+    useProjectArtifacts.mockReturnValue({
+      artifacts,
+      isLoading: false,
+      error: null,
+    });
+
+    render(<ArtifactsPage />);
+
+    expect(screen.getAllByRole("treeitem")).toHaveLength(60);
+    expect(screen.getByTestId("artifact-tree-leaf-a-60")).toBeInTheDocument();
+  });
+
   it("navigates visible leaves in depth-first order and skips collapsed descendants", () => {
     useProjectArtifacts.mockReturnValue({
       artifacts: [
