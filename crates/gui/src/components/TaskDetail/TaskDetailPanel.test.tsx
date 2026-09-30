@@ -11,6 +11,7 @@ import { TaskDetailPanel } from "./TaskDetailPanel";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import * as eventsModule from "../../bindings";
 import type {
+  Artifact,
   StepExecution,
   Task,
   TaskRun,
@@ -29,6 +30,7 @@ import {
 
 const mockTaskOverrides = vi.hoisted(() => ({
   current: {} as Partial<Task>,
+  listTaskArtifacts: vi.fn(),
 }));
 
 // Mock the useTask hook to return task data directly
@@ -135,6 +137,8 @@ vi.mock("../../bindings", () => ({
     orchestrateTask: vi.fn(),
     stopOrchestrator: vi.fn(),
     deleteTask: vi.fn(),
+    listTaskArtifacts: (...args: unknown[]) =>
+      mockTaskOverrides.listTaskArtifacts(...args),
     listTasks: vi.fn(async () => ({ status: "ok", data: [] })),
     getTaskRunTrace: vi.fn(async () => ({
       status: "ok",
@@ -168,6 +172,19 @@ const mockTaskData = createMockTask({
   sections: [],
   code_refs: [],
 });
+
+function taskArtifact(index: number): Artifact {
+  return {
+    id: `artifact-${index}`,
+    project_id: "project-1",
+    filename: `attachment-${index}.md`,
+    body: `# Attachment ${index}`,
+    logical_name: `attachment-${index}`,
+    metadata: null,
+    created_at: null,
+    updated_at: null,
+  };
+}
 
 function activeRunControls(): TaskRunControls {
   return {
@@ -252,6 +269,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     vi.clearAllMocks();
     resetProjectScopedStores();
     mockTaskOverrides.current = {};
+    mockTaskOverrides.listTaskArtifacts.mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
     usePanelFocusStore.getState().reset();
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
@@ -411,6 +432,32 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(
         screen.getByText("Reject invalid workflow payloads")
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("Attachments", () => {
+    it("renders 60 task attachments", async () => {
+      const artifacts = Array.from({ length: 60 }, (_, index) =>
+        taskArtifact(index + 1)
+      );
+      mockTaskOverrides.listTaskArtifacts.mockResolvedValue({
+        status: "ok",
+        data: artifacts,
+      });
+
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("task-artifact-artifact-60")
+        ).toBeInTheDocument()
+      );
+      expect(screen.getAllByTestId(/^task-artifact-artifact-/)).toHaveLength(
+        60
+      );
+      expect(mockTaskOverrides.listTaskArtifacts).toHaveBeenCalledWith(
+        mockTaskData.id
+      );
     });
   });
 
