@@ -5,7 +5,7 @@ Feature: Codex App Server step execution
 
   Scenario: Explicit Codex step harness dispatches without provider selection
     Given a configured daemon test environment
-    And a workflow with one execute step using harness "codex" and model "gpt-5.5"
+    And a workflow with one inference step using harness "codex" and model "gpt-5.5"
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
     And I start a TaskRun
@@ -17,7 +17,7 @@ Feature: Codex App Server step execution
 
   Scenario: Codex completed execution with metrics
     Given a configured daemon test environment
-    And a workflow with one execute step using openai
+    And a workflow with one inference step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
     And I start a TaskRun
@@ -29,7 +29,7 @@ Feature: Codex App Server step execution
 
   Scenario: Codex request carries model and reasoning effort
     Given a configured daemon test environment
-    And a workflow with one execute step using openai and reasoning effort "high"
+    And a workflow with one inference step using openai and reasoning effort "high"
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
     And I start a TaskRun
@@ -39,7 +39,7 @@ Feature: Codex App Server step execution
 
   Scenario: Codex request carries speed tier, personality, and verbosity
     Given a configured daemon test environment
-    And a workflow with one execute step using openai, speed tier "fast", personality "friendly", and verbosity "high"
+    And a workflow with one inference step using openai, speed tier "fast", personality "friendly", and verbosity "high"
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
     And I start a TaskRun
@@ -50,7 +50,7 @@ Feature: Codex App Server step execution
 
   Scenario: Codex request omits model settings when they are unset
     Given a configured daemon test environment
-    And a workflow with one execute step using openai
+    And a workflow with one inference step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
     And I start a TaskRun
@@ -61,7 +61,7 @@ Feature: Codex App Server step execution
 
   Scenario: Codex request carries an upstream model provider
     Given a configured daemon test environment
-    And a workflow with one execute step using openai, codex model provider "openrouter", and model "deepseek/deepseek-v4-flash"
+    And a workflow with one inference step using openai, codex model provider "openrouter", and model "deepseek/deepseek-v4-flash"
     And a task assigned to the workflow
     When the codex mock is scripted to succeed with full metrics
     And I start a TaskRun
@@ -71,7 +71,7 @@ Feature: Codex App Server step execution
 
   Scenario: Codex completed without an agent_message
     Given a configured daemon test environment
-    And a workflow with one execute step using openai
+    And a workflow with one inference step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to succeed without an agent_message
     And I start a TaskRun
@@ -82,7 +82,7 @@ Feature: Codex App Server step execution
 
   Scenario: Codex item events become session log entries
     Given a configured daemon test environment
-    And a workflow with one execute step using openai
+    And a workflow with one inference step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to emit three jsonl item events
     And I start a TaskRun
@@ -93,7 +93,7 @@ Feature: Codex App Server step execution
 
   Scenario: Codex top-level error event reports failure
     Given a configured daemon test environment
-    And a workflow with one execute step using openai
+    And a workflow with one inference step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to emit an error event
     And I start a TaskRun
@@ -102,7 +102,7 @@ Feature: Codex App Server step execution
 
   Scenario: Codex failed turn reports failure
     Given a configured daemon test environment
-    And a workflow with one execute step using openai
+    And a workflow with one inference step using openai
     And a task assigned to the workflow
     When the codex mock is scripted to emit a turn.failed event
     And I start a TaskRun

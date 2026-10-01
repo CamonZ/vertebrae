@@ -1399,6 +1399,11 @@ export type DaemonMetricsEvent = { connection_id: string; daemon_id: string; sch
 export type DaemonMutationResult = { connection_id: string; daemon: Daemon }
 export type DaemonNameUpdate = { kind: "unchanged" } | { kind: "clear" } | { kind: "set"; value: string }
 /**
+ * Execute config shared by workflow definitions and execution records.
+ * Context is server-written only on runtime execution snapshots; null on definitions.
+ */
+export type ExecuteStepConfig = { version: number; script: string; context: JsonValue | null; output_schema: JsonValue }
+/**
  * Execution status - mirrors db::ExecutionStatus
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
@@ -1807,7 +1812,7 @@ export type StepChangedEvent = { step_id: string; workflow_id: string; change_ty
  * A step's `step_type`-specific configuration, serialized as the bare
  * config object. Narrow it with the owning step's `step_type`.
  */
-export type StepConfig = LlmInferenceStepConfig | StructuredInferenceStepConfig | RouteStepConfig | WaitChildrenStepConfig
+export type StepConfig = LlmInferenceStepConfig | StructuredInferenceStepConfig | ExecuteStepConfig | RouteStepConfig | WaitChildrenStepConfig
 /**
  * Step execution record - mirrors db::StepExecution.
  *
@@ -1857,7 +1862,8 @@ completed_at: string | null;
 status?: ExecutionStatus;
 /**
  * Step config the execution ran with, templates rendered (rendered
- * prompt for llm_inference, resolved state for structured_inference);
+ * prompt for llm_inference, resolved state for structured_inference,
+ * rendered script and context snapshot for execute);
  * null for human_input, stop, and finish. Narrow it with `step_type`.
  */
 config?: StepConfig | null;
@@ -1943,7 +1949,7 @@ export type StepTransitionChangedEvent = { transition_id: string; from_step_id: 
 /**
  * Step type - mirrors core::StepType
  */
-export type StepType = "llm_inference" | "structured_inference" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
+export type StepType = "llm_inference" | "structured_inference" | "execute" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
 /** Harness selected for an individual workflow step. */
 export type StepHarness = "claude" | "codex" | "typesafe"
 /**

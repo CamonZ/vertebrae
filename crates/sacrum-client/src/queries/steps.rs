@@ -12,6 +12,7 @@ pub const STEP_FIELDS: &str = r#"
                 version prompt output_schema agents skills agent_config
             }
             ... on StructuredInferenceStepConfig { version provider model state questions }
+            ... on ExecuteStepConfig { version script context output_schema }
             ... on RouteStepConfig { version route_config }
             ... on WaitChildrenStepConfig { version output_schema }
         }
@@ -42,6 +43,7 @@ pub const WORKFLOW_EXPORT_STEP_FIELDS: &str = r#"
                 version prompt output_schema agents skills agent_config
             }
             ... on StructuredInferenceStepConfig { version provider model state questions }
+            ... on ExecuteStepConfig { version script context output_schema }
             ... on RouteStepConfig { version route_config }
             ... on WaitChildrenStepConfig { version output_schema }
         }
@@ -107,6 +109,32 @@ pub const CREATE_STEP: &str = r#"
             goal: $goal,
             step_type: $step_type,
             harness: $harness,
+            config: $config,
+            persistence_options: $persistence_options,
+            step_order: $step_order
+        ) {
+            ...StepFields
+        }
+    }
+"#;
+
+/// Execute steps do not select a provider harness. Omit the argument entirely
+/// so the backend cannot apply an inference default through nullable coercion.
+pub const CREATE_EXECUTE_STEP: &str = r#"
+    mutation CreateExecuteStep(
+        $workflow_id: Uuid4!,
+        $name: String!,
+        $goal: String,
+        $step_type: String,
+        $config: Json,
+        $persistence_options: Json,
+        $step_order: Int
+    ) {
+        create_workflow_step(
+            workflow_id: $workflow_id,
+            name: $name,
+            goal: $goal,
+            step_type: $step_type,
             config: $config,
             persistence_options: $persistence_options,
             step_order: $step_order
@@ -189,6 +217,10 @@ mod tests {
             assert!(fragment.contains(
                 "... on StructuredInferenceStepConfig { version provider model state questions }"
             ));
+            assert!(
+                fragment
+                    .contains("... on ExecuteStepConfig { version script context output_schema }")
+            );
             assert!(fragment.contains("... on RouteStepConfig { version route_config }"));
             assert!(fragment.contains("... on WaitChildrenStepConfig { version output_schema }"));
         }
@@ -199,6 +231,9 @@ mod tests {
         assert!(CREATE_STEP.contains("persistence_options: $persistence_options"));
         assert!(!CREATE_STEP.contains("$prompt"));
         assert!(!CREATE_STEP.contains("$route_config"));
+        assert!(CREATE_EXECUTE_STEP.contains("config: $config"));
+        assert!(CREATE_EXECUTE_STEP.contains("step_type: $step_type"));
+        assert!(!CREATE_EXECUTE_STEP.contains("harness"));
     }
 
     #[test]

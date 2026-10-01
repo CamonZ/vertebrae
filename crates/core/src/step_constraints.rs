@@ -34,6 +34,14 @@ pub fn validate_config_fields<'a>(
 
 /// Validate a new step's config against its type, as Sacrum does on create.
 pub fn validate_step_config(step: &Step) -> ServiceResult<()> {
+    if matches!(step.step_type, StepType::Execute) {
+        let Some(StepConfig::Execute(config)) = &step.config else {
+            return Err(ServiceError::validation_failed(
+                "config: execute requires version, script, and output_schema",
+            ));
+        };
+        config.validate()?;
+    }
     let config = step
         .config
         .as_ref()
@@ -43,23 +51,29 @@ pub fn validate_step_config(step: &Step) -> ServiceResult<()> {
     match config {
         Some(serde_json::Value::Object(fields)) => validate_config_fields(
             &step.step_type,
-            fields
-                .keys()
-                .map(String::as_str)
-                .filter(|key| *key != "version"),
+            fields.keys().map(String::as_str).filter(|key| {
+                *key != "version"
+                    && !(matches!(step.step_type, StepType::Execute) && *key == "context")
+            }),
         ),
         _ => Ok(()),
     }
 }
 
 /// Apply a partial config patch the way Sacrum does: undeclared fields are
-/// rejected, sent fields replace the stored values, and `null` clears one.
+/// rejected and sent fields replace the stored values. Execute context is
+/// server-written and cannot be patched; required authored fields cannot clear.
 pub fn apply_config_patch(
     step: &mut Step,
     patch: &serde_json::Map<String, serde_json::Value>,
 ) -> ServiceResult<()> {
     validate_config_fields(&step.step_type, patch.keys().map(String::as_str))?;
     let Some(config) = &step.config else {
+        if matches!(step.step_type, StepType::Execute) {
+            return Err(ServiceError::validation_failed(
+                "config: execute requires version, script, and output_schema",
+            ));
+        }
         return Ok(());
     };
 
@@ -79,6 +93,10 @@ mod tests {
 
     #[test]
     fn accepts_declared_fields() {
+        assert!(
+            validate_config_fields(&StepType::Execute, ["version", "script", "output_schema"])
+                .is_ok()
+        );
         assert!(validate_config_fields(&StepType::LlmInference, ["prompt", "skills"]).is_ok());
         assert!(validate_config_fields(&StepType::Route, ["route_config"]).is_ok());
         assert!(validate_config_fields(&StepType::WaitChildren, ["output_schema"]).is_ok());
@@ -117,6 +135,73 @@ mod tests {
             error.contains("$.agents: is not supported for wait_children steps"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn execute_creation_requires_explicit_valid_authored_config() {
+        let mut step = Step::new("transform", "wf1").with_step_type(StepType::Execute);
+        assert!(
+            validate_step_config(&step)
+                .unwrap_err()
+                .to_string()
+                .contains("execute requires version, script, and output_schema")
+        );
+        step.config = Some(StepConfig::Execute(crate::models::ExecuteConfig {
+            version: 2,
+            script: "task.id".into(),
+            context: None,
+            output_schema: serde_json::json!({}),
+        }));
+        assert!(
+            validate_step_config(&step)
+                .unwrap_err()
+                .to_string()
+                .contains("execute requires version 1")
+        );
+        step.config = StepConfig::from_value(&StepType::Execute, serde_json::json!({"version":1,"script":"task.id","context":{"task":{"id":"task1"}},"output_schema":{}})).unwrap();
+        validate_step_config(&step).unwrap();
+        for field in ["input", "context", "provider", "unknown"] {
+            let error = validate_config_fields(&StepType::Execute, [field]).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("$.{field}: is not supported for execute steps")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn execute_patch_changes_authored_fields_and_rejects_context_input_atomically() {
+        let context = serde_json::json!({"execution":{"previous_output":{"quantity":3}}});
+        let mut step = Step::new("transform", "wf1").with_step_type(StepType::Execute).with_config(StepConfig::from_value(&StepType::Execute, serde_json::json!({"version":1,"script":"execution.previous_output","context":context,"output_schema":{}})).unwrap());
+        apply_config_patch(
+            &mut step,
+            serde_json::json!({"script":"execution.previous_output.quantity * 12"})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            step.execute().unwrap().script,
+            "execution.previous_output.quantity * 12"
+        );
+        assert_eq!(step.execute().unwrap().context, Some(context));
+        assert_eq!(step.output_schema(), Some(&serde_json::json!({})));
+        let expected = step.config.clone();
+        for patch in [
+            serde_json::json!({"version":2}),
+            serde_json::json!({"script":" "}),
+            serde_json::json!({"output_schema":null}),
+            serde_json::json!({"output_schema":true}),
+            serde_json::json!({"input":null}),
+            serde_json::json!({"context":null}),
+            serde_json::json!({"context":{"task":{}}}),
+            serde_json::json!({"provider":"claude"}),
+        ] {
+            assert!(apply_config_patch(&mut step, patch.as_object().unwrap()).is_err());
+            assert_eq!(step.config, expected);
+        }
     }
 
     #[test]

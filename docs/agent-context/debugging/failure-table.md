@@ -7,7 +7,7 @@ Use this when: a run failed, stalled, or produced the wrong path.
 |---|---|---|
 | `multiple_outgoing_transitions` | A non-route step has more than one edge | Keep one edge; branch with a route |
 | `no_outgoing_transitions` | A non-route, non-finish step has no edge | Add the edge, or end the path with finish/stop |
-| `step_config_render_failed ... is missing` | State references a step not run in this TaskRun | Restart from the first step, or use `?` ([state](../templating/state.md)) |
+| `step_config_render_failed ... is missing` | Required state or execute reference is missing in this TaskRun | Check the reference and run scope using the field's [templating rules](../templating/index.md) |
 | Prompt has empty values / raw `{% %}` | Lenient Liquid; parse error | [Templating troubleshooting](../templating/troubleshooting.md) |
 | `route_no_match` | No rule matched, no default | Add a default or cover the case ([partitions](../workflows/steps/route/partitions.md)) |
 | `route_ambiguous_match` | Two rules matched (tags/visit-count rules are not checked at save) | Make them disjoint ([overlap checks](../workflows/steps/route/overlap-checks.md)) |
@@ -23,6 +23,11 @@ Use this when: a run failed, stalled, or produced the wrong path.
 | `invalid agent_config in run_step payload` | Step's agent_config does not parse (e.g. malformed provider ID) | Fix the step's `--agent-config` |
 | `selected '<h>' harness is unavailable` | Harness binary or key missing on the daemon machine | Install/log in, or set the key and restart the daemon |
 | Codex rejects the output schema | Not strict (optional props, type arrays) | [Output schemas](../workflows/steps/llm_inference/output-schemas.md) |
+| `execute fields require explicit step_type='execute'` / `execute run_step must omit ...` | Malformed execute dispatch, or inference-only fields supplied | Use the explicit execute version/script/context/output_schema contract without harness/provider settings ([execute](../workflows/steps/execute/index.md)) |
+| `execute requires a resolved context JSON object` / `execute context.<namespace> must be a JSON object` | Missing or malformed immutable context snapshot | Use a backend with the merged context contract; inspect the saved config and dispatch, without supplying authored input/context |
+| `Rhai execution failed` | Script syntax, missing context property, incompatible types, or operation budget exceeded | Check the persisted script/context snapshot and the Rhai source position; correct the script or reduce work |
+| `Rhai execution capacity exceeded` / `Rhai execution deadline exceeded` | Worker admission is full or the cooperative deadline expired | Reduce concurrent script demand or script work; Sacrum owns retries ([execute](../workflows/steps/execute/index.md)) |
+| Execute output violates `output_schema` | Returned JSON does not conform | Check the schema-error instance/schema paths and fix the return value or schema; inference-only schema restrictions do not apply |
 | "No vertebrae project found" | `vtb` run outside the project checkout | Run from the project directory |
 | Run completes but nothing was posted externally | The external service rejected the action (e.g. reviewing your own PR) | Check the step's output/artifact for the error; adjust the action |
 

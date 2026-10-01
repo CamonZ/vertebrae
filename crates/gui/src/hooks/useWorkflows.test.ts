@@ -96,6 +96,72 @@ describe("useWorkflows", () => {
     expect(result.current.workflows[0].name).toBe("Will Stay");
   });
 
+  it("preserves a workflow created while the initial list is in flight", async () => {
+    let resolveFetch!: (value: { status: "ok"; data: Workflow[] }) => void;
+    mockListWorkflows.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+    const { result } = renderHook(() => useWorkflows(), { wrapper });
+    await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledTimes(1));
+    const created = createMockWorkflow({
+      id: "created-during-fetch",
+      kanban_column: "New column",
+    });
+    act(() => upsertWorkflowInQueryCache(created));
+    const baseline = createMockWorkflow({ id: "already-on-server" });
+    mockListWorkflows.mockResolvedValueOnce({
+      status: "ok",
+      data: [baseline, created],
+    });
+    await act(async () => resolveFetch({ status: "ok", data: [baseline] }));
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryState(
+          queryKeys.workflows.list(getProjectScopeGeneration())
+        )?.fetchStatus
+      ).toBe("idle")
+    );
+    expect(result.current.workflows).toEqual([baseline, created]);
+    expect(mockListWorkflows).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["update", "delete"])(
+    "preserves a live %s while the initial list is in flight",
+    async (change) => {
+      let resolveFetch!: (value: { status: "ok"; data: Workflow[] }) => void;
+      mockListWorkflows.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        })
+      );
+      const { result } = renderHook(() => useWorkflows(), { wrapper });
+      await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledTimes(1));
+      const original = createMockWorkflow({
+        id: "workflow-1",
+        kanban_column: "Old column",
+      });
+      const updated = { ...original, kanban_column: null };
+      act(() => {
+        if (change === "update") upsertWorkflowInQueryCache(updated);
+        else removeWorkflowFromQueryCache(original.id!);
+      });
+      const fresh = change === "update" ? [updated] : [];
+      mockListWorkflows.mockResolvedValueOnce({ status: "ok", data: fresh });
+      await act(async () => resolveFetch({ status: "ok", data: [original] }));
+      await waitFor(() =>
+        expect(
+          queryClient.getQueryState(
+            queryKeys.workflows.list(getProjectScopeGeneration())
+          )?.fetchStatus
+        ).toBe("idle")
+      );
+      expect(result.current.workflows).toEqual(fresh);
+      expect(mockListWorkflows).toHaveBeenCalledTimes(2);
+    }
+  );
+
   it("sets error state on fetch failure without returning stale store data", async () => {
     mockListWorkflows.mockResolvedValue({
       status: "error",

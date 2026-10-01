@@ -4,7 +4,7 @@ Feature: Failure path step execution
 
   Scenario: Failed execution from non-zero exit
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     When the mock is scripted to exit non-zero with an error message
     And I start a TaskRun
@@ -13,7 +13,7 @@ Feature: Failure path step execution
 
   Scenario: Failed from SIGKILL-like exit code
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     When the mock is scripted to exit with code 137
     And I start a TaskRun
@@ -23,7 +23,7 @@ Feature: Failure path step execution
 
   Scenario: Selected TypeSafe harness reports missing server credentials
     Given a configured daemon test environment
-    And a workflow with one execute step using harness "typesafe" and model "jev"
+    And a workflow with one inference step using harness "typesafe" and model "jev"
     And a task assigned to the workflow
     When I start a TaskRun
     And I wait for the execution to reach status "failed"

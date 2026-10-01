@@ -5,7 +5,7 @@ Feature: Happy path step execution
 
   Scenario: Explicit Claude step harness uses the Claude runtime
     Given a configured daemon test environment
-    And a workflow with one execute step using harness "claude" and model "claude-sonnet-4-6"
+    And a workflow with one inference step using harness "claude" and model "claude-sonnet-4-6"
     And a task assigned to the workflow
     When the mock is scripted to succeed with full metrics
     And I start a TaskRun
@@ -17,7 +17,7 @@ Feature: Happy path step execution
   @skip
   Scenario: Completed execution with metrics
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     When the mock is scripted to succeed with full metrics
     And I start a TaskRun
@@ -30,7 +30,7 @@ Feature: Happy path step execution
 
   Scenario: Completed execution without a stream-json result line
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     When the mock is scripted to succeed without a result line
     And I start a TaskRun
@@ -41,7 +41,7 @@ Feature: Happy path step execution
 
   Scenario: Every stdout line produces a session log entry
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     When the mock is scripted to emit three stream-json lines
     And I start a TaskRun
@@ -51,7 +51,7 @@ Feature: Happy path step execution
 
   Scenario: Completed with only stderr output
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     When the mock is scripted to succeed with only stderr output
     And I start a TaskRun

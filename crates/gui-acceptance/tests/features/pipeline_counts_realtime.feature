@@ -7,6 +7,7 @@ Feature: Real-time pipeline aggregate counts
     Given I create a workflow with:
       | name | Pipeline Active Workflow |
     And I create a step "Run Count" in the workflow "Pipeline Active Workflow" via the CLI
+    And the step prompt is set to a mock that sleeps 15000 milliseconds
     And the GUI is on the pipeline view
     And I select factory "No Factory"
     When I create a task with:

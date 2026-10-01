@@ -5,7 +5,7 @@ Feature: Daemon translates step config into Claude CLI invocation
 
   Scenario: Explicit agent_config.model reaches the CLI
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     And the step is configured with agent_config '{"model":"claude-opus-4-5"}'
     When the mock is scripted to succeed with full metrics
@@ -16,7 +16,7 @@ Feature: Daemon translates step config into Claude CLI invocation
 
   Scenario: Claude model settings reach the CLI invocation
     Given a configured daemon test environment
-    And a workflow with one execute step using anthropic, speed tier "fast", and personality "friendly"
+    And a workflow with one inference step using anthropic, speed tier "fast", and personality "friendly"
     And a task assigned to the workflow
     When the mock is scripted to succeed with full metrics
     And I start a TaskRun
@@ -27,7 +27,7 @@ Feature: Daemon translates step config into Claude CLI invocation
 
   Scenario: permission_mode plan is passed through and not overridden
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     And the step is configured with agent_config '{"permission_mode":"plan"}'
     When the mock is scripted to succeed with full metrics
@@ -38,7 +38,7 @@ Feature: Daemon translates step config into Claude CLI invocation
 
   Scenario: permission_mode auto is passed through
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     And the step is configured with agent_config '{"permission_mode":"auto"}'
     When the mock is scripted to succeed with full metrics
@@ -48,7 +48,7 @@ Feature: Daemon translates step config into Claude CLI invocation
 
   Scenario: Worktree path is used as the CLI working directory
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     And the task has worktree "/tmp"
     When the mock is scripted to succeed with full metrics

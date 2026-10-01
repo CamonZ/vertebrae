@@ -1,11 +1,14 @@
 # Daemon
 
-Purpose: the local process that executes AI steps.
+Purpose: the local process that executes AI steps and Rhai JSON transformations.
 Use this when: steps are not executing, or after changing credentials or config.
 
 ## How it works
 - The daemon connects to the backend, receives dispatched `llm_inference` and
   `structured_inference` steps, runs them through the harnesses, and reports results.
+  It also receives [execute](../workflows/steps/execute/index.md), which runs in a
+  bounded Rhai worker without provider binaries or credentials. Both backend
+  and daemon must support the execute contract.
 - Installed by the GUI onboarding. On macOS it runs under launchd as
   `com.vertebrae.daemon`; binary in `~/Library/Application Support/Vertebrae/bin/`.
 - It reads config and credentials at startup.

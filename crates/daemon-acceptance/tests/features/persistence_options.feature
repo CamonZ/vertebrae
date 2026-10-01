@@ -4,7 +4,7 @@ Feature: Structured output persistence options
 
   Scenario: Successful structured output creates a visible task artifact
     Given a configured daemon test environment
-    And a workflow with one execute step and an output schema
+    And a workflow with one inference step and an output schema
     And the step is configured with persistence logical name "step_result"
     And a task assigned to the workflow
     When the mock emits structured JSON output
@@ -15,7 +15,7 @@ Feature: Structured output persistence options
 
   Scenario: Schema-invalid output does not create a task artifact
     Given a configured daemon test environment
-    And a workflow with one execute step and an output schema
+    And a workflow with one inference step and an output schema
     And the step is configured with persistence logical name "step_result"
     And a task assigned to the workflow
     When the mock is scripted to emit output that violates the schema
@@ -25,7 +25,7 @@ Feature: Structured output persistence options
 
   Scenario: Successful persistence replaces an existing logical artifact
     Given a configured daemon test environment
-    And a workflow with one execute step and an output schema
+    And a workflow with one inference step and an output schema
     And the step is configured with persistence logical name "step_result"
     And a task assigned to the workflow
     And the task has an existing artifact named "step_result"

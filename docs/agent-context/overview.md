@@ -13,8 +13,9 @@ right surface (CLI, GUI, chat) for a request.
   next step, evaluates routes, schedules children and completes tasks.
 - **Daemon** (`vtb-daemon`, local) executes the steps the backend dispatches to it:
   `llm_inference` (on the `claude` or `codex` harness) and
-  `structured_inference` (on the `typesafe` harness). Each step selects its harness.
-  It streams events back; it does not decide routing.
+  `structured_inference` (on the `typesafe` harness), and [execute](workflows/steps/execute/index.md)
+  (pure Rhai JSON transformations without a harness). Inference steps select
+  their harness. The daemon reports results; it does not decide routing.
 - **vtb CLI** and the **GUI** are clients of the backend. The GUI also hosts local
   chat sessions (this conversation, if you are running inside it).
 - A project is resolved from the working directory (see [setup](setup/index.md)).
@@ -24,7 +25,7 @@ right surface (CLI, GUI, chat) for a request.
 - Workflow: an ordered set of steps plus transitions; a task is assigned to one workflow at a time.
 - Factory: a named group of related workflows (`--factory-name`).
 - Step: one node in a workflow; its type decides who handles it.
-- Harness: the runtime (`claude`, `codex`, `typesafe`) that executes a daemon-run step.
+- Harness: the provider runtime (`claude`, `codex`, `typesafe`) that executes an inference step; execute does not use one.
 - Step transition / workflow transition: allowed edges between steps / between workflows.
 - TaskRun: one durable automation run of a task through its workflow(s).
 - Step execution: one attempt at one step inside a TaskRun.

@@ -305,7 +305,7 @@ DaemonSupervisor
   TypeSafe requires `structured_inference`; Claude and Codex handle
   `llm_inference`. The selector remains separate from model/request settings.
   See
-  [vtb Guide — Provider Selection](vtb-guide/steps.md#provider-selection-anthropic--openai).
+  [vtb Guide — Harness and Provider Settings](vtb-guide/steps.md#harness-and-provider-settings).
 - When an `llm_inference` step has an `output_schema`, passes it through the
   provider-neutral harness request to enforce structured output
 - Step-level `output_schema` takes precedence over `agent_config.json_schema`
@@ -313,11 +313,44 @@ DaemonSupervisor
   `format=harness` `SessionLog` records via `SessionLogEventSink`
 - Reports completion/failure with token counts, cost, and the actual
   provider/model used, derived from the normalized usage and outcome events
-- Handles daemon-dispatched `llm_inference` steps. `route` is a Sacrum-local
+- Handles daemon-dispatched `llm_inference`, `structured_inference`, and
+  `execute` steps. Execute selects a bounded Rhai worker before any provider
+  resolution and records no inference model, token, or cost metadata. Sacrum
+  supplies the immutable rendered script, complete canonical JSON context, and output
+  schema; the daemon does not render templates again. `route` is a Sacrum-local
   deterministic control step and is never dispatched to a daemon.
 - Runs as a macOS launchd or Linux systemd user service installed by the GUI onboarding flow.
   Service installation only writes the service definition; it never rewrites
   standalone enrollment state.
+
+Execute admission is daemon-wide: one active evaluation and four pending
+attempts. Overflow fails the attempt explicitly; Sacrum owns retries. Each
+attempt creates a fresh Rhai Engine/Scope inside `spawn_blocking`, with no module
+loading or host filesystem/process functions. Default budgets are 256 KiB of
+script, 1 MiB each of JSON context/schema/result, 100,000 operations, and a
+cooperative two-second deadline starting at admission, including queue time and
+schema compilation. Schema structure is checked at dispatch; its validator is
+compiled once inside the admitted blocking worker and reused for output validation.
+Strings, arrays, maps,
+expression depth, and call depth also have finite limits; their source of truth
+is `crates/daemon/src/script_worker.rs`. The six server namespaces (`task`,
+`execution`, `inputs`, `steps`, `workflow`, `artifacts`) are bound directly as
+Rhai variables through typed JSON conversion. Context integers must fit the signed
+64-bit Rhai integer range; larger integers fail with their JSON pointer rather
+than being rounded to floating point. JSON floating-point values retain their
+floating-point representation. Context is required on dispatch,
+never authored or rendered again, and kept separate from mutable execution audit
+metadata. All namespace maps and the aggregate context budget are checked before
+queueing; no input-only fallback or silent truncation is performed.
+
+Cancellation signals queued/running work and joins its settlement before the
+terminal report. Schema compilation and validation are not interrupted by Rhai
+callbacks; cancellation and the deadline are checked around those phases, and
+capacity remains owned until the blocking worker settles. A running evaluation
+retains capacity until it exits, including
+panic unwinding. The workspace release profile uses `panic="unwind"` so a worker
+panic can fail one attempt and recover its slot; `panic="abort"` would terminate
+the whole daemon. These cooperative bounds do not provide process isolation.
 
 Standalone daemons publish a bounded, sanitized v1 report after the enrolled
 `daemon:<id>` channel join and restart a single 30-second application heartbeat

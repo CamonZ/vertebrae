@@ -5,7 +5,7 @@ Feature: Worktree updates during orchestration
   @worktree-during-orchestration
   Scenario: Set worktree while the daemon is working on a step
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     When the mock is scripted to sleep 15000 milliseconds
     And I orchestrate the task

@@ -9,4 +9,4 @@ How work moves: workflows group steps, transitions connect them, step types deci
 - [Authoring order](authoring-order.md): the sequence for building a workflow graph end to end.
   Load when: building a new workflow or factory from scratch.
 - [Steps](steps/index.md): step types and per-type configuration.
-  Load when: adding or configuring a step, llm_inference, structured_inference, route, wait_children, stop, finish, human_input.
+  Load when: adding or configuring a step, llm_inference, structured_inference, execute, Rhai, route, wait_children, stop, finish, human_input.

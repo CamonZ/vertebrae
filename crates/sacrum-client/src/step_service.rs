@@ -15,8 +15,8 @@ use crate::api_types::{ShortIdResponse, WorkflowResponse, WorkflowStepResponse};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::error::SacrumClientError;
 use crate::queries::steps::{
-    CREATE_STEP, DELETE_STEP, GET_STEP, LIST_STEPS, RESOLVE_STEP_SHORT_ID, STEP_FIELDS,
-    SYNC_STEP_TRANSITIONS, update_step_query,
+    CREATE_EXECUTE_STEP, CREATE_STEP, DELETE_STEP, GET_STEP, LIST_STEPS, RESOLVE_STEP_SHORT_ID,
+    STEP_FIELDS, SYNC_STEP_TRANSITIONS, update_step_query,
 };
 use crate::queries::workflows::{LIST_WORKFLOWS, WORKFLOW_FIELDS};
 
@@ -106,20 +106,31 @@ impl StepService for SacrumStepService {
         Self::validate_stop_transitions(&step.step_type, &step.transitions_to)?;
         validate_step_config(step)?;
 
-        let query = with_fragments(CREATE_STEP, &[STEP_FIELDS]);
-        // Sacrum requires an explicit harness for every new step. Preserve
-        // legacy callers by defaulting steps without a selection to Claude.
-        let harness = step.harness.unwrap_or(StepHarness::Claude);
+        let execute = matches!(step.step_type, StepType::Execute);
+        let mutation = if execute {
+            CREATE_EXECUTE_STEP
+        } else {
+            CREATE_STEP
+        };
+        let query = with_fragments(mutation, &[STEP_FIELDS]);
         let mut variables = json!({
             "workflow_id": step.workflow_id,
             "name": step.name,
             "goal": step.goal,
             "step_type": step.step_type.as_str(),
-            "harness": harness.as_str(),
             "step_order": step.order,
         });
+        if !execute {
+            // Preserve the legacy default for existing inference callers.
+            let harness = step.harness.unwrap_or(StepHarness::Claude);
+            variables["harness"] = json!(harness.as_str());
+        }
         if let Some(config) = &step.config {
-            variables["config"] = json!(Self::json_variable(config, "config")?);
+            variables["config"] = json!(match config {
+                StepConfig::Execute(config) =>
+                    Self::json_variable(&config.definition_value(), "config")?,
+                _ => Self::json_variable(config, "config")?,
+            });
         }
         if let Some(options) = &step.persistence_options {
             variables["persistence_options"] =
@@ -264,7 +275,11 @@ impl StepService for SacrumStepService {
             variables["harness"] = json!(harness.as_str());
         }
         if let Some(config) = &updates.config {
-            variables["config"] = json!(Self::json_variable(config, "config")?);
+            let mut config = config.clone();
+            // Context is a read-only execute snapshot, never a definition key.
+            // Drop it when a caller builds a patch from a read config object.
+            config.remove("context");
+            variables["config"] = json!(Self::json_variable(&config, "config")?);
         }
         if let Some(order) = updates.order {
             variables["step_order"] = json!(order);
@@ -552,7 +567,6 @@ mod tests {
             ("human_input", StepType::HumanInput),
             ("stop", StepType::Stop),
             ("finish", StepType::Finish),
-            ("execute", StepType::Unsupported("execute".to_string())),
         ] {
             let step = SacrumStepService::response_to_step(&step_response(
                 Some(input),
@@ -627,6 +641,171 @@ mod tests {
             "updated_at": null,
             "transitions": []
         })
+    }
+
+    #[tokio::test]
+    async fn execute_step_create_read_update_round_trips_without_harness_defaults() {
+        use wiremock::matchers::body_partial_json;
+
+        let server = MockServer::start().await;
+        let config = json!({
+            "version": 1,
+            "script": "#{ name: execution.previous_output.name, total: execution.previous_output.quantity * execution.previous_output.unit_price }",
+            "context": {"task": {"id":"task1"}, "execution": {"previous_output":{"name":"example","quantity":3,"unit_price":12}}, "inputs": {}, "steps": {}, "workflow": {}, "artifacts": {}},
+            "output_schema": {"type": "object", "properties": {"total": {"type": "number"}}}
+        });
+        let mut definition = config.clone();
+        definition.as_object_mut().unwrap().remove("context");
+        let mut response = make_step_response("step-execute", "Transform", "wf-1", 0);
+        response["step_type"] = json!("execute");
+        response["config"] = config.clone();
+        let mut patch = StepUpdate::new().with_name("Updated");
+        patch.config = Some(config.as_object().unwrap().clone());
+        for field in [
+            "create_workflow_step",
+            "workflow_step",
+            "update_workflow_step",
+        ] {
+            let variables = if field == "create_workflow_step" {
+                json!({"name": "Transform"})
+            } else if field == "workflow_step" {
+                json!({"id": "step-execute"})
+            } else {
+                json!({"id": "step-execute", "name": "Updated"})
+            };
+            let mutation = match field {
+                "create_workflow_step" => CREATE_EXECUTE_STEP.to_string(),
+                "workflow_step" => GET_STEP.to_string(),
+                _ => update_step_query(&patch),
+            };
+            Mock::given(method("POST"))
+                .and(path("/graphql"))
+                .and(body_partial_json(json!({"variables": variables, "query": with_fragments(&mutation, &[STEP_FIELDS])})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(field, response.clone())))
+                .mount(&server)
+                .await;
+        }
+        let service = create_wiremock_service(&server.uri());
+        let step = Step::new("Transform", "wf-1")
+            .with_step_type(StepType::Execute)
+            .with_harness(StepHarness::Codex)
+            .with_config(StepConfig::from_value(&StepType::Execute, config.clone()).unwrap());
+        let created = service.create_step(&step).await.unwrap();
+        assert_eq!(created.step_type, StepType::Execute);
+        assert_eq!(created.harness, None);
+        assert_eq!(
+            serde_json::to_value(created.config.as_ref().unwrap()).unwrap(),
+            config
+        );
+        assert_eq!(
+            created.execute().unwrap().script,
+            config["script"].as_str().unwrap()
+        );
+        assert_eq!(created.prompt(), None);
+        assert_eq!(created.agent_config(), None);
+        let read = service.get_step("step-execute").await.unwrap().unwrap();
+        assert_eq!(read.config, created.config);
+        assert_eq!(
+            service.update_step("step-execute", &patch).await.unwrap(),
+            "wf-1"
+        );
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 3);
+        for request in &requests {
+            let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            let query = body["query"].as_str().unwrap();
+            assert!(
+                query.contains("... on ExecuteStepConfig { version script context output_schema }")
+            );
+            assert!(!query.contains("$harness"));
+            for field in ["harness", "provider", "model", "agent_config"] {
+                assert!(
+                    body["variables"].get(field).is_none(),
+                    "unexpected {field}: {body}"
+                );
+            }
+        }
+        let create: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(create["variables"]["step_type"], "execute");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                create["variables"]["config"].as_str().unwrap()
+            )
+            .unwrap(),
+            definition
+        );
+        let update: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                update["variables"]["config"].as_str().unwrap()
+            )
+            .unwrap(),
+            definition
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_creation_rejects_missing_or_invalid_config_before_http() {
+        let server = MockServer::start().await;
+        let service = create_wiremock_service(&server.uri());
+        let mut step = Step::new("Transform", "wf-1").with_step_type(StepType::Execute);
+        let error = service.create_step(&step).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("execute requires version, script, and output_schema")
+        );
+        step.config = Some(StepConfig::Execute(vertebrae_core::ExecuteConfig {
+            version: 2,
+            script: "task.id".into(),
+            context: None,
+            output_schema: json!({}),
+        }));
+        let error = service.create_step(&step).await.unwrap_err();
+        assert!(error.to_string().contains("execute requires version 1"));
+        assert_eq!(server.received_requests().await.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn execute_response_decodes_absent_null_context_and_rejects_obsolete_input() {
+        for context in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(
+                json!({"task":{"id":"task1"}, "execution":{}, "inputs":{}, "steps":{}, "workflow":{}, "artifacts":{}}),
+            ),
+        ] {
+            let mut config =
+                json!({"version":1,"script":"task.id","output_schema":{"type":"string"}});
+            if let Some(context) = &context {
+                config["context"] = context.clone();
+            }
+            let step = SacrumStepService::response_to_step(&step_response(Some("execute"), config))
+                .unwrap();
+            assert_eq!(step.step_type, StepType::Execute);
+            assert_eq!(
+                step.execute().unwrap().context.as_ref(),
+                context.as_ref().filter(|value| !value.is_null())
+            );
+            assert_eq!(step.output_schema(), Some(&json!({"type":"string"})));
+        }
+        for field in ["input", "unknown", "provider"] {
+            let error = SacrumStepService::response_to_step(&step_response(
+                Some("execute"),
+                json!({"version":1,"script":"task.id","output_schema":{},field:null}),
+            ))
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("unknown field `{field}`")),
+                "{error}"
+            );
+        }
+        let error =
+            SacrumStepService::response_to_step(&step_response(Some("execute"), json!(null)))
+                .unwrap_err();
+        assert!(error.to_string().contains("Invalid execute config"));
     }
 
     #[tokio::test]

@@ -15,8 +15,11 @@ Use this when: diagnosing, or answering "what happened".
 
 ## Doing it
 Start from the failing step: its type tells you who failed. Daemon-executed
-steps (llm_inference, structured_inference) leave traces in the daemon log;
+steps (llm_inference, structured_inference, execute) leave traces in the daemon log;
 Backend-side steps (route, wait_children, stop, finish) fail with a coded reason.
+Execute persists validated JSON on success and a diagnostic on failure, without
+inference model/token/cost metadata or a provider session event stream. Inspect
+its immutable execution `config.context` snapshot (separate from audit metadata) for the rendered script and complete context/schema.
 
 ## Related
 [Failure table](failure-table.md) · [Artifacts](../artifacts.md)

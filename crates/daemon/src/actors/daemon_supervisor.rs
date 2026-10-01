@@ -6,6 +6,7 @@
 //! - Demuxes daemon-channel messages by their payload project ID
 //! - Routes messages to the corresponding ProjectSupervisor actor
 //! - Uses OneForOne supervision: project failures are isolated
+//! - Owns one script-worker capacity shared by every project and step executor
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -256,6 +257,7 @@ impl std::fmt::Debug for DaemonMessage {
 
 /// Runtime state held by the DaemonSupervisor actor.
 pub struct DaemonState {
+    script_worker: Arc<crate::script_worker::ScriptWorker>,
     /// The Phoenix WebSocket connection.
     socket: PhoenixSocket,
     /// Saved config (needed for reconnection).
@@ -327,6 +329,7 @@ impl Actor for DaemonSupervisor {
         let reader_handle = tokio::spawn(Self::ws_reader_pump(reader, myself_clone));
 
         Ok(DaemonState {
+            script_worker: Arc::new(crate::script_worker::ScriptWorker::default()),
             socket,
             config: args,
             projects: HashMap::new(),
@@ -566,6 +569,7 @@ impl DaemonSupervisor {
         let services = Arc::new(vertebrae_sacrum_client::from_sacrum(client));
 
         let project_config = ProjectConfig {
+            script_worker: Arc::clone(&state.script_worker),
             project_id: project_id.to_string(),
             services,
             project_root: project_root.to_path_buf(),

@@ -29,13 +29,14 @@ mod step_create_tests {
 
         // Create step
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: None,
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -71,13 +72,14 @@ mod step_create_tests {
 
         let persistence = r#"{"artifact":{"logical_name":"step_result"}}"#;
         let add = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Persisted".to_string(),
             workflow: workflow_id,
             id: Some("persisted-step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -109,6 +111,7 @@ mod step_create_tests {
         );
 
         StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -159,6 +162,7 @@ mod step_create_tests {
         );
 
         StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -217,13 +221,14 @@ mod step_create_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Finish".to_string(),
             workflow: workflow_id,
             id: Some("finish-step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -266,13 +271,14 @@ mod step_create_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Invalid Finish".to_string(),
             workflow: workflow_id,
             id: Some("invalid-finish".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -310,13 +316,14 @@ mod step_create_tests {
 
         // Create step with custom ID
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("review-step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -365,13 +372,14 @@ mod step_create_tests {
 
         // Create step with goal
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Code Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("code-review".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: Some("Review code for quality and best practices".to_string()),
             agent: vec![],
             skill: vec![],
@@ -420,13 +428,14 @@ mod step_create_tests {
 
         // Create step with specific order
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Deploy".to_string(),
             workflow: workflow_id.clone(),
             id: Some("deploy".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -467,13 +476,14 @@ mod step_create_tests {
 
         // Create finish step
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Complete".to_string(),
             workflow: workflow_id.clone(),
             id: Some("complete".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -518,13 +528,14 @@ mod step_create_tests {
 
         // Create step with agents
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Analysis".to_string(),
             workflow: workflow_id.clone(),
             id: Some("analysis".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![
                 ".claude/agents/reviewer.md".to_string(),
@@ -581,13 +592,14 @@ mod step_create_tests {
 
         // Create step with skills
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Testing".to_string(),
             workflow: workflow_id.clone(),
             id: Some("testing".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec!["test-writing".to_string(), "debugging".to_string()],
@@ -630,13 +642,14 @@ mod step_create_tests {
 
         // Create step with transitions
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Decision".to_string(),
             workflow: workflow_id.clone(),
             id: Some("decision".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -689,13 +702,14 @@ mod step_create_tests {
 
         // Create step with legacy model field
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "LegacyStep".to_string(),
             workflow: workflow_id.clone(),
             id: Some("legacy-step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -754,13 +768,14 @@ mod step_list_tests {
         // Create steps
         for i in 0..3 {
             let cmd = StepAddCommand {
+                script: None,
                 speed_tier: None,
                 personality: None,
                 verbosity: None,
                 name: format!("Step {}", i + 1),
                 workflow: workflow_id.clone(),
                 id: Some(format!("step-{}", i)),
-                harness: CliHarness::Claude,
+                harness: Some(CliHarness::Claude),
                 goal: None,
                 agent: vec![],
                 skill: vec![],
@@ -815,13 +830,14 @@ mod step_list_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("review-step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: Some("Review implementation".to_string()),
             agent: vec![],
             skill: vec![],
@@ -899,13 +915,14 @@ mod step_list_tests {
 
         // Create step
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "MyStep".to_string(),
             workflow: workflow_id.clone(),
             id: Some("mystep".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -946,6 +963,62 @@ mod step_show_tests {
     use super::*;
 
     #[tokio::test]
+    async fn show_execute_definition_preserves_script_and_schema() {
+        let services = mock_services();
+        let config = serde_json::json!({
+            "version": 1,
+            "script": "execution.previous_output.quantity * 12",
+            "output_schema": {"type": "number"}
+        });
+        let step = vertebrae_core::Step::new("Transform", "wf-1")
+            .with_step_type(vertebrae_core::StepType::Execute)
+            .with_config(
+                vertebrae_core::StepConfig::from_value(
+                    &vertebrae_core::StepType::Execute,
+                    config.clone(),
+                )
+                .unwrap(),
+            );
+        services
+            .steps()
+            .create_step_with_id("transform", &step)
+            .await
+            .unwrap();
+        let shown = StepShowCommand {
+            id: "transform".into(),
+        }
+        .execute(services.steps())
+        .await
+        .unwrap();
+        assert!(shown.contains("Step Type:     execute"), "{shown}");
+        assert!(shown.contains("Harness:       (none)"), "{shown}");
+        assert!(
+            shown.contains("Script:        execution.previous_output.quantity * 12"),
+            "{shown}"
+        );
+        assert!(!shown.contains("Context:"), "{shown}");
+        assert!(!shown.contains("Input:"), "{shown}");
+        assert!(
+            shown.contains("Output Schema: {\n  \"type\": \"number\"\n}"),
+            "{shown}"
+        );
+        let json = Command::Step(StepCommand::Show(StepShowCommand {
+            id: "transform".into(),
+        }))
+        .execute_json(&services)
+        .await
+        .unwrap();
+        let CommandResult::Json(json) = json else {
+            panic!("step show --json should return the execute definition");
+        };
+        assert_eq!(json["step_type"], "execute");
+        let mut expected = config;
+        expected["context"] = serde_json::Value::Null;
+        assert_eq!(json["config"], expected);
+        assert!(json.get("harness").is_none());
+    }
+
+    #[tokio::test]
     async fn test_show_step_basic() {
         let services = mock_services();
 
@@ -958,13 +1031,14 @@ mod step_show_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Review".to_string(),
             workflow: workflow_id.clone(),
             id: Some("review".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: Some("Review code quality".to_string()),
             agent: vec![],
             skill: vec![],
@@ -1012,13 +1086,14 @@ mod step_show_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Analysis".to_string(),
             workflow: workflow_id,
             id: Some("analysis".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![".claude/agents/reviewer.md".to_string()],
             skill: vec!["code-review".to_string(), "lint".to_string()],
@@ -1064,13 +1139,14 @@ mod step_show_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Complete".to_string(),
             workflow: workflow_id,
             id: Some("complete".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1125,13 +1201,14 @@ mod step_show_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "MyStep".to_string(),
             workflow: workflow_id,
             id: Some("mystep".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1173,13 +1250,14 @@ mod step_show_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Ask human".to_string(),
             workflow: workflow_id.clone(),
             id: Some("human-gate".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: Some("Collect reviewer decision".to_string()),
             agent: vec![],
             skill: vec![],
@@ -1250,13 +1328,14 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Original".to_string(),
             workflow: workflow_id,
             id: Some("step1".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1279,6 +1358,7 @@ mod step_update_tests {
 
         // Update name
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -1328,13 +1408,14 @@ mod step_update_tests {
             .unwrap();
 
         let mut add = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Done".to_string(),
             workflow: workflow_id,
             id: Some("done".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1390,13 +1471,14 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Analysis".to_string(),
             workflow: workflow_id,
             id: Some("analysis".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: Some("Old goal".to_string()),
             agent: vec![],
             skill: vec![],
@@ -1419,6 +1501,7 @@ mod step_update_tests {
 
         // Update goal
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -1471,13 +1554,14 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1500,6 +1584,7 @@ mod step_update_tests {
 
         // Update order
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -1552,13 +1637,14 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1581,6 +1667,7 @@ mod step_update_tests {
 
         // Add agents
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -1641,13 +1728,14 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![".claude/agents/old.md".to_string()],
             skill: vec![],
@@ -1670,6 +1758,7 @@ mod step_update_tests {
 
         // Clear agents
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -1722,13 +1811,14 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1751,6 +1841,7 @@ mod step_update_tests {
 
         // Add transitions
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -1816,13 +1907,14 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1845,6 +1937,7 @@ mod step_update_tests {
 
         // Clear transitions
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -1896,13 +1989,14 @@ mod step_update_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -1924,6 +2018,7 @@ mod step_update_tests {
         cmd.execute(services.steps()).await.unwrap();
 
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -1997,13 +2092,14 @@ mod step_dispatcher_tests {
             .unwrap();
 
         let cmd = StepCommand::Add(Box::new(StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Dispatched".to_string(),
             workflow: workflow_id,
             id: Some("dispatched".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2054,13 +2150,14 @@ mod step_delete_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "ToDelete".to_string(),
             workflow: workflow_id,
             id: Some("todelete".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2125,13 +2222,14 @@ mod step_delete_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2175,13 +2273,14 @@ mod step_delete_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("mystep".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2233,13 +2332,14 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Review".to_string(),
             workflow: workflow_id,
             id: Some("review".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2281,13 +2381,14 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Deploy".to_string(),
             workflow: workflow_id,
             id: Some("deploy".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2327,13 +2428,14 @@ mod step_prompt_and_agent_config_tests {
 
         // --agent-config sets model to "sonnet", but --model overrides to "opus"
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Override".to_string(),
             workflow: workflow_id,
             id: Some("override".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2385,13 +2487,14 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Bad".to_string(),
             workflow: workflow_id,
             id: None,
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2433,13 +2536,14 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let add_cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2461,6 +2565,7 @@ mod step_prompt_and_agent_config_tests {
         add_cmd.execute(services.steps()).await.unwrap();
 
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -2511,13 +2616,14 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let add_cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2540,6 +2646,7 @@ mod step_prompt_and_agent_config_tests {
 
         // --agent-config sets model to "sonnet", --model overrides to "opus"
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -2590,13 +2697,14 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let add_cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Step".to_string(),
             workflow: workflow_id,
             id: Some("step".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2618,6 +2726,7 @@ mod step_prompt_and_agent_config_tests {
         add_cmd.execute(services.steps()).await.unwrap();
 
         let update_cmd = StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -2674,13 +2783,14 @@ mod step_prompt_and_agent_config_tests {
             .unwrap();
 
         let cmd = StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "FullStep".to_string(),
             workflow: workflow_id,
             id: Some("full".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: Some("Complete review".to_string()),
             agent: vec![],
             skill: vec![],
@@ -2745,14 +2855,17 @@ mod provider_tests {
             .and_then(|config| config["provider"].as_str().map(ProviderId::parse))
             .and_then(Result::ok);
         StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: name.to_string(),
             workflow: workflow_id,
             id: Some(id.to_string()),
-            harness: harness_for(provider.as_ref().or(config_provider.as_ref()))
-                .unwrap_or(CliHarness::Claude),
+            harness: Some(
+                harness_for(provider.as_ref().or(config_provider.as_ref()))
+                    .unwrap_or(CliHarness::Claude),
+            ),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -2780,6 +2893,7 @@ mod provider_tests {
         provider: Option<ProviderId>,
     ) -> StepUpdateCommand {
         StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -2836,7 +2950,7 @@ mod provider_tests {
         ] {
             let id = format!("step-{wire}");
             let mut add = add_cmd_with("Harness", workflow_id.clone(), &id, None, None, None);
-            add.harness = harness;
+            add.harness = Some(harness);
             add.execute(services.steps()).await.unwrap();
 
             let mut update = update_cmd_with(&id, None, None, None);
@@ -3042,7 +3156,7 @@ mod provider_tests {
         let (services, workflow_id) = mk_workflow().await;
         let mut cmd = add_cmd_with("Bad", workflow_id, "custom-bad-3", None, None, None);
         cmd.provider = Some("openrouter".to_string());
-        cmd.harness = CliHarness::Claude;
+        cmd.harness = Some(CliHarness::Claude);
         cmd.reasoning_effort = Some("high".to_string());
         let err = cmd.execute(services.steps()).await.expect_err("must fail");
         assert!(err.to_string().contains("codex harness"), "{err}");
@@ -3059,7 +3173,7 @@ mod provider_tests {
             Some("opus".to_string()),
             Some(ProviderId::anthropic()),
         );
-        cmd.harness = CliHarness::Codex;
+        cmd.harness = Some(CliHarness::Codex);
         let err = cmd.execute(services.steps()).await.expect_err("must fail");
         assert!(
             err.to_string()
@@ -3629,13 +3743,14 @@ mod route_config_tests {
 
     fn add_command(workflow: &str, id: &str, route_config: Option<String>) -> StepAddCommand {
         StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Router".to_string(),
             workflow: workflow.to_string(),
             id: Some(id.to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -3658,6 +3773,7 @@ mod route_config_tests {
 
     pub(super) fn update_command(id: &str) -> StepUpdateCommand {
         StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -3908,13 +4024,14 @@ mod route_config_tests {
             .await
             .unwrap();
         StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Implement".to_string(),
             workflow: workflow_id,
             id: Some("implement".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec!["rust".to_string()],
@@ -3998,13 +4115,14 @@ mod structured_inference_tests {
 
     fn add_cmd(workflow_id: String, step_type: CliStepType) -> StepAddCommand {
         StepAddCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
             name: "Classify".to_string(),
             workflow: workflow_id,
             id: Some("classify".to_string()),
-            harness: CliHarness::Claude,
+            harness: Some(CliHarness::Claude),
             goal: None,
             agent: vec![],
             skill: vec![],
@@ -4027,6 +4145,7 @@ mod structured_inference_tests {
 
     fn update_cmd(id: &str) -> StepUpdateCommand {
         StepUpdateCommand {
+            script: None,
             speed_tier: None,
             personality: None,
             verbosity: None,
@@ -4245,7 +4364,7 @@ mod structured_inference_tests {
 
         let mut add = add_cmd(workflow_id, CliStepType::LlmInference);
         add.provider = Some("openai".to_string());
-        add.harness = CliHarness::Codex;
+        add.harness = Some(CliHarness::Codex);
         add.execute(services.steps()).await.unwrap();
         let mut update = update_cmd("classify");
         update.questions = Some(
@@ -4290,5 +4409,466 @@ mod structured_inference_tests {
             ),
             "{error}"
         );
+    }
+}
+
+#[cfg(test)]
+mod execute_authoring_tests {
+    use super::*;
+    use async_trait::async_trait;
+    use clap::Parser;
+    use serde_json::{Value, json};
+    use std::sync::Mutex;
+    use vertebrae_core::{
+        ExecuteConfig, ServiceResult, Step, StepConfig, StepService, StepType, StepUpdate,
+    };
+
+    const WORKFLOW: &str = "a1b2c3d4-0000-4000-8000-000000000006";
+    const STEP: &str = "a1b2c3d4-0000-4000-8000-000000000007";
+    const SCRIPT: &str =
+        "#{ total: steps.producer.output.quantity * steps.producer.output.unit_price }";
+    const SCHEMA: &str =
+        r#"{"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}"#;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(subcommand)]
+        command: StepCommand,
+    }
+
+    fn add(extra: &[&str]) -> Box<StepAddCommand> {
+        let mut args = vec![
+            "test",
+            "add",
+            "Transform",
+            "--workflow",
+            WORKFLOW,
+            "--id",
+            STEP,
+            "--step-type",
+            "execute",
+        ];
+        args.extend_from_slice(extra);
+        let StepCommand::Add(cmd) = TestCli::try_parse_from(args).unwrap().command else {
+            panic!("expected add")
+        };
+        cmd
+    }
+
+    fn update(extra: &[&str]) -> Box<StepUpdateCommand> {
+        let mut args = vec!["test", "update", STEP];
+        args.extend_from_slice(extra);
+        let StepCommand::Update(cmd) = TestCli::try_parse_from(args).unwrap().command else {
+            panic!("expected update")
+        };
+        cmd
+    }
+
+    fn snapshot() -> Step {
+        let mut step = Step::new("Transform", WORKFLOW)
+            .with_step_type(StepType::Execute)
+            .with_config(Some(StepConfig::Execute(ExecuteConfig {
+                version: 1,
+                script: SCRIPT.to_string(),
+                context: None,
+                output_schema: serde_json::from_str(SCHEMA).unwrap(),
+            })));
+        step.id = Some(STEP.to_string());
+        step
+    }
+
+    /// Records service mutations without doing any service-side validation, so
+    /// rejected commands prove validation happened before the mutation call.
+    #[derive(Default)]
+    struct RecordingSteps {
+        existing: Option<Step>,
+        created: Mutex<Vec<Step>>,
+        updated: Mutex<Vec<StepUpdate>>,
+    }
+
+    impl RecordingSteps {
+        fn with_snapshot() -> Self {
+            Self {
+                existing: Some(snapshot()),
+                ..Self::default()
+            }
+        }
+        fn assert_no_mutations(&self) {
+            assert!(self.created.lock().unwrap().is_empty());
+            assert!(self.updated.lock().unwrap().is_empty());
+        }
+    }
+
+    #[async_trait]
+    impl StepService for RecordingSteps {
+        async fn create_step(&self, step: &Step) -> ServiceResult<Step> {
+            self.create_step_with_id(STEP, step).await
+        }
+        async fn create_step_with_id(&self, id: &str, step: &Step) -> ServiceResult<Step> {
+            self.created.lock().unwrap().push(step.clone());
+            let mut created = step.clone();
+            created.id = Some(id.to_string());
+            Ok(created)
+        }
+        async fn get_step(&self, id: &str) -> ServiceResult<Option<Step>> {
+            assert_eq!(id, STEP);
+            Ok(self.existing.clone())
+        }
+        async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String> {
+            assert_eq!(id, STEP);
+            self.updated.lock().unwrap().push(StepUpdate {
+                name: updates.name.clone(),
+                goal: updates.goal.clone(),
+                harness: updates.harness,
+                config: updates.config.clone(),
+                persistence_options: updates.persistence_options.clone(),
+                transitions_to: updates.transitions_to.clone(),
+                order: updates.order,
+            });
+            Ok(WORKFLOW.to_string())
+        }
+        async fn list_steps_for_workflow(&self, id: &str) -> ServiceResult<Vec<Step>> {
+            assert_eq!(id, WORKFLOW);
+            Ok(self.existing.clone().into_iter().collect())
+        }
+        async fn resolve_short_id(&self, _: &str, _: Option<&str>) -> ServiceResult<String> {
+            panic!("unused")
+        }
+        async fn step_exists(&self, _: &str) -> ServiceResult<bool> {
+            panic!("unused")
+        }
+        async fn get_step_by_id(&self, _: &str) -> ServiceResult<Option<Step>> {
+            panic!("unused")
+        }
+        async fn delete_step(&self, _: &str) -> ServiceResult<()> {
+            panic!("unused")
+        }
+        async fn get_initial_step(&self, _: &str) -> ServiceResult<Option<Step>> {
+            panic!("unused")
+        }
+        async fn get_transitions(&self, _: &str) -> ServiceResult<Vec<Step>> {
+            panic!("unused")
+        }
+        async fn get_finish_steps(&self, _: &str) -> ServiceResult<Vec<Step>> {
+            panic!("unused")
+        }
+        async fn list_all_steps(&self) -> ServiceResult<Vec<Step>> {
+            panic!("unused")
+        }
+    }
+
+    struct ScriptFile(std::path::PathBuf);
+    impl ScriptFile {
+        fn new(contents: &str) -> Self {
+            let path =
+                std::env::temp_dir().join(format!("vtb-execute-{}.rhai", uuid::Uuid::now_v7()));
+            std::fs::write(&path, contents).unwrap();
+            Self(path)
+        }
+        fn flag(&self) -> String {
+            format!("@{}", self.0.display())
+        }
+    }
+    impl Drop for ScriptFile {
+        fn drop(&mut self) {
+            std::fs::remove_file(&self.0).ok();
+        }
+    }
+
+    #[tokio::test]
+    async fn inline_and_file_creation_send_authored_config_without_harness() {
+        let file = ScriptFile::new(SCRIPT);
+        for source in [SCRIPT.to_string(), file.flag()] {
+            let service = RecordingSteps::default();
+            let result = add(&["--script", &source, "--output-schema", SCHEMA])
+                .execute_result(&service)
+                .await
+                .unwrap();
+            assert_eq!(result, STEP);
+            let created = service.created.lock().unwrap();
+            assert_eq!(created.len(), 1);
+            let step = &created[0];
+            assert_eq!(step.step_type, StepType::Execute);
+            assert_eq!(step.harness, None);
+            assert_eq!(step.execute().unwrap().context, None);
+            assert_eq!(
+                step.execute().unwrap().definition_value(),
+                json!({
+                    "version":1,"script":SCRIPT,"output_schema":serde_json::from_str::<Value>(SCHEMA).unwrap()
+                })
+            );
+            assert!(service.updated.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn script_and_schema_updates_send_only_requested_fields() {
+        let file = ScriptFile::new("#{ total: inputs.quantity * 12 }");
+        for source in ["#{ total: 36 }".to_string(), file.flag()] {
+            let service = RecordingSteps::with_snapshot();
+            update(&["--script", &source])
+                .execute(&service)
+                .await
+                .unwrap();
+            let updates = service.updated.lock().unwrap();
+            assert_eq!(updates.len(), 1);
+            let expected = if source.starts_with('@') {
+                "#{ total: inputs.quantity * 12 }"
+            } else {
+                &source
+            };
+            assert_eq!(
+                updates[0].config,
+                Some(json!({"script":expected}).as_object().unwrap().clone())
+            );
+            assert_eq!(updates[0].harness, None);
+        }
+        let service = RecordingSteps::with_snapshot();
+        update(&[
+            "--output-schema",
+            r#"{"type":"object","additionalProperties":false}"#,
+        ])
+        .execute(&service)
+        .await
+        .unwrap();
+        assert_eq!(
+            service.updated.lock().unwrap()[0].config,
+            Some(
+                json!({"output_schema":{"type":"object","additionalProperties":false}})
+                    .as_object()
+                    .unwrap()
+                    .clone()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn update_preserves_version_and_unchanged_schema_or_script_in_storage() {
+        let services = mock_services();
+        services.steps().create_step(&snapshot()).await.unwrap();
+        update(&["--script", "#{ total: 48 }"])
+            .execute(services.steps())
+            .await
+            .unwrap();
+        let after = services.steps().get_step(STEP).await.unwrap().unwrap();
+        let config = after.execute().unwrap();
+        assert_eq!(config.version, 1);
+        assert_eq!(config.script, "#{ total: 48 }");
+        assert_eq!(
+            config.output_schema,
+            serde_json::from_str::<Value>(SCHEMA).unwrap()
+        );
+        assert_eq!(config.context, None);
+        update(&["--output-schema", r#"{"type":"object"}"#])
+            .execute(services.steps())
+            .await
+            .unwrap();
+        let after = services.steps().get_step(STEP).await.unwrap().unwrap();
+        let config = after.execute().unwrap();
+        assert_eq!(config.version, 1);
+        assert_eq!(config.script, "#{ total: 48 }");
+        assert_eq!(config.output_schema, json!({"type":"object"}));
+        assert_eq!(config.context, None);
+    }
+
+    #[tokio::test]
+    async fn invalid_script_or_schema_rejected_before_create_and_update_mutations() {
+        let whitespace = ScriptFile::new(" \n\t");
+        let oversized = "x".repeat(262_145);
+        let missing = format!("@/vtb-missing-{}.rhai", uuid::Uuid::now_v7());
+        for (args, message) in [
+            (vec!["--output-schema", SCHEMA], "require --script"),
+            (vec!["--script", SCRIPT], "require --output-schema"),
+            (
+                vec!["--script", " \n\t", "--output-schema", SCHEMA],
+                "non-empty script",
+            ),
+            (
+                vec!["--script", oversized.as_str(), "--output-schema", SCHEMA],
+                "262144 bytes",
+            ),
+            (
+                vec!["--script", missing.as_str(), "--output-schema", SCHEMA],
+                "Failed to read --script file",
+            ),
+            (
+                vec!["--script", SCRIPT, "--output-schema", "{"],
+                "Invalid --output-schema JSON",
+            ),
+            (
+                vec!["--script", SCRIPT, "--output-schema", "true"],
+                "JSON Schema object",
+            ),
+            (
+                vec!["--script", SCRIPT, "--output-schema", "null"],
+                "JSON Schema object",
+            ),
+            (
+                vec![
+                    "--script",
+                    SCRIPT,
+                    "--output-schema",
+                    r#"{"type":"banana"}"#,
+                ],
+                "invalid JSON Schema",
+            ),
+        ] {
+            let service = RecordingSteps::default();
+            let error = add(&args).execute(&service).await.unwrap_err().to_string();
+            assert!(error.contains(message), "{args:?}: {error}");
+            service.assert_no_mutations();
+        }
+        let whitespace_flag = whitespace.flag();
+        for (args, message) in [
+            (vec!["--script", ""], "non-empty script"),
+            (
+                vec!["--script", whitespace_flag.as_str()],
+                "non-empty script",
+            ),
+            (vec!["--script", oversized.as_str()], "262144 bytes"),
+            (
+                vec!["--script", missing.as_str()],
+                "Failed to read --script file",
+            ),
+            (vec!["--output-schema", "{"], "Invalid --output-schema JSON"),
+            (vec!["--output-schema", "[]"], "JSON Schema object"),
+            (vec!["--output-schema", "false"], "JSON Schema object"),
+            (
+                vec!["--output-schema", r#"{"type":"banana"}"#],
+                "invalid JSON Schema",
+            ),
+            (vec!["--clear-output-schema"], "cannot be cleared"),
+        ] {
+            let service = RecordingSteps::with_snapshot();
+            let error = update(&args)
+                .execute(&service)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(message), "{args:?}: {error}");
+            service.assert_no_mutations();
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_harness_provider_and_agent_flags_before_mutation() {
+        for args in [
+            vec!["--harness", "claude"],
+            vec!["--provider", "openai"],
+            vec!["--model", "gpt-5.5"],
+            vec!["--agent", "agent.md"],
+            vec!["--skill", "test"],
+            vec!["--agent-config", r#"{"provider":"openai"}"#],
+            vec!["--prompt", "hello"],
+            vec!["--reasoning-effort", "high"],
+            vec!["--speed-tier", "fast"],
+            vec!["--personality", "friendly"],
+            vec!["--verbosity", "high"],
+            vec!["--codex-model-provider", "azure"],
+            vec!["--state", "{}"],
+            vec!["--questions", "{}"],
+        ] {
+            let mut create_args = vec!["--script", SCRIPT, "--output-schema", SCHEMA];
+            create_args.extend_from_slice(&args);
+            let service = RecordingSteps::default();
+            let error = add(&create_args)
+                .execute(&service)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("not supported for execute steps"),
+                "{args:?}: {error}"
+            );
+            service.assert_no_mutations();
+            let service = RecordingSteps::with_snapshot();
+            let error = update(&args)
+                .execute(&service)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("not supported for execute steps"),
+                "{args:?}: {error}"
+            );
+            service.assert_no_mutations();
+        }
+        for flag in [
+            "--clear-agents",
+            "--clear-skills",
+            "--clear-prompt",
+            "--clear-speed-tier",
+            "--clear-personality",
+            "--clear-verbosity",
+        ] {
+            let service = RecordingSteps::with_snapshot();
+            let error = update(&[flag])
+                .execute(&service)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("not supported for execute steps"),
+                "{flag}: {error}"
+            );
+            service.assert_no_mutations();
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_list_reports_no_harness() {
+        let service = RecordingSteps::with_snapshot();
+        let listed = StepListCommand {
+            workflow: WORKFLOW.to_string(),
+        }
+        .execute(&service)
+        .await
+        .unwrap();
+        assert!(
+            listed.contains("type: execute, harness: (none)"),
+            "{listed}"
+        );
+        assert!(!listed.contains("server-default"), "{listed}");
+    }
+
+    #[tokio::test]
+    async fn other_types_require_harness_and_reject_script_before_mutation() {
+        for step_type in [
+            CliStepType::LlmInference,
+            CliStepType::StructuredInference,
+            CliStepType::Route,
+            CliStepType::WaitChildren,
+            CliStepType::HumanInput,
+            CliStepType::Stop,
+            CliStepType::Finish,
+        ] {
+            let service = RecordingSteps::default();
+            let mut command = add(&["--script", SCRIPT, "--output-schema", SCHEMA]);
+            command.step_type = step_type.clone();
+            let error = command.execute(&service).await.unwrap_err().to_string();
+            assert!(
+                error.contains("--harness is required"),
+                "{step_type:?}: {error}"
+            );
+            service.assert_no_mutations();
+
+            command.harness = Some(CliHarness::Claude);
+            if StepType::from(step_type.clone()) == StepType::Stop {
+                command.transitions_to = vec![WORKFLOW.to_string()];
+            }
+            let error = command.execute(&service).await.unwrap_err().to_string();
+            assert!(error.contains("config:"), "{step_type:?}: {error}");
+            service.assert_no_mutations();
+
+            let mut service = RecordingSteps::with_snapshot();
+            service.existing.as_mut().unwrap().step_type = step_type.into();
+            let error = update(&["--script", SCRIPT])
+                .execute(&service)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("config:"), "{error}");
+            service.assert_no_mutations();
+        }
     }
 }

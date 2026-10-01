@@ -135,7 +135,7 @@ const styles: Record<StepKind, StepTypeStyle> = {
 export function stepTypeStyle(
   stepType: StepType | null | undefined
 ): StepTypeStyle {
-  return styles[normalizeStepType(stepType)];
+  return styles[normalizeStepType(stepType)] ?? styles.unknown;
 }
 
 export function hearthStepKind(

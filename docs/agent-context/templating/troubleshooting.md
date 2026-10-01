@@ -1,7 +1,7 @@
 # Templating troubleshooting
 
 Purpose: map template symptoms to causes.
-Use this when: a rendered prompt or state is wrong, or a dispatch failed on a template.
+Use this when: a rendered prompt, state, or execute field is wrong, or dispatch failed on a template.
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -14,6 +14,7 @@ Use this when: a rendered prompt or state is wrong, or a dispatch failed on a te
 | `step_config_render_failed ... whole string` | Object/array embedded in text | Make it the whole string value |
 | `route_handoff_template_invalid` | Bad reference syntax or unknown output path | Fix the path against the predecessor schema |
 | `previous_output` empty after a route | Routes produce no output | Use `execution.handoff` or `steps.<name>.output` |
+| Execute script rendering fails | Strict script template reference is invalid or missing | Check the reference and this TaskRun's prior outputs; see [execute context/output](../workflows/steps/execute/input-output.md) |
 
 ## Related
-[Prompts](prompts.md) · [State](state.md) · [Handoffs](handoffs.md) · [Failure table](../debugging/failure-table.md)
+[Prompts](prompts.md) · [State](state.md) · [Execute](../workflows/steps/execute/index.md) · [Handoffs](handoffs.md) · [Failure table](../debugging/failure-table.md)

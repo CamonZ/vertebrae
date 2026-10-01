@@ -48,6 +48,11 @@ describe("stepTypeStyle", () => {
     expect(style.hearthKind).toBe("unknown");
     expect(style.barVar).toBe("--color-line-strong");
   });
+
+  it("uses the neutral style for execute snapshots without an authoring palette", () => {
+    expect(stepTypeStyle("execute")).toEqual(stepTypeStyle(null));
+    expect(hearthStepKind("execute")).toBe("unknown");
+  });
 });
 
 describe("hearthStepKind", () => {
