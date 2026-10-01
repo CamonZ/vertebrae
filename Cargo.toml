@@ -24,7 +24,8 @@ opt-level = 3
 lto = "thin"                    # Good balance of speed and link time
 codegen-units = 16
 strip = true
-panic = "abort"
+# Rhai blocking workers must unwind so their join reports panic and returns capacity.
+panic = "unwind"
 
 # Focused checks mapped to docs/rust-guideline-enforcement.json.
 # Do not enable the entire restriction/pedantic groups without a scoped audit.

@@ -11,6 +11,10 @@ Use this when: running many children, or limiting load on the machine or provide
   cannot set their own.
 - A run tree is pinned to one daemon.
 - Waiting parents release their execution slot while children run.
+- [Execute](../workflows/steps/execute/index.md) additionally has a daemon-wide local
+  limit of one active Rhai evaluation and four pending attempts. TaskRun
+  concurrency does not raise that worker capacity; overflow fails the attempt
+  explicitly and the backend owns retry decisions.
 
 ## Doing it
 For an epic with many independent tickets: `vtb start-taskrun <epic> --max-concurrency 3`

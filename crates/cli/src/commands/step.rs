@@ -4,11 +4,11 @@
 
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
-    AgentConfig, BuiltinProvider, OutputVerbosity, ProviderId, ServiceError, SpeedTier, Step,
-    StepConfig, StepHarness, StepService, StepType, StepUpdate, VertebraeServices,
-    normalize_harness_personality, normalize_harness_reasoning_effort, normalize_personality,
-    validate_config_fields, validate_harness_agent_config,
-    validate_provider_model_with_codex_provider,
+    AgentConfig, BuiltinProvider, ExecuteConfig, OutputVerbosity, ProviderId, STEP_CONFIG_VERSION,
+    ServiceError, SpeedTier, Step, StepConfig, StepHarness, StepService, StepType, StepUpdate,
+    VertebraeServices, apply_config_patch, normalize_harness_personality,
+    normalize_harness_reasoning_effort, normalize_personality, validate_config_fields,
+    validate_harness_agent_config, validate_provider_model_with_codex_provider,
 };
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -67,6 +67,7 @@ pub enum CliStepType {
     LlmInference,
     #[value(name = "structured_inference")]
     StructuredInference,
+    Execute,
     Route,
     #[value(name = "wait_children")]
     WaitChildren,
@@ -82,6 +83,7 @@ impl From<CliStepType> for StepType {
         match cli {
             CliStepType::LlmInference => StepType::LlmInference,
             CliStepType::StructuredInference => StepType::StructuredInference,
+            CliStepType::Execute => StepType::Execute,
             CliStepType::Route => StepType::Route,
             CliStepType::WaitChildren => StepType::WaitChildren,
             CliStepType::HumanInput => StepType::HumanInput,
@@ -242,9 +244,13 @@ pub struct StepAddCommand {
     #[arg(long, short)]
     pub goal: Option<String>,
 
-    /// Runtime harness for this step.
-    #[arg(long, value_enum)]
-    pub harness: CliHarness,
+    /// Runtime harness for this step; required except for execute steps.
+    #[arg(long, value_enum, required_unless_present("step_type"), required_if_eq_any([
+        ("step_type", "llm_inference"), ("step_type", "structured_inference"),
+        ("step_type", "route"), ("step_type", "wait_children"),
+        ("step_type", "human_input"), ("step_type", "stop"), ("step_type", "finish")
+    ]))]
+    pub harness: Option<CliHarness>,
 
     /// Paths to .claude/agents/ files (can be specified multiple times)
     #[arg(long, short = 'a')]
@@ -257,6 +263,11 @@ pub struct StepAddCommand {
     /// Prompt sent to the agent when executing this step
     #[arg(long)]
     pub prompt: Option<String>,
+
+    /// Rhai script for an execute step, inline or `@path`. Runtime namespaces:
+    /// task, execution, inputs, steps, workflow, artifacts.
+    #[arg(long, value_name = "SCRIPT|@PATH", allow_hyphen_values = true)]
+    pub script: Option<String>,
 
     /// Full agent config as a JSON string (e.g. '{"model":"opus","max_budget_usd":5.0}')
     #[arg(long, value_name = "JSON")]
@@ -303,15 +314,15 @@ pub struct StepAddCommand {
     #[arg(long, alias = "model-provider", value_name = "PROVIDER")]
     pub provider: Option<String>,
 
-    /// Type of this step (llm_inference, structured_inference, route,
+    /// Type of this step (llm_inference, structured_inference, execute, route,
     /// wait_children, human_input, stop, finish).
     ///
     /// A step's type cannot change after creation. Config flags must be
     /// declared by the type: llm_inference takes the prompt, output schema,
     /// agent, skill, and agent-config flags; structured_inference takes
     /// --provider, --model, --state, and --questions; route takes
-    /// --route-config; wait_children takes --output-schema; the others take
-    /// none.
+    /// --route-config; wait_children takes --output-schema; execute requires
+    /// --script and --output-schema and has no harness; the others take none.
     #[arg(long, value_enum, default_value = "llm_inference")]
     pub step_type: CliStepType,
 
@@ -481,6 +492,7 @@ impl StepAddCommand {
     fn config_fields(&self, step_type: &StepType) -> Vec<&'static str> {
         let structured = *step_type == StepType::StructuredInference;
         [
+            ("script", self.script.is_some()),
             ("prompt", self.prompt.is_some()),
             ("output_schema", self.output_schema.is_some()),
             ("agents", !self.agent.is_empty()),
@@ -499,6 +511,23 @@ impl StepAddCommand {
 
     fn build_config(&self, step_type: &StepType) -> Result<Option<StepConfig>, ServiceError> {
         let output_schema = parse_json_flag(self.output_schema.as_deref(), "--output-schema")?;
+        if *step_type == StepType::Execute {
+            let script = self
+                .script
+                .as_deref()
+                .ok_or_else(|| ServiceError::validation_failed("execute steps require --script"))?;
+            let output_schema = output_schema.ok_or_else(|| {
+                ServiceError::validation_failed("execute steps require --output-schema")
+            })?;
+            let config = ExecuteConfig {
+                version: STEP_CONFIG_VERSION,
+                script: read_flag_value(script, "--script")?,
+                context: None,
+                output_schema,
+            };
+            config.validate()?;
+            return Ok(Some(StepConfig::Execute(config)));
+        }
         let route_config = parse_json_flag(self.route_config.as_deref(), "--route-config")?;
 
         let mut config = StepConfig::default_for(step_type);
@@ -511,7 +540,7 @@ impl StepAddCommand {
                 config.agent_config = build_overlayed_agent_config(
                     AgentConfig::new(),
                     self.agent_config.as_deref(),
-                    Some(self.harness.into()),
+                    self.harness.map(Into::into),
                     AgentConfigOverrides {
                         provider: parse_agent_provider(self.provider.as_deref())?,
                         model: self.model.as_deref(),
@@ -531,7 +560,7 @@ impl StepAddCommand {
             }
             Some(StepConfig::Route(config)) => config.route_config = route_config,
             Some(StepConfig::WaitChildren(config)) => config.output_schema = output_schema,
-            None => {}
+            Some(StepConfig::Execute(_)) | None => {}
         }
         Ok(config)
     }
@@ -539,6 +568,20 @@ impl StepAddCommand {
     pub async fn execute_result(&self, service: &dyn StepService) -> Result<String, ServiceError> {
         let workflow_id = self.workflow.to_lowercase();
         let step_type: StepType = self.step_type.clone().into();
+
+        match (&step_type, self.harness) {
+            (StepType::Execute, Some(_)) => {
+                return Err(ServiceError::validation_failed(
+                    "--harness is not supported for execute steps",
+                ));
+            }
+            (StepType::Execute, None) | (_, Some(_)) => {}
+            (_, None) => {
+                return Err(ServiceError::validation_failed(
+                    "--harness is required for this step type",
+                ));
+            }
+        }
 
         let transitions_to: Vec<String> = self
             .transitions_to
@@ -556,8 +599,11 @@ impl StepAddCommand {
             .with_step_type(step_type)
             .with_config(config)
             .with_order(self.order)
-            .with_transitions_to(transitions_to)
-            .with_harness(self.harness.into());
+            .with_transitions_to(transitions_to);
+
+        if let Some(harness) = self.harness {
+            step = step.with_harness(harness.into());
+        }
 
         if let Some(options) = persistence_options {
             step = step.with_persistence_options(options);
@@ -642,6 +688,13 @@ impl StepListCommand {
                         .map(|t| t.to_string())
                         .unwrap_or_else(|| "?".to_string());
                 let step_type = s.step_type.to_string();
+                let harness = s.harness.map(StepHarness::as_str).unwrap_or(
+                    if s.step_type == StepType::Execute {
+                        "(none)"
+                    } else {
+                        "server-default"
+                    },
+                );
                 let model = match &s.config {
                     Some(StepConfig::LlmInference(config)) => {
                         Some(config.agent_config.model.as_deref().unwrap_or("default"))
@@ -658,9 +711,7 @@ impl StepListCommand {
                         s.name,
                         id,
                         step_type,
-                        s.harness
-                            .map(StepHarness::as_str)
-                            .unwrap_or("server-default"),
+                        harness,
                         model
                     ),
                     None => format!(
@@ -669,9 +720,7 @@ impl StepListCommand {
                         s.name,
                         id,
                         step_type,
-                        s.harness
-                            .map(StepHarness::as_str)
-                            .unwrap_or("server-default"),
+                        harness,
                     ),
                 }
             })
@@ -746,9 +795,13 @@ Goal:          {}
             workflow_id,
             s.order,
             s.step_type,
-            s.harness
-                .map(StepHarness::as_str)
-                .unwrap_or("server-default"),
+            s.harness.map(StepHarness::as_str).unwrap_or(
+                if matches!(s.step_type, StepType::Execute) {
+                    "(none)"
+                } else {
+                    "server-default"
+                }
+            ),
             goal,
         );
 
@@ -782,6 +835,13 @@ Goal:          {}
                 output.push_str(&format!(
                     "Output Schema: {}\n",
                     pretty_json(config.output_schema.as_ref())
+                ));
+            }
+            Some(StepConfig::Execute(config)) => {
+                output.push_str(&format!(
+                    "Script:        {}\nOutput Schema: {}\n",
+                    config.script,
+                    pretty_json(Some(&config.output_schema)),
                 ));
             }
             None => output.push_str("Config:        (none)\n"),
@@ -855,6 +915,11 @@ pub struct StepUpdateCommand {
     /// New prompt for the step
     #[arg(long)]
     pub prompt: Option<String>,
+
+    /// New Rhai script for an execute step, inline or `@path`. Runtime namespaces:
+    /// task, execution, inputs, steps, workflow, artifacts.
+    #[arg(long, value_name = "SCRIPT|@PATH", allow_hyphen_values = true)]
+    pub script: Option<String>,
 
     /// Clear the existing prompt
     #[arg(long)]
@@ -1002,6 +1067,7 @@ impl StepUpdateCommand {
     fn config_fields(&self, step_type: &StepType) -> Vec<&'static str> {
         let structured = *step_type == StepType::StructuredInference;
         [
+            ("script", self.script.is_some()),
             ("prompt", self.prompt.is_some() || self.clear_prompt),
             (
                 "output_schema",
@@ -1032,7 +1098,13 @@ impl StepUpdateCommand {
                 ServiceError::validation_failed(format!("Step not found: {}", self.id))
             })?;
 
-        if self.harness.is_none() && self.sets_provider() {
+        if existing.step_type == StepType::Execute && self.harness.is_some() {
+            return Err(ServiceError::validation_failed(
+                "--harness is not supported for execute steps",
+            ));
+        }
+        if existing.step_type != StepType::Execute && self.harness.is_none() && self.sets_provider()
+        {
             return Err(ServiceError::validation_failed(
                 "--harness is required when setting the provider",
             ));
@@ -1064,6 +1136,12 @@ impl StepUpdateCommand {
 
         validate_config_fields(&existing.step_type, self.config_fields(&existing.step_type))?;
 
+        if existing.step_type == StepType::Execute && self.clear_output_schema {
+            return Err(ServiceError::validation_failed(
+                "execute steps require --output-schema; it cannot be cleared",
+            ));
+        }
+
         let resulting_transitions = if self.clear_transitions {
             Vec::new()
         } else if !self.transitions_to.is_empty() {
@@ -1092,6 +1170,10 @@ impl StepUpdateCommand {
         }
         if self.clear_prompt {
             updates = updates.clear_prompt();
+        }
+        if let Some(script) = &self.script {
+            updates =
+                updates.with_config_field("script", read_flag_value(script, "--script")?.into());
         }
 
         if self.clear_agents {
@@ -1191,6 +1273,13 @@ impl StepUpdateCommand {
             updates = updates.with_transitions_to(transitions);
         }
 
+        if existing.step_type == StepType::Execute
+            && let Some(patch) = &updates.config
+        {
+            let mut candidate = existing;
+            apply_config_patch(&mut candidate, patch)?;
+        }
+
         service
             .update_step(&self.id.to_lowercase(), &updates)
             .await?;
@@ -1245,10 +1334,164 @@ mod tests {
     use clap::Parser;
 
     /// Test struct to parse commands
-    #[derive(Parser)]
+    #[derive(Debug, Parser)]
     struct TestCli {
         #[command(subcommand)]
         command: StepCommand,
+    }
+
+    #[test]
+    fn execute_add_parses_without_harness_and_update_accepts_script_file() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Transform",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "execute",
+            "--script",
+            "#{ total: steps.producer.output.quantity * 2 }",
+            "--output-schema",
+            r#"{"type":"object"}"#,
+        ])
+        .unwrap();
+        let StepCommand::Add(cmd) = cli.command else {
+            panic!("expected add")
+        };
+        assert_eq!(StepType::from(cmd.step_type.clone()), StepType::Execute);
+        assert!(cmd.harness.is_none());
+        assert_eq!(
+            cmd.script.as_deref(),
+            Some("#{ total: steps.producer.output.quantity * 2 }")
+        );
+        assert_eq!(cmd.output_schema.as_deref(), Some(r#"{"type":"object"}"#));
+
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000007",
+            "--script",
+            "@transform.rhai",
+        ])
+        .unwrap();
+        let StepCommand::Update(cmd) = cli.command else {
+            panic!("expected update")
+        };
+        assert_eq!(cmd.script.as_deref(), Some("@transform.rhai"));
+        assert!(cmd.output_schema.is_none());
+        assert!(cmd.harness.is_none());
+    }
+
+    #[test]
+    fn execute_script_accepts_leading_hyphens() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Transform",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "execute",
+            "--script",
+            "-1",
+            "--output-schema",
+            "{}",
+        ])
+        .unwrap();
+        let StepCommand::Add(cmd) = cli.command else {
+            panic!("expected add")
+        };
+        assert_eq!(cmd.script.as_deref(), Some("-1"));
+
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000007",
+            "--script",
+            "-2",
+        ])
+        .unwrap();
+        let StepCommand::Update(cmd) = cli.command else {
+            panic!("expected update")
+        };
+        assert_eq!(cmd.script.as_deref(), Some("-2"));
+    }
+
+    #[test]
+    fn existing_step_types_still_require_harness() {
+        for step_type in [
+            "llm_inference",
+            "structured_inference",
+            "route",
+            "wait_children",
+            "human_input",
+            "stop",
+            "finish",
+        ] {
+            let error = TestCli::try_parse_from([
+                "test",
+                "add",
+                "Step",
+                "--workflow",
+                "a1b2c3d4-0000-4000-8000-000000000006",
+                "--step-type",
+                step_type,
+            ])
+            .unwrap_err();
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::MissingRequiredArgument
+            );
+            assert!(
+                error.to_string().contains("--harness"),
+                "{step_type}: {error}"
+            );
+        }
+        assert!(
+            TestCli::try_parse_from([
+                "test",
+                "add",
+                "Step",
+                "--workflow",
+                "a1b2c3d4-0000-4000-8000-000000000006",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn execute_script_help_names_rhai_and_all_runtime_namespaces() {
+        for subcommand in ["add", "update"] {
+            let error = TestCli::try_parse_from(["test", subcommand, "--help"]).unwrap_err();
+            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+            let help = error.to_string();
+            assert!(help.contains("Rhai"), "{help}");
+            assert!(help.contains("@path"), "{help}");
+            assert!(
+                help.contains("task, execution, inputs, steps, workflow, artifacts"),
+                "{help}"
+            );
+        }
+    }
+
+    #[test]
+    fn execute_has_no_authored_input_or_context_flags() {
+        for flag in ["--input", "--context"] {
+            let error = TestCli::try_parse_from([
+                "test",
+                "add",
+                "Transform",
+                "--workflow",
+                "a1b2c3d4-0000-4000-8000-000000000006",
+                "--step-type",
+                "execute",
+                flag,
+                "{}",
+            ])
+            .unwrap_err();
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+        }
     }
 
     #[test]
@@ -1948,21 +2191,19 @@ mod tests {
     }
 
     #[test]
-    fn test_step_add_rejects_retired_step_types() {
-        for retired in ["execute", "evaluate"] {
-            let result = TestCli::try_parse_from([
-                "test",
-                "add",
-                "--harness",
-                "claude",
-                "Checker",
-                "--workflow",
-                "a1b2c3d4-0000-4000-8000-000000000006",
-                "--step-type",
-                retired,
-            ]);
-            assert!(result.is_err(), "{retired} should be rejected");
-        }
+    fn test_step_add_rejects_retired_evaluate_type() {
+        let result = TestCli::try_parse_from([
+            "test",
+            "add",
+            "--harness",
+            "claude",
+            "Checker",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "evaluate",
+        ]);
+        assert!(result.is_err(), "evaluate should be rejected");
     }
 
     #[test]

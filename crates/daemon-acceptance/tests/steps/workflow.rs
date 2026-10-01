@@ -2,12 +2,12 @@ use cucumber::given;
 
 use crate::DaemonWorld;
 
-#[given("a workflow with one execute step")]
+#[given("a workflow with one inference step")]
 pub async fn given_workflow_with_one_execute_step(world: &mut DaemonWorld) {
     create_workflow_and_step(world, None).await;
 }
 
-#[given(expr = "a workflow with one execute step using harness {string} and model {string}")]
+#[given(expr = "a workflow with one inference step using harness {string} and model {string}")]
 pub async fn given_workflow_with_explicit_harness(
     world: &mut DaemonWorld,
     harness: String,
@@ -83,14 +83,14 @@ pub async fn given_workflow_with_explicit_harness(
     world.step_id = Some(run_id);
 }
 
-#[given("a workflow with one execute step using openai")]
+#[given("a workflow with one inference step using openai")]
 pub async fn given_workflow_with_codex_step(world: &mut DaemonWorld) {
     create_workflow_and_step(world, None).await;
     update_current_step_openai(world, "gpt-5", None).await;
     world.assert_vtb_ok("step update --provider openai");
 }
 
-#[given(expr = "a workflow with one execute step using openai and reasoning effort {string}")]
+#[given(expr = "a workflow with one inference step using openai and reasoning effort {string}")]
 pub async fn given_workflow_with_codex_step_and_reasoning_effort(
     world: &mut DaemonWorld,
     reasoning_effort: String,
@@ -101,7 +101,7 @@ pub async fn given_workflow_with_codex_step_and_reasoning_effort(
 }
 
 #[given(
-    expr = "a workflow with one execute step using openai, speed tier {string}, personality {string}, and verbosity {string}"
+    expr = "a workflow with one inference step using openai, speed tier {string}, personality {string}, and verbosity {string}"
 )]
 pub async fn given_workflow_with_codex_step_and_model_settings(
     world: &mut DaemonWorld,
@@ -134,7 +134,7 @@ pub async fn given_workflow_with_codex_step_and_model_settings(
 }
 
 #[given(
-    expr = "a workflow with one execute step using anthropic, speed tier {string}, and personality {string}"
+    expr = "a workflow with one inference step using anthropic, speed tier {string}, and personality {string}"
 )]
 pub async fn given_workflow_with_claude_step_and_model_settings(
     world: &mut DaemonWorld,
@@ -164,7 +164,7 @@ pub async fn given_workflow_with_claude_step_and_model_settings(
 }
 
 #[given(
-    expr = "a workflow with one execute step using openai, codex model provider {string}, and model {string}"
+    expr = "a workflow with one inference step using openai, codex model provider {string}, and model {string}"
 )]
 pub async fn given_workflow_with_codex_step_model_provider_and_model(
     world: &mut DaemonWorld,
@@ -182,7 +182,7 @@ pub async fn given_workflow_with_codex_step_model_provider_and_model(
     world.assert_vtb_ok("step update --provider openai --codex-model-provider");
 }
 
-#[given("a workflow with one execute step and an output schema")]
+#[given("a workflow with one inference step and an output schema")]
 pub async fn given_workflow_with_schema(world: &mut DaemonWorld) {
     let schema = serde_json::json!({
         "type": "object",
@@ -232,7 +232,7 @@ pub async fn given_task_existing_artifact(world: &mut DaemonWorld, logical_name:
     world.assert_vtb_ok("artifact add existing task artifact");
 }
 
-#[given("a workflow with one execute step using openai and an output schema")]
+#[given("a workflow with one inference step using openai and an output schema")]
 pub async fn given_workflow_with_codex_schema_step(world: &mut DaemonWorld) {
     let schema = serde_json::json!({
         "type": "object",

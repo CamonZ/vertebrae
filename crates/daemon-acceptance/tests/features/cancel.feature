@@ -6,7 +6,7 @@ Feature: Cancel a running step
 
   Scenario: Cancel mid-sleep
     Given a configured daemon test environment
-    And a workflow with one execute step
+    And a workflow with one inference step
     And a task assigned to the workflow
     When the mock is scripted to sleep 15000 milliseconds
     And I start a TaskRun

@@ -15,7 +15,7 @@ A route that only leaves its workflow has no step transitions (empty `transition
 ## Edge rules at runtime
 | Step type | Outgoing step transitions |
 |---|---|
-| llm_inference, structured_inference, human_input, wait_children | exactly one |
+| llm_inference, structured_inference, execute, human_input, wait_children | exactly one |
 | stop | exactly one (the next TaskRun follows it) |
 | route | one per intra-workflow target (none if it only exits) |
 | finish | none |

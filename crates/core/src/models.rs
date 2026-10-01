@@ -163,6 +163,8 @@ pub enum StepType {
     #[default]
     LlmInference,
     StructuredInference,
+    /// Runs a rendered Rhai script with the runtime context snapshot in the daemon.
+    Execute,
     Route,
     WaitChildren,
     HumanInput,
@@ -177,6 +179,7 @@ impl StepType {
         match value {
             "llm_inference" => StepType::LlmInference,
             "structured_inference" => StepType::StructuredInference,
+            "execute" => StepType::Execute,
             "route" => StepType::Route,
             "wait_children" => StepType::WaitChildren,
             "human_input" => StepType::HumanInput,
@@ -190,6 +193,7 @@ impl StepType {
         match self {
             StepType::LlmInference => "llm_inference",
             StepType::StructuredInference => "structured_inference",
+            StepType::Execute => "execute",
             StepType::Route => "route",
             StepType::WaitChildren => "wait_children",
             StepType::HumanInput => "human_input",
@@ -211,6 +215,7 @@ impl StepType {
                 "agent_config",
             ]),
             StepType::StructuredInference => Some(&["provider", "model", "state", "questions"]),
+            StepType::Execute => Some(&["version", "script", "output_schema"]),
             StepType::Route => Some(&["route_config"]),
             StepType::WaitChildren => Some(&["output_schema"]),
             StepType::HumanInput | StepType::Stop | StepType::Finish => None,
@@ -1727,6 +1732,169 @@ impl Default for StructuredInferenceConfig {
     }
 }
 
+/// Provider-independent configuration for a daemon-run Rhai transformation.
+/// Definitions contain version, script, and output_schema. Context is a
+/// server-written execution snapshot and is never authored by clients.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "ExecuteConfigFields")]
+pub struct ExecuteConfig {
+    pub version: i32,
+    pub script: String,
+    /// Complete PromptContext data on a rendered execution; definitions and
+    /// unrendered snapshots carry no context. Separate from StepExecution.context.
+    #[serde(default)]
+    pub context: Option<serde_json::Value>,
+    pub output_schema: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecuteConfigFields {
+    // Sacrum channel snapshots carry their union discriminator as metadata.
+    #[serde(default, rename = "__type__")]
+    step_type: Option<String>,
+    version: i32,
+    script: String,
+    #[serde(default)]
+    context: Option<serde_json::Value>,
+    #[serde(deserialize_with = "required_json_value")]
+    output_schema: serde_json::Value,
+}
+
+fn required_json_value<'de, D>(deserializer: D) -> Result<serde_json::Value, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde_json::Value::deserialize(deserializer)
+}
+
+impl TryFrom<ExecuteConfigFields> for ExecuteConfig {
+    type Error = crate::error::ServiceError;
+
+    fn try_from(fields: ExecuteConfigFields) -> Result<Self, Self::Error> {
+        if fields
+            .step_type
+            .as_deref()
+            .is_some_and(|kind| kind != "execute")
+        {
+            return Err(crate::error::ServiceError::validation_failed(
+                "config: $.__type__: expected execute config",
+            ));
+        }
+        let config = Self {
+            version: fields.version,
+            script: fields.script,
+            context: fields.context,
+            output_schema: fields.output_schema,
+        };
+        config.validate()?;
+        Ok(config)
+    }
+}
+
+impl ExecuteConfig {
+    /// Validate the explicit execute contract without inference constraints.
+    pub fn validate(&self) -> crate::error::ServiceResult<()> {
+        self.validate_structure()?;
+        jsonschema::validator_for(&self.output_schema).map_err(|error| {
+            crate::error::ServiceError::validation_failed(format!(
+                "config: $.output_schema: invalid JSON Schema: {error}"
+            ))
+        })?;
+        Ok(())
+    }
+
+    /// Check bounded config structure without compiling its JSON Schema.
+    /// Runtime consumers compile once inside their admitted blocking worker.
+    pub fn validate_structure(&self) -> crate::error::ServiceResult<()> {
+        use crate::error::ServiceError;
+
+        if self.version != STEP_CONFIG_VERSION {
+            return Err(ServiceError::validation_failed(format!(
+                "config: $.version: execute requires version {STEP_CONFIG_VERSION}"
+            )));
+        }
+        if self.script.trim().is_empty() {
+            return Err(ServiceError::validation_failed(
+                "config: $.script: execute requires a non-empty script",
+            ));
+        }
+        if self.script.len() > 262_144 {
+            return Err(ServiceError::validation_failed(
+                "config: $.script: must be at most 262144 bytes",
+            ));
+        }
+        if !self.output_schema.is_object() {
+            return Err(ServiceError::validation_failed(
+                "config: $.output_schema: must be a JSON Schema object",
+            ));
+        }
+        if self
+            .context
+            .as_ref()
+            .is_some_and(|context| !context.is_object())
+        {
+            return Err(ServiceError::validation_failed(
+                "config: $.context: must be a JSON object or null",
+            ));
+        }
+        validate_execute_json_bounds(&self.output_schema, "$.output_schema")?;
+        Ok(())
+    }
+
+    /// Serialize only authored fields when reusing a read execution snapshot
+    /// to create or update a workflow definition.
+    pub fn definition_value(&self) -> serde_json::Value {
+        serde_json::json!({
+            "version": self.version,
+            "script": self.script,
+            "output_schema": self.output_schema,
+        })
+    }
+}
+
+fn validate_execute_json_bounds(
+    value: &serde_json::Value,
+    label: &str,
+) -> crate::error::ServiceResult<()> {
+    use crate::error::ServiceError;
+    let mut pending = vec![(value, 0)];
+    while let Some((value, depth)) = pending.pop() {
+        if depth > 32 {
+            return Err(ServiceError::validation_failed(format!(
+                "config: {label}: must have nesting depth at most 32"
+            )));
+        }
+        match value {
+            serde_json::Value::Array(items) => {
+                if items.len() > 4096 {
+                    return Err(ServiceError::validation_failed(format!(
+                        "config: {label}: must have at most 4096 entries"
+                    )));
+                }
+                pending.extend(items.iter().map(|value| (value, depth + 1)));
+            }
+            serde_json::Value::Object(fields) => {
+                if fields.len() > 4096 {
+                    return Err(ServiceError::validation_failed(format!(
+                        "config: {label}: must have at most 4096 entries"
+                    )));
+                }
+                pending.extend(fields.values().map(|value| (value, depth + 1)));
+            }
+            _ => {}
+        }
+    }
+    let bytes = serde_json::to_vec(value)
+        .map_err(|error| ServiceError::validation_failed(format!("config: {label}: {error}")))?;
+    if bytes.len() > 1_048_576 {
+        return Err(ServiceError::validation_failed(format!(
+            "config: {label}: must encode to at most 1048576 bytes"
+        )));
+    }
+    Ok(())
+}
+
 /// Config of a `route` step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RouteConfig {
@@ -1782,13 +1950,14 @@ where
 pub enum StepConfig {
     LlmInference(Box<LlmInferenceConfig>),
     StructuredInference(StructuredInferenceConfig),
+    Execute(ExecuteConfig),
     Route(RouteConfig),
     WaitChildren(WaitChildrenConfig),
 }
 
 impl StepConfig {
     /// Default config for a new step of `step_type`, or `None` for types
-    /// without config.
+    /// without config or requiring an explicitly supplied execute config.
     pub fn default_for(step_type: &StepType) -> Option<Self> {
         match step_type {
             StepType::LlmInference => Some(Self::LlmInference(Box::default())),
@@ -1806,7 +1975,7 @@ impl StepConfig {
         step_type: &StepType,
         value: serde_json::Value,
     ) -> Result<Option<Self>, serde_json::Error> {
-        if value.is_null() {
+        if value.is_null() && !matches!(step_type, StepType::Execute) {
             return Ok(None);
         }
         Ok(match step_type {
@@ -1816,6 +1985,7 @@ impl StepConfig {
             StepType::StructuredInference => {
                 Some(Self::StructuredInference(serde_json::from_value(value)?))
             }
+            StepType::Execute => Some(Self::Execute(serde_json::from_value(value)?)),
             StepType::Route => Some(Self::Route(serde_json::from_value(value)?)),
             StepType::WaitChildren => Some(Self::WaitChildren(serde_json::from_value(value)?)),
             _ => None,
@@ -1833,6 +2003,7 @@ impl StepConfig {
         match self {
             Self::LlmInference(config) => config.output_schema.as_ref(),
             Self::WaitChildren(config) => config.output_schema.as_ref(),
+            Self::Execute(config) => Some(&config.output_schema),
             Self::StructuredInference(_) | Self::Route(_) => None,
         }
     }
@@ -1840,6 +2011,13 @@ impl StepConfig {
     pub fn structured_inference(&self) -> Option<&StructuredInferenceConfig> {
         match self {
             Self::StructuredInference(config) => Some(config),
+            _ => None,
+        }
+    }
+
+    pub fn execute(&self) -> Option<&ExecuteConfig> {
+        match self {
+            Self::Execute(config) => Some(config),
             _ => None,
         }
     }
@@ -1893,8 +2071,9 @@ pub struct Step {
     /// The type of this step; immutable once the step exists.
     pub step_type: StepType,
 
-    /// Runtime harness selected for this step. `None` preserves Sacrum's
+    /// Runtime harness selected for inference. `None` preserves Sacrum's
     /// configured default or provider backfill for existing workflows.
+    /// Execute steps do not select a provider harness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<StepHarness>,
 
@@ -1971,6 +2150,10 @@ impl Step {
             .and_then(StepConfig::structured_inference)
     }
 
+    pub fn execute(&self) -> Option<&ExecuteConfig> {
+        self.config.as_ref().and_then(StepConfig::execute)
+    }
+
     fn llm_inference_config(&mut self) -> &mut LlmInferenceConfig {
         match &mut self.config {
             Some(StepConfig::LlmInference(config)) => config,
@@ -2033,11 +2216,12 @@ impl Step {
         self
     }
 
-    /// Set the output schema of an `llm_inference` or `wait_children` step.
+    /// Set the output schema of an inference, execute, or wait_children step.
     pub fn with_output_schema(mut self, schema: serde_json::Value) -> Self {
         match &mut self.config {
             Some(StepConfig::LlmInference(config)) => config.output_schema = Some(schema),
             Some(StepConfig::WaitChildren(config)) => config.output_schema = Some(schema),
+            Some(StepConfig::Execute(config)) => config.output_schema = schema,
             _ => panic!("{} steps have no output_schema", self.step_type),
         }
         self
@@ -2253,7 +2437,8 @@ pub struct StepExecution {
 
     /// The step config this execution ran with, templates rendered: the
     /// rendered prompt for `llm_inference`, the resolved state for
-    /// `structured_inference`. `None` for human_input, stop, and finish.
+    /// `structured_inference`, and the rendered script/typed context snapshot for
+    /// `execute`. `None` for human_input, stop, and finish.
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub config: Option<StepConfig>,
 
@@ -2393,6 +2578,11 @@ impl StepExecution {
     /// Rendered prompt of an `llm_inference` execution
     pub fn prompt(&self) -> Option<&str> {
         self.config.as_ref().and_then(StepConfig::prompt)
+    }
+
+    /// Rendered execute snapshot, including its resolved JSON input.
+    pub fn execute(&self) -> Option<&ExecuteConfig> {
+        self.config.as_ref().and_then(StepConfig::execute)
     }
 
     /// Set output
@@ -3655,6 +3845,7 @@ mod tests {
     #[test]
     fn step_type_as_str() {
         assert_eq!(StepType::LlmInference.as_str(), "llm_inference");
+        assert_eq!(StepType::Execute.as_str(), "execute");
         assert_eq!(
             StepType::StructuredInference.as_str(),
             "structured_inference"
@@ -3673,6 +3864,7 @@ mod tests {
     #[test]
     fn step_type_display() {
         assert_eq!(StepType::LlmInference.to_string(), "llm_inference");
+        assert_eq!(StepType::Execute.to_string(), "execute");
         assert_eq!(StepType::Route.to_string(), "route");
         assert_eq!(StepType::WaitChildren.to_string(), "wait_children");
         assert_eq!(StepType::HumanInput.to_string(), "human_input");
@@ -3689,6 +3881,7 @@ mod tests {
         for (variant, expected_json) in [
             (StepType::LlmInference, "\"llm_inference\""),
             (StepType::StructuredInference, "\"structured_inference\""),
+            (StepType::Execute, "\"execute\""),
             (StepType::Route, "\"route\""),
             (StepType::WaitChildren, "\"wait_children\""),
             (StepType::HumanInput, "\"human_input\""),
@@ -3717,13 +3910,11 @@ mod tests {
     }
 
     #[test]
-    fn step_type_retired_values_are_unsupported() {
-        for retired in ["execute", "evaluate"] {
-            assert_eq!(
-                StepType::from_wire_str(retired),
-                StepType::Unsupported(retired.to_string())
-            );
-        }
+    fn step_type_evaluate_remains_unsupported() {
+        assert_eq!(
+            StepType::from_wire_str("evaluate"),
+            StepType::Unsupported("evaluate".to_string())
+        );
     }
 
     #[test]
@@ -3745,6 +3936,10 @@ mod tests {
             Some(&["provider", "model", "state", "questions"][..])
         );
         assert_eq!(StepType::Route.config_fields(), Some(&["route_config"][..]));
+        assert_eq!(
+            StepType::Execute.config_fields(),
+            Some(&["version", "script", "output_schema"][..])
+        );
         assert_eq!(
             StepType::WaitChildren.config_fields(),
             Some(&["output_schema"][..])
@@ -3798,6 +3993,268 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Step::new("f", "wf1").with_step_type(StepType::Finish)).unwrap()["config"],
             serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn execute_config_round_trips_read_only_context_and_separate_audit_metadata() {
+        for context in [
+            serde_json::json!({
+                "task": {"id": "task1", "title": "quotes\"\n\\ {{ unchanged }}"},
+                "execution": {"previous_output": {"quantity": 3, "values": [true, null, false, ""]}},
+                "inputs": {}, "steps": {"prepare": {"output": 12}},
+                "workflow": {}, "artifacts": {}
+            }),
+            serde_json::Value::Null,
+        ] {
+            let value = serde_json::json!({
+                "version": 1,
+                "script": "execution.previous_output.quantity * 12",
+                "context": context,
+                "output_schema": {"type": "number"}
+            });
+            let config = StepConfig::from_value(&StepType::Execute, value.clone())
+                .unwrap()
+                .unwrap();
+            assert_eq!(serde_json::to_value(&config).unwrap(), value);
+            assert_eq!(
+                config.execute().unwrap().context.as_ref(),
+                (!context.is_null()).then_some(&context)
+            );
+            assert_eq!(
+                config.execute().unwrap().definition_value(),
+                serde_json::json!({
+                    "version": 1, "script": "execution.previous_output.quantity * 12", "output_schema": {"type": "number"}
+                })
+            );
+            assert_eq!(config.output_schema(), Some(&value["output_schema"]));
+            assert_eq!(config.prompt(), None);
+            assert_eq!(config.agent_config(), None);
+            let step = Step::new("transform", "wf1")
+                .with_step_type(StepType::Execute)
+                .with_config(Some(config.clone()));
+            assert_eq!(step.execute(), config.execute());
+            assert_eq!(serde_json::to_value(step).unwrap()["config"], value);
+            let mut execution =
+                StepExecution::new("task1", "wf1", "transform").with_config(config.clone());
+            execution.step_type = Some("execute".into());
+            execution.context = Some("{\"audit\":\"separate\"}".into());
+            let decoded: StepExecution =
+                serde_json::from_value(serde_json::to_value(execution).unwrap()).unwrap();
+            assert_eq!(decoded.config, Some(config));
+            assert_eq!(decoded.context.as_deref(), Some("{\"audit\":\"separate\"}"));
+            assert_eq!(
+                decoded.execute().unwrap().context.as_ref(),
+                (!context.is_null()).then_some(&context)
+            );
+        }
+    }
+
+    #[test]
+    fn execute_definition_requires_authored_fields_and_rejects_obsolete_input() {
+        let valid = serde_json::json!({"version": 1, "script": "task.id", "output_schema": {"type":"string"}});
+        let definition = StepConfig::from_value(&StepType::Execute, valid.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(definition.execute().unwrap().context, None);
+        assert_eq!(
+            serde_json::to_value(&definition).unwrap()["context"],
+            serde_json::Value::Null
+        );
+        for field in ["version", "script", "output_schema"] {
+            let mut value = valid.clone();
+            value.as_object_mut().unwrap().remove(field);
+            let error = StepConfig::from_value(&StepType::Execute, value).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("missing field `{field}`")),
+                "{error}"
+            );
+        }
+        for (field, invalid, expected) in [
+            (
+                "version",
+                serde_json::json!(2),
+                "execute requires version 1",
+            ),
+            ("version", serde_json::Value::Null, "invalid type"),
+            ("script", serde_json::json!(" \n\t"), "non-empty script"),
+            ("script", serde_json::Value::Null, "invalid type"),
+            ("script", serde_json::json!(42), "invalid type"),
+            (
+                "context",
+                serde_json::json!([1]),
+                "must be a JSON object or null",
+            ),
+            (
+                "context",
+                serde_json::json!("old input"),
+                "must be a JSON object or null",
+            ),
+            (
+                "output_schema",
+                serde_json::Value::Null,
+                "JSON Schema object",
+            ),
+            (
+                "output_schema",
+                serde_json::json!(true),
+                "JSON Schema object",
+            ),
+            (
+                "output_schema",
+                serde_json::json!(false),
+                "JSON Schema object",
+            ),
+            (
+                "output_schema",
+                serde_json::json!("schema"),
+                "JSON Schema object",
+            ),
+            (
+                "output_schema",
+                serde_json::json!({"type": "unknown"}),
+                "invalid JSON Schema",
+            ),
+        ] {
+            let mut value = valid.clone();
+            value[field] = invalid;
+            let error = StepConfig::from_value(&StepType::Execute, value).unwrap_err();
+            assert!(error.to_string().contains(expected), "{field}: {error}");
+        }
+        for field in [
+            "input",
+            "provider",
+            "model",
+            "harness",
+            "agent_config",
+            "unknown",
+        ] {
+            let mut value = valid.clone();
+            value[field] = serde_json::Value::Null;
+            let error = StepConfig::from_value(&StepType::Execute, value).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("unknown field `{field}`")),
+                "{error}"
+            );
+        }
+        assert!(StepConfig::from_value(&StepType::Execute, serde_json::Value::Null).is_err());
+    }
+
+    #[test]
+    fn execute_structure_validation_defers_schema_compilation() {
+        let mut config = ExecuteConfig {
+            version: 1,
+            script: "42".into(),
+            context: None,
+            output_schema: serde_json::json!({"type":"invalid"}),
+        };
+        config.validate_structure().unwrap();
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("invalid JSON Schema")
+        );
+        config.output_schema = serde_json::Value::Null;
+        assert!(config.validate_structure().is_err());
+    }
+
+    #[test]
+    fn execute_config_accepts_non_inference_object_schemas() {
+        for schema in [
+            serde_json::json!({}),
+            serde_json::json!({"type":"array", "items":{"type":"string"}}),
+            serde_json::json!({"type":"number"}),
+            serde_json::json!({"type":"object", "additionalProperties":false}),
+        ] {
+            let value = serde_json::json!({"version": 1, "script": "execution.previous_output", "output_schema": schema});
+            let config = StepConfig::from_value(&StepType::Execute, value)
+                .unwrap()
+                .unwrap();
+            assert_eq!(config.output_schema(), Some(&schema));
+        }
+    }
+
+    #[test]
+    fn execute_definition_limits_match_backend_script_and_schema_bounds() {
+        let valid = ExecuteConfig {
+            version: 1,
+            script: "task.id".into(),
+            context: None,
+            output_schema: serde_json::json!({}),
+        };
+        let long_script = ExecuteConfig {
+            script: "x".repeat(262_145),
+            ..valid.clone()
+        };
+        assert!(
+            long_script
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("262144 bytes")
+        );
+        let large_schema = ExecuteConfig {
+            output_schema: serde_json::json!({"description": "x".repeat(1_048_576)}),
+            ..valid.clone()
+        };
+        assert!(
+            large_schema
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("1048576 bytes")
+        );
+        let mut nested = serde_json::Value::Null;
+        for _ in 0..33 {
+            nested = serde_json::json!({"unknown": nested});
+        }
+        let deep_schema = ExecuteConfig {
+            output_schema: nested,
+            ..valid.clone()
+        };
+        assert!(
+            deep_schema
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("depth at most 32")
+        );
+        let large_map = (0..4097)
+            .map(|i| (i.to_string(), serde_json::Value::Null))
+            .collect::<serde_json::Map<_, _>>();
+        let wide_schema = ExecuteConfig {
+            output_schema: serde_json::Value::Object(large_map),
+            ..valid
+        };
+        assert!(
+            wide_schema
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("4096 entries")
+        );
+    }
+
+    #[test]
+    fn execute_config_accepts_matching_channel_discriminator_without_persisting_it() {
+        let mut value = serde_json::json!({"__type__": "execute", "version": 1, "script": "task.id", "context": null, "output_schema": {}});
+        let config = StepConfig::from_value(&StepType::Execute, value.clone())
+            .unwrap()
+            .unwrap();
+        let mut expected = value.clone();
+        expected.as_object_mut().unwrap().remove("__type__");
+        assert_eq!(serde_json::to_value(config).unwrap(), expected);
+        value["__type__"] = serde_json::json!("llm_inference");
+        let error = StepConfig::from_value(&StepType::Execute, value).unwrap_err();
+        assert!(
+            error.to_string().contains("expected execute config"),
+            "{error}"
         );
     }
 

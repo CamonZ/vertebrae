@@ -13,9 +13,9 @@ The system solves a fundamental problem with LLM-driven development: **context i
 The platform has two components:
 
 - **Sacrum** — an Elixir/Phoenix server (GraphQL API + PostgreSQL + Phoenix Channels) that stores all state and orchestrates workflow execution
-- **Vertebrae** — a Rust client ecosystem (CLI `vtb`, desktop GUI, background daemon) that interacts with Sacrum and executes workflow steps through shared Claude, Codex, or TypeSafe harness runtimes (see [vtb Guide — Steps](vtb-guide/steps.md#steps))
+- **Vertebrae** — a Rust client ecosystem (CLI `vtb`, desktop GUI, background daemon) that interacts with Sacrum and executes inference through shared Claude, Codex, or TypeSafe harness runtimes, and JSON transformations through a bounded Rhai worker (see [vtb Guide — Steps](vtb-guide/steps.md#steps))
 
-> Claude remains the legacy default when a step has no explicit harness. A step may select `claude`, `codex`, or `typesafe`; TypeSafe supports `structured_inference`, while Claude and Codex support `llm_inference`.
+> Claude remains the legacy default when an inference step has no explicit harness. Inference may select `claude`, `codex`, or `typesafe`; TypeSafe supports `structured_inference`, while Claude and Codex support `llm_inference`. Execute omits the harness and provider settings.
 
 ---
 
@@ -31,7 +31,7 @@ Epic (large initiative)
               └── Code Refs (source file links)
               └── Dependencies (blocking tasks)
               └── Workflow (step-by-step progression)
-                    └── Steps (each run by an AI agent)
+                    └── Steps (inference, transformations, or backend control)
                           └── Executions (audit log of each run)
                                 └── Session Logs (streaming output)
 ```
@@ -59,7 +59,7 @@ Vertebrae is the interface and execution layer. It has three runnable components
 |-----------|--------|------|
 | CLI | `vtb` | Human and agent-facing command interface |
 | GUI | Tauri desktop app | Visual task management and monitoring |
-| Daemon | `vtb-daemon` | Background worker that executes workflow steps via Claude |
+| Daemon | `vtb-daemon` | Background worker for provider inference and Rhai JSON transformations |
 
 All three share the same service layer abstraction (`VertebraeServices`) built on trait-based interfaces backed by the Sacrum HTTP client.
 
@@ -150,6 +150,7 @@ step keeps Sacrum's default and provider-backfill behavior.
 |------|----------|----------|
 | `llm_inference` (default) | `prompt`, `output_schema`, `agents`, `skills`, `agent_config` | Dispatches an agent through the selected harness. |
 | `structured_inference` | `provider`, `model`, `state`, `questions` | Sends Sacrum-resolved `state` and provider-shaped System One `questions` to a supporting harness; the answer map is returned unchanged and validated by Sacrum against a schema derived from the questions. |
+| `execute` | Authored `version=1`, `script`, `output_schema`; server-written execution `context` | Runs a pure Rhai JSON transformation with the full canonical context bound as `task`, `execution`, `inputs`, `steps`, `workflow`, and `artifacts`, validates the result, and completes through the existing execution status path. It has no provider harness. |
 | `route` | `route_config` | Sacrum evaluates the deterministic route locally; an empty config is a draft. |
 | `wait_children` | `output_schema` | Waits for child tasks and can validate their combined output. |
 | `human_input` | `null` | Pauses for external input; its detailed semantics remain unspecified. |
@@ -204,7 +205,7 @@ An audit record of a single step execution run.
 | `duration_ms` | Wall-clock execution time |
 | `session_id` | Provider session ID |
 
-Each execution also has `SessionLog` records containing serialized `HarnessEventV1`
+Inference executions also have `SessionLog` records containing serialized `HarnessEventV1`
 events (`format=harness`). The GUI replays those normalized events through the
 same projection used by the live trace.
 
@@ -212,7 +213,12 @@ same projection used by the live trace.
 
 ## Workflow Execution: End-to-End
 
-This is the core loop: a task moves through a workflow, and each step is executed by its selected provider harness.
+This is the core loop: a task moves through a workflow. Sacrum owns control flow;
+the daemon executes inference and Rhai transformations. The walkthrough below
+illustrates inference. For execute, Sacrum persists a rendered script and resolved
+JSON context/schema snapshot; the daemon evaluates it without a provider, validates
+the returned JSON, and reports completion without inference metrics or events.
+See [execute](agent-context/workflows/steps/execute/index.md) for that contract.
 
 ```
 1. Task assigned to workflow
@@ -332,9 +338,11 @@ The GUI maintains a WebSocket connection with 30-second heartbeats and exponenti
 
 ---
 
-## The Daemon: AI Execution Engine
+## The Daemon: Inference and Transformation Execution
 
-The daemon (`vtb-daemon`) is the bridge between the task management system and the provider harnesses. It is an actor-based system (using the Ractor framework in Rust) with three actor types:
+The daemon (`vtb-daemon`) executes provider inference and pure Rhai transformations
+for the task management system. It is an actor-based system (using the Ractor
+framework in Rust) with three actor types:
 
 ```
 DaemonSupervisor
@@ -342,7 +350,7 @@ DaemonSupervisor
         └── StepExecutor (one per active step execution)
 ```
 
-When the daemon receives a `run_step` event, `StepExecutor`:
+For an inference `run_step` event, `StepExecutor`:
 
 1. Builds a provider-neutral harness request from the step's `prompt` and request configuration
 2. Starts the selected Claude, Codex, or TypeSafe shared harness according to the step's `harness` (or Sacrum's default/backfill)
@@ -352,6 +360,13 @@ When the daemon receives a `run_step` event, `StepExecutor`:
 6. `ProjectSupervisor` calls Sacrum's `update_execution_status` GraphQL mutation
 
 The daemon runs Claude in the project root directory (or a git worktree if `task.worktree` is set), with the user's shell `PATH` inherited, so all tools are accessible.
+
+An execute event selects the daemon-wide Rhai worker before any provider setup.
+One evaluation runs at a time with four pending attempts. Each attempt has a fresh
+Engine/Scope and operation, data, and deadline bounds; it exposes no host filesystem
+or process functions. Cancellation settles the worker before terminal persistence
+and capacity release. See [daemon architecture](architecture.md#daemon-cratesdaemon)
+for limits and ownership.
 
 ---
 

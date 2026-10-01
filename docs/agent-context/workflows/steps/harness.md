@@ -1,10 +1,10 @@
 # Harness
 
-Purpose: choose which runtime executes a daemon-run step.
+Purpose: choose which provider runtime executes a daemon-run inference step.
 Use this when: the user says "run this on Codex/Claude/TypeSafe", or a step fails to start its runtime.
 
 ## How it works
-- Each step has a `harness`: `claude` (Claude Code), `codex`
+- Inference steps have a `harness`: `claude` (Claude Code), `codex`
   (Codex App Server) or `typesafe` (TypeSafe structured inference).
 - It picks the runtime only. Model, provider and request settings stay in
   their own config (`agent_config` for llm_inference, `config` for
@@ -12,14 +12,19 @@ Use this when: the user says "run this on Codex/Claude/TypeSafe", or a step fail
 - Supported pairs: `claude` and `codex` run `llm_inference`; `typesafe` runs
   `structured_inference`. Backend-side steps (route, wait_children, stop,
   finish, human_input) ignore it.
+- [Execute](execute/index.md) runs Rhai directly and must omit `harness`,
+  `agent_config`, provider, and model settings. Rhai is not a harness selector
+  and requires no provider credentials.
 - The provider must run on the step's harness: `anthropic` → `claude`,
   `openai` → `codex`, a custom `[providers.<id>]` → its configured harness.
 
 ## Doing it
 `vtb step add "Review" -w <wf> --harness codex --model <m> ...` (`--harness` is
-required), `vtb step update <id> --harness typesafe`. `vtb step update` also
+required except for execute), `vtb step update <id> --harness typesafe`. `vtb step update` also
 requires `--harness` whenever it sets the provider. A harness can be changed but
 not cleared.
+For execute, use `--step-type execute --script @file.rhai --output-schema <JSON>`
+and omit the harness; the CLI rejects harness settings on execute steps.
 
 ## Gotchas
 Rejected by the CLI when the step is saved:

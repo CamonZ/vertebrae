@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { commands } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import type { Workflow } from "../bindings";
-import { errorMessage, queryKeys, unwrapCommand } from "../query";
+import { errorMessage, queryClient, queryKeys, unwrapCommand } from "../query";
 
 // Stable fallback for no-data renders; see NO_TASKS in useTasks.ts.
 const NO_WORKFLOWS: Workflow[] = [];
@@ -14,10 +14,25 @@ const NO_WORKFLOWS: Workflow[] = [];
  */
 export function useWorkflows() {
   const projectScopeGeneration = useProjectScopeGeneration();
+  const queryKey = queryKeys.workflows.list(projectScopeGeneration);
 
   const query = useQuery({
-    queryKey: queryKeys.workflows.list(projectScopeGeneration),
-    queryFn: () => unwrapCommand(commands.listWorkflows()),
+    queryKey,
+    queryFn: async ({ signal }) => {
+      // A list response can predate a live creation, update, or deletion.
+      // Fetch again if the cache changed while waiting, so the old baseline
+      // cannot overwrite those events. Cancellation retires the whole loop.
+      while (true) {
+        const updates = queryClient.getQueryState(queryKey)?.dataUpdateCount;
+        const workflows = await unwrapCommand(commands.listWorkflows());
+        if (
+          signal.aborted ||
+          updates === queryClient.getQueryState(queryKey)?.dataUpdateCount
+        ) {
+          return workflows;
+        }
+      }
+    },
   });
 
   return {

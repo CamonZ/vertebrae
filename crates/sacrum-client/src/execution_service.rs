@@ -677,6 +677,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_execution_read_preserves_resolved_config_and_json_output() {
+        let server = MockServer::start().await;
+        let context = json!({"task":{"id":"task1"},"execution":{"previous_output":{"name": "example", "quantity": 3, "unit_price": 12, "nested": [true, null, "quotes\"\n\\ {{ untouched }}"]}},"inputs":{},"steps":{},"workflow":{},"artifacts":{}});
+        let config = json!({
+            "version": 1,
+            "script": "#{ name: execution.previous_output.name, total: execution.previous_output.quantity * execution.previous_output.unit_price }",
+            "context": context,
+            "output_schema": {"type": "object"}
+        });
+        let output = json!({"name": "example", "total": 36}).to_string();
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"step_execution": {
+                    "id": "exec-transform", "task_id": "task-1", "task_run_id": "run-1",
+                    "workflow_id": "wf-1", "step_name": "transform", "step_type": "execute",
+                    "status": "completed", "config": config, "output": output, "context":{"audit":"separate"}
+                }}
+            })))
+            .mount(&server)
+            .await;
+        let service = create_wiremock_service(&server.uri());
+        let execution = service
+            .get_execution("exec-transform")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(execution.step_type.as_deref(), Some("execute"));
+        assert_eq!(execution.task_run_id.as_deref(), Some("run-1"));
+        assert_eq!(execution.status, ExecutionStatus::Completed);
+        assert_eq!(execution.execute().unwrap().context, Some(context));
+        assert_eq!(
+            execution.context.as_deref(),
+            Some("{\"audit\":\"separate\"}")
+        );
+        assert_eq!(
+            serde_json::to_value(execution.config.unwrap()).unwrap(),
+            config
+        );
+        assert_eq!(execution.output, Some(output));
+        assert_eq!(execution.model_provider, None);
+        assert_eq!(execution.model_used, None);
+        assert_eq!(execution.token_usage, None);
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert!(
+            body["query"]
+                .as_str()
+                .unwrap()
+                .contains("... on ExecuteStepConfig { version script context output_schema }")
+        );
+    }
+
+    #[tokio::test]
     async fn test_get_execution_success() {
         let server = MockServer::start().await;
 

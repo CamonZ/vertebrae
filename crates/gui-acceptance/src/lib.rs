@@ -300,17 +300,40 @@ fn retryable_click(error: &fantoccini::error::CmdError) -> bool {
         | ErrorStatus::StaleElementReference | ErrorStatus::NoSuchElement))
 }
 
-/// Native clicks also test hit-target readiness while a panel is animating.
+/// Wait for a stable, unobstructed target after its panel finishes animating.
 /// Re-resolve the locator so a React rerender cannot leave a stale target.
 pub async fn click_when_ready(
     client: &Client,
     locator: fantoccini::Locator<'_>,
     description: &str,
 ) {
+    let previous_rect = std::cell::Cell::new(None);
     wait_until(description, std::time::Duration::from_secs(5), || async {
         let result = async {
             let element = client.find(locator).await?;
             if !element.is_displayed().await? || !element.is_enabled().await? {
+                previous_rect.set(None);
+                return Ok(false);
+            }
+            let ready = client.execute(
+                r#"const element = arguments[0];
+                element.scrollIntoView({block: 'nearest', inline: 'nearest', behavior: 'instant'});
+                for (let node = element; node; node = node.parentElement) {
+                    if (node.getAnimations().some(animation =>
+                        animation.playState === 'running' &&
+                        Number.isFinite(animation.effect?.getComputedTiming().endTime))) return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+                return !!hit && element.contains(hit);"#,
+                vec![serde_json::to_value(&element).expect("WebDriver element serializes")],
+            ).await?;
+            if ready.as_bool() != Some(true) {
+                previous_rect.set(None);
+                return Ok(false);
+            }
+            let rect = element.rectangle().await?;
+            if previous_rect.replace(Some(rect)) != Some(rect) {
                 return Ok(false);
             }
             element.click().await?;
@@ -319,7 +342,10 @@ pub async fn click_when_ready(
         .await;
         match result {
             Ok(clicked) => Ok(clicked),
-            Err(error) if retryable_click(&error) => Err(error.to_string()),
+            Err(error) if retryable_click(&error) => {
+                previous_rect.set(None);
+                Err(error.to_string())
+            }
             Err(error) => panic!("failed to click {description}: {error}"),
         }
     })

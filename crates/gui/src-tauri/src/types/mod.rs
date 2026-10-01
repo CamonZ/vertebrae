@@ -613,6 +613,7 @@ pub enum StepType {
     #[default]
     LlmInference,
     StructuredInference,
+    Execute,
     Route,
     WaitChildren,
     HumanInput,
@@ -626,6 +627,7 @@ impl From<vertebrae_core::StepType> for StepType {
         match st {
             vertebrae_core::StepType::LlmInference => StepType::LlmInference,
             vertebrae_core::StepType::StructuredInference => StepType::StructuredInference,
+            vertebrae_core::StepType::Execute => StepType::Execute,
             vertebrae_core::StepType::Route => StepType::Route,
             vertebrae_core::StepType::WaitChildren => StepType::WaitChildren,
             vertebrae_core::StepType::HumanInput => StepType::HumanInput,
@@ -641,6 +643,7 @@ impl From<StepType> for vertebrae_core::StepType {
         match st {
             StepType::LlmInference => vertebrae_core::StepType::LlmInference,
             StepType::StructuredInference => vertebrae_core::StepType::StructuredInference,
+            StepType::Execute => vertebrae_core::StepType::Execute,
             StepType::Route => vertebrae_core::StepType::Route,
             StepType::WaitChildren => vertebrae_core::StepType::WaitChildren,
             StepType::HumanInput => vertebrae_core::StepType::HumanInput,
@@ -710,6 +713,16 @@ pub struct StructuredInferenceStepConfig {
     pub questions: Option<serde_json::Value>,
 }
 
+/// Execute config shared by workflow definitions and execution records.
+/// Context is server-written only on runtime execution snapshots; null on definitions.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct ExecuteStepConfig {
+    pub version: i32,
+    pub script: String,
+    pub context: Option<serde_json::Value>,
+    pub output_schema: serde_json::Value,
+}
+
 /// Config of a `route` step.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct RouteStepConfig {
@@ -733,6 +746,7 @@ pub struct WaitChildrenStepConfig {
 pub enum StepConfig {
     LlmInference(Box<LlmInferenceStepConfig>),
     StructuredInference(StructuredInferenceStepConfig),
+    Execute(ExecuteStepConfig),
     Route(RouteStepConfig),
     WaitChildren(WaitChildrenStepConfig),
 }
@@ -762,6 +776,12 @@ impl From<vertebrae_core::StepConfig> for StepConfig {
             vertebrae_core::StepConfig::Route(config) => StepConfig::Route(RouteStepConfig {
                 version: config.version,
                 route_config: config.route_config,
+            }),
+            vertebrae_core::StepConfig::Execute(config) => StepConfig::Execute(ExecuteStepConfig {
+                version: config.version,
+                script: config.script,
+                context: config.context,
+                output_schema: config.output_schema,
             }),
             vertebrae_core::StepConfig::WaitChildren(config) => {
                 StepConfig::WaitChildren(WaitChildrenStepConfig {
@@ -1212,7 +1232,8 @@ pub struct StepExecution {
     #[serde(default = "StepExecution::default_status")]
     pub status: ExecutionStatus,
     /// Step config the execution ran with, templates rendered (rendered
-    /// prompt for llm_inference, resolved state for structured_inference);
+    /// prompt for llm_inference, resolved state for structured_inference,
+    /// rendered script and context snapshot for execute);
     /// null for human_input, stop, and finish. Narrow it with `step_type`.
     #[serde(default)]
     pub config: Option<StepConfig>,
@@ -2246,6 +2267,66 @@ mod tests {
         assert!(config.skills.is_empty());
         assert!(gui.transitions_to.is_empty());
         assert_eq!(gui.order, 0);
+    }
+
+    #[test]
+    fn execute_execution_snapshot_round_trips_separately_from_audit_metadata() {
+        let config = serde_json::json!({
+            "version": 1,
+            "script": "execution.previous_output.quantity * execution.previous_output.unit_price",
+            "context": {
+                "task": {"id": "task-1", "title": "example", "description": "quotes\"\n\\ and {{ unchanged }}"},
+                "execution": {"previous_output": {"quantity": 3, "unit_price": 12}, "handoff": null},
+                "inputs": {"flags": [false, true, null, ""]},
+                "steps": {"prepare": {"output": {"quantity": 3, "unit_price": 12}}},
+                "workflow": {"name": "Example", "step_count": 3},
+                "artifacts": {"task": {"report": "artifact-1"}}
+            },
+            "output_schema": {"type": "number"}
+        });
+        let mut core_execution = vertebrae_core::StepExecution::new("task-1", "wf-1", "transform")
+            .with_task_run_id("run-1")
+            .with_config(
+                vertebrae_core::StepConfig::from_value(
+                    &vertebrae_core::StepType::Execute,
+                    config.clone(),
+                )
+                .unwrap()
+                .unwrap(),
+            )
+            .with_context("{\"metadata\":true}");
+        core_execution.step_type = Some("execute".into());
+        let execution = StepExecution::from(core_execution);
+        assert_eq!(execution.task_run_id.as_deref(), Some("run-1"));
+        assert_eq!(execution.context.as_deref(), Some("{\"metadata\":true}"));
+        assert_eq!(serde_json::to_value(&execution.config).unwrap(), config);
+        let execution: StepExecution =
+            serde_json::from_value(serde_json::to_value(execution).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(&execution.config).unwrap(), config);
+    }
+
+    #[test]
+    fn execute_step_definition_accepts_missing_or_null_context() {
+        for supplied in [None, Some(serde_json::Value::Null)] {
+            let mut config = serde_json::json!({
+                "version": 1, "script": "42", "output_schema": {"type": "number"}
+            });
+            if let Some(value) = supplied {
+                config["context"] = value;
+            }
+            let step: Step = serde_json::from_value(serde_json::json!({
+                "id": "transform", "name": "Transform", "workflow_id": "wf-1",
+                "step_type": "execute", "config": config
+            }))
+            .unwrap();
+            let Some(StepConfig::Execute(config)) = &step.config else {
+                panic!("expected execute config");
+            };
+            assert_eq!(config.context, None);
+            let value = serde_json::to_value(step).unwrap();
+            assert_eq!(value["config"]["context"], serde_json::Value::Null);
+            assert!(value["config"].get("input").is_none());
+        }
     }
 
     #[test]

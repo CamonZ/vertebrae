@@ -5,7 +5,7 @@ Feature: Codex structured-output JSON parsing
 
   Scenario: Structured JSON agent_message succeeds with parsed value visible
     Given a configured daemon test environment
-    And a workflow with one execute step using openai and an output schema
+    And a workflow with one inference step using openai and an output schema
     And a task assigned to the workflow
     When the codex mock is scripted to emit a structured JSON agent_message
     And I start a TaskRun
@@ -17,7 +17,7 @@ Feature: Codex structured-output JSON parsing
 
   Scenario: Malformed JSON despite App Server completion fails the step
     Given a configured daemon test environment
-    And a workflow with one execute step using openai and an output schema
+    And a workflow with one inference step using openai and an output schema
     And a task assigned to the workflow
     When the codex mock is scripted to emit a malformed JSON agent_message
     And I start a TaskRun

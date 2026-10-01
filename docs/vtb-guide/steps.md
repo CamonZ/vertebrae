@@ -62,6 +62,10 @@ vtb step add "Classify" -w <workflow-id> --harness typesafe \
 # Add a human-input gate
 vtb step add "Needs Input" -w <workflow-id> --harness claude --step-type human_input
 
+# Add a Rhai transformation without a provider harness
+vtb step add "Transform" -w <workflow-id> --step-type execute \
+  --script @transform.rhai --output-schema '{"type":"object"}'
+
 # Add a routing step
 vtb step add "Router" -w <workflow-id> --harness claude --step-type route
 
@@ -83,6 +87,7 @@ vtb step update <step-id> --speed-tier fast --personality friendly --verbosity l
 vtb step update <step-id> --clear-speed-tier --clear-personality --clear-verbosity
 vtb step update <step-id> --prompt "New prompt for {{task.id}}"
 vtb step update <step-id> --clear-prompt
+vtb step update <execute-step-id> --script @transform.rhai
 vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
 vtb step update <step-id> --route-config '<route-config-json>'
@@ -97,7 +102,9 @@ vtb --json step delete <step-id>
 ```
 
 `vtb step add` takes a required `<name>` positional argument plus required
-`--workflow` / `-w` and `--harness`; run `vtb step add --help` for the complete creation flag list.
+`--workflow` / `-w`. `--harness` is required except for `--step-type execute`,
+which requires `--script` and `--output-schema` and rejects harness settings.
+Run `vtb step add --help` for the complete creation flag list.
 `--transition-to` accepts full UUIDs or 8-character short IDs. The global
 `--json` flag returns a creation envelope with `command`, `status`, `step_id`,
 and `workflow_id`.
@@ -111,13 +118,15 @@ System One questions keyed by question ID. Each question carries a `type`
 the value as a string template; `{{ dotted.path }}` references are resolved by
 Sacrum at dispatch. `--state` and `--questions` also accept `@path` to read the
 value from a file. Sacrum requires all four fields on create and derives its
-answer validation schema from the questions. For every other type `--provider`
-and `--model` remain `agent_config` shortcuts, and `--state` and `--questions` are rejected with
+answer validation schema from the questions. For `llm_inference`, `--provider`
+and `--model` remain `agent_config` shortcuts. Execute rejects inference flags;
+`--state` and `--questions` are rejected on other types with
 `config: $.<field>: is not supported for <type> steps`.
 
 `--harness` selects the step runtime independently of model and request
-settings. It accepts `claude`, `codex`, or `typesafe`; omitting it keeps
-Sacrum's configured default and provider backfill behavior. TypeSafe supports
+settings. It accepts `claude`, `codex`, or `typesafe`; execute omits it and runs
+Rhai directly. In other API clients, omission for inference keeps Sacrum's
+configured default and provider backfill behavior. TypeSafe supports
 `structured_inference` steps. Claude and Codex run `llm_inference` steps.
 `--provider` and `--model` continue to configure the request, and do not set
 the step harness. `--provider` accepts a built-in provider or a custom
@@ -137,7 +146,8 @@ Steps for workflow '<workflow-id>':
 
 The model is `agent_config.model` for `llm_inference` steps and `config.model`
 for `structured_inference` steps; other types omit it. Missing harness values
-are displayed as `server-default` and defer to Sacrum's default/backfill.
+are displayed as `server-default` and defer to Sacrum's default/backfill,
+except execute, which displays `(none)` and uses no harness.
 
 When the workflow has no steps, it prints `No steps found for workflow
 '<workflow-id>'`. With the global `--json` flag, `step list` returns the raw
@@ -173,7 +183,8 @@ Updated:       2026-05-30 16:48
 
 The config lines depend on the step type: `structured_inference` steps show
 `Provider`, `Model`, `State`, and `Fields`; `route` steps show `Route Config`;
-`wait_children` steps show `Output Schema`; config-less types show
+`wait_children` steps show `Output Schema`; `execute` definitions show `Script`
+and `Output Schema`; config-less types show
 `Config: (none)`.
 
 Missing optional fields are shown as `(none)`, and missing timestamps are shown
@@ -205,7 +216,7 @@ request with no property changes before reporting success.
 | Flag | Short | Behavior |
 |------|-------|----------|
 | `--name <NAME>` | | Replace the step name |
-| `--harness <HARNESS>` | | Select `claude`, `codex`, or `typesafe` for this step |
+| `--harness <HARNESS>` | | Select `claude`, `codex`, or `typesafe`; rejected for execute |
 | `--goal <GOAL>` | `-g` | Replace the step goal |
 | `--agent <AGENT>` | `-a` | Replace the full agents list; repeat for multiple agents |
 | `--clear-agents` | | Replace the agents list with an empty list |
@@ -213,6 +224,7 @@ request with no property changes before reporting success.
 | `--clear-skills` | | Replace the skills list with an empty list |
 | `--prompt <PROMPT>` | | Replace the execution prompt |
 | `--clear-prompt` | | Explicitly clear a retained prompt |
+| `--script <RHAI>` | | Replace an execute step's Rhai script, inline or from `@path`; omitted fields remain unchanged |
 | `--agent-config <JSON>` | | Replace/overlay the full agent config from a JSON string |
 | `--model <MODEL>` | `-m` | Set `config.model` on `structured_inference` steps, otherwise `agent_config.model` |
 | `--provider <PROVIDER>` | | Set `config.provider` on `structured_inference` steps, otherwise `agent_config.provider`: a built-in provider (`anthropic`/`claude` or `openai`/`codex`) or a custom `[providers.<id>]` ID; alias `--model-provider` |
@@ -227,7 +239,7 @@ request with no property changes before reporting success.
 | `--clear-personality` | | Remove `agent_config.personality` |
 | `--clear-verbosity` | | Remove `agent_config.verbosity` |
 | `--output-schema <JSON>` | | Replace the step output schema from a JSON string |
-| `--clear-output-schema` | | Remove the output schema |
+| `--clear-output-schema` | | Remove an optional output schema; execute's required schema cannot be cleared |
 | `--route-config <JSON>` | | Replace the opaque deterministic route configuration |
 | `--clear-route-config` | | Remove the route configuration, leaving a route draft |
 | `--persistence-options <JSON>` | | Replace Sacrum's persistence configuration |
@@ -325,17 +337,21 @@ matching step exists, the command fails with `Step not found: <id>`. If an
 | `agents` | Agent file paths for AI-assisted execution |
 | `skills` | Slash commands available during this step |
 | `transition-to` | Restrict which steps can follow this one |
-| `step-type` | Type of step: `llm_inference`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (see below) |
+| `step-type` | CLI creation type: `llm_inference`, `structured_inference`, `execute`, `route`, `wait_children`, `human_input`, `stop`, or `finish` |
+| `script` | Execute step's Rhai source, inline or from `@path` |
 | `output-schema` | JSON Schema for structured output enforcement (see below) |
 | `route-config` | Opaque nullable V1 deterministic route program; only valid for `route` steps |
 
 ### Step Types
 
-Each step has a `--step-type` that determines its role in the workflow:
+Each step has a fixed `step_type` that determines its role in the workflow.
+The CLI exposes these types through `--step-type` and their type-specific config flags.
 
 | Type | Description |
 |------|-------------|
 | `llm_inference` | **Default.** Runs the configured prompt through the selected agent harness. |
+| `structured_inference` | Runs resolved state and fixed questions through the TypeSafe harness and returns its JSON answer map. |
+| `execute` | Runs a pure Rhai JSON transformation in the daemon, validates its returned JSON, and completes without a provider harness. Create with `--script` and `--output-schema`. |
 | `route` | Sacrum-local deterministic control step. Evaluates `route_config`; it does not dispatch a daemon prompt or use `output_schema` as a routing program. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
 | `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. |
@@ -377,6 +393,39 @@ The step types are carried unchanged through the Sacrum API, core models,
 CLI JSON output, Tauri bindings, Atlas/task-location surfaces, and trace
 normalization. Unknown future wire values remain available through the
 `unsupported` compatibility variant.
+
+### Execute transformations
+
+Authored execute config has required `version=1`, non-empty `script`, and
+valid JSON Schema object `output_schema`. `context` is server-written on executions;
+authored `context` and obsolete `input` are rejected. Create and update with:
+
+```bash
+vtb step add "Transform" -w <workflow-id> --step-type execute \
+  --script 'execution.previous_output.quantity * execution.previous_output.unit_price' \
+  --output-schema '{"type":"number"}'
+vtb step update <step-id> --script @transform.rhai
+```
+
+`--script` reads a UTF-8 file when prefixed with `@`, otherwise it preserves the
+inline source. Creation sets `version=1` and requires a non-empty script and valid
+JSON Schema object; script syntax and output validity are checked at runtime.
+Updates preserve omitted config fields, and execute's required output schema
+cannot be cleared. Omit `--harness`; inference flags are rejected. GraphQL config
+remains available, while the GUI has no script editor in this PoC. Read a definition
+with `vtb step show` or `vtb --json step show`; runtime context is available only
+on a TaskRun's step execution.
+
+Sacrum snapshots the complete canonical context and renders the script before
+dispatch. The daemon binds `task`, `execution`, `inputs`, `steps`, `workflow`,
+and `artifacts` as typed Rhai variables in a fresh scope. It returns
+schema-validated JSON for later steps in the same TaskRun. Rhai runs in a bounded
+blocking worker with cancellation, operation/data/deadline limits, and no host
+filesystem/process functions. Sacrum retains workflow progression and retries.
+
+See [execute agent guidance](../agent-context/workflows/steps/execute/index.md) for the
+CLI/GraphQL authoring, context/output example, limits, and diagnostics, and
+[the Docker-only demo](../testing.md#rhai-execute-demo) for isolated verification.
 
 ### Deterministic route configuration
 

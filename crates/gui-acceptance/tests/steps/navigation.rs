@@ -1231,23 +1231,18 @@ async fn type_into_element_with_test_id(world: &mut GuiWorld, text: String, test
         .clone();
     let client = wd.lock().await;
 
-    let element = client
-        .wait()
-        .at_most(std::time::Duration::from_secs(5))
-        .for_element(Locator::Css(&format!("[data-testid=\"{}\"]", test_id)))
-        .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "element with test id '{}' not found within 5 seconds",
-                test_id
-            )
-        });
+    let selector = format!("[data-testid=\"{test_id}\"]");
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css(&selector),
+        &format!("focus element with test id '{test_id}'"),
+    )
+    .await;
 
-    gui_acceptance::wait_actionable(&element).await;
-    element
-        .click()
+    let element = client
+        .find(Locator::Css(&selector))
         .await
-        .unwrap_or_else(|_| panic!("failed to focus element with test id '{}'", test_id));
+        .unwrap_or_else(|error| panic!("focused element '{test_id}' not found: {error}"));
 
     element.send_keys(&text).await.unwrap_or_else(|_| {
         panic!(

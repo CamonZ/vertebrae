@@ -5,6 +5,7 @@
 //! - Classifies incoming events and dispatches domain-specific handling
 //! - Tracks running StepExecutors by execution ID for cancel support
 //! - Reports execution status changes back to Sacrum via GraphQL
+//! - Shares daemon-wide script admission and drains settled results on shutdown
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -18,11 +19,12 @@ use vertebrae_core::models::{AgentConfig, ExecutionStatus};
 use vertebrae_core::{ProviderId, StepHarness, VertebraeServices};
 
 use crate::actors::step_executor::{
-    StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult,
+    ExecutionKind, StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult,
 };
 use crate::capabilities::{DaemonCapabilities, SharedDaemonCapabilities};
 use crate::output_validator::SchemaValidationError;
 use crate::phoenix::PhoenixMessage;
+use crate::script_worker::{ScriptCompletion, ScriptWorker, validate_limits};
 
 const STEP_EXECUTOR_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -54,6 +56,7 @@ pub struct ProjectConfig {
     pub project_root: PathBuf,
     /// Immutable daemon-startup discovery shared with every step executor.
     pub capabilities: SharedDaemonCapabilities,
+    pub script_worker: Arc<ScriptWorker>,
 }
 
 impl std::fmt::Debug for ProjectConfig {
@@ -85,6 +88,10 @@ pub enum ProjectMessage {
         execution_id: String,
         task_id: String,
         result: StepResult,
+    },
+    /// A script child persisted shutdown after joining its evaluation.
+    ScriptStopped {
+        execution_id: String,
     },
     Shutdown,
 }
@@ -128,6 +135,9 @@ impl std::fmt::Debug for ProjectMessage {
                 .field("result", result)
                 .finish(),
             Self::Shutdown => write!(f, "Shutdown"),
+            Self::ScriptStopped { execution_id } => {
+                f.debug_tuple("ScriptStopped").field(execution_id).finish()
+            }
         }
     }
 }
@@ -189,6 +199,13 @@ pub struct RunStepPayload {
     pub id: String,
     /// The task this step belongs to.
     pub task_id: String,
+    #[serde(default)]
+    pub version: Option<serde_json::Value>,
+    #[serde(default)]
+    pub script: Option<serde_json::Value>,
+    /// Immutable canonical context resolved and recorded by Sacrum for execute.
+    #[serde(default, deserialize_with = "deserialize_present_json_value")]
+    pub context: Option<serde_json::Value>,
     /// The composed prompt for this step execution (built by Sacrum).
     #[serde(default)]
     pub prompt: Option<String>,
@@ -250,6 +267,20 @@ pub struct CancelStepPayload {
 ///
 /// This is a pure function so it can be tested without an actor.
 pub fn parse_run_step_payload(payload: &serde_json::Value) -> Result<RunStepPayload, String> {
+    if payload.get("step_type").and_then(serde_json::Value::as_str) != Some("execute")
+        && ["version", "script", "input"]
+            .iter()
+            .any(|field| payload.get(field).is_some())
+    {
+        return Err("execute fields require explicit step_type='execute'".into());
+    }
+    if payload.get("step_type").and_then(serde_json::Value::as_str) == Some("execute") {
+        for forbidden in ["harness", "agent_config", "provider", "model", "input"] {
+            if payload.get(forbidden).is_some() {
+                return Err(format!("execute run_step must omit {forbidden}"));
+            }
+        }
+    }
     serde_json::from_value(payload.clone())
         .map_err(|e| format!("Failed to parse run_step payload: {e}"))
 }
@@ -336,6 +367,62 @@ pub fn parse_cancel_step_payload(payload: &serde_json::Value) -> Result<CancelSt
 /// - Parses `agent_config` JSON into an `AgentConfig` struct.
 /// - Carries `agents` and `skills` from the payload into the config.
 pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepConfig, String> {
+    if payload.step_type.as_deref() != Some("execute")
+        && (payload.version.is_some() || payload.script.is_some())
+    {
+        return Err("execute fields require explicit step_type='execute'".into());
+    }
+    if payload.step_type.as_deref() == Some("execute") {
+        if payload.harness.is_some() || !payload.agent_config.is_null() {
+            return Err("execute requires no harness or agent_config".into());
+        }
+        let version = payload
+            .version
+            .as_ref()
+            .and_then(serde_json::Value::as_i64)
+            .filter(|version| *version == 1)
+            .ok_or_else(|| "execute version must be 1".to_string())?;
+        let script = payload
+            .script
+            .as_ref()
+            .and_then(serde_json::Value::as_str)
+            .filter(|script| !script.trim().is_empty())
+            .ok_or_else(|| "execute requires a non-empty script string".to_string())?;
+        let config = vertebrae_core::models::ExecuteConfig {
+            version: version as i32,
+            script: script.to_string(),
+            context: Some(
+                payload
+                    .context
+                    .clone()
+                    .ok_or_else(|| "execute requires resolved context".to_string())?,
+            ),
+            output_schema: payload
+                .output_schema
+                .clone()
+                .ok_or_else(|| "execute requires output_schema".to_string())?,
+        };
+        validate_limits(&config)?;
+        config
+            .validate_structure()
+            .map_err(|error| error.to_string())?;
+        return Ok(StepConfig {
+            execution_kind: ExecutionKind::Execute(config),
+            harness: None,
+            prompt: None,
+            state: None,
+            questions: None,
+            agent_config: AgentConfig::default(),
+            agents: Vec::new(),
+            skills: Vec::new(),
+            verbose_daemon_logging: payload.verbose_daemon_logging,
+        });
+    }
+    if let Some(kind) = payload.step_type.as_deref()
+        && !matches!(kind, "llm_inference" | "structured_inference")
+    {
+        return Err(format!("unsupported daemon step type '{kind}'"));
+    }
     let harness = parse_payload_harness(payload.harness.as_ref())?;
     validate_step_harness_compatibility(payload.step_type.as_deref(), harness)?;
     // A null/absent agent_config means "use defaults"; anything else must
@@ -367,7 +454,11 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepCo
         prompt: payload.prompt.clone(),
         state: payload.state.clone(),
         questions: payload.questions.clone(),
-        structured_inference,
+        execution_kind: if structured_inference {
+            ExecutionKind::StructuredInference
+        } else {
+            ExecutionKind::LlmInference
+        },
         agent_config,
         agents: payload.agents.clone(),
         skills: payload.skills.clone(),
@@ -457,6 +548,7 @@ pub struct ProjectState {
     project_root: PathBuf,
     /// Immutable daemon-startup discovery shared with every step executor.
     capabilities: SharedDaemonCapabilities,
+    script_worker: Arc<ScriptWorker>,
     /// Map from execution_id to the running StepExecutor actor ref.
     /// Used to route cancel_step events to the correct executor.
     running_executors: HashMap<String, ActorRef<StepExecutorMessage>>,
@@ -464,6 +556,7 @@ pub struct ProjectState {
     /// status updates can re-attach provider/model metadata after the
     /// StepExecutor (which owned the original) has stopped.
     pending_metadata: HashMap<String, ExecutionMetadata>,
+    script_completions: HashMap<String, Arc<ScriptCompletion>>,
 }
 
 /// Per-project supervisor actor.
@@ -493,8 +586,10 @@ impl Actor for ProjectSupervisor {
             services: args.services,
             project_root: args.project_root,
             capabilities: args.capabilities,
+            script_worker: args.script_worker,
             running_executors: HashMap::new(),
             pending_metadata: HashMap::new(),
+            script_completions: HashMap::new(),
         })
     }
 
@@ -541,6 +636,11 @@ impl Actor for ProjectSupervisor {
             }
             ProjectMessage::Shutdown => {
                 self.handle_shutdown(myself, state);
+            }
+            ProjectMessage::ScriptStopped { execution_id } => {
+                state.running_executors.remove(&execution_id);
+                state.pending_metadata.remove(&execution_id);
+                state.script_completions.remove(&execution_id);
             }
         }
         Ok(())
@@ -628,6 +728,16 @@ impl Actor for ProjectSupervisor {
             }
             state.pending_metadata.remove(&execution_id);
         }
+        let pending_results: Vec<_> = state
+            .script_completions
+            .iter()
+            .filter_map(|(id, completion)| completion.result().map(|result| (id.clone(), result)))
+            .collect();
+        for (execution_id, result) in pending_results {
+            self.handle_step_finished(&execution_id, "shutdown", &result, state)
+                .await;
+        }
+        state.script_completions.clear();
         state.pending_metadata.clear();
         tracing::info!("ProjectSupervisor stopped for project {}", state.project_id);
         Ok(())
@@ -648,7 +758,7 @@ impl ProjectSupervisor {
             return;
         };
 
-        let output = format!("Step harness selection failed: {error}");
+        let output = format!("Step dispatch validation failed: {error}");
         if let Err(update_error) = state
             .services
             .executions()
@@ -863,15 +973,22 @@ impl ProjectSupervisor {
             task_id
         );
 
-        let metadata = resolved_execution_metadata(
-            &step_config.agent_config,
-            step_config.harness,
-            &state.capabilities,
-        );
-        let running_params = attach_resolved_metadata(
-            UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
-            &metadata,
-        );
+        if state.running_executors.contains_key(execution_id) {
+            return Ok(());
+        }
+        let metadata = if matches!(step_config.execution_kind, ExecutionKind::Execute(_)) {
+            None
+        } else {
+            Some(resolved_execution_metadata(
+                &step_config.agent_config,
+                step_config.harness,
+                &state.capabilities,
+            ))
+        };
+        let mut running_params = UpdateExecutionStatusParams::new(ExecutionStatus::InProgress);
+        if let Some(metadata) = &metadata {
+            running_params = attach_resolved_metadata(running_params, metadata);
+        }
 
         if let Err(e) = state
             .services
@@ -888,10 +1005,19 @@ impl ProjectSupervisor {
             return Ok(());
         }
 
-        state
-            .pending_metadata
-            .insert(execution_id.to_string(), metadata);
+        if let Some(metadata) = metadata {
+            state
+                .pending_metadata
+                .insert(execution_id.to_string(), metadata);
+        }
 
+        let script_completion = matches!(step_config.execution_kind, ExecutionKind::Execute(_))
+            .then(|| Arc::new(ScriptCompletion::default()));
+        if let Some(completion) = &script_completion {
+            state
+                .script_completions
+                .insert(execution_id.to_string(), Arc::clone(completion));
+        }
         let executor_config = StepExecutorConfig {
             execution_id: execution_id.to_string(),
             task_id: task_id.to_string(),
@@ -900,6 +1026,8 @@ impl ProjectSupervisor {
             worktree,
             capabilities: state.capabilities.clone(),
             execution_service: state.services.executions_arc(),
+            script_worker: Arc::clone(&state.script_worker),
+            script_completion,
         };
 
         let actor_name = format!("step-{}-{}", state.project_id, execution_id);
@@ -926,6 +1054,7 @@ impl ProjectSupervisor {
                     );
                     state.running_executors.remove(execution_id);
                     state.pending_metadata.remove(execution_id);
+                    state.script_completions.remove(execution_id);
                 }
             }
             Err(e) => {
@@ -937,6 +1066,7 @@ impl ProjectSupervisor {
                 );
 
                 let metadata = state.pending_metadata.remove(execution_id);
+                state.script_completions.remove(execution_id);
                 let mut failure_params = UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
                     .with_output(format!("Failed to spawn executor: {e}"));
                 if let Some(metadata) = metadata.as_ref() {
@@ -994,6 +1124,11 @@ impl ProjectSupervisor {
         // Remove from running executors map (it may already be removed by cancel).
         state.running_executors.remove(execution_id);
         let metadata = state.pending_metadata.remove(execution_id);
+        if let Some(completion) = state.script_completions.remove(execution_id)
+            && !completion.claim_persistence()
+        {
+            return;
+        }
 
         match result {
             StepResult::Completed {
@@ -1083,6 +1218,359 @@ impl ProjectSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn execute_payload() -> serde_json::Value {
+        serde_json::json!({"id":"execute-attempt","task_id":"execute-task","project_id":"execute-project","step_type":"execute","version":1,"script":"#{ name: execution.previous_output.name, total: execution.previous_output.quantity * execution.previous_output.unit_price }","context":{"task":{},"execution":{"previous_output":{"name":"example","quantity":3,"unit_price":12}},"inputs":{},"steps":{},"workflow":{},"artifacts":{}},"output_schema":{"type":"object","required":["name","total"]}})
+    }
+
+    #[test]
+    fn execute_dispatch_preserves_data_and_rejects_missing_or_provider_fields() {
+        let payload = parse_run_step_payload(&execute_payload()).unwrap();
+        let config = build_step_config_from_payload(&payload).unwrap();
+        match config.execution_kind {
+            ExecutionKind::Execute(execute) => {
+                assert_eq!(execute.version, 1);
+                assert_eq!(
+                    execute.context.as_ref().unwrap()["execution"]["previous_output"],
+                    serde_json::json!({"name":"example","quantity":3,"unit_price":12})
+                );
+                assert!(execute.script.contains(
+                    "execution.previous_output.quantity * execution.previous_output.unit_price"
+                ));
+            }
+            kind => panic!("wrong runtime: {kind:?}"),
+        }
+        assert_eq!(config.harness, None);
+        assert!(config.agent_config.is_empty());
+        for key in ["version", "script", "context", "output_schema"] {
+            let mut malformed = execute_payload();
+            malformed.as_object_mut().unwrap().remove(key);
+            let parsed = parse_run_step_payload(&malformed).unwrap();
+            let error = build_step_config_from_payload(&parsed).unwrap_err();
+            assert!(error.contains(key), "missing {key}: {error}");
+        }
+        for (key, value) in [
+            ("version", serde_json::json!(2)),
+            ("script", serde_json::json!(" ")),
+            ("script", serde_json::json!(7)),
+            ("output_schema", serde_json::json!([])),
+        ] {
+            let mut malformed = execute_payload();
+            malformed[key] = value;
+            let parsed = parse_run_step_payload(&malformed).unwrap();
+            assert!(
+                build_step_config_from_payload(&parsed)
+                    .unwrap_err()
+                    .contains(key)
+            );
+        }
+        for key in ["provider", "model", "harness", "agent_config", "input"] {
+            let mut malformed = execute_payload();
+            malformed[key] = serde_json::Value::Null;
+            assert!(
+                parse_run_step_payload(&malformed)
+                    .unwrap_err()
+                    .contains(key)
+            );
+        }
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!([]),
+            serde_json::json!({}),
+        ] {
+            let mut malformed = execute_payload();
+            malformed["context"] = value;
+            let parsed = parse_run_step_payload(&malformed).unwrap();
+            assert!(
+                build_step_config_from_payload(&parsed)
+                    .unwrap_err()
+                    .contains("context")
+            );
+        }
+        let mut unknown = execute_payload();
+        unknown["step_type"] = serde_json::json!("unknown");
+        assert!(
+            parse_run_step_payload(&unknown)
+                .unwrap_err()
+                .contains("explicit step_type")
+        );
+        let mut missing_kind = execute_payload();
+        missing_kind.as_object_mut().unwrap().remove("step_type");
+        assert!(
+            parse_run_step_payload(&missing_kind)
+                .unwrap_err()
+                .contains("explicit step_type")
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_dispatch_defers_invalid_schema_to_the_bounded_worker() {
+        let mut payload = execute_payload();
+        payload["output_schema"] = serde_json::json!({"type":"invalid"});
+        let parsed = parse_run_step_payload(&payload).unwrap();
+        let config = build_step_config_from_payload(&parsed).unwrap();
+        assert_eq!(config.harness, None);
+        let ExecutionKind::Execute(config) = config.execution_kind else {
+            panic!("invalid execute schema must not select an inference provider");
+        };
+        let result = ScriptWorker::default()
+            .admit(config, |_| {})
+            .unwrap()
+            .settle()
+            .await;
+        assert!(
+            matches!(result, StepResult::Failed { error, .. } if error.contains("output_schema"))
+        );
+    }
+
+    fn test_execute_config(
+        server: &wiremock::MockServer,
+        worker: Arc<ScriptWorker>,
+    ) -> ProjectConfig {
+        use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
+        let services = Arc::new(vertebrae_sacrum_client::from_sacrum(Arc::new(
+            GraphqlClient::new(SacrumConfig::new(
+                server.uri(),
+                "token".into(),
+                "execute-project".into(),
+            )),
+        )));
+        let capabilities = Arc::new(DaemonCapabilities {
+            harnesses: HashMap::new(),
+            provider_binaries: crate::helpers::ProviderBinaries {
+                anthropic: None,
+                openai: None,
+            },
+            shell_path: String::new(),
+            installed_skills_roots: Vec::new(),
+            installed_skills_diagnostic: None,
+            claude_plugin_dir: vertebrae_installer::ClaudePluginDirResolution {
+                plugin_root: None,
+                warning: None,
+            },
+            typesafe_api_key: None,
+            typesafe_base_url: None,
+            typesafe_url: None,
+            provider_profiles: Default::default(),
+        });
+        ProjectConfig {
+            project_id: format!("execute-project-{}", uuid::Uuid::new_v4()),
+            services,
+            project_root: PathBuf::from("/nonexistent/provider/root"),
+            capabilities,
+            script_worker: worker,
+        }
+    }
+
+    async fn test_execute_project(
+        server: &wiremock::MockServer,
+        worker: Arc<ScriptWorker>,
+    ) -> (
+        ActorRef<ProjectMessage>,
+        ractor::concurrency::JoinHandle<()>,
+    ) {
+        Actor::spawn(None, ProjectSupervisor, test_execute_config(server, worker))
+            .await
+            .unwrap()
+    }
+
+    async fn execution_requests(
+        server: &wiremock::MockServer,
+        count: usize,
+    ) -> Vec<serde_json::Value> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let requests = server.received_requests().await.unwrap();
+                if requests.len() >= count {
+                    return requests.into_iter().map(|request| serde_json::from_slice::<serde_json::Value>(&request.body).unwrap()["variables"].clone()).collect();
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.unwrap()
+    }
+
+    async fn execution_server() -> wiremock::MockServer {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        };
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"data":{"update_step_execution":{"id":"execute-attempt"}}}),
+            ))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn execute_success_persists_once_without_provider_resolution_or_metadata() {
+        let server = execution_server().await;
+        let (project, handle) =
+            test_execute_project(&server, Arc::new(ScriptWorker::default())).await;
+        project
+            .cast(ProjectMessage::ChannelEvent(msg(
+                "daemon:test",
+                "run_step",
+                execute_payload(),
+            )))
+            .unwrap();
+        let requests = execution_requests(&server, 2).await;
+        project
+            .stop_and_wait(None, Some(Duration::from_secs(5)))
+            .await
+            .unwrap();
+        handle.await.unwrap();
+        assert_eq!(requests[0]["status"], "in_progress");
+        assert_eq!(requests[1]["status"], "completed");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(requests[1]["output"].as_str().unwrap())
+                .unwrap(),
+            serde_json::json!({"name":"example","total":36})
+        );
+        let requests = execution_requests(&server, 2).await;
+        assert_eq!(requests.len(), 2, "one terminal persistence");
+        for request in requests {
+            for key in [
+                "model",
+                "model_provider",
+                "harness",
+                "input_tokens",
+                "output_tokens",
+                "cost",
+            ] {
+                assert!(request.get(key).is_none(), "unexpected {key}: {request}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_cancel_and_project_shutdown_settle_before_one_terminal_persistence() {
+        for shutdown in [false, true] {
+            let server = execution_server().await;
+            let worker = Arc::new(ScriptWorker::without_operation_limit_for_test());
+            let (project, handle) = test_execute_project(&server, Arc::clone(&worker)).await;
+            let mut payload = execute_payload();
+            payload["script"] = serde_json::json!("loop {}");
+            project
+                .cast(ProjectMessage::ChannelEvent(msg(
+                    "daemon:test",
+                    "run_step",
+                    payload,
+                )))
+                .unwrap();
+            execution_requests(&server, 1).await;
+            if shutdown {
+                project
+                    .stop_and_wait(
+                        Some("test project shutdown".into()),
+                        Some(Duration::from_secs(5)),
+                    )
+                    .await
+                    .unwrap();
+            } else {
+                project
+                    .cast(ProjectMessage::CancelStep {
+                        step_execution_id: "execute-attempt".into(),
+                        task_id: "execute-task".into(),
+                    })
+                    .unwrap();
+                execution_requests(&server, 2).await;
+                project
+                    .stop_and_wait(None, Some(Duration::from_secs(5)))
+                    .await
+                    .unwrap();
+            }
+            handle.await.unwrap();
+            let requests = execution_requests(&server, 2).await;
+            assert_eq!(
+                requests.len(),
+                2,
+                "one terminal report on shutdown={shutdown}"
+            );
+            assert_eq!(requests[1]["status"], "failed");
+            assert!(
+                requests[1]["output"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Cancelled"),
+                "{requests:?}"
+            );
+            assert!(requests[1].get("model_provider").is_none());
+            let recovered = worker
+                .admit(
+                    vertebrae_core::models::ExecuteConfig {
+                        version: 1,
+                        script: "42".into(),
+                        context: Some(execute_payload()["context"].clone()),
+                        output_schema: serde_json::json!({}),
+                    },
+                    |_| {},
+                )
+                .unwrap()
+                .settle()
+                .await;
+            assert!(
+                matches!(recovered, StepResult::Completed { output: Some(ref output), .. } if output == "42")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn project_shutdown_drains_a_settled_result_queued_behind_stop_once() {
+        let server = execution_server().await;
+        let worker = Arc::new(ScriptWorker::default());
+        let (project, handle) = test_execute_project(&server, Arc::clone(&worker)).await;
+        let mut state = ProjectSupervisor
+            .pre_start(project.clone(), test_execute_config(&server, worker))
+            .await
+            .unwrap();
+        let completion = Arc::new(ScriptCompletion::default());
+        // This is the exact handoff milestone before StepFinished can be
+        // consumed: the child has joined and recorded its terminal result.
+        completion.record(StepResult::Completed {
+            exit_code: 0,
+            metrics: None,
+            output: Some("42".into()),
+        });
+        state
+            .script_completions
+            .insert("queued-completion".into(), Arc::clone(&completion));
+        ProjectSupervisor
+            .post_stop(project.clone(), &mut state)
+            .await
+            .unwrap();
+        let requests = execution_requests(&server, 1).await;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["id"], "queued-completion");
+        assert_eq!(requests[0]["status"], "completed");
+        assert_eq!(requests[0]["output"], "42");
+        assert!(
+            !completion.claim_persistence(),
+            "shutdown owns the single terminal request"
+        );
+        // A result already persisted by a forced child stop must be drained
+        // without another terminal update from the stopping parent.
+        let claimed = Arc::new(ScriptCompletion::default());
+        claimed.record(StepResult::failed(None, "Cancelled"));
+        assert!(claimed.claim_persistence());
+        state
+            .script_completions
+            .insert("already-persisted".into(), claimed);
+        ProjectSupervisor
+            .post_stop(project.clone(), &mut state)
+            .await
+            .unwrap();
+        assert_eq!(execution_requests(&server, 1).await.len(), 1);
+        assert!(state.script_completions.is_empty());
+        project
+            .stop_and_wait(None, Some(Duration::from_secs(5)))
+            .await
+            .unwrap();
+        handle.await.unwrap();
+    }
 
     // ===== Test helpers =====
 
@@ -1243,6 +1731,7 @@ mod tests {
     #[test]
     fn project_config_debug_format() {
         let config = ProjectConfig {
+            script_worker: Arc::new(ScriptWorker::default()),
             project_id: "proj-123".to_string(),
             services: test_services(),
             project_root: PathBuf::from("/home/user/project"),
@@ -1293,7 +1782,7 @@ mod tests {
                 prompt: Some("Implement feature".to_string()),
                 state: None,
                 questions: None,
-                structured_inference: false,
+                execution_kind: ExecutionKind::LlmInference,
                 agent_config: AgentConfig::new().with_model("claude-sonnet-4-20250514"),
                 agents: Vec::new(),
                 skills: Vec::new(),
@@ -1490,7 +1979,7 @@ mod tests {
         }))
         .unwrap();
         let config = build_step_config_from_payload(&payload).unwrap();
-        assert!(!config.structured_inference);
+        assert!(!config.execution_kind.is_structured_inference());
         assert_eq!(config.harness, Some(StepHarness::Claude));
 
         let unsupported = parse_run_step_payload(&serde_json::json!({
@@ -1516,7 +2005,7 @@ mod tests {
         }))
         .unwrap();
         let config = build_step_config_from_payload(&structured).unwrap();
-        assert!(config.structured_inference);
+        assert!(config.execution_kind.is_structured_inference());
         assert_eq!(config.harness, Some(StepHarness::Typesafe));
     }
 
@@ -1552,7 +2041,7 @@ mod tests {
         });
         let parsed = parse_run_step_payload(&payload).unwrap();
         let config = build_step_config_from_payload(&parsed).unwrap();
-        assert!(config.structured_inference);
+        assert!(config.execution_kind.is_structured_inference());
         assert!(config.prompt.is_none());
         assert_eq!(config.state, Some(payload["state"].clone()));
         assert_eq!(
@@ -1611,7 +2100,7 @@ mod tests {
 
         let config = build_step_config_from_payload(&payload).unwrap();
 
-        assert!(config.structured_inference);
+        assert!(config.execution_kind.is_structured_inference());
         assert!(config.state.is_none());
         assert!(config.questions.is_none());
     }
@@ -1923,7 +2412,7 @@ mod tests {
                 prompt: Some("Implement in worktree".to_string()),
                 state: None,
                 questions: None,
-                structured_inference: false,
+                execution_kind: ExecutionKind::LlmInference,
                 agent_config: AgentConfig::default(),
                 agents: Vec::new(),
                 skills: Vec::new(),
@@ -2032,6 +2521,9 @@ mod tests {
     #[test]
     fn build_step_config_ignores_null_output_schema() {
         let payload = RunStepPayload {
+            version: None,
+            script: None,
+            context: None,
             project_id: String::new(),
             id: "exec-os-null".to_string(),
             task_id: "task-os-null".to_string(),

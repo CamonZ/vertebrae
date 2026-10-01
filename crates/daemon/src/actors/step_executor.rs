@@ -1,11 +1,12 @@
-//! StepExecutor - per-step actor that runs a provider harness for one workflow step.
+//! StepExecutor - per-attempt actor for provider inference or a Rhai transformation.
 //!
-//! Spawned by ProjectSupervisor upon receiving an execute_step channel event from Sacrum.
+//! Spawned by ProjectSupervisor upon receiving a `run_step` event from Sacrum.
 //! Each StepExecutor:
-//! - Receives step config (prompt, model), execution_id, and task_id from its parent
-//! - Runs provider inference through shared harness crates and persists normalized events
-//! - Reports StepCompleted or StepFailed to the parent ProjectSupervisor on exit
-//! - Cancels the active harness and awaits harness settlement
+//! - Consumes Sacrum's rendered config snapshot and complete typed context
+//! - Selects execute before any provider resolution or harness creation
+//! - Owns cancellation and joins its bounded blocking script attempt before terminal reporting
+//! - Uses StepFinished for ordinary persistence and a shared receipt during supervisor shutdown
+//! - Preserves inference harness events, cancellation, and settlement
 //!
 //! Orchestration (step ordering, parallel vs serial, retry logic) lives entirely
 //! in Sacrum/Elixir -- the daemon just executes what it is told.
@@ -17,7 +18,7 @@ use async_trait::async_trait;
 use ractor::{Actor, ActorProcessingErr, ActorRef};
 use vertebrae_core::StepHarness;
 use vertebrae_core::execution_service::ExecutionService;
-use vertebrae_core::models::{AgentConfig, PermissionMode};
+use vertebrae_core::models::{AgentConfig, ExecuteConfig, PermissionMode};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
     CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
@@ -30,6 +31,7 @@ use vertebrae_harness_core::{
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
 use crate::capabilities::SharedDaemonCapabilities;
 use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
+use crate::script_worker::{ScriptAttempt, ScriptCompletion, ScriptWorker};
 use crate::session_log_event_sink::SessionLogEventSink;
 use crate::settings_synthesis::SyntheticSettings;
 
@@ -43,6 +45,19 @@ const CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(250);
 
 #[derive(Debug, Clone)]
+pub enum ExecutionKind {
+    LlmInference,
+    StructuredInference,
+    Execute(ExecuteConfig),
+}
+
+impl ExecutionKind {
+    pub fn is_structured_inference(&self) -> bool {
+        matches!(self, Self::StructuredInference)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct StepConfig {
     /// Explicit workflow-step harness selection. `None` preserves legacy
     /// provider config/default behavior.
@@ -50,7 +65,7 @@ pub struct StepConfig {
     pub prompt: Option<String>,
     pub state: Option<serde_json::Value>,
     pub questions: Option<std::collections::BTreeMap<String, serde_json::Value>>,
-    pub structured_inference: bool,
+    pub execution_kind: ExecutionKind,
     /// Full agent configuration (model, allowed_tools, permission_mode, etc.)
     pub agent_config: AgentConfig,
     /// Agent file paths/names to pass as --agent flags.
@@ -149,6 +164,8 @@ pub struct StepExecutorConfig {
     /// Immutable daemon-startup discovery consumed without re-probing.
     pub capabilities: SharedDaemonCapabilities,
     pub execution_service: Arc<dyn ExecutionService>,
+    pub script_worker: Arc<ScriptWorker>,
+    pub script_completion: Option<Arc<ScriptCompletion>>,
 }
 
 impl StepExecutorConfig {
@@ -176,6 +193,7 @@ pub enum StepExecutorMessage {
     Execute,
     Cancel,
     HarnessSettled(Box<Result<RunOutcome, String>>),
+    ScriptSettled(StepResult),
 }
 
 impl std::fmt::Debug for StepExecutorMessage {
@@ -184,6 +202,7 @@ impl std::fmt::Debug for StepExecutorMessage {
             Self::Execute => write!(f, "Execute"),
             Self::Cancel => write!(f, "Cancel"),
             Self::HarnessSettled(result) => f.debug_tuple("HarnessSettled").field(result).finish(),
+            Self::ScriptSettled(result) => f.debug_tuple("ScriptSettled").field(result).finish(),
         }
     }
 }
@@ -383,6 +402,8 @@ pub struct StepExecutorState {
     compiled_schema: Option<Result<CompiledSchema, SchemaError>>,
     /// Owns the temp dir for this execution's `--settings` bundle; dropped on stop.
     settings_guard: Option<SyntheticSettings>,
+    script_attempt: Option<ScriptAttempt>,
+    terminal_reported: bool,
 }
 
 pub struct StepExecutor;
@@ -405,12 +426,17 @@ impl Actor for StepExecutor {
             config.task_id
         );
 
-        let compiled_schema = config
-            .step_config
-            .agent_config
-            .json_schema
-            .as_ref()
-            .map(CompiledSchema::compile);
+        let compiled_schema =
+            if matches!(config.step_config.execution_kind, ExecutionKind::Execute(_)) {
+                None
+            } else {
+                config
+                    .step_config
+                    .agent_config
+                    .json_schema
+                    .as_ref()
+                    .map(CompiledSchema::compile)
+            };
 
         if let Some(Err(ref err)) = compiled_schema {
             tracing::error!(
@@ -434,6 +460,8 @@ impl Actor for StepExecutor {
             harness_cancel_tx,
             compiled_schema,
             settings_guard: None,
+            script_attempt: None,
+            terminal_reported: false,
         })
     }
 
@@ -453,6 +481,12 @@ impl Actor for StepExecutor {
             StepExecutorMessage::HarnessSettled(result) => {
                 self.handle_harness_settled(*result, myself, state).await;
             }
+            StepExecutorMessage::ScriptSettled(result) => {
+                if let Some(attempt) = state.script_attempt.take() {
+                    let _ = attempt.settle().await;
+                }
+                self.report_script_result(result, &myself, state);
+            }
         }
         Ok(())
     }
@@ -463,6 +497,43 @@ impl Actor for StepExecutor {
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         tracing::info!("StepExecutor stopping for execution {}", state.execution_id);
+
+        if matches!(
+            state.config.step_config.execution_kind,
+            ExecutionKind::Execute(_)
+        ) {
+            if let Some(attempt) = state.script_attempt.take() {
+                attempt.cancel();
+                let _ = attempt.settle().await;
+            }
+            if !state.terminal_reported {
+                // A stopping supervisor cannot consume normal terminal messages.
+                // The child retains persistence ownership until its worker joins.
+                let result = StepResult::failed(None, "Cancelled during executor shutdown");
+                if let Some(completion) = &state.config.script_completion {
+                    completion.record(result);
+                    if !completion.claim_persistence() {
+                        return Ok(());
+                    }
+                }
+                let params = vertebrae_core::execution_service::UpdateExecutionStatusParams::new(
+                    vertebrae_core::models::ExecutionStatus::Failed,
+                )
+                .with_output("Cancelled during executor shutdown");
+                if let Err(error) = state
+                    .config
+                    .execution_service
+                    .update_execution_status(&state.execution_id, params)
+                    .await
+                {
+                    tracing::error!(execution_id = %state.execution_id, %error, "Failed to persist settled script shutdown");
+                }
+                state.terminal_reported = true;
+                let _ = state.parent.cast(ProjectMessage::ScriptStopped {
+                    execution_id: state.execution_id.clone(),
+                });
+            }
+        }
 
         let _ = state.harness_cancel_tx.send(true);
         let turn = state.harness_turn.take();
@@ -565,6 +636,24 @@ impl StepExecutor {
         myself: ActorRef<StepExecutorMessage>,
         state: &mut StepExecutorState,
     ) -> Result<(), ActorProcessingErr> {
+        if state.script_attempt.is_some() || state.terminal_reported {
+            return Ok(());
+        }
+        if let ExecutionKind::Execute(config) = &state.config.step_config.execution_kind {
+            let actor_ref = myself.clone();
+            match state
+                .config
+                .script_worker
+                .admit(config.clone(), move |result| {
+                    let _ = actor_ref.cast(StepExecutorMessage::ScriptSettled(result));
+                }) {
+                Ok(attempt) => state.script_attempt = Some(attempt),
+                Err(error) => {
+                    self.report_script_result(StepResult::failed(None, error), &myself, state)
+                }
+            }
+            return Ok(());
+        }
         if state.harness_run.is_some() || state.harness_session.is_some() {
             tracing::warn!(
                 "Execute received but harness already running for execution {}",
@@ -835,7 +924,12 @@ impl StepExecutor {
             return Ok(());
         }
 
-        let run_request = if state.config.step_config.structured_inference {
+        let run_request = if state
+            .config
+            .step_config
+            .execution_kind
+            .is_structured_inference()
+        {
             let request = match structured_inference_request(
                 &state.config.step_config,
                 &state.execution_id,
@@ -909,6 +1003,18 @@ impl StepExecutor {
     ) {
         tracing::info!("Cancel requested for execution {}", state.execution_id);
 
+        if matches!(
+            state.config.step_config.execution_kind,
+            ExecutionKind::Execute(_)
+        ) {
+            if let Some(attempt) = &state.script_attempt {
+                attempt.cancel();
+            } else {
+                self.report_script_result(StepResult::failed(None, "Cancelled"), &myself, state);
+            }
+            return;
+        }
+
         if let Some(turn) = state.harness_turn.as_ref() {
             if let Err(error) = turn.interrupt().await {
                 tracing::warn!(
@@ -965,7 +1071,12 @@ impl StepExecutor {
             Err(error) => StepResult::failed(None, error),
             Ok(outcome) => match outcome.status {
                 CompletionStatus::Completed => {
-                    let validation = if state.config.step_config.structured_inference {
+                    let validation = if state
+                        .config
+                        .step_config
+                        .execution_kind
+                        .is_structured_inference()
+                    {
                         Ok(())
                     } else {
                         self.validate_output(
@@ -1038,6 +1149,27 @@ impl StepExecutor {
         });
         myself.stop(Some("harness settled".into()));
     }
+
+    fn report_script_result(
+        &self,
+        result: StepResult,
+        myself: &ActorRef<StepExecutorMessage>,
+        state: &mut StepExecutorState,
+    ) {
+        if state.terminal_reported {
+            return;
+        }
+        state.terminal_reported = true;
+        if let Some(completion) = &state.config.script_completion {
+            completion.record(result.clone());
+        }
+        let _ = state.parent.cast(ProjectMessage::StepFinished {
+            execution_id: state.execution_id.clone(),
+            task_id: state.task_id.clone(),
+            result,
+        });
+        myself.stop(Some("script settled".into()));
+    }
 }
 
 #[cfg(test)]
@@ -1051,7 +1183,7 @@ mod tests {
             prompt: None,
             state: None,
             questions: None,
-            structured_inference: true,
+            execution_kind: ExecutionKind::StructuredInference,
             agent_config: AgentConfig::default(),
             agents: Vec::new(),
             skills: Vec::new(),

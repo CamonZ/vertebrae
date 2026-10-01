@@ -81,6 +81,46 @@ under test is unchanged.
 docker compose run --rm daemon-test-runner
 ```
 
+### Rhai execute demo
+
+`crates/daemon-acceptance/tests/features/execute.feature` creates disposable
+fixtures for a deterministic inference producer, a real Rhai transform,
+a JSON consumer, and a terminal finish. Execute steps are created through
+`vtb step add --step-type execute` with inline and `@file` scripts, without a
+harness. The transform script is then updated through
+`vtb step update --script @file`, and definition reads verify the retained schema and absent runtime
+context before the run. The isolated Sacrum image must contain
+the merged Sacrum PR 235 context/GraphQL/render/dispatch contract; an older image cannot run
+these scenarios. Both `sacrum` and `seeder` must use that same companion image.
+Run only these scenarios with a Compose environment override setting
+`CUCUMBER_FILTER_TAGS=@execute` on `daemon-test-runner`, or run the whole suite
+with the command above. Use a unique Compose project name and tear down its
+containers and volumes after the run.
+
+The producer persists `{"name":"example","quantity":3,"unit_price":12}`.
+The transform is authored with this config, without a harness:
+
+```json
+{
+  "version": 1,
+  "script": "#{ name: execution.previous_output.name, total: execution.previous_output.quantity * execution.previous_output.unit_price }",
+  "output_schema": {
+    "type": "object",
+    "properties": {"name": {"type": "string"}, "total": {"type": "number"}},
+    "required": ["name", "total"],
+    "additionalProperties": false
+  }
+}
+```
+
+Its output is `{"name":"example","total":36}`. The consumer reads
+`steps.transform.output.total` and validates a numeric `observed_total`. It also
+returns all six namespace bindings and compares them with its persisted
+`config.context`, proving the full server snapshot reaches the Rhai scope. A second example changes quantity to 4 and asserts total 48.
+The tests also inspect resolved execution snapshots, common TaskRun identity,
+absence of inference metadata, and evaluation/schema failures. Existing
+provider mock scenarios use `llm_inference`; they do not prove Rhai execution.
+
 **Mock prompt-as-JSON envelope.** The step's `prompt` is parsed by the mock as a
 JSON envelope with this schema:
 
