@@ -267,6 +267,14 @@ pub trait TaskService: Send + Sync {
     /// Get a task by ID
     async fn get_task(&self, id: &str) -> ServiceResult<Task>;
 
+    /// Get a task by ID without resolving workflow and step names.
+    ///
+    /// The default delegates to `get_task`; backends whose name resolution
+    /// costs extra requests override it.
+    async fn get_task_without_lookups(&self, id: &str) -> ServiceResult<Task> {
+        self.get_task(id).await
+    }
+
     /// Get a task by ID using only fields needed for relationship summaries.
     async fn get_task_summary(&self, id: &str) -> ServiceResult<Task> {
         self.get_task(id).await

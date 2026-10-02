@@ -348,9 +348,12 @@ worker thread. Each one makes a direct, unstaged service call through
 `HostContext::call`, which blocks that thread on the async request using the
 runtime handle and races it against the attempt's cancellation. The daemon fills
 in the execution's project ID on every call; scripts never pass one. Failures
-raise a catchable Rhai error `#{ kind, message }` with `kind` one of `not_found`,
-`invalid`, `cancelled`, or `transport`. Services are never called synchronously
-from actor handlers or async workers.
+raise a catchable Rhai error `#{ kind, message, function }` with `kind` one of
+`not_found`, `invalid`, `cancelled`, or `transport`. Services are never called
+synchronously from actor handlers or async workers. `crates/daemon/src/script_host/`
+registers the production modules: `vtb::tasks` reads (`get`, `find`, `parent`,
+`children`, `dependencies`, `dependents`) compare each task's `project_id` with
+the execution's project and treat a mismatch as absent.
 
 Cancellation signals queued/running work and joins its settlement before the
 terminal report. Schema compilation and validation are not interrupted by Rhai
