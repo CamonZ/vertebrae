@@ -6,11 +6,14 @@
 //!
 //! Host functions run on that blocking worker thread. Each one blocks the
 //! thread on a single async service call through [`HostContext::call`], which
-//! races only the attempt's cancellation. Nothing else bounds a script: there
+//! races only the attempt's cancellation, or on owned work such as a command
+//! through [`HostContext::block_on_owned`], which settles itself on cancel
+//! before the thread (and its slot) is released. Nothing else bounds a script: there
 //! is no deadline, operation limit, or size cap. Rhai's default expression and
 //! call depth guards stay because a stack overflow aborts the whole daemon.
 
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -59,12 +62,18 @@ impl Default for ScriptWorker {
     }
 }
 
-/// The execution's project and its project-scoped services. Scripts never
-/// see or pass a project ID; every host call receives this one.
+/// The execution's project, its project-scoped services and its working
+/// directory. Scripts never see or pass a project ID; every host call
+/// receives this one.
 #[derive(Clone)]
 pub struct ScriptScope {
     pub project_id: String,
     pub services: Arc<VertebraeServices>,
+    /// The task worktree, else the project root.
+    pub working_dir: PathBuf,
+    /// The user's login-shell PATH, as given to provider subprocesses; the
+    /// daemon's own PATH is minimal under launchd.
+    pub search_path: String,
 }
 
 /// What a host function needs to make a cancellable service call from the
@@ -79,6 +88,27 @@ pub struct HostContext {
 impl HostContext {
     pub fn project_id(&self) -> &str {
         &self.scope.project_id
+    }
+
+    /// The step's working directory: the task worktree, else the project root.
+    pub fn working_dir(&self) -> &Path {
+        &self.scope.working_dir
+    }
+
+    /// The PATH local commands run with unless a script overrides it.
+    pub fn search_path(&self) -> &str {
+        &self.scope.search_path
+    }
+
+    /// Block the worker thread on `work`, which receives the attempt's
+    /// cancellation. Unlike [`Self::call`], the future is never dropped on
+    /// cancel: it must observe [`CancelSignal`] and finish tearing down what
+    /// it owns (such as a process group) before it returns.
+    ///
+    /// Must only run on the script's blocking worker thread.
+    pub fn block_on_owned<F: Future>(&self, work: impl FnOnce(CancelSignal) -> F) -> F::Output {
+        self.runtime
+            .block_on(work(CancelSignal(self.cancellation.clone())))
     }
 
     /// Block the worker thread on one direct service call. The call races
@@ -103,6 +133,27 @@ impl HostContext {
                 result = request => result.map_err(HostError::from),
             }
         })
+    }
+}
+
+/// The attempt's cancellation, handed to owned host work.
+pub struct CancelSignal(watch::Receiver<bool>);
+
+impl CancelSignal {
+    /// Resolve once the attempt is cancelled; never on a dropped sender.
+    pub async fn cancelled(&mut self) {
+        cancelled(&mut self.0).await;
+    }
+
+    /// Whether the attempt is already cancelled, so owned work can decline
+    /// to start.
+    pub fn is_cancelled(&self) -> bool {
+        *self.0.borrow()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(cancellation: watch::Receiver<bool>) -> Self {
+        Self(cancellation)
     }
 }
 
@@ -160,7 +211,7 @@ impl HostError {
         self
     }
 
-    fn cancelled() -> Self {
+    pub(crate) fn cancelled() -> Self {
         Self::new(HostErrorKind::Cancelled, "Cancelled")
     }
 }
@@ -575,6 +626,8 @@ pub(crate) mod test_support {
                     "script-project".into(),
                 )),
             ))),
+            working_dir: std::env::temp_dir(),
+            search_path: std::env::var("PATH").unwrap_or_default(),
         }
     }
 

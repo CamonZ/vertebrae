@@ -42,6 +42,8 @@ pub(super) async fn run(
                 PROJECT.into(),
             )),
         ))),
+        working_dir: std::env::temp_dir(),
+        search_path: std::env::var("PATH").unwrap_or_default(),
     };
     let script = ids.iter().fold(script.to_string(), |script, (name, id)| {
         script.replace(&format!("${name}"), &format!("\"{id}\""))

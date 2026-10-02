@@ -101,44 +101,6 @@ fn extract_prompt(args: &[String]) -> Option<&str> {
     None
 }
 
-#[cfg(test)]
-mod tests {
-    use super::extract_prompt;
-
-    #[test]
-    fn extracts_prompt_from_claude_print_flag() {
-        let args = [
-            "mock-claude",
-            "--print",
-            "fixture prompt",
-            "--output-format",
-            "stream-json",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-
-        assert_eq!(extract_prompt(&args), Some("fixture prompt"));
-    }
-
-    #[test]
-    fn does_not_treat_standalone_print_flag_as_a_prompt() {
-        let args = [
-            "mock-claude",
-            "--print",
-            "--output-format",
-            "stream-json",
-            "--input-format",
-            "stream-json",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-
-        assert_eq!(extract_prompt(&args), None);
-    }
-}
-
 /// Returns `None` if the prompt is not a JSON object (e.g. the empty-prompt
 /// fallback string "Execute step"). Returns `Some(envelope)` for a valid
 /// fixture envelope. Panics on malformed envelopes.
@@ -379,5 +341,43 @@ fn interruptible_sleep(total: Duration) {
     while Instant::now().duration_since(start) < total {
         let remaining = total - Instant::now().duration_since(start);
         std::thread::sleep(remaining.min(slice));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_prompt;
+
+    #[test]
+    fn extracts_prompt_from_claude_print_flag() {
+        let args = [
+            "mock-claude",
+            "--print",
+            "fixture prompt",
+            "--output-format",
+            "stream-json",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+        assert_eq!(extract_prompt(&args), Some("fixture prompt"));
+    }
+
+    #[test]
+    fn does_not_treat_standalone_print_flag_as_a_prompt() {
+        let args = [
+            "mock-claude",
+            "--print",
+            "--output-format",
+            "stream-json",
+            "--input-format",
+            "stream-json",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+        assert_eq!(extract_prompt(&args), None);
     }
 }

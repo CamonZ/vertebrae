@@ -1,7 +1,7 @@
 # Execute limits and cancellation
 
-Purpose: understand Rhai worker capacity and how scripts stop.
-Use this when: overflow, limits, cancellation, isolation, or provider setup.
+Purpose: understand Rhai worker capacity, how scripts and their commands stop.
+Use this when: overflow, limits, cancellation, isolation, commands, or provider setup.
 
 Admission is daemon-wide and shared by every project: one active evaluation and
 four pending attempts by default, set by `[daemon]` `script_active_slots` and
@@ -29,7 +29,18 @@ services directly from the worker thread, scoped to the execution's project,
 and raise a catchable `#{ kind, message }` error (`not_found`, `invalid`,
 `cancelled`, `transport`). Writes are not undone on failure or cancellation.
 Each attempt uses a fresh Engine/Scope. Cancellation is cooperative; there is
-no process isolation or AST cache. Execute requires no provider binaries or credentials.
+no AST cache. Execute requires no provider binaries or credentials.
+
+`vtb::cmd::run` commands run as the daemon user with its permissions and
+environment, outside any sandbox. `PATH` is the user's login-shell PATH, as for
+provider steps; pass `env` to add or override variables; an explicit `cwd` is not confined to the
+worktree. A command has no timeout or output cap and holds its execute slot
+until it exits, so with one active slot a long `cargo test` delays every other
+execute step (inference steps are unaffected). Cancelling the step sends
+SIGTERM to the command's process group, SIGKILL after a short grace period, and
+reaps it before the slot is released; it raises `cancelled` and does not undo
+side effects. Background processes a command leaves in its group are killed when
+it exits.
 
 TaskRun concurrency does not raise local worker capacity. Sacrum owns retries;
 the worker does not select transitions or start new attempts.
