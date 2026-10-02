@@ -227,6 +227,7 @@ impl SacrumTaskService {
             archived: response.archived,
             worktree: response.worktree.clone(),
             rejection_reason: response.rejection_reason.clone(),
+            project_id: (!response.project_id.is_empty()).then(|| response.project_id.clone()),
             parent_id: response.parent_id.clone(),
             dependency_ids,
             sections,
@@ -467,6 +468,11 @@ impl TaskService for SacrumTaskService {
             Some(&step_names),
             Some(&step_types),
         )
+    }
+
+    async fn get_task_without_lookups(&self, id: &str) -> ServiceResult<Task> {
+        let response = self.fetch_task_response(id).await?;
+        self.response_to_task_with_lookups(&response, None, None, None)
     }
 
     async fn get_task_summary(&self, id: &str) -> ServiceResult<Task> {

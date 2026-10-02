@@ -1463,6 +1463,10 @@ pub struct Task {
     /// Hierarchy level (epic, ticket, task)
     pub level: Level,
 
+    /// Owning project, when the backend reports it
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+
     /// Optional priority
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<Priority>,
@@ -1560,6 +1564,7 @@ impl Task {
             title: title.into(),
             description: None,
             level,
+            project_id: None,
             priority: None,
             tags: Vec::new(),
             workflow_id: None,

@@ -92,6 +92,7 @@ impl TaskService for MockTaskService {
             archived: false,
             worktree: options.worktree.clone(),
             rejection_reason: None,
+            project_id: None,
             workflow_id: options.workflow_id.clone(),
             current_step_id: None,
             workflow_name: None,

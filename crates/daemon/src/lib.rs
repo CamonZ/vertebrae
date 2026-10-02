@@ -7,6 +7,7 @@ pub mod helpers;
 pub mod output_validator;
 pub mod phoenix;
 pub mod provider;
+mod script_host;
 pub mod script_worker;
 pub mod session_log_event_sink;
 pub mod settings_synthesis;

@@ -132,12 +132,13 @@ impl HostErrorKind {
     }
 }
 
-/// A failed host call. Raised into Rhai as `#{ kind, message }` so scripts
-/// can `try`/`catch` and branch on `err.kind`.
+/// A failed host call. Raised into Rhai as `#{ kind, message, function }`
+/// so scripts can `try`/`catch` and branch on `err.kind`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostError {
     pub kind: HostErrorKind,
     pub message: String,
+    pub function: Option<String>,
 }
 
 impl HostError {
@@ -145,7 +146,18 @@ impl HostError {
         Self {
             kind,
             message: message.into(),
+            function: None,
         }
+    }
+
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::new(HostErrorKind::Invalid, message)
+    }
+
+    /// Name the qualified host function that raised this error.
+    pub fn in_function(mut self, function: impl Into<String>) -> Self {
+        self.function = Some(function.into());
+        self
     }
 
     fn cancelled() -> Self {
@@ -179,12 +191,17 @@ impl From<HostError> for Box<EvalAltResult> {
         let mut value = rhai::Map::new();
         value.insert("kind".into(), error.kind.as_str().into());
         value.insert("message".into(), error.message.into());
+        if let Some(function) = error.function {
+            value.insert("function".into(), function.into());
+        }
         EvalAltResult::ErrorRuntime(value.into(), Position::NONE).into()
     }
 }
 
 /// Production host modules, registered on every attempt's engine.
-fn register_host_api(_engine: &mut Engine, _host: &HostContext) {}
+fn register_host_api(engine: &mut Engine, host: &HostContext) {
+    crate::script_host::register(engine, host);
+}
 
 pub struct ScriptAttempt {
     cancellation: Arc<AtomicBool>,
