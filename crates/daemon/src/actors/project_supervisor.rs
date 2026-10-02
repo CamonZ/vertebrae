@@ -24,7 +24,7 @@ use crate::actors::step_executor::{
 use crate::capabilities::{DaemonCapabilities, SharedDaemonCapabilities};
 use crate::output_validator::SchemaValidationError;
 use crate::phoenix::PhoenixMessage;
-use crate::script_worker::{ScriptCompletion, ScriptWorker, validate_limits};
+use crate::script_worker::{ScriptCompletion, ScriptScope, ScriptWorker, validate_context};
 
 const STEP_EXECUTOR_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -402,7 +402,7 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepCo
                 .clone()
                 .ok_or_else(|| "execute requires output_schema".to_string())?,
         };
-        validate_limits(&config)?;
+        validate_context(&config)?;
         config
             .validate_structure()
             .map_err(|error| error.to_string())?;
@@ -1027,6 +1027,10 @@ impl ProjectSupervisor {
             capabilities: state.capabilities.clone(),
             execution_service: state.services.executions_arc(),
             script_worker: Arc::clone(&state.script_worker),
+            script_scope: ScriptScope {
+                project_id: state.project_id.clone(),
+                services: Arc::clone(&state.services),
+            },
             script_completion,
         };
 
@@ -1314,7 +1318,7 @@ mod tests {
             panic!("invalid execute schema must not select an inference provider");
         };
         let result = ScriptWorker::default()
-            .admit(config, |_| {})
+            .admit(config, crate::script_worker::test_support::scope(), |_| {})
             .unwrap()
             .settle()
             .await;
@@ -1448,12 +1452,22 @@ mod tests {
 
     #[tokio::test]
     async fn execute_cancel_and_project_shutdown_settle_before_one_terminal_persistence() {
-        for shutdown in [false, true] {
+        // A busy script and a hung host call must both stop on cancellation;
+        // the actor stays responsive to CancelStep while either runs.
+        for (shutdown, script) in [
+            (false, "loop {}"),
+            (true, "loop {}"),
+            (false, "test::hang()"),
+            (true, "test::hang()"),
+        ] {
             let server = execution_server().await;
-            let worker = Arc::new(ScriptWorker::without_operation_limit_for_test());
+            let worker = Arc::new(ScriptWorker::with_host_api(
+                Default::default(),
+                crate::script_worker::test_support::hanging_host_api(),
+            ));
             let (project, handle) = test_execute_project(&server, Arc::clone(&worker)).await;
             let mut payload = execute_payload();
-            payload["script"] = serde_json::json!("loop {}");
+            payload["script"] = serde_json::json!(script);
             project
                 .cast(ProjectMessage::ChannelEvent(msg(
                     "daemon:test",
@@ -1488,7 +1502,7 @@ mod tests {
             assert_eq!(
                 requests.len(),
                 2,
-                "one terminal report on shutdown={shutdown}"
+                "one terminal report on shutdown={shutdown} for {script}"
             );
             assert_eq!(requests[1]["status"], "failed");
             assert!(
@@ -1507,6 +1521,7 @@ mod tests {
                         context: Some(execute_payload()["context"].clone()),
                         output_schema: serde_json::json!({}),
                     },
+                    crate::script_worker::test_support::scope(),
                     |_| {},
                 )
                 .unwrap()

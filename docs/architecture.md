@@ -323,34 +323,43 @@ DaemonSupervisor
   Service installation only writes the service definition; it never rewrites
   standalone enrollment state.
 
-Execute admission is daemon-wide: one active evaluation and four pending
-attempts. Overflow fails the attempt explicitly; Sacrum owns retries. Each
-attempt creates a fresh Rhai Engine/Scope inside `spawn_blocking`, with no module
-loading or host filesystem/process functions. Default budgets are 256 KiB of
-script, 1 MiB each of JSON context/schema/result, 100,000 operations, and a
-cooperative two-second deadline starting at admission, including queue time and
-schema compilation. Schema structure is checked at dispatch; its validator is
-compiled once inside the admitted blocking worker and reused for output validation.
-Strings, arrays, maps,
-expression depth, and call depth also have finite limits; their source of truth
-is `crates/daemon/src/script_worker.rs`. The six server namespaces (`task`,
+Execute admission is daemon-wide and shared by every project: by default one
+active evaluation and four pending attempts, set by `[daemon]`
+`script_active_slots` and `script_pending_slots` in `config.toml`. Overflow fails
+the attempt explicitly; Sacrum owns retries. Each attempt creates a fresh Rhai
+Engine/Scope inside `spawn_blocking`, with no file module loading or dynamic
+eval. Nothing bounds a script: there is no deadline, operation limit, or script,
+context, result, string, or collection size cap. Rhai's default expression and
+call depth guards stay, because a stack overflow aborts the whole daemon.
+Cancellation is the only way to stop a long or stuck script. Schema structure is
+checked at dispatch; its validator is compiled once inside the admitted blocking
+worker and reused for output validation. The six server namespaces (`task`,
 `execution`, `inputs`, `steps`, `workflow`, `artifacts`) are bound directly as
 Rhai variables through typed JSON conversion. Context integers must fit the signed
 64-bit Rhai integer range; larger integers fail with their JSON pointer rather
 than being rounded to floating point. JSON floating-point values retain their
 floating-point representation. Context is required on dispatch,
 never authored or rendered again, and kept separate from mutable execution audit
-metadata. All namespace maps and the aggregate context budget are checked before
-queueing; no input-only fallback or silent truncation is performed.
+metadata. All namespace maps are checked before queueing; no input-only
+fallback or silent truncation is performed.
+
+Host functions are registered per attempt and run on the script's blocking
+worker thread. Each one makes a direct, unstaged service call through
+`HostContext::call`, which blocks that thread on the async request using the
+runtime handle and races it against the attempt's cancellation. The daemon fills
+in the execution's project ID on every call; scripts never pass one. Failures
+raise a catchable Rhai error `#{ kind, message }` with `kind` one of `not_found`,
+`invalid`, `cancelled`, or `transport`. Services are never called synchronously
+from actor handlers or async workers.
 
 Cancellation signals queued/running work and joins its settlement before the
 terminal report. Schema compilation and validation are not interrupted by Rhai
-callbacks; cancellation and the deadline are checked around those phases, and
-capacity remains owned until the blocking worker settles. A running evaluation
+callbacks; cancellation is checked around those phases, and capacity remains
+owned until the blocking worker and any in-flight host call settle. A running evaluation
 retains capacity until it exits, including
 panic unwinding. The workspace release profile uses `panic="unwind"` so a worker
 panic can fail one attempt and recover its slot; `panic="abort"` would terminate
-the whole daemon. These cooperative bounds do not provide process isolation.
+the whole daemon. Cooperative cancellation does not provide process isolation.
 
 Standalone daemons publish a bounded, sanitized v1 report after the enrolled
 `daemon:<id>` channel join and restart a single 30-second application heartbeat

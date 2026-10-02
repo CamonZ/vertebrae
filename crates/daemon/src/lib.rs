@@ -22,7 +22,8 @@ pub use actors::{StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessa
 pub use capabilities::{DaemonCapabilities, HarnessCapability, SharedDaemonCapabilities};
 pub use config::{
     ConfigError, DaemonEnrollmentStorage, DaemonIdentity, ProjectEntry, ResolvedConfig,
-    daemon_config_path, load_daemon_identity, retire_daemon_identity, save_daemon_identity,
+    ScriptSlots, daemon_config_path, load_daemon_identity, retire_daemon_identity,
+    save_daemon_identity,
 };
 pub use enrollment::{DaemonEnrollmentClient, EnrollmentError, EnrollmentResult};
 pub use provider::{

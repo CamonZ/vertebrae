@@ -31,7 +31,7 @@ use vertebrae_harness_core::{
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
 use crate::capabilities::SharedDaemonCapabilities;
 use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
-use crate::script_worker::{ScriptAttempt, ScriptCompletion, ScriptWorker};
+use crate::script_worker::{ScriptAttempt, ScriptCompletion, ScriptScope, ScriptWorker};
 use crate::session_log_event_sink::SessionLogEventSink;
 use crate::settings_synthesis::SyntheticSettings;
 
@@ -165,6 +165,8 @@ pub struct StepExecutorConfig {
     pub capabilities: SharedDaemonCapabilities,
     pub execution_service: Arc<dyn ExecutionService>,
     pub script_worker: Arc<ScriptWorker>,
+    /// Project and services every Rhai host call is scoped to.
+    pub script_scope: ScriptScope,
     pub script_completion: Option<Arc<ScriptCompletion>>,
 }
 
@@ -641,12 +643,13 @@ impl StepExecutor {
         }
         if let ExecutionKind::Execute(config) = &state.config.step_config.execution_kind {
             let actor_ref = myself.clone();
-            match state
-                .config
-                .script_worker
-                .admit(config.clone(), move |result| {
+            match state.config.script_worker.admit(
+                config.clone(),
+                state.config.script_scope.clone(),
+                move |result| {
                     let _ = actor_ref.cast(StepExecutorMessage::ScriptSettled(result));
-                }) {
+                },
+            ) {
                 Ok(attempt) => state.script_attempt = Some(attempt),
                 Err(error) => {
                     self.report_script_result(StepResult::failed(None, error), &myself, state)

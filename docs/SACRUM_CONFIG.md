@@ -54,6 +54,15 @@ default_model = "moonshotai/kimi-k2"
   Default: `https://api.typesafe.ai/v1/systemone`. URLs with credentials,
   query strings, or fragments are rejected.
 
+`[daemon]`
+
+- **script_active_slots** (optional, default `1`, at least `1`): Rhai execute
+  evaluations that run at once. One worker serves every project on the daemon.
+- **script_pending_slots** (optional, default `4`): evaluations that may wait for
+  an active slot; further attempts fail with a capacity error.
+
+The daemon reads these at startup; restart it after changing them.
+
 `[projects.<slug>]`
 
 - **id** (required unless using `VTB_PROJECT_ID`): The project ID in Sacrum

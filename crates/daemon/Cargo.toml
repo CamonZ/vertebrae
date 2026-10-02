@@ -20,7 +20,7 @@ futures = "0.3"
 jsonschema = { version = "0.30", default-features = false }
 reqwest = { version = "0.13", features = ["json", "stream"] }
 ractor = "0.15"
-rhai = { version = "1.26", features = ["serde", "no_module", "no_time", "no_custom_syntax"] }
+rhai = { version = "1.26", features = ["serde", "no_time", "no_custom_syntax"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"

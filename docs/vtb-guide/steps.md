@@ -419,9 +419,9 @@ on a TaskRun's step execution.
 Sacrum snapshots the complete canonical context and renders the script before
 dispatch. The daemon binds `task`, `execution`, `inputs`, `steps`, `workflow`,
 and `artifacts` as typed Rhai variables in a fresh scope. It returns
-schema-validated JSON for later steps in the same TaskRun. Rhai runs in a bounded
-blocking worker with cancellation, operation/data/deadline limits, and no host
-filesystem/process functions. Sacrum retains workflow progression and retries.
+schema-validated JSON for later steps in the same TaskRun. Rhai runs in a
+daemon-wide blocking worker with cancellation and no deadline, operation, or
+size limits. Sacrum retains workflow progression and retries.
 
 See [execute agent guidance](../agent-context/workflows/steps/execute/index.md) for the
 CLI/GraphQL authoring, context/output example, limits, and diagnostics, and
