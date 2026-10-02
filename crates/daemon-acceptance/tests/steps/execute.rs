@@ -237,7 +237,7 @@ async fn failing_workflow(world: &mut DaemonWorld, script: String) {
     }
 }
 
-async fn executions(world: &DaemonWorld) -> Vec<Value> {
+pub(crate) async fn executions(world: &DaemonWorld) -> Vec<Value> {
     let query = vertebrae_sacrum_client::client::with_fragments(
         vertebrae_sacrum_client::queries::executions::LIST_EXECUTIONS,
         &[vertebrae_sacrum_client::queries::executions::EXECUTION_FIELDS],

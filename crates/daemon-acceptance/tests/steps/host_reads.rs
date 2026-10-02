@@ -20,7 +20,7 @@ const PLAN_BODY: &str = "  # Plan\n\n\tstep one  \n✓ done\r\n";
 const DATA_BODY: &str = r#"{"max": 9223372036854775807, "min": -9223372036854775808,
   "exact": 9007199254740993, "none": null, "nested": [{"ok": true, "ratio": 0.5}, []]}"#;
 
-fn id(world: &DaemonWorld, role: &str) -> String {
+pub(crate) fn id(world: &DaemonWorld, role: &str) -> String {
     world
         .fixture_ids
         .get(role)
@@ -82,7 +82,7 @@ pub(crate) async fn add_task(
     task_id
 }
 
-async fn add_artifact(
+pub(crate) async fn add_artifact(
     world: &mut DaemonWorld,
     project: &str,
     subject: (&str, &str),
