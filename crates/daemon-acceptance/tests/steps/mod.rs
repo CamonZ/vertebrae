@@ -4,6 +4,7 @@ pub mod codex_mocks;
 pub mod execute;
 pub mod hierarchy;
 pub mod host_commands;
+pub mod host_edits;
 pub mod host_reads;
 pub mod host_rollup;
 pub mod host_writes;
