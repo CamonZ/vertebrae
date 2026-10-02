@@ -646,6 +646,21 @@ done
             .unwrap();
         assert_eq!(outcome.status, CompletionStatus::Completed);
         assert_balanced_turn(&sink.0.lock().unwrap(), turn_id, &outcome);
+        if turn_id == "turn-1" {
+            // The continuation follows turn-1's result on stdout; the next
+            // turn may only start once the decoder has closed it.
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while !sink.0.lock().unwrap().iter().any(|event| {
+                    event.correlation.turn_id.as_ref().map(TurnId::as_str)
+                        == Some("claude-task-notification-4")
+                        && matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_))
+                }) {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("background continuation finishes before the next turn");
+        }
     }
 
     assert_eq!(
