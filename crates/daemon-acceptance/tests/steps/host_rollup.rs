@@ -3,14 +3,14 @@
 //! shown: an execute step on a parent reads each direct child's `outcome`
 //! artifact, and output persistence stores the summary on the parent.
 
-use std::time::{Duration, Instant};
-
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
 use serde_json::{Value, json};
 
 use super::assertions::task_artifacts;
-use super::execute::{connect, create_step, create_workflow, executions};
+use super::execute::{
+    connect, create_step, create_workflow, executions, fenced_block, wait_for_step,
+};
 use super::host_reads::{add_artifact, add_task, id, vtb_ok};
 use crate::DaemonWorld;
 
@@ -19,19 +19,10 @@ const DOC: &str =
 const SUMMARY: &str = "children-summary";
 const FIRST_RUN: &str = "summarize";
 const SECOND_RUN: &str = "summarize-again";
-const SECOND_RUN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The body of the doc's first fenced block in `language`.
 fn fenced(language: &str) -> &'static str {
-    let open = format!("```{language}\n");
-    let start = DOC
-        .find(&open)
-        .unwrap_or_else(|| panic!("host-reads.md has no {language} block"))
-        + open.len();
-    let end = DOC[start..]
-        .find("```")
-        .unwrap_or_else(|| panic!("unterminated {language} block in host-reads.md"));
-    &DOC[start..start + end]
+    fenced_block(DOC, "host-reads.md", language)
 }
 
 fn title(role: &str) -> String {
@@ -169,28 +160,7 @@ async fn documented_step_twice(world: &mut DaemonWorld) {
 
 #[when("I wait for the second summary to complete")]
 async fn second_summary(world: &mut DaemonWorld) {
-    let deadline = Instant::now() + SECOND_RUN_TIMEOUT;
-    let execution_id = loop {
-        let rows = executions(world).await;
-        if let Some(id) = rows
-            .iter()
-            .find(|row| row["step_name"] == SECOND_RUN)
-            .and_then(|row| row["id"].as_str())
-        {
-            break id.to_owned();
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the second summary never started: {rows:?}"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    };
-    let execution = world
-        .poll_execution(&execution_id, &["completed"], SECOND_RUN_TIMEOUT)
-        .await
-        .expect("the second summary completes");
-    world.execution_id = Some(execution_id);
-    world.last_execution = Some(execution);
+    wait_for_step(world, SECOND_RUN).await;
 }
 
 #[then("both summary runs returned the same summary")]

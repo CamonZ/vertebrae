@@ -15,7 +15,7 @@ use super::execute::{connect, create_execute_step, create_step, create_workflow}
 use crate::DaemonWorld;
 
 /// The marker in every other-project fixture; no script output may contain it.
-const SECRET: &str = "Foreign secret";
+pub(crate) const SECRET: &str = "Foreign secret";
 const PLAN_BODY: &str = "  # Plan\n\n\tstep one  \n✓ done\r\n";
 const DATA_BODY: &str = r#"{"max": 9223372036854775807, "min": -9223372036854775808,
   "exact": 9007199254740993, "none": null, "nested": [{"ok": true, "ratio": 0.5}, []]}"#;
@@ -30,7 +30,7 @@ pub(crate) fn id(world: &DaemonWorld, role: &str) -> String {
 
 /// Replace each `$ROLE` with its quoted ID. Longer roles go first so that
 /// `$FOREIGN` never consumes the start of `$FOREIGN_PLAN`.
-fn substitute(world: &DaemonWorld, text: &str) -> String {
+pub(crate) fn substitute(world: &DaemonWorld, text: &str) -> String {
     let mut roles: Vec<_> = world.fixture_ids.iter().collect();
     roles.sort_by_key(|(role, _)| std::cmp::Reverse(role.len()));
     let text = roles.into_iter().fold(text.to_owned(), |text, (role, id)| {
@@ -48,7 +48,7 @@ pub(crate) fn docstring(step: &Step) -> &str {
 }
 
 /// Run `vtb` against `project` instead of the scenario's project.
-async fn run_vtb_in(world: &mut DaemonWorld, project: &str, args: &[&str]) {
+pub(crate) async fn run_vtb_in(world: &mut DaemonWorld, project: &str, args: &[&str]) {
     let own = world
         .env
         .insert("VTB_PROJECT_ID".into(), project.to_owned())

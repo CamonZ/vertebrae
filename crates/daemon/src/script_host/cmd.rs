@@ -22,7 +22,7 @@ use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
 use vertebrae_harness_core::{ReapMode, reap_process_tree, signal_process_group};
 
-use super::{set_host_fn3, string_argument};
+use super::{map_argument, set_host_fn3, string_argument};
 use crate::script_worker::{CancelSignal, HostContext, HostError, HostErrorKind};
 
 const NAMESPACE: &str = "vtb::cmd";
@@ -288,13 +288,6 @@ fn array_argument(value: Dynamic, what: &str) -> Result<rhai::Array, HostError> 
     value
         .try_cast::<rhai::Array>()
         .ok_or_else(|| HostError::invalid(format!("{what} must be an array, got {type_name}")))
-}
-
-fn map_argument(value: Dynamic, what: &str) -> Result<Map, HostError> {
-    let type_name = value.type_name();
-    value
-        .try_cast::<Map>()
-        .ok_or_else(|| HostError::invalid(format!("{what} must be a map, got {type_name}")))
 }
 
 fn env_argument(value: Dynamic) -> Result<BTreeMap<String, String>, HostError> {

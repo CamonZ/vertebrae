@@ -239,7 +239,9 @@ impl UpdateTaskOptions {
             || self.priority.is_some()
             || !self.add_tags.is_empty()
             || !self.remove_tags.is_empty()
+            || self.parent_id.is_some()
             || self.archived.is_some()
+            || self.level.is_some()
             || self.worktree.is_some()
     }
 }
@@ -657,6 +659,20 @@ mod tests {
     fn update_task_options_has_updates_empty() {
         let opts = UpdateTaskOptions::new();
         assert!(!opts.has_updates());
+    }
+
+    #[test]
+    fn update_task_options_has_updates_includes_level_and_parent() {
+        let level = UpdateTaskOptions {
+            level: Some("ticket".into()),
+            ..UpdateTaskOptions::default()
+        };
+        let parent = UpdateTaskOptions {
+            parent_id: Some(None),
+            ..UpdateTaskOptions::default()
+        };
+        assert!(level.has_updates());
+        assert!(parent.has_updates());
     }
 
     #[test]
