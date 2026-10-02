@@ -40,7 +40,7 @@ fn substitute(world: &DaemonWorld, text: &str) -> String {
     text
 }
 
-fn docstring(step: &Step) -> &str {
+pub(crate) fn docstring(step: &Step) -> &str {
     step.docstring
         .as_deref()
         .expect("step needs a docstring")
@@ -57,12 +57,17 @@ async fn run_vtb_in(world: &mut DaemonWorld, project: &str, args: &[&str]) {
     world.env.insert("VTB_PROJECT_ID".into(), own);
 }
 
-async fn vtb_ok(world: &mut DaemonWorld, context: &str, args: &[&str]) {
+pub(crate) async fn vtb_ok(world: &mut DaemonWorld, context: &str, args: &[&str]) {
     world.run_vtb(args).await;
     world.assert_vtb_ok(context);
 }
 
-async fn add_task(world: &mut DaemonWorld, project: &str, role: &str, args: &[&str]) -> String {
+pub(crate) async fn add_task(
+    world: &mut DaemonWorld,
+    project: &str,
+    role: &str,
+    args: &[&str],
+) -> String {
     run_vtb_in(world, project, &[&["add"], args].concat()).await;
     world.assert_vtb_ok(&format!("task add ({role})"));
     let task_id = world
@@ -304,6 +309,11 @@ async fn many_artifacts(world: &mut DaemonWorld, count: usize) {
 #[given("a Rhai step running:")]
 async fn rhai_step(world: &mut DaemonWorld, step: &Step) {
     let script = substitute(world, docstring(step));
+    install_rhai_step(world, &script).await;
+}
+
+/// Install `script` as `SELF`'s execute step; see [`rhai_step`].
+pub(crate) async fn install_rhai_step(world: &mut DaemonWorld, script: &str) {
     let script =
         format!("let host_read_result = {{\n{script}\n}};\n#{{ result: host_read_result }}");
     let workflow_id = create_workflow(world).await;

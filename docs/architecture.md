@@ -356,7 +356,16 @@ registers the production modules: `vtb::tasks` reads (`get`, `find`, `parent`,
 the execution's project and treat a mismatch as absent. `vtb::artifacts` reads
 (`list`, `lookup`, `read`, `read_json`) address a task or `"project"` subject by
 logical name through the project-scoped `artifactByLogicalName` and subject
-listings; raw by-ID artifact reads are not exposed.
+listings; raw by-ID artifact reads are not exposed. `vtb::cmd::run` spawns an
+argv command (no implicit shell) as the daemon user, unsandboxed, in its own
+process group, defaulting to the step's working directory (task worktree, else
+project root) carried on `ScriptScope`, with the login-shell `PATH` that
+provider subprocesses get unless the script's `env` overrides it. It runs through
+`HostContext::block_on_owned` instead of `call`: the future is never dropped on
+cancel; it terminates the group (SIGTERM, then SIGKILL after a grace period via
+`vertebrae_harness_core::reap_process_tree`) and reaps the leader before raising
+`cancelled`, so the slot stays held until then. When the leader exits normally,
+remaining group members are killed.
 
 Cancellation signals queued/running work and joins its settlement before the
 terminal report. Schema compilation and validation are not interrupted by Rhai
@@ -365,7 +374,8 @@ owned until the blocking worker and any in-flight host call settle. A running ev
 retains capacity until it exits, including
 panic unwinding. The workspace release profile uses `panic="unwind"` so a worker
 panic can fail one attempt and recover its slot; `panic="abort"` would terminate
-the whole daemon. Cooperative cancellation does not provide process isolation.
+the whole daemon. Cooperative cancellation does not provide process isolation;
+commands started by `vtb::cmd` are owned and reaped, but not sandboxed.
 
 Standalone daemons publish a bounded, sanitized v1 report after the enrolled
 `daemon:<id>` channel join and restart a single 30-second application heartbeat

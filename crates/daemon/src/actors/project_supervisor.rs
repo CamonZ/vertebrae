@@ -1018,6 +1018,9 @@ impl ProjectSupervisor {
                 .script_completions
                 .insert(execution_id.to_string(), Arc::clone(completion));
         }
+        let working_dir = worktree
+            .clone()
+            .unwrap_or_else(|| state.project_root.clone());
         let executor_config = StepExecutorConfig {
             execution_id: execution_id.to_string(),
             task_id: task_id.to_string(),
@@ -1030,6 +1033,8 @@ impl ProjectSupervisor {
             script_scope: ScriptScope {
                 project_id: state.project_id.clone(),
                 services: Arc::clone(&state.services),
+                working_dir,
+                search_path: state.capabilities.shell_path.clone(),
             },
             script_completion,
         };

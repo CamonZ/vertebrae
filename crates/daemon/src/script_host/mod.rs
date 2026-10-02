@@ -1,11 +1,13 @@
 //! Production `vtb::*` host modules for Rhai execute scripts.
 //!
-//! Every function runs on the script's blocking worker thread and reaches
-//! Sacrum through [`HostContext::call`], which supplies the execution's
-//! project and races the attempt's cancellation. Scripts never pass project
+//! Every function runs on the script's blocking worker thread. Service
+//! functions reach Sacrum through [`HostContext::call`], which supplies the
+//! execution's project and races the attempt's cancellation; `vtb::cmd` runs
+//! local processes through [`HostContext::block_on_owned`]. Scripts never pass project
 //! IDs; anything outside the execution's project behaves as absent.
 
 mod artifacts;
+mod cmd;
 mod tasks;
 #[cfg(test)]
 mod test_support;
@@ -18,6 +20,7 @@ use crate::script_worker::{HostContext, HostError, HostErrorKind};
 pub(crate) fn register(engine: &mut Engine, host: &HostContext) {
     engine.register_static_module("vtb::tasks", tasks::module(host).into());
     engine.register_static_module("vtb::artifacts", artifacts::module(host).into());
+    engine.register_static_module("vtb::cmd", cmd::module(host).into());
 }
 
 /// Register a one-argument host function whose errors carry its qualified
@@ -50,6 +53,25 @@ fn set_host_fn2(
     module.set_native_fn(name, move |first: Dynamic, second: Dynamic| {
         function(&host, first, second).map_err(|error| error.in_function(qualified.as_str()).into())
     });
+}
+
+/// Register a three-argument host function; see [`set_host_fn`].
+fn set_host_fn3(
+    module: &mut Module,
+    host: &HostContext,
+    namespace: &str,
+    name: &str,
+    function: fn(&HostContext, Dynamic, Dynamic, Dynamic) -> Result<Dynamic, HostError>,
+) {
+    let host = host.clone();
+    let qualified = format!("{namespace}::{name}");
+    module.set_native_fn(
+        name,
+        move |first: Dynamic, second: Dynamic, third: Dynamic| {
+            function(&host, first, second, third)
+                .map_err(|error| error.in_function(qualified.as_str()).into())
+        },
+    );
 }
 
 /// Make one host call for a read. Arguments are validated before any request,

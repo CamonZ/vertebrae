@@ -150,7 +150,7 @@ step keeps Sacrum's default and provider-backfill behavior.
 |------|----------|----------|
 | `llm_inference` (default) | `prompt`, `output_schema`, `agents`, `skills`, `agent_config` | Dispatches an agent through the selected harness. |
 | `structured_inference` | `provider`, `model`, `state`, `questions` | Sends Sacrum-resolved `state` and provider-shaped System One `questions` to a supporting harness; the answer map is returned unchanged and validated by Sacrum against a schema derived from the questions. |
-| `execute` | Authored `version=1`, `script`, `output_schema`; server-written execution `context` | Runs a Rhai JSON transformation, which may read tasks and named artifacts in its project through the `vtb::tasks` and `vtb::artifacts` host functions, with the full canonical context bound as `task`, `execution`, `inputs`, `steps`, `workflow`, and `artifacts`, validates the result, and completes through the existing execution status path. It has no provider harness. |
+| `execute` | Authored `version=1`, `script`, `output_schema`; server-written execution `context` | Runs a Rhai JSON transformation, which may read tasks and named artifacts in its project through the `vtb::tasks` and `vtb::artifacts` host functions and run local commands through `vtb::cmd`, with the full canonical context bound as `task`, `execution`, `inputs`, `steps`, `workflow`, and `artifacts`, validates the result, and completes through the existing execution status path. It has no provider harness. |
 | `route` | `route_config` | Sacrum evaluates the deterministic route locally; an empty config is a draft. |
 | `wait_children` | `output_schema` | Waits for child tasks and can validate their combined output. |
 | `human_input` | `null` | Pauses for external input; its detailed semantics remain unspecified. |
@@ -362,10 +362,12 @@ For an inference `run_step` event, `StepExecutor`:
 The daemon runs Claude in the project root directory (or a git worktree if `task.worktree` is set), with the user's shell `PATH` inherited, so all tools are accessible.
 
 An execute event selects the daemon-wide Rhai worker before any provider setup.
-One evaluation runs at a time with four pending attempts. Each attempt has a fresh
-Engine/Scope and operation, data, and deadline bounds; it exposes no host filesystem
-or process functions. Cancellation settles the worker before terminal persistence
-and capacity release. See [daemon architecture](architecture.md#daemon-cratesdaemon)
+By default one evaluation runs at a time with four pending attempts. Each attempt
+has a fresh Engine/Scope and no deadline, operation, or size bounds. Scripts can
+run local commands through `vtb::cmd::run` in the task worktree (else the project
+root), as the daemon user and unsandboxed. Cancellation kills and reaps any
+running command, then settles the worker before terminal persistence and
+capacity release. See [daemon architecture](architecture.md#daemon-cratesdaemon)
 for limits and ownership.
 
 ---
