@@ -126,6 +126,13 @@ provider mock scenarios use `llm_inference`; they do not prove Rhai execution.
 embed that doc and take the first `rhai` and `json` blocks as the script and
 output schema, so editing the sample changes what the scenarios run.
 
+`execute_task_writes.feature` covers `vtb::tasks::create`, `update`, `archive`
+and `unarchive`, including other-project targets and refused patch keys.
+`execute_plan_children.feature` runs the plan-children sample from
+`docs/agent-context/workflows/steps/execute/host-writes.md` the same way: the
+first `json` block is the plan, the first `rhai` block the script, and the
+`--output-schema` value the schema.
+
 **Mock prompt-as-JSON envelope.** The step's `prompt` is parsed by the mock as a
 JSON envelope with this schema:
 

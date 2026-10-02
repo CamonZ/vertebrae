@@ -8,11 +8,12 @@
 
 mod artifacts;
 mod cmd;
+mod task_writes;
 mod tasks;
 #[cfg(test)]
 mod test_support;
 
-use rhai::{Dynamic, Engine, Module};
+use rhai::{Dynamic, Engine, Map, Module};
 use vertebrae_core::{ServiceResult, VertebraeServices};
 
 use crate::script_worker::{HostContext, HostError, HostErrorKind};
@@ -113,6 +114,13 @@ fn string_argument(value: Dynamic, what: &str) -> Result<String, HostError> {
         .into_immutable_string()
         .map(|text| text.to_string())
         .map_err(|_| HostError::invalid(format!("{what} must be a string, got {type_name}")))
+}
+
+fn map_argument(value: Dynamic, what: &str) -> Result<Map, HostError> {
+    let type_name = value.type_name();
+    value
+        .try_cast::<Map>()
+        .ok_or_else(|| HostError::invalid(format!("{what} must be a map, got {type_name}")))
 }
 
 fn bool_argument(value: Dynamic, what: &str) -> Result<bool, HostError> {

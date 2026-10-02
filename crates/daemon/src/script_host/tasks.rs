@@ -1,5 +1,5 @@
 //! `vtb::tasks` reads: `get`, `find`, `parent`, `children`, `dependencies`
-//! and `dependents`.
+//! and `dependents`. Writes live in [`super::task_writes`].
 //!
 //! A task is visible only when Sacrum reports it in the execution's project;
 //! any other task, including one missing a project, reads as absent. Missing
@@ -25,6 +25,7 @@ pub(super) fn module(host: &HostContext) -> Module {
     set_host_fn(&mut module, host, NAMESPACE, "children", children);
     set_host_fn(&mut module, host, NAMESPACE, "dependencies", dependencies);
     set_host_fn(&mut module, host, NAMESPACE, "dependents", dependents);
+    super::task_writes::register(&mut module, host);
     module
 }
 
@@ -188,7 +189,7 @@ impl FindQuery {
     }
 }
 
-fn level(value: &str) -> Result<Level, HostError> {
+pub(super) fn level(value: &str) -> Result<Level, HostError> {
     match value {
         "epic" => Ok(Level::Epic),
         "ticket" => Ok(Level::Ticket),
@@ -199,7 +200,7 @@ fn level(value: &str) -> Result<Level, HostError> {
     }
 }
 
-fn priority(value: &str) -> Result<Priority, HostError> {
+pub(super) fn priority(value: &str) -> Result<Priority, HostError> {
     match value {
         "low" => Ok(Priority::Low),
         "medium" => Ok(Priority::Medium),
@@ -211,14 +212,14 @@ fn priority(value: &str) -> Result<Priority, HostError> {
     }
 }
 
-fn nonblank(value: String, what: &str) -> Result<String, HostError> {
+pub(super) fn nonblank(value: String, what: &str) -> Result<String, HostError> {
     if value.trim().is_empty() {
         return Err(HostError::invalid(format!("{what} must not be blank")));
     }
     Ok(value)
 }
 
-fn string_array(value: Dynamic, what: &str) -> Result<Vec<String>, HostError> {
+pub(super) fn string_array(value: Dynamic, what: &str) -> Result<Vec<String>, HostError> {
     let type_name = value.type_name();
     value
         .try_cast::<Array>()
@@ -230,7 +231,7 @@ fn string_array(value: Dynamic, what: &str) -> Result<Vec<String>, HostError> {
 
 /// The script-facing `Task` map. Every documented key is present; project
 /// IDs, run controls and nested relationships are deliberately left out.
-fn task_value(task: &Task) -> Dynamic {
+pub(super) fn task_value(task: &Task) -> Dynamic {
     let mut map = Map::new();
     map.insert("id".into(), task.id.clone().into());
     map.insert("title".into(), task.title.clone().into());

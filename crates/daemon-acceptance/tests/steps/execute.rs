@@ -397,3 +397,42 @@ async fn assert_failure(world: &mut DaemonWorld) {
         "execute launched a provider mock"
     );
 }
+
+/// The body of `doc`'s first fenced block in `language`; `name` labels panics.
+pub(crate) fn fenced_block(doc: &'static str, name: &str, language: &str) -> &'static str {
+    let open = format!("```{language}\n");
+    let start = doc
+        .find(&open)
+        .unwrap_or_else(|| panic!("{name} has no {language} block"))
+        + open.len();
+    let end = doc[start..]
+        .find("```")
+        .unwrap_or_else(|| panic!("unterminated {language} block in {name}"));
+    &doc[start..start + end]
+}
+
+const STEP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Wait until the execution of the step named `name` completes, and make it
+/// the scenario's last execution.
+pub(crate) async fn wait_for_step(world: &mut DaemonWorld, name: &str) {
+    let deadline = Instant::now() + STEP_TIMEOUT;
+    let execution_id = loop {
+        let rows = executions(world).await;
+        if let Some(id) = rows
+            .iter()
+            .find(|row| row["step_name"] == name)
+            .and_then(|row| row["id"].as_str())
+        {
+            break id.to_owned();
+        }
+        assert!(Instant::now() < deadline, "{name} never started: {rows:?}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let execution = world
+        .poll_execution(&execution_id, &["completed"], STEP_TIMEOUT)
+        .await
+        .unwrap_or_else(|error| panic!("{name} never completed: {error}"));
+    world.execution_id = Some(execution_id);
+    world.last_execution = Some(execution);
+}

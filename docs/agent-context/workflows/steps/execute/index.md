@@ -9,5 +9,7 @@ and persists its validated JSON result. Execute has no provider harness.
   Load when: script templates, canonical namespaces, prior output, JSON types, output validation, persistence, or failures.
 - [Reading tasks and artifacts](host-reads.md): `vtb::tasks` and `vtb::artifacts` reads, and a child-outcome rollup example.
   Load when: a script reads tasks, children or artifacts, rolls up child results, or uses `read_json`.
+- [Creating and updating tasks](host-writes.md): `vtb::tasks::create`, `update`, `archive` and `unarchive`, and a create-children-from-a-plan example.
+  Load when: a script creates child tasks, patches task fields or tags, archives tasks, or must not duplicate tasks on rerun.
 - [Limits and cancellation](limits.md): daemon-wide capacity settings, unbounded evaluation, cancellation, host-call errors, and command execution (`vtb::cmd`) permissions.
   Load when: script limits, overflow, cancellation, isolation, running commands from a script, or provider requirements.
