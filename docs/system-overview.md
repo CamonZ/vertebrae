@@ -150,7 +150,7 @@ step keeps Sacrum's default and provider-backfill behavior.
 |------|----------|----------|
 | `llm_inference` (default) | `prompt`, `output_schema`, `agents`, `skills`, `agent_config` | Dispatches an agent through the selected harness. |
 | `structured_inference` | `provider`, `model`, `state`, `questions` | Sends Sacrum-resolved `state` and provider-shaped System One `questions` to a supporting harness; the answer map is returned unchanged and validated by Sacrum against a schema derived from the questions. |
-| `execute` | Authored `version=1`, `script`, `output_schema`; server-written execution `context` | Runs a Rhai JSON transformation, which may read tasks in its project through `vtb::tasks` host functions, with the full canonical context bound as `task`, `execution`, `inputs`, `steps`, `workflow`, and `artifacts`, validates the result, and completes through the existing execution status path. It has no provider harness. |
+| `execute` | Authored `version=1`, `script`, `output_schema`; server-written execution `context` | Runs a Rhai JSON transformation, which may read tasks and named artifacts in its project through the `vtb::tasks` and `vtb::artifacts` host functions, with the full canonical context bound as `task`, `execution`, `inputs`, `steps`, `workflow`, and `artifacts`, validates the result, and completes through the existing execution status path. It has no provider harness. |
 | `route` | `route_config` | Sacrum evaluates the deterministic route locally; an empty config is a draft. |
 | `wait_children` | `output_schema` | Waits for child tasks and can validate their combined output. |
 | `human_input` | `null` | Pauses for external input; its detailed semantics remain unspecified. |
