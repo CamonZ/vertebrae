@@ -353,7 +353,10 @@ raise a catchable Rhai error `#{ kind, message, function }` with `kind` one of
 synchronously from actor handlers or async workers. `crates/daemon/src/script_host/`
 registers the production modules: `vtb::tasks` reads (`get`, `find`, `parent`,
 `children`, `dependencies`, `dependents`) compare each task's `project_id` with
-the execution's project and treat a mismatch as absent.
+the execution's project and treat a mismatch as absent. `vtb::artifacts` reads
+(`list`, `lookup`, `read`, `read_json`) address a task or `"project"` subject by
+logical name through the project-scoped `artifactByLogicalName` and subject
+listings; raw by-ID artifact reads are not exposed.
 
 Cancellation signals queued/running work and joins its settlement before the
 terminal report. Schema compilation and validation are not interrupted by Rhai

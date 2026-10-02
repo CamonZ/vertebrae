@@ -494,7 +494,7 @@ fn evaluate_with(
 /// Convert the context without serde's unsigned-to-float
 /// fallback. Rhai integers are signed 64-bit; reject larger JSON integers
 /// with their JSON pointer rather than persisting a rounded successful result.
-fn json_to_rhai(value: &serde_json::Value, path: &str) -> Result<Dynamic, String> {
+pub(crate) fn json_to_rhai(value: &serde_json::Value, path: &str) -> Result<Dynamic, String> {
     use serde_json::Value;
 
     Ok(match value {

@@ -43,6 +43,9 @@ pub struct DaemonWorld {
     pub child_task_ids: Vec<String>,
     pub grandchild_task_ids: Vec<String>,
 
+    // Rhai host-read scenario fixtures, by role.
+    pub fixture_ids: HashMap<String, String>,
+
     pub last_stdout: String,
     pub last_stderr: String,
     pub last_exit_code: i32,
@@ -112,6 +115,7 @@ impl DaemonWorld {
             intermediate_task_id: None,
             child_task_ids: Vec::new(),
             grandchild_task_ids: Vec::new(),
+            fixture_ids: HashMap::new(),
             last_stdout: String::new(),
             last_stderr: String::new(),
             last_exit_code: 0,

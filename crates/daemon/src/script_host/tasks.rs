@@ -10,8 +10,10 @@ use rhai::{Array, Dynamic, Map, Module};
 use vertebrae_core::models::{CodeRef, Level, Priority, Section, Task, TaskFilter};
 use vertebrae_core::{ServiceError, ServiceResult, VertebraeServices};
 
-use super::{bool_argument, optional_string, set_host_fn, string_argument, uuid_argument};
-use crate::script_worker::{HostContext, HostError, HostErrorKind};
+use super::{
+    bool_argument, optional_string, read, set_host_fn, string_argument, timestamp, uuid_argument,
+};
+use crate::script_worker::{HostContext, HostError};
 
 const NAMESPACE: &str = "vtb::tasks";
 
@@ -102,27 +104,8 @@ fn find(host: &HostContext, filter: Dynamic) -> Result<Dynamic, HostError> {
     Ok(found.map_or(Dynamic::UNIT, |tasks| task_list(tasks).into()))
 }
 
-/// Make one host call for a read. Arguments are validated before any request,
-/// so whatever the service reports here is a backend failure rather than a
-/// script mistake: everything but cancellation surfaces as `transport`.
-fn read<'a, T, F>(
-    host: &'a HostContext,
-    request: impl FnOnce(&'a VertebraeServices, &'a str) -> F,
-) -> Result<T, HostError>
-where
-    F: std::future::Future<Output = ServiceResult<T>>,
-{
-    host.call(request).map_err(|error| match error.kind {
-        HostErrorKind::Cancelled => error,
-        _ => HostError {
-            kind: HostErrorKind::Transport,
-            ..error
-        },
-    })
-}
-
 /// Read a task, treating an absent task or one from another project as `None`.
-async fn scoped_task(
+pub(super) async fn scoped_task(
     services: &VertebraeServices,
     project: &str,
     id: &str,
@@ -167,9 +150,6 @@ impl FindQuery {
                 "priority" => filter
                     .priorities
                     .push(priority(&string_argument(value, &what)?)?),
-                "step_name" => filter
-                    .step_names
-                    .push(nonblank(string_argument(value, &what)?, &what)?),
                 "tags" => filter.tags = string_array(value, &what)?,
                 "parent_id" => filter.children_of = Some(uuid_argument(value, &what)?),
                 "root_only" => filter.root_only = bool_argument(value, &what)?,
@@ -177,8 +157,8 @@ impl FindQuery {
                 "search" => filter.search = Some(nonblank(string_argument(value, &what)?, &what)?),
                 _ => {
                     return Err(HostError::invalid(format!(
-                        "Unknown filter key '{key}'; accepted keys are level, priority, \
-                         step_name, tags, parent_id, root_only, include_archived and search"
+                        "Unknown filter key '{key}'; accepted keys are level, priority, tags, \
+                         parent_id, root_only, include_archived and search"
                     )));
                 }
             }
@@ -342,23 +322,14 @@ fn optional_int(value: Option<u32>) -> Dynamic {
     value.map_or(Dynamic::UNIT, |value| Dynamic::from(rhai::INT::from(value)))
 }
 
-fn timestamp(value: Option<chrono::DateTime<chrono::Utc>>) -> Dynamic {
-    value.map_or(Dynamic::UNIT, |at| at.to_rfc3339().into())
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use serde_json::{Value, json};
-    use vertebrae_core::models::ExecuteConfig;
-    use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate, matchers};
+    use wiremock::{MockServer, Request, Respond, ResponseTemplate};
 
+    use super::super::test_support::{self, OTHER_PROJECT, PROJECT, sacrum_requests};
     use crate::actors::step_executor::StepResult;
-    use crate::script_worker::{ScriptScope, ScriptWorker};
 
-    const PROJECT: &str = "11111111-1111-4111-8111-111111111111";
-    const OTHER_PROJECT: &str = "22222222-2222-4222-8222-222222222222";
     const SELF: &str = "a0000000-0000-4000-8000-000000000001";
     const PARENT: &str = "a0000000-0000-4000-8000-000000000002";
     const CHILD_LATE: &str = "a0000000-0000-4000-8000-000000000003";
@@ -488,78 +459,27 @@ mod tests {
     }
 
     async fn sacrum(listed: Vec<&'static str>) -> MockServer {
-        let server = MockServer::start().await;
-        Mock::given(matchers::method("POST"))
-            .and(matchers::path("/graphql"))
-            .respond_with(Sacrum { listed })
-            .mount(&server)
-            .await;
-        server
+        test_support::sacrum(Sacrum { listed }).await
     }
 
+    const IDS: [(&str, &str); 9] = [
+        ("SELF", SELF),
+        ("PARENT", PARENT),
+        ("UNRELATED", UNRELATED),
+        ("FOREIGN", FOREIGN),
+        ("MISSING", MISSING),
+        ("FAILING", FAILING),
+        ("NO_PROJECT", NO_PROJECT),
+        ("UNAUTHORIZED", UNAUTHORIZED),
+        ("MALFORMED", MALFORMED),
+    ];
+
     async fn run(server: &MockServer, script: &str) -> StepResult {
-        use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
-        let scope = ScriptScope {
-            project_id: PROJECT.into(),
-            services: Arc::new(vertebrae_sacrum_client::from_sacrum(Arc::new(
-                GraphqlClient::new(SacrumConfig::new(
-                    server.uri(),
-                    "token".into(),
-                    PROJECT.into(),
-                )),
-            ))),
-        };
-        let script = [
-            ("SELF", SELF),
-            ("PARENT", PARENT),
-            ("UNRELATED", UNRELATED),
-            ("FOREIGN", FOREIGN),
-            ("MISSING", MISSING),
-            ("FAILING", FAILING),
-            ("NO_PROJECT", NO_PROJECT),
-            ("UNAUTHORIZED", UNAUTHORIZED),
-            ("MALFORMED", MALFORMED),
-        ]
-        .iter()
-        .fold(script.to_string(), |script, (name, id)| {
-            script.replace(&format!("${name}"), &format!("\"{id}\""))
-        });
-        let config = ExecuteConfig {
-            version: 1,
-            script,
-            context: Some(json!({
-                "task": {"id": SELF}, "execution": {}, "inputs": {},
-                "steps": {}, "workflow": {}, "artifacts": {}
-            })),
-            output_schema: json!({}),
-        };
-        ScriptWorker::default()
-            .admit(config, scope, |_| {})
-            .unwrap()
-            .settle()
-            .await
+        test_support::run(server, SELF, &IDS, script).await
     }
 
     async fn output(server: &MockServer, script: &str) -> Value {
-        match run(server, script).await {
-            StepResult::Completed {
-                output: Some(output),
-                ..
-            } => serde_json::from_str(&output).unwrap(),
-            other => panic!("expected completion for {script}, got {other:?}"),
-        }
-    }
-
-    async fn sacrum_requests(server: &MockServer, operation: &str) -> Vec<Value> {
-        server
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .map(|request| serde_json::from_slice::<Value>(&request.body).unwrap())
-            .filter(|body| body["query"].as_str().unwrap().contains(operation))
-            .map(|body| body["variables"].clone())
-            .collect()
+        test_support::completed(run(server, script).await, script)
     }
 
     #[tokio::test]
@@ -671,7 +591,7 @@ mod tests {
             &server,
             r#"
             vtb::tasks::find(#{
-                level: "task", priority: "high", step_name: "todo", tags: ["key:a", "b"],
+                level: "task", priority: "high", tags: ["key:a", "b"],
                 parent_id: task.id, include_archived: true, search: "child"
             }).map(|t| [t.id, t.sections.len()])
             "#,
@@ -692,7 +612,7 @@ mod tests {
             listings[0],
             json!({
                 "project_id": PROJECT, "level": "task", "priority": "high",
-                "status": "todo", "tags": ["key:a", "b"], "parent_id": SELF,
+                "tags": ["key:a", "b"], "parent_id": SELF,
                 "includeArchived": true, "search": "child"
             })
         );
@@ -707,6 +627,7 @@ mod tests {
         let server = sacrum(vec![UNRELATED]).await;
         for call in [
             "vtb::tasks::find(#{ bogus: 1 })",
+            r#"vtb::tasks::find(#{ step_name: "todo" })"#,
             "vtb::tasks::find(#{ level: () })",
             r#"vtb::tasks::find(#{ level: ["task"] })"#,
             r#"vtb::tasks::find(#{ level: "huge" })"#,

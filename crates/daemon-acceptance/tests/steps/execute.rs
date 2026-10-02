@@ -16,7 +16,7 @@ fn transform_schema() -> Value {
     })
 }
 
-async fn create_workflow(world: &mut DaemonWorld) -> String {
+pub(crate) async fn create_workflow(world: &mut DaemonWorld) -> String {
     let response: Value = world
         .graphql_client
         .as_ref()
@@ -37,7 +37,7 @@ async fn create_workflow(world: &mut DaemonWorld) -> String {
     id
 }
 
-async fn create_step(
+pub(crate) async fn create_step(
     world: &DaemonWorld,
     workflow_id: &str,
     name: &str,
@@ -94,7 +94,7 @@ async fn assert_execute_definition(
     assert!(definition["config"].get("input").is_none());
 }
 
-async fn create_execute_step(
+pub(crate) async fn create_execute_step(
     world: &mut DaemonWorld,
     workflow_id: &str,
     name: &str,
@@ -132,7 +132,7 @@ async fn create_execute_step(
     id
 }
 
-async fn connect(world: &DaemonWorld, from: &str, to: &str) {
+pub(crate) async fn connect(world: &DaemonWorld, from: &str, to: &str) {
     let query = r#"mutation ConnectFixture($id: Uuid4!, $to: Uuid4!) {
         sync_step_transitions(id: $id, transitions: [{to_step_id: $to}]) { id }
     }"#;
