@@ -121,6 +121,11 @@ The tests also inspect resolved execution snapshots, common TaskRun identity,
 absence of inference metadata, and evaluation/schema failures. Existing
 provider mock scenarios use `llm_inference`; they do not prove Rhai execution.
 
+`execute_rollup.feature` runs the child-outcome rollup sample from
+`docs/agent-context/workflows/steps/execute/host-reads.md`. The step definitions
+embed that doc and take the first `rhai` and `json` blocks as the script and
+output schema, so editing the sample changes what the scenarios run.
+
 **Mock prompt-as-JSON envelope.** The step's `prompt` is parsed by the mock as a
 JSON envelope with this schema:
 

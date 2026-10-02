@@ -430,7 +430,9 @@ timeout or output cap, and cancelling the step kills its process group. Sacrum
 retains workflow progression and retries.
 
 See [execute agent guidance](../agent-context/workflows/steps/execute/index.md) for the
-CLI/GraphQL authoring, context/output example, limits, and diagnostics, and
+CLI/GraphQL authoring, context/output example, limits, and diagnostics,
+[a child-outcome rollup](../agent-context/workflows/steps/execute/host-reads.md)
+that reads tasks and artifacts, and
 [the Docker-only demo](../testing.md#rhai-execute-demo) for isolated verification.
 
 ### Deterministic route configuration

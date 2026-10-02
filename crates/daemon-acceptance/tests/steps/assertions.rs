@@ -12,7 +12,7 @@ fn last_execution(world: &DaemonWorld) -> &StepExecutionResponse {
         .expect("no execution polled yet — call `wait for the execution to reach status` first")
 }
 
-async fn task_artifacts(world: &DaemonWorld) -> Vec<vertebrae_core::Artifact> {
+pub(crate) async fn task_artifacts(world: &DaemonWorld) -> Vec<vertebrae_core::Artifact> {
     let task_id = world.task_id.as_ref().expect("task not created");
     let client = world
         .graphql_client
