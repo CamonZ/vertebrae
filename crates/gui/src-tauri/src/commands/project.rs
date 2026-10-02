@@ -795,6 +795,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         };
 
         ensure_project_slug_available_for_path(&config, "duplicate", &registered).unwrap();
@@ -843,6 +844,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         })
         .unwrap();
         let custom_status = sacrum_config_status().await.unwrap();
@@ -918,6 +920,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         })
         .unwrap();
 
@@ -960,6 +963,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         })
         .unwrap();
 
@@ -1038,6 +1042,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         })
         .unwrap();
 
@@ -1088,6 +1093,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         })
         .unwrap();
 

@@ -8,8 +8,11 @@ Use this when: keys, endpoints or project registration need to change.
   directory: macOS `~/Library/Application Support/vertebrae/config.toml`,
   Linux `~/.config/vertebrae/config.toml`. Sections include `[sacrum]`
   (backend URL and token), provider settings such as `[typesafe]`
-  (structured_inference API key), `[providers.<id>]` (custom providers), and
-  `[projects.<name>]` (registered checkouts).
+  (structured_inference API key), `[providers.<id>]` (custom providers),
+  `[daemon]` (daemon-wide settings), and `[projects.<name>]` (registered checkouts).
+- `[daemon]` sets `script_active_slots` (default 1, at least 1) and
+  `script_pending_slots` (default 4): how many execute scripts run at once and
+  how many may wait, across all projects on that daemon.
 - `[providers.<id>]` declares a custom provider (e.g. OpenRouter, a local
   OpenAI-compatible server) for steps and local chat: `harness`
   (`claude`/`codex`/`typesafe`, required), `models` (the exact list, required),

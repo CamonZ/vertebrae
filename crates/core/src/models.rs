@@ -1819,11 +1819,6 @@ impl ExecuteConfig {
                 "config: $.script: execute requires a non-empty script",
             ));
         }
-        if self.script.len() > 262_144 {
-            return Err(ServiceError::validation_failed(
-                "config: $.script: must be at most 262144 bytes",
-            ));
-        }
         if !self.output_schema.is_object() {
             return Err(ServiceError::validation_failed(
                 "config: $.output_schema: must be a JSON Schema object",
@@ -4181,7 +4176,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_definition_limits_match_backend_script_and_schema_bounds() {
+    fn execute_definition_bounds_schema_but_not_script_size() {
         let valid = ExecuteConfig {
             version: 1,
             script: "task.id".into(),
@@ -4189,16 +4184,10 @@ mod tests {
             output_schema: serde_json::json!({}),
         };
         let long_script = ExecuteConfig {
-            script: "x".repeat(262_145),
+            script: format!("// {}\ntask.id", "x".repeat(262_145)),
             ..valid.clone()
         };
-        assert!(
-            long_script
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("262144 bytes")
-        );
+        assert!(long_script.validate().is_ok());
         let large_schema = ExecuteConfig {
             output_schema: serde_json::json!({"description": "x".repeat(1_048_576)}),
             ..valid.clone()

@@ -4674,7 +4674,6 @@ mod execute_authoring_tests {
     #[tokio::test]
     async fn invalid_script_or_schema_rejected_before_create_and_update_mutations() {
         let whitespace = ScriptFile::new(" \n\t");
-        let oversized = "x".repeat(262_145);
         let missing = format!("@/vtb-missing-{}.rhai", uuid::Uuid::now_v7());
         for (args, message) in [
             (vec!["--output-schema", SCHEMA], "require --script"),
@@ -4682,10 +4681,6 @@ mod execute_authoring_tests {
             (
                 vec!["--script", " \n\t", "--output-schema", SCHEMA],
                 "non-empty script",
-            ),
-            (
-                vec!["--script", oversized.as_str(), "--output-schema", SCHEMA],
-                "262144 bytes",
             ),
             (
                 vec!["--script", missing.as_str(), "--output-schema", SCHEMA],
@@ -4725,7 +4720,6 @@ mod execute_authoring_tests {
                 vec!["--script", whitespace_flag.as_str()],
                 "non-empty script",
             ),
-            (vec!["--script", oversized.as_str()], "262144 bytes"),
             (
                 vec!["--script", missing.as_str()],
                 "Failed to read --script file",

@@ -7,6 +7,7 @@
 //! - `[sacrum].url` in config file for base URL (default: https://vertebrae.dev)
 //! - `[projects.<name>]` entries matched by CWD longest-prefix (CLI) or by name (GUI)
 //! - `[providers.<id>]` custom provider profiles used by steps and local chat
+//! - `[daemon]` daemon-wide execution settings (Rhai worker slots)
 
 use crate::error::{SacrumClientError, SacrumClientResult};
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,35 @@ pub struct VertebraeConfigFile {
     pub providers: BTreeMap<ProviderId, ProviderProfile>,
     #[serde(default, skip_serializing_if = "ObservabilityConfig::is_default")]
     pub observability: ObservabilityConfig,
+    /// Daemon-wide execution settings shared by every project.
+    #[serde(default, skip_serializing_if = "DaemonSection::is_default")]
+    pub daemon: DaemonSection,
+}
+
+/// `[daemon]` settings read by vtb-daemon at startup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DaemonSection {
+    /// Rhai evaluations that may run at once across all projects.
+    pub script_active_slots: usize,
+    /// Rhai evaluations that may wait for an active slot before admission
+    /// rejects new attempts.
+    pub script_pending_slots: usize,
+}
+
+impl Default for DaemonSection {
+    fn default() -> Self {
+        Self {
+            script_active_slots: 1,
+            script_pending_slots: 4,
+        }
+    }
+}
+
+impl DaemonSection {
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
 }
 
 /// TypeSafe provider settings shared with the daemon at startup.
@@ -645,6 +675,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         };
 
         // CWD inside child-project should match the child (longer prefix)
@@ -675,6 +706,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         };
 
         let cwd = std::path::Path::new("/tmp/unrelated");
@@ -703,6 +735,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         };
 
         let cwd = std::path::Path::new("/home/user/code/myproject");
@@ -852,6 +885,7 @@ models = ["kimi-k2"]
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         };
 
         let serialized = toml::to_string_pretty(&config).unwrap();
@@ -952,6 +986,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         }
     }
 
@@ -1042,6 +1077,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
 
@@ -1069,6 +1105,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
 
@@ -1360,6 +1397,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         };
 
         let _cwd = CurrentDirGuard::push(&subdir);
@@ -1391,6 +1429,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         }
     }
 
@@ -1455,6 +1494,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         };
         let result = SacrumConfig::load_from_config(config);
         assert!(result.is_err());

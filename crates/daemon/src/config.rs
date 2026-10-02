@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use vertebrae_core::{ProviderId, ProviderProfile};
-use vertebrae_sacrum_client::{VertebraeConfigFile, config_path, load_config_file};
+use vertebrae_sacrum_client::{DaemonSection, VertebraeConfigFile, config_path, load_config_file};
 
 const DAEMON_CONFIG_FILENAME: &str = "daemon.toml";
 
@@ -143,6 +143,24 @@ pub struct ResolvedConfig {
     pub provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
     pub daemon_identity: Option<DaemonIdentity>,
     pub projects: Vec<ProjectEntry>,
+    pub script_slots: ScriptSlots,
+}
+
+/// Daemon-wide Rhai worker capacity from `[daemon]` in `config.toml`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScriptSlots {
+    pub active: usize,
+    pub pending: usize,
+}
+
+impl Default for ScriptSlots {
+    fn default() -> Self {
+        let section = DaemonSection::default();
+        Self {
+            active: section.script_active_slots,
+            pending: section.script_pending_slots,
+        }
+    }
 }
 
 impl fmt::Debug for ResolvedConfig {
@@ -161,6 +179,7 @@ impl fmt::Debug for ResolvedConfig {
             .field("provider_profiles", &self.provider_profiles)
             .field("daemon_identity", &self.daemon_identity)
             .field("projects", &self.projects)
+            .field("script_slots", &self.script_slots)
             .finish()
     }
 }
@@ -451,6 +470,11 @@ impl ResolvedConfig {
                 path: section.path.clone(),
             })
             .collect();
+        if config.daemon.script_active_slots == 0 {
+            return Err(ConfigError::LoadFailed(
+                "[daemon].script_active_slots must be at least 1".to_string(),
+            ));
+        }
         let sacrum_url = daemon_identity
             .as_ref()
             .map(|identity| identity.endpoint.clone())
@@ -464,6 +488,10 @@ impl ResolvedConfig {
             provider_profiles: config.providers.clone(),
             daemon_identity,
             projects,
+            script_slots: ScriptSlots {
+                active: config.daemon.script_active_slots,
+                pending: config.daemon.script_pending_slots,
+            },
         })
     }
 }
@@ -492,6 +520,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
+            daemon: Default::default(),
         }
     }
 
@@ -520,6 +549,34 @@ mod tests {
     fn missing_authentication_is_rejected() {
         let error = ResolvedConfig::from_config_file(&config(None)).unwrap_err();
         assert!(error.to_string().contains("enroll this daemon"));
+    }
+
+    #[test]
+    fn script_slots_default_to_one_active_and_four_pending_and_read_daemon_section() {
+        let resolved = ResolvedConfig::from_config_file(&config(Some("token"))).unwrap();
+        assert_eq!(
+            resolved.script_slots,
+            ScriptSlots {
+                active: 1,
+                pending: 4
+            }
+        );
+        let parsed: VertebraeConfigFile = toml::from_str(
+            "[sacrum]\ntoken = \"token\"\n[daemon]\nscript_active_slots = 3\nscript_pending_slots = 0\n",
+        )
+        .unwrap();
+        let resolved = ResolvedConfig::from_config_file(&parsed).unwrap();
+        assert_eq!(
+            resolved.script_slots,
+            ScriptSlots {
+                active: 3,
+                pending: 0
+            }
+        );
+        let mut idle = config(Some("token"));
+        idle.daemon.script_active_slots = 0;
+        let error = ResolvedConfig::from_config_file(&idle).unwrap_err();
+        assert!(error.to_string().contains("script_active_slots"), "{error}");
     }
 
     #[test]

@@ -1,25 +1,29 @@
-//! Daemon-wide admission and settlement for pure JSON Rhai transformations.
+//! Daemon-wide admission and settlement for Rhai execute evaluations.
 //!
 //! Every admitted attempt owns its queue permit and cancellation signal. The
 //! active permit stays inside the blocking closure, including panic unwinding;
 //! cancelling the async waiter never releases a still-running evaluation.
+//!
+//! Host functions run on that blocking worker thread. Each one blocks the
+//! thread on a single async service call through [`HostContext::call`], which
+//! races only the attempt's cancellation. Nothing else bounds a script: there
+//! is no deadline, operation limit, or size cap. Rhai's default expression and
+//! call depth guards stay because a stack overflow aborts the whole daemon.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 
-use rhai::{Dynamic, Engine, Scope};
+use rhai::{Dynamic, Engine, EvalAltResult, Position, Scope};
+use tokio::runtime::Handle;
 use tokio::sync::{Semaphore, watch};
 use vertebrae_core::models::ExecuteConfig;
+use vertebrae_core::{ServiceError, ServiceResult, VertebraeServices};
 
 use crate::actors::step_executor::{StepResult, step_result_for_schema_error};
+use crate::config::ScriptSlots;
 use crate::output_validator::{CompiledSchema, SchemaError};
 
-pub const SCRIPT_PENDING_CAPACITY: usize = 4;
-pub const SCRIPT_MAX_OPERATIONS: u64 = 100_000;
-pub const SCRIPT_DEADLINE: Duration = Duration::from_secs(2);
-pub const SCRIPT_MAX_SOURCE_BYTES: usize = 256 * 1024;
-pub const SCRIPT_MAX_JSON_BYTES: usize = 1024 * 1024;
 pub const SCRIPT_CONTEXT_NAMESPACES: [&str; 6] = [
     "task",
     "execution",
@@ -28,29 +32,159 @@ pub const SCRIPT_CONTEXT_NAMESPACES: [&str; 6] = [
     "workflow",
     "artifacts",
 ];
-const MAX_STRING_BYTES: usize = 256 * 1024;
-const MAX_ARRAY_ITEMS: usize = 16_384;
-const MAX_MAP_ENTRIES: usize = 4096;
-const MAX_DEPTH: usize = 64;
 
-#[derive(Debug)]
+/// Registers host modules on each attempt's fresh engine.
+pub type HostApi = Arc<dyn Fn(&mut Engine, &HostContext) + Send + Sync>;
+
 pub struct ScriptWorker {
     admitted: Arc<Semaphore>,
     active: Arc<Semaphore>,
-    deadline: Duration,
-    max_operations: u64,
+    slots: ScriptSlots,
+    host_api: HostApi,
+}
+
+impl std::fmt::Debug for ScriptWorker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScriptWorker")
+            .field("slots", &self.slots)
+            .field("active_available", &self.active.available_permits())
+            .field("admitted_available", &self.admitted.available_permits())
+            .finish()
+    }
 }
 
 impl Default for ScriptWorker {
     fn default() -> Self {
-        Self {
-            admitted: Arc::new(Semaphore::new(1 + SCRIPT_PENDING_CAPACITY)),
-            active: Arc::new(Semaphore::new(1)),
-            deadline: SCRIPT_DEADLINE,
-            max_operations: SCRIPT_MAX_OPERATIONS,
+        Self::new(ScriptSlots::default())
+    }
+}
+
+/// The execution's project and its project-scoped services. Scripts never
+/// see or pass a project ID; every host call receives this one.
+#[derive(Clone)]
+pub struct ScriptScope {
+    pub project_id: String,
+    pub services: Arc<VertebraeServices>,
+}
+
+/// What a host function needs to make a cancellable service call from the
+/// script's blocking worker thread.
+#[derive(Clone)]
+pub struct HostContext {
+    runtime: Handle,
+    cancellation: watch::Receiver<bool>,
+    scope: ScriptScope,
+}
+
+impl HostContext {
+    pub fn project_id(&self) -> &str {
+        &self.scope.project_id
+    }
+
+    /// Block the worker thread on one direct service call. The call races
+    /// only the attempt's cancellation; on cancel the request future is
+    /// dropped, so a hung request cannot hold the thread or its slot.
+    ///
+    /// Must only run on the script's blocking worker thread; Tokio panics if
+    /// this is reached from async code.
+    pub fn call<'a, T, F>(
+        &'a self,
+        request: impl FnOnce(&'a VertebraeServices, &'a str) -> F,
+    ) -> Result<T, HostError>
+    where
+        F: Future<Output = ServiceResult<T>>,
+    {
+        let mut cancellation = self.cancellation.clone();
+        let request = request(&self.scope.services, &self.scope.project_id);
+        self.runtime.block_on(async move {
+            tokio::select! {
+                biased;
+                () = cancelled(&mut cancellation) => Err(HostError::cancelled()),
+                result = request => result.map_err(HostError::from),
+            }
+        })
+    }
+}
+
+/// Resolve on an explicit cancel. A dropped sender is not a cancel.
+async fn cancelled(cancellation: &mut watch::Receiver<bool>) {
+    if cancellation.wait_for(|cancelled| *cancelled).await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostErrorKind {
+    NotFound,
+    Invalid,
+    Cancelled,
+    Transport,
+}
+
+impl HostErrorKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "not_found",
+            Self::Invalid => "invalid",
+            Self::Cancelled => "cancelled",
+            Self::Transport => "transport",
         }
     }
 }
+
+/// A failed host call. Raised into Rhai as `#{ kind, message }` so scripts
+/// can `try`/`catch` and branch on `err.kind`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostError {
+    pub kind: HostErrorKind,
+    pub message: String,
+}
+
+impl HostError {
+    pub fn new(kind: HostErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    fn cancelled() -> Self {
+        Self::new(HostErrorKind::Cancelled, "Cancelled")
+    }
+}
+
+impl From<ServiceError> for HostError {
+    fn from(error: ServiceError) -> Self {
+        let kind = match &error {
+            ServiceError::TaskNotFound { .. }
+            | ServiceError::WorkflowNotFound { .. }
+            | ServiceError::ArtifactNotFound { .. }
+            | ServiceError::ParentNotFound { .. }
+            | ServiceError::DependencyNotFound { .. } => HostErrorKind::NotFound,
+            ServiceError::InvalidTransition { .. }
+            | ServiceError::TaskBlocked { .. }
+            | ServiceError::ValidationFailed { .. }
+            | ServiceError::CyclicDependency
+            | ServiceError::InvalidInput(_) => HostErrorKind::Invalid,
+            ServiceError::ApiError { .. }
+            | ServiceError::NetworkError(_)
+            | ServiceError::ConfigError(_) => HostErrorKind::Transport,
+        };
+        Self::new(kind, error.to_string())
+    }
+}
+
+impl From<HostError> for Box<EvalAltResult> {
+    fn from(error: HostError) -> Self {
+        let mut value = rhai::Map::new();
+        value.insert("kind".into(), error.kind.as_str().into());
+        value.insert("message".into(), error.message.into());
+        EvalAltResult::ErrorRuntime(value.into(), Position::NONE).into()
+    }
+}
+
+/// Production host modules, registered on every attempt's engine.
+fn register_host_api(_engine: &mut Engine, _host: &HostContext) {}
 
 pub struct ScriptAttempt {
     cancellation: Arc<AtomicBool>,
@@ -106,28 +240,50 @@ impl ScriptAttempt {
 }
 
 impl ScriptWorker {
-    #[cfg(test)]
-    pub(crate) fn without_operation_limit_for_test() -> Self {
+    pub fn new(slots: ScriptSlots) -> Self {
+        Self::with_host_api(slots, Arc::new(register_host_api))
+    }
+
+    pub fn with_host_api(slots: ScriptSlots, host_api: HostApi) -> Self {
         Self {
-            max_operations: u64::MAX,
-            ..Self::default()
+            admitted: Arc::new(Semaphore::new(
+                slots
+                    .active
+                    .saturating_add(slots.pending)
+                    .min(Semaphore::MAX_PERMITS),
+            )),
+            active: Arc::new(Semaphore::new(slots.active.min(Semaphore::MAX_PERMITS))),
+            slots,
+            host_api,
         }
     }
+
     /// Reject overflow synchronously before allocating a waiter or blocking job.
     /// The settlement callback is invoked only after the worker has been joined.
     pub fn admit(
         &self,
         config: ExecuteConfig,
+        scope: ScriptScope,
         settled: impl FnOnce(StepResult) + Send + 'static,
     ) -> Result<ScriptAttempt, String> {
-        self.admit_with(config, settled, evaluate)
+        let host_api = Arc::clone(&self.host_api);
+        self.admit_with(config, scope, settled, move |config, cancellation, host| {
+            evaluate_with(
+                config,
+                cancellation,
+                |engine| host_api(engine, &host),
+                CompiledSchema::compile,
+                || {},
+            )
+        })
     }
 
     fn admit_with(
         &self,
         config: ExecuteConfig,
+        scope: ScriptScope,
         settled: impl FnOnce(StepResult) + Send + 'static,
-        evaluation: impl FnOnce(ExecuteConfig, Arc<AtomicBool>, Instant, u64) -> StepResult
+        evaluation: impl FnOnce(ExecuteConfig, Arc<AtomicBool>, HostContext) -> StepResult
         + Send
         + 'static,
     ) -> Result<ScriptAttempt, String> {
@@ -135,45 +291,48 @@ impl ScriptWorker {
             .try_acquire_owned()
             .map_err(|_| {
                 format!(
-                    "Rhai execution capacity exceeded (1 active, {SCRIPT_PENDING_CAPACITY} pending)"
+                    "Rhai execution capacity exceeded ({} active, {} pending)",
+                    self.slots.active, self.slots.pending
                 )
             })?;
-        let deadline = Instant::now() + self.deadline;
-        validate_limits(&config)?;
+        validate_context(&config)?;
         config
             .validate_structure()
             .map_err(|error| error.to_string())?;
         let active = Arc::clone(&self.active);
         // Reserve an idle active slot immediately, so simultaneous admissions
-        // allocate at most four genuine pending waiters before any task polls.
+        // allocate at most the configured pending waiters before any task polls.
         let immediate = Arc::clone(&active).try_acquire_owned().ok();
         let cancellation = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancellation);
-        let (cancel_tx, mut cancel_rx) = watch::channel(false);
-        let max_operations = self.max_operations;
+        let (cancel_tx, cancel_rx) = watch::channel(false);
         let settlement = tokio::spawn(async move {
-            let acquisition = if *cancel_rx.borrow() {
+            let mut queue_cancel = cancel_rx.clone();
+            let acquisition = if *queue_cancel.borrow() {
                 Err("Cancelled".to_string())
-            } else if Instant::now() >= deadline {
-                Err("Rhai execution deadline exceeded while queued".to_string())
             } else if let Some(permit) = immediate {
                 Ok(permit)
             } else {
                 tokio::select! {
                     biased;
-                    _ = cancel_rx.changed() => Err("Cancelled".to_string()),
-                    _ = tokio::time::sleep_until(deadline.into()) => Err("Rhai execution deadline exceeded while queued".to_string()),
+                    _ = queue_cancel.changed() => Err("Cancelled".to_string()),
                     permit = active.acquire_owned() => permit.map_err(|_| "Rhai worker closed".to_string()),
                 }
             };
             let result = match acquisition {
                 Err(error) => StepResult::failed(None, error),
                 Ok(permit) => {
+                    let host = HostContext {
+                        runtime: Handle::current(),
+                        cancellation: cancel_rx,
+                        scope,
+                    };
                     // No timeout/abort races this join: the closure cooperates
-                    // with its own cancellation flag and deadline instead.
+                    // with its cancellation flag, and host calls race the same
+                    // signal, so the permit is released only once both settle.
                     match tokio::task::spawn_blocking(move || {
                         let _permit = permit;
-                        evaluation(config, worker_cancel, deadline, max_operations)
+                        evaluation(config, worker_cancel, host)
                     })
                     .await
                     {
@@ -196,16 +355,7 @@ impl ScriptWorker {
     }
 }
 
-pub(crate) fn validate_limits(config: &ExecuteConfig) -> Result<(), String> {
-    if config.script.len() > SCRIPT_MAX_SOURCE_BYTES {
-        return Err(format!(
-            "execute script exceeds {SCRIPT_MAX_SOURCE_BYTES} byte limit"
-        ));
-    }
-    let context_value = config
-        .context
-        .as_ref()
-        .ok_or_else(|| "execute requires a resolved context JSON object".to_string())?;
+pub(crate) fn validate_context(config: &ExecuteConfig) -> Result<(), String> {
     let context = runtime_context(config)?;
     for namespace in SCRIPT_CONTEXT_NAMESPACES {
         if !context
@@ -214,12 +364,6 @@ pub(crate) fn validate_limits(config: &ExecuteConfig) -> Result<(), String> {
         {
             return Err(format!("execute context.{namespace} must be a JSON object"));
         }
-    }
-    for (label, value) in [
-        ("context", context_value),
-        ("output_schema", &config.output_schema),
-    ] {
-        validate_json_limits(value, label)?;
     }
     Ok(())
 }
@@ -234,87 +378,19 @@ fn runtime_context(
         .ok_or_else(|| "execute requires a resolved context JSON object".into())
 }
 
-fn validate_json_limits(value: &serde_json::Value, label: &str) -> Result<(), String> {
-    let mut pending = vec![(value, 0)];
-    while let Some((value, depth)) = pending.pop() {
-        if depth > MAX_DEPTH {
-            return Err(format!(
-                "execute {label} exceeds JSON depth limit {MAX_DEPTH}"
-            ));
-        }
-        match value {
-            serde_json::Value::Array(items) => {
-                if items.len() > MAX_ARRAY_ITEMS {
-                    return Err(format!(
-                        "execute {label} exceeds array size limit {MAX_ARRAY_ITEMS}"
-                    ));
-                }
-                pending.extend(items.iter().map(|value| (value, depth + 1)));
-            }
-            serde_json::Value::Object(fields) => {
-                if fields.len() > MAX_MAP_ENTRIES {
-                    return Err(format!(
-                        "execute {label} exceeds map size limit {MAX_MAP_ENTRIES}"
-                    ));
-                }
-                pending.extend(fields.values().map(|value| (value, depth + 1)));
-            }
-            serde_json::Value::String(text) if text.len() > MAX_STRING_BYTES => {
-                return Err(format!(
-                    "execute {label} exceeds string size limit {MAX_STRING_BYTES}"
-                ));
-            }
-            _ => {}
-        }
-    }
-    let encoded =
-        serde_json::to_vec(value).map_err(|error| format!("Invalid execute {label}: {error}"))?;
-    if encoded.len() > SCRIPT_MAX_JSON_BYTES {
-        return Err(format!(
-            "execute {label} exceeds {SCRIPT_MAX_JSON_BYTES} byte JSON limit"
-        ));
-    }
-    Ok(())
-}
-
-fn evaluate(
-    config: ExecuteConfig,
-    cancellation: Arc<AtomicBool>,
-    deadline: Instant,
-    max_operations: u64,
-) -> StepResult {
-    evaluate_with(
-        config,
-        cancellation,
-        deadline,
-        max_operations,
-        CompiledSchema::compile,
-        || {},
-    )
-}
-
 fn evaluate_with(
     config: ExecuteConfig,
     cancellation: Arc<AtomicBool>,
-    deadline: Instant,
-    max_operations: u64,
+    register_host: impl FnOnce(&mut Engine),
     compile_schema: impl FnOnce(&serde_json::Value) -> Result<CompiledSchema, SchemaError>,
     progress: impl Fn() + 'static,
 ) -> StepResult {
-    let check_interruption = || {
-        if cancellation.load(Ordering::Relaxed) {
-            Some("Cancelled")
-        } else if Instant::now() >= deadline {
-            Some("Rhai execution deadline exceeded")
-        } else {
-            None
-        }
-    };
+    let check_interruption = || cancellation.load(Ordering::Relaxed).then_some("Cancelled");
     if let Some(error) = check_interruption() {
         return StepResult::failed(None, error);
     }
-    // Schema compilation shares the worker's permit and deadline. It cannot
-    // be interrupted by Rhai callbacks, so observe cancellation after it joins.
+    // Schema compilation shares the worker's permit. It cannot be
+    // interrupted by Rhai callbacks, so observe cancellation after it joins.
     let schema = compile_schema(&config.output_schema);
     if let Some(error) = check_interruption() {
         return StepResult::failed(None, error);
@@ -325,29 +401,20 @@ fn evaluate_with(
     };
     let mut engine = Engine::new();
     engine
-        .set_max_operations(max_operations)
-        .set_max_string_size(MAX_STRING_BYTES)
-        .set_max_array_size(MAX_ARRAY_ITEMS)
-        .set_max_map_size(MAX_MAP_ENTRIES)
-        .set_max_expr_depths(MAX_DEPTH, MAX_DEPTH)
-        .set_max_call_levels(32)
-        .set_max_variables(128)
-        .set_max_functions(64)
+        .set_module_resolver(rhai::module_resolvers::DummyModuleResolver::new())
         .set_fail_on_invalid_map_property(true)
         .disable_symbol("eval")
+        .disable_symbol("import")
         .on_print(|_| {})
         .on_debug(|_, _, _| {});
     let progress_cancel = Arc::clone(&cancellation);
     engine.on_progress(move |_| {
         progress();
-        if progress_cancel.load(Ordering::Relaxed) {
-            Some("Cancelled".into())
-        } else if Instant::now() >= deadline {
-            Some("Rhai execution deadline exceeded".into())
-        } else {
-            None
-        }
+        progress_cancel
+            .load(Ordering::Relaxed)
+            .then(|| "Cancelled".into())
     });
+    register_host(&mut engine);
     let context = match runtime_context(&config) {
         Ok(context) => context,
         Err(error) => return StepResult::failed(None, error),
@@ -387,16 +454,13 @@ fn evaluate_with(
     if let Some(error) = check_interruption() {
         return StepResult::failed(None, error);
     }
-    if let Err(error) = validate_dynamic_result(&result, 0, &mut 0) {
+    if let Err(error) = validate_json_result(&result) {
         return StepResult::failed(None, error);
     }
     let output = match rhai::serde::from_dynamic::<serde_json::Value>(&result) {
         Ok(output) => output,
         Err(error) => return StepResult::failed(None, format!("Rhai result is not JSON: {error}")),
     };
-    if let Err(error) = validate_json_limits(&output, "result") {
-        return StepResult::failed(None, error);
-    }
     if let Err(error) = schema.validate_output(Some(&output), None) {
         return step_result_for_schema_error(error);
     }
@@ -410,7 +474,7 @@ fn evaluate_with(
     }
 }
 
-/// Convert the already-bounded context without serde's unsigned-to-float
+/// Convert the context without serde's unsigned-to-float
 /// fallback. Rhai integers are signed 64-bit; reject larger JSON integers
 /// with their JSON pointer rather than persisting a rounded successful result.
 fn json_to_rhai(value: &serde_json::Value, path: &str) -> Result<Dynamic, String> {
@@ -446,56 +510,30 @@ fn json_to_rhai(value: &serde_json::Value, path: &str) -> Result<Dynamic, String
     })
 }
 
-/// Count the aggregate encoded size before serde can expand shared strings or
-/// nested containers into an owned JSON tree. Bounds also reject non-JSON types.
-fn validate_dynamic_result(value: &Dynamic, depth: usize, bytes: &mut usize) -> Result<(), String> {
-    if depth > MAX_DEPTH {
-        return Err(format!("Rhai result exceeds JSON depth limit {MAX_DEPTH}"));
-    }
-    let mut add_bytes = |count: usize| -> Result<(), String> {
-        *bytes = bytes.saturating_add(count);
-        if *bytes > SCRIPT_MAX_JSON_BYTES {
-            Err(format!(
-                "Rhai result exceeds {SCRIPT_MAX_JSON_BYTES} byte JSON limit"
-            ))
-        } else {
-            Ok(())
-        }
-    };
-    if value.is_unit() || value.is::<bool>() || value.is::<rhai::INT>() {
-        return add_bytes(32);
+/// Reject values serde would otherwise coerce or refuse, such as functions,
+/// custom types, and non-finite floats, before the result is persisted.
+fn validate_json_result(value: &Dynamic) -> Result<(), String> {
+    if value.is_unit()
+        || value.is::<bool>()
+        || value.is::<rhai::INT>()
+        || value.is::<rhai::ImmutableString>()
+    {
+        return Ok(());
     }
     if value.is::<rhai::FLOAT>() {
-        if !value.as_float().map_err(str::to_string)?.is_finite() {
-            return Err("Rhai result contains a non-finite JSON number".into());
-        }
-        return add_bytes(32);
-    }
-    if value.is::<rhai::ImmutableString>() {
-        let text = value.clone_cast::<rhai::ImmutableString>();
-        return add_bytes(json_string_size(&text));
+        return if value.as_float().map_err(str::to_string)?.is_finite() {
+            Ok(())
+        } else {
+            Err("Rhai result contains a non-finite JSON number".into())
+        };
     }
     if value.is::<rhai::Array>() {
         let items = value.as_array_ref().map_err(str::to_string)?;
-        add_bytes(items.len().saturating_add(2))?;
-        for item in items.iter() {
-            validate_dynamic_result(item, depth + 1, bytes)?;
-        }
-        return Ok(());
+        return items.iter().try_for_each(validate_json_result);
     }
     if value.is::<rhai::Map>() {
         let fields = value.as_map_ref().map_err(str::to_string)?;
-        add_bytes(fields.len().saturating_add(2))?;
-        for (key, item) in fields.iter() {
-            *bytes = bytes.saturating_add(json_string_size(key).saturating_add(1));
-            if *bytes > SCRIPT_MAX_JSON_BYTES {
-                return Err(format!(
-                    "Rhai result exceeds {SCRIPT_MAX_JSON_BYTES} byte JSON limit"
-                ));
-            }
-            validate_dynamic_result(item, depth + 1, bytes)?;
-        }
-        return Ok(());
+        return fields.values().try_for_each(validate_json_result);
     }
     Err(format!(
         "Rhai result type '{}' is not JSON",
@@ -503,21 +541,49 @@ fn validate_dynamic_result(value: &Dynamic, depth: usize, bytes: &mut usize) -> 
     ))
 }
 
-fn json_string_size(text: &str) -> usize {
-    text.bytes().fold(2_usize, |bytes, byte| {
-        bytes.saturating_add(match byte {
-            b'"' | b'\\' | b'\n' | b'\r' | b'\t' | 8 | 12 => 2,
-            0..=31 => 6,
-            _ => 1,
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// Services pointed at an unroutable endpoint; tests that use it must not
+    /// make real service calls.
+    pub(crate) fn scope() -> ScriptScope {
+        use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
+        ScriptScope {
+            project_id: "script-project".into(),
+            services: Arc::new(vertebrae_sacrum_client::from_sacrum(Arc::new(
+                GraphqlClient::new(SacrumConfig::new(
+                    "http://127.0.0.1:9".into(),
+                    "token".into(),
+                    "script-project".into(),
+                )),
+            ))),
+        }
+    }
+
+    /// Registers `test::hang()`, a host call whose service request never
+    /// completes, so only cancellation can end it.
+    pub(crate) fn hanging_host_api() -> HostApi {
+        Arc::new(|engine, host| {
+            let host = host.clone();
+            let mut module = rhai::Module::new();
+            module.set_native_fn("hang", move || {
+                Ok(host.call(|_, _| std::future::pending::<ServiceResult<rhai::INT>>())?)
+            });
+            engine.register_static_module("test", module.into());
         })
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::{hanging_host_api, scope};
     use super::*;
     use serde_json::json;
-    use tokio::sync::oneshot;
+    use std::time::Duration;
+    use tokio::sync::{Notify, oneshot};
+
+    const PENDING: usize = 4;
 
     fn config(script: &str, input: serde_json::Value) -> ExecuteConfig {
         ExecuteConfig {
@@ -552,7 +618,11 @@ mod tests {
     }
 
     async fn run(worker: &ScriptWorker, config: ExecuteConfig) -> StepResult {
-        worker.admit(config, |_| {}).unwrap().settle().await
+        worker
+            .admit(config, scope(), |_| {})
+            .unwrap()
+            .settle()
+            .await
     }
 
     #[tokio::test]
@@ -658,14 +728,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_missing_malformed_and_oversized_whole_context_before_admission() {
+    async fn rejects_missing_and_malformed_whole_context_before_admission() {
         let worker = ScriptWorker::default();
         for context in [None, Some(json!(null)), Some(json!([])), Some(json!({}))] {
             let mut attempt = config("42", json!(null));
             attempt.context = context;
             assert!(
                 worker
-                    .admit(attempt, |_| {})
+                    .admit(attempt, scope(), |_| {})
                     .err()
                     .unwrap()
                     .contains("context")
@@ -682,26 +752,13 @@ mod tests {
                 }
                 assert!(
                     worker
-                        .admit(attempt, |_| {})
+                        .admit(attempt, scope(), |_| {})
                         .err()
                         .unwrap()
                         .contains(namespace)
                 );
             }
         }
-        let mut attempt = config("42", json!(null));
-        for namespace in SCRIPT_CONTEXT_NAMESPACES {
-            attempt.context.as_mut().unwrap()[namespace] = json!({"values":[
-                "x".repeat(100_000), "y".repeat(100_000)
-            ]});
-        }
-        assert!(
-            worker
-                .admit(attempt, |_| {})
-                .err()
-                .unwrap()
-                .contains("context exceeds")
-        );
         assert_eq!(worker.admitted.available_permits(), 5);
         assert_eq!(worker.active.available_permits(), 1);
     }
@@ -767,43 +824,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn limits_deadline_and_cancellation_recover_capacity() {
-        let worker = ScriptWorker {
-            max_operations: 100,
-            ..ScriptWorker::default()
-        };
-        let error = failure(run(&worker, config("loop {}", json!(null))).await);
-        assert!(error.contains("operations"), "{error}");
+    async fn scripts_have_no_operation_limit_and_stop_only_on_cancellation() {
+        let worker = ScriptWorker::default();
         assert_eq!(
-            output(run(&worker, config("42", json!(null))).await),
-            json!(42)
+            output(
+                run(
+                    &worker,
+                    config(
+                        "let total = 0; for i in 0..200000 { total += 1; } total",
+                        json!(null)
+                    )
+                )
+                .await
+            ),
+            json!(200_000)
         );
-        let worker = ScriptWorker {
-            max_operations: u64::MAX,
-            deadline: Duration::from_millis(20),
-            ..ScriptWorker::default()
-        };
-        assert!(failure(run(&worker, config("loop {}", json!(null))).await).contains("deadline"));
-        assert_eq!(
-            output(run(&worker, config("7", json!(null))).await),
-            json!(7)
-        );
-        let worker = ScriptWorker {
-            max_operations: u64::MAX,
-            ..ScriptWorker::default()
-        };
-        let progress = Arc::new(tokio::sync::Notify::new());
+        let progress = Arc::new(Notify::new());
         let notify = Arc::clone(&progress);
         let attempt = worker
             .admit_with(
                 config("loop {}", json!(null)),
+                scope(),
                 |_| {},
-                move |config, cancellation, deadline, operations| {
+                move |config, cancellation, _| {
                     evaluate_with(
                         config,
                         cancellation,
-                        deadline,
-                        operations,
+                        |_| {},
                         CompiledSchema::compile,
                         move || notify.notify_one(),
                     )
@@ -832,11 +879,8 @@ mod tests {
     async fn schema_compilation_is_admitted_once_and_settles_before_releasing_capacity() {
         use std::sync::atomic::AtomicUsize;
 
-        for cancel in [true, false] {
-            let worker = ScriptWorker {
-                deadline: Duration::from_millis(100),
-                ..ScriptWorker::default()
-            };
+        {
+            let worker = ScriptWorker::default();
             let compiled = Arc::new(AtomicUsize::new(0));
             let compile_count = Arc::clone(&compiled);
             let (started_tx, started_rx) = oneshot::channel();
@@ -847,18 +891,18 @@ mod tests {
             let active = worker
                 .admit_with(
                     invalid_schema.clone(),
+                    scope(),
                     move |result| {
                         let _ = terminal_tx.send(result);
                     },
-                    move |config, cancellation, deadline, operations| {
+                    move |config, cancellation, _| {
                         evaluate_with(
                             config,
                             cancellation,
-                            deadline,
-                            operations,
+                            |_| {},
                             move |schema| {
                                 compile_count.fetch_add(1, Ordering::Relaxed);
-                                let _ = started_tx.send(deadline);
+                                let _ = started_tx.send(());
                                 release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
                                 CompiledSchema::compile(schema)
                             },
@@ -870,22 +914,26 @@ mod tests {
             // A current-thread runtime can receive this only if compilation
             // is off its async thread and admission did not compile the schema.
             let started = tokio::time::timeout(Duration::from_secs(1), started_rx).await;
-            let deadline = match started {
-                Ok(Ok(deadline)) => deadline,
+            match started {
+                Ok(Ok(())) => {}
                 error => {
                     let _ = release_tx.send(());
                     active.cancel();
                     let result = active.settle().await;
                     panic!("schema worker did not start: {error:?}; {result:?}");
                 }
-            };
+            }
             let mut queued = Vec::new();
-            for _ in 0..SCRIPT_PENDING_CAPACITY {
-                queued.push(worker.admit(invalid_schema.clone(), |_| {}).unwrap());
+            for _ in 0..PENDING {
+                queued.push(
+                    worker
+                        .admit(invalid_schema.clone(), scope(), |_| {})
+                        .unwrap(),
+                );
             }
             assert!(
                 worker
-                    .admit(invalid_schema, |_| {})
+                    .admit(invalid_schema, scope(), |_| {})
                     .err()
                     .unwrap()
                     .contains("capacity exceeded")
@@ -893,11 +941,7 @@ mod tests {
             let queued_cancel = queued.pop().unwrap();
             queued_cancel.cancel();
             assert_eq!(failure(queued_cancel.settle().await), "Cancelled");
-            if cancel {
-                active.cancel();
-            } else {
-                tokio::time::sleep_until(deadline.into()).await;
-            }
+            active.cancel();
             assert_eq!(worker.active.available_permits(), 0);
             assert_eq!(compiled.load(Ordering::Relaxed), 1);
             assert!(
@@ -909,10 +953,7 @@ mod tests {
             }
             release_tx.send(()).unwrap();
             let error = failure(active.settle().await);
-            assert!(
-                error.contains(if cancel { "Cancelled" } else { "deadline" }),
-                "{error}"
-            );
+            assert!(error.contains("Cancelled"), "{error}");
             for attempt in queued {
                 let _ = attempt.settle().await;
             }
@@ -956,13 +997,14 @@ mod tests {
         let active = worker
             .admit_with(
                 config("42", json!(null)),
+                scope(),
                 {
                     let terminal_tx = terminal_tx.clone();
                     move |result| {
                         let _ = terminal_tx.send(result);
                     }
                 },
-                move |_, _, _, _| {
+                move |_, _, _| {
                     let _ = started_tx.send(());
                     release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
                     panic!("injected worker panic")
@@ -977,11 +1019,11 @@ mod tests {
             panic!("blocking worker did not start: {result:?}");
         }
         let mut queued = Vec::new();
-        for _ in 0..SCRIPT_PENDING_CAPACITY {
+        for _ in 0..PENDING {
             let terminal_tx = terminal_tx.clone();
             queued.push(
                 worker
-                    .admit(config("42", json!(null)), move |result| {
+                    .admit(config("42", json!(null)), scope(), move |result| {
                         let _ = terminal_tx.send(result);
                     })
                     .unwrap(),
@@ -990,7 +1032,7 @@ mod tests {
         assert_eq!(worker.active.available_permits(), 0);
         assert_eq!(worker.admitted.available_permits(), 0);
         let overflow = worker
-            .admit(config("42", json!(null)), |_| {})
+            .admit(config("42", json!(null)), scope(), |_| {})
             .err()
             .unwrap();
         assert!(overflow.contains("capacity exceeded"));
@@ -1004,7 +1046,11 @@ mod tests {
         );
         assert_eq!(worker.admitted.available_permits(), 1);
         let replacement = worker
-            .admit(config("inputs.value", json!("replacement")), |_| {})
+            .admit(
+                config("inputs.value", json!("replacement")),
+                scope(),
+                |_| {},
+            )
             .unwrap();
         // The only Tokio thread remains responsive while the blocking worker waits.
         tokio::task::yield_now().await;
@@ -1033,7 +1079,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_malformed_and_oversized_data_before_admission() {
+    async fn rejects_malformed_config_but_never_caps_script_context_or_result_size() {
         let worker = ScriptWorker::default();
         for invalid in [
             ExecuteConfig {
@@ -1045,48 +1091,47 @@ mod tests {
                 output_schema: json!([]),
                 ..config("inputs.value", json!(null))
             },
-            config(&"x".repeat(SCRIPT_MAX_SOURCE_BYTES + 1), json!(null)),
-            config("inputs.value", json!("x".repeat(MAX_STRING_BYTES + 1))),
         ] {
-            assert!(worker.admit(invalid, |_| {}).is_err());
+            assert!(worker.admit(invalid, scope(), |_| {}).is_err());
             assert_eq!(worker.admitted.available_permits(), 5);
         }
-        let error = failure(
-            run(
-                &worker,
-                config(
-                    "let result = []; for x in 0..100 { result.push(inputs.value); } result",
-                    json!("x".repeat(16_384)),
-                ),
-            )
-            .await,
-        );
-        assert!(error.contains("Length of string too large"), "{error}");
+        let large = "x".repeat(2 * 1024 * 1024);
+        let padded = format!("// {large}\ninputs.value.len()");
         assert_eq!(
-            output(run(&worker, config("10", json!(null))).await),
-            json!(10)
+            output(run(&worker, config(&padded, json!(large))).await),
+            json!(large.len())
+        );
+        let wide: Vec<_> = (0..20_000).collect();
+        let deep = (0..100).fold(json!(1), |value, _| json!([value]));
+        assert_eq!(
+            output(
+                run(
+                    &worker,
+                    config("inputs.value", json!({"wide": wide, "deep": deep}))
+                )
+                .await
+            ),
+            json!({"wide": wide, "deep": deep})
+        );
+        assert_eq!(
+            output(
+                run(
+                    &worker,
+                    config(
+                        "let result = []; for x in 0..100 { result.push(inputs.value); } result.len()",
+                        json!("x".repeat(16_384)),
+                    ),
+                )
+                .await
+            ),
+            json!(100)
         );
         let error = failure(run(&worker, config("|| 42", json!(null))).await);
         assert!(error.contains("not JSON"), "{error}");
-    }
-
-    #[test]
-    fn aggregate_result_budget_counts_repeated_strings_before_json_conversion() {
-        let text = rhai::ImmutableString::from("x".repeat(16_384));
-        let values: rhai::Array = (0..100).map(|_| Dynamic::from(text.clone())).collect();
-        let result = Dynamic::from(values);
-        let error = validate_dynamic_result(&result, 0, &mut 0).unwrap_err();
-        assert!(error.contains("1048576 byte JSON limit"), "{error}");
         assert!(
-            validate_dynamic_result(&Dynamic::from(rhai::FLOAT::NAN), 0, &mut 0)
+            validate_json_result(&Dynamic::from(rhai::FLOAT::NAN))
                 .unwrap_err()
                 .contains("non-finite")
-        );
-        assert_eq!(
-            json_string_size("quote \" newline\n slash \\"),
-            serde_json::to_string("quote \" newline\n slash \\")
-                .unwrap()
-                .len()
         );
     }
 
@@ -1098,8 +1143,9 @@ mod tests {
         let attempt = worker
             .admit_with(
                 config("42", json!(null)),
+                scope(),
                 |_| {},
-                move |_, _, _, _| {
+                move |_, _, _| {
                     marker.store(true, Ordering::Relaxed);
                     panic!("cancelled evaluation must not start")
                 },
@@ -1110,5 +1156,181 @@ mod tests {
         assert!(!evaluated.load(Ordering::Relaxed));
         assert_eq!(worker.active.available_permits(), 1);
         assert_eq!(worker.admitted.available_permits(), 5);
+    }
+
+    fn host_worker(
+        register: impl Fn(&mut rhai::Module, &HostContext) + Send + Sync + 'static,
+    ) -> ScriptWorker {
+        ScriptWorker::with_host_api(
+            ScriptSlots::default(),
+            Arc::new(move |engine, host| {
+                let mut module = rhai::Module::new();
+                register(&mut module, host);
+                engine.register_static_module("test", module.into());
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn active_and_pending_slots_come_from_daemon_settings() {
+        let worker = ScriptWorker::new(ScriptSlots {
+            active: 2,
+            pending: 1,
+        });
+        assert_eq!(worker.active.available_permits(), 2);
+        assert_eq!(worker.admitted.available_permits(), 3);
+        let attempts: Vec<_> = (0..3)
+            .map(|_| {
+                worker
+                    .admit(config("loop {}", json!(null)), scope(), |_| {})
+                    .unwrap()
+            })
+            .collect();
+        let overflow = worker
+            .admit(config("42", json!(null)), scope(), |_| {})
+            .err()
+            .unwrap();
+        assert!(
+            overflow.contains("capacity exceeded (2 active, 1 pending)"),
+            "{overflow}"
+        );
+        for attempt in &attempts {
+            attempt.cancel();
+        }
+        for attempt in attempts {
+            assert_eq!(failure(attempt.settle().await), "Cancelled");
+        }
+        assert_eq!(worker.active.available_permits(), 2);
+        assert_eq!(worker.admitted.available_permits(), 3);
+        let default = ScriptWorker::default();
+        assert_eq!(default.active.available_permits(), 1);
+        assert_eq!(default.admitted.available_permits(), 1 + PENDING);
+    }
+
+    #[tokio::test]
+    async fn host_calls_receive_the_execution_project_and_return_values_to_the_script() {
+        let worker = host_worker(|module, host| {
+            let host = host.clone();
+            module.set_native_fn("project", move || {
+                Ok(host.call(|_, project| async move { Ok(project.to_string()) })?)
+            });
+        });
+        assert_eq!(
+            output(run(&worker, config("test::project()", json!(null))).await),
+            json!("script-project")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn slow_host_call_blocks_only_its_worker_thread() {
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let worker = {
+            let (started, release) = (Arc::clone(&started), Arc::clone(&release));
+            host_worker(move |module, host| {
+                let (host, started, release) =
+                    (host.clone(), Arc::clone(&started), Arc::clone(&release));
+                module.set_native_fn("slow", move || {
+                    started.notify_one();
+                    let release = Arc::clone(&release);
+                    Ok(host.call(|_, _| async move {
+                        release.notified().await;
+                        Ok(7 as rhai::INT)
+                    })?)
+                });
+            })
+        };
+        let attempt = worker
+            .admit(config("test::slow() * 6", json!(null)), scope(), |_| {})
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), started.notified())
+            .await
+            .expect("host call started");
+        // The only Tokio thread still runs timers and other tasks while the
+        // host call is in flight on the blocking worker.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(tokio::spawn(async { 41 + 1 }).await.unwrap(), 42);
+        assert_eq!(worker.active.available_permits(), 0);
+        release.notify_one();
+        assert_eq!(output(attempt.settle().await), json!(42));
+        assert_eq!(worker.active.available_permits(), 1);
+        assert_eq!(worker.admitted.available_permits(), 5);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelling_a_hung_host_call_settles_once_and_releases_the_slot() {
+        let worker = ScriptWorker::with_host_api(ScriptSlots::default(), hanging_host_api());
+        for script in [
+            "test::hang()",
+            // Catching the cancellation cannot turn it into a success.
+            "let kind = (); try { test::hang(); } catch (error) { kind = error.kind; } kind",
+        ] {
+            let (terminal_tx, mut terminal_rx) = tokio::sync::mpsc::unbounded_channel();
+            let attempt = worker
+                .admit(config(script, json!(null)), scope(), move |result| {
+                    let _ = terminal_tx.send(result);
+                })
+                .unwrap();
+            let queued = worker
+                .admit(config("5", json!(null)), scope(), |_| {})
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            assert_eq!(worker.active.available_permits(), 0, "{script}");
+            attempt.cancel();
+            assert_eq!(failure(attempt.settle().await), "Cancelled", "{script}");
+            assert_eq!(output(queued.settle().await), json!(5));
+            assert_eq!(failure(terminal_rx.recv().await.unwrap()), "Cancelled");
+            assert!(terminal_rx.try_recv().is_err(), "one terminal result");
+            assert_eq!(worker.active.available_permits(), 1);
+            assert_eq!(worker.admitted.available_permits(), 5);
+        }
+    }
+
+    #[tokio::test]
+    async fn host_function_panic_fails_the_attempt_and_capacity_recovers() {
+        let worker = host_worker(|module, _| {
+            module.set_native_fn("boom", || -> Result<rhai::INT, Box<EvalAltResult>> {
+                panic!("injected host panic")
+            });
+        });
+        let error = failure(run(&worker, config("test::boom()", json!(null))).await);
+        assert!(error.contains("panicked"), "{error}");
+        assert!(error.contains("injected host panic"), "{error}");
+        assert_eq!(worker.active.available_permits(), 1);
+        assert_eq!(worker.admitted.available_permits(), 5);
+        assert_eq!(
+            output(run(&worker, config("11", json!(null))).await),
+            json!(11)
+        );
+    }
+
+    #[tokio::test]
+    async fn service_errors_raise_catchable_kinds_distinguishing_not_found_from_transport() {
+        let worker = host_worker(|module, host| {
+            let host = host.clone();
+            module.set_native_fn("fail", move |kind: rhai::ImmutableString| {
+                let error = match kind.as_str() {
+                    "missing" => ServiceError::task_not_found("gone"),
+                    "invalid" => ServiceError::InvalidInput("bad".into()),
+                    _ => ServiceError::NetworkError("connection refused".into()),
+                };
+                Ok(host.call(|_, _| async move { Err::<rhai::INT, _>(error) })?)
+            });
+        });
+        for (argument, kind) in [
+            ("missing", "not_found"),
+            ("invalid", "invalid"),
+            ("network", "transport"),
+        ] {
+            let script = format!(
+                "let caught = (); try {{ test::fail(\"{argument}\"); }} catch (error) {{ caught = error; }} caught"
+            );
+            let caught = output(run(&worker, config(&script, json!(null))).await);
+            assert_eq!(caught["kind"], kind);
+            assert!(!caught["message"].as_str().unwrap().is_empty());
+        }
+        let error = failure(run(&worker, config("test::fail(\"network\")", json!(null))).await);
+        assert!(error.contains("transport"), "{error}");
+        assert!(error.contains("connection refused"), "{error}");
     }
 }

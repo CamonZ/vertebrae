@@ -367,6 +367,7 @@ fn sample_daemon_config() -> DaemonConfig {
             typesafe_url: None,
             provider_profiles: Default::default(),
         }),
+        script_slots: Default::default(),
     }
 }
 
