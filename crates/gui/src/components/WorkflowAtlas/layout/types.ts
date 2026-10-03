@@ -18,6 +18,7 @@
  */
 export type Kind =
   | "llm"
+  | "execute"
   | "structured"
   | "route"
   | "wait"

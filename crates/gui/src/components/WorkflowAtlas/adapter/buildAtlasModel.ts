@@ -35,7 +35,8 @@ export function stepRef(workflowId: string, stepId: string): string {
  * Derive the visual `Kind` of a step.
  *
  *  Maps the REAL backend `StepType` via `hearthStepKind`, renaming the Hearth
- *  kinds to the Atlas vocabulary: `llm`, `wait`, and `human`. Unknown
+ *  kinds to the Atlas vocabulary: `llm`, `wait`, and `human`. Execute has its
+ *  own Atlas kind. Unknown
  *  step types render as a generic `llm` process box.
  */
 export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
@@ -45,6 +46,7 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
   const known: ReadonlySet<string> = new Set([
     "llm_inference",
     "structured_inference",
+    "execute",
     "route",
     "human_input",
     "wait_children",
@@ -54,6 +56,7 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
   const raw = step.step_type;
   if (raw === null || !known.has(raw)) return "llm";
 
+  if (raw === "execute") return "execute";
   const hearth = hearthStepKind(raw as StepType);
   switch (hearth) {
     case "llm":

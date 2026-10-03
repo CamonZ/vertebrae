@@ -493,19 +493,37 @@ async fn given_create_step_with_type_in_workflow_via_cli(
         })
         .clone();
 
-    world
-        .run_vtb(&[
-            "step",
-            "add",
-            "--workflow",
-            &workflow_id,
-            "--step-type",
-            &step_type,
-            &step_name,
-            "--harness",
-            "claude",
-        ])
-        .await;
+    if step_type == "execute" {
+        world
+            .run_vtb(&[
+                "step",
+                "add",
+                "--workflow",
+                &workflow_id,
+                "--step-type",
+                &step_type,
+                "--script",
+                r#"#{"result": 42}"#,
+                "--output-schema",
+                r#"{"type":"object","properties":{"result":{"type":"number"}},"required":["result"]}"#,
+                &step_name,
+            ])
+            .await;
+    } else {
+        world
+            .run_vtb(&[
+                "step",
+                "add",
+                "--workflow",
+                &workflow_id,
+                "--step-type",
+                &step_type,
+                &step_name,
+                "--harness",
+                "claude",
+            ])
+            .await;
+    }
     assert_eq!(
         world.last_exit_code, 0,
         "vtb step add failed: {}{}",

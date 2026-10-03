@@ -25,6 +25,21 @@ Feature: Real-time step detail panel updates
     Then the GUI should show "Step Configuration" within 5 seconds
     And the GUI element with test id "step-type-badge" should have text "human_input" within 5 seconds
 
+  Scenario: Execute step type renders its Rhai script and output schema in the detail panel
+    Given I create a workflow with:
+      | name | Execute Step Panel Workflow |
+    And I create a step "Rhai Transform" with type "execute" in the workflow "Execute Step Panel Workflow" via the CLI
+    And the GUI is on the pipeline view
+    And I select factory "No Factory"
+    Then the GUI should show "Rhai Transform" within 10 seconds
+    When I click on the element with test id "step-node-Rhai Transform"
+    Then the GUI should show "Step Configuration" within 5 seconds
+    And the GUI element with test id "step-type-badge" should have text "execute" within 5 seconds
+    And the GUI should show an element with test id "execute-script-section" within 5 seconds
+    And the GUI should show an element with test id "rhai-script-highlighted" within 5 seconds
+    And the GUI element with test id "rhai-script-highlighted" should contain text "result" within 5 seconds
+    And the GUI should show "Output Schema" within 5 seconds
+
   Scenario: Harness selected in the GUI step editor is saved and displayed
     Given I create a workflow with:
       | name | Step Harness Panel Workflow |

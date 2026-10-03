@@ -18,6 +18,7 @@ import { useStep } from "../../../hooks";
 import {
   commands,
   type JsonValue,
+  type ExecuteStepConfig,
   type LlmInferenceStepConfig,
   type RouteStepConfig,
   type StepHarness,
@@ -32,6 +33,7 @@ import type { AtlasModel, AtlasWorkflow } from "../layout/types";
 import type { AtlasSelection } from "./selection";
 import { kindClass } from "./selection";
 import { StructuredInferenceQuestions } from "./StructuredInferenceQuestions";
+import { RhaiScript } from "./RhaiScript";
 import {
   EMPTY_STRUCTURED_INPUT,
   structuredInferenceConfig,
@@ -65,6 +67,8 @@ function backendTypeForKind(kind: string): string {
       return "human_input";
     case "structured":
       return "structured_inference";
+    case "execute":
+      return "execute";
     case "wait":
       return "wait_children";
     case "route":
@@ -117,6 +121,7 @@ export function StepInspector({
   const [goal, setGoal] = useState("");
   const [harness, setHarness] = useState<StepHarness | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [script, setScript] = useState("");
   const [agentsText, setAgentsText] = useState("");
   const [skillsText, setSkillsText] = useState("");
   const [transitionsTo, setTransitionsTo] = useState("");
@@ -143,6 +148,11 @@ export function StepInspector({
         ? (cfg.config as LlmInferenceStepConfig | null)
         : null;
     setPrompt(inferenceConfig?.prompt ?? "");
+    setScript(
+      cfg.step_type === "execute"
+        ? ((cfg.config as ExecuteStepConfig | null)?.script ?? "")
+        : ""
+    );
     setAgentsText((inferenceConfig?.agents ?? []).join(", "));
     setSkillsText((inferenceConfig?.skills ?? []).join(", "));
     setTransitionsTo((cfg.transitions_to ?? []).join(", "));
@@ -242,6 +252,11 @@ export function StepInspector({
     cfg?.step_type === "llm_inference"
       ? (cfg.config as LlmInferenceStepConfig | null)
       : null;
+  const executeConfig =
+    cfg?.step_type === "execute"
+      ? (cfg.config as ExecuteStepConfig | null)
+      : null;
+  const isExecute = cfg?.step_type === "execute";
   const route =
     cfg?.step_type === "route" ? (cfg.config as RouteStepConfig | null) : null;
   const structuredConfig =
@@ -279,13 +294,22 @@ export function StepInspector({
     }
 
     let parsedSchema: JsonValue | null = null;
-    if (outputConfig && outputSchema.trim()) {
+    if ((outputConfig || isExecute) && outputSchema.trim()) {
       try {
         parsedSchema = JSON.parse(outputSchema) as JsonValue;
       } catch {
         setError("Output schema must be valid JSON.");
         return;
       }
+    }
+    if (
+      isExecute &&
+      (parsedSchema === null ||
+        typeof parsedSchema !== "object" ||
+        Array.isArray(parsedSchema))
+    ) {
+      setError("Execute steps require a valid output schema.");
+      return;
     }
 
     let structuredPatch: Record<string, JsonValue> | undefined;
@@ -366,28 +390,35 @@ export function StepInspector({
     setSaving(true);
     setError(null);
     try {
-      const config = isInference
+      const config = isExecute
         ? {
-            prompt: prompt || null,
-            agents: listValue(agentsText),
-            skills: listValue(skillsText),
-            agent_config: {
-              ...inference?.agent_config,
-              model: modelValue || null,
-            },
-            output_schema: parsedSchema,
+            version: executeConfig?.version ?? 1,
+            script,
+            context: null,
+            output_schema: parsedSchema as JsonValue,
           }
-        : cfg?.step_type === "wait_children"
-          ? { output_schema: parsedSchema }
-          : cfg?.step_type === "route"
-            ? { route_config: parsedRouteConfig }
-            : structuredPatch;
+        : isInference
+          ? {
+              prompt: prompt || null,
+              agents: listValue(agentsText),
+              skills: listValue(skillsText),
+              agent_config: {
+                ...inference?.agent_config,
+                model: modelValue || null,
+              },
+              output_schema: parsedSchema,
+            }
+          : cfg?.step_type === "wait_children"
+            ? { output_schema: parsedSchema }
+            : cfg?.step_type === "route"
+              ? { route_config: parsedRouteConfig }
+              : structuredPatch;
       await unwrapCommand(
         commands.updateStep({
           step_id: stepId,
           name,
           goal,
-          harness,
+          harness: isExecute ? null : harness,
           config,
           persistence_options: parsedPersistence,
           clear_persistence_options: clearPersistenceOptions,
@@ -464,20 +495,22 @@ export function StepInspector({
             Goal
             <textarea value={goal} onChange={(e) => setGoal(e.target.value)} />
           </label>
-          <label>
-            Harness
-            <select
-              aria-label="Step harness"
-              value={harness ?? ""}
-              onChange={(event) =>
-                setHarness((event.target.value || null) as StepHarness | null)
-              }
-            >
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-              <option value="typesafe">TypeSafe</option>
-            </select>
-          </label>
+          {!isExecute ? (
+            <label>
+              Harness
+              <select
+                aria-label="Step harness"
+                value={harness ?? ""}
+                onChange={(event) =>
+                  setHarness((event.target.value || null) as StepHarness | null)
+                }
+              >
+                <option value="claude">Claude</option>
+                <option value="codex">Codex</option>
+                <option value="typesafe">TypeSafe</option>
+              </select>
+            </label>
+          ) : null}
           {isInference ? (
             <>
               <label>
@@ -517,6 +550,28 @@ export function StepInspector({
               value={structured}
               onChange={setStructured}
             />
+          ) : null}
+          {isExecute ? (
+            <>
+              <label>
+                Rhai script
+                <textarea
+                  aria-label="Rhai script"
+                  value={script}
+                  onChange={(event) => setScript(event.target.value)}
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                Output schema
+                <textarea
+                  aria-label="Output schema"
+                  value={outputSchema}
+                  onChange={(event) => setOutputSchema(event.target.value)}
+                  placeholder="JSON Schema"
+                />
+              </label>
+            </>
           ) : null}
           <label>
             Transitions{" "}
@@ -588,12 +643,14 @@ export function StepInspector({
           )}
         </section>
 
-        <section className="wfd-sec" data-testid="step-harness-section">
-          <div className="wfd-lbl">Harness</div>
-          <div className="wfd-text" data-testid="step-harness-value">
-            {cfg?.harness ?? "Sacrum default"}
-          </div>
-        </section>
+        {!isExecute ? (
+          <section className="wfd-sec" data-testid="step-harness-section">
+            <div className="wfd-lbl">Harness</div>
+            <div className="wfd-text" data-testid="step-harness-value">
+              {cfg?.harness ?? "Sacrum default"}
+            </div>
+          </section>
+        ) : null}
 
         {isStructured ? (
           <section className="wfd-sec" data-testid="structured-state-section">
@@ -610,6 +667,19 @@ export function StepInspector({
                   JSON.stringify(structuredState, null, 2)
                 )}
               </pre>
+            )}
+          </section>
+        ) : isExecute ? (
+          <section className="wfd-sec" data-testid="execute-script-section">
+            <div className="wfd-lbl">Rhai Script</div>
+            {executeConfig?.script ? (
+              <div data-testid="execute-script-value">
+                <RhaiScript source={executeConfig.script} />
+              </div>
+            ) : (
+              <div className="wfd-placeholder">
+                {isLoading ? "Loading…" : "No script configured"}
+              </div>
             )}
           </section>
         ) : (
@@ -667,39 +737,43 @@ export function StepInspector({
           </div>
         </section>
 
-        <section className="wfd-sec">
-          <div className="wfd-lbl">
-            Agents <span className="n">{agents.length}</span>
-          </div>
-          {agents.length ? (
-            <div className="wfd-chiprow">
-              {agents.map((a) => (
-                <span key={a} className="wfd-chip">
-                  {a}
-                </span>
-              ))}
+        {!isExecute ? (
+          <section className="wfd-sec">
+            <div className="wfd-lbl">
+              Agents <span className="n">{agents.length}</span>
             </div>
-          ) : (
-            <div className="wfd-placeholder">No agents</div>
-          )}
-        </section>
+            {agents.length ? (
+              <div className="wfd-chiprow">
+                {agents.map((a) => (
+                  <span key={a} className="wfd-chip">
+                    {a}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="wfd-placeholder">No agents</div>
+            )}
+          </section>
+        ) : null}
 
-        <section className="wfd-sec">
-          <div className="wfd-lbl">
-            Skills <span className="n">{skills.length}</span>
-          </div>
-          {skills.length ? (
-            <div className="wfd-chiprow">
-              {skills.map((s) => (
-                <span key={s} className="wfd-chip">
-                  {s}
-                </span>
-              ))}
+        {!isExecute ? (
+          <section className="wfd-sec">
+            <div className="wfd-lbl">
+              Skills <span className="n">{skills.length}</span>
             </div>
-          ) : (
-            <div className="wfd-placeholder">No skills</div>
-          )}
-        </section>
+            {skills.length ? (
+              <div className="wfd-chiprow">
+                {skills.map((s) => (
+                  <span key={s} className="wfd-chip">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="wfd-placeholder">No skills</div>
+            )}
+          </section>
+        ) : null}
 
         <section className="wfd-sec">
           <div className="wfd-lbl">
@@ -724,30 +798,35 @@ export function StepInspector({
           )}
         </section>
 
-        <section className="wfd-sec">
-          <div className="wfd-lbl">Model</div>
-          {isStructured ? (
+        {!isExecute ? (
+          <section className="wfd-sec">
+            <div className="wfd-lbl">Model</div>
+            {isStructured ? (
+              <div className="wfd-row">
+                <span className="rk">Provider</span>
+                {structuredConfig?.provider ? (
+                  <span className="wfd-pill">{structuredConfig.provider}</span>
+                ) : (
+                  <span className="wfd-placeholder">none</span>
+                )}
+              </div>
+            ) : null}
             <div className="wfd-row">
-              <span className="rk">Provider</span>
-              {structuredConfig?.provider ? (
-                <span className="wfd-pill">{structuredConfig.provider}</span>
+              <span className="rk">Primary</span>
+              {model_ ? (
+                <span className="wfd-pill">{model_}</span>
               ) : (
                 <span className="wfd-placeholder">none</span>
               )}
             </div>
-          ) : null}
-          <div className="wfd-row">
-            <span className="rk">Primary</span>
-            {model_ ? (
-              <span className="wfd-pill">{model_}</span>
-            ) : (
-              <span className="wfd-placeholder">none</span>
-            )}
-          </div>
-        </section>
+          </section>
+        ) : null}
 
         {isStructured ? (
-          <section className="wfd-sec" data-testid="structured-questions-section">
+          <section
+            className="wfd-sec"
+            data-testid="structured-questions-section"
+          >
             <div className="wfd-lbl">Questions</div>
             {structuredConfig?.questions ? (
               <pre>{JSON.stringify(structuredConfig.questions, null, 2)}</pre>
@@ -760,12 +839,16 @@ export function StepInspector({
         ) : null}
 
         {cfg?.step_type === "llm_inference" ||
-        cfg?.step_type === "wait_children" ? (
+        cfg?.step_type === "wait_children" ||
+        isExecute ? (
           <section className="wfd-sec">
             <div className="wfd-lbl">Output Schema</div>
-            {outputConfig?.output_schema ? (
+            {(outputConfig?.output_schema ?? executeConfig?.output_schema) ? (
               <SchemaTree
-                schema={outputConfig.output_schema as Record<string, unknown>}
+                schema={
+                  (outputConfig?.output_schema ??
+                    executeConfig?.output_schema) as Record<string, unknown>
+                }
               />
             ) : (
               <div className="wfd-placeholder">
