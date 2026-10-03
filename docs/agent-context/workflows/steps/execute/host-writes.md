@@ -14,7 +14,7 @@ Use this when: turning a plan into child tasks, or maintaining task fields from 
   `()`. Tag changes read the current tags and write the full set, so two
   scripts editing the same task's tags at once can overwrite each other.
 - `vtb::tasks::archive(id)` and `unarchive(id)` do nothing when the task is
-  already in that state.
+  already in that state. To delete a task, see [deleting](host-deletes.md).
 
 Writes apply immediately and are not undone when the script fails later. If
 adding `depends_on` fails, the new task stays without its dependencies.
@@ -64,5 +64,6 @@ The first run lists every child under `created`; a rerun lists them under
 one doesn't bring it back.
 
 ## Related
-[Reading tasks and artifacts](host-reads.md) · [Settings](settings.md) ·
+[Reading tasks and artifacts](host-reads.md) · [Deleting](host-deletes.md) ·
+[Settings](settings.md) ·
 [Context bindings and output](input-output.md)
