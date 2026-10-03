@@ -78,15 +78,13 @@ describe("StepNodeGeo", () => {
     );
   });
 
-  it("carries the lane-aligned seam geometry onto the stop node", () => {
-    render(
-      <StepNodeGeo
-        step={makeStep("stop", { seamOffset: 18, seamExtent: 142 })}
-      />
-    );
+  it("renders the run-boundary seam label across its lane", () => {
+    render(<StepNodeGeo step={makeStep("stop", { w: 264 })} />);
 
     const node = screen.getByTestId("step-node-stop step");
-    expect(node.style.getPropertyValue("--seam-offset")).toBe("18px");
-    expect(node.style.getPropertyValue("--seam-extent")).toBe("142px");
+    expect(node).toHaveStyle({ width: "264px" });
+    expect(node.querySelector(".ag-stop-label")).toHaveTextContent(
+      "Run boundary"
+    );
   });
 });

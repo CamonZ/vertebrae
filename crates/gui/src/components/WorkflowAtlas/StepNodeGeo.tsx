@@ -142,9 +142,7 @@ function NodeContent({
     case "route":
       return (
         <>
-          <span className="ag-route-diamond" aria-hidden="true">
-            <span>↗</span>
-          </span>
+          <span className="ag-route-diamond" aria-hidden="true" />
           <span className="ag-route-label">
             <Eyebrow>Route</Eyebrow>
             <StepTitle>{step.goal?.trim() || step.name}</StepTitle>
@@ -232,16 +230,11 @@ export function StepNodeGeo({
     event.stopPropagation();
     select();
   };
-  const style: CSSProperties & {
-    "--seam-offset"?: string;
-    "--seam-extent"?: string;
-  } = {
+  const style: CSSProperties = {
     left: step.x,
     top: step.y,
     width: step.w,
     height: step.h,
-    "--seam-offset": `${step.seamOffset ?? 0}px`,
-    "--seam-extent": `${step.seamExtent ?? 0}px`,
   };
   const accessibleDescription =
     running > 0

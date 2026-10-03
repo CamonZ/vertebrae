@@ -668,6 +668,21 @@ export function WorkflowAtlas() {
                 </svg>
               )}
 
+              {showGraphChrome &&
+                full?.cross.map((edge) => {
+                  if (!edge.labelPos || !edge.label) return null;
+                  return (
+                    <EdgeLabel
+                      key={`graph-${edge.id}`}
+                      labels={[edge.label]}
+                      left={edge.labelPos.x}
+                      top={edge.labelPos.y}
+                      state={crossEdgeState(edge)}
+                      variant="graph"
+                    />
+                  );
+                })}
+
               {/* ── GRAPH chrome: step nodes (above the boxes) ────────── */}
               {full && (
                 <div

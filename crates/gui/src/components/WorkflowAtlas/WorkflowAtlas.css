@@ -427,6 +427,26 @@
 .uv-wf.dim {
   opacity: 0.3;
 }
+.uv-wf.graph-lane {
+  overflow: visible;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.uv-wf.graph-lane:hover,
+.uv-wf.graph-lane.lit {
+  border-color: transparent;
+  box-shadow: none;
+}
+.uv-wf.graph-lane.lit .ag-wf-name {
+  color: var(--accent);
+}
+.uv-wf.graph-lane .ag-wf-hd {
+  padding: var(--s-3) var(--s-3h) 0;
+  border: 0;
+  background: transparent;
+}
 
 .uv-face {
   position: absolute;
@@ -699,6 +719,27 @@
 .al-cond.dim {
   opacity: 0.2;
 }
+.ag-cond {
+  position: absolute;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-mute);
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ag-cond.lit {
+  border-color: var(--step-route);
+  color: var(--step-route-fg);
+}
+.ag-cond.dim {
+  opacity: 0.2;
+}
 
 /* ── Role-specific step forms (graph nodes are positioned by ELK) ── */
 .ag-step {
@@ -806,7 +847,7 @@
 }
 .ag-step--llm .ag-step-card-body,
 .ag-step--structured .ag-step-card-body {
-  padding: 13px 15px 10px;
+  padding: 14px 16px 12px;
 }
 .ag-step--llm .ag-step-live-line {
   display: flex;
@@ -814,7 +855,7 @@
   align-items: center;
   gap: 8px;
   overflow: hidden;
-  padding: 7px 15px;
+  padding: 8px 16px;
   border-top: 1px solid var(--line);
   color: var(--fg-soft);
   font-family: var(--mono);
@@ -849,8 +890,8 @@
   animation: none;
 }
 .ag-step--structured .ag-step-card-footer {
-  min-height: 34px;
-  padding: 7px 15px;
+  min-height: 40px;
+  padding: 12px 16px 14px;
 }
 .ag-primitive-key {
   display: flex;
@@ -953,14 +994,7 @@
   border: 1.5px solid var(--kc);
   border-radius: 6px;
   background: color-mix(in oklch, var(--kw) 75%, var(--bg));
-  color: var(--kf);
   transform: rotate(45deg);
-}
-.ag-route-diamond > span {
-  font-family: var(--mono);
-  font-size: 18px;
-  line-height: 1;
-  transform: rotate(-45deg);
 }
 .ag-route-label {
   display: flex;
@@ -1015,14 +1049,14 @@
 }
 .ag-step--wait .ag-step-card-body {
   overflow: hidden;
-  padding: 12px 14px 9px;
+  padding: 14px 16px 12px;
   gap: 8px;
 }
 .ag-step--wait .ag-step-card-footer {
   justify-content: space-between;
   gap: 8px;
   min-height: 30px;
-  padding: 7px 14px;
+  padding: 7px 16px;
   border-radius: 0 0 var(--r-xl) var(--r-xl);
   color: var(--kf);
 }
@@ -1052,6 +1086,18 @@
   box-shadow:
     0 0 0 4px color-mix(in oklch, var(--kc) 9%, transparent),
     var(--shadow-1);
+}
+.ag-step--human::before {
+  position: absolute;
+  top: -8px;
+  left: calc(50% - 8px);
+  width: 16px;
+  height: 8px;
+  border: 1px solid var(--kc);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: var(--bg);
+  content: "";
 }
 .ag-step--human.is-awaiting-input:not(.is-future-run) {
   animation: ag-human-halo 2s ease-in-out infinite;
@@ -1103,8 +1149,7 @@
   border-style: solid;
 }
 
-/* The Atlas flows left-to-right, so this run boundary crosses that lane
-   vertically and leaves future-run work on its right. */
+/* Stop is a seam across the workflow lane; future-run steps continue below. */
 .ag-step--stop {
   align-items: center;
   justify-content: center;
@@ -1115,13 +1160,13 @@
 .ag-step--stop::before {
   position: absolute;
   z-index: 0;
-  top: var(--seam-offset, 0px);
-  left: 50%;
-  height: var(--seam-extent, 0px);
-  border-left: 1.5px dashed var(--kc);
+  top: 50%;
+  left: 0;
+  width: 100%;
+  border-top: 1.5px dashed var(--kc);
   content: "";
   pointer-events: none;
-  transform: translateX(-50%);
+  transform: translateY(-50%);
 }
 .ag-sr-only {
   position: absolute;

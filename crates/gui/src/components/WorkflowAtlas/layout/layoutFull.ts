@@ -5,16 +5,16 @@
    workflow containers ⊃ step nodes, orthogonal step + cross-workflow routing.
 
    Layout model:
-     • Each workflow is an ELK container laid out RIGHT (steps flow left→right).
-     • The root lays containers DOWN.
+     • Each workflow is an ELK container laid out DOWN (steps flow top→bottom).
+     • The root lays linked workflow containers RIGHT.
      • Forward intra-workflow links are SYNTHESISED here from step order — the
        adapter deliberately does not emit them.
      • Cross-workflow edges route container→container (ELK routes top-level
        nodes reliably across the hierarchy). Their endpoints are re-anchored
        onto the workflow box borders afterwards.
      • Loop-backs (same-workflow `transitions_to`) are kept OUT of ELK and drawn
-       as arcs under the step row from resolved step positions — feeding them to
-       ELK would distort the clean left→right step rows.
+       up the left side of the step lane — feeding them to ELK would distort
+       the clean top→bottom step flow.
      • "Hub" workflows (wired to most others, e.g. a shared review workflow) have
        their cross edges drawn as a light overlay and kept OUT of ELK so a
        fully-connected node doesn't inflate the board into a sparse canvas.
@@ -62,16 +62,17 @@ interface StepSize {
 function stepSize(kind: AtlasStep["kind"], fallback: StepSize): StepSize {
   switch (kind) {
     case "llm":
+      return { width: 240, height: 114 };
     case "structured":
-      return { width: 224, height: 96 };
+      return { width: 240, height: 122 };
     case "execute":
-      return { width: 204, height: 88 };
+      return { width: 220, height: 88 };
     case "route":
       return { width: 138, height: 72 };
     case "wait":
-      return { width: 212, height: 92 };
+      return { width: 220, height: 100 };
     case "human":
-      return { width: 224, height: 88 };
+      return { width: 240, height: 88 };
     case "stop":
       return { width: 184, height: 34 };
     case "finish":
@@ -129,6 +130,32 @@ function elkLabel(
   };
 }
 
+/** Keep a cross-workflow handoff attached to its actual source and target step. */
+function attachCrossEdgeToSteps(
+  points: Point[],
+  source: PlacedStep,
+  target: PlacedStep
+): Point[] {
+  if (points.length < 2) return points;
+  const sourcePortX = points[0].x;
+  const targetPortX = points[points.length - 1].x;
+  const start = { x: source.x + source.w, y: source.y + source.h / 2 };
+  const end = { x: target.x, y: target.y + target.h / 2 };
+  const expanded = [
+    start,
+    { x: sourcePortX, y: start.y },
+    ...points,
+    { x: targetPortX, y: end.y },
+    end,
+  ];
+  return expanded.filter(
+    (point, index) =>
+      index === 0 ||
+      point.x !== expanded[index - 1].x ||
+      point.y !== expanded[index - 1].y
+  );
+}
+
 /**
  * Compute the nested graph layout for an `AtlasModel`.
  *
@@ -166,24 +193,31 @@ export async function layoutFull(
       ] as const;
     })
   );
+  const preferredLaneWidth = 640 / Math.max(1, model.workflows.length);
 
   const meta: Record<string, EdgeMeta> = {};
 
-  // ── containers: one ELK node per workflow, step children laid out RIGHT ──
+  // ── containers: one ELK node per workflow, step children laid out DOWN ──
   const containers: ElkNode[] = model.workflows.map((w) => {
     const wSteps = stepsByWorkflow.get(w.id) ?? [];
+    const widestStep = Math.max(
+      0,
+      ...wSteps.map((step) => sizesByStep.get(step.id)!.width)
+    );
+    const laneMinWidth = Math.max(widestStep + 40, preferredLaneWidth);
     const node: ElkNode = {
       id: w.id,
       layoutOptions: {
         "elk.algorithm": "layered",
-        "elk.direction": "RIGHT",
-        // explicit: keep child layout independent of the root's DOWN flow.
+        "elk.direction": "DOWN",
+        // explicit: keep child layout independent of the root's RIGHT flow.
         "elk.hierarchyHandling": "SEPARATE_CHILDREN",
         "elk.padding": `[top=${HEAD},left=20,bottom=40,right=20]`,
         "elk.spacing.nodeNode": "22",
-        "elk.layered.spacing.nodeNodeBetweenLayers": "34",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "40",
         "elk.nodeSize.constraints": "MINIMUM_SIZE",
-        "elk.nodeSize.minimum": "(216.0,0.0)",
+        "elk.nodeSize.minimum": `(${laneMinWidth}.0,0.0)`,
+        "elk.contentAlignment": "H_CENTER V_TOP",
       },
       children: wSteps.map((st) => ({
         id: st.id,
@@ -266,12 +300,12 @@ export async function layoutFull(
     }
   });
 
-  // ── root graph: containers laid out DOWN, cross edges polyline-routed ──
+  // ── root graph: linked workflow containers laid out RIGHT ──
   const graph: ElkNode = {
     id: "root",
     layoutOptions: {
       "elk.algorithm": "layered",
-      "elk.direction": "DOWN",
+      "elk.direction": "RIGHT",
       "elk.hierarchyHandling": "SEPARATE_CHILDREN",
       // Orthogonal so cross-workflow handoffs read as clean horizontal/vertical
       // runs with 90° turns (matching the map face), not diagonal polylines.
@@ -301,6 +335,7 @@ export async function layoutFull(
       const nodeX = st.x ?? 0;
       const nodeY = st.y ?? 0;
       const nodeWidth = st.width ?? STEP_W;
+      const isStop = def.kind === "stop";
       return {
         id: st.id,
         stepId: def.stepId,
@@ -311,16 +346,10 @@ export async function layoutFull(
         role: def.role,
         futureRun: stopOrder !== undefined && def.order > stopOrder,
         idx: i + 1,
-        x: cx + nodeX,
+        x: cx + (isStop ? 20 : nodeX),
         y: cy + nodeY,
-        w: nodeWidth,
+        w: isStop ? Math.max(0, (c.width ?? nodeWidth + 40) - 40) : nodeWidth,
         h: st.height ?? STEP_H,
-        ...(def.kind === "stop"
-          ? {
-              seamOffset: HEAD - nodeY,
-              seamExtent: Math.max(0, (c.height ?? 0) - HEAD),
-            }
-          : {}),
       };
     });
     const intra: PlacedEdge[] = ((c.edges ?? []) as ElkExtendedEdge[]).map(
@@ -353,7 +382,7 @@ export async function layoutFull(
 
   const wfById = new Map(placedWorkflows.map((w) => [w.id, w]));
 
-  // ── loop-backs: arc under the step row, from resolved step positions ──
+  // ── loop-backs: return up the lane's left gutter ──
   const loopGeo: PlacedEdge[] = loops
     .map((lp): PlacedEdge | null => {
       const w = wfById.get(lp.workflowId);
@@ -361,15 +390,14 @@ export async function layoutFull(
       const from = w.steps.find((s) => s.id === lp.from);
       const to = w.steps.find((s) => s.id === lp.to);
       if (!from || !to) return null;
-      const rowBottom = Math.max(...w.steps.map((s) => s.y + s.h));
-      const lane = rowBottom + 18;
-      const fx = from.x + from.w / 2;
-      const tx = to.x + to.w / 2;
+      const gutterX = Math.min(...w.steps.map((step) => step.x)) - 28;
+      const sourceY = from.y + from.h / 2;
+      const targetY = to.y + to.h / 2;
       const points: Point[] = [
-        { x: fx, y: from.y + from.h },
-        { x: fx, y: lane },
-        { x: tx, y: lane },
-        { x: tx, y: to.y + to.h },
+        { x: from.x, y: sourceY },
+        { x: gutterX, y: sourceY },
+        { x: gutterX, y: targetY },
+        { x: to.x, y: targetY },
       ];
       return {
         id: lp.id,
@@ -380,7 +408,11 @@ export async function layoutFull(
         toWorkflow: lp.workflowId,
         label: lp.label,
         points,
-        labelPos: { text: lp.label ?? "", x: (fx + tx) / 2, y: lane },
+        labelPos: {
+          text: lp.label ?? "",
+          x: (from.x + gutterX) / 2,
+          y: sourceY,
+        },
       };
     })
     .filter((x): x is PlacedEdge => x !== null);
@@ -397,7 +429,14 @@ export async function layoutFull(
       const A = wfById.get(m.fromWorkflow);
       const B = wfById.get(m.toWorkflow);
       let points = edgePoints(firstSection(e), 0, 0);
-      if (A && B) points = anchorEdge(points, A, B);
+      if (A && B) {
+        points = anchorEdge(points, A, B);
+        const source = A.steps.find((step) => step.id === m.from);
+        const target = B.steps.find((step) => step.id === m.to);
+        if (source && target) {
+          points = attachCrossEdgeToSteps(points, source, target);
+        }
+      }
       return {
         id: e.id,
         kind: m.kind,

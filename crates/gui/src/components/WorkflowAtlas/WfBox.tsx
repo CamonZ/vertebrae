@@ -115,7 +115,8 @@ export function WfBox({
 
   const { workflow, shape, stepCount, view = "graph" } = node;
   const w = workflow;
-  const cls = "uv-wf" + (state ? " " + state : "");
+  const cls =
+    "uv-wf" + (view === "graph" ? " graph-lane" : "") + (state ? " " + state : "");
   const stepWord = stepCount === 1 ? "step" : "steps";
   const select = () => onSelect?.(w.id);
   const selectFromName = (event: MouseEvent<HTMLButtonElement>) => {

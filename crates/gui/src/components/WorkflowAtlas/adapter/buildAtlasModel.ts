@@ -56,8 +56,6 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
   const raw = step.step_type;
   if (raw === null || !known.has(raw)) return "llm";
   if (raw === "execute") return "execute";
-
-  if (raw === "execute") return "execute";
   const hearth = hearthStepKind(raw as StepType);
   switch (hearth) {
     case "llm":

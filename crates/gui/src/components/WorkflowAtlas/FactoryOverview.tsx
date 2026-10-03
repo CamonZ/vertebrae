@@ -324,6 +324,20 @@ export function FactoryOverview({
                   </svg>
                 )}
 
+                {workflowView === "graph" &&
+                  full?.cross.map((edge) => {
+                    if (!edge.labelPos || !edge.label) return null;
+                    return (
+                      <EdgeLabel
+                        key={`graph-${edge.id}`}
+                        labels={[edge.label]}
+                        left={edge.labelPos.x}
+                        top={edge.labelPos.y}
+                        variant="graph"
+                      />
+                    );
+                  })}
+
                 <div
                   className={
                     "factory-overview-workflows" +

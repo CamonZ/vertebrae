@@ -18,7 +18,6 @@
  */
 export type Kind =
   | "llm"
-  | "execute"
   | "structured"
   | "execute"
   | "route"
@@ -151,10 +150,6 @@ export interface PlacedStep extends Rect {
   role: Role;
   /** True when this step follows the first run-boundary seam in its workflow. */
   futureRun?: boolean;
-  /** Seam line start, relative to this stop node's top edge. */
-  seamOffset?: number;
-  /** Seam line extent along the Atlas's cross-flow axis. */
-  seamExtent?: number;
   /** 1-based ordinal shown on the node. */
   idx: number;
 }
