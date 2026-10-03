@@ -39,7 +39,14 @@
 
    Ported from docs/design/workflow-views.jsx (UnifiedViews).
    ────────────────────────────────────────────────────────────────── */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { SearchInput } from "../molecules/SearchInput";
 import { SegmentedControl } from "../molecules/SegmentedControl";
 import { FactoryFilter } from "../FactoryFilter";
@@ -64,7 +71,7 @@ import { buildAtlasModel } from "./adapter/buildAtlasModel";
 import { selectionFromWorkflowTarget } from "./inspector/selection";
 import { usePanZoom } from "./hooks/usePanZoom";
 import { useFactoryFilterStore } from "../../stores/factoryFilterStore";
-import { roundedPath } from "./layout/geometry";
+import { roundedPath, routeFromSourcePort } from "./layout/geometry";
 import { layoutCondensed } from "./layout/layoutCondensed";
 import { layoutFull } from "./layout/layoutFull";
 import type {
@@ -73,11 +80,12 @@ import type {
   FullLayout,
   Kind,
   PlacedEdge,
+  Point,
   Rect,
 } from "./layout/types";
 import "./WorkflowAtlas.css";
 
-const FULL_OPTS = { headH: 118, stepW: 150, stepH: 90 } as const;
+const FULL_OPTS = { headH: 118 } as const;
 const COND_OPTS = { boxW: 264, boxH: 140 } as const;
 
 /** Camera-glide schedule for the morph (matches the 0.66s box transition). */
@@ -216,6 +224,35 @@ export function WorkflowAtlas() {
   // newer one (key changed mid-flight).
   const [full, setFull] = useState<FullLayout | null>(null);
   const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [workflowTitlePorts, setWorkflowTitlePorts] = useState<
+    Record<string, Point>
+  >({});
+  const reportWorkflowTitlePort = useCallback(
+    (workflowId: string, point: Point) => {
+      setWorkflowTitlePorts((current) => {
+        const previous = current[workflowId];
+        if (
+          previous &&
+          Math.abs(previous.x - point.x) < 0.5 &&
+          Math.abs(previous.y - point.y) < 0.5
+        ) {
+          return current;
+        }
+        return { ...current, [workflowId]: point };
+      });
+    },
+    []
+  );
+  const graphCross = useMemo(
+    () =>
+      (full?.cross ?? []).map((edge) => {
+        const titlePort = workflowTitlePorts[edge.fromWorkflow];
+        return titlePort
+          ? { ...edge, points: routeFromSourcePort(edge.points, titlePort) }
+          : edge;
+      }),
+    [full, workflowTitlePorts]
+  );
   const keyRef = useRef(key);
   keyRef.current = key;
   const modelRef = useRef(model);
@@ -633,7 +670,7 @@ export function WorkflowAtlas() {
                   viewBox={`0 0 ${board.w} ${board.h}`}
                 >
                   <GraphMarkers />
-                  {full.cross
+                  {graphCross
                     .slice()
                     .sort(
                       (a, b) =>
@@ -667,6 +704,21 @@ export function WorkflowAtlas() {
                     ))}
                 </svg>
               )}
+
+              {showGraphChrome &&
+                graphCross.map((edge) => {
+                  if (!edge.labelPos || !edge.label) return null;
+                  return (
+                    <EdgeLabel
+                      key={`graph-${edge.id}`}
+                      labels={[edge.label]}
+                      left={edge.labelPos.x}
+                      top={edge.labelPos.y}
+                      state={crossEdgeState(edge)}
+                      variant="graph"
+                    />
+                  );
+                })}
 
               {/* ── GRAPH chrome: step nodes (above the boxes) ────────── */}
               {full && (
@@ -718,6 +770,7 @@ export function WorkflowAtlas() {
                     stepCount={w.stepIds.length}
                     view={view}
                     state={wfState(w.id)}
+                    onTitlePort={reportWorkflowTitlePort}
                     onHover={setHover}
                     onSelect={(id) =>
                       setSel({ type: "workflow", workflowId: id })
