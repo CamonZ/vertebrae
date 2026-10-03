@@ -66,7 +66,7 @@ export function shortId(s: string): string {
 export function edgePoints(
   section: ElkEdgeSection | undefined,
   ox: number,
-  oy: number,
+  oy: number
 ): Point[] {
   const pts: Point[] = [];
   if (section) {
@@ -75,6 +75,19 @@ export function edgePoints(
     pts.push(section.endPoint);
   }
   return pts.map((p) => ({ x: p.x + ox, y: p.y + oy }));
+}
+
+/** Extend a routed edge back to a measured source port with an orthogonal join. */
+export function routeFromSourcePort(points: Point[], source: Point): Point[] {
+  if (points.length < 2) return points;
+  const boundary = points[0];
+  const expanded = [source, { x: boundary.x, y: source.y }, ...points];
+  return expanded.filter(
+    (point, index) =>
+      index === 0 ||
+      point.x !== expanded[index - 1].x ||
+      point.y !== expanded[index - 1].y
+  );
 }
 
 /* ── edge ↔ box anchoring ───────────────────────────────────────────
@@ -107,7 +120,7 @@ export function rayBox(
   cy: number,
   tx: number,
   ty: number,
-  b: Rect,
+  b: Rect
 ): Point {
   const dx = tx - cx;
   const dy = ty - cy;

@@ -10,9 +10,9 @@
      • Forward intra-workflow links are SYNTHESISED here from step order — the
        adapter deliberately does not emit them.
      • Cross-workflow edges are laid out between workflow containers (ELK routes
-       top-level nodes reliably across the hierarchy). Their visible source is
-       re-anchored to the workflow header; the destination stays on its target
-       step.
+       top-level nodes reliably across the hierarchy). Layout starts at the
+       workflow header and ends at the target step; the renderers move the
+       source to the measured title edge.
      • Loop-backs (same-workflow `transitions_to`) are kept OUT of ELK and drawn
        up the left side of the step lane — feeding them to ELK would distort
        the clean top→bottom step flow.
