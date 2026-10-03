@@ -1,5 +1,5 @@
 //! `vtb::artifacts` reads: `list`, `lookup`, `read` and `read_json`. The
-//! writes, `put` and `put_json`, are in `artifact_writes`.
+//! writes, `put`, `put_json` and `delete`, are in `artifact_writes`.
 //!
 //! A subject is a task UUID in the execution's project or the literal
 //! `"project"` for the project's own attachments. Artifacts are addressed by

@@ -9,8 +9,9 @@ Use this when: the user asks where a run's result is, or a workflow should leave
 - Read one: `vtb artifact show <artifact-id>`, or by name:
   `vtb artifact lookup --subject-type task --subject-id <task-id> <logical_name>`.
 - Create/update/delete artifacts manually (`vtb artifact add/update/delete`; delete needs consent).
-- Write named artifacts from an execute script with `vtb::artifacts::put` and
-  `put_json` ([writing artifacts](workflows/steps/execute/host-artifact-writes.md)).
+- Write or delete named artifacts from an execute script with
+  `vtb::artifacts::put`, `put_json` and `delete`
+  ([writing artifacts](workflows/steps/execute/host-artifact-writes.md)).
 
 ## How it works
 - The backend (not the daemon) writes the artifact after the step's output validates.

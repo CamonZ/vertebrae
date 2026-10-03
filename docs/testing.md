@@ -148,6 +148,14 @@ other-project targets. It runs the progress sample from
 `docs/agent-context/workflows/steps/execute/host-artifact-writes.md` (its
 first `rhai` block) twice in one script.
 
+`execute_deletes.feature` covers `vtb::tasks::delete` with and without cascade
+and `vtb::artifacts::delete` on a task and the project, reruns that treat
+`not_found` as done, refusals for the running task, another task's active
+TaskRun and a cascade that reaches either, artifacts that outlive their task,
+and other-project targets. It runs the scratch-children sample from
+`docs/agent-context/workflows/steps/execute/host-deletes.md` (its first `rhai`
+block).
+
 **Mock prompt-as-JSON envelope.** The step's `prompt` is parsed by the mock as a
 JSON envelope with this schema:
 

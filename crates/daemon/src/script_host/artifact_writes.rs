@@ -1,10 +1,11 @@
-//! `vtb::artifacts` writes: `put` and `put_json`.
+//! `vtb::artifacts` writes: `put`, `put_json` and `delete`.
 //!
 //! A write is the scoped lookup by subject and logical name followed by an
 //! update of what that lookup found, or a create when it found nothing, so
 //! sequential reruns converge on one attachment. Writes apply immediately
 //! and stay if the script later fails. Each one records the execution that
-//! wrote it in the attachment's provenance.
+//! wrote it in the attachment's provenance. `delete` removes only what the
+//! same scoped lookup finds.
 
 use rhai::{Dynamic, Module};
 use serde_json::Value;
@@ -15,12 +16,13 @@ use vertebrae_core::models::{
 
 use super::artifacts::{NAMESPACE, address, artifact_info, named_artifact};
 use super::task_writes::require_task;
-use super::{read, set_host_fn3, string_argument};
-use crate::script_worker::{HostContext, HostError, rhai_to_json};
+use super::{read, set_host_fn2, set_host_fn3, string_argument};
+use crate::script_worker::{HostContext, HostError, HostErrorKind, rhai_to_json};
 
 pub(super) fn register(module: &mut Module, host: &HostContext) {
     set_host_fn3(module, host, NAMESPACE, "put", put);
     set_host_fn3(module, host, NAMESPACE, "put_json", put_json);
+    set_host_fn2(module, host, NAMESPACE, "delete", delete);
 }
 
 #[derive(Clone, Copy)]
@@ -111,6 +113,38 @@ fn upsert(
         })?,
     };
     artifact_info(&written)
+}
+
+/// Sacrum deletes the artifact with every link to it; artifacts are created
+/// per subject, so that is this subject's attachment.
+fn delete(host: &HostContext, subject: Dynamic, name: Dynamic) -> Result<Dynamic, HostError> {
+    let address = address(host, subject, name)?;
+    if address.subject_type == "task" {
+        require_task(host, &address.subject_id, ServiceError::task_not_found)?;
+    }
+    let existing = read(host, |services, _| {
+        named_artifact(services, address.clone())
+    })?;
+    let Some(artifact) = existing else {
+        return Err(HostError::new(
+            HostErrorKind::NotFound,
+            format!(
+                "No artifact named '{}' on {}",
+                address.logical_name,
+                subject_label(&address)
+            ),
+        ));
+    };
+    host.call(|services, _| services.artifacts().delete_artifact(&artifact.id))?;
+    Ok(Dynamic::UNIT)
+}
+
+fn subject_label(address: &GetArtifactByLogicalNameInput) -> String {
+    if address.subject_type == "project" {
+        "the project".into()
+    } else {
+        format!("task {}", address.subject_id)
+    }
 }
 
 /// The version-1 envelope for a script write. The TaskRun is read once per
@@ -282,6 +316,21 @@ mod tests {
                     serde_json::from_str(vars["metadata"].as_str().unwrap()).unwrap();
                 artifact["updated_at"] = json!("2026-10-01T11:00:00Z");
                 json!({"updateArtifact": artifact})
+            } else if query.contains("mutation DeleteArtifact(") {
+                let Some(artifact) = state
+                    .links
+                    .iter()
+                    .find(|link| link.artifact["id"] == vars["id"])
+                    .map(|link| link.artifact.clone())
+                else {
+                    return graphql_error("not_found");
+                };
+                if artifact["logical_name"] == "delete-down" {
+                    return unavailable();
+                }
+                // Like Sacrum, every link to the artifact goes with it.
+                state.links.retain(|link| link.artifact["id"] != vars["id"]);
+                json!({"deleteArtifact": artifact})
             } else {
                 panic!("unexpected Sacrum request: {query}");
             };
@@ -616,5 +665,104 @@ mod tests {
         // A refused replacement leaves the shared artifact as it was.
         assert_eq!(output["shared_on_self"], "shared body");
         assert_eq!(output["shared_on_project"], "shared body");
+    }
+
+    #[tokio::test]
+    async fn delete_removes_one_named_artifact_and_a_rerun_converges() {
+        let server = test_support::sacrum(sacrum()).await;
+        let output = run(
+            &server,
+            r#"
+            let gone = |subject, name| {
+                let outcome = "deleted";
+                try { vtb::artifacts::delete(subject, name); }
+                catch (error) { if error.kind != "not_found" { throw error; } outcome = "already gone"; }
+                outcome
+            };
+            vtb::artifacts::put(task.id, "notes", "body");
+            vtb::artifacts::put($OTHER, "notes", "kept");
+            vtb::artifacts::put("project", "policy", "body");
+            #{
+                outcomes: [
+                    gone.call(task.id, "notes"), gone.call(task.id, "notes"),
+                    gone.call("project", "policy"), gone.call("project", "policy"),
+                ],
+                notes: vtb::artifacts::lookup(task.id, "notes"),
+                other: vtb::artifacts::read($OTHER, "notes"),
+                policy: vtb::artifacts::lookup("project", "policy"),
+            }
+            "#,
+        )
+        .await;
+        assert_eq!(
+            output,
+            json!({
+                "outcomes": ["deleted", "already gone", "deleted", "already gone"],
+                "notes": null, "other": "kept", "policy": null
+            })
+        );
+        assert_eq!(
+            sacrum_requests(&server, "mutation DeleteArtifact(")
+                .await
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_errors_are_catchable_and_never_reach_another_subject() {
+        let server = test_support::sacrum(sacrum()).await;
+        let output = run(
+            &server,
+            r#"
+            vtb::artifacts::put(task.id, "delete-down", "body");
+            let caught = [];
+            for attempt in [
+                || vtb::artifacts::delete("Project", "notes"),
+                || vtb::artifacts::delete(task.id, ""),
+                || vtb::artifacts::delete(task.id, 7),
+                || vtb::artifacts::delete($FOREIGN, "notes"),
+                || vtb::artifacts::delete($MISSING, "notes"),
+                || vtb::artifacts::delete(task.id, "absent"),
+                || vtb::artifacts::delete($UNAUTHORIZED, "notes"),
+                || vtb::artifacts::delete(task.id, "delete-down"),
+            ] {
+                try { attempt.call(); } catch (error) { caught.push(error); }
+            }
+            caught
+            "#,
+        )
+        .await;
+        let kinds: Vec<_> = output
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|error| {
+                assert_eq!(error["function"], "vtb::artifacts::delete", "{error}");
+                error["kind"].clone()
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "invalid",
+                "invalid",
+                "invalid",
+                "not_found",
+                "not_found",
+                "not_found",
+                "transport",
+                "transport"
+            ]
+        );
+        assert!(
+            output[5]["message"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("No artifact named 'absent' on task {SELF}")),
+            "{output}"
+        );
+        let deletes = sacrum_requests(&server, "mutation DeleteArtifact(").await;
+        assert_eq!(deletes.len(), 1, "only the failing delete was sent");
     }
 }

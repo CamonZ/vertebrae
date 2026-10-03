@@ -351,7 +351,7 @@ The CLI exposes these types through `--step-type` and their type-specific config
 |------|-------------|
 | `llm_inference` | **Default.** Runs the configured prompt through the selected agent harness. |
 | `structured_inference` | Runs resolved state and fixed questions through the TypeSafe harness and returns its JSON answer map. |
-| `execute` | Runs a Rhai JSON transformation in the daemon, which can read tasks and named artifacts in its project through `vtb::tasks` and `vtb::artifacts`, create, update and archive tasks and edit their content and relationships through `vtb::tasks`, write named artifacts through `vtb::artifacts`, and run local commands through `vtb::cmd`, validates its returned JSON, and completes without a provider harness. Create with `--script` and `--output-schema`. |
+| `execute` | Runs a Rhai JSON transformation in the daemon, which can read tasks and named artifacts in its project through `vtb::tasks` and `vtb::artifacts`, create, update, archive and delete tasks and edit their content and relationships through `vtb::tasks`, write and delete named artifacts through `vtb::artifacts`, and run local commands through `vtb::cmd`, validates its returned JSON, and completes without a provider harness. Create with `--script` and `--output-schema`. |
 | `route` | Sacrum-local deterministic control step. Evaluates `route_config`; it does not dispatch a daemon prompt or use `output_schema` as a routing program. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
 | `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. |
@@ -424,11 +424,13 @@ daemon-wide blocking worker with cancellation and no deadline, operation, or
 size limits. Scripts can read tasks, their hierarchy and dependencies in the
 execution's project through the `vtb::tasks` host functions, and artifact
 bodies on a task or the project by logical name through `vtb::artifacts`.
-`vtb::tasks::create`, `update`, `archive` and `unarchive` write tasks, and
-the section, checklist, code-ref, parent and dependency edits change their
-content and relationships. `vtb::artifacts::put` and `put_json` create or
-replace a named artifact on a task or the project and record the execution
-that wrote it. Writes apply immediately; a failed or cancelled
+`vtb::tasks::create`, `update`, `archive`, `unarchive` and `delete` write
+tasks, and the section, checklist, code-ref, parent and dependency edits change
+their content and relationships. `delete` refuses the running task and any
+task with an active TaskRun, and cascades only when asked.
+`vtb::artifacts::put` and `put_json` create or replace a named artifact on a
+task or the project and record the execution that wrote it;
+`vtb::artifacts::delete` removes one. Writes apply immediately; a failed or cancelled
 script does not undo them, and creating a task or adding a dependency never
 starts a TaskRun.
 `vtb::cmd::run` runs a command in the task worktree (else the project root) and

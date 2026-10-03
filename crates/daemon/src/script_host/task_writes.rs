@@ -1,4 +1,5 @@
-//! `vtb::tasks` writes: `create`, `update`, `archive` and `unarchive`.
+//! `vtb::tasks` writes: `create`, `update`, `archive`, `unarchive` and
+//! `delete`.
 //!
 //! Writes apply immediately and are never rolled back. Every task or
 //! workflow a script names is checked against the execution's project before
@@ -11,7 +12,8 @@ use vertebrae_core::{CreateTaskOptions, ServiceError, UpdateTaskOptions};
 
 use super::tasks::{level, nonblank, priority, scoped_task, string_array, task_value};
 use super::{
-    map_argument, read, set_host_fn, set_host_fn2, string_argument, uuid_argument, uuid_text,
+    bool_argument, map_argument, read, set_host_fn, set_host_fn2, string_argument, uuid_argument,
+    uuid_text,
 };
 use crate::script_worker::{HostContext, HostError, HostErrorKind};
 
@@ -22,6 +24,7 @@ pub(super) fn register(module: &mut Module, host: &HostContext) {
     set_host_fn2(module, host, NAMESPACE, "update", update);
     set_host_fn(module, host, NAMESPACE, "archive", archive);
     set_host_fn(module, host, NAMESPACE, "unarchive", unarchive);
+    set_host_fn2(module, host, NAMESPACE, "delete", delete);
 }
 
 /// Target checks are reads, so their failures classify as reads do; only
@@ -102,6 +105,92 @@ fn set_archived(host: &HostContext, id: Dynamic, archived: bool) -> Result<Dynam
         host.call(|services, _| services.tasks().update_task(&id, options))?;
     }
     Ok(Dynamic::UNIT)
+}
+
+/// Deleting a task also deletes its TaskRuns and step executions, so the
+/// executing task and anything with an active run are refused. The check
+/// reads current run state and can race with a run starting.
+fn delete(host: &HostContext, id: Dynamic, opts: Dynamic) -> Result<Dynamic, HostError> {
+    let id = uuid_argument(id, "Task ID")?;
+    let cascade = cascade_option(opts)?;
+    let target = require_task(host, &id, ServiceError::task_not_found)?;
+    refuse_running(host, &target, false)?;
+    if cascade {
+        for descendant in descendants(host, target)? {
+            refuse_running(host, &descendant, true)?;
+        }
+    }
+    // Sacrum defaults to cascading, so the choice is always passed.
+    host.call(|services, _| services.tasks().delete_task(&id, cascade))?;
+    Ok(Dynamic::UNIT)
+}
+
+fn cascade_option(opts: Dynamic) -> Result<bool, HostError> {
+    let mut cascade = false;
+    for (key, value) in map_argument(opts, "Options")? {
+        match key.as_str() {
+            "cascade" => cascade = bool_argument(value, "Option 'cascade'")?,
+            _ => {
+                return Err(HostError::invalid(format!(
+                    "Unknown option '{key}'; the only accepted option is cascade"
+                )));
+            }
+        }
+    }
+    Ok(cascade)
+}
+
+/// A descendant outside the project is refused without naming it.
+fn refuse_running(host: &HostContext, task: &Task, in_cascade: bool) -> Result<(), HostError> {
+    let visible = task.project_id.as_deref() == Some(host.project_id());
+    let reason = if task.id == host.task_id() {
+        "is the executing task".to_string()
+    } else if let Some(run) = task
+        .run_controls
+        .as_ref()
+        .and_then(|controls| controls.active_run.as_ref())
+    {
+        if visible {
+            format!("has an active TaskRun {}", run.id)
+        } else {
+            "has an active TaskRun".to_string()
+        }
+    } else {
+        return Ok(());
+    };
+    let target = match (in_cascade, visible) {
+        (false, _) => format!("task {}", task.id),
+        (true, true) => format!("the cascade includes task {}, which", task.id),
+        (true, false) => "the cascade includes a task in another project, which".to_string(),
+    };
+    Err(HostError::invalid(format!(
+        "Refusing to delete: {target} {reason}"
+    )))
+}
+
+/// Every task a cascade would delete below `root`, read fresh so each carries
+/// its own run state. Sacrum cascades by parent regardless of project, so
+/// descendants are read unscoped; one that vanished meanwhile is skipped.
+fn descendants(host: &HostContext, root: Task) -> Result<Vec<Task>, HostError> {
+    read(host, |services, _| async move {
+        let mut seen = std::collections::HashSet::from([root.id.clone()]);
+        let mut pending: Vec<String> = root.children.into_iter().map(|child| child.id).collect();
+        let mut found = Vec::new();
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            match services.tasks().get_task_without_lookups(&id).await {
+                Ok(task) => {
+                    pending.extend(task.children.iter().map(|child| child.id.clone()));
+                    found.push(task);
+                }
+                Err(ServiceError::TaskNotFound { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(found)
+    })
 }
 
 fn create_options(fields: Dynamic) -> Result<CreateTaskOptions, HostError> {
@@ -578,5 +667,297 @@ mod tests {
             assert_eq!(error["function"], "vtb::tasks::update");
         }
         assert!(server.received_requests().await.unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod delete_tests {
+    use std::sync::Mutex;
+
+    use serde_json::{Value, json};
+    use wiremock::{MockServer, Request, Respond, ResponseTemplate};
+
+    use super::super::test_support::{self, OTHER_PROJECT, PROJECT, sacrum_requests};
+
+    const HOLDER: &str = "e0000000-0000-4000-8000-000000000001";
+    const SELF: &str = "e0000000-0000-4000-8000-000000000002";
+    const LEAF: &str = "e0000000-0000-4000-8000-000000000003";
+    const PARENT: &str = "e0000000-0000-4000-8000-000000000004";
+    const KID: &str = "e0000000-0000-4000-8000-000000000005";
+    const TREE: &str = "e0000000-0000-4000-8000-000000000006";
+    const BRANCH: &str = "e0000000-0000-4000-8000-000000000007";
+    const BUSY_LEAF: &str = "e0000000-0000-4000-8000-000000000008";
+    const BUSY: &str = "e0000000-0000-4000-8000-000000000009";
+    const FOREIGN: &str = "e0000000-0000-4000-8000-00000000000a";
+    const MISSING: &str = "e0000000-0000-4000-8000-00000000000b";
+    const DOWN: &str = "e0000000-0000-4000-8000-00000000000c";
+    const STRAY_ROOT: &str = "e0000000-0000-4000-8000-00000000000d";
+    const STRAY: &str = "e0000000-0000-4000-8000-00000000000e";
+    const RUN: &str = "e0000000-0000-4000-8000-0000000000aa";
+
+    const IDS: [(&str, &str); 12] = [
+        ("STRAY_ROOT", STRAY_ROOT),
+        ("HOLDER", HOLDER),
+        ("LEAF", LEAF),
+        ("PARENT", PARENT),
+        ("KID", KID),
+        ("TREE", TREE),
+        ("BRANCH", BRANCH),
+        ("BUSY_LEAF", BUSY_LEAF),
+        ("BUSY", BUSY),
+        ("FOREIGN", FOREIGN),
+        ("MISSING", MISSING),
+        ("DOWN", DOWN),
+    ];
+
+    /// (id, project, parent, has an active run)
+    const ROWS: [(&str, &str, Option<&str>, bool); 13] = [
+        (STRAY_ROOT, PROJECT, None, false),
+        (STRAY, OTHER_PROJECT, Some(STRAY_ROOT), true),
+        (HOLDER, PROJECT, None, false),
+        (SELF, PROJECT, Some(HOLDER), true),
+        (LEAF, PROJECT, None, false),
+        (PARENT, PROJECT, None, false),
+        (KID, PROJECT, Some(PARENT), false),
+        (TREE, PROJECT, None, false),
+        (BRANCH, PROJECT, Some(TREE), false),
+        (BUSY_LEAF, PROJECT, Some(BRANCH), true),
+        (BUSY, PROJECT, None, true),
+        (FOREIGN, OTHER_PROJECT, None, false),
+        (DOWN, PROJECT, None, false),
+    ];
+
+    struct Row {
+        id: &'static str,
+        project: &'static str,
+        parent: Option<&'static str>,
+        busy: bool,
+    }
+
+    /// A Sacrum that embeds direct children in a task read and applies
+    /// deletes as the real one does: cascade removes the subtree, otherwise
+    /// the children are detached first.
+    struct Sacrum(Mutex<Vec<Row>>);
+
+    fn sacrum() -> Sacrum {
+        Sacrum(Mutex::new(
+            ROWS.iter()
+                .map(|&(id, project, parent, busy)| Row {
+                    id,
+                    project,
+                    parent,
+                    busy,
+                })
+                .collect(),
+        ))
+    }
+
+    fn task(row: &Row, rows: &[Row], nested: bool) -> Value {
+        let active_run = row
+            .busy
+            .then(|| json!({"id": RUN, "task_id": row.id, "status": "running"}));
+        let children: Vec<Value> = if nested {
+            rows.iter()
+                .filter(|child| child.parent == Some(row.id))
+                .map(|child| task(child, rows, false))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        json!({
+            "id": row.id, "project_id": row.project, "title": "Task", "level": "task",
+            "parent_id": row.parent, "tags": [], "archived": false, "sections": [],
+            "code_refs": [], "inserted_at": "2026-10-01T10:00:00Z", "children": children,
+            "run_controls": {
+                "runnable": !row.busy, "stoppable": row.busy, "active_run": active_run
+            }
+        })
+    }
+
+    impl Respond for Sacrum {
+        fn respond(&self, request: &Request) -> ResponseTemplate {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let query = body["query"].as_str().unwrap();
+            let vars = &body["variables"];
+            let mut rows = self.0.lock().unwrap();
+            let data = if query.contains("query GetTask(") {
+                let Some(row) = rows.iter().find(|row| vars["id"] == row.id) else {
+                    return ResponseTemplate::new(200).set_body_json(
+                        json!({"data": null, "errors": [{"message": "not_found"}]}),
+                    );
+                };
+                json!({"task": task(row, &rows, true)})
+            } else if query.contains("mutation DeleteTask(") {
+                let id = vars["id"].as_str().unwrap();
+                if id == DOWN {
+                    return ResponseTemplate::new(503).set_body_string("upstream down");
+                }
+                if vars["cascade"] == true {
+                    let mut doomed = vec![id.to_owned()];
+                    while let Some(next) = rows
+                        .iter()
+                        .find(|row| {
+                            row.parent
+                                .is_some_and(|parent| doomed.iter().any(|d| d == parent))
+                                && !doomed.iter().any(|d| d == row.id)
+                        })
+                        .map(|row| row.id.to_owned())
+                    {
+                        doomed.push(next);
+                    }
+                    rows.retain(|row| !doomed.iter().any(|d| d == row.id));
+                } else {
+                    assert_eq!(vars["cascade"], false, "cascade is always explicit");
+                    for row in rows.iter_mut().filter(|row| row.parent == Some(id)) {
+                        row.parent = None;
+                    }
+                    rows.retain(|row| row.id != id);
+                }
+                json!({"delete_task": {"id": id}})
+            } else {
+                panic!("unexpected Sacrum request: {query}");
+            };
+            ResponseTemplate::new(200).set_body_json(json!({ "data": data }))
+        }
+    }
+
+    async fn output(server: &MockServer, script: &str) -> Value {
+        test_support::completed(test_support::run(server, SELF, &IDS, script).await, script)
+    }
+
+    async fn deleted(server: &MockServer) -> Vec<(Value, Value)> {
+        sacrum_requests(server, "mutation DeleteTask(")
+            .await
+            .iter()
+            .map(|vars| (vars["id"].clone(), vars["cascade"].clone()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn deletes_without_cascade_unless_asked_and_a_rerun_converges() {
+        let server = test_support::sacrum(sacrum()).await;
+        let script = r#"
+            let gone = |id, opts| {
+                let outcome = "deleted";
+                try { vtb::tasks::delete(id, opts); }
+                catch (error) { if error.kind != "not_found" { throw error; } outcome = "already gone"; }
+                outcome
+            };
+            #{
+                leaf: [gone.call($LEAF, #{}), gone.call($LEAF, #{})],
+                parent: gone.call($PARENT, #{ cascade: false }),
+                kid: vtb::tasks::get($KID).parent_id,
+                tree: gone.call($TREE, #{ cascade: false }),
+                branch: vtb::tasks::get($BRANCH).parent_id,
+            }
+        "#;
+        let output = output(&server, script).await;
+        assert_eq!(
+            output,
+            json!({
+                "leaf": ["deleted", "already gone"], "parent": "deleted", "kid": null,
+                "tree": "deleted", "branch": null
+            })
+        );
+        assert_eq!(
+            deleted(&server).await,
+            [
+                (json!(LEAF), json!(false)),
+                (json!(PARENT), json!(false)),
+                (json!(TREE), json!(false))
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn cascade_deletes_the_subtree_when_nothing_in_it_is_running() {
+        let server = test_support::sacrum(sacrum()).await;
+        let output = output(
+            &server,
+            r#"
+            vtb::tasks::delete($PARENT, #{ cascade: true });
+            [vtb::tasks::get($PARENT), vtb::tasks::get($KID)]
+            "#,
+        )
+        .await;
+        assert_eq!(output, json!([null, null]));
+        assert_eq!(deleted(&server).await, [(json!(PARENT), json!(true))]);
+    }
+
+    #[tokio::test]
+    async fn running_work_is_refused_before_any_delete() {
+        let server = test_support::sacrum(sacrum()).await;
+        let output = output(
+            &server,
+            r#"
+            let caught = [];
+            for attempt in [
+                || vtb::tasks::delete(task.id, #{}),
+                || vtb::tasks::delete($BUSY, #{}),
+                || vtb::tasks::delete($HOLDER, #{ cascade: true }),
+                || vtb::tasks::delete($TREE, #{ cascade: true }),
+                || vtb::tasks::delete($STRAY_ROOT, #{ cascade: true }),
+            ] {
+                try { attempt.call(); } catch (error) { caught.push(error); }
+            }
+            caught
+            "#,
+        )
+        .await;
+        let caught = output.as_array().unwrap();
+        assert_eq!(caught.len(), 5);
+        for (error, detail) in caught.iter().zip([
+            format!("task {SELF} is the executing task"),
+            format!("task {BUSY} has an active TaskRun {RUN}"),
+            format!("the cascade includes task {SELF}, which is the executing task"),
+            format!("the cascade includes task {BUSY_LEAF}, which has an active TaskRun {RUN}"),
+            "the cascade includes a task in another project, which has an active TaskRun".into(),
+        ]) {
+            assert_eq!(error["kind"], "invalid", "{error}");
+            assert_eq!(error["function"], "vtb::tasks::delete");
+            assert!(
+                error["message"].as_str().unwrap().contains(&detail),
+                "{error}"
+            );
+        }
+        assert!(!caught[4].to_string().contains(STRAY), "{}", caught[4]);
+        assert!(deleted(&server).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn bad_arguments_and_unknown_targets_never_delete() {
+        let server = test_support::sacrum(sacrum()).await;
+        let output = output(
+            &server,
+            r#"
+            let caught = [];
+            for attempt in [
+                || vtb::tasks::delete($LEAF, #{ cascade: "yes" }),
+                || vtb::tasks::delete($LEAF, #{ force: true }),
+                || vtb::tasks::delete($LEAF, ()),
+                || vtb::tasks::delete("e0000000", #{}),
+                || vtb::tasks::delete($FOREIGN, #{}),
+                || vtb::tasks::delete($MISSING, #{ cascade: true }),
+                || vtb::tasks::delete($DOWN, #{}),
+            ] {
+                try { attempt.call(); } catch (error) { caught.push(error.kind); }
+            }
+            caught
+            "#,
+        )
+        .await;
+        assert_eq!(
+            output,
+            json!([
+                "invalid",
+                "invalid",
+                "invalid",
+                "invalid",
+                "not_found",
+                "not_found",
+                "transport"
+            ])
+        );
+        assert_eq!(deleted(&server).await, [(json!(DOWN), json!(false))]);
     }
 }

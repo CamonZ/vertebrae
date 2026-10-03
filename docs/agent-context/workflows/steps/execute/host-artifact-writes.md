@@ -1,6 +1,6 @@
-# Writing artifacts in execute
+# Writing and deleting artifacts in execute
 
-Purpose: publish named artifacts on a task or the project from an execute script.
+Purpose: publish or delete named artifacts on a task or the project from an execute script.
 Use this when: a script leaves a record on another task, shares data through the project, or hands results to a later step by name.
 
 - `vtb::artifacts::put(subject, name, body)` stores `body`, a string, exactly
@@ -17,6 +17,8 @@ Use this when: a script leaves a record on another task, shares data through the
 - The metadata records the writer: `origin: "rhai"`, `format` (`text` or
   `json`), and `execution_id`, `task_run_id` and `task_id` under
   `extensions`. A replacement records the latest writer.
+- `vtb::artifacts::delete(subject, name)` deletes the named artifact; see
+  [deleting](host-deletes.md). Deleting a task leaves its artifacts in place.
 
 Writes apply immediately and stay if the script fails later. A task in
 another project or a missing one is `not_found`. A blank body, a blank
