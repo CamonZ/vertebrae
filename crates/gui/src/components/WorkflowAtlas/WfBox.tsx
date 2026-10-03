@@ -95,7 +95,7 @@ export function WfBox({
       const scaleY = rootRect.height / rect.h;
       if (!scaleX || !scaleY) return;
       onTitlePort(workflowId, {
-        x: rect.x + (titleRect.right - rootRect.left) / scaleX,
+        x: rect.x + (titleRect.right - rootRect.left) / scaleX + 8,
         y:
           rect.y +
           (titleRect.top + titleRect.height / 2 - rootRect.top) / scaleY,
