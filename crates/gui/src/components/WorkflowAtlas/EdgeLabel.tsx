@@ -17,13 +17,21 @@ export interface EdgeLabelProps {
   left: number;
   top: number;
   state?: EdgeLabelState;
+  variant?: "map" | "graph";
 }
 
-export function EdgeLabel({ labels, left, top, state = "" }: EdgeLabelProps) {
+export function EdgeLabel({
+  labels,
+  left,
+  top,
+  state = "",
+  variant = "map",
+}: EdgeLabelProps) {
   if (labels.length === 0) return null;
   const extra = labels.length - 1;
   const text = labels[0] + (extra > 0 ? ` +${extra}` : "");
-  const cls = "al-cond" + (state ? " " + state : "");
+  const cls =
+    (variant === "graph" ? "ag-cond" : "al-cond") + (state ? " " + state : "");
   return (
     <div className={cls} style={{ left, top }}>
       {text}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PipelineSummary } from "../../bindings";
 import {
   NO_FACTORY_SCOPE,
@@ -18,6 +18,7 @@ import type {
   AtlasModel,
   CondensedLayout,
   FullLayout,
+  Point,
   Rect,
 } from "./layout/types";
 import {
@@ -25,12 +26,12 @@ import {
   layoutFactoryOverview,
   NO_FACTORY_KEY,
 } from "./factoryOverviewModel";
-import { roundedPath } from "./layout/geometry";
+import { roundedPath, routeFromSourcePort } from "./layout/geometry";
 import { ZoomWidget } from "./ZoomWidget";
 
 export const FACTORY_EXPAND_SCALE = 1.6;
 
-const FULL_OPTS = { headH: 118, stepW: 150, stepH: 90 } as const;
+const FULL_OPTS = { headH: 118 } as const;
 const COND_OPTS = { boxW: 264, boxH: 140 } as const;
 
 interface FactoryOverviewProps {
@@ -131,6 +132,35 @@ export function FactoryOverview({
     layout: FullLayout;
   } | null>(null);
   const full = fullState?.model === model ? fullState.layout : null;
+  const [workflowTitlePorts, setWorkflowTitlePorts] = useState<
+    Record<string, Point>
+  >({});
+  const reportWorkflowTitlePort = useCallback(
+    (workflowId: string, point: Point) => {
+      setWorkflowTitlePorts((current) => {
+        const previous = current[workflowId];
+        if (
+          previous &&
+          Math.abs(previous.x - point.x) < 0.5 &&
+          Math.abs(previous.y - point.y) < 0.5
+        ) {
+          return current;
+        }
+        return { ...current, [workflowId]: point };
+      });
+    },
+    []
+  );
+  const graphCross = useMemo(
+    () =>
+      (full?.cross ?? []).map((edge) => {
+        const titlePort = workflowTitlePorts[edge.fromWorkflow];
+        return titlePort
+          ? { ...edge, points: routeFromSourcePort(edge.points, titlePort) }
+          : edge;
+      }),
+    [full, workflowTitlePorts]
+  );
   const [layoutError, setLayoutError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
@@ -307,7 +337,7 @@ export function FactoryOverview({
                     aria-hidden="true"
                   >
                     <GraphMarkers />
-                    {full.cross.map((edge) => (
+                    {graphCross.map((edge) => (
                       <GraphEdge
                         key={edge.id}
                         kind="handoff"
@@ -323,6 +353,20 @@ export function FactoryOverview({
                     ))}
                   </svg>
                 )}
+
+                {workflowView === "graph" &&
+                  graphCross.map((edge) => {
+                    if (!edge.labelPos || !edge.label) return null;
+                    return (
+                      <EdgeLabel
+                        key={`graph-${edge.id}`}
+                        labels={[edge.label]}
+                        left={edge.labelPos.x}
+                        top={edge.labelPos.y}
+                        variant="graph"
+                      />
+                    );
+                  })}
 
                 <div
                   className={
@@ -360,6 +404,7 @@ export function FactoryOverview({
                         shape={shapes.get(workflow.id) ?? []}
                         stepCount={workflow.stepIds.length}
                         view={workflowView}
+                        onTitlePort={reportWorkflowTitlePort}
                         onSelect={() =>
                           onSelect(workflowScope(workflow.factoryName))
                         }
