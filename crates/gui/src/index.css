@@ -86,7 +86,9 @@
   --color-step-llm-wash: oklch(0.32 0.12 285);
   --color-step-llm-fg: oklch(0.82 0.14 285);
 
-  --color-step-structured: oklch(0.78 0.13 200); /* teal — structured inference */
+  --color-step-structured: oklch(
+    0.78 0.13 200
+  ); /* teal — structured inference */
   --color-step-structured-wash: oklch(0.32 0.1 200);
   --color-step-structured-fg: oklch(0.85 0.12 200);
 
@@ -102,7 +104,9 @@
   --color-step-wait-wash: oklch(0.3 0.05 70);
   --color-step-wait-fg: oklch(0.79 0.08 70);
 
-  --color-step-stop: oklch(0.56 0.07 65); /* dark warm neutral — inactive boundary */
+  --color-step-stop: oklch(
+    0.56 0.07 65
+  ); /* dark warm neutral — inactive boundary */
   --color-step-stop-wash: oklch(0.26 0.03 65);
   --color-step-stop-fg: oklch(0.68 0.07 65);
 
@@ -4071,9 +4075,9 @@ html.light ::selection {
   --kw: var(--step-structured-wash);
 }
 .k-execute {
-  --kc: var(--step-structured);
-  --kf: var(--step-structured-fg);
-  --kw: var(--step-structured-wash);
+  --kc: var(--line-strong);
+  --kf: var(--fg-soft);
+  --kw: var(--bg-1);
 }
 .k-route {
   --kc: var(--step-route);

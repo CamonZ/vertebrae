@@ -30,7 +30,7 @@ import { ZoomWidget } from "./ZoomWidget";
 
 export const FACTORY_EXPAND_SCALE = 1.6;
 
-const FULL_OPTS = { headH: 118, stepW: 150, stepH: 90 } as const;
+const FULL_OPTS = { headH: 118 } as const;
 const COND_OPTS = { boxW: 264, boxH: 140 } as const;
 
 interface FactoryOverviewProps {

@@ -20,6 +20,7 @@ export type Kind =
   | "llm"
   | "execute"
   | "structured"
+  | "execute"
   | "route"
   | "wait"
   | "human"
@@ -44,6 +45,8 @@ export interface AtlasStep {
   name: string;
   /** Raw backend step type, preserved for detail panels and test hooks. */
   stepType: string | null;
+  /** Optional step goal, used as the route node's concise rule context. */
+  goal?: string | null;
   kind: Kind;
   role: Role;
   /** Backend ordering within the workflow (ascending). */
@@ -142,8 +145,16 @@ export interface PlacedStep extends Rect {
   stepId: string;
   workflowId: string;
   name: string;
+  /** Optional goal used to give a route junction a concise subject. */
+  goal?: string | null;
   kind: Kind;
   role: Role;
+  /** True when this step follows the first run-boundary seam in its workflow. */
+  futureRun?: boolean;
+  /** Seam line start, relative to this stop node's top edge. */
+  seamOffset?: number;
+  /** Seam line extent along the Atlas's cross-flow axis. */
+  seamExtent?: number;
   /** 1-based ordinal shown on the node. */
   idx: number;
 }

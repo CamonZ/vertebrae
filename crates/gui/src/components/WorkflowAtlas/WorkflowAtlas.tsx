@@ -77,7 +77,7 @@ import type {
 } from "./layout/types";
 import "./WorkflowAtlas.css";
 
-const FULL_OPTS = { headH: 118, stepW: 150, stepH: 90 } as const;
+const FULL_OPTS = { headH: 118 } as const;
 const COND_OPTS = { boxW: 264, boxH: 140 } as const;
 
 /** Camera-glide schedule for the morph (matches the 0.66s box transition). */

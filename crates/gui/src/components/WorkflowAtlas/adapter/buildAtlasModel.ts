@@ -55,6 +55,7 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
   ]);
   const raw = step.step_type;
   if (raw === null || !known.has(raw)) return "llm";
+  if (raw === "execute") return "execute";
 
   if (raw === "execute") return "execute";
   const hearth = hearthStepKind(raw as StepType);
@@ -217,6 +218,7 @@ export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
         workflowId: wf.id,
         name: s.name,
         stepType: s.step_type,
+        goal: s.goal,
         kind,
         role,
         order: s.step_order,
