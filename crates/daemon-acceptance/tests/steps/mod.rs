@@ -3,6 +3,7 @@ pub mod cancel;
 pub mod codex_mocks;
 pub mod execute;
 pub mod hierarchy;
+pub mod host_artifact_writes;
 pub mod host_commands;
 pub mod host_edits;
 pub mod host_reads;

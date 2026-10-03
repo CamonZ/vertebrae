@@ -1,4 +1,5 @@
-//! `vtb::artifacts` reads: `list`, `lookup`, `read` and `read_json`.
+//! `vtb::artifacts` reads: `list`, `lookup`, `read` and `read_json`. The
+//! writes, `put` and `put_json`, are in `artifact_writes`.
 //!
 //! A subject is a task UUID in the execution's project or the literal
 //! `"project"` for the project's own attachments. Artifacts are addressed by
@@ -14,7 +15,7 @@ use super::tasks::scoped_task;
 use super::{read, set_host_fn, set_host_fn2, string_argument, timestamp, uuid_text};
 use crate::script_worker::{HostContext, HostError, json_to_rhai};
 
-const NAMESPACE: &str = "vtb::artifacts";
+pub(super) const NAMESPACE: &str = "vtb::artifacts";
 
 /// Sacrum caps artifact pages at this size, so a shorter page is the last.
 const PAGE: i32 = 50;
@@ -25,6 +26,7 @@ pub(super) fn module(host: &HostContext) -> Module {
     set_host_fn2(&mut module, host, NAMESPACE, "lookup", lookup);
     set_host_fn2(&mut module, host, NAMESPACE, "read", read_body);
     set_host_fn2(&mut module, host, NAMESPACE, "read_json", read_json);
+    super::artifact_writes::register(&mut module, host);
     module
 }
 
@@ -54,7 +56,7 @@ impl Subject {
 }
 
 /// A validated subject-plus-name address. The project is the execution's.
-fn address(
+pub(super) fn address(
     host: &HostContext,
     subject: Dynamic,
     name: Dynamic,
@@ -160,7 +162,7 @@ fn read_json(host: &HostContext, subject: Dynamic, name: Dynamic) -> Result<Dyna
 /// Sacrum answers a missing name, a foreign subject and a foreign project
 /// alike with GraphQL `not_found`, which the client reports as
 /// `TaskNotFound`.
-async fn named_artifact(
+pub(super) async fn named_artifact(
     services: &VertebraeServices,
     input: GetArtifactByLogicalNameInput,
 ) -> ServiceResult<Option<Artifact>> {
@@ -205,7 +207,7 @@ fn out_of_range_integer(text: &str) -> Option<&str> {
 }
 
 /// The `ArtifactInfo` map: metadata only, never the body.
-fn artifact_info(artifact: &Artifact) -> Result<Dynamic, HostError> {
+pub(super) fn artifact_info(artifact: &Artifact) -> Result<Dynamic, HostError> {
     let metadata = match &artifact.metadata {
         Some(metadata) => {
             let value = serde_json::to_value(metadata)

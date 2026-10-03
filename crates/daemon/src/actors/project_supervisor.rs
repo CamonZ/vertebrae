@@ -1032,6 +1032,8 @@ impl ProjectSupervisor {
             script_worker: Arc::clone(&state.script_worker),
             script_scope: ScriptScope {
                 project_id: state.project_id.clone(),
+                execution_id: execution_id.to_string(),
+                task_id: task_id.to_string(),
                 services: Arc::clone(&state.services),
                 working_dir,
                 search_path: state.capabilities.shell_path.clone(),

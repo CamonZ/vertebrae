@@ -14,8 +14,8 @@
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use rhai::{Dynamic, Engine, EvalAltResult, Position, Scope};
 use tokio::runtime::Handle;
@@ -68,6 +68,10 @@ impl Default for ScriptWorker {
 #[derive(Clone)]
 pub struct ScriptScope {
     pub project_id: String,
+    /// The step execution and task this attempt runs, recorded as write
+    /// provenance.
+    pub execution_id: String,
+    pub task_id: String,
     pub services: Arc<VertebraeServices>,
     /// The task worktree, else the project root.
     pub working_dir: PathBuf,
@@ -83,11 +87,27 @@ pub struct HostContext {
     runtime: Handle,
     cancellation: watch::Receiver<bool>,
     scope: ScriptScope,
+    task_run_id: Arc<OnceLock<Option<String>>>,
 }
 
 impl HostContext {
     pub fn project_id(&self) -> &str {
         &self.scope.project_id
+    }
+
+    pub fn execution_id(&self) -> &str {
+        &self.scope.execution_id
+    }
+
+    pub fn task_id(&self) -> &str {
+        &self.scope.task_id
+    }
+
+    /// The execution's TaskRun, once a host function has read it. Sacrum's
+    /// dispatch does not carry it, so the first writer that needs it reads the
+    /// execution and stores it here for the rest of the attempt.
+    pub fn task_run_id(&self) -> &OnceLock<Option<String>> {
+        &self.task_run_id
     }
 
     /// The step's working directory: the task worktree, else the project root.
@@ -394,6 +414,7 @@ impl ScriptWorker {
                         runtime: Handle::current(),
                         cancellation: cancel_rx,
                         scope,
+                        task_run_id: Arc::default(),
                     };
                     // No timeout/abort races this join: the closure cooperates
                     // with its cancellation flag, and host calls race the same
@@ -522,12 +543,9 @@ fn evaluate_with(
     if let Some(error) = check_interruption() {
         return StepResult::failed(None, error);
     }
-    if let Err(error) = validate_json_result(&result) {
-        return StepResult::failed(None, error);
-    }
-    let output = match rhai::serde::from_dynamic::<serde_json::Value>(&result) {
+    let output = match rhai_to_json(&result) {
         Ok(output) => output,
-        Err(error) => return StepResult::failed(None, format!("Rhai result is not JSON: {error}")),
+        Err(error) => return StepResult::failed(None, format!("Rhai result {error}")),
     };
     if let Err(error) = schema.validate_output(Some(&output), None) {
         return step_result_for_schema_error(error);
@@ -578,8 +596,15 @@ pub(crate) fn json_to_rhai(value: &serde_json::Value, path: &str) -> Result<Dyna
     })
 }
 
+/// Convert a script value to JSON, rejecting values serde would otherwise
+/// coerce or refuse. The error completes a sentence about the value.
+pub(crate) fn rhai_to_json(value: &Dynamic) -> Result<serde_json::Value, String> {
+    validate_json_result(value)?;
+    rhai::serde::from_dynamic(value).map_err(|error| format!("is not JSON: {error}"))
+}
+
 /// Reject values serde would otherwise coerce or refuse, such as functions,
-/// custom types, and non-finite floats, before the result is persisted.
+/// custom types, and non-finite floats.
 fn validate_json_result(value: &Dynamic) -> Result<(), String> {
     if value.is_unit()
         || value.is::<bool>()
@@ -592,7 +617,7 @@ fn validate_json_result(value: &Dynamic) -> Result<(), String> {
         return if value.as_float().map_err(str::to_string)?.is_finite() {
             Ok(())
         } else {
-            Err("Rhai result contains a non-finite JSON number".into())
+            Err("contains a non-finite JSON number".into())
         };
     }
     if value.is::<rhai::Array>() {
@@ -603,10 +628,7 @@ fn validate_json_result(value: &Dynamic) -> Result<(), String> {
         let fields = value.as_map_ref().map_err(str::to_string)?;
         return fields.values().try_for_each(validate_json_result);
     }
-    Err(format!(
-        "Rhai result type '{}' is not JSON",
-        value.type_name()
-    ))
+    Err(format!("type '{}' is not JSON", value.type_name()))
 }
 
 #[cfg(test)]
@@ -619,6 +641,8 @@ pub(crate) mod test_support {
         use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
         ScriptScope {
             project_id: "script-project".into(),
+            execution_id: "script-execution".into(),
+            task_id: "script-task".into(),
             services: Arc::new(vertebrae_sacrum_client::from_sacrum(Arc::new(
                 GraphqlClient::new(SacrumConfig::new(
                     "http://127.0.0.1:9".into(),

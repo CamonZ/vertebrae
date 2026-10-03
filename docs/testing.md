@@ -140,6 +140,14 @@ It runs the checklist sample from
 `docs/agent-context/workflows/steps/execute/host-edits.md` (its first `rhai`
 block) twice in one script.
 
+`execute_artifact_writes.feature` covers `vtb::artifacts::put` and `put_json`
+creating and replacing artifacts on the script's task, another task and the
+project, their stored bodies, filenames and provenance, a retried attempt that
+converges, output persistence overwriting a `put` to the same name, and
+other-project targets. It runs the progress sample from
+`docs/agent-context/workflows/steps/execute/host-artifact-writes.md` (its
+first `rhai` block) twice in one script.
+
 **Mock prompt-as-JSON envelope.** The step's `prompt` is parsed by the mock as a
 JSON envelope with this schema:
 
