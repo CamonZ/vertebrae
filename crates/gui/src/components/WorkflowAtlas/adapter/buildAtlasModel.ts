@@ -55,7 +55,6 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
   ]);
   const raw = step.step_type;
   if (raw === null || !known.has(raw)) return "llm";
-
   if (raw === "execute") return "execute";
   const hearth = hearthStepKind(raw as StepType);
   switch (hearth) {
@@ -126,10 +125,11 @@ function orderPhases(
 }
 
 /**
- * Resolve a cross-workflow transition's source step ref. There is no source
- * step on the backend payload, so we synthesise a plausible terminal step:
- * the last `finish` step if one exists, else the last `route` step, else the
- * last step by order, else the initial step.
+ * Resolve a logical step ref for transition tracing. The backend transition is
+ * workflow-level and has no source step; graph geometry connects it to the
+ * workflow header instead. When a step ref is needed for selection, prefer the
+ * last `finish`, then the last `route`, then the last ordered step, falling
+ * back to the declared initial step for an empty workflow.
  */
 function resolveSourceStep(wf: PipelineWorkflow): string | null {
   const steps = wf.workflow_steps;

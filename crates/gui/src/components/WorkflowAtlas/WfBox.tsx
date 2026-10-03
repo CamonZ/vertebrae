@@ -20,11 +20,12 @@
  *
  * Ported from docs/design/workflow-views.jsx (WfBox).
  */
+import { useLayoutEffect, useRef } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { StepStrip } from "./StepStrip";
 import { TaskCount } from "./TaskCount";
 import { shortId } from "./layout/geometry";
-import type { AtlasWorkflow, Kind, Rect } from "./layout/types";
+import type { AtlasWorkflow, Kind, Point, Rect } from "./layout/types";
 
 export type WfBoxState = "" | "lit" | "dim";
 export type WfBoxView = "graph" | "map";
@@ -47,6 +48,8 @@ export interface WfBoxWorkflowProps extends WfBoxCommonProps {
   stepCount: number;
   /** Which face is active. */
   view?: WfBoxView;
+  /** Report the rendered workflow title's right-center graph port. */
+  onTitlePort?: (workflowId: string, point: Point) => void;
 }
 
 export interface WfBoxFactoryProps extends WfBoxCommonProps {
@@ -70,6 +73,51 @@ export function WfBox({
   onSelect,
   ...node
 }: WfBoxProps) {
+  const workflowRootRef = useRef<HTMLDivElement>(null);
+  const graphTitleRef = useRef<HTMLButtonElement>(null);
+  const isWorkflow = node.variant !== "factory";
+  const workflowId = isWorkflow ? node.workflow.id : null;
+  const workflowView = isWorkflow ? (node.view ?? "graph") : null;
+  const onTitlePort = isWorkflow ? node.onTitlePort : undefined;
+
+  useLayoutEffect(() => {
+    if (!workflowId || workflowView !== "graph" || !onTitlePort) return;
+
+    const measureTitlePort = () => {
+      const root = workflowRootRef.current;
+      const title = graphTitleRef.current;
+      if (!root || !title) return;
+      if (!rect.w || !rect.h) return;
+      const rootRect = root.getBoundingClientRect();
+      const titleRect = title.getBoundingClientRect();
+      if (!rootRect.width || !rootRect.height) return;
+      const scaleX = rootRect.width / rect.w;
+      const scaleY = rootRect.height / rect.h;
+      if (!scaleX || !scaleY) return;
+      onTitlePort(workflowId, {
+        x: rect.x + (titleRect.right - rootRect.left) / scaleX + 8,
+        y:
+          rect.y +
+          (titleRect.top + titleRect.height / 2 - rootRect.top) / scaleY,
+      });
+    };
+
+    measureTitlePort();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measureTitlePort);
+    if (observer) {
+      if (workflowRootRef.current) observer.observe(workflowRootRef.current);
+      if (graphTitleRef.current) observer.observe(graphTitleRef.current);
+    }
+    window.addEventListener("resize", measureTitlePort);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measureTitlePort);
+    };
+  }, [onTitlePort, rect.h, rect.w, rect.x, rect.y, workflowId, workflowView]);
+
   if (node.variant === "factory") {
     const factory = node.factory;
     const select = () => onSelect?.(factory.id);
@@ -115,7 +163,10 @@ export function WfBox({
 
   const { workflow, shape, stepCount, view = "graph" } = node;
   const w = workflow;
-  const cls = "uv-wf" + (state ? " " + state : "");
+  const cls =
+    "uv-wf" +
+    (view === "graph" ? " graph-lane" : "") +
+    (state ? " " + state : "");
   const stepWord = stepCount === 1 ? "step" : "steps";
   const select = () => onSelect?.(w.id);
   const selectFromName = (event: MouseEvent<HTMLButtonElement>) => {
@@ -126,6 +177,7 @@ export function WfBox({
   return (
     <div
       className={cls}
+      ref={workflowRootRef}
       data-testid={`workflow-node-${w.name}`}
       aria-label={`Workflow ${w.name}`}
       style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
@@ -142,6 +194,7 @@ export function WfBox({
             <button
               type="button"
               className="ag-wf-name"
+              ref={graphTitleRef}
               onClick={selectFromName}
             >
               {w.name}

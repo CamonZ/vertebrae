@@ -18,8 +18,8 @@
  */
 export type Kind =
   | "llm"
-  | "execute"
   | "structured"
+  | "execute"
   | "route"
   | "wait"
   | "human"
@@ -144,6 +144,8 @@ export interface PlacedStep extends Rect {
   name: string;
   kind: Kind;
   role: Role;
+  /** True when this step follows the first run-boundary seam in its workflow. */
+  futureRun?: boolean;
   /** 1-based ordinal shown on the node. */
   idx: number;
 }

@@ -5,16 +5,17 @@
    workflow containers ⊃ step nodes, orthogonal step + cross-workflow routing.
 
    Layout model:
-     • Each workflow is an ELK container laid out RIGHT (steps flow left→right).
-     • The root lays containers DOWN.
+     • Each workflow is an ELK container laid out DOWN (steps flow top→bottom).
+     • The root lays linked workflow containers RIGHT.
      • Forward intra-workflow links are SYNTHESISED here from step order — the
        adapter deliberately does not emit them.
-     • Cross-workflow edges route container→container (ELK routes top-level
-       nodes reliably across the hierarchy). Their endpoints are re-anchored
-       onto the workflow box borders afterwards.
+     • Cross-workflow edges are laid out between workflow containers (ELK routes
+       top-level nodes reliably across the hierarchy). Layout starts at the
+       workflow header and ends at the target step; the renderers move the
+       source to the measured title edge.
      • Loop-backs (same-workflow `transitions_to`) are kept OUT of ELK and drawn
-       as arcs under the step row from resolved step positions — feeding them to
-       ELK would distort the clean left→right step rows.
+       up the left side of the step lane — feeding them to ELK would distort
+       the clean top→bottom step flow.
      • "Hub" workflows (wired to most others, e.g. a shared review workflow) have
        their cross edges drawn as a light overlay and kept OUT of ELK so a
        fully-connected node doesn't inflate the board into a sparse canvas.
@@ -32,6 +33,7 @@ import ELK, {
 } from "elkjs/lib/elk.bundled.js";
 import { anchorEdge, edgePoints, rayBox } from "./geometry";
 import type {
+  AtlasStep,
   AtlasModel,
   EdgeKind,
   FullLayout,
@@ -45,12 +47,40 @@ import type {
 const elk = new ELK();
 
 export interface LayoutFullOptions {
-  /** Step node width (px). */
+  /** Override width for every kind when a uniform layout is desired (px). */
   stepW?: number;
-  /** Step node height (px). */
+  /** Override height for every kind when a uniform layout is desired (px). */
   stepH?: number;
   /** Container header height (top padding inside each workflow box, px). */
   headH?: number;
+}
+
+interface StepSize {
+  width: number;
+  height: number;
+}
+
+function stepSize(kind: AtlasStep["kind"], fallback: StepSize): StepSize {
+  switch (kind) {
+    case "llm":
+      return { width: 240, height: 114 };
+    case "structured":
+      return { width: 240, height: 122 };
+    case "execute":
+      return { width: 220, height: 88 };
+    case "route":
+      return { width: 160, height: 132 };
+    case "wait":
+      return { width: 220, height: 100 };
+    case "human":
+      return { width: 240, height: 88 };
+    case "stop":
+      return { width: 184, height: 34 };
+    case "finish":
+      return { width: 112, height: 42 };
+    default:
+      return fallback;
+  }
 }
 
 /** Approximate the rendered width of an edge label (for ELK label reservation). */
@@ -87,7 +117,11 @@ function firstSection(edge: ElkExtendedEdge) {
 }
 
 /** Read an ELK label back into an absolute, centred label position. */
-function elkLabel(edge: ElkExtendedEdge, ox: number, oy: number): LabelPos | null {
+function elkLabel(
+  edge: ElkExtendedEdge,
+  ox: number,
+  oy: number
+): LabelPos | null {
   const l = edge.labels?.[0];
   if (!l) return null;
   return {
@@ -97,6 +131,36 @@ function elkLabel(edge: ElkExtendedEdge, ox: number, oy: number): LabelPos | nul
   };
 }
 
+/** Start a workflow handoff at its header, then attach it to the target step. */
+function attachCrossEdgeFromHeader(
+  points: Point[],
+  source: PlacedWorkflow,
+  target: PlacedStep,
+  headerHeight: number
+): Point[] {
+  if (points.length < 2) return points;
+  const sourcePortX = points[0].x;
+  const targetPortX = points[points.length - 1].x;
+  const start = {
+    x: sourcePortX,
+    y: source.y + Math.min(headerHeight, source.h) / 2,
+  };
+  const end = { x: target.x, y: target.y + target.h / 2 };
+  const expanded = [
+    start,
+    { x: sourcePortX, y: start.y },
+    ...points,
+    { x: targetPortX, y: end.y },
+    end,
+  ];
+  return expanded.filter(
+    (point, index) =>
+      index === 0 ||
+      point.x !== expanded[index - 1].x ||
+      point.y !== expanded[index - 1].y
+  );
+}
+
 /**
  * Compute the nested graph layout for an `AtlasModel`.
  *
@@ -104,7 +168,7 @@ function elkLabel(edge: ElkExtendedEdge, ox: number, oy: number): LabelPos | nul
  */
 export async function layoutFull(
   model: AtlasModel,
-  opts: LayoutFullOptions = {},
+  opts: LayoutFullOptions = {}
 ): Promise<FullLayout> {
   const STEP_W = opts.stepW ?? 148;
   const STEP_H = opts.stepH ?? 88;
@@ -122,29 +186,48 @@ export async function layoutFull(
     list.sort((a, b) => a.order - b.order);
   }
   const stepById = new Map(model.steps.map((s) => [s.id, s]));
+  const sizesByStep = new Map(
+    model.steps.map((step) => {
+      const size = stepSize(step.kind, { width: STEP_W, height: STEP_H });
+      return [
+        step.id,
+        {
+          width: opts.stepW ?? size.width,
+          height: opts.stepH ?? size.height,
+        },
+      ] as const;
+    })
+  );
+  const preferredLaneWidth = 640 / Math.max(1, model.workflows.length);
 
   const meta: Record<string, EdgeMeta> = {};
 
-  // ── containers: one ELK node per workflow, step children laid out RIGHT ──
+  // ── containers: one ELK node per workflow, step children laid out DOWN ──
   const containers: ElkNode[] = model.workflows.map((w) => {
     const wSteps = stepsByWorkflow.get(w.id) ?? [];
+    const widestStep = Math.max(
+      0,
+      ...wSteps.map((step) => sizesByStep.get(step.id)!.width)
+    );
+    const laneMinWidth = Math.max(widestStep + 40, preferredLaneWidth);
     const node: ElkNode = {
       id: w.id,
       layoutOptions: {
         "elk.algorithm": "layered",
-        "elk.direction": "RIGHT",
-        // explicit: keep child layout independent of the root's DOWN flow.
+        "elk.direction": "DOWN",
+        // explicit: keep child layout independent of the root's RIGHT flow.
         "elk.hierarchyHandling": "SEPARATE_CHILDREN",
         "elk.padding": `[top=${HEAD},left=20,bottom=40,right=20]`,
         "elk.spacing.nodeNode": "22",
-        "elk.layered.spacing.nodeNodeBetweenLayers": "34",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "40",
         "elk.nodeSize.constraints": "MINIMUM_SIZE",
-        "elk.nodeSize.minimum": "(216.0,0.0)",
+        "elk.nodeSize.minimum": `(${laneMinWidth}.0,0.0)`,
+        "elk.contentAlignment": "H_CENTER V_TOP",
       },
       children: wSteps.map((st) => ({
         id: st.id,
-        width: STEP_W,
-        height: STEP_H,
+        width: sizesByStep.get(st.id)!.width,
+        height: sizesByStep.get(st.id)!.height,
       })),
       edges: [],
     };
@@ -222,12 +305,12 @@ export async function layoutFull(
     }
   });
 
-  // ── root graph: containers laid out DOWN, cross edges polyline-routed ──
+  // ── root graph: linked workflow containers laid out RIGHT ──
   const graph: ElkNode = {
     id: "root",
     layoutOptions: {
       "elk.algorithm": "layered",
-      "elk.direction": "DOWN",
+      "elk.direction": "RIGHT",
       "elk.hierarchyHandling": "SEPARATE_CHILDREN",
       // Orthogonal so cross-workflow handoffs read as clean horizontal/vertical
       // runs with 90° turns (matching the map face), not diagonal polylines.
@@ -250,8 +333,14 @@ export async function layoutFull(
     const w = model.workflows.find((x) => x.id === c.id)!;
     const cx = c.x ?? 0;
     const cy = c.y ?? 0;
+    const workflowSteps = stepsByWorkflow.get(c.id) ?? [];
+    const stopOrder = workflowSteps.find((step) => step.kind === "stop")?.order;
     const steps: PlacedStep[] = (c.children ?? []).map((st, i) => {
       const def = stepById.get(st.id)!;
+      const nodeX = st.x ?? 0;
+      const nodeY = st.y ?? 0;
+      const nodeWidth = st.width ?? STEP_W;
+      const isStop = def.kind === "stop";
       return {
         id: st.id,
         stepId: def.stepId,
@@ -259,10 +348,11 @@ export async function layoutFull(
         name: def.name,
         kind: def.kind,
         role: def.role,
+        futureRun: stopOrder !== undefined && def.order > stopOrder,
         idx: i + 1,
-        x: cx + (st.x ?? 0),
-        y: cy + (st.y ?? 0),
-        w: st.width ?? STEP_W,
+        x: cx + (isStop ? 20 : nodeX),
+        y: cy + nodeY,
+        w: isStop ? Math.max(0, (c.width ?? nodeWidth + 40) - 40) : nodeWidth,
         h: st.height ?? STEP_H,
       };
     });
@@ -280,7 +370,7 @@ export async function layoutFull(
           points: edgePoints(firstSection(e), cx, cy),
           labelPos: elkLabel(e, cx, cy),
         };
-      },
+      }
     );
     return {
       id: c.id,
@@ -296,7 +386,7 @@ export async function layoutFull(
 
   const wfById = new Map(placedWorkflows.map((w) => [w.id, w]));
 
-  // ── loop-backs: arc under the step row, from resolved step positions ──
+  // ── loop-backs: return up the lane's left gutter ──
   const loopGeo: PlacedEdge[] = loops
     .map((lp): PlacedEdge | null => {
       const w = wfById.get(lp.workflowId);
@@ -304,15 +394,14 @@ export async function layoutFull(
       const from = w.steps.find((s) => s.id === lp.from);
       const to = w.steps.find((s) => s.id === lp.to);
       if (!from || !to) return null;
-      const rowBottom = Math.max(...w.steps.map((s) => s.y + s.h));
-      const lane = rowBottom + 18;
-      const fx = from.x + from.w / 2;
-      const tx = to.x + to.w / 2;
+      const gutterX = Math.min(...w.steps.map((step) => step.x)) - 28;
+      const sourceY = from.y + from.h / 2;
+      const targetY = to.y + to.h / 2;
       const points: Point[] = [
-        { x: fx, y: from.y + from.h },
-        { x: fx, y: lane },
-        { x: tx, y: lane },
-        { x: tx, y: to.y + to.h },
+        { x: from.x, y: sourceY },
+        { x: gutterX, y: sourceY },
+        { x: gutterX, y: targetY },
+        { x: to.x, y: targetY },
       ];
       return {
         id: lp.id,
@@ -323,7 +412,11 @@ export async function layoutFull(
         toWorkflow: lp.workflowId,
         label: lp.label,
         points,
-        labelPos: { text: lp.label ?? "", x: (fx + tx) / 2, y: lane },
+        labelPos: {
+          text: lp.label ?? "",
+          x: (from.x + gutterX) / 2,
+          y: sourceY,
+        },
       };
     })
     .filter((x): x is PlacedEdge => x !== null);
@@ -334,25 +427,31 @@ export async function layoutFull(
   }
 
   // ── cross edges from ELK: re-anchor onto box borders ──
-  const cross: PlacedEdge[] = ((r.edges ?? []) as ElkExtendedEdge[]).map((e) => {
-    const m = meta[e.id];
-    const A = wfById.get(m.fromWorkflow);
-    const B = wfById.get(m.toWorkflow);
-    let points = edgePoints(firstSection(e), 0, 0);
-    if (A && B) points = anchorEdge(points, A, B);
-    return {
-      id: e.id,
-      kind: m.kind,
-      from: m.from ?? "",
-      to: m.to ?? "",
-      fromWorkflow: m.fromWorkflow,
-      toWorkflow: m.toWorkflow,
-      label: m.label,
-      points,
-      labelPos: elkLabel(e, 0, 0),
-      hub: m.hub,
-    };
-  });
+  const cross: PlacedEdge[] = ((r.edges ?? []) as ElkExtendedEdge[]).map(
+    (e) => {
+      const m = meta[e.id];
+      const A = wfById.get(m.fromWorkflow);
+      const B = wfById.get(m.toWorkflow);
+      let points = edgePoints(firstSection(e), 0, 0);
+      if (A && B) {
+        points = anchorEdge(points, A, B);
+        const target = B.steps.find((step) => step.id === m.to);
+        if (target) points = attachCrossEdgeFromHeader(points, A, target, HEAD);
+      }
+      return {
+        id: e.id,
+        kind: m.kind,
+        from: m.from ?? "",
+        to: m.to ?? "",
+        fromWorkflow: m.fromWorkflow,
+        toWorkflow: m.toWorkflow,
+        label: m.label,
+        points,
+        labelPos: elkLabel(e, 0, 0),
+        hub: m.hub,
+      };
+    }
+  );
 
   // ── hub overlay edges: straight border→border, computed after layout so
   //    they never participate in (or distort) the ELK packing ──
