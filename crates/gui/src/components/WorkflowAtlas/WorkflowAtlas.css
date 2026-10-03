@@ -977,20 +977,18 @@
   );
 }
 
-/* Route is a junction, with its optional subject beside the diamond. */
+/* Route is a junction, with its step name below the diamond. */
 .ag-step--route {
-  align-items: center;
-  flex-direction: row;
-  gap: 14px;
+  display: block;
   overflow: visible;
 }
 .ag-route-diamond {
-  display: flex;
+  position: absolute;
+  top: 50%;
+  left: 50%;
   width: 44px;
   height: 44px;
-  flex: 0 0 44px;
-  align-items: center;
-  justify-content: center;
+  margin: -22px 0 0 -22px;
   border: 1.5px solid var(--kc);
   border-radius: 6px;
   background: color-mix(in oklch, var(--kw) 75%, var(--bg));
@@ -998,11 +996,16 @@
 }
 .ag-route-label {
   display: flex;
+  position: absolute;
+  top: calc(50% + 31px);
+  left: 0;
   min-width: 0;
-  flex: 1;
+  max-width: 100%;
+  width: 100%;
   flex-direction: column;
   gap: 4px;
   overflow: hidden;
+  text-align: center;
 }
 .ag-route-label .ag-step-title {
   display: block;
@@ -1037,11 +1040,11 @@
   pointer-events: none;
 }
 .ag-step--wait::before {
-  transform: translate(5px, -5px);
+  transform: translate(5px, 5px);
 }
 .ag-step--wait::after {
   opacity: 0.8;
-  transform: translate(10px, -10px);
+  transform: translate(10px, 10px);
 }
 .ag-step--wait > * {
   position: relative;

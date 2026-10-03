@@ -53,7 +53,7 @@ describe("StepNodeGeo", () => {
       "ChoiceScoreNoul"
     );
     expect(document.querySelectorAll(".ag-primitive-icon")).toHaveLength(3);
-    expect(screen.getByText("Typed questions")).toBeInTheDocument();
+    expect(screen.queryByText("Typed questions")).not.toBeInTheDocument();
   });
 
   it("marks live LLM work and waiting human input from active-run counts", () => {

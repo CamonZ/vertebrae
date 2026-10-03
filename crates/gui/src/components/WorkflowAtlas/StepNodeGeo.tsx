@@ -91,24 +91,23 @@ function NodeContent({
               <WorkCount total={total} running={running} />
             </div>
             <StepTitle>{step.name}</StepTitle>
-            <span className="ag-step-meta">Open-ended agent work</span>
           </div>
-          <div className="ag-step-live-line">
-            {running > 0 ? (
-              <>
-                <span className="ag-live-dot" aria-hidden="true" />
+          {(running > 0 || total > 0) && (
+            <div className="ag-step-live-line">
+              {running > 0 ? (
+                <>
+                  <span className="ag-live-dot" aria-hidden="true" />
+                  <span>
+                    {running} active run{running === 1 ? "" : "s"}
+                  </span>
+                </>
+              ) : (
                 <span>
-                  {running} active run{running === 1 ? "" : "s"}
+                  {total} work item{total === 1 ? "" : "s"} parked
                 </span>
-              </>
-            ) : total > 0 ? (
-              <span>
-                {total} work item{total === 1 ? "" : "s"} parked
-              </span>
-            ) : (
-              <span>No active work</span>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </>
       );
     case "structured":
@@ -120,7 +119,6 @@ function NodeContent({
               <WorkCount total={total} running={running} />
             </div>
             <StepTitle>{step.name}</StepTitle>
-            <span className="ag-step-meta">Typed questions</span>
           </div>
           <div className="ag-step-card-footer">
             <StructuredTypeKey />
@@ -136,7 +134,6 @@ function NodeContent({
           </div>
           <StepTitle>{step.name}</StepTitle>
           <span className="ag-execute-rule" aria-hidden="true" />
-          <span className="ag-step-meta">Deterministic script</span>
         </div>
       );
     case "route":
@@ -145,26 +142,18 @@ function NodeContent({
           <span className="ag-route-diamond" aria-hidden="true" />
           <span className="ag-route-label">
             <Eyebrow>Route</Eyebrow>
-            <StepTitle>{step.goal?.trim() || step.name}</StepTitle>
+            <StepTitle>{step.name}</StepTitle>
           </span>
         </>
       );
     case "wait":
       return (
-        <>
-          <div className="ag-step-card-body">
-            <div className="ag-step-card-heading">
-              <Eyebrow>Wait for children</Eyebrow>
-            </div>
-            <StepTitle>{step.name}</StepTitle>
+        <div className="ag-step-card-body">
+          <div className="ag-step-card-heading">
+            <Eyebrow>Wait for children</Eyebrow>
           </div>
-          <div className="ag-step-card-footer ag-wait-counts">
-            <span>Work items</span>
-            <span>
-              {total} parked · {running} active
-            </span>
-          </div>
-        </>
+          <StepTitle>{step.name}</StepTitle>
+        </div>
       );
     case "human":
       return (
@@ -237,11 +226,13 @@ export function StepNodeGeo({
     height: step.h,
   };
   const accessibleDescription =
-    running > 0
-      ? `${LABELS[kind]}, ${running} active run${running === 1 ? "" : "s"}`
-      : total > 0
-        ? `${LABELS[kind]}, ${total} work item${total === 1 ? "" : "s"} parked`
-        : LABELS[kind];
+    kind === "wait"
+      ? LABELS[kind]
+      : running > 0
+        ? `${LABELS[kind]}, ${running} active run${running === 1 ? "" : "s"}`
+        : total > 0
+          ? `${LABELS[kind]}, ${total} work item${total === 1 ? "" : "s"} parked`
+          : LABELS[kind];
   return (
     <div
       className={cls}

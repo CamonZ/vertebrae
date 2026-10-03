@@ -9,9 +9,10 @@
      • The root lays linked workflow containers RIGHT.
      • Forward intra-workflow links are SYNTHESISED here from step order — the
        adapter deliberately does not emit them.
-     • Cross-workflow edges route container→container (ELK routes top-level
-       nodes reliably across the hierarchy). Their endpoints are re-anchored
-       onto the workflow box borders afterwards.
+     • Cross-workflow edges are laid out between workflow containers (ELK routes
+       top-level nodes reliably across the hierarchy). Their visible source is
+       re-anchored to the workflow header; the destination stays on its target
+       step.
      • Loop-backs (same-workflow `transitions_to`) are kept OUT of ELK and drawn
        up the left side of the step lane — feeding them to ELK would distort
        the clean top→bottom step flow.
@@ -68,7 +69,7 @@ function stepSize(kind: AtlasStep["kind"], fallback: StepSize): StepSize {
     case "execute":
       return { width: 220, height: 88 };
     case "route":
-      return { width: 138, height: 72 };
+      return { width: 160, height: 132 };
     case "wait":
       return { width: 220, height: 100 };
     case "human":
@@ -130,16 +131,20 @@ function elkLabel(
   };
 }
 
-/** Keep a cross-workflow handoff attached to its actual source and target step. */
-function attachCrossEdgeToSteps(
+/** Start a workflow handoff at its header, then attach it to the target step. */
+function attachCrossEdgeFromHeader(
   points: Point[],
-  source: PlacedStep,
-  target: PlacedStep
+  source: PlacedWorkflow,
+  target: PlacedStep,
+  headerHeight: number
 ): Point[] {
   if (points.length < 2) return points;
   const sourcePortX = points[0].x;
   const targetPortX = points[points.length - 1].x;
-  const start = { x: source.x + source.w, y: source.y + source.h / 2 };
+  const start = {
+    x: sourcePortX,
+    y: source.y + Math.min(headerHeight, source.h) / 2,
+  };
   const end = { x: target.x, y: target.y + target.h / 2 };
   const expanded = [
     start,
@@ -341,7 +346,6 @@ export async function layoutFull(
         stepId: def.stepId,
         workflowId: def.workflowId,
         name: def.name,
-        goal: def.goal,
         kind: def.kind,
         role: def.role,
         futureRun: stopOrder !== undefined && def.order > stopOrder,
@@ -431,11 +435,8 @@ export async function layoutFull(
       let points = edgePoints(firstSection(e), 0, 0);
       if (A && B) {
         points = anchorEdge(points, A, B);
-        const source = A.steps.find((step) => step.id === m.from);
         const target = B.steps.find((step) => step.id === m.to);
-        if (source && target) {
-          points = attachCrossEdgeToSteps(points, source, target);
-        }
+        if (target) points = attachCrossEdgeFromHeader(points, A, target, HEAD);
       }
       return {
         id: e.id,
