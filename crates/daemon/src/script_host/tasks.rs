@@ -1,5 +1,6 @@
 //! `vtb::tasks` reads: `get`, `find`, `parent`, `children`, `dependencies`
-//! and `dependents`. Writes live in [`super::task_writes`].
+//! and `dependents`. Writes live in [`super::task_writes`] and
+//! [`super::task_edits`].
 //!
 //! A task is visible only when Sacrum reports it in the execution's project;
 //! any other task, including one missing a project, reads as absent. Missing
@@ -26,6 +27,7 @@ pub(super) fn module(host: &HostContext) -> Module {
     set_host_fn(&mut module, host, NAMESPACE, "dependencies", dependencies);
     set_host_fn(&mut module, host, NAMESPACE, "dependents", dependents);
     super::task_writes::register(&mut module, host);
+    super::task_edits::register(&mut module, host);
     module
 }
 
@@ -287,7 +289,7 @@ pub(super) fn task_value(task: &Task) -> Dynamic {
     map.into()
 }
 
-fn section_value(section: &Section) -> Dynamic {
+pub(super) fn section_value(section: &Section) -> Dynamic {
     let mut map = Map::new();
     map.insert("type".into(), section.section_type.as_str().into());
     map.insert("content".into(), section.content.clone().into());

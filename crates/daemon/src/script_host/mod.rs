@@ -8,6 +8,7 @@
 
 mod artifacts;
 mod cmd;
+mod task_edits;
 mod task_writes;
 mod tasks;
 #[cfg(test)]
@@ -70,6 +71,25 @@ fn set_host_fn3(
         name,
         move |first: Dynamic, second: Dynamic, third: Dynamic| {
             function(&host, first, second, third)
+                .map_err(|error| error.in_function(qualified.as_str()).into())
+        },
+    );
+}
+
+/// Register a four-argument host function; see [`set_host_fn`].
+fn set_host_fn4(
+    module: &mut Module,
+    host: &HostContext,
+    namespace: &str,
+    name: &str,
+    function: fn(&HostContext, Dynamic, Dynamic, Dynamic, Dynamic) -> Result<Dynamic, HostError>,
+) {
+    let host = host.clone();
+    let qualified = format!("{namespace}::{name}");
+    module.set_native_fn(
+        name,
+        move |first: Dynamic, second: Dynamic, third: Dynamic, fourth: Dynamic| {
+            function(&host, first, second, third, fourth)
                 .map_err(|error| error.in_function(qualified.as_str()).into())
         },
     );

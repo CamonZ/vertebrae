@@ -11,5 +11,7 @@ and persists its validated JSON result. Execute has no provider harness.
   Load when: a script reads tasks, children or artifacts, rolls up child results, or uses `read_json`.
 - [Creating and updating tasks](host-writes.md): `vtb::tasks::create`, `update`, `archive` and `unarchive`, and a create-children-from-a-plan example.
   Load when: a script creates child tasks, patches task fields or tags, archives tasks, or must not duplicate tasks on rerun.
+- [Editing task content and relationships](host-edits.md): sections, checklist items, code refs, parents and dependencies through `vtb::tasks`, and an add-a-checklist-once example.
+  Load when: a script adds or edits sections, checks items, adds code refs, reparents tasks, or adds dependencies.
 - [Limits and cancellation](limits.md): daemon-wide capacity settings, unbounded evaluation, cancellation, host-call errors, and command execution (`vtb::cmd`) permissions.
   Load when: script limits, overflow, cancellation, isolation, running commands from a script, or provider requirements.

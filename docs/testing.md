@@ -133,6 +133,13 @@ and `unarchive`, including other-project targets and refused patch keys.
 first `json` block is the plan, the first `rhai` block the script, and the
 `--output-schema` value the schema.
 
+`execute_task_edits.feature` covers the section, checklist, code-ref, parent
+and dependency edits on existing and newly created tasks, reruns, ordinals
+that survive an earlier section's removal, cycles and other-project targets.
+It runs the checklist sample from
+`docs/agent-context/workflows/steps/execute/host-edits.md` (its first `rhai`
+block) twice in one script.
+
 **Mock prompt-as-JSON envelope.** The step's `prompt` is parsed by the mock as a
 JSON envelope with this schema:
 

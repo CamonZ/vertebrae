@@ -63,7 +63,7 @@ fn require_workflow(host: &HostContext, id: &str) -> Result<(), HostError> {
 }
 
 /// Read a task in the execution's project, raising `absent(id)` otherwise.
-fn require_task(
+pub(super) fn require_task(
     host: &HostContext,
     id: &str,
     absent: fn(&str) -> ServiceError,
@@ -174,7 +174,7 @@ fn update_options(patch: Dynamic) -> Result<UpdateTaskOptions, HostError> {
 }
 
 /// `()` clears the field; anything else must parse.
-fn clearable<T>(
+pub(super) fn clearable<T>(
     value: Dynamic,
     parse: impl FnOnce(Dynamic) -> Result<T, HostError>,
 ) -> Result<Option<T>, HostError> {
