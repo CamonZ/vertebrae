@@ -4070,6 +4070,11 @@ html.light ::selection {
   --kf: var(--step-structured-fg);
   --kw: var(--step-structured-wash);
 }
+.k-execute {
+  --kc: var(--step-structured);
+  --kf: var(--step-structured-fg);
+  --kw: var(--step-structured-wash);
+}
 .k-route {
   --kc: var(--step-route);
   --kf: var(--step-route-fg);

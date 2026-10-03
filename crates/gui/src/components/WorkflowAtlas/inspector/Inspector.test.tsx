@@ -127,6 +127,16 @@ const STOP_MODEL = buildAtlasModel({
     ]),
   ],
 });
+const EXECUTE_MODEL = buildAtlasModel({
+  workflows: [
+    makeWorkflow("wf-execute", [
+      makeStep("script-step", "wf-execute", 0, {
+        name: "Run script",
+        step_type: "execute",
+      }),
+    ]),
+  ],
+});
 
 const stepFixture = (overrides: Partial<Step> = {}): Step => ({
   id: "s1",
@@ -713,9 +723,9 @@ describe("StepInspector", () => {
     expect(screen.getByTestId("structured-state-section")).toHaveTextContent(
       "{{ task.title }}"
     );
-    expect(screen.getByTestId("structured-questions-section")).toHaveTextContent(
-      "label"
-    );
+    expect(
+      screen.getByTestId("structured-questions-section")
+    ).toHaveTextContent("label");
     expect(screen.getByText("typesafe")).toBeInTheDocument();
     expect(screen.getByText("jev")).toBeInTheDocument();
 
@@ -754,7 +764,9 @@ describe("StepInspector", () => {
         />
       );
 
-      expect(screen.getByTestId("step-harness-value")).toHaveTextContent(harness);
+      expect(screen.getByTestId("step-harness-value")).toHaveTextContent(
+        harness
+      );
       fireEvent.click(screen.getByRole("button", { name: "Edit" }));
       expect(screen.getByLabelText("Step harness")).toHaveValue(harness);
       fireEvent.click(screen.getByRole("button", { name: "Save step" }));
@@ -1033,6 +1045,78 @@ describe("StepInspector", () => {
       screen.getByText("No prompt — run boundary is not dispatched")
     ).toBeInTheDocument();
     expect(screen.getByText("Continue")).toBeInTheDocument();
+  });
+
+  it("renders and edits execute script and required output schema without inference fields", async () => {
+    const output_schema = {
+      type: "object",
+      properties: { result: { type: "number" } },
+    };
+    const updatedSchema = {
+      type: "object",
+      properties: { count: { type: "integer" } },
+    };
+    mockUseStep(
+      stepFixture({
+        id: "script-step",
+        name: "Run script",
+        step_type: "execute",
+        harness: null,
+        config: {
+          version: 1,
+          script: 'let result = 42; #{"result": result}',
+          context: null,
+          output_schema,
+        },
+      })
+    );
+    render(
+      <StepInspector
+        model={EXECUTE_MODEL}
+        workflowId="wf-execute"
+        stepId="script-step"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(document.querySelector(".wfd.kindspine")).toHaveClass("k-execute");
+    expect(screen.getByTestId("rhai-script-highlighted")).toHaveTextContent(
+      /let result = 42; #\{\s*"result": result\s*\}/
+    );
+    expect(
+      screen.getByTestId("rhai-script-highlighted").querySelector("code")
+    ).toHaveClass("language-rhai");
+    expect(screen.getByText("Output Schema")).toBeInTheDocument();
+    expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
+    expect(screen.queryByText("Harness")).not.toBeInTheDocument();
+    expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+    expect(screen.queryByText("Skills")).not.toBeInTheDocument();
+    expect(screen.queryByText("Model")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const updatedScript = '#{"result": 84}';
+    fireEvent.change(screen.getByLabelText("Rhai script"), {
+      target: { value: updatedScript },
+    });
+    fireEvent.change(screen.getByLabelText("Output schema"), {
+      target: { value: JSON.stringify(updatedSchema) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+
+    await waitFor(() =>
+      expect(commands.updateStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          harness: null,
+          config: {
+            version: 1,
+            script: updatedScript,
+            context: null,
+            output_schema: updatedSchema,
+          },
+        })
+      )
+    );
   });
 });
 

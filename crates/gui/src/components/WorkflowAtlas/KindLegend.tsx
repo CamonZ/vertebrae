@@ -11,6 +11,7 @@ import type { Kind } from "./layout/types";
 
 const KINDS: ReadonlyArray<Kind> = [
   "llm",
+  "execute",
   "structured",
   "route",
   "wait",

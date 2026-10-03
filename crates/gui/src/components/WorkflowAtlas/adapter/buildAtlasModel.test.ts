@@ -71,6 +71,7 @@ describe("kindFor", () => {
       ["llm", "llm"],
       ["llm_inference", "llm"],
       ["structured_inference", "structured"],
+      ["execute", "execute"],
       ["wait_children", "wait"],
       ["human_input", "human"],
       ["route", "route"],
@@ -88,6 +89,7 @@ describe("kindFor", () => {
     // entry/final are NOT kinds — the real backend type always wins.
     expect(kindFor({ step_type: "route" })).toBe("route");
     expect(kindFor({ step_type: "llm_inference" })).toBe("llm");
+    expect(kindFor({ step_type: "execute" })).toBe("execute");
   });
 });
 
