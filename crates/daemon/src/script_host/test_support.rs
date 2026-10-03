@@ -13,6 +13,8 @@ use crate::script_worker::{ScriptScope, ScriptWorker};
 /// The execution's project.
 pub(super) const PROJECT: &str = "11111111-1111-4111-8111-111111111111";
 pub(super) const OTHER_PROJECT: &str = "22222222-2222-4222-8222-222222222222";
+/// The step execution every test script runs as.
+pub(super) const EXECUTION: &str = "33333333-3333-4333-8333-333333333333";
 
 pub(super) async fn sacrum(responder: impl Respond + 'static) -> MockServer {
     let server = MockServer::start().await;
@@ -35,6 +37,8 @@ pub(super) async fn run(
     use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
     let scope = ScriptScope {
         project_id: PROJECT.into(),
+        execution_id: EXECUTION.into(),
+        task_id: task_id.into(),
         services: Arc::new(vertebrae_sacrum_client::from_sacrum(Arc::new(
             GraphqlClient::new(SacrumConfig::new(
                 server.uri(),

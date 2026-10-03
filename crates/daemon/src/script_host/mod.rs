@@ -6,6 +6,7 @@
 //! local processes through [`HostContext::block_on_owned`]. Scripts never pass project
 //! IDs; anything outside the execution's project behaves as absent.
 
+mod artifact_writes;
 mod artifacts;
 mod cmd;
 mod task_edits;

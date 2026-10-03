@@ -13,5 +13,7 @@ and persists its validated JSON result. Execute has no provider harness.
   Load when: a script creates child tasks, patches task fields or tags, archives tasks, or must not duplicate tasks on rerun.
 - [Editing task content and relationships](host-edits.md): sections, checklist items, code refs, parents and dependencies through `vtb::tasks`, and an add-a-checklist-once example.
   Load when: a script adds or edits sections, checks items, adds code refs, reparents tasks, or adds dependencies.
+- [Writing artifacts](host-artifact-writes.md): `vtb::artifacts::put` and `put_json` on a task or the project, provenance, and a record-progress example.
+  Load when: a script publishes or replaces a named artifact, shares data through the project, or writes the same name as output persistence.
 - [Limits and cancellation](limits.md): daemon-wide capacity settings, unbounded evaluation, cancellation, host-call errors, and command execution (`vtb::cmd`) permissions.
   Load when: script limits, overflow, cancellation, isolation, running commands from a script, or provider requirements.
