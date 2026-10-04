@@ -60,6 +60,9 @@
 .flight-strip .mk.kind-structured {
   background: var(--color-step-structured, var(--color-info));
 }
+.flight-strip .mk.kind-execute {
+  background: var(--color-line-strong, var(--color-fg-mute));
+}
 .flight-strip .mk.kind-route {
   background: var(--color-step-route, var(--color-warn));
 }
@@ -68,6 +71,9 @@
 }
 .flight-strip .mk.kind-wait {
   background: var(--color-step-wait, var(--color-fg-mute));
+}
+.flight-strip .mk.kind-stop {
+  background: var(--color-step-stop, var(--color-fg-mute));
 }
 .flight-strip .mk.kind-finish {
   background: var(--color-step-finish, var(--color-ok));

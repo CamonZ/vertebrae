@@ -85,11 +85,13 @@ export interface ThreadCapabilities {
 
 /**
  * Visual step kinds used for thread colors and badges. Sacrum's
- * `llm_inference` maps to `llm`; a subagent without a step uses `llm`.
+ * `llm_inference` maps to `llm`; execute steps retain their own kind. A
+ * subagent without a step uses `llm`.
  */
 export type StepKind =
   | "llm"
   | "structured"
+  | "execute"
   | "route"
   | "human"
   | "wait"
