@@ -10,6 +10,7 @@ describe("normalizeStepType", () => {
   it.each([
     ["llm_inference", "llm_inference"],
     ["structured_inference", "structured_inference"],
+    ["execute", "execute"],
     ["route", "route"],
     ["human_input", "human_input"],
     ["wait_children", "wait_children"],
@@ -49,9 +50,16 @@ describe("stepTypeStyle", () => {
     expect(style.barVar).toBe("--color-line-strong");
   });
 
-  it("uses the neutral style for execute snapshots without an authoring palette", () => {
-    expect(stepTypeStyle("execute")).toEqual(stepTypeStyle(null));
-    expect(hearthStepKind("execute")).toBe("unknown");
+  it("uses the dedicated execute style for execute snapshots", () => {
+    expect(stepTypeStyle("execute")).toMatchObject({
+      kind: "execute",
+      hearthKind: "execute",
+      label: "Execute",
+      barVar: "--color-line-strong",
+      washVar: "--color-bg-1",
+      fgVar: "--color-fg-soft",
+    });
+    expect(hearthStepKind("execute")).toBe("execute");
   });
 });
 
@@ -59,6 +67,7 @@ describe("hearthStepKind", () => {
   it.each([
     ["llm_inference", "llm"],
     ["structured_inference", "structured"],
+    ["execute", "execute"],
     ["route", "route"],
     ["human_input", "human"],
     ["wait_children", "wait"],

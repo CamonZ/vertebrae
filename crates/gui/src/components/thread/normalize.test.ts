@@ -179,9 +179,10 @@ function harnessConversationLogs(execId: string, model: string): SessionLog[] {
 // ===========================================================================
 
 describe("stepKindFromStepType", () => {
-  it("maps the six known step types and falls back to inference", () => {
+  it("maps known step types and falls back to inference", () => {
     expect(stepKindFromStepType("llm")).toBe("llm");
     expect(stepKindFromStepType("llm_inference")).toBe("llm");
+    expect(stepKindFromStepType("execute")).toBe("execute");
     expect(stepKindFromStepType("route")).toBe("route");
     expect(stepKindFromStepType("human_input")).toBe("human");
     expect(stepKindFromStepType("wait_children")).toBe("wait");
@@ -326,6 +327,26 @@ describe("runToThreads — structured_inference executions", () => {
       .filter((m) => m.type === "system")
       .map((m) => (m as SystemMessage).label);
     expect(labels).toEqual(["State"]);
+  });
+});
+
+describe("runToThreads — execute step", () => {
+  it("preserves execute as the trace thread and step kind", () => {
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [
+        exec({
+          id: "execute-1",
+          step_name: "Run script",
+          step_type: "execute",
+        }),
+      ],
+      logsByExecutionId: {},
+    };
+
+    const [thread] = runToThreads(input);
+    expect(thread.kind).toBe("execute");
+    expect(thread.step?.kind).toBe("execute");
   });
 });
 

@@ -84,12 +84,16 @@ function stepKindColorVar(kind: string): string {
       return "var(--color-step-llm, var(--color-info))";
     case "structured":
       return "var(--color-step-structured, var(--color-info))";
+    case "execute":
+      return "var(--color-line-strong, var(--color-fg-mute))";
     case "route":
       return "var(--color-step-route, var(--color-warn))";
     case "human":
       return "var(--color-step-human, var(--color-info))";
     case "wait":
       return "var(--color-step-wait, var(--color-fg-mute))";
+    case "stop":
+      return "var(--color-step-stop, var(--color-fg-mute))";
     case "finish":
       return "var(--color-step-finish, var(--color-ok))";
     default:

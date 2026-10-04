@@ -113,6 +113,7 @@ export interface ChatMsg {
 /**
  * Map a Sacrum {@link StepType} to a {@link StepKind}.
  *   llm_inference → "llm", structured_inference → "structured",
+ *   execute → "execute",
  *   route → "route",
  *   human_input → "human", wait_children → "wait", stop → "stop",
  *   finish → "finish".
@@ -129,6 +130,8 @@ export function stepKindFromStepType(
       return "llm";
     case "structured_inference":
       return "structured";
+    case "execute":
+      return "execute";
     case "route":
       return "route";
     case "human_input":
