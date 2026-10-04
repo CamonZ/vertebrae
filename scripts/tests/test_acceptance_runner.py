@@ -13,7 +13,15 @@ SPEC.loader.exec_module(runner)
 class RunnerTests(unittest.TestCase):
     def setUp(self):
         self.env = {"VTB_ACCEPTANCE_CACHE_KEY": "test-cache", "COMPOSE_PROJECT_NAME": "test-run"}
+        self.env.update({runner.image_env(suite): f"registry/{suite}:tag" for suite in runner.SUITES})
         self.calls = []
+        # Images are present locally unless a test says otherwise.
+        succeeds = patch.object(runner, "succeeds", return_value=True)
+        self.succeeds = succeeds.start()
+        self.addCleanup(succeeds.stop)
+        platform = patch.object(runner, "docker_platform", return_value="linux/amd64")
+        platform.start()
+        self.addCleanup(platform.stop)
 
     def fake_run(self, args, env, output, phase):
         self.calls.append((phase, args))
@@ -24,7 +32,7 @@ class RunnerTests(unittest.TestCase):
         with patch.object(runner, "run", side_effect=self.fake_run):
             status = runner.execute(["cli", "gui", "daemon"], self.env, Path("unused"))
         self.assertEqual(status, 7)
-        self.assertEqual([p for p, _ in self.calls], ["images", "backend", "seed", "cli", "gui", "daemon", "cleanup"])
+        self.assertEqual([p for p, _ in self.calls], ["backend", "seed", "cli", "gui", "daemon", "cleanup"])
         self.assertEqual(self.calls[-1][1][-5:], ["down", "--timeout", "10", "--volumes", "--remove-orphans"])
         self.assertEqual(volume_create.call_count, 4)
         self.assertEqual([c.args[0][-1] for c in volume_create.call_args_list],
@@ -44,13 +52,14 @@ class RunnerTests(unittest.TestCase):
 
     @patch.object(runner.subprocess, "run")
     def test_failed_build_skips_runtime_and_cleans_up(self, _volume_create):
-        with patch.object(runner, "run", side_effect=[2, 0]) as run:
+        self.succeeds.return_value = False
+        with patch.object(runner, "run", side_effect=[1, 2, 0]) as run:
             self.assertEqual(runner.execute(["cli"], self.env, Path("unused")), 2)
-        self.assertEqual([c.args[-1] for c in run.call_args_list], ["images", "cleanup"])
+        self.assertEqual([c.args[-1] for c in run.call_args_list], ["image-cli", "image-cli-build", "cleanup"])
 
     @patch.object(runner.subprocess, "run")
     def test_cleanup_failure_fails_successful_run(self, _volume_create):
-        with patch.object(runner, "run", side_effect=[0, 0, 0, 0, 3]):
+        with patch.object(runner, "run", side_effect=[0, 0, 0, 3]):
             self.assertEqual(runner.execute(["cli"], self.env, Path("unused")), 3)
 
     def test_cleanup_command_deadline_terminates_hung_client(self):
@@ -76,6 +85,32 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(runner.cleanup(["docker", "compose"], self.env, Path("unused")), 0)
         for sig, handler in before.items():
             self.assertEqual(runner.signal.getsignal(sig), handler)
+
+    def test_images_are_pulled_and_built_only_when_missing(self):
+        local = {"registry/cli:tag"}
+        self.succeeds.side_effect = lambda args, env: args[-1] in local
+        pulled = {"registry/gui:tag"}
+        def fake_run(args, env, output, phase):
+            self.calls.append((phase, args))
+            return 0 if args[:2] != ["docker", "pull"] or args[-1] in pulled else 1
+        with patch.object(runner, "run", side_effect=fake_run):
+            self.assertEqual(runner.prepare_images(["cli", "gui", "daemon"], self.env, Path("unused")), 0)
+        self.assertEqual([p for p, _ in self.calls], ["image-gui", "image-daemon", "image-daemon-build"])
+        self.assertEqual(self.calls[0][1], ["docker", "pull", "--platform", "linux/amd64", "registry/gui:tag"])
+        self.assertEqual(self.calls[-1][1][-3:], ["-t", "registry/daemon:tag", "docker"])
+
+    def test_publish_pushes_only_unpublished_images(self):
+        self.succeeds.side_effect = lambda args, env: args[-1] != "registry/gui:tag"
+        with patch.object(runner, "run", side_effect=self.fake_run):
+            self.assertEqual(runner.publish_images(self.env, Path("unused")), 0)
+        self.assertEqual([p for p, _ in self.calls], ["image-gui-build", "image-gui-push"])
+        self.assertEqual(self.calls[-1][1], ["docker", "push", "registry/gui:tag"])
+
+    def test_image_ref_is_content_addressed_per_suite(self):
+        refs = {suite: runner.image_ref(suite, "registry") for suite in runner.SUITES}
+        self.assertEqual(refs["gui"], runner.image_ref("gui", "registry"))
+        self.assertEqual(len(set(refs.values())), len(refs))
+        self.assertRegex(refs["cli"], r"^registry/vtb-acceptance-cli:[0-9a-f]{16}$")
 
     def test_distinct_cache_names_do_not_collide_after_sanitizing(self):
         self.assertNotEqual(runner.cache_key("Runner A"), runner.cache_key("Runner-A"))

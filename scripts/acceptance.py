@@ -18,6 +18,9 @@ from contextlib import ExitStack, contextmanager
 ROOT = Path(__file__).resolve().parent.parent
 SUITES = {"cli": "test-runner", "gui": "gui-test-runner", "daemon": "daemon-test-runner"}
 CACHE_TYPES = ("cargo", "target", "rustup", "npm")
+DOCKERFILES = {"cli": "test-runner.Dockerfile", "gui": "gui-test-runner.Dockerfile",
+               "daemon": "daemon-test-runner.Dockerfile"}
+IMAGE_REGISTRY = "ghcr.io/camonz"
 
 
 def cache_key(value):
@@ -25,6 +28,64 @@ def cache_key(value):
     slug = re.sub(r"[^a-z0-9-]", "-", value.lower()).strip("-")[:40] or "local"
     digest = hashlib.sha256(value.encode()).hexdigest()[:12]
     return f"vtb-acceptance-{slug}-{digest}"
+
+
+def image_env(suite):
+    return f"VTB_ACCEPTANCE_IMAGE_{suite.upper()}"
+
+
+def image_ref(suite, registry=IMAGE_REGISTRY):
+    # Runner images hold only system tools; the checkout is mounted and compiled
+    # at run time. The Dockerfile is therefore the image's only input, so its
+    # digest names the image. Include any file a Dockerfile starts to COPY.
+    digest = hashlib.sha256((ROOT / "docker" / DOCKERFILES[suite]).read_bytes()).hexdigest()[:16]
+    return f"{registry}/vtb-acceptance-{suite}:{digest}"
+
+
+def succeeds(args, env):
+    return subprocess.run(args, cwd=ROOT, env=env, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode == 0
+
+
+def build_image(suite, ref, env, output):
+    return run(["docker", "build", "-f", f"docker/{DOCKERFILES[suite]}", "-t", ref, "docker"],
+               env, output, f"image-{suite}-build")
+
+
+def docker_platform(env):
+    arch = subprocess.run(["docker", "version", "--format", "{{.Server.Arch}}"], cwd=ROOT, env=env,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    return f"linux/{arch}"
+
+
+def prepare_images(suites, env, output):
+    """Reuse a local or published runner image; build only when neither exists."""
+    # Published images match the CI runners. Pull only that platform so other
+    # hosts build natively instead of running an emulated image.
+    platform = docker_platform(env)
+    for suite in suites:
+        ref = env[image_env(suite)]
+        if succeeds(["docker", "image", "inspect", ref], env):
+            continue
+        if run(["docker", "pull", "--platform", platform, ref], env, output, f"image-{suite}") == 0:
+            continue
+        status = build_image(suite, ref, env, output)
+        if status:
+            return status
+    return 0
+
+
+def publish_images(env, output):
+    """Build and push each runner image whose content digest is not yet published."""
+    for suite in SUITES:
+        ref = env[image_env(suite)]
+        if succeeds(["docker", "manifest", "inspect", ref], env):
+            print(f"{ref} already published", flush=True)
+            continue
+        status = build_image(suite, ref, env, output) or run(["docker", "push", ref], env, output, f"image-{suite}-push")
+        if status:
+            return status
+    return 0
 
 
 @contextmanager
@@ -93,7 +154,7 @@ def execute(suites, env, output):
         for kind in CACHE_TYPES:
             subprocess.run(["docker", "volume", "create", f"{env['VTB_ACCEPTANCE_CACHE_KEY']}-{kind}"],
                            env=env, check=True, stdout=subprocess.DEVNULL)
-        status = run(compose + ["build"] + [SUITES[s] for s in suites], env, output, "images")
+        status = prepare_images(suites, env, output)
         if not status:
             status = run(compose + ["up", "--wait", "postgres", "sacrum"], env, output, "backend")
         if not status:
@@ -112,6 +173,7 @@ def execute(suites, env, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cleanup", action="store_true", help="Dispose a recorded run using VTB_ACCEPTANCE_OUTPUT")
+    parser.add_argument("--publish-images", action="store_true", help="Build and push unpublished runner images")
     # Older argparse versions validate the entire default list as one choice.
     # Validate supplied names separately and apply the default after parsing.
     parser.add_argument("suites", nargs="*", metavar="{cli,gui,daemon}")
@@ -121,12 +183,16 @@ def main():
             parser.error(f"unknown suite {suite!r}; choose from {', '.join(SUITES)}")
     args.suites = args.suites or list(SUITES)
     env = os.environ.copy()
+    for suite in SUITES:
+        env[image_env(suite)] = image_ref(suite, env.get("VTB_ACCEPTANCE_REGISTRY", IMAGE_REGISTRY))
     env["VTB_ACCEPTANCE_CACHE_KEY"] = cache_key(env.get("VTB_ACCEPTANCE_CACHE_KEY", str(ROOT)))
     env["COMPOSE_PROJECT_NAME"] = f"vtb-acceptance-{uuid.uuid4().hex[:12]}"
     output = Path(env.get("VTB_ACCEPTANCE_OUTPUT", ROOT / "test-output" / env["COMPOSE_PROJECT_NAME"])).resolve()
     output.mkdir(parents=True, exist_ok=True)
     env["VTB_ACCEPTANCE_OUTPUT"] = str(output)
     context_file = output / "runner-context.json"
+    if args.publish_images:
+        return publish_images(env, output)
     if args.cleanup:
         if not os.environ.get("VTB_ACCEPTANCE_OUTPUT"):
             parser.error("--cleanup requires VTB_ACCEPTANCE_OUTPUT")
