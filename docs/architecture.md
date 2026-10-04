@@ -323,10 +323,8 @@ DaemonSupervisor
   Service installation only writes the service definition; it never rewrites
   standalone enrollment state.
 
-Execute admission is daemon-wide and shared by every project: by default one
-active evaluation and four pending attempts, set by `[daemon]`
-`script_active_slots` and `script_pending_slots` in `config.toml`. Overflow fails
-the attempt explicitly; Sacrum owns retries. Each attempt creates a fresh Rhai
+Execute concurrency is controlled by the backend dispatcher; the daemon does
+not impose active or pending slot limits. Sacrum owns retries. Each attempt creates a fresh Rhai
 Engine/Scope inside `spawn_blocking`, with no file module loading or dynamic
 eval. Nothing bounds a script: there is no deadline, operation limit, or script,
 context, result, string, or collection size cap. Rhai's default expression and

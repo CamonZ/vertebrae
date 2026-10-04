@@ -1,14 +1,14 @@
-//! Daemon-wide admission and settlement for Rhai execute evaluations.
+//! Settlement for Rhai execute evaluations dispatched by the backend.
 //!
-//! Every admitted attempt owns its queue permit and cancellation signal. The
-//! active permit stays inside the blocking closure, including panic unwinding;
-//! cancelling the async waiter never releases a still-running evaluation.
+//! Every attempt owns its cancellation signal. Cancelling the async waiter
+//! never releases a still-running evaluation: its blocking worker settles
+//! before the completion callback is invoked.
 //!
 //! Host functions run on that blocking worker thread. Each one blocks the
 //! thread on a single async service call through [`HostContext::call`], which
 //! races only the attempt's cancellation, or on owned work such as a command
 //! through [`HostContext::block_on_owned`], which settles itself on cancel
-//! before the thread (and its slot) is released. Nothing else bounds a script: there
+//! before its blocking worker settles. Nothing else bounds a script: there
 //! is no deadline, operation limit, or size cap. Rhai's default expression and
 //! call depth guards stay because a stack overflow aborts the whole daemon.
 
@@ -19,12 +19,11 @@ use std::sync::{Arc, OnceLock};
 
 use rhai::{Dynamic, Engine, EvalAltResult, Position, Scope};
 use tokio::runtime::Handle;
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::watch;
 use vertebrae_core::models::ExecuteConfig;
 use vertebrae_core::{ServiceError, ServiceResult, VertebraeServices};
 
 use crate::actors::step_executor::{StepResult, step_result_for_schema_error};
-use crate::config::ScriptSlots;
 use crate::output_validator::{CompiledSchema, SchemaError};
 
 pub const SCRIPT_CONTEXT_NAMESPACES: [&str; 6] = [
@@ -40,25 +39,18 @@ pub const SCRIPT_CONTEXT_NAMESPACES: [&str; 6] = [
 pub type HostApi = Arc<dyn Fn(&mut Engine, &HostContext) + Send + Sync>;
 
 pub struct ScriptWorker {
-    admitted: Arc<Semaphore>,
-    active: Arc<Semaphore>,
-    slots: ScriptSlots,
     host_api: HostApi,
 }
 
 impl std::fmt::Debug for ScriptWorker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ScriptWorker")
-            .field("slots", &self.slots)
-            .field("active_available", &self.active.available_permits())
-            .field("admitted_available", &self.admitted.available_permits())
-            .finish()
+        f.debug_struct("ScriptWorker").finish()
     }
 }
 
 impl Default for ScriptWorker {
     fn default() -> Self {
-        Self::new(ScriptSlots::default())
+        Self::with_host_api(Arc::new(register_host_api))
     }
 }
 
@@ -328,25 +320,10 @@ impl ScriptAttempt {
 }
 
 impl ScriptWorker {
-    pub fn new(slots: ScriptSlots) -> Self {
-        Self::with_host_api(slots, Arc::new(register_host_api))
+    pub fn with_host_api(host_api: HostApi) -> Self {
+        Self { host_api }
     }
 
-    pub fn with_host_api(slots: ScriptSlots, host_api: HostApi) -> Self {
-        Self {
-            admitted: Arc::new(Semaphore::new(
-                slots
-                    .active
-                    .saturating_add(slots.pending)
-                    .min(Semaphore::MAX_PERMITS),
-            )),
-            active: Arc::new(Semaphore::new(slots.active.min(Semaphore::MAX_PERMITS))),
-            slots,
-            host_api,
-        }
-    }
-
-    /// Reject overflow synchronously before allocating a waiter or blocking job.
     /// The settlement callback is invoked only after the worker has been joined.
     pub fn admit(
         &self,
@@ -375,64 +352,36 @@ impl ScriptWorker {
         + Send
         + 'static,
     ) -> Result<ScriptAttempt, String> {
-        let admitted = Arc::clone(&self.admitted)
-            .try_acquire_owned()
-            .map_err(|_| {
-                format!(
-                    "Rhai execution capacity exceeded ({} active, {} pending)",
-                    self.slots.active, self.slots.pending
-                )
-            })?;
         validate_context(&config)?;
         config
             .validate_structure()
             .map_err(|error| error.to_string())?;
-        let active = Arc::clone(&self.active);
-        // Reserve an idle active slot immediately, so simultaneous admissions
-        // allocate at most the configured pending waiters before any task polls.
-        let immediate = Arc::clone(&active).try_acquire_owned().ok();
         let cancellation = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancellation);
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let settlement = tokio::spawn(async move {
-            let mut queue_cancel = cancel_rx.clone();
-            let acquisition = if *queue_cancel.borrow() {
-                Err("Cancelled".to_string())
-            } else if let Some(permit) = immediate {
-                Ok(permit)
+            let queue_cancel = cancel_rx.clone();
+            let result = if *queue_cancel.borrow() {
+                StepResult::failed(None, "Cancelled".to_string())
             } else {
-                tokio::select! {
-                    biased;
-                    _ = queue_cancel.changed() => Err("Cancelled".to_string()),
-                    permit = active.acquire_owned() => permit.map_err(|_| "Rhai worker closed".to_string()),
-                }
-            };
-            let result = match acquisition {
-                Err(error) => StepResult::failed(None, error),
-                Ok(permit) => {
-                    let host = HostContext {
-                        runtime: Handle::current(),
-                        cancellation: cancel_rx,
-                        scope,
-                        task_run_id: Arc::default(),
-                    };
-                    // No timeout/abort races this join: the closure cooperates
-                    // with its cancellation flag, and host calls race the same
-                    // signal, so the permit is released only once both settle.
-                    match tokio::task::spawn_blocking(move || {
-                        let _permit = permit;
-                        evaluation(config, worker_cancel, host)
-                    })
+                let host = HostContext {
+                    runtime: Handle::current(),
+                    cancellation: cancel_rx,
+                    scope,
+                    task_run_id: Arc::default(),
+                };
+                // No timeout/abort races this join: the closure cooperates
+                // with its cancellation flag, and host calls race the same
+                // signal, so settlement runs only after the worker settles.
+                match tokio::task::spawn_blocking(move || evaluation(config, worker_cancel, host))
                     .await
-                    {
-                        Ok(result) => result,
-                        Err(error) => {
-                            StepResult::failed(None, format!("Rhai worker panicked: {error}"))
-                        }
+                {
+                    Ok(result) => result,
+                    Err(error) => {
+                        StepResult::failed(None, format!("Rhai worker panicked: {error}"))
                     }
                 }
             };
-            drop(admitted);
             settled(result.clone());
             result
         });
@@ -677,8 +626,6 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::{Notify, oneshot};
 
-    const PENDING: usize = 4;
-
     fn config(script: &str, input: serde_json::Value) -> ExecuteConfig {
         ExecuteConfig {
             version: 1,
@@ -853,8 +800,6 @@ mod tests {
                 );
             }
         }
-        assert_eq!(worker.admitted.available_permits(), 5);
-        assert_eq!(worker.active.available_permits(), 1);
     }
 
     #[tokio::test]
@@ -961,8 +906,6 @@ mod tests {
             "the actual Rhai progress callback must run before cancellation: {result:?}"
         );
         assert!(failure(result).contains("Cancelled"));
-        assert_eq!(worker.active.available_permits(), 1);
-        assert_eq!(worker.admitted.available_permits(), 5);
         assert_eq!(
             output(run(&worker, config("8", json!(null))).await),
             json!(8)
@@ -1018,25 +961,19 @@ mod tests {
                 }
             }
             let mut queued = Vec::new();
-            for _ in 0..PENDING {
+            for _ in 0..6 {
                 queued.push(
                     worker
                         .admit(invalid_schema.clone(), scope(), |_| {})
                         .unwrap(),
                 );
             }
-            assert!(
-                worker
-                    .admit(invalid_schema, scope(), |_| {})
-                    .err()
-                    .unwrap()
-                    .contains("capacity exceeded")
-            );
+            let beyond_former_limit = worker.admit(invalid_schema, scope(), |_| {}).unwrap();
+            beyond_former_limit.cancel();
             let queued_cancel = queued.pop().unwrap();
             queued_cancel.cancel();
             assert_eq!(failure(queued_cancel.settle().await), "Cancelled");
             active.cancel();
-            assert_eq!(worker.active.available_permits(), 0);
             assert_eq!(compiled.load(Ordering::Relaxed), 1);
             assert!(
                 terminal_rx.try_recv().is_err(),
@@ -1051,14 +988,13 @@ mod tests {
             for attempt in queued {
                 let _ = attempt.settle().await;
             }
+            assert_eq!(failure(beyond_former_limit.settle().await), "Cancelled");
             assert_eq!(compiled.load(Ordering::Relaxed), 1);
             assert!(terminal_rx.try_recv().is_ok());
             assert!(
                 terminal_rx.try_recv().is_err(),
                 "one settled terminal result"
             );
-            assert_eq!(worker.active.available_permits(), 1);
-            assert_eq!(worker.admitted.available_permits(), 5);
             assert_eq!(
                 output(run(&worker, config("42", json!(null))).await),
                 json!(42)
@@ -1074,8 +1010,6 @@ mod tests {
         let error = failure(run(&worker, invalid).await);
         assert!(error.contains("output_schema"), "{error}");
         assert!(error.contains("malformed"), "{error}");
-        assert_eq!(worker.active.available_permits(), 1);
-        assert_eq!(worker.admitted.available_permits(), 5);
         assert_eq!(
             output(run(&worker, config("42", json!(null))).await),
             json!(42)
@@ -1083,7 +1017,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn saturation_queued_cancel_and_panic_settle_once_before_recovery() {
+    async fn concurrent_attempts_and_panic_settle_once() {
         let worker = ScriptWorker::default();
         let (started_tx, started_rx) = oneshot::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
@@ -1112,10 +1046,10 @@ mod tests {
             let result = active.settle().await;
             panic!("blocking worker did not start: {result:?}");
         }
-        let mut queued = Vec::new();
-        for _ in 0..PENDING {
+        let mut concurrent = Vec::new();
+        for _ in 0..6 {
             let terminal_tx = terminal_tx.clone();
-            queued.push(
+            concurrent.push(
                 worker
                     .admit(config("42", json!(null)), scope(), move |result| {
                         let _ = terminal_tx.send(result);
@@ -1123,22 +1057,9 @@ mod tests {
                     .unwrap(),
             );
         }
-        assert_eq!(worker.active.available_permits(), 0);
-        assert_eq!(worker.admitted.available_permits(), 0);
-        let overflow = worker
-            .admit(config("42", json!(null)), scope(), |_| {})
-            .err()
-            .unwrap();
-        assert!(overflow.contains("capacity exceeded"));
-        let cancelled = queued.pop().unwrap();
+        let cancelled = concurrent.pop().unwrap();
         cancelled.cancel();
         assert_eq!(failure(cancelled.settle().await), "Cancelled");
-        assert_eq!(
-            worker.active.available_permits(),
-            0,
-            "queued cancellation cannot release the running slot"
-        );
-        assert_eq!(worker.admitted.available_permits(), 1);
         let replacement = worker
             .admit(
                 config("inputs.value", json!("replacement")),
@@ -1150,11 +1071,11 @@ mod tests {
         tokio::task::yield_now().await;
         release_tx.send(()).unwrap();
         assert!(failure(active.settle().await).contains("injected worker panic"));
-        for attempt in queued {
+        for attempt in concurrent {
             assert_eq!(output(attempt.settle().await), json!(42));
         }
         assert_eq!(output(replacement.settle().await), json!("replacement"));
-        for _ in 0..5 {
+        for _ in 0..7 {
             tokio::time::timeout(Duration::from_secs(1), terminal_rx.recv())
                 .await
                 .unwrap()
@@ -1164,8 +1085,6 @@ mod tests {
             terminal_rx.try_recv().is_err(),
             "each admitted tracked attempt has exactly one settlement callback"
         );
-        assert_eq!(worker.active.available_permits(), 1);
-        assert_eq!(worker.admitted.available_permits(), 5);
         assert_eq!(
             output(run(&worker, config("9", json!(null))).await),
             json!(9)
@@ -1187,7 +1106,6 @@ mod tests {
             },
         ] {
             assert!(worker.admit(invalid, scope(), |_| {}).is_err());
-            assert_eq!(worker.admitted.available_permits(), 5);
         }
         let large = "x".repeat(2 * 1024 * 1024);
         let padded = format!("// {large}\ninputs.value.len()");
@@ -1248,57 +1166,39 @@ mod tests {
         attempt.cancel();
         assert_eq!(failure(attempt.settle().await), "Cancelled");
         assert!(!evaluated.load(Ordering::Relaxed));
-        assert_eq!(worker.active.available_permits(), 1);
-        assert_eq!(worker.admitted.available_permits(), 5);
     }
 
     fn host_worker(
         register: impl Fn(&mut rhai::Module, &HostContext) + Send + Sync + 'static,
     ) -> ScriptWorker {
-        ScriptWorker::with_host_api(
-            ScriptSlots::default(),
-            Arc::new(move |engine, host| {
-                let mut module = rhai::Module::new();
-                register(&mut module, host);
-                engine.register_static_module("test", module.into());
-            }),
-        )
+        ScriptWorker::with_host_api(Arc::new(move |engine, host| {
+            let mut module = rhai::Module::new();
+            register(&mut module, host);
+            engine.register_static_module("test", module.into());
+        }))
     }
 
     #[tokio::test]
-    async fn active_and_pending_slots_come_from_daemon_settings() {
-        let worker = ScriptWorker::new(ScriptSlots {
-            active: 2,
-            pending: 1,
-        });
-        assert_eq!(worker.active.available_permits(), 2);
-        assert_eq!(worker.admitted.available_permits(), 3);
-        let attempts: Vec<_> = (0..3)
+    async fn worker_admits_more_than_the_former_local_capacity() {
+        let worker = ScriptWorker::default();
+        let attempts: Vec<_> = (0..6)
             .map(|_| {
                 worker
                     .admit(config("loop {}", json!(null)), scope(), |_| {})
                     .unwrap()
             })
             .collect();
-        let overflow = worker
+        let beyond_former_limit = worker
             .admit(config("42", json!(null)), scope(), |_| {})
-            .err()
             .unwrap();
-        assert!(
-            overflow.contains("capacity exceeded (2 active, 1 pending)"),
-            "{overflow}"
-        );
         for attempt in &attempts {
             attempt.cancel();
         }
         for attempt in attempts {
             assert_eq!(failure(attempt.settle().await), "Cancelled");
         }
-        assert_eq!(worker.active.available_permits(), 2);
-        assert_eq!(worker.admitted.available_permits(), 3);
-        let default = ScriptWorker::default();
-        assert_eq!(default.active.available_permits(), 1);
-        assert_eq!(default.admitted.available_permits(), 1 + PENDING);
+        beyond_former_limit.cancel();
+        assert_eq!(failure(beyond_former_limit.settle().await), "Cancelled");
     }
 
     #[tokio::test]
@@ -1344,16 +1244,13 @@ mod tests {
         // host call is in flight on the blocking worker.
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert_eq!(tokio::spawn(async { 41 + 1 }).await.unwrap(), 42);
-        assert_eq!(worker.active.available_permits(), 0);
         release.notify_one();
         assert_eq!(output(attempt.settle().await), json!(42));
-        assert_eq!(worker.active.available_permits(), 1);
-        assert_eq!(worker.admitted.available_permits(), 5);
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn cancelling_a_hung_host_call_settles_once_and_releases_the_slot() {
-        let worker = ScriptWorker::with_host_api(ScriptSlots::default(), hanging_host_api());
+        let worker = ScriptWorker::with_host_api(hanging_host_api());
         for script in [
             "test::hang()",
             // Catching the cancellation cannot turn it into a success.
@@ -1369,14 +1266,11 @@ mod tests {
                 .admit(config("5", json!(null)), scope(), |_| {})
                 .unwrap();
             tokio::time::sleep(Duration::from_millis(20)).await;
-            assert_eq!(worker.active.available_permits(), 0, "{script}");
             attempt.cancel();
             assert_eq!(failure(attempt.settle().await), "Cancelled", "{script}");
             assert_eq!(output(queued.settle().await), json!(5));
             assert_eq!(failure(terminal_rx.recv().await.unwrap()), "Cancelled");
             assert!(terminal_rx.try_recv().is_err(), "one terminal result");
-            assert_eq!(worker.active.available_permits(), 1);
-            assert_eq!(worker.admitted.available_permits(), 5);
         }
     }
 
@@ -1390,8 +1284,6 @@ mod tests {
         let error = failure(run(&worker, config("test::boom()", json!(null))).await);
         assert!(error.contains("panicked"), "{error}");
         assert!(error.contains("injected host panic"), "{error}");
-        assert_eq!(worker.active.available_permits(), 1);
-        assert_eq!(worker.admitted.available_permits(), 5);
         assert_eq!(
             output(run(&worker, config("11", json!(null))).await),
             json!(11)

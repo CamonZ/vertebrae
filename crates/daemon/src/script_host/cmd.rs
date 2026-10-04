@@ -8,7 +8,7 @@
 //! or output cap. The group is owned by the call: leftovers are killed when
 //! the leader exits, and cancellation terminates the group (SIGTERM, then
 //! SIGKILL) and reaps the leader before the call raises `cancelled`, so the
-//! worker slot is never released while the command is still running.
+//! worker is never reported settled while the command is still running.
 
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
@@ -318,7 +318,6 @@ mod tests {
     use vertebrae_core::models::ExecuteConfig;
 
     use crate::actors::step_executor::StepResult;
-    use crate::config::ScriptSlots;
     use crate::script_host::test_support::completed;
     use crate::script_worker::test_support::scope;
     use crate::script_worker::{CancelSignal, ScriptAttempt, ScriptWorker};
@@ -574,10 +573,7 @@ mod tests {
     #[tokio::test]
     async fn cancelling_kills_and_reaps_the_group_then_settles_once() {
         let dir = TempDir::new().unwrap();
-        let worker = ScriptWorker::new(ScriptSlots {
-            active: 1,
-            pending: 4,
-        });
+        let worker = ScriptWorker::default();
         let (terminal_tx, mut terminal_rx) = tokio::sync::mpsc::unbounded_channel();
         let attempt = admit(
             &worker,
@@ -594,15 +590,12 @@ mod tests {
         let mut survivors = Survivors::default();
         let leader = survivors.own(&read_when_written(&dir.path().join("leader")).await);
         let child = survivors.own(&read_when_written(&dir.path().join("child")).await);
-        let (queued_tx, mut queued_rx) = tokio::sync::mpsc::unbounded_channel();
-        let queued = admit(&worker, dir.path(), "5", move |result| {
-            let _ = queued_tx.send(result);
+        let (concurrent_tx, mut concurrent_rx) = tokio::sync::mpsc::unbounded_channel();
+        let concurrent = admit(&worker, dir.path(), "5", move |result| {
+            let _ = concurrent_tx.send(result);
         });
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(
-            queued_rx.try_recv().is_err(),
-            "a running command holds the only active slot"
-        );
+        assert_eq!(completed(bounded(concurrent.settle()).await, "5"), json!(5));
+        assert!(bounded(concurrent_rx.recv()).await.is_some());
 
         attempt.cancel();
         // Catching the cancellation cannot turn it into a success.
@@ -614,8 +607,6 @@ mod tests {
             "Cancelled"
         );
         assert!(terminal_rx.try_recv().is_err(), "one terminal result");
-        assert_eq!(completed(bounded(queued.settle()).await, "5"), json!(5));
-        assert!(bounded(queued_rx.recv()).await.is_some());
     }
 
     #[tokio::test]
@@ -642,10 +633,7 @@ mod tests {
     #[tokio::test]
     async fn another_active_slot_lets_a_second_script_run_beside_a_command() {
         let dir = TempDir::new().unwrap();
-        let worker = ScriptWorker::new(ScriptSlots {
-            active: 2,
-            pending: 4,
-        });
+        let worker = ScriptWorker::default();
         let long = admit(
             &worker,
             dir.path(),

@@ -161,8 +161,6 @@ pub struct DaemonConfig {
     /// Immutable provider, path, skill, and Claude compatibility discovery
     /// captured before this actor starts.
     pub capabilities: SharedDaemonCapabilities,
-    /// Rhai worker capacity shared by every project on this daemon.
-    pub script_slots: crate::config::ScriptSlots,
 }
 
 impl std::fmt::Debug for DaemonConfig {
@@ -171,7 +169,6 @@ impl std::fmt::Debug for DaemonConfig {
             .field("base_url", &self.base_url)
             .field("identity", &self.identity)
             .field("capabilities", &self.capabilities)
-            .field("script_slots", &self.script_slots)
             .finish()
     }
 }
@@ -332,7 +329,7 @@ impl Actor for DaemonSupervisor {
         let reader_handle = tokio::spawn(Self::ws_reader_pump(reader, myself_clone));
 
         Ok(DaemonState {
-            script_worker: Arc::new(crate::script_worker::ScriptWorker::new(args.script_slots)),
+            script_worker: Arc::new(crate::script_worker::ScriptWorker::default()),
             socket,
             config: args,
             projects: HashMap::new(),
