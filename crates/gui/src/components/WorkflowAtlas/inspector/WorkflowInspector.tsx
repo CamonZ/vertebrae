@@ -15,6 +15,7 @@
    ────────────────────────────────────────────────────────────────── */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CloseIcon, IconButton } from "../../panels";
+import { IdChip } from "../../shared/HearthPrimitives";
 import {
   commands,
   type JsonValue,
@@ -238,6 +239,7 @@ export function WorkflowInspector({
           </span>
         </div>
         <div className="wfd-title">{wf.name}</div>
+        <IdChip id={wf.id} kind="workflow" testId="workflow-detail-id" />
         <div className="wfd-sub">
           <span>{wf.stepIds.length} steps</span>
           <span className="sep">·</span>

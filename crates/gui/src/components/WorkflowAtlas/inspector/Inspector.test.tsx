@@ -362,7 +362,9 @@ describe("WorkflowInspector", () => {
       />
     );
 
-    expect(screen.getByText("wf-build")).toBeInTheDocument();
+    expect(
+      screen.getByText("wf-build", { selector: ".wfd-title" })
+    ).toBeInTheDocument();
     expect(screen.getByText("Builds things.")).toBeInTheDocument();
     // step list (kind-colored buttons) — scoped, since step names also appear in
     // the loop-back row now that loop-backs render step names (not uuids).
@@ -1123,3 +1125,56 @@ describe("StepInspector", () => {
 /** type guard sanity: selection union compiles. */
 const _sel: AtlasSelection = { type: "workflow", workflowId: "x" };
 void _sel;
+
+describe("entity UUID chips", () => {
+  const workflowId = "12345678-1234-4321-8765-123456789abc";
+  const stepId = "abcdef01-1234-4321-8765-123456789abc";
+  const model = buildAtlasModel({
+    workflows: [makeWorkflow(workflowId, [makeStep(stepId, workflowId, 0)])],
+  });
+
+  it("displays the step UUID prefix and copies the full step UUID", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <StepInspector
+        model={model}
+        workflowId={workflowId}
+        stepId={stepId}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    const chip = screen.getByTestId("step-detail-id");
+    expect(chip).toHaveTextContent(/^abcdef01$/);
+    expect(chip).toHaveAttribute("data-full-id", stepId);
+    fireEvent.click(screen.getByRole("button", { name: "Copy full step ID" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(stepId));
+  });
+
+  it("displays the workflow UUID prefix and copies the full workflow UUID", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <WorkflowInspector
+        model={model}
+        workflowId={workflowId}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    const chip = screen.getByTestId("workflow-detail-id");
+    expect(chip).toHaveTextContent(/^12345678$/);
+    expect(chip).toHaveAttribute("data-full-id", workflowId);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy full workflow ID" })
+    );
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(workflowId));
+  });
+});
