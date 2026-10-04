@@ -1469,7 +1469,6 @@ mod tests {
         ] {
             let server = execution_server().await;
             let worker = Arc::new(ScriptWorker::with_host_api(
-                Default::default(),
                 crate::script_worker::test_support::hanging_host_api(),
             ));
             let (project, handle) = test_execute_project(&server, Arc::clone(&worker)).await;

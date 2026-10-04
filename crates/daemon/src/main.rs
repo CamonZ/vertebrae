@@ -86,7 +86,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         typesafe_api_key,
         typesafe_url,
         provider_profiles,
-        script_slots,
         ..
     } = match ResolvedConfig::load() {
         Ok(config) => config,
@@ -102,8 +101,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(
         sacrum_url = %sacrum_url,
         project_count = projects.len(),
-        script_active_slots = script_slots.active,
-        script_pending_slots = script_slots.pending,
         "Starting vtb-daemon"
     );
 
@@ -153,7 +150,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         base_url: sacrum_url,
         identity,
         capabilities,
-        script_slots,
     };
 
     let (actor_ref, actor_handle) = Actor::spawn(

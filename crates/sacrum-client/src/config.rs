@@ -53,24 +53,9 @@ pub struct VertebraeConfigFile {
 }
 
 /// `[daemon]` settings read by vtb-daemon at startup.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct DaemonSection {
-    /// Rhai evaluations that may run at once across all projects.
-    pub script_active_slots: usize,
-    /// Rhai evaluations that may wait for an active slot before admission
-    /// rejects new attempts.
-    pub script_pending_slots: usize,
-}
-
-impl Default for DaemonSection {
-    fn default() -> Self {
-        Self {
-            script_active_slots: 1,
-            script_pending_slots: 4,
-        }
-    }
-}
+pub struct DaemonSection {}
 
 impl DaemonSection {
     fn is_default(&self) -> bool {

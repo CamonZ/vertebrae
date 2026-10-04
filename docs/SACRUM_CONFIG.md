@@ -56,12 +56,8 @@ default_model = "moonshotai/kimi-k2"
 
 `[daemon]`
 
-- **script_active_slots** (optional, default `1`, at least `1`): Rhai execute
-  evaluations that run at once. One worker serves every project on the daemon.
-- **script_pending_slots** (optional, default `4`): evaluations that may wait for
-  an active slot; further attempts fail with a capacity error.
-
-The daemon reads these at startup; restart it after changing them.
+No daemon-side Rhai concurrency settings are currently supported. The backend
+dispatcher controls execute-step concurrency.
 
 `[projects.<slug>]`
 
