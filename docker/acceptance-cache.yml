@@ -1,17 +1,18 @@
 # Used by scripts/acceptance.py. Runtime/database volumes remain disposable.
+# Runner images are content-addressed GHCR references; see image_ref().
 services:
   test-runner:
-    image: ${VTB_ACCEPTANCE_CACHE_KEY}-cli
+    image: ${VTB_ACCEPTANCE_IMAGE_CLI}
     volumes:
       - rustup-cache:/usr/local/rustup
       - ${VTB_ACCEPTANCE_OUTPUT}:/app/test-output
   daemon-test-runner:
-    image: ${VTB_ACCEPTANCE_CACHE_KEY}-daemon
+    image: ${VTB_ACCEPTANCE_IMAGE_DAEMON}
     volumes:
       - rustup-cache:/usr/local/rustup
       - ${VTB_ACCEPTANCE_OUTPUT}:/app/test-output
   gui-test-runner:
-    image: ${VTB_ACCEPTANCE_CACHE_KEY}-gui
+    image: ${VTB_ACCEPTANCE_IMAGE_GUI}
     environment:
       npm_config_cache: /npm-cache
       GUI_ACCEPTANCE_SCREENSHOTS: ${GUI_ACCEPTANCE_SCREENSHOTS:-failure}

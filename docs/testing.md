@@ -283,6 +283,19 @@ through `VTB_ACCEPTANCE_CACHE_KEY`. The runner prints the resolved cache name.
 To benchmark an empty cache, supply a new key; reuse that key for warm runs.
 Only remove these named cache volumes when no run is using them.
 
+Runner images contain only system packages and tools; the checkout is mounted
+and compiled inside the container, so feature files and acceptance crates never
+require an image rebuild. Each image is tagged
+`ghcr.io/camonz/vtb-acceptance-<suite>:<Dockerfile digest>`. The runner uses a
+local copy, then pulls the published tag for the Docker host's platform, and
+builds locally only when neither exists. Published images are amd64, matching
+the CI runners, so other hosts build natively.
+`.github/workflows/acceptance-images.yml` publishes new digests from `master`
+and from PRs that change image inputs with
+`python3 scripts/acceptance.py --publish-images`; later runs pull them. Set
+`VTB_ACCEPTANCE_REGISTRY` to use another registry. If a Dockerfile starts to
+`COPY` files, include them in `image_ref()` in `scripts/acceptance.py`.
+
 The runner uses nonblocking Unix file locks on both the checkout and cache
 identity. A second run that would modify the same staged sidecars, frontend
 files, or compiled binaries fails with a clear message. Independent worktrees
