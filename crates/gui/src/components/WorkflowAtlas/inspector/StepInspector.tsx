@@ -14,6 +14,7 @@
    ────────────────────────────────────────────────────────────────── */
 import { useEffect, useMemo, useState } from "react";
 import { CloseIcon, IconButton } from "../../panels";
+import { IdChip } from "../../shared/HearthPrimitives";
 import { useStep } from "../../../hooks";
 import {
   commands,
@@ -28,7 +29,7 @@ import {
 import { unwrapCommand } from "../../../query";
 import { LiquidHighlight } from "../../StepDetail/LiquidHighlight";
 import { SchemaTree } from "../../StepDetail/SchemaTree";
-import { splitRef, shortId } from "../layout/geometry";
+import { splitRef } from "../layout/geometry";
 import type { AtlasModel, AtlasWorkflow } from "../layout/types";
 import type { AtlasSelection } from "./selection";
 import { kindClass } from "./selection";
@@ -476,7 +477,7 @@ export function StepInspector({
           <span className={"wfd-num " + kindCls}>{idx + 1}</span>
           <div className="wfd-step-name">
             <div className="wfd-title mono">{step.name}</div>
-            <div className="wfd-hash">{shortId(ref)}</div>
+            <IdChip id={step.stepId} kind="step" testId="step-detail-id" />
           </div>
         </div>
       </div>
