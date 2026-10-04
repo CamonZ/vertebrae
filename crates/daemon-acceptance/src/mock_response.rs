@@ -22,6 +22,19 @@ use std::path::{Component, Path, PathBuf};
 /// These must not appear anywhere in the envelope JSON or its fixture lines.
 const PROHIBITED_SEQUENCES: [&str; 4] = ["{{", "}}", "{%", "%}"];
 
+/// Key of the stdout fixture line written by [`MockResponse::with_stdout_pause`].
+const PAUSE_DIRECTIVE: &str = "mock_pause_ms";
+
+/// The pause duration when `line` is a pause directive, otherwise `None`.
+pub fn stdout_pause_ms(line: &str) -> Option<u64> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    object.get(PAUSE_DIRECTIVE)?.as_u64()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum MockResponseError {
     #[error("prohibited Liquid trigger {sequence:?} found in {field}")]
@@ -90,6 +103,13 @@ impl MockResponse {
         }
         self.stdout_lines.push(line.into());
         self
+    }
+
+    /// Pause the mock's stdout stream for `ms` milliseconds at this point, so
+    /// a scenario can observe partially streamed output. The mocks consume the
+    /// directive line and never emit it.
+    pub fn with_stdout_pause(self, ms: u64) -> Self {
+        self.with_stdout_line(format!(r#"{{"{PAUSE_DIRECTIVE}":{ms}}}"#))
     }
 
     pub fn with_stderr_line(mut self, line: impl Into<String>) -> Self {
@@ -352,6 +372,32 @@ mod tests {
             .with_stdout_line(r#"{"type":"result","nested":{"k":"v"} }"#)
             .build();
         assert!(ok.is_ok(), "expected single-brace variant to be accepted");
+    }
+
+    #[test]
+    fn stdout_pause_writes_a_directive_line_the_mocks_recognise() {
+        let dir = tmp_dir();
+        let envelope_str = MockResponse::new(&dir, "feat", "pause", "step_1")
+            .with_stdout_line(r#"{"type":"first"}"#)
+            .with_stdout_pause(1500)
+            .build()
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&envelope_str).unwrap();
+        let written =
+            std::fs::read_to_string(dir.join(value["stdout_file"].as_str().unwrap())).unwrap();
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(stdout_pause_ms(lines[0]), None);
+        assert_eq!(stdout_pause_ms(lines[1]), Some(1500));
+    }
+
+    #[test]
+    fn stdout_pause_ms_ignores_lines_that_only_mention_the_key() {
+        assert_eq!(stdout_pause_ms("not json"), None);
+        assert_eq!(stdout_pause_ms(r#"{"mock_pause_ms":"10"}"#), None);
+        assert_eq!(
+            stdout_pause_ms(r#"{"mock_pause_ms":10,"type":"result"}"#),
+            None
+        );
     }
 
     #[test]

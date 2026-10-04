@@ -211,6 +211,10 @@ async fn emit_script(
         let body = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("read Codex fixture {}: {error}", path.display()));
         for line in body.lines().filter(|line| !line.is_empty()) {
+            if let Some(ms) = daemon_acceptance::stdout_pause_ms(line) {
+                sleep(Duration::from_millis(ms)).await;
+                continue;
+            }
             let notification: Value = serde_json::from_str(line)
                 .unwrap_or_else(|error| panic!("parse Codex fixture line {line:?}: {error}"));
             if notification.get("method").and_then(Value::as_str) == Some("turn/completed") {

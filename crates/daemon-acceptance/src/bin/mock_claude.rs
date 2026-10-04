@@ -326,6 +326,11 @@ fn stream_lines(path: &Path, target: StreamTarget) {
     };
     for line in reader.lines() {
         let line = line.expect("fixture read");
+        if let Some(ms) = daemon_acceptance::stdout_pause_ms(&line) {
+            writer.flush().expect("fixture flush");
+            interruptible_sleep(Duration::from_millis(ms));
+            continue;
+        }
         writer.write_all(line.as_bytes()).expect("fixture write");
         writer.write_all(b"\n").expect("fixture write");
     }
