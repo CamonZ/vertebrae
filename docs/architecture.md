@@ -349,7 +349,10 @@ in the execution's project ID on every call; scripts never pass one. Failures
 raise a catchable Rhai error `#{ kind, message, function }` with `kind` one of
 `not_found`, `invalid`, `cancelled`, or `transport`. Services are never called
 synchronously from actor handlers or async workers. `crates/daemon/src/script_host/`
-registers the production modules: `vtb::tasks` reads (`get`, `find`, `parent`,
+registers the production modules: `vtb::regex` provides bounded Rust-regex
+matching, captures and replacement; `vtb::time` parses the documented ISO 8601
+calendar-date/offset-date-time subset to UTC epoch milliseconds and provides
+checked millisecond arithmetic. `vtb::tasks` reads (`get`, `find`, `parent`,
 `children`, `dependencies`, `dependents`) compare each task's `project_id` with
 the execution's project and treat a mismatch as absent. `vtb::artifacts` reads
 (`list`, `lookup`, `read`, `read_json`) address a task or `"project"` subject by

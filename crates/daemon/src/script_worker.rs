@@ -695,6 +695,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn production_engine_registers_regex_and_time_modules() {
+        let worker = ScriptWorker::default();
+        let script = r##"#{
+            matched: vtb::regex::is_match("Ticket-42", #"(?i)^ticket-(\d+)$"#),
+            captures: vtb::regex::captures("Ticket-42", #"(?i)^ticket-(\d+)$"#),
+            replaced: vtb::regex::replace_all("Ticket-42", #"(\d+)"#, "id-$1"),
+            timestamp: vtb::time::parse_iso8601("2026-10-05T12:30:00+02:00"),
+            normalized: vtb::time::format_iso8601(vtb::time::parse_iso8601("2026-10-05T12:30:00+02:00")),
+            elapsed: vtb::time::difference_millis(
+                vtb::time::add_millis(vtb::time::parse_iso8601("2026-10-05T12:30:00Z"), 500),
+                vtb::time::parse_iso8601("2026-10-05T12:30:00Z")
+            )
+        }"##;
+        assert_eq!(
+            output(run(&worker, config(script, json!(null))).await),
+            json!({
+                "matched": true,
+                "captures": ["Ticket-42", "42"],
+                "replaced": "Ticket-id-42",
+                "timestamp": 1791196200000_i64,
+                "normalized": "2026-10-05T10:30:00.000Z",
+                "elapsed": 500
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn context_integer_boundaries_are_exact_or_fail_with_a_json_pointer() {
         let worker = ScriptWorker::default();
         let input = json!({

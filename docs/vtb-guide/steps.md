@@ -433,6 +433,9 @@ task or the project and record the execution that wrote it;
 `vtb::artifacts::delete` removes one. Writes apply immediately; a failed or cancelled
 script does not undo them, and creating a task or adding a dependency never
 starts a TaskRun.
+The pure `vtb::regex` and `vtb::time` modules provide bounded regex operations,
+ISO 8601 calendar date/offset date-time parsing, UTC formatting, and checked
+millisecond arithmetic; see [their API and accepted formats](../agent-context/workflows/steps/execute/regex-time.md).
 `vtb::cmd::run` runs a command in the task worktree (else the project root) and
 returns its exit code and output; it runs as the daemon user with no sandbox,
 timeout or output cap, and cancelling the step kills its process group. Sacrum

@@ -7750,6 +7750,7 @@ dependencies = [
  "futures",
  "jsonschema",
  "ractor",
+ "regex",
  "reqwest",
  "rhai",
  "serde",
