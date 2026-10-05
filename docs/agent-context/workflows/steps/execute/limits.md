@@ -9,9 +9,9 @@ cancellation stops evaluation and any in-flight host call, and the worker
 settles before a terminal result is persisted. An attempt cancelled before its
 blocking evaluation starts never evaluates.
 
-There are no limits: no deadline, operation limit, or script, context, result,
-string or collection size cap. Rhai's default expression and call depth guards
-stay. Cancellation is the only way to stop a long or stuck script. The schema
+There are no general limits: no deadline, operation limit, or script, context,
+result, string or collection size cap. Rhai's default expression and call depth
+guards stay. Cancellation is the only way to stop a long or stuck script. The schema
 validator compiles once inside the admitted blocking worker.
 Compilation/validation cannot be interrupted by Rhai callbacks: cancellation is
 checked around these phases, and the attempt is not reported settled until the worker settles.
@@ -28,6 +28,10 @@ and raise a catchable `#{ kind, message }` error (`not_found`, `invalid`,
 `cancelled`, `transport`). Writes are not undone on failure or cancellation.
 Each attempt uses a fresh Engine/Scope. Cancellation is cooperative; there is
 no AST cache. Execute requires no provider binaries or credentials.
+
+The pure `vtb::regex` and `vtb::time` helpers have per-call limits documented
+in [regex and time helpers](regex-time.md). These caps constrain those
+operations; they do not add global script or context limits.
 
 `vtb::cmd::run` commands run as the daemon user with its permissions and
 environment, outside any sandbox. `PATH` is the user's login-shell PATH, as for

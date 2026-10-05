@@ -17,5 +17,7 @@ and persists its validated JSON result. Execute has no provider harness.
   Load when: a script adds or edits sections, checks items, adds code refs, reparents tasks, or adds dependencies.
 - [Writing artifacts](host-artifact-writes.md): `vtb::artifacts::put`, `put_json` and `delete` on a task or the project, provenance, and a record-progress example.
   Load when: a script publishes, replaces or deletes a named artifact, shares data through the project, or writes the same name as output persistence.
+- [Regex and time helpers](regex-time.md): bounded regex matching, capture/replacement, supported ISO 8601 timestamps, and millisecond arithmetic.
+  Load when: scripts need regex matching, timestamp parsing, formatting, comparison or arithmetic.
 - [Limits and cancellation](limits.md): daemon-wide capacity settings, unbounded evaluation, cancellation, host-call errors, and command execution (`vtb::cmd`) permissions.
   Load when: script limits, overflow, cancellation, isolation, running commands from a script, or provider requirements.

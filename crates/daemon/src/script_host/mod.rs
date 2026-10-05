@@ -9,11 +9,13 @@
 mod artifact_writes;
 mod artifacts;
 mod cmd;
+mod regex;
 mod task_edits;
 mod task_writes;
 mod tasks;
 #[cfg(test)]
 mod test_support;
+mod time;
 
 use rhai::{Dynamic, Engine, Map, Module};
 use vertebrae_core::{ServiceResult, VertebraeServices};
@@ -24,6 +26,8 @@ pub(crate) fn register(engine: &mut Engine, host: &HostContext) {
     engine.register_static_module("vtb::tasks", tasks::module(host).into());
     engine.register_static_module("vtb::artifacts", artifacts::module(host).into());
     engine.register_static_module("vtb::cmd", cmd::module(host).into());
+    engine.register_static_module(regex::NAMESPACE, regex::module().into());
+    engine.register_static_module(time::NAMESPACE, time::module().into());
 }
 
 /// Register a one-argument host function whose errors carry its qualified
