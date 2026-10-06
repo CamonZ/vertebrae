@@ -10,7 +10,7 @@ on:
 jobs:
   acceptance:
     name: Acceptance Tests
-    runs-on: homelab
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: read
@@ -19,11 +19,8 @@ jobs:
       - name: Checkout vertebrae
         uses: actions/checkout@v4
 
-      - name: Install Docker Compose plugin
-        run: |
-          mkdir -p ~/.docker/cli-plugins
-          curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m) -o ~/.docker/cli-plugins/docker-compose
-          chmod +x ~/.docker/cli-plugins/docker-compose
+      - name: Verify Docker Compose
+        run: docker compose version
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -34,8 +31,8 @@ jobs:
 
       - name: Run acceptance suites
         env:
-          # One job per runner; retain its compilation cache across checkouts.
-          VTB_ACCEPTANCE_CACHE_KEY: ${{ runner.name }}
+          # Isolate build caches for this disposable GitHub-hosted job.
+          VTB_ACCEPTANCE_CACHE_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
           VTB_ACCEPTANCE_OUTPUT: ${{ github.workspace }}/test-output/acceptance
         run: python3 scripts/acceptance.py
 

@@ -278,8 +278,9 @@ The runner creates a unique Compose project for every invocation and always
 tears it down, including its database and temporary GUI node_modules volume.
 The cache overlay keeps Cargo downloads, compiled targets, Rust toolchains, and
 npm downloads in external Docker volumes. These survive runtime teardown.
-Local cache identity derives from the checkout path; CI supplies the runner name
-through `VTB_ACCEPTANCE_CACHE_KEY`. The runner prints the resolved cache name.
+Local cache identity derives from the checkout path; GitHub-hosted CI supplies
+the run ID and attempt through `VTB_ACCEPTANCE_CACHE_KEY`. CI build caches last
+for that disposable job. The runner prints the resolved cache name.
 To benchmark an empty cache, supply a new key; reuse that key for warm runs.
 Only remove these named cache volumes when no run is using them.
 

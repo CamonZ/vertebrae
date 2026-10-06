@@ -6,8 +6,7 @@
 
 use crate::error::ServiceResult;
 use crate::models::{
-    Artifact, CreateArtifactInput, GetArtifactByLogicalNameInput, ListArtifactInput,
-    UpdateArtifactInput,
+    Artifact, CreateArtifactInput, GetArtifactByLogicalNameInput, UpdateArtifactInput,
 };
 use async_trait::async_trait;
 
@@ -20,18 +19,14 @@ pub trait ArtifactService: Send + Sync {
     /// Create an artifact in the active project.
     async fn create_artifact(&self, input: CreateArtifactInput) -> ServiceResult<Artifact>;
 
-    /// List artifacts in the active project using the supplied pagination.
-    async fn list_artifacts(&self, input: ListArtifactInput) -> ServiceResult<Vec<Artifact>>;
+    /// List artifacts in the active project without truncation.
+    async fn list_artifacts(&self) -> ServiceResult<Vec<Artifact>>;
 
-    /// List artifacts attached to a task in the active project using the supplied pagination.
+    /// List artifacts attached to a task in the active project without truncation.
     ///
     /// The returned artifact projections include the attachment's logical name
     /// and metadata when Sacrum loads them through `Task.artifacts`.
-    async fn list_task_artifacts(
-        &self,
-        task_id: &str,
-        input: ListArtifactInput,
-    ) -> ServiceResult<Vec<Artifact>>;
+    async fn list_task_artifacts(&self, task_id: &str) -> ServiceResult<Vec<Artifact>>;
 
     /// Get an artifact by ID within the caller's user scope.
     async fn get_artifact(&self, id: &str) -> ServiceResult<Artifact>;

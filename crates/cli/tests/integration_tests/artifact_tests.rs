@@ -122,25 +122,17 @@ async fn add_list_and_json_output_use_the_active_project_scope() {
     let services = mock_services();
     let artifact_id = add_artifact(&services, "notes.md", "hello").await;
 
-    let list = ArtifactCommand::List(ArtifactListCommand {
-        task_id: None,
-        limit: None,
-        offset: None,
-    })
-    .execute(&services)
-    .await
-    .unwrap();
+    let list = ArtifactCommand::List(ArtifactListCommand { task_id: None })
+        .execute(&services)
+        .await
+        .unwrap();
     assert!(list.contains(&artifact_id));
     assert!(list.contains("notes.md"));
 
-    let result = Command::Artifact(ArtifactCommand::List(ArtifactListCommand {
-        task_id: None,
-        limit: None,
-        offset: None,
-    }))
-    .execute_json(&services)
-    .await
-    .unwrap();
+    let result = Command::Artifact(ArtifactCommand::List(ArtifactListCommand { task_id: None }))
+        .execute_json(&services)
+        .await
+        .unwrap();
     let CommandResult::Json(json) = result else {
         panic!("artifact list --json should return JSON output");
     };
@@ -180,8 +172,6 @@ async fn task_scoped_list_resolves_short_ids_and_preserves_human_and_json_output
     let unrelated_id = add_artifact(&services, "project-note.md", "unrelated").await;
     let mut command = Command::Artifact(ArtifactCommand::List(ArtifactListCommand {
         task_id: Some("a1b2c3d4".to_string()),
-        limit: None,
-        offset: None,
     }));
     command.resolve_ids(&services).await.unwrap();
 
@@ -245,8 +235,6 @@ async fn task_scoped_list_returns_only_direct_artifacts_across_task_hierarchy() 
     ] {
         let result = ArtifactCommand::List(ArtifactListCommand {
             task_id: Some(subject_id.to_string()),
-            limit: None,
-            offset: None,
         })
         .execute_json(&services)
         .await
@@ -255,23 +243,6 @@ async fn task_scoped_list_returns_only_direct_artifacts_across_task_hierarchy() 
         assert_eq!(artifacts.len(), 1);
         assert_eq!(artifacts[0]["filename"], filename);
     }
-
-    let task_page = ArtifactCommand::List(ArtifactListCommand {
-        task_id: Some(TASK_ID.to_string()),
-        limit: Some(1),
-        offset: Some(1),
-    })
-    .execute(&services)
-    .await
-    .unwrap();
-    assert_eq!(task_page, "No artifacts found");
-
-    let invalid_page = ArtifactCommand::List(ArtifactListCommand {
-        task_id: Some(TASK_ID.to_string()),
-        limit: Some(0),
-        offset: None,
-    });
-    assert!(invalid_page.execute(&services).await.is_err());
 }
 
 #[tokio::test]
@@ -538,20 +509,16 @@ async fn show_and_update_preserve_partial_update_semantics() {
 }
 
 #[tokio::test]
-async fn list_pagination_and_delete_force_and_errors_are_enforced() {
+async fn list_and_delete_force_and_errors_are_enforced() {
     let services = mock_services();
     let first_id = add_artifact(&services, "first.md", "one").await;
     let second_id = add_artifact(&services, "second.md", "two").await;
 
-    let page = ArtifactCommand::List(ArtifactListCommand {
-        task_id: None,
-        limit: Some(1),
-        offset: Some(1),
-    })
-    .execute(&services)
-    .await
-    .unwrap();
-    assert!(!page.contains(&first_id));
+    let page = ArtifactCommand::List(ArtifactListCommand { task_id: None })
+        .execute(&services)
+        .await
+        .unwrap();
+    assert!(page.contains(&first_id));
     assert!(page.contains(&second_id));
 
     let result = Command::Artifact(ArtifactCommand::Delete(ArtifactDeleteCommand {
@@ -580,4 +547,40 @@ async fn list_pagination_and_delete_force_and_errors_are_enforced() {
         panic!("expected artifact delete command");
     };
     assert!(command.force);
+}
+
+#[test]
+fn artifact_list_rejects_removed_pagination_flags() {
+    for flag in ["--limit", "--offset"] {
+        assert!(CliArgs::try_parse_from(["vtb", "artifact", "list", flag, "1"]).is_err());
+    }
+}
+
+#[tokio::test]
+async fn artifact_lists_return_all_rows_beyond_former_limits() {
+    let services = mock_services();
+    for index in 0..1_001 {
+        services
+            .artifacts()
+            .create_artifact(
+                CreateArtifactInput::new(format!("artifact-{index}.md"), "body")
+                    .with_subject("task", TASK_ID)
+                    .with_logical_name(format!("result-{index}")),
+            )
+            .await
+            .unwrap();
+    }
+    add_artifact(&services, "project.md", "project body").await;
+    for (task_id, count) in [(None, 1_002), (Some(TASK_ID.to_string()), 1_001)] {
+        let command = ArtifactCommand::List(ArtifactListCommand { task_id });
+        let result = command.execute_json(&services).await.unwrap();
+        let rows = result.as_array().unwrap();
+        assert_eq!(rows.len(), count);
+        assert_eq!(rows[0]["filename"], "artifact-0.md");
+        assert_eq!(rows[1_000]["filename"], "artifact-1000.md");
+        assert_eq!(rows[1_000]["logical_name"], "result-1000");
+        assert_eq!(rows[1_000]["body"], "body");
+        let human = command.execute(&services).await.unwrap();
+        assert!(human.contains("artifact-1000.md"));
+    }
 }

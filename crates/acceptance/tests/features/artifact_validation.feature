@@ -8,9 +8,9 @@ Feature: Artifact validation and not-found behavior
     When I add artifact "" with body "body"
     Then the command should fail with "Validation failed: artifact filename cannot be empty"
 
-  Scenario: Artifact list rejects a non-positive limit
-    When I list artifacts with --limit 0
-    Then the command should fail with "Validation failed: artifact list limit must be greater than zero"
+  Scenario: Artifact list rejects removed pagination flags
+    When I run vtb "artifact list --limit 1"
+    Then the command should fail with "unexpected argument '--limit'"
 
   Scenario: Artifact listing rejects an invalid token
     When I list artifacts with an invalid token

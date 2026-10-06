@@ -9,7 +9,7 @@ use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
 use serde_json::{Value, json};
 use vertebrae_core::ArtifactService;
-use vertebrae_core::models::{Artifact, ListArtifactInput};
+use vertebrae_core::models::Artifact;
 use vertebrae_sacrum_client::SacrumArtifactService;
 
 use super::execute::{executions, fenced_block};
@@ -30,18 +30,16 @@ async fn documented_progress_twice(world: &mut DaemonWorld) {
     install_rhai_step(world, &script).await;
 }
 
-/// The fixtures stay well under one page.
 async fn subject_artifacts(world: &DaemonWorld, role: &str) -> Vec<Artifact> {
     let client = world
         .graphql_client
         .as_ref()
         .expect("graphql_client not configured");
     let service = SacrumArtifactService::new((**client).clone());
-    let page = ListArtifactInput::new().with_limit(50);
     let artifacts = if role == "PROJECT" {
-        service.list_artifacts(page).await
+        service.list_artifacts().await
     } else {
-        service.list_task_artifacts(&id(world, role), page).await
+        service.list_task_artifacts(&id(world, role)).await
     };
     artifacts.unwrap_or_else(|error| panic!("list {role} artifacts: {error}"))
 }

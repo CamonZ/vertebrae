@@ -8,7 +8,6 @@ List artifacts across the active project:
 
 ```bash
 vtb artifact list
-vtb artifact list --limit 20 --offset 20
 vtb --json artifact list
 ```
 
@@ -18,7 +17,6 @@ List artifacts attached directly to an epic, ticket, or task:
 vtb artifact list --task-id <task-uuid>
 vtb artifact list --task-id <8-character-short-id>
 vtb --json artifact list --task-id <task-uuid>
-vtb artifact list --task-id <task-uuid> --limit 20 --offset 20
 ```
 
 Epics, tickets, and tasks use the same task ID namespace. Full UUIDs and
@@ -35,5 +33,21 @@ when present. JSON output returns the artifact array, including body, timestamps
 logical name, and attachment metadata when available. An empty scope prints
 `No artifacts found` in human-readable mode and returns `[]` in JSON mode.
 
-`--limit` must be greater than zero and `--offset` cannot be negative. Invalid
-or nonexistent task IDs fail instead of falling back to a project-wide list.
+Listing returns the complete authorized collection without pagination or a
+client-side item cap. `--limit` and `--offset` are not supported. This requires
+the Sacrum unpaginated artifact-list contract; older servers may still truncate
+argument-free queries. Invalid or nonexistent task IDs fail instead of falling
+back to a project-wide list.
+
+## Migration from paginated listing
+
+Deploy Sacrum's unpaginated artifact contract
+([Sacrum ticket](vtb://ticket/97127f9a-6498-4a52-9a03-84693e77f120))
+before using this client. Queries now request `Project.artifacts` and `Task.artifacts` without arguments and expect
+complete, ordered results. Older servers' default page-size clamping is not
+compatible with this contract.
+
+Remove `--limit` and `--offset` from scripts. Rust callers use
+`ArtifactService::list_artifacts()` or `list_task_artifacts(task_id)`;
+`ListArtifactInput` has been removed. Rhai and GUI command signatures are
+unchanged, but their listings now return every artifact in the requested scope.

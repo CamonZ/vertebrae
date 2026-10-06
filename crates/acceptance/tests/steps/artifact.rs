@@ -288,23 +288,65 @@ async fn add_artifact_with_invalid_metadata(
         .await;
 }
 
-#[when(expr = "I list artifacts with --limit {int}")]
-async fn list_artifacts_with_limit(world: &mut SmokeWorld, limit: i32) {
-    let limit = limit.to_string();
-    world
-        .run_vtb(&["artifact", "list", "--limit", &limit])
-        .await;
+#[when(expr = "I create {int} numbered project artifacts")]
+async fn create_numbered_project_artifacts(world: &mut SmokeWorld, count: usize) {
+    for index in 0..count {
+        let filename = format!("numbered-{index:03}.md");
+        let body = format!("numbered body {index}");
+        let logical_name = format!("numbered/{index:03}");
+        world
+            .run_vtb(&[
+                "--json",
+                "artifact",
+                "add",
+                &filename,
+                "--body",
+                &body,
+                "--logical-name",
+                &logical_name,
+            ])
+            .await;
+        assert_eq!(
+            world.last_exit_code, 0,
+            "failed to create {filename}: {}",
+            world.last_stderr
+        );
+        remember_created_artifact(world, Some(&format!("numbered_artifact_{index}")));
+    }
 }
 
-#[when(expr = "I list artifacts with --limit {int} and --offset {int}")]
-async fn list_artifacts_with_limit_and_offset(world: &mut SmokeWorld, limit: i32, offset: i32) {
-    let limit = limit.to_string();
-    let offset = offset.to_string();
-    world
-        .run_vtb(&[
-            "--json", "artifact", "list", "--limit", &limit, "--offset", &offset,
-        ])
-        .await;
+#[then(expr = "the JSON artifact listing contains all {int} numbered artifacts")]
+async fn json_listing_contains_numbered_artifacts(world: &mut SmokeWorld, count: usize) {
+    let value = last_json(world, "artifact list");
+    let rows = value.as_array().expect("artifact list should be an array");
+    assert_eq!(rows.len(), count);
+    for index in 0..count {
+        let id = &world.stored_ids[&format!("numbered_artifact_{index}")];
+        let matching: Vec<_> = rows.iter().filter(|row| row["id"] == *id).collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "artifact {index} must appear exactly once"
+        );
+        assert_eq!(matching[0]["filename"], format!("numbered-{index:03}.md"));
+        assert_eq!(matching[0]["body"], format!("numbered body {index}"));
+        assert_eq!(matching[0]["logical_name"], format!("numbered/{index:03}"));
+    }
+}
+
+#[then(expr = "the human artifact listing contains all {int} numbered artifacts")]
+async fn human_listing_contains_numbered_artifacts(world: &mut SmokeWorld, count: usize) {
+    let rows: Vec<_> = world.last_stdout.lines().collect();
+    assert_eq!(rows.len(), count);
+    for index in 0..count {
+        let id = &world.stored_ids[&format!("numbered_artifact_{index}")];
+        let expected = format!("{id}  numbered-{index:03}.md  (numbered/{index:03})");
+        assert_eq!(
+            rows.iter().filter(|row| **row == expected).count(),
+            1,
+            "artifact {index} must appear exactly once in human output"
+        );
+    }
 }
 
 #[when("I list artifacts for humans")]

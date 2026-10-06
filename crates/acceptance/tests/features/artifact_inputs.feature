@@ -35,14 +35,12 @@ Feature: Artifact input and output modes
     Then the command should succeed
     And the human artifact list should say "No artifacts found"
 
-  Scenario: Artifact listing supports pagination and empty pages
-    When I add artifact "page-one.md" with body "one" as "page_one"
+  Scenario: Artifact listing returns all 100 artifacts beyond the former page limit
+    When I create 100 numbered project artifacts
+    And I list artifacts as JSON
     Then the command should succeed
-    When I add artifact "page-two.md" with body "two" as "page_two"
+    And the JSON artifact listing contains all 100 numbered artifacts
+    And every listed artifact should belong to the active project
+    When I list artifacts for humans
     Then the command should succeed
-    When I list artifacts with --limit 1 and --offset 1
-    Then the command should succeed
-    And the artifact JSON list should contain 1 entries
-    When I list artifacts with --limit 1 and --offset 100
-    Then the command should succeed
-    And the artifact JSON list should contain 0 entries
+    And the human artifact listing contains all 100 numbered artifacts
