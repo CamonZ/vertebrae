@@ -1413,37 +1413,6 @@ impl GetArtifactByLogicalNameInput {
     }
 }
 
-/// Input for listing the artifacts attached to the active project.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ListArtifactInput {
-    /// Maximum number of artifacts to return.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub limit: Option<i32>,
-
-    /// Number of artifacts to skip before returning results.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub offset: Option<i32>,
-}
-
-impl ListArtifactInput {
-    /// Create an input using Sacrum's default pagination.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set the maximum number of artifacts to return.
-    pub fn with_limit(mut self, limit: i32) -> Self {
-        self.limit = Some(limit);
-        self
-    }
-
-    /// Set the number of artifacts to skip.
-    pub fn with_offset(mut self, offset: i32) -> Self {
-        self.offset = Some(offset);
-        self
-    }
-}
-
 /// A task in the Vertebrae task management system (domain model)
 ///
 /// This is the canonical task type used throughout the system.

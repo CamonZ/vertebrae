@@ -8,8 +8,7 @@ use std::str::FromStr;
 use vertebrae_core::artifact_service::ArtifactService;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{
-    Artifact, CreateArtifactInput, GetArtifactByLogicalNameInput, ListArtifactInput,
-    UpdateArtifactInput,
+    Artifact, CreateArtifactInput, GetArtifactByLogicalNameInput, UpdateArtifactInput,
 };
 
 pub struct SacrumArtifactService {
@@ -138,13 +137,11 @@ impl ArtifactService for SacrumArtifactService {
             .map_err(ServiceError::from)?;
         Self::map(response, Some(self.client.project_id()))
     }
-    async fn list_artifacts(&self, input: ListArtifactInput) -> ServiceResult<Vec<Artifact>> {
+    async fn list_artifacts(&self) -> ServiceResult<Vec<Artifact>> {
         let query = with_fragments(artifacts::LIST_ARTIFACTS, &[artifacts::ARTIFACT_FIELDS]);
         let project_id = self.active_project_id()?;
         let variables = json!({
             "project_id": project_id,
-            "limit": input.limit,
-            "offset": input.offset,
         });
         let project: ProjectArtifactsResponse = self
             .client
@@ -158,11 +155,7 @@ impl ArtifactService for SacrumArtifactService {
             .collect()
     }
 
-    async fn list_task_artifacts(
-        &self,
-        task_id: &str,
-        input: ListArtifactInput,
-    ) -> ServiceResult<Vec<Artifact>> {
+    async fn list_task_artifacts(&self, task_id: &str) -> ServiceResult<Vec<Artifact>> {
         let task_id = Self::id(task_id, "task id")?;
         let query = with_fragments(
             artifacts::LIST_TASK_ARTIFACTS,
@@ -174,8 +167,6 @@ impl ArtifactService for SacrumArtifactService {
                 &query,
                 json!({
                     "task_id": task_id,
-                    "limit": input.limit,
-                    "offset": input.offset,
                 }),
                 "task",
             )
@@ -406,26 +397,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_maps_pagination_and_response() {
+    async fn list_maps_complete_response() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_string_contains("ListArtifacts"))
             .and(body_string_contains(PROJECT_ID))
-            .and(body_string_contains("\"limit\":2"))
+            .and(VariablesExactly(json!({"project_id": PROJECT_ID})))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": { "project": { "artifacts": [artifact_json()] } }
             })))
             .mount(&server)
             .await;
 
-        let artifacts = service(&server)
-            .list_artifacts(ListArtifactInput::new().with_limit(2).with_offset(4))
-            .await
-            .unwrap();
+        let artifacts = service(&server).list_artifacts().await.unwrap();
         assert_eq!(artifacts.len(), 1);
         assert_eq!(artifacts[0].filename, "notes.md");
         assert_eq!(artifacts[0].project_id.as_deref(), Some(PROJECT_ID));
+    }
+
+    #[tokio::test]
+    async fn lists_preserve_all_rows_in_a_single_unpaginated_request() {
+        for task_scope in [false, true] {
+            let server = MockServer::start().await;
+            let rows: Vec<_> = (0..1_001)
+                .map(|index| {
+                    let mut row = artifact_json();
+                    row["filename"] = json!(format!("artifact-{index}.md"));
+                    row
+                })
+                .collect();
+            let (operation, field, variables) = if task_scope {
+                ("ListTaskArtifacts", "task", json!({"task_id": ARTIFACT_ID}))
+            } else {
+                (
+                    "ListArtifacts",
+                    "project",
+                    json!({"project_id": PROJECT_ID}),
+                )
+            };
+            Mock::given(method("POST"))
+                .and(path("/graphql"))
+                .and(body_string_contains(operation))
+                .and(VariablesExactly(variables))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "data": {field: {"artifacts": rows}}
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let service = service(&server);
+            let artifacts = if task_scope {
+                service.list_task_artifacts(ARTIFACT_ID).await
+            } else {
+                service.list_artifacts().await
+            }
+            .unwrap();
+            assert_eq!(artifacts.len(), 1_001);
+            assert_eq!(artifacts[0].filename, "artifact-0.md");
+            assert_eq!(artifacts[1_000].filename, "artifact-1000.md");
+            assert_eq!(
+                artifacts[1_000].logical_name.as_deref(),
+                Some("conversation")
+            );
+            assert_eq!(artifacts[1_000].project_id.as_deref(), Some(PROJECT_ID));
+            server.verify().await;
+        }
     }
 
     #[tokio::test]
@@ -438,8 +475,6 @@ mod tests {
             .and(body_string_contains(ARTIFACT_ID))
             .and(VariablesExactly(json!({
                 "task_id": ARTIFACT_ID,
-                "limit": 1,
-                "offset": 2,
             })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": { "task": { "artifacts": [artifact_json()] } }
@@ -449,10 +484,7 @@ mod tests {
             .await;
 
         let artifacts = service(&server)
-            .list_task_artifacts(
-                ARTIFACT_ID,
-                ListArtifactInput::new().with_limit(1).with_offset(2),
-            )
+            .list_task_artifacts(ARTIFACT_ID)
             .await
             .unwrap();
 

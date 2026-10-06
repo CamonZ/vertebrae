@@ -1,6 +1,5 @@
 use cucumber::then;
 use vertebrae_core::artifact_service::ArtifactService;
-use vertebrae_core::models::ListArtifactInput;
 use vertebrae_sacrum_client::{SacrumArtifactService, StepExecutionResponse};
 
 use crate::DaemonWorld;
@@ -20,7 +19,7 @@ pub(crate) async fn task_artifacts(world: &DaemonWorld) -> Vec<vertebrae_core::A
         .expect("graphql_client not configured")
         .clone();
     SacrumArtifactService::new((*client).clone())
-        .list_task_artifacts(task_id, ListArtifactInput::new())
+        .list_task_artifacts(task_id)
         .await
         .expect("list task artifacts failed")
 }

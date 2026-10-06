@@ -23,7 +23,7 @@ jobs:
   publish:
     name: Publish acceptance images
     # Same architecture as the acceptance runners that pull these images.
-    runs-on: homelab
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write

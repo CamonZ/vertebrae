@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 use cucumber::{given, then};
 
 use vertebrae_core::ArtifactService;
-use vertebrae_core::models::ListArtifactInput;
 use vertebrae_core::service::TaskService;
 use vertebrae_sacrum_client::{SacrumArtifactService, SacrumTaskService};
 
@@ -42,7 +41,7 @@ async fn task_exists(world: &DaemonWorld, role: &str) -> bool {
 
 async fn named_artifact_id(world: &DaemonWorld, role: &str, name: &str) -> Option<String> {
     artifacts(world)
-        .list_task_artifacts(&id(world, role), ListArtifactInput::new().with_limit(50))
+        .list_task_artifacts(&id(world, role))
         .await
         .unwrap_or_else(|error| panic!("list {role} artifacts: {error}"))
         .into_iter()

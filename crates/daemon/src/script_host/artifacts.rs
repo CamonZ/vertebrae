@@ -8,7 +8,7 @@
 //! `()`.
 
 use rhai::{Array, Dynamic, Map, Module};
-use vertebrae_core::models::{Artifact, GetArtifactByLogicalNameInput, ListArtifactInput};
+use vertebrae_core::models::{Artifact, GetArtifactByLogicalNameInput};
 use vertebrae_core::{ServiceError, ServiceResult, VertebraeServices};
 
 use super::tasks::scoped_task;
@@ -16,9 +16,6 @@ use super::{read, set_host_fn, set_host_fn2, string_argument, timestamp, uuid_te
 use crate::script_worker::{HostContext, HostError, json_to_rhai};
 
 pub(super) const NAMESPACE: &str = "vtb::artifacts";
-
-/// Sacrum caps artifact pages at this size, so a shorter page is the last.
-const PAGE: i32 = 50;
 
 pub(super) fn module(host: &HostContext) -> Module {
     let mut module = Module::new();
@@ -75,16 +72,12 @@ fn list(host: &HostContext, subject: Dynamic) -> Result<Dynamic, HostError> {
     let subject = Subject::parse(subject)?;
     let listed = read(host, |services, project| async move {
         match &subject {
-            Subject::Project => Ok(Some(
-                all_pages(|page| services.artifacts().list_artifacts(page)).await?,
-            )),
+            Subject::Project => Ok(Some(services.artifacts().list_artifacts().await?)),
             Subject::Task(id) => {
                 if scoped_task(services, project, id).await?.is_none() {
                     return Ok(None);
                 }
-                Ok(Some(
-                    all_pages(|page| services.artifacts().list_task_artifacts(id, page)).await?,
-                ))
+                Ok(Some(services.artifacts().list_task_artifacts(id).await?))
             }
         }
     })?;
@@ -100,28 +93,6 @@ fn list(host: &HostContext, subject: Dynamic) -> Result<Dynamic, HostError> {
         .map(artifact_info)
         .collect::<Result<Array, _>>()
         .map(Dynamic::from_array)
-}
-
-async fn all_pages<F>(mut page: impl FnMut(ListArtifactInput) -> F) -> ServiceResult<Vec<Artifact>>
-where
-    F: std::future::Future<Output = ServiceResult<Vec<Artifact>>>,
-{
-    let mut artifacts = Vec::new();
-    loop {
-        let offset = i32::try_from(artifacts.len())
-            .map_err(|_| ServiceError::invalid_input("Too many artifacts to page through"))?;
-        let rows = page(
-            ListArtifactInput::new()
-                .with_limit(PAGE)
-                .with_offset(offset),
-        )
-        .await?;
-        let last = rows.len() < PAGE as usize;
-        artifacts.extend(rows);
-        if last {
-            return Ok(artifacts);
-        }
-    }
 }
 
 fn lookup(host: &HostContext, subject: Dynamic, name: Dynamic) -> Result<Dynamic, HostError> {
@@ -333,7 +304,7 @@ mod tests {
                 "Foreign secret",
             ),
         ];
-        // Enough for two full pages and a partial one.
+        // Exceed the former server page size.
         links.extend((0..103).map(|n| link(PROJECT, "task", MANY, 100 + n, Some("many"), "many")));
         links
     }
@@ -352,9 +323,7 @@ mod tests {
                     "data": null, "errors": [{"message": "not_found"}]
                 }))
             };
-            let page = |subject_type: &str, subject_id: &str, project: &str| {
-                let offset = vars["offset"].as_u64().unwrap() as usize;
-                let limit = vars["limit"].as_u64().unwrap().min(50) as usize;
+            let listed = |subject_type: &str, subject_id: &str, project: &str| {
                 links()
                     .into_iter()
                     .filter(|link| {
@@ -363,8 +332,6 @@ mod tests {
                             && link.subject_id == subject_id
                     })
                     .map(|link| link.artifact)
-                    .skip(offset)
-                    .take(limit)
                     .collect::<Vec<_>>()
             };
             let data = if query.contains("query GetArtifactByLogicalName(") {
@@ -387,14 +354,14 @@ mod tests {
                 json!({"artifactByLogicalName": link.artifact})
             } else if query.contains("query ListArtifacts(") {
                 let project = vars["project_id"].as_str().unwrap();
-                json!({"project": {"artifacts": page("project", project, project)}})
+                json!({"project": {"artifacts": listed("project", project, project)}})
             } else if query.contains("query ListTaskArtifacts(") {
                 let id = vars["task_id"].as_str().unwrap();
                 if id == FAILING {
                     return ResponseTemplate::new(503).set_body_string("upstream down");
                 }
                 let project = TASKS.iter().find(|(task, _)| *task == id).unwrap().1;
-                json!({"task": {"artifacts": page("task", id, project)}})
+                json!({"task": {"artifacts": listed("task", id, project)}})
             } else if query.contains("query GetTask(") {
                 let id = vars["id"].as_str().unwrap();
                 let Some((_, project)) = TASKS.iter().find(|(task, _)| *task == id) else {
@@ -488,21 +455,12 @@ mod tests {
         assert_eq!(read["project_names"], json!(["plan", "shared"]));
         assert_eq!(read["other_list"], 1);
         assert_eq!(read["many"], 103);
-        // Listings follow every page; a short page ends the listing.
-        let pages = sacrum_requests(&server, "query ListTaskArtifacts(").await;
-        let many: Vec<_> = pages
+        let requests = sacrum_requests(&server, "query ListTaskArtifacts(").await;
+        let many: Vec<_> = requests
             .iter()
             .filter(|vars| vars["task_id"] == MANY)
-            .map(|vars| (vars["offset"].clone(), vars["limit"].clone()))
             .collect();
-        assert_eq!(
-            many,
-            [
-                (json!(0), json!(50)),
-                (json!(50), json!(50)),
-                (json!(100), json!(50))
-            ]
-        );
+        assert_eq!(many, [&json!({"task_id": MANY})]);
         // Project artifacts use the execution's project as the subject.
         let lookups = sacrum_requests(&server, "query GetArtifactByLogicalName(").await;
         assert!(lookups.contains(&json!({

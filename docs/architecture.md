@@ -119,7 +119,7 @@ Steps carry:
 - `persistence_options: Option<Value>` — Sacrum-owned artifact persistence configuration
 - `agent_config: AgentConfig` — LLM configuration (model, budget, tools, permissions, json_schema)
 
-DTOs: `CreateTaskOptions`, `UpdateTaskOptions`, `CreateWorkflowOptions`, `CreateArtifactInput`, `UpdateArtifactInput`, `ListArtifactInput`, `StepUpdate`, etc.
+DTOs: `CreateTaskOptions`, `UpdateTaskOptions`, `CreateWorkflowOptions`, `CreateArtifactInput`, `UpdateArtifactInput`, `StepUpdate`, etc.
 
 Error types: `ServiceError`, `ServiceResult`
 

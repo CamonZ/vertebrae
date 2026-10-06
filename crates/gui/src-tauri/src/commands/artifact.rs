@@ -1,11 +1,5 @@
 use super::*;
 use crate::types::Artifact;
-use vertebrae_core::ListArtifactInput;
-
-/// One-shot mitigation until GUI artifact pagination is implemented.
-/// Lists still return complete artifact projections, including bodies, and
-/// collections larger than this limit remain truncated.
-const ARTIFACT_LIST_LIMIT: i32 = 1_000;
 
 /// List artifact files in the active project.
 #[tauri::command]
@@ -20,7 +14,7 @@ pub async fn list_project_artifacts(
 
     service
         .artifacts()
-        .list_artifacts(ListArtifactInput::new().with_limit(ARTIFACT_LIST_LIMIT))
+        .list_artifacts()
         .await
         .map(|artifacts| artifacts.into_iter().map(Into::into).collect())
         .map_err(Into::into)
@@ -40,10 +34,7 @@ pub async fn list_task_artifacts(
 
     service
         .artifacts()
-        .list_task_artifacts(
-            &task_id,
-            ListArtifactInput::new().with_limit(ARTIFACT_LIST_LIMIT),
-        )
+        .list_task_artifacts(&task_id)
         .await
         .map(|artifacts| artifacts.into_iter().map(Into::into).collect())
         .map_err(Into::into)
@@ -95,30 +86,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_artifact_list_returns_up_to_the_1000_item_limit() {
+    async fn project_artifact_list_returns_all_items_beyond_1000() {
         let app = crate::commands::test_support::build_app_with_services();
-        create_artifacts(&app, ARTIFACT_LIST_LIMIT as usize + 1, None).await;
+        create_artifacts(&app, 1_001, None).await;
 
         let artifacts = list_project_artifacts(app.state())
             .await
             .expect("list project artifacts");
 
-        assert_eq!(artifacts.len(), ARTIFACT_LIST_LIMIT as usize);
+        assert_eq!(artifacts.len(), 1_001);
         assert_eq!(artifacts.first().unwrap().filename, "artifact-0.txt");
-        assert_eq!(artifacts.last().unwrap().filename, "artifact-999.txt");
+        assert_eq!(artifacts.last().unwrap().filename, "artifact-1000.txt");
     }
 
     #[tokio::test]
-    async fn task_artifact_list_returns_up_to_the_1000_item_limit() {
+    async fn task_artifact_list_returns_all_items_beyond_1000() {
         let app = crate::commands::test_support::build_app_with_services();
-        create_artifacts(&app, ARTIFACT_LIST_LIMIT as usize + 1, Some("task-id")).await;
+        create_artifacts(&app, 1_001, Some("task-id")).await;
 
         let artifacts = list_task_artifacts(app.state(), "task-id".into())
             .await
             .expect("list task artifacts");
 
-        assert_eq!(artifacts.len(), ARTIFACT_LIST_LIMIT as usize);
+        assert_eq!(artifacts.len(), 1_001);
         assert_eq!(artifacts.first().unwrap().filename, "artifact-0.txt");
-        assert_eq!(artifacts.last().unwrap().filename, "artifact-999.txt");
+        assert_eq!(artifacts.last().unwrap().filename, "artifact-1000.txt");
     }
 }

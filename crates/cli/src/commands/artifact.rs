@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 use vertebrae_core::{
     Artifact, ArtifactLinkMetadata, CreateArtifactInput, GetArtifactByLogicalNameInput,
-    ListArtifactInput, ServiceError, UpdateArtifactInput, VertebraeServices,
+    ServiceError, UpdateArtifactInput, VertebraeServices,
 };
 
 /// Artifact management commands.
@@ -115,20 +115,6 @@ fn validate_filename(filename: &str) -> Result<(), ServiceError> {
     if filename.contains('\0') {
         return Err(ServiceError::validation_failed(
             "artifact filename cannot contain a NUL character",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_pagination(limit: Option<i32>, offset: Option<i32>) -> Result<(), ServiceError> {
-    if limit.is_some_and(|value| value <= 0) {
-        return Err(ServiceError::validation_failed(
-            "artifact list limit must be greater than zero",
-        ));
-    }
-    if offset.is_some_and(|value| value < 0) {
-        return Err(ServiceError::validation_failed(
-            "artifact list offset cannot be negative",
         ));
     }
     Ok(())
@@ -349,42 +335,16 @@ pub struct ArtifactListCommand {
     /// Task ID whose directly attached artifacts should be listed.
     #[arg(long, value_parser = crate::commands::parse_uuid("task ID"))]
     pub task_id: Option<String>,
-
-    /// Maximum number of artifacts to return.
-    #[arg(long)]
-    pub limit: Option<i32>,
-
-    /// Number of artifacts to skip.
-    #[arg(long)]
-    pub offset: Option<i32>,
 }
 
 impl ArtifactListCommand {
-    fn input(&self) -> Result<ListArtifactInput, ServiceError> {
-        validate_pagination(self.limit, self.offset)?;
-        let mut input = ListArtifactInput::new();
-        if let Some(limit) = self.limit {
-            input = input.with_limit(limit);
-        }
-        if let Some(offset) = self.offset {
-            input = input.with_offset(offset);
-        }
-        Ok(input)
-    }
-
     async fn execute_result(
         &self,
         services: &VertebraeServices,
     ) -> Result<Vec<Artifact>, ServiceError> {
-        let input = self.input()?;
         match &self.task_id {
-            Some(task_id) => {
-                services
-                    .artifacts()
-                    .list_task_artifacts(task_id, input)
-                    .await
-            }
-            None => services.artifacts().list_artifacts(input).await,
+            Some(task_id) => services.artifacts().list_task_artifacts(task_id).await,
+            None => services.artifacts().list_artifacts().await,
         }
     }
 
@@ -668,7 +628,7 @@ mod tests {
     fn parses_all_artifact_subcommands() {
         let cases = [
             vec!["test", "add", "notes.md", "--body", "hello"],
-            vec!["test", "list", "--limit", "10", "--offset", "2"],
+            vec!["test", "list"],
             vec!["test", "show", ARTIFACT_ID],
             vec![
                 "test",
@@ -792,7 +752,7 @@ mod tests {
     }
 
     #[test]
-    fn validates_add_input_and_pagination() {
+    fn validates_add_input() {
         let add = ArtifactAddCommand {
             filename: "notes.md".to_string(),
             body: Some("hello".to_string()),
@@ -816,25 +776,6 @@ mod tests {
             metadata_file: None,
         };
         assert!(empty_filename.create_input().is_err());
-
-        assert!(
-            ArtifactListCommand {
-                task_id: None,
-                limit: Some(0),
-                offset: None,
-            }
-            .input()
-            .is_err()
-        );
-        assert!(
-            ArtifactListCommand {
-                task_id: None,
-                limit: None,
-                offset: Some(-1),
-            }
-            .input()
-            .is_err()
-        );
     }
 
     #[test]

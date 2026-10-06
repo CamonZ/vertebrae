@@ -53,23 +53,23 @@ vtb artifact add result.md --body-file ./result.md \
   --metadata-file ./result-metadata.json
 ```
 
-## Read and paginate
+## Read and list
 
 ```bash
 vtb artifact list
-vtb artifact list --limit 20 --offset 20
 vtb artifact show <artifact-uuid>
 vtb artifact lookup result --subject-type task --subject-id <task-uuid>
 
 # Machine-readable output: put the global flag before the command group.
-vtb --json artifact list --limit 20 --offset 0
+vtb --json artifact list
 vtb --json artifact show <artifact-uuid>
 vtb --json artifact lookup result --subject-type task --subject-id <task-uuid>
 ```
 
 `list` is scoped to the active project. Human-readable empty results say
-`No artifacts found`; JSON list output is an array. The backend caps the list
-limit at 50. `show` and `lookup` render the logical name and metadata when an
+`No artifacts found`; JSON list output is an array. Listing returns all
+authorized results without pagination and requires the unpaginated Sacrum
+contract. Use `--task-id` to list only direct task attachments. `show` and `lookup` render the logical name and metadata when an
 attachment context is available. Use `lookup` when the stable subject-local
 logical name is known; do not search root artifacts by filename.
 
