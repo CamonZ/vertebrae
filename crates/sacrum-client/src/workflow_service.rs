@@ -1052,6 +1052,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_export_execute_step_preserves_authored_config() {
+        let server = MockServer::start().await;
+        let config = json!({
+            "version": 1,
+            "script": "#{ ok: true }",
+            "output_schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+        });
+        let mut workflow = gql_empty_export_workflow("wf-execute", "Execute export");
+        workflow["workflow_steps"] = json!([{
+            "id": "step-execute", "name": "Transform", "goal": null,
+            "step_type": "execute", "harness": null, "config": config,
+            "persistence_options": null, "step_order": 0,
+            "workflow_id": "wf-execute", "project_id": "test-proj",
+            "inserted_at": null, "updated_at": null, "transitions": []
+        }]);
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains(
+                "... on ExecuteStepConfig { version script output_schema }",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"data": {"workflow": workflow}})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let bundle = service
+            .export_workflow_bundle(Some("wf-execute"))
+            .await
+            .unwrap();
+        let exported = &bundle.workflows[0].steps[0];
+        assert_eq!(exported.step_type, vertebrae_core::StepType::Execute);
+        assert_eq!(exported.harness, None);
+        assert_eq!(exported.config.as_ref(), Some(&config));
+        assert!(exported.config.as_ref().unwrap().get("context").is_none());
+        bundle.validate().unwrap();
+    }
+
+    #[tokio::test]
     async fn test_export_workflow_snapshot_preserves_complete_wire_graph() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))

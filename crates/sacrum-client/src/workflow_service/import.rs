@@ -23,17 +23,22 @@ impl SacrumWorkflowService {
             ServiceError::invalid_input(format!("workflow bundle validation failed: {error}"))
         })?;
 
-        // Sacrum requires a harness on every imported step. Older manifests
-        // omitted it, so choose the legacy default before sending the bundle.
-        let mut bundle_for_import = bundle.clone();
-        for workflow in &mut bundle_for_import.workflows {
-            for step in &mut workflow.steps {
-                if step.harness.is_none() {
-                    step.harness = Some(default_import_harness(
-                        &step.step_type,
-                        step.config.as_ref(),
-                    ));
-                }
+        // Execute steps require an explicit null harness. Other step types
+        // retain the legacy default when older manifests omit their harness.
+        let mut bundle_for_import = serde_json::to_value(&bundle).map_err(|error| {
+            ServiceError::invalid_input(format!("could not encode workflow bundle: {error}"))
+        })?;
+        for (workflow_index, workflow) in bundle.workflows.iter().enumerate() {
+            for (step_index, step) in workflow.steps.iter().enumerate() {
+                let harness = if step.step_type == StepType::Execute {
+                    serde_json::Value::Null
+                } else {
+                    json!(step.harness.unwrap_or_else(|| {
+                        default_import_harness(&step.step_type, step.config.as_ref())
+                    }))
+                };
+                bundle_for_import["workflows"][workflow_index]["steps"][step_index]["harness"] =
+                    harness;
             }
         }
 
@@ -431,6 +436,41 @@ mod tests {
                 harness
             );
         }
+    }
+
+    #[tokio::test]
+    async fn imports_execute_steps_with_explicit_null_harness() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"importWorkflowBundle": import_data()}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let mut bundle = bundle_with_repeated_step_refs();
+        let config = json!({
+            "version": 1, "script": "#{ ok: true }",
+            "output_schema": {"type": "object"}
+        });
+        let step = &mut bundle.workflows[0].steps[0];
+        step.step_type = StepType::Execute;
+        step.harness = None;
+        step.config = Some(config.clone());
+        service(&server.uri())
+            .import_workflow_bundle(bundle)
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let request: Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let sent: Value =
+            serde_json::from_str(request["variables"]["bundle"].as_str().unwrap()).unwrap();
+        let step = &sent["workflows"][0]["steps"][0];
+        assert_eq!(step.get("harness"), Some(&Value::Null));
+        assert_eq!(step["config"], config);
+        assert_eq!(sent["workflows"][1]["steps"][0]["harness"], "claude");
     }
 
     #[tokio::test]
