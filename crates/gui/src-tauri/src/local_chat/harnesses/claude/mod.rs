@@ -257,6 +257,20 @@ mod tests {
                     supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                     supports_personality: None,
                 },
+                LocalChatModelOption {
+                    id: "claude-sonnet-5-5".to_string(),
+                    label: "Claude Sonnet 5.5".to_string(),
+                    supported_reasoning_effort_ids: None,
+                    supported_speed_tier_ids: None,
+                    supports_personality: None,
+                },
+                LocalChatModelOption {
+                    id: "claude-haiku-5-5".to_string(),
+                    label: "Claude Haiku 5.5".to_string(),
+                    supported_reasoning_effort_ids: None,
+                    supported_speed_tier_ids: None,
+                    supports_personality: None,
+                },
             ]
         );
         assert_eq!(
@@ -298,6 +312,16 @@ mod tests {
                         id: "claude-opus-4-8".to_string(),
                         label: "Claude Opus 4.8".to_string(),
                         supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
+                    },
+                    ClaudeModelOption {
+                        id: "claude-sonnet-5-5".to_string(),
+                        label: "Claude Sonnet 5.5".to_string(),
+                        supported_speed_tier_ids: None,
+                    },
+                    ClaudeModelOption {
+                        id: "claude-haiku-5-5".to_string(),
+                        label: "Claude Haiku 5.5".to_string(),
+                        supported_speed_tier_ids: None,
                     },
                 ],
             }

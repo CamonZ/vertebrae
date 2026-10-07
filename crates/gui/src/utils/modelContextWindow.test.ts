@@ -30,6 +30,24 @@ describe("resolveContextWindow", () => {
     expect(resolveContextWindow("claude-haiku-4-5", undefined)).toBe(200_000);
   });
 
+  it.each([
+    "claude-sonnet-5-5",
+    "sonnet-5.5",
+    "CLAUDE-SONNET-5-5",
+    "claude-sonnet-5-5-20261008",
+  ])("uses the 1M Sonnet 5.5 window for %s over the legacy fallback", (model) => {
+    expect(resolveContextWindow(model, 200_000)).toBe(1_000_000);
+  });
+
+  it.each([
+    "claude-haiku-5-5",
+    "haiku-5.5",
+    "CLAUDE-HAIKU-5-5",
+    "claude-haiku-5-5-20261008",
+  ])("uses the 1M Haiku 5.5 window for %s over the legacy fallback", (model) => {
+    expect(resolveContextWindow(model, 200_000)).toBe(1_000_000);
+  });
+
   it("falls back to backend value when model not in table", () => {
     expect(resolveContextWindow("claude-mystery-9-9", 250_000)).toBe(250_000);
   });

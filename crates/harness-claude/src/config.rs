@@ -23,6 +23,7 @@ pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
     ("claude-opus-5-5", "Claude Opus 5.5"),
     ("claude-opus-4-8", "Claude Opus 4.8"),
     ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+    ("claude-haiku-5-5", "Claude Haiku 5.5"),
 ];
 
 pub(crate) fn claude_model_supports_fast_mode(model: &str) -> bool {
@@ -448,6 +449,8 @@ mod tests {
         for model in [
             "sonnet",
             "claude-sonnet-5-5",
+            "haiku",
+            "claude-haiku-5-5",
             "claude-opus-4-6",
             "claude-opus-4-7",
         ] {
@@ -592,5 +595,44 @@ mod tests {
             .position(|arg| arg == "--model")
             .expect("model flag");
         assert_eq!(spec.args[model_flag + 1], "claude-sonnet-5-5");
+    }
+
+    #[test]
+    fn command_spec_preserves_haiku_5_5_in_daemon_and_chat_launches() {
+        let directory = tempdir().expect("temporary directory");
+        let executable = directory.path().join("claude");
+        File::create(&executable).expect("placeholder executable");
+        let config = ClaudeProviderConfig {
+            executable: Some(executable),
+            ..Default::default()
+        };
+        let request = RequestConfig {
+            model: Some("claude-haiku-5-5".into()),
+            ..Default::default()
+        };
+
+        for mode in [
+            ClaudeLaunchMode::OneShot { prompt: "do work" },
+            ClaudeLaunchMode::Persistent { resume_id: None },
+            ClaudeLaunchMode::Persistent {
+                resume_id: Some("existing-session"),
+            },
+        ] {
+            let spec = config.command_spec(mode, &request).expect("command spec");
+            let model_flag = spec
+                .args
+                .iter()
+                .position(|arg| arg == "--model")
+                .expect("model flag");
+            assert_eq!(spec.args[model_flag + 1], "claude-haiku-5-5");
+            if let ClaudeLaunchMode::Persistent {
+                resume_id: Some(resume_id),
+            } = mode
+            {
+                assert!(spec.args.contains(&format!("--resume={resume_id}")));
+            } else {
+                assert!(!spec.args.iter().any(|arg| arg.starts_with("--resume=")));
+            }
+        }
     }
 }

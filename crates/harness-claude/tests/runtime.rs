@@ -1918,6 +1918,24 @@ fn runtime(executable: PathBuf) -> ClaudeRuntime {
     })
 }
 
+#[tokio::test]
+async fn capabilities_advertise_haiku_5_5_without_opus_fast_mode() {
+    let temp = TempDir::new().unwrap();
+    let executable = temp.path().join("claude");
+    fs::write(&executable, "fixture").unwrap();
+
+    let capabilities = runtime(executable).capabilities().await.unwrap();
+    assert!(capabilities.available);
+    let model = capabilities
+        .models
+        .iter()
+        .find(|model| model.id == "claude-haiku-5-5")
+        .expect("Haiku 5.5 must be discoverable by harness consumers");
+    assert_eq!(model.label, "Claude Haiku 5.5");
+    assert!(model.supported_speed_tiers.is_empty());
+    assert_eq!(capabilities.default_model.as_deref(), Some("sonnet"));
+}
+
 async fn wait_for_payload(
     sink: &Arc<CollectSink>,
     predicate: impl Fn(&HarnessEventPayloadV1) -> bool,

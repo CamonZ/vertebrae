@@ -662,6 +662,40 @@ async fn start_request_carries_reference_instructions_and_agent_context_index() 
 }
 
 #[tokio::test]
+async fn claude_5_5_selections_reaches_fresh_and_resumed_chat_requests() {
+    for model_id in ["claude-haiku-5-5", "claude-sonnet-5-5"] {
+        for resume_id in [None, Some("existing-haiku-session".to_string())] {
+            let test = test_adapter("backend-haiku");
+            let mut input = input("backend-haiku", None);
+            input.provider_resume_id = resume_id.clone();
+            input.model_id = Some(model_id.into());
+            input.reasoning_effort = None;
+            let resolved = resolve_requested_claude_model(
+                input.model_id.clone(),
+                input.provider_resume_id.is_some(),
+            );
+            assert!(resolved.warning.is_none());
+            test.adapter
+                .create_prepared_session(
+                    input,
+                    LocalChatRuntime::inert_for_tests(),
+                    prepared(resolved.model_id.as_deref()),
+                )
+                .await
+                .unwrap();
+
+            let requests = test.runtime_state.start_requests.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].config.model.as_deref(), Some(model_id));
+            assert_eq!(
+                requests[0].resume_id.as_ref().map(|id| id.as_str()),
+                resume_id.as_deref()
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn initial_prompt_and_subsequent_messages_use_the_same_session_handle() {
     let test = test_adapter("backend-turns");
     let (runtime, _events) = LocalChatRuntime::capturing_for_tests();

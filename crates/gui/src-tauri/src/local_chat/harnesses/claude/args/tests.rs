@@ -44,6 +44,16 @@ fn supported_claude_model_catalog_uses_expected_aliases_and_default() {
                     label: "Claude Opus 4.8".to_string(),
                     supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
                 },
+                ClaudeModelOption {
+                    id: "claude-sonnet-5-5".to_string(),
+                    label: "Claude Sonnet 5.5".to_string(),
+                    supported_speed_tier_ids: None,
+                },
+                ClaudeModelOption {
+                    id: "claude-haiku-5-5".to_string(),
+                    label: "Claude Haiku 5.5".to_string(),
+                    supported_speed_tier_ids: None,
+                },
             ],
         }
     );
@@ -65,6 +75,24 @@ fn resolve_requested_claude_model_accepts_supported_ids() {
                 warning: None,
             }
         );
+    }
+}
+
+#[test]
+fn resolve_requested_5_5_models_preserve_fresh_and_resumed_selection() {
+    for is_resume in [false, true] {
+        for (requested, expected) in [
+            (" CLAUDE-HAIKU-5-5 ", "claude-haiku-5-5"),
+            (" CLAUDE-SONNET-5-5 ", "claude-sonnet-5-5"),
+        ] {
+            assert_eq!(
+                resolve_requested_claude_model(Some(requested.into()), is_resume),
+                ResolvedClaudeModel {
+                    model_id: Some(expected.into()),
+                    warning: None,
+                }
+            );
+        }
     }
 }
 
