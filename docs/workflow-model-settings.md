@@ -21,6 +21,21 @@ Provider validation happens before a runtime is started. Unsupported values
 produce an actionable request error; omitted values are preserved as omitted
 so existing workflow definitions retain their behavior.
 
+Claude Sonnet 5.5 is available as `claude-sonnet-5-5` for Claude daemon steps
+and as an explicit desktop Anthropic chat model option. It requires Claude Code
+2.1.284 or later, and the chat utilization badge uses its native 1M-token window.
+
+Claude Haiku 5.5 is available as `claude-haiku-5-5` for Claude daemon steps
+and in the desktop Anthropic chat model picker. Both paths require Claude Code
+2.1.293 or later. On the Anthropic API, that version also advances the `haiku`
+alias to Haiku 5.5; alias resolution on other platforms can differ. Use the
+explicit model ID to select this version. Haiku 5.5 has a native 1M-token
+context window, reflected in the chat utilization badge. Claude Code manages
+adaptive thinking and its default medium effort; Vertebrae's explicit
+`reasoning_effort` setting remains Codex-only. See the
+[Claude Code model configuration](https://code.claude.com/docs/en/model-config)
+for provider availability and configuration.
+
 Codex currently exposes `model_verbosity` as an app-server configuration
 setting rather than a `thread/start` or `turn/start` field. Since Vertebrae
 creates one app-server process per runtime, a selected verbosity is delivered

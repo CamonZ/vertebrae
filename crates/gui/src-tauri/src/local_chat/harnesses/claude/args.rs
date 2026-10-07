@@ -33,6 +33,14 @@ const SUPPORTED_CLAUDE_MODELS: &[ClaudeModelDefinition] = &[
         id: "claude-opus-4-8",
         label: "Claude Opus 4.8",
     },
+    ClaudeModelDefinition {
+        id: "claude-sonnet-5-5",
+        label: "Claude Sonnet 5.5",
+    },
+    ClaudeModelDefinition {
+        id: "claude-haiku-5-5",
+        label: "Claude Haiku 5.5",
+    },
 ];
 
 const BUILTIN_CLAUDE_OUTPUT_STYLES: &[(&str, &str, bool)] = &[

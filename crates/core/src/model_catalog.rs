@@ -552,6 +552,10 @@ mod tests {
             classify_model("claude-haiku-4-5"),
             Some(BuiltinProvider::Anthropic)
         );
+        assert_eq!(
+            classify_model("claude-haiku-5-5"),
+            Some(BuiltinProvider::Anthropic)
+        );
         assert_eq!(classify_model("claude"), Some(BuiltinProvider::Anthropic));
     }
 
@@ -663,6 +667,9 @@ mod tests {
             validate_provider_model(BuiltinProvider::Anthropic, Some("claude-opus-5-5")).is_ok()
         );
         assert!(validate_provider_model(BuiltinProvider::Anthropic, Some("fable")).is_ok());
+        assert!(
+            validate_provider_model(BuiltinProvider::Anthropic, Some("claude-haiku-5-5")).is_ok()
+        );
         assert!(validate_provider_model(BuiltinProvider::Openai, Some("gpt-4o")).is_ok());
         assert!(validate_provider_model(BuiltinProvider::Openai, Some("o3-mini")).is_ok());
         assert!(

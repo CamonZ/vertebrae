@@ -19,8 +19,12 @@ const MODEL_CONTEXT_WINDOW: Array<{ pattern: string; max: number }> = [
   { pattern: "opus-4.7", max: 1_000_000 },
   { pattern: "sonnet-4-6", max: 600_000 },
   { pattern: "sonnet-4.6", max: 600_000 },
+  { pattern: "sonnet-5-5", max: 1_000_000 },
+  { pattern: "sonnet-5.5", max: 1_000_000 },
   { pattern: "haiku-4-5", max: 200_000 },
   { pattern: "haiku-4.5", max: 200_000 },
+  { pattern: "haiku-5-5", max: 1_000_000 },
+  { pattern: "haiku-5.5", max: 1_000_000 },
 ];
 
 /**
