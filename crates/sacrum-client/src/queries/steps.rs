@@ -43,7 +43,7 @@ pub const WORKFLOW_EXPORT_STEP_FIELDS: &str = r#"
                 version prompt output_schema agents skills agent_config
             }
             ... on StructuredInferenceStepConfig { version provider model state questions }
-            ... on ExecuteStepConfig { version script context output_schema }
+            ... on ExecuteStepConfig { version script output_schema }
             ... on RouteStepConfig { version route_config }
             ... on WaitChildrenStepConfig { version output_schema }
         }
@@ -217,13 +217,18 @@ mod tests {
             assert!(fragment.contains(
                 "... on StructuredInferenceStepConfig { version provider model state questions }"
             ));
-            assert!(
-                fragment
-                    .contains("... on ExecuteStepConfig { version script context output_schema }")
-            );
+            assert!(fragment.contains("... on ExecuteStepConfig"));
             assert!(fragment.contains("... on RouteStepConfig { version route_config }"));
             assert!(fragment.contains("... on WaitChildrenStepConfig { version output_schema }"));
         }
+        assert!(
+            STEP_FIELDS
+                .contains("... on ExecuteStepConfig { version script context output_schema }")
+        );
+        assert!(
+            WORKFLOW_EXPORT_STEP_FIELDS
+                .contains("... on ExecuteStepConfig { version script output_schema }")
+        );
         assert!(CREATE_STEP.contains("$config: Json"));
         assert!(CREATE_STEP.contains("config: $config"));
         assert!(CREATE_STEP.contains("$harness: String!"));

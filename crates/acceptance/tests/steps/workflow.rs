@@ -16,6 +16,19 @@ fn extract_workflow_id(stdout: &str) -> String {
         .to_string()
 }
 
+fn execute_roundtrip_config() -> Value {
+    json!({
+        "version": 1,
+        "script": "#{ ok: true, total: 3 * 12 }",
+        "output_schema": {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}, "total": {"type": "integer"}},
+            "required": ["ok", "total"],
+            "additionalProperties": false
+        }
+    })
+}
+
 #[when("I stage the built-in workflow bundle fixture")]
 async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
     let mut fixture: serde_json::Value = serde_json::from_str(include_str!(
@@ -71,6 +84,35 @@ async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
         .unwrap();
     done["step_type"] = json!("llm_inference");
     done["config"] = json!({"version": 1});
+    // Exercise execute portability in the existing review -> classify chain.
+    for step in review_steps.iter_mut() {
+        if step["step_order"].as_i64().unwrap() >= 1 {
+            step["step_order"] = json!(step["step_order"].as_i64().unwrap() + 1);
+        }
+    }
+    review_steps.push(json!({
+        "step_ref": "transform",
+        "name": "Transform",
+        "goal": "Transform JSON without a provider harness",
+        "step_type": "execute",
+        "step_order": 1,
+        "harness": null,
+        "config": execute_roundtrip_config(),
+        "persistence_options": null
+    }));
+    let edges = fixture["step_edges"].as_array_mut().unwrap();
+    let review_edge = edges
+        .iter_mut()
+        .find(|edge| {
+            edge["from"]["workflow_ref"] == "review" && edge["from"]["step_ref"] == "review"
+        })
+        .unwrap();
+    review_edge["to"]["step_ref"] = json!("transform");
+    edges.push(json!({
+        "from": {"workflow_ref": "review", "step_ref": "transform"},
+        "to": {"workflow_ref": "review", "step_ref": "classify"},
+        "label": "transformed"
+    }));
     let contents = serde_json::to_string(&fixture).expect("workflow fixture should serialize");
     let path = world.write_temp_file(&contents);
     world.stored_ids.insert(
@@ -237,6 +279,33 @@ async fn workflow_bundles_should_match_canonical_semantics(world: &mut SmokeWorl
             .canonical_json()
             .expect("canonicalize destination bundle")
     );
+}
+
+#[then("the roundtrip bundles should preserve the authored execute step")]
+async fn roundtrip_bundles_should_preserve_authored_execute_step(world: &mut SmokeWorld) {
+    for key in [
+        "source_workflow_bundle_path",
+        "destination_workflow_bundle_path",
+    ] {
+        let bundle = read_workflow_bundle(world, key);
+        let execute_steps: Vec<_> = bundle
+            .workflows
+            .iter()
+            .flat_map(|workflow| &workflow.steps)
+            .filter(|step| step.step_type == vertebrae_core::StepType::Execute)
+            .collect();
+        assert_eq!(
+            execute_steps.len(),
+            1,
+            "{key} must contain the authored execute step"
+        );
+        let step = execute_steps[0];
+        assert_eq!(step.name, "Transform");
+        assert_eq!(step.step_order, 1);
+        assert_eq!(step.harness, None);
+        assert_eq!(step.config, Some(execute_roundtrip_config()));
+        assert!(step.config.as_ref().unwrap().get("context").is_none());
+    }
 }
 
 fn mapped_id<'a>(mappings: &'a Map<String, Value>, reference: &str) -> &'a str {
@@ -416,6 +485,12 @@ async fn destination_workflow_graph_should_match_import_mappings(world: &mut Smo
                 actual.step_type.as_deref().unwrap_or(""),
                 step.step_type.as_str()
             );
+            if step.step_type == vertebrae_core::StepType::Execute {
+                assert_eq!(
+                    actual.harness, None,
+                    "execute steps must not acquire a harness"
+                );
+            }
             assert_eq!(actual.step_order, step.step_order);
             assert_eq!(actual.persistence_options, step.persistence_options);
 
@@ -528,8 +603,8 @@ async fn workflow_import_json_should_contain_complete_mappings(world: &mut Smoke
     assert_eq!(value["workflow_mappings"].as_object().unwrap().len(), 2);
     assert_eq!(value["step_mappings"].as_object().unwrap().len(), 2);
     assert_eq!(value["workflow_count"], 2);
-    assert_eq!(value["step_count"], 9);
-    assert_eq!(value["step_edge_count"], 9);
+    assert_eq!(value["step_count"], 10);
+    assert_eq!(value["step_edge_count"], 10);
     assert_eq!(value["workflow_edge_count"], 2);
 }
 
