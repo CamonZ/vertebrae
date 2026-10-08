@@ -1,21 +1,31 @@
 //! Deterministic Codex App Server used by the daemon acceptance suite.
 //!
-//! The daemon launches this binary as `codex app-server --listen ws://…`.
-//! It exposes the App Server readiness endpoint and a small JSON-RPC WebSocket
-//! implementation. Scenario-specific notifications are read from the fixture
+//! Implements `codex app-server daemon version|start` and the daemon's Unix
+//! control socket. Scenario-specific notifications are read from the fixture
 //! envelope passed as the first turn's text input.
 
-use std::path::{Component, Path, PathBuf};
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    path::{Component, Path, PathBuf},
+    process::Stdio,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::{
-    io::AsyncWriteExt,
-    net::{TcpListener, TcpStream},
+    io::{AsyncRead, AsyncWrite},
+    net::{UnixListener, UnixStream},
     time::{Duration, sleep},
 };
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio_tungstenite::{WebSocketStream, accept_async, tungstenite::Message};
+
+const IDLE_EXIT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Deserialize)]
 struct Envelope {
@@ -35,23 +45,19 @@ async fn main() {
         return;
     }
 
-    let address = listen_address(&args);
-    let listener = TcpListener::bind(address)
-        .await
-        .unwrap_or_else(|error| panic!("mock-codex failed to bind {address}: {error}"));
-
-    loop {
-        let (stream, _) = listener
-            .accept()
-            .await
-            .expect("mock-codex failed to accept connection");
-        tokio::spawn(async move {
-            if is_readiness_probe(&stream).await {
-                respond_ready(stream).await;
-            } else if let Err(error) = serve_websocket(stream).await {
-                eprintln!("mock-codex WebSocket failed: {error}");
-            }
-        });
+    let daemon_command = args
+        .windows(3)
+        .find(|window| window[0] == "app-server" && window[1] == "daemon")
+        .map(|window| window[2].as_str());
+    match daemon_command {
+        Some("version") => print_status(if is_serving(&socket_path()).await {
+            "running"
+        } else {
+            "notRunning"
+        }),
+        Some("start") => start_daemon().await,
+        Some("serve") => serve(socket_path()).await,
+        other => panic!("mock-codex does not support {other:?} (argv {args:?})"),
     }
 }
 
@@ -75,18 +81,101 @@ fn print_model_catalog() {
     );
 }
 
-fn listen_address(args: &[String]) -> std::net::SocketAddr {
-    let raw = args
-        .windows(2)
-        .find(|pair| pair[0] == "--listen")
-        .map(|pair| pair[1].as_str())
-        .or_else(|| args.iter().find_map(|arg| arg.strip_prefix("--listen=")))
-        .expect("mock-codex requires --listen");
-    raw.strip_prefix("ws://")
-        .or_else(|| raw.strip_prefix("wss://"))
-        .unwrap_or(raw)
-        .parse()
-        .unwrap_or_else(|error| panic!("invalid Codex App Server listen address {raw:?}: {error}"))
+fn socket_path() -> PathBuf {
+    let mut hasher = DefaultHasher::new();
+    for key in ["CODEX_HOME", "HOME", "MOCK_OUTPUT_DIR", "MOCK_CAPTURE_DIR"] {
+        std::env::var_os(key).hash(&mut hasher);
+    }
+    std::env::temp_dir().join(format!("mock-codex-{:016x}.sock", hasher.finish()))
+}
+
+fn print_status(status: &str) {
+    let socket = socket_path();
+    println!(
+        "{}",
+        json!({"status": status, "backend": "mock", "socketPath": socket})
+    );
+}
+
+async fn is_serving(socket: &Path) -> bool {
+    UnixStream::connect(socket).await.is_ok()
+}
+
+async fn start_daemon() {
+    let socket = socket_path();
+    if is_serving(&socket).await {
+        print_status("alreadyRunning");
+        return;
+    }
+    let executable = std::env::current_exe().expect("mock-codex executable path");
+    let mut command = std::process::Command::new(executable);
+    command
+        .args(["app-server", "daemon", "serve"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    // The daemon is detached on purpose: this `start` invocation exits and
+    // the daemon is reparented, like Codex's own managed daemon.
+    #[allow(clippy::zombie_processes)]
+    let _daemon = command.spawn().expect("spawn mock-codex daemon");
+    for _ in 0..100 {
+        if is_serving(&socket).await {
+            print_status("started");
+            return;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    panic!("mock-codex daemon did not start on {}", socket.display());
+}
+
+async fn serve(socket: PathBuf) {
+    let _ = std::fs::remove_file(&socket);
+    let listener = UnixListener::bind(&socket)
+        .unwrap_or_else(|error| panic!("mock-codex failed to bind {}: {error}", socket.display()));
+    let active = Arc::new(AtomicUsize::new(0));
+    let last_activity = Arc::new(AtomicU64::new(now_secs()));
+    {
+        let active = Arc::clone(&active);
+        let last_activity = Arc::clone(&last_activity);
+        let socket = socket.clone();
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_secs(5)).await;
+                let idle = now_secs().saturating_sub(last_activity.load(Ordering::SeqCst));
+                if active.load(Ordering::SeqCst) == 0 && idle >= IDLE_EXIT.as_secs() {
+                    let _ = std::fs::remove_file(&socket);
+                    std::process::exit(0);
+                }
+            }
+        });
+    }
+    loop {
+        let (stream, _) = listener
+            .accept()
+            .await
+            .expect("mock-codex failed to accept connection");
+        active.fetch_add(1, Ordering::SeqCst);
+        let active = Arc::clone(&active);
+        let last_activity = Arc::clone(&last_activity);
+        tokio::spawn(async move {
+            // Status probes connect and close without a WebSocket handshake.
+            if let Err(error) = serve_websocket(stream).await
+                && !error.contains("handshake")
+            {
+                eprintln!("mock-codex WebSocket failed: {error}");
+            }
+            last_activity.store(now_secs(), Ordering::SeqCst);
+            active.fetch_sub(1, Ordering::SeqCst);
+        });
+    }
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
 }
 
 fn capture_invocation(args: &[String]) {
@@ -101,19 +190,10 @@ fn capture_invocation(args: &[String]) {
     std::fs::write(dir.join("cwd.txt"), cwd.to_string_lossy().as_bytes()).expect("write cwd.txt");
 }
 
-async fn is_readiness_probe(stream: &TcpStream) -> bool {
-    let mut probe = [0_u8; 64];
-    let count = stream.peek(&mut probe).await.unwrap_or(0);
-    probe[..count].starts_with(b"GET /readyz")
-}
-
-async fn respond_ready(mut stream: TcpStream) {
-    let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK";
-    let _ = stream.write_all(response).await;
-    let _ = stream.shutdown().await;
-}
-
-async fn serve_websocket(stream: TcpStream) -> Result<(), String> {
+async fn serve_websocket<S>(stream: S) -> Result<(), String>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let mut socket = accept_async(stream)
         .await
         .map_err(|error| format!("WebSocket handshake failed: {error}"))?;
@@ -182,8 +262,8 @@ async fn serve_websocket(stream: TcpStream) -> Result<(), String> {
     Ok(())
 }
 
-async fn send_response(
-    socket: &mut tokio_tungstenite::WebSocketStream<TcpStream>,
+async fn send_response<S: AsyncRead + AsyncWrite + Unpin>(
+    socket: &mut WebSocketStream<S>,
     id: Value,
     result: Value,
 ) -> Result<(), String> {
@@ -195,8 +275,8 @@ async fn send_response(
         .map_err(|error| format!("WebSocket response failed: {error}"))
 }
 
-async fn emit_script(
-    socket: &mut tokio_tungstenite::WebSocketStream<TcpStream>,
+async fn emit_script<S: AsyncRead + AsyncWrite + Unpin>(
+    socket: &mut WebSocketStream<S>,
     envelope: &Envelope,
 ) -> Result<(), String> {
     if envelope.delay_ms > 0 {

@@ -46,7 +46,7 @@ Feature: Codex App Server step execution
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the Codex App Server request contains service tier "priority" and personality "friendly"
-    And the mock argv contains "-c" followed by "model_verbosity=high"
+    And the Codex App Server thread config sets model verbosity "high"
 
   Scenario: Codex request omits model settings when they are unset
     Given a configured daemon test environment
@@ -57,7 +57,7 @@ Feature: Codex App Server step execution
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the Codex App Server request omits optional model settings
-    And the mock argv contains "-c" exactly 0 time(s)
+    And the Codex App Server thread config omits model verbosity
 
   Scenario: Codex request carries an upstream model provider
     Given a configured daemon test environment

@@ -12,7 +12,8 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use vertebrae_harness_codex::{
-    CodexAppServerLauncher, CodexProviderConfig, CodexRuntime, LaunchedCodexAppServer,
+    CodexAppServerEndpoint, CodexAppServerLauncher, CodexProviderConfig, CodexRuntime,
+    LaunchedCodexAppServer,
 };
 use vertebrae_harness_core::{
     CompletionStatus, ControlResolution, ControlSink, EventSink, HarnessError,
@@ -31,8 +32,7 @@ struct TestLauncher {
 impl CodexAppServerLauncher for TestLauncher {
     async fn launch(&self) -> Result<LaunchedCodexAppServer, HarnessError> {
         Ok(LaunchedCodexAppServer {
-            ws_url: self.url.clone(),
-            process: None,
+            endpoint: CodexAppServerEndpoint::WebSocketUrl(self.url.clone()),
         })
     }
 }
@@ -73,6 +73,7 @@ fn runtime_with_timeouts(url: String) -> CodexRuntime {
         launcher: Some(Arc::new(TestLauncher { url })),
         request_timeout: Duration::from_millis(40),
         terminal_exit_timeout: Duration::from_millis(40),
+        launch_attempts: 1,
         ..Default::default()
     })
 }
