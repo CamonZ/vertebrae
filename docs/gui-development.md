@@ -164,13 +164,14 @@ switches do not delete chat history or provider resume IDs, so the next
 project-scoped view can start a fresh provider session and resume durable
 conversation state when supported.
 
-The GUI currently uses one Codex App Server process per live GUI session. A
-single long-lived App Server was evaluated, but the existing harness contract
-has one lossless notification receiver, one root-thread identity, and one
-session-specific event/control sink per connection. Sharing it would require a
-larger connection multiplexer and ownership redesign; the manager-wide close
-boundary therefore remains the compatible lifecycle guarantee for this
-architecture.
+Codex chat sessions run as threads on Codex's machine-wide managed App Server
+daemon (`codex app-server daemon`), shared with the `vtb-daemon` and the
+user's own Codex clients. Each live GUI session holds its own connection, so
+the harness contract keeps one lossless notification receiver, one
+root-thread identity, and one session-specific event/control sink per
+connection; closing a session interrupts its active turn and sends
+`thread/unsubscribe` rather than terminating a process. The GUI never stops
+or restarts the daemon.
 
 The GUI and daemon have separate lifecycles. GUI exit and project switching
 close only the GUI's registered local-chat harnesses; they must not stop the

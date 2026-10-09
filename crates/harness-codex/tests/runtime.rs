@@ -12,8 +12,8 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use vertebrae_harness_codex::{
-    CodexAppServerLauncher, CodexCustomModelProvider, CodexProviderConfig, CodexRuntime,
-    LaunchedCodexAppServer,
+    CodexAppServerEndpoint, CodexAppServerLauncher, CodexCustomModelProvider, CodexProviderConfig,
+    CodexRuntime, LaunchedCodexAppServer,
 };
 use vertebrae_harness_core::{
     CompletionStatus, ControlResolution, ControlSink, EventSink, HarnessError,
@@ -32,8 +32,7 @@ struct TestLauncher {
 impl CodexAppServerLauncher for TestLauncher {
     async fn launch(&self) -> Result<LaunchedCodexAppServer, HarnessError> {
         Ok(LaunchedCodexAppServer {
-            ws_url: self.url.clone(),
-            process: None,
+            endpoint: CodexAppServerEndpoint::WebSocketUrl(self.url.clone()),
         })
     }
 }
@@ -151,6 +150,7 @@ fn runtime_with_timeouts(url: String) -> CodexRuntime {
         launcher: Some(Arc::new(TestLauncher { url })),
         request_timeout: Duration::from_millis(40),
         terminal_exit_timeout: Duration::from_millis(40),
+        launch_attempts: 1,
         ..Default::default()
     })
 }
@@ -422,7 +422,7 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
     })
     .await
     .unwrap();
-    let events = events.events.lock().unwrap();
+    let events = events.events.lock().unwrap().clone();
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::SessionStarted(started) if started.provider == "openai")));
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::SessionTitle(title) if title.title == "Native Codex Title" && event.correlation.thread_id.as_ref() == Some(&vertebrae_harness_core::ThreadId::from("root-thread")))));
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::TurnInput(input) if input.content == "hello" && input.provenance == TurnInputProvenance::Human)));
@@ -479,8 +479,7 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
             .iter()
             .any(|event| matches!(&event.payload, HarnessEventPayloadV1::Warning(_)))
     );
-    drop(events);
-    let controls = controls.requests.lock().unwrap();
+    let controls = controls.requests.lock().unwrap().clone();
     assert_eq!(controls.len(), 2);
     let root_control = controls
         .iter()
@@ -509,11 +508,16 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
         Some(&vertebrae_harness_core::ThreadId::from("child-thread"))
     );
     assert_eq!(child_control.is_root, Some(false));
-    drop(controls);
     session.close().await.unwrap();
     assert_eq!(
         requests.lock().unwrap().as_slice(),
-        ["initialize", "initialized", "thread/start", "turn/start"]
+        [
+            "initialize",
+            "initialized",
+            "thread/start",
+            "turn/start",
+            "thread/unsubscribe"
+        ]
     );
     tokio::time::timeout(Duration::from_secs(2), server)
         .await
@@ -628,7 +632,7 @@ async fn one_shot_emits_run_finished_and_cleans_up() {
         run.await_outcome().await.unwrap().status,
         CompletionStatus::Completed
     );
-    let events = events.events.lock().unwrap();
+    let events = events.events.lock().unwrap().clone();
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::RunFinished(outcome) if outcome.status == CompletionStatus::Completed)));
     assert!(
         events
@@ -907,7 +911,7 @@ async fn child_terminal_does_not_settle_the_root_turn_handle() {
     root_completion.notify_one();
     let outcome = turn.await_outcome().await.unwrap();
     assert_eq!(outcome.status, CompletionStatus::Completed);
-    let captured = events.events.lock().unwrap();
+    let captured = events.events.lock().unwrap().clone();
     assert_balanced_turn(&captured, "root", &outcome);
     assert!(captured.iter().any(|event| {
         event.correlation.turn_id.as_ref() == Some(&TurnId::from("child-turn"))
@@ -917,7 +921,6 @@ async fn child_terminal_does_not_settle_the_root_turn_handle() {
                     if child.status == CompletionStatus::Completed
             )
     }));
-    drop(captured);
 
     session.close().await.unwrap();
     let _ = server.await;

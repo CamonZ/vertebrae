@@ -72,6 +72,13 @@ impl CodexNotification {
     }
 }
 
+pub fn is_known_notification(method: &str) -> bool {
+    !matches!(
+        decode_notification(method, Value::Object(Default::default())),
+        Ok(CodexNotification::Unknown { .. })
+    )
+}
+
 /// Decode known App Server notifications at the protocol boundary. Known
 /// notifications must carry an object, while unknown optional notifications
 /// remain observable instead of being silently discarded.

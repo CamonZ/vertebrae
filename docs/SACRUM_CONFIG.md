@@ -90,16 +90,20 @@ lowercase letters, digits, `-`, and `_`; built-in names and their aliases
   of the named environment variable (read from the daemon's or GUI's process
   environment) wins over the literal `api_key`; a configured but missing
   `api_key_env` without an `api_key` fails the run. Claude receives it as
-  `ANTHROPIC_AUTH_TOKEN` (with `ANTHROPIC_API_KEY` cleared); Codex reads it
-  through a generated `env_key`; TypeSafe sends it as its bearer key instead of
-  the `[typesafe]` section. Debug output and diagnostics redact it.
+  `ANTHROPIC_AUTH_TOKEN` (with `ANTHROPIC_API_KEY` cleared); Codex App Server
+  threads receive it as a per-thread `experimental_bearer_token` (one-off
+  `codex exec` processes read it through a generated `env_key`); TypeSafe
+  sends it as its bearer key instead of the `[typesafe]` section. Debug output
+  and diagnostics redact it.
 - **env** (`claude`/`codex`, optional table): Extra environment for the
-  harness process. Values are redacted from Debug output.
+  harness process; for Codex App Server threads, tool-execution environment
+  sent per thread. Values are redacted from Debug output.
 - **wire_api** (`codex`, optional): `chat` or `responses`.
 
-Codex custom providers are defined entirely here; Vertebrae passes them as
-`-c model_providers.<id>.*` overrides, so `~/.codex/config.toml` needs no
-edits. `claude`/`codex` providers appear in the local chat provider picker;
+Codex custom providers are defined entirely here; Vertebrae passes them as a
+per-thread `model_providers.<id>` config table on every `thread/start` and
+`thread/resume` (one-off CLI processes get `-c model_providers.<id>.*`
+overrides), so `~/.codex/config.toml` needs no edits. `claude`/`codex` providers appear in the local chat provider picker;
 `typesafe` providers are step-only. A step whose provider is not configured on
 the executing daemon, or whose explicit harness disagrees with the provider's,
 fails with a descriptive error. Like `[typesafe]`, provider profiles are

@@ -37,9 +37,11 @@ adaptive thinking and its default medium effort; Vertebrae's explicit
 for provider availability and configuration.
 
 Codex currently exposes `model_verbosity` as an app-server configuration
-setting rather than a `thread/start` or `turn/start` field. Since Vertebrae
-creates one app-server process per runtime, a selected verbosity is delivered
-as a process-local `-c model_verbosity=<low|medium|high>` override. This keeps
+setting rather than a dedicated `thread/start` or `turn/start` field. Vertebrae
+runs every Codex session as a thread on Codex's shared managed App Server
+daemon, so a selected verbosity is delivered as a per-thread
+`config.model_verbosity` override on `thread/start` and again on every
+`thread/resume` (Codex does not persist per-thread config). This keeps
 concurrent task runs isolated and avoids changing the user's shared Codex
 configuration. The eventual Responses API request remains conceptually
 separate: its corresponding output control is `text.verbosity`.

@@ -384,6 +384,36 @@ pub async fn codex_request_contains_service_tier_and_personality(
     assert_eq!(thread_start["params"]["personality"], personality);
 }
 
+/// Verbosity is per-thread config on the shared App Server daemon, re-sent on
+/// every resume, rather than a launch flag.
+#[then(expr = "the Codex App Server thread config sets model verbosity {string}")]
+pub async fn codex_thread_config_sets_model_verbosity(world: &mut DaemonWorld, verbosity: String) {
+    let requests = world.captured_codex_requests();
+    let thread_start = requests
+        .iter()
+        .find(|request| request["method"] == "thread/start")
+        .unwrap_or_else(|| panic!("no thread/start request captured: {requests:?}"));
+    assert_eq!(
+        thread_start["params"]["config"]["model_verbosity"], verbosity,
+        "unexpected thread config: {thread_start}"
+    );
+}
+
+#[then("the Codex App Server thread config omits model verbosity")]
+pub async fn codex_thread_config_omits_model_verbosity(world: &mut DaemonWorld) {
+    let requests = world.captured_codex_requests();
+    let thread_start = requests
+        .iter()
+        .find(|request| request["method"] == "thread/start")
+        .unwrap_or_else(|| panic!("no thread/start request captured: {requests:?}"));
+    assert!(
+        thread_start["params"]["config"]
+            .get("model_verbosity")
+            .is_none(),
+        "unexpected model_verbosity: {thread_start}"
+    );
+}
+
 #[then("the Codex App Server request omits optional model settings")]
 pub async fn codex_request_omits_optional_model_settings(world: &mut DaemonWorld) {
     let requests = world.captured_codex_requests();

@@ -10,8 +10,7 @@ use vertebrae_harness_core::{
 
 use crate::{
     CodexProviderConfig,
-    launcher::{CodexAppServerLauncher, ProcessCodexAppServerLauncher, cleanup_process},
-    runtime::CodexConnection,
+    runtime::{OwnedThreads, attach},
 };
 
 const CODEX_DEFAULT_MODEL_ID: &str = "default";
@@ -116,39 +115,16 @@ pub(crate) async fn discover_capabilities(
 async fn discover_from_app_server(
     config: &CodexProviderConfig,
 ) -> Result<Vec<CodexAppServerModel>, HarnessError> {
-    let launch_config = config.clone();
-    let launcher: Arc<dyn CodexAppServerLauncher> = config
-        .launcher
-        .clone()
-        .unwrap_or_else(|| Arc::new(ProcessCodexAppServerLauncher::new(Arc::new(launch_config))));
-    let mut launched = launcher.launch().await?;
-    let connection =
-        match CodexConnection::connect(&launched.ws_url, Arc::new(DiscoveryControlSink)).await {
-            Ok(connection) => connection,
-            Err(error) => {
-                cleanup_process(&mut launched.process, config.cleanup_timeout).await;
-                return Err(error);
-            }
-        };
+    let control_sink: Arc<dyn ControlSink> = Arc::new(DiscoveryControlSink);
+    let (connection, _, _) = attach(
+        config,
+        &control_sink,
+        &Arc::new(OwnedThreads::default()),
+        None,
+    )
+    .await?;
 
     let result = async {
-        connection
-            .request(
-                "initialize",
-                serde_json::json!({
-                    "clientInfo": {
-                        "name": config.client_name,
-                        "title": config.client_title,
-                        "version": config.client_version
-                    },
-                    "capabilities": {"experimentalApi": true}
-                }),
-            )
-            .await?;
-        connection
-            .notify("initialized", serde_json::json!({}))
-            .await?;
-
         let mut cursor = None;
         let mut models = Vec::new();
         loop {
@@ -174,7 +150,6 @@ async fn discover_from_app_server(
     .await;
 
     connection.close().await;
-    cleanup_process(&mut launched.process, config.cleanup_timeout).await;
     result
 }
 

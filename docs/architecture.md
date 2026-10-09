@@ -136,7 +136,7 @@ both live delivery and `format=harness` `SessionLog` replay.
 |-------|------|------------------|
 | `crates/harness-core` | The V1 contract: `HarnessRuntime`, `SessionHandle`/`TurnHandle`, `HarnessEventV1` + drafts, `EventSequencer`, `EventSink`, `ControlSink`, capabilities, and the canonical projection | Provider wire types, surface orchestration |
 | `crates/harness-claude` | Claude Code discovery, launch policy, live stream-json decoding, durable transcript discovery/replay, control responses, process lifetime | GUI, daemon, actor, persistence, or provider-settings code |
-| `crates/harness-codex` | Codex App Server launch/readiness, WebSocket JSON-RPC, durable rollout discovery/replay, model catalog, turn and control mapping | GUI, daemon, actor, persistence, or provider-settings code |
+| `crates/harness-codex` | Codex managed App Server daemon attachment, WebSocket JSON-RPC, durable rollout discovery/replay, model catalog, turn and control mapping | GUI, daemon, actor, persistence, or provider-settings code |
 | `crates/harness` | Runtime **selection** only: `HarnessRuntimeFactory` maps a step's explicit `harness` (`claude`, `codex`, `typesafe`) to an adapter; when absent, it preserves the legacy `AgentConfig.provider` default/backfill path | Wire protocols, event decoding |
 
 Only `crates/harness` depends on the adapter crates. Surfaces depend on
@@ -214,8 +214,8 @@ harness and need no configuration. Custom providers are per-machine
   the built-in catalog; custom providers accept only their profile's `models`.
 - Each adapter translates a profile into its own launch settings:
   `ClaudeProviderEndpoint` (environment), `CodexCustomModelProvider`
-  (`-c model_providers.<id>.*` plus `modelProvider`), and the TypeSafe client
-  config. Normalized events are unchanged.
+  (a per-thread `model_providers.<id>` table plus `modelProvider`), and the
+  TypeSafe client config. Normalized events are unchanged.
 - The daemon reports the resolved provider ID and harness on execution status
   updates and advertises configured custom provider IDs (never endpoints or
   credentials) in its capability report.

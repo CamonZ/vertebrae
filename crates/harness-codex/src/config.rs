@@ -50,13 +50,15 @@ impl CodexPermissionConfig {
     }
 }
 
-/// Environment variable the adapter exports a custom provider's resolved
-/// credential under; the generated `model_providers.<id>.env_key` names it.
+/// Environment variable a one-off Codex CLI process reads a custom provider's
+/// resolved credential from; the generated `model_providers.<id>.env_key`
+/// names it.
 pub const CODEX_CUSTOM_PROVIDER_API_KEY_ENV: &str = "VERTEBRAE_MODEL_PROVIDER_API_KEY";
 
 /// A custom Codex model provider declared outside `~/.codex/config.toml`.
-/// The adapter translates it into `-c model_providers.<id>.*` launch
-/// overrides plus `modelProvider=<id>` on thread start.
+/// App Server threads receive it as a per-thread `model_providers.<id>`
+/// table ([`Self::thread_provider_table`]) plus `modelProvider=<id>`; one-off
+/// CLI processes receive `-c model_providers.<id>.*` overrides.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct CodexCustomModelProvider {
     /// Provider ID used as the `model_providers` key and `modelProvider`.
@@ -93,6 +95,26 @@ impl CodexCustomModelProvider {
             .collect()
     }
 
+    /// Per-thread `model_providers.<id>` table for the shared App Server
+    /// daemon. The credential is an `experimental_bearer_token`: `env_key`
+    /// would be resolved in the daemon's environment, which never carries
+    /// Vertebrae secrets. Codex does not persist per-thread config, so it is
+    /// sent again on every `thread/resume`.
+    pub fn thread_provider_table(&self) -> Value {
+        let mut table = serde_json::Map::new();
+        table.insert("name".into(), json!(self.id));
+        if let Some(base_url) = &self.base_url {
+            table.insert("base_url".into(), json!(base_url));
+        }
+        if let Some(wire_api) = &self.wire_api {
+            table.insert("wire_api".into(), json!(wire_api));
+        }
+        if let Some(api_key) = &self.api_key {
+            table.insert("experimental_bearer_token".into(), json!(api_key));
+        }
+        Value::Object(table)
+    }
+
     pub fn launch_environment(&self) -> BTreeMap<String, String> {
         let mut environment = self.environment.clone();
         if let Some(api_key) = &self.api_key {
@@ -121,8 +143,9 @@ pub struct CodexProviderConfig {
     pub executable: Option<PathBuf>,
     pub executable_environment_key: String,
     pub search_path: Option<OsString>,
+    /// Surface environment. `CODEX_HOME` selects the managed daemon; every
+    /// entry is also exported to tool execution per thread.
     pub environment: BTreeMap<String, String>,
-    pub extra_args: Vec<String>,
     pub client_name: String,
     pub client_title: String,
     pub client_version: String,
@@ -133,7 +156,9 @@ pub struct CodexProviderConfig {
     pub permission: CodexPermissionConfig,
     pub installed_skills_roots: Vec<PathBuf>,
     pub cleanup_timeout: Duration,
-    pub readiness_timeout: Duration,
+    /// Maximum wait for `codex app-server daemon version|start`. Starting the
+    /// daemon may install its managed package first.
+    pub daemon_command_timeout: Duration,
     /// Maximum wait for an App Server request/response round trip once the
     /// connection is ready.
     pub request_timeout: Duration,
@@ -153,7 +178,6 @@ impl std::fmt::Debug for CodexProviderConfig {
             )
             .field("search_path", &self.search_path)
             .field("environment", &self.environment)
-            .field("extra_args", &self.extra_args)
             .field("client_name", &self.client_name)
             .field("client_title", &self.client_title)
             .field("client_version", &self.client_version)
@@ -162,7 +186,7 @@ impl std::fmt::Debug for CodexProviderConfig {
             .field("permission", &self.permission)
             .field("installed_skills_roots", &self.installed_skills_roots)
             .field("cleanup_timeout", &self.cleanup_timeout)
-            .field("readiness_timeout", &self.readiness_timeout)
+            .field("daemon_command_timeout", &self.daemon_command_timeout)
             .field("request_timeout", &self.request_timeout)
             .field("terminal_exit_timeout", &self.terminal_exit_timeout)
             .field("launch_attempts", &self.launch_attempts)
@@ -178,7 +202,6 @@ impl Default for CodexProviderConfig {
             executable_environment_key: "CODEX_PATH".into(),
             search_path: env::var_os("PATH"),
             environment: BTreeMap::new(),
-            extra_args: Vec::new(),
             client_name: "vertebrae".into(),
             client_title: "Vertebrae".into(),
             client_version: env!("CARGO_PKG_VERSION").into(),
@@ -187,10 +210,10 @@ impl Default for CodexProviderConfig {
             permission: CodexPermissionConfig::default(),
             installed_skills_roots: Vec::new(),
             cleanup_timeout: Duration::from_secs(3),
-            readiness_timeout: Duration::from_secs(5),
+            daemon_command_timeout: Duration::from_secs(60),
             request_timeout: Duration::from_secs(30),
             terminal_exit_timeout: Duration::from_millis(250),
-            launch_attempts: 3,
+            launch_attempts: 8,
             launcher: None,
         }
     }
