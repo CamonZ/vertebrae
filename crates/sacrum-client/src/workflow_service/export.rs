@@ -724,6 +724,35 @@ mod tests {
     }
 
     #[test]
+    fn conversion_exports_llm_session_config_exactly() {
+        let mut snapshot = snapshot();
+        for (step, session) in snapshot.workflows[0].workflow_steps.iter_mut().zip([
+            json!({"name": "conv", "mode": "resume"}),
+            json!({"name": "conv", "mode": "new"}),
+        ]) {
+            step.config.as_mut().unwrap()["session"] = session;
+        }
+
+        let bundle = snapshot_to_bundle(&snapshot).unwrap();
+        let value: Value = serde_json::from_str(&bundle.canonical_json().unwrap()).unwrap();
+        assert_eq!(
+            value["workflows"][0]["steps"][0]["config"]["session"],
+            json!({"name": "conv", "mode": "new"})
+        );
+        assert_eq!(
+            value["workflows"][0]["steps"][1]["config"]["session"],
+            json!({"name": "conv", "mode": "resume"})
+        );
+
+        snapshot.workflows[0].workflow_steps[0]
+            .config
+            .as_mut()
+            .unwrap()["session"] = json!({"name": "conv", "mode": "fork"});
+        let error = snapshot_to_bundle(&snapshot).unwrap_err().to_string();
+        assert!(error.contains("session"), "{error}");
+    }
+
+    #[test]
     fn closed_snapshot_rejects_missing_workflow_destination_with_guidance() {
         let mut snapshot = snapshot();
         snapshot.workflows[0]

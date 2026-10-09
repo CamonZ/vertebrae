@@ -9,13 +9,18 @@
 //! SIGKILL path works.
 //!
 //! When `MOCK_CAPTURE_DIR` is set, writes `argv.json` (array of strings) and
-//! `cwd.txt` to that directory on startup so tests can assert on how the daemon
-//! invoked the CLI. The envelope prompt is not required for capture, which lets
-//! scenarios exercise the daemon's empty-prompt fallback.
+//! `cwd.txt` to that directory on startup, and appends the argv to
+//! `argv.jsonl`, so tests can assert on how the daemon invoked the CLI. The
+//! envelope prompt is not required for capture, which lets scenarios exercise
+//! the daemon's empty-prompt fallback.
 //!
-//! When invoked without a prompt flag and with `--input-format stream-json`, it also
-//! serves the GUI local-chat acceptance path by reading stdin prompts and
-//! emitting Claude `stream-json` stdout events.
+//! When invoked without a prompt flag and with `--input-format stream-json`, it
+//! reads user turns from stdin. A turn whose text is an envelope is a scripted
+//! session turn: the mock reports the launch `--session-id`/`--resume` id in
+//! `system/init` and the result, and an envelope with `forget_session` records
+//! that id in `$MOCK_CAPTURE_DIR/forgotten_sessions.txt`, so a later `--resume`
+//! of it fails as Claude does for an unknown conversation. Any other turn
+//! serves the GUI local-chat acceptance path with canned stream-json events.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Component, Path, PathBuf};
@@ -59,7 +64,7 @@ fn main() -> ExitCode {
         );
         ExitCode::from(0)
     } else if prompt.is_none() && uses_stdin_stream_json(&args) {
-        run_stdin_stream_json()
+        run_stdin_stream_json(launch_session(&args))
     } else {
         ExitCode::from(0)
     }
@@ -68,9 +73,19 @@ fn main() -> ExitCode {
 fn capture_invocation(dir: &Path, args: &[String]) {
     std::fs::create_dir_all(dir).expect("create MOCK_CAPTURE_DIR");
     let argv_json = serde_json::to_string(args).expect("argv serialises");
-    std::fs::write(dir.join("argv.json"), argv_json).expect("write argv.json");
+    std::fs::write(dir.join("argv.json"), &argv_json).expect("write argv.json");
+    append_line(&dir.join("argv.jsonl"), &argv_json);
     let cwd = std::env::current_dir().expect("current_dir");
     std::fs::write(dir.join("cwd.txt"), cwd.to_string_lossy().as_bytes()).expect("write cwd.txt");
+}
+
+fn append_line(path: &Path, line: &str) {
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+    writeln!(file, "{line}").unwrap_or_else(|e| panic!("append {}: {e}", path.display()));
 }
 
 #[derive(Debug)]
@@ -79,6 +94,58 @@ struct Envelope {
     delay_ms: u64,
     stdout_file: Option<String>,
     stderr_file: Option<String>,
+    forget_session: bool,
+}
+
+/// The conversation a stream-json process was launched to start or resume.
+#[derive(Debug)]
+enum LaunchSession {
+    New(String),
+    Resume(String),
+}
+
+impl LaunchSession {
+    fn id(&self) -> &str {
+        match self {
+            Self::New(id) | Self::Resume(id) => id,
+        }
+    }
+}
+
+fn launch_session(args: &[String]) -> Option<LaunchSession> {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--session-id" {
+            return iter.next().cloned().map(LaunchSession::New);
+        }
+        if arg == "--resume" {
+            return iter.next().cloned().map(LaunchSession::Resume);
+        }
+        if let Some(id) = arg.strip_prefix("--resume=") {
+            return Some(LaunchSession::Resume(id.to_string()));
+        }
+    }
+    None
+}
+
+fn forgotten_sessions_path() -> Option<PathBuf> {
+    std::env::var_os("MOCK_CAPTURE_DIR")
+        .map(|dir| PathBuf::from(dir).join("forgotten_sessions.txt"))
+}
+
+fn is_forgotten(session_id: &str) -> bool {
+    forgotten_sessions_path()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .is_some_and(|body| body.lines().any(|line| line == session_id))
+}
+
+fn forget(session_id: &str) {
+    if let Some(path) = forgotten_sessions_path() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create MOCK_CAPTURE_DIR");
+        }
+        append_line(&path, session_id);
+    }
 }
 
 fn extract_prompt(args: &[String]) -> Option<&str> {
@@ -123,6 +190,9 @@ fn parse_envelope(raw: &str) -> Option<Envelope> {
         delay_ms: delay_ms as u64,
         stdout_file: optional_string(obj, "stdout_file"),
         stderr_file: optional_string(obj, "stderr_file"),
+        forget_session: obj
+            .get("forget_session")
+            .is_some_and(|value| value.as_bool().expect("'forget_session' must be a bool")),
     })
 }
 
@@ -145,7 +215,24 @@ fn has_arg_value(args: &[String], flag: &str, value: &str) -> bool {
     false
 }
 
-fn run_stdin_stream_json() -> ExitCode {
+fn run_stdin_stream_json(launch: Option<LaunchSession>) -> ExitCode {
+    // Claude rejects an unknown --resume id at startup, before reading stdin.
+    if let Some(LaunchSession::Resume(id)) = &launch
+        && is_forgotten(id)
+    {
+        let error = format!("No conversation found with session ID: {id}");
+        eprintln!("{error}");
+        write_json_line(serde_json::json!({
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": true,
+            "num_turns": 0,
+            "session_id": id,
+            "errors": [error]
+        }));
+        return ExitCode::from(1);
+    }
+
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let mut initialized = false;
@@ -164,6 +251,16 @@ fn run_stdin_stream_json() -> ExitCode {
                 eprintln!("mock-claude: failed to read stdin stream-json: {err}");
                 return ExitCode::from(1);
             }
+        }
+        if let Some(envelope) = turn_text(&message).and_then(|text| parse_envelope(&text)) {
+            let session_id = launch
+                .as_ref()
+                .map_or("mock-session", LaunchSession::id)
+                .to_string();
+            if let Some(code) = run_scripted_turn(&envelope, &session_id, &mut initialized) {
+                return code;
+            }
+            continue;
         }
         let session_id = session_id_from_input(&message)
             .or_else(|| std::env::var("VTB_CLAUDE_SESSION_ID").ok())
@@ -259,6 +356,84 @@ fn run_stdin_stream_json() -> ExitCode {
     }
 
     ExitCode::from(0)
+}
+
+/// Run one scripted session turn, returning the exit code when the envelope
+/// ends the process.
+fn run_scripted_turn(
+    envelope: &Envelope,
+    session_id: &str,
+    initialized: &mut bool,
+) -> Option<ExitCode> {
+    if !*initialized {
+        write_json_line(serde_json::json!({
+            "type": "system",
+            "subtype": "init",
+            "session_id": session_id,
+            "model": "claude-sonnet-4",
+            "tools": []
+        }));
+        *initialized = true;
+    }
+    let mock_dir =
+        PathBuf::from(std::env::var_os("MOCK_OUTPUT_DIR").expect("MOCK_OUTPUT_DIR env var"));
+    let mut saw_result = false;
+    if let Some(rel) = &envelope.stdout_file {
+        let path = resolve_fixture(&mock_dir, rel);
+        let body = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()));
+        for line in body.lines().filter(|line| !line.is_empty()) {
+            if let Some(ms) = daemon_acceptance::stdout_pause_ms(line) {
+                interruptible_sleep(Duration::from_millis(ms));
+                continue;
+            }
+            let mut event: serde_json::Value = serde_json::from_str(line)
+                .unwrap_or_else(|e| panic!("scripted turn line is not JSON {line:?}: {e}"));
+            // This turn's system/init was already emitted with the launch id.
+            if event["type"] == "system" && event["subtype"] == "init" {
+                continue;
+            }
+            saw_result |= event["type"] == "result";
+            if let Some(object) = event.as_object_mut()
+                && object.contains_key("session_id")
+            {
+                object.insert("session_id".into(), session_id.into());
+            }
+            write_json_line(event);
+        }
+    }
+    if let Some(rel) = &envelope.stderr_file {
+        stream_lines(&resolve_fixture(&mock_dir, rel), StreamTarget::Stderr);
+    }
+    if envelope.delay_ms > 0 {
+        interruptible_sleep(Duration::from_millis(envelope.delay_ms));
+    }
+    if envelope.exit_code != 0 {
+        return Some(ExitCode::from(envelope.exit_code as u8));
+    }
+    if !saw_result {
+        write_json_line(serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "result": "scripted turn complete",
+            "session_id": session_id,
+            "num_turns": 1,
+            "duration_ms": 1,
+            "total_cost_usd": 0.0,
+            "usage": {"input_tokens": 1, "output_tokens": 1}
+        }));
+    }
+    if envelope.forget_session {
+        forget(session_id);
+    }
+    None
+}
+
+/// The text of a stream-json user turn.
+fn turn_text(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    value["message"]["content"].as_str().map(ToOwned::to_owned)
 }
 
 fn session_id_from_input(line: &str) -> Option<String> {

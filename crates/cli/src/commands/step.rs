@@ -4,11 +4,12 @@
 
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
-    AgentConfig, BuiltinProvider, ExecuteConfig, OutputVerbosity, ProviderId, STEP_CONFIG_VERSION,
-    ServiceError, SpeedTier, Step, StepConfig, StepHarness, StepService, StepType, StepUpdate,
-    VertebraeServices, apply_config_patch, normalize_harness_personality,
-    normalize_harness_reasoning_effort, normalize_personality, validate_config_fields,
-    validate_harness_agent_config, validate_provider_model_with_codex_provider,
+    AgentConfig, BuiltinProvider, ExecuteConfig, LlmSessionConfig, LlmSessionMode, OutputVerbosity,
+    ProviderId, STEP_CONFIG_VERSION, ServiceError, SpeedTier, Step, StepConfig, StepHarness,
+    StepService, StepType, StepUpdate, VertebraeServices, apply_config_patch,
+    normalize_harness_personality, normalize_harness_reasoning_effort, normalize_personality,
+    validate_config_fields, validate_harness_agent_config,
+    validate_provider_model_with_codex_provider,
 };
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -57,6 +58,41 @@ impl From<CliHarness> for StepHarness {
             CliHarness::Codex => Self::Codex,
             CliHarness::Typesafe => Self::Typesafe,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum CliSessionMode {
+    /// Start a new conversation under the session name
+    New,
+    /// Continue the named conversation; dispatch fails when the TaskRun has none
+    Resume,
+    /// Continue the named conversation, or start one when the TaskRun has none
+    #[value(name = "resume_or_new")]
+    ResumeOrNew,
+}
+
+impl From<CliSessionMode> for LlmSessionMode {
+    fn from(value: CliSessionMode) -> Self {
+        match value {
+            CliSessionMode::New => Self::New,
+            CliSessionMode::Resume => Self::Resume,
+            CliSessionMode::ResumeOrNew => Self::ResumeOrNew,
+        }
+    }
+}
+
+/// Build an `llm_inference` session config from the paired session flags.
+fn parse_session_flags(
+    name: Option<&str>,
+    mode: Option<CliSessionMode>,
+) -> Result<Option<LlmSessionConfig>, ServiceError> {
+    match (name, mode) {
+        (None, None) => Ok(None),
+        (Some(name), Some(mode)) => LlmSessionConfig::new(name, mode.into()).map(Some),
+        _ => Err(ServiceError::validation_failed(
+            "--session-name and --session-mode must be used together",
+        )),
     }
 }
 
@@ -319,7 +355,7 @@ pub struct StepAddCommand {
     ///
     /// A step's type cannot change after creation. Config flags must be
     /// declared by the type: llm_inference takes the prompt, output schema,
-    /// agent, skill, and agent-config flags; structured_inference takes
+    /// agent, skill, agent-config, and session flags; structured_inference takes
     /// --provider, --model, --state, and --questions; route takes
     /// --route-config; wait_children takes --output-schema; execute requires
     /// --script and --output-schema and has no harness; the others take none.
@@ -339,6 +375,16 @@ pub struct StepAddCommand {
     /// JSON Schema describing the expected output of this step (raw JSON string)
     #[arg(long, value_name = "JSON")]
     pub output_schema: Option<String>,
+
+    /// Name of the TaskRun session this llm_inference step starts or
+    /// resumes; requires --session-mode
+    #[arg(long, value_name = "NAME", requires = "session_mode")]
+    pub session_name: Option<String>,
+
+    /// How this llm_inference step uses its named session; requires
+    /// --session-name
+    #[arg(long, value_enum, requires = "session_name")]
+    pub session_mode: Option<CliSessionMode>,
 
     /// Orchestrator-owned persistence configuration (raw JSON string)
     #[arg(long, value_name = "JSON")]
@@ -498,6 +544,10 @@ impl StepAddCommand {
             ("agents", !self.agent.is_empty()),
             ("skills", !self.skill.is_empty()),
             ("agent_config", self.agent_config_flags_present(step_type)),
+            (
+                "session",
+                self.session_name.is_some() || self.session_mode.is_some(),
+            ),
             ("route_config", self.route_config.is_some()),
             ("provider", structured && self.provider.is_some()),
             ("model", structured && self.model.is_some()),
@@ -537,6 +587,8 @@ impl StepAddCommand {
                 config.output_schema = output_schema;
                 config.agents = self.agent.clone();
                 config.skills = self.skill.clone();
+                config.session =
+                    parse_session_flags(self.session_name.as_deref(), self.session_mode)?;
                 config.agent_config = build_overlayed_agent_config(
                     AgentConfig::new(),
                     self.agent_config.as_deref(),
@@ -808,10 +860,14 @@ Goal:          {}
         match &s.config {
             Some(StepConfig::LlmInference(config)) => {
                 output.push_str(&format!(
-                    "Agents:        {}\nSkills:        {}\nModel:         {}\nPrompt:        {}\nOutput Schema: {}\n",
+                    "Agents:        {}\nSkills:        {}\nModel:         {}\nSession:       {}\nPrompt:        {}\nOutput Schema: {}\n",
                     list_or_none(&config.agents),
                     list_or_none(&config.skills),
                     config.agent_config.model.as_deref().unwrap_or("default"),
+                    config.session.as_ref().map_or_else(
+                        || "(none)".to_string(),
+                        |session| format!("{} ({})", session.name, session.mode)
+                    ),
                     config.prompt.as_deref().unwrap_or("(none)"),
                     pretty_json(config.output_schema.as_ref()),
                 ));
@@ -998,6 +1054,20 @@ pub struct StepUpdateCommand {
     #[arg(long)]
     pub clear_output_schema: bool,
 
+    /// New name of the TaskRun session this llm_inference step starts or
+    /// resumes; requires --session-mode
+    #[arg(long, value_name = "NAME", requires = "session_mode")]
+    pub session_name: Option<String>,
+
+    /// New mode for this llm_inference step's named session; requires
+    /// --session-name
+    #[arg(long, value_enum, requires = "session_name")]
+    pub session_mode: Option<CliSessionMode>,
+
+    /// Clear the named session so each dispatch is an independent conversation
+    #[arg(long, conflicts_with_all = ["session_name", "session_mode"])]
+    pub clear_session: bool,
+
     /// Replace the orchestrator-owned persistence configuration with JSON
     #[arg(long, value_name = "JSON")]
     pub persistence_options: Option<String>,
@@ -1076,6 +1146,10 @@ impl StepUpdateCommand {
             ("agents", !self.agent.is_empty() || self.clear_agents),
             ("skills", !self.skill.is_empty() || self.clear_skills),
             ("agent_config", self.agent_config_flags_present(step_type)),
+            (
+                "session",
+                self.session_name.is_some() || self.session_mode.is_some() || self.clear_session,
+            ),
             (
                 "route_config",
                 self.route_config.is_some() || self.clear_route_config,
@@ -1194,6 +1268,14 @@ impl StepUpdateCommand {
             parse_json_flag(self.output_schema.as_deref(), "--output-schema")?
         {
             updates = updates.with_output_schema(Some(schema));
+        }
+
+        if self.clear_session {
+            updates = updates.with_session(None);
+        } else if let Some(session) =
+            parse_session_flags(self.session_name.as_deref(), self.session_mode)?
+        {
+            updates = updates.with_session(Some(&session));
         }
 
         if self.clear_persistence_options {

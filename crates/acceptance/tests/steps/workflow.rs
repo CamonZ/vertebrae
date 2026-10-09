@@ -29,6 +29,20 @@ fn execute_roundtrip_config() -> Value {
     })
 }
 
+/// Session configs the staged fixture gives its `llm_inference` steps, keyed
+/// by step name: export regenerates refs from names, so names are the stable
+/// identity across a round trip. The review workflow's `Done` step stays
+/// session-less.
+fn session_roundtrip_configs() -> [(&'static str, Value); 2] {
+    [
+        ("Start", json!({"name": "build-conv", "mode": "new"})),
+        (
+            "Review",
+            json!({"name": "review-conv", "mode": "resume_or_new"}),
+        ),
+    ]
+}
+
 #[when("I stage the built-in workflow bundle fixture")]
 async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
     let mut fixture: serde_json::Value = serde_json::from_str(include_str!(
@@ -113,6 +127,17 @@ async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
         "to": {"workflow_ref": "review", "step_ref": "classify"},
         "label": "transformed"
     }));
+    // Exercise named llm_inference session portability.
+    for (step_name, session) in session_roundtrip_configs() {
+        let step = fixture["workflows"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .flat_map(|workflow| workflow["steps"].as_array_mut().unwrap().iter_mut())
+            .find(|step| step["name"] == step_name)
+            .unwrap();
+        step["config"]["session"] = session;
+    }
     let contents = serde_json::to_string(&fixture).expect("workflow fixture should serialize");
     let path = world.write_temp_file(&contents);
     world.stored_ids.insert(
@@ -305,6 +330,38 @@ async fn roundtrip_bundles_should_preserve_authored_execute_step(world: &mut Smo
         assert_eq!(step.harness, None);
         assert_eq!(step.config, Some(execute_roundtrip_config()));
         assert!(step.config.as_ref().unwrap().get("context").is_none());
+    }
+}
+
+#[then("the roundtrip bundles should preserve the authored session configs")]
+async fn roundtrip_bundles_should_preserve_authored_session_configs(world: &mut SmokeWorld) {
+    let expected = session_roundtrip_configs();
+    for key in [
+        "source_workflow_bundle_path",
+        "destination_workflow_bundle_path",
+    ] {
+        let bundle = read_workflow_bundle(world, key);
+        for workflow in &bundle.workflows {
+            for step in &workflow.steps {
+                if step.step_type != vertebrae_core::StepType::LlmInference {
+                    continue;
+                }
+                let session = step
+                    .config
+                    .as_ref()
+                    .and_then(|config| config.get("session"))
+                    .filter(|session| !session.is_null());
+                let authored = expected
+                    .iter()
+                    .find(|(step_name, _)| *step_name == step.name)
+                    .map(|(_, session)| session);
+                assert_eq!(
+                    session, authored,
+                    "{key}: session mismatch for {}/{}",
+                    workflow.workflow_ref, step.step_ref
+                );
+            }
+        }
     }
 }
 
@@ -709,6 +766,43 @@ async fn workflow_export_stdout_should_not_contain_persistence_fields(world: &mu
             world.last_stdout
         );
     }
+}
+
+fn exported_step_config(world: &SmokeWorld, name: &str) -> Value {
+    let bundle: Value =
+        serde_json::from_str(&world.last_stdout).expect("workflow export should be valid JSON");
+    bundle["workflows"]
+        .as_array()
+        .expect("workflow bundle should contain a workflow array")
+        .iter()
+        .flat_map(|workflow| workflow["steps"].as_array().into_iter().flatten())
+        .find(|step| step["name"] == name)
+        .unwrap_or_else(|| panic!("exported bundle has no step {name:?}: {bundle:#}"))["config"]
+        .clone()
+}
+
+#[then(expr = "the exported step {string} should have session {string} with mode {string}")]
+async fn exported_step_should_have_session(
+    world: &mut SmokeWorld,
+    step_name: String,
+    name: String,
+    mode: String,
+) {
+    let config = exported_step_config(world, &step_name);
+    assert_eq!(
+        config["session"],
+        json!({"name": name, "mode": mode}),
+        "{config:#}"
+    );
+}
+
+#[then(expr = "the exported step {string} should have no session")]
+async fn exported_step_should_have_no_session(world: &mut SmokeWorld, step_name: String) {
+    let config = exported_step_config(world, &step_name);
+    assert!(
+        config.get("session").is_none_or(Value::is_null),
+        "{config:#}"
+    );
 }
 
 #[then("the workflow export file should equal the remembered stdout")]

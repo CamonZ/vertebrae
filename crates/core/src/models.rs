@@ -3,6 +3,7 @@
 //! These are the canonical domain models for the Vertebrae task management system.
 //! All IDs are plain strings rather than database-specific record types.
 
+use crate::error::ServiceError;
 use crate::{OutputVerbosity, ProviderId, SpeedTier, StepHarness};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -213,6 +214,7 @@ impl StepType {
                 "agents",
                 "skills",
                 "agent_config",
+                "session",
             ]),
             StepType::StructuredInference => Some(&["provider", "model", "state", "questions"]),
             StepType::Execute => Some(&["version", "script", "output_schema"]),
@@ -1660,6 +1662,10 @@ pub struct LlmInferenceConfig {
     /// Agent configuration
     #[serde(default, deserialize_with = "null_as_default")]
     pub agent_config: AgentConfig,
+    /// Named TaskRun conversation this step starts or resumes; `None` runs an
+    /// independent conversation
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<LlmSessionConfig>,
 }
 
 impl Default for LlmInferenceConfig {
@@ -1671,7 +1677,66 @@ impl Default for LlmInferenceConfig {
             agents: Vec::new(),
             skills: Vec::new(),
             agent_config: AgentConfig::default(),
+            session: None,
         }
+    }
+}
+
+/// Maximum byte length of an `llm_inference` session name, as Sacrum enforces.
+pub const MAX_LLM_SESSION_NAME_BYTES: usize = 255;
+
+/// How an `llm_inference` step uses its named TaskRun session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmSessionMode {
+    /// Start a new conversation under the name.
+    New,
+    /// Continue the named conversation; dispatch fails when the TaskRun has none.
+    Resume,
+    /// Continue the named conversation, or start one when the TaskRun has none.
+    ResumeOrNew,
+}
+
+impl LlmSessionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Resume => "resume",
+            Self::ResumeOrNew => "resume_or_new",
+        }
+    }
+}
+
+impl std::fmt::Display for LlmSessionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Named session config of an `llm_inference` step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LlmSessionConfig {
+    pub name: String,
+    pub mode: LlmSessionMode,
+}
+
+impl LlmSessionConfig {
+    /// Build a session config, applying Sacrum's name rules: not blank and at
+    /// most [`MAX_LLM_SESSION_NAME_BYTES`] bytes.
+    pub fn new(name: impl Into<String>, mode: LlmSessionMode) -> Result<Self, ServiceError> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return Err(ServiceError::validation_failed(
+                "config: $.session.name: must not be blank",
+            ));
+        }
+        if name.len() > MAX_LLM_SESSION_NAME_BYTES {
+            return Err(ServiceError::validation_failed(format!(
+                "config: $.session.name: must be at most {MAX_LLM_SESSION_NAME_BYTES} bytes"
+            )));
+        }
+        Ok(Self { name, mode })
     }
 }
 
@@ -2012,6 +2077,13 @@ impl StepConfig {
         }
     }
 
+    pub fn session(&self) -> Option<&LlmSessionConfig> {
+        match self {
+            Self::LlmInference(config) => config.session.as_ref(),
+            _ => None,
+        }
+    }
+
     pub fn route_config(&self) -> Option<&serde_json::Value> {
         match self {
             Self::Route(config) => config.route_config.as_ref(),
@@ -2107,6 +2179,10 @@ impl Step {
 
     pub fn agent_config(&self) -> Option<&AgentConfig> {
         self.config.as_ref().and_then(StepConfig::agent_config)
+    }
+
+    pub fn session(&self) -> Option<&LlmSessionConfig> {
+        self.config.as_ref().and_then(StepConfig::session)
     }
 
     pub fn route_config(&self) -> Option<&serde_json::Value> {
@@ -3020,6 +3096,11 @@ impl StepUpdate {
         self.with_config_field("agent_config", config)
     }
 
+    /// Set or clear the named session of an `llm_inference` step.
+    pub fn with_session(self, session: Option<&LlmSessionConfig>) -> Self {
+        self.with_config_field("session", serde_json::json!(session))
+    }
+
     /// Set the output schema (Some to set, None to clear)
     pub fn with_output_schema(self, schema: Option<serde_json::Value>) -> Self {
         self.with_config_field("output_schema", schema.unwrap_or_default())
@@ -3887,6 +3968,54 @@ mod tests {
     }
 
     #[test]
+    fn llm_session_config_matches_sacrum_contract() {
+        let config: LlmInferenceConfig = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "session": {"name": "conv", "mode": "resume_or_new"}
+        }))
+        .unwrap();
+        assert_eq!(
+            config.session,
+            Some(LlmSessionConfig {
+                name: "conv".to_string(),
+                mode: LlmSessionMode::ResumeOrNew,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&config).unwrap()["session"],
+            serde_json::json!({"name": "conv", "mode": "resume_or_new"})
+        );
+
+        let config: LlmInferenceConfig =
+            serde_json::from_value(serde_json::json!({"version": 1, "session": null})).unwrap();
+        assert_eq!(config.session, None);
+        assert!(
+            serde_json::to_value(&config)
+                .unwrap()
+                .get("session")
+                .is_none()
+        );
+
+        for session in [
+            serde_json::json!({"name": "conv", "mode": "fork"}),
+            serde_json::json!({"name": "conv"}),
+            serde_json::json!({"name": "conv", "mode": "new", "fork": true}),
+        ] {
+            assert!(
+                serde_json::from_value::<LlmInferenceConfig>(
+                    serde_json::json!({"version": 1, "session": session})
+                )
+                .is_err(),
+                "{session}"
+            );
+        }
+
+        assert!(LlmSessionConfig::new(" ", LlmSessionMode::New).is_err());
+        assert!(LlmSessionConfig::new("a".repeat(256), LlmSessionMode::New).is_err());
+        assert!(LlmSessionConfig::new("a".repeat(255), LlmSessionMode::Resume).is_ok());
+    }
+
+    #[test]
     fn step_type_config_fields() {
         assert_eq!(
             StepType::LlmInference.config_fields(),
@@ -3896,7 +4025,8 @@ mod tests {
                     "output_schema",
                     "agents",
                     "skills",
-                    "agent_config"
+                    "agent_config",
+                    "session"
                 ][..]
             )
         );

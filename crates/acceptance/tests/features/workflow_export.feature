@@ -24,6 +24,18 @@ Feature: Workflow bundle export
     And the workflow export stdout should be a valid workflow bundle
     And the workflow export stdout should not contain persistence fields
 
+  Scenario: Export preserves llm_inference session config
+    Given I create a workflow "Session Export WF" with:
+      | steps | plain |
+    Then the command should succeed
+    When I run vtb "step add Converse --workflow <workflow_id> --harness claude --order 1 --session-name conv --session-mode resume_or_new"
+    Then the command should succeed
+    When I run vtb "workflow export --workflow <workflow_id>"
+    Then the command should succeed
+    And the workflow export stdout should be a valid workflow bundle
+    And the exported step "Converse" should have session "conv" with mode "resume_or_new"
+    And the exported step "plain" should have no session
+
   Scenario: Export a selected workflow set together as one closed bundle
     Given I create a workflow "Selected First WF" with:
       | steps | first |

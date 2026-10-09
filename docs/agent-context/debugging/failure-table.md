@@ -13,6 +13,9 @@ Use this when: a run failed, stalled, or produced the wrong path.
 | `route_ambiguous_match` | Two rules matched (tags/visit-count rules are not checked at save) | Make them disjoint ([overlap checks](../workflows/steps/route/overlap-checks.md)) |
 | `route_config_ambiguous` / `route_config_uncovered` on save | Rules overlap / leave a closed case uncovered | Fix the partition or add a default |
 | `route_reference_unknown` / `route_target_invalid` on save | Ref not in predecessor schema / target edge missing | Add the schema field / create the transition first |
+| `dispatch_failed` whose reason is a session name, no execution | A `resume` session step ran before any completed step of this TaskRun bound the name | Run a `new` step with that name first, or use `resume_or_new` ([sessions](../workflows/steps/llm_inference/sessions.md)) |
+| `dispatch_failed` whose reason names a session with `bound` and `step` harnesses | The session was created on another harness | Use the same harness for every step sharing the name, or a different name |
+| Failed execution: `No conversation found with session ID` / `no rollout found for thread id` | The provider no longer has the conversation being resumed | Start a new conversation (`new` or a different name) |
 | `child_missing_workflow` | A direct child has no workflow at `wait_children` | Assign workflows to every child |
 | Parent run stays `waiting` | A child is incomplete or parked | `vtb list --parent <id>`; fix or finish that child |
 | Provider 401 / auth errors, then `retry_exhausted` | Daemon holds a stale or missing key | Update config, then restart the daemon ([setup/daemon](../setup/daemon.md)) |

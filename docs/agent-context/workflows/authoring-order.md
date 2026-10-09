@@ -23,6 +23,8 @@ draft and is not runnable.
 
 ## Gotchas
 - Output schemas for `codex` steps must satisfy strict mode (see [output schemas](steps/llm_inference/output-schemas.md)).
+- Steps that share a [session](steps/llm_inference/sessions.md) name must run in
+  sequence and on the same harness; parallel branches need distinct names.
 - Persisting outputs is configured per step (see [artifacts](../artifacts.md)).
 
 ## Related

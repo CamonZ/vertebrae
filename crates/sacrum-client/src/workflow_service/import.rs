@@ -474,6 +474,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn imports_llm_session_config_unchanged() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"importWorkflowBundle": import_data()}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let mut bundle = bundle_with_repeated_step_refs();
+        let config = json!({
+            "version": 1,
+            "prompt": "continue",
+            "session": {"name": "conv", "mode": "resume_or_new"}
+        });
+        bundle.workflows[0].steps[0].config = Some(config.clone());
+        service(&server.uri())
+            .import_workflow_bundle(bundle)
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let request: Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let sent: Value =
+            serde_json::from_str(request["variables"]["bundle"].as_str().unwrap()).unwrap();
+        assert_eq!(sent["workflows"][0]["steps"][0]["config"], config);
+    }
+
+    #[tokio::test]
     async fn qualifies_repeated_local_step_refs_by_workflow() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))

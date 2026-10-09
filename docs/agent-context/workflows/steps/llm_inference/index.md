@@ -10,6 +10,8 @@ The step's harness (`claude` or `codex`) runs the step's rendered prompt in the 
   Load when: "use Codex/Claude", `--harness`, a harness/provider conflict or unavailable-harness error.
 - [Settings](settings.md): model, speed tier, reasoning effort, verbosity, `--agent-config`.
   Load when: model choice, fast mode, deeper reasoning, replacing the agent config.
+- [Sessions](sessions.md): continuing one provider conversation across steps of a TaskRun.
+  Load when: "same conversation", "resume", `--session-name`/`--session-mode`, a `dispatch_failed` run whose reason is a session name.
 - [Guardrails](guardrails.md): restricting what the agent may do (tools, permission mode, budget).
   Load when: "don't let it change code/push/comment", `disallowed_tools`, read-only review steps.
 - [Templating context](../../../templating/context.md): everything available to interpolate.

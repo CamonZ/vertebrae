@@ -83,6 +83,12 @@ vtb step add "Classify" -w <workflow-id> --harness typesafe \
   --state '{"title":"{{ task.title }}"}' \
   --fields @classify-schema.json
 
+# Continue one provider conversation across two steps of the same TaskRun
+vtb step add "Implement" -w <workflow-id> --harness claude --prompt "..." \
+  --session-name impl --session-mode new
+vtb step add "Address review" -w <workflow-id> --harness claude --prompt "..." \
+  --session-name impl --session-mode resume
+
 # Create a deterministic route draft, then configure it after graph targets exist
 vtb step add "Router" -w <workflow-id> --harness claude --step-type route
 vtb step update <step-id> --route-config '<route-config-json>'
@@ -120,6 +126,8 @@ vtb --json step add "Review" -w <workflow-id> --harness claude
 | `--verbosity` | | Output detail level: `low`, `medium`, or `high`; alias `--output-verbosity`; currently valid with OpenAI/Codex |
 | `--step-type` | | Step type: `llm_inference`, `structured_inference`, `route`, `wait_children`, `human_input`, `stop`, or `finish` (default: `llm_inference`) |
 | `--output-schema` | | JSON Schema describing expected structured output |
+| `--session-name` | | `llm_inference` only: name of the TaskRun conversation this step starts or resumes; requires `--session-mode` |
+| `--session-mode` | | `new`, `resume`, or `resume_or_new`; requires `--session-name` |
 | `--route-config` | | Opaque deterministic route configuration as a JSON string; only valid for `route` steps |
 | `--persistence-options` | | Sacrum-owned JSON configuration for persisting structured output as a task artifact |
 | `--order` | `-o` | Step order (default: 0) |
@@ -149,6 +157,24 @@ valid for `route` steps. A route may be created without it as a non-runnable
 draft; configure it after the workflow graph and predecessor contracts exist.
 Route authoring rejects `--prompt` and `--output-schema`; neither is a routing
 mechanism.
+
+`--session-name` and `--session-mode` set `config.session` on an
+`llm_inference` step; other step types reject them. Without them the step runs
+an independent conversation. Modes:
+
+- `new` starts a conversation and binds it to the name.
+- `resume` continues the bound conversation. When the TaskRun has no binding
+  yet, the TaskRun fails with outcome `dispatch_failed` (reason: the session
+  name) without creating an execution or launching the provider.
+- `resume_or_new` resumes when a binding exists and starts a new conversation
+  otherwise.
+
+A name binds to the conversation of the TaskRun's most recent completed
+execution that used it; names never cross TaskRuns. A resume must use the
+harness that created the conversation (otherwise the TaskRun fails with
+`dispatch_failed`), and a resume the provider rejects fails the execution
+instead of starting fresh. Parallel steps must not resume the same name concurrently. Names must be
+non-blank and at most 255 bytes.
 
 `structured_inference` steps take only `--provider`, `--model`, `--state`, and
 `--fields`, and Sacrum requires all four on create. Agent, prompt, and output
@@ -223,13 +249,15 @@ full UUID or an 8-character hex short ID and is resolved case-insensitively.
 There are no command aliases, defaults, or value enums for `step show`.
 
 Human-readable output is a flat detail view with the step ID and name, workflow
-ID, order, step type, goal, agents, skills, model, output schema, route config,
+ID, order, step type, goal, agents, skills, model, session (`<name> (<mode>)`),
+output schema, route config,
 transitions, and persistence configuration, and created/updated timestamps.
 Missing optional fields are shown as `(none)`, and missing timestamps are shown
 as `-`.
 
 `--json` returns the raw `Step` object with fields such as `id`, `name`,
-`workflow_id`, `order`, `goal`, `step_type`, `config`, `persistence_options`,
+`workflow_id`, `order`, `goal`, `step_type`, `config` (including
+`config.session` when set), `persistence_options`,
 `transitions_to`, and timestamps.
 It does not wrap the result in an `output` field.
 
@@ -294,6 +322,10 @@ vtb step update <step-id> --fields @classify-schema.json
 vtb step update <step-id> --route-config '<route-config-json>'
 vtb step update <step-id> --clear-route-config
 
+# Set, change, or clear an llm_inference step's named session
+vtb step update <step-id> --session-name impl --session-mode resume_or_new
+vtb step update <step-id> --clear-session
+
 # Clear all agents
 vtb step update <step-id> --clear-agents
 
@@ -340,6 +372,9 @@ vtb --json step update <step-id> --goal "New goal"
 | `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh`; only valid when the resulting provider is OpenAI/Codex |
 | | `--output-schema` | | New output schema as a JSON string |
 | `--clear-output-schema` | | Clear the output schema |
+| `--session-name` | | New session name for an `llm_inference` step; requires `--session-mode` |
+| `--session-mode` | | New session mode: `new`, `resume`, or `resume_or_new`; requires `--session-name` |
+| `--clear-session` | | Remove the session so each dispatch is an independent conversation; conflicts with `--session-name`/`--session-mode` |
 | `--route-config` | | Replace the opaque deterministic route configuration |
 | `--clear-route-config` | | Clear the route configuration, leaving a route draft |
 | `--persistence-options` | | Replace Sacrum's persistence configuration with JSON |
@@ -369,6 +404,9 @@ equivalent JSON fields are `provider`, `model`, `codex_model_provider`,
 vtb step update <step-id> \
   --agent-config '{"provider":"openai","model":"gpt-5.5","speed_tier":"fast","personality":"pragmatic","verbosity":"high"}'
 ```
+
+Updating other fields keeps a stored session; only `--session-name`/`--session-mode`
+or `--clear-session` change it.
 
 `--json` returns an operation envelope with `command`, `status`, and `step_id`.
 Invalid `--agent-config`, `--output-schema`, `--persistence-options`, or

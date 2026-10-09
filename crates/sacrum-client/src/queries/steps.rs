@@ -10,6 +10,7 @@ pub const STEP_FIELDS: &str = r#"
         config {
             ... on LlmInferenceStepConfig {
                 version prompt output_schema agents skills agent_config
+                session { name mode }
             }
             ... on StructuredInferenceStepConfig { version provider model state questions }
             ... on ExecuteStepConfig { version script context output_schema }
@@ -41,6 +42,7 @@ pub const WORKFLOW_EXPORT_STEP_FIELDS: &str = r#"
         config {
             ... on LlmInferenceStepConfig {
                 version prompt output_schema agents skills agent_config
+                session { name mode }
             }
             ... on StructuredInferenceStepConfig { version provider model state questions }
             ... on ExecuteStepConfig { version script output_schema }
@@ -214,6 +216,7 @@ mod tests {
         for fragment in [STEP_FIELDS, WORKFLOW_EXPORT_STEP_FIELDS] {
             assert!(fragment.contains("persistence_options"));
             assert!(fragment.contains("... on LlmInferenceStepConfig"));
+            assert!(fragment.contains("session { name mode }"));
             assert!(fragment.contains(
                 "... on StructuredInferenceStepConfig { version provider model state questions }"
             ));

@@ -54,6 +54,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         let result = cmd.execute(services.steps()).await.unwrap();
@@ -97,6 +99,8 @@ mod step_create_tests {
             output_schema: Some(r#"{"type":"object"}"#.to_string()),
             persistence_options: Some(persistence.to_string()),
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         add.execute(services.steps()).await.unwrap();
         assert_eq!(
@@ -146,6 +150,9 @@ mod step_create_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         }
         .execute(services.steps())
         .await
@@ -195,6 +202,9 @@ mod step_create_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         }
         .execute(services.steps())
         .await
@@ -246,6 +256,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -296,6 +308,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         let error = cmd.execute(services.steps()).await.unwrap_err();
@@ -341,6 +355,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         let result = cmd.execute(services.steps()).await.unwrap();
@@ -397,6 +413,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -453,6 +471,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -501,6 +521,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -556,6 +578,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -617,6 +641,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -671,6 +697,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -727,6 +755,8 @@ mod step_create_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -797,6 +827,8 @@ mod step_list_tests {
                 output_schema: None,
                 persistence_options: None,
                 route_config: None,
+                session_name: None,
+                session_mode: None,
             };
             cmd.execute(services.steps()).await.unwrap();
         }
@@ -855,6 +887,8 @@ mod step_list_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -940,6 +974,8 @@ mod step_list_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1056,6 +1092,8 @@ mod step_show_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1111,6 +1149,8 @@ mod step_show_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1164,6 +1204,8 @@ mod step_show_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1226,6 +1268,8 @@ mod step_show_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1277,6 +1321,8 @@ mod step_show_tests {
                 r#"{"artifact":{"logical_name":"human-result"}}"#.to_string(),
             ),
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1353,6 +1399,8 @@ mod step_update_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1391,6 +1439,9 @@ mod step_update_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1433,6 +1484,8 @@ mod step_update_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         let error = add.execute(services.steps()).await.unwrap_err();
         assert!(
@@ -1496,6 +1549,8 @@ mod step_update_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1534,6 +1589,9 @@ mod step_update_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1579,6 +1637,8 @@ mod step_update_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1617,6 +1677,9 @@ mod step_update_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1662,6 +1725,8 @@ mod step_update_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1700,6 +1765,9 @@ mod step_update_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1753,6 +1821,8 @@ mod step_update_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1791,6 +1861,9 @@ mod step_update_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1836,6 +1909,8 @@ mod step_update_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1874,6 +1949,9 @@ mod step_update_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1932,6 +2010,8 @@ mod step_update_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1970,6 +2050,9 @@ mod step_update_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -2014,6 +2097,8 @@ mod step_update_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -2051,6 +2136,9 @@ mod step_update_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -2117,6 +2205,8 @@ mod step_dispatcher_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         }));
 
         // Call through the dispatcher, not the inner command directly
@@ -2175,6 +2265,8 @@ mod step_delete_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -2247,6 +2339,8 @@ mod step_delete_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -2298,6 +2392,8 @@ mod step_delete_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -2358,6 +2454,8 @@ mod step_prompt_and_agent_config_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -2406,6 +2504,8 @@ mod step_prompt_and_agent_config_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -2453,6 +2553,8 @@ mod step_prompt_and_agent_config_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -2512,6 +2614,8 @@ mod step_prompt_and_agent_config_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         let result = cmd.execute(services.steps()).await;
@@ -2561,6 +2665,8 @@ mod step_prompt_and_agent_config_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -2598,6 +2704,9 @@ mod step_prompt_and_agent_config_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -2641,6 +2750,8 @@ mod step_prompt_and_agent_config_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -2679,6 +2790,9 @@ mod step_prompt_and_agent_config_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -2722,6 +2836,8 @@ mod step_prompt_and_agent_config_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -2759,6 +2875,9 @@ mod step_prompt_and_agent_config_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         };
 
         let result = update_cmd.execute(services.steps()).await;
@@ -2808,6 +2927,8 @@ mod step_prompt_and_agent_config_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -2883,6 +3004,8 @@ mod provider_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         }
     }
 
@@ -2926,6 +3049,9 @@ mod provider_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         }
     }
 
@@ -3768,6 +3894,8 @@ mod route_config_tests {
             output_schema: None,
             persistence_options: None,
             route_config,
+            session_name: None,
+            session_mode: None,
         }
     }
 
@@ -3806,6 +3934,9 @@ mod route_config_tests {
             clear_persistence_options: false,
             route_config: None,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         }
     }
 
@@ -4049,6 +4180,8 @@ mod route_config_tests {
             output_schema: Some(r#"{"type":"object"}"#.to_string()),
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         }
         .execute(services.steps())
         .await
@@ -4140,6 +4273,8 @@ mod structured_inference_tests {
             output_schema: None,
             persistence_options: None,
             route_config: None,
+            session_name: None,
+            session_mode: None,
         }
     }
 
@@ -4178,6 +4313,9 @@ mod structured_inference_tests {
             route_config: None,
             clear_prompt: false,
             clear_route_config: false,
+            session_name: None,
+            session_mode: None,
+            clear_session: false,
         }
     }
 
@@ -4864,5 +5002,355 @@ mod execute_authoring_tests {
             assert!(error.contains("config:"), "{error}");
             service.assert_no_mutations();
         }
+    }
+}
+
+// ============================================================================
+// llm_inference session config tests
+// ============================================================================
+
+#[cfg(test)]
+mod llm_session_tests {
+    use super::*;
+    use clap::Parser;
+    use serde_json::json;
+    use vertebrae_core::{LlmSessionConfig, LlmSessionMode, Step, VertebraeServices};
+
+    const PLACEHOLDER_WORKFLOW: &str = "a1b2c3d4-0000-4000-8000-000000000010";
+    const STEP: &str = "a1b2c3d4-0000-4000-8000-000000000011";
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(subcommand)]
+        command: StepCommand,
+    }
+
+    fn parse(args: &[&str]) -> Result<StepCommand, clap::Error> {
+        let mut argv = vec!["test"];
+        argv.extend_from_slice(args);
+        TestCli::try_parse_from(argv).map(|cli| cli.command)
+    }
+
+    fn add(workflow: &str, extra: &[&str]) -> Box<StepAddCommand> {
+        let mut args = vec![
+            "add",
+            "Converse",
+            "--workflow",
+            PLACEHOLDER_WORKFLOW,
+            "--id",
+            STEP,
+            "--harness",
+            "claude",
+        ];
+        args.extend_from_slice(extra);
+        let StepCommand::Add(mut cmd) = parse(&args).unwrap() else {
+            panic!("expected add")
+        };
+        cmd.workflow = workflow.to_string();
+        cmd
+    }
+
+    fn update(extra: &[&str]) -> Box<StepUpdateCommand> {
+        let mut args = vec!["update", STEP];
+        args.extend_from_slice(extra);
+        let StepCommand::Update(cmd) = parse(&args).unwrap() else {
+            panic!("expected update")
+        };
+        cmd
+    }
+
+    async fn mk_workflow() -> (VertebraeServices, String) {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Sessions", vec![]))
+            .await
+            .unwrap();
+        (services, workflow_id)
+    }
+
+    async fn stored(services: &VertebraeServices) -> Step {
+        services.steps().get_step(STEP).await.unwrap().unwrap()
+    }
+
+    fn session(name: &str, mode: LlmSessionMode) -> LlmSessionConfig {
+        LlmSessionConfig::new(name, mode).unwrap()
+    }
+
+    #[tokio::test]
+    async fn add_sends_session_only_when_flags_are_given() {
+        let (services, workflow) = mk_workflow().await;
+        add(
+            &workflow,
+            &["--session-name", "conv", "--session-mode", "resume_or_new"],
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+        let step = stored(&services).await;
+        assert_eq!(
+            step.session(),
+            Some(&session("conv", LlmSessionMode::ResumeOrNew))
+        );
+        let config = serde_json::to_value(step.config.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            config["session"],
+            json!({"name": "conv", "mode": "resume_or_new"})
+        );
+
+        let (services, workflow) = mk_workflow().await;
+        add(&workflow, &["--prompt", "hi"])
+            .execute(services.steps())
+            .await
+            .unwrap();
+        let step = stored(&services).await;
+        assert_eq!(step.session(), None);
+        let config = serde_json::to_value(step.config.as_ref().unwrap()).unwrap();
+        assert!(config.get("session").is_none(), "{config}");
+    }
+
+    #[test]
+    fn session_flags_are_paired_and_modes_are_closed() {
+        for args in [
+            vec!["--session-name", "conv"],
+            vec!["--session-mode", "new"],
+            vec!["--session-name", "conv", "--session-mode", "fork"],
+            vec!["--session-name", "conv", "--session-mode", "resume-or-new"],
+        ] {
+            let mut add_args = vec![
+                "add",
+                "Converse",
+                "--workflow",
+                PLACEHOLDER_WORKFLOW,
+                "--harness",
+                "claude",
+            ];
+            add_args.extend_from_slice(&args);
+            assert!(parse(&add_args).is_err(), "add {args:?}");
+            let mut update_args = vec!["update", STEP];
+            update_args.extend_from_slice(&args);
+            assert!(parse(&update_args).is_err(), "update {args:?}");
+        }
+        assert!(parse(&["update", STEP, "--clear-session", "--session-name", "conv"]).is_err());
+        assert!(parse(&["update", STEP, "--clear-session", "--session-mode", "new"]).is_err());
+        for mode in ["new", "resume", "resume_or_new"] {
+            assert!(
+                parse(&[
+                    "update",
+                    STEP,
+                    "--session-name",
+                    "conv",
+                    "--session-mode",
+                    mode
+                ])
+                .is_ok(),
+                "{mode}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_session_names_and_step_types_are_rejected_before_mutation() {
+        let long_name = "a".repeat(256);
+        for (name, message) in [
+            ("", "must not be blank"),
+            ("  \t", "must not be blank"),
+            (long_name.as_str(), "at most 255 bytes"),
+        ] {
+            let (services, workflow) = mk_workflow().await;
+            let error = add(
+                &workflow,
+                &["--session-name", name, "--session-mode", "new"],
+            )
+            .execute(services.steps())
+            .await
+            .unwrap_err()
+            .to_string();
+            assert!(error.contains(message), "{name:?}: {error}");
+            assert!(services.steps().get_step(STEP).await.unwrap().is_none());
+        }
+        let (services, workflow) = mk_workflow().await;
+        add(
+            &workflow,
+            &["--session-name", &"é".repeat(127), "--session-mode", "new"],
+        )
+        .execute(services.steps())
+        .await
+        .expect("254 bytes is within the limit");
+
+        let (services, workflow) = mk_workflow().await;
+        let mut route = add(
+            &workflow,
+            &["--session-name", "conv", "--session-mode", "new"],
+        );
+        route.step_type = CliStepType::Route;
+        let error = route
+            .execute(services.steps())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("config: $.session: is not supported for route steps"),
+            "{error}"
+        );
+        assert!(services.steps().get_step(STEP).await.unwrap().is_none());
+
+        let mut route = add(&workflow, &[]);
+        route.step_type = CliStepType::Route;
+        route.execute(services.steps()).await.unwrap();
+        for args in [
+            vec!["--session-name", "conv", "--session-mode", "new"],
+            vec!["--clear-session"],
+        ] {
+            let error = update(&args)
+                .execute(services.steps())
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("config: $.session: is not supported for route steps"),
+                "{args:?}: {error}"
+            );
+        }
+
+        let (services, workflow) = mk_workflow().await;
+        add(
+            &workflow,
+            &["--session-name", "conv", "--session-mode", "new"],
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+        let error = update(&["--session-name", " ", "--session-mode", "resume"])
+            .execute(services.steps())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("must not be blank"), "{error}");
+        assert_eq!(
+            stored(&services).await.session(),
+            Some(&session("conv", LlmSessionMode::New))
+        );
+    }
+
+    #[tokio::test]
+    async fn update_sets_changes_preserves_and_clears_the_session() {
+        let (services, workflow) = mk_workflow().await;
+        add(&workflow, &["--prompt", "first"])
+            .execute(services.steps())
+            .await
+            .unwrap();
+
+        update(&["--session-name", "conv", "--session-mode", "new"])
+            .execute(services.steps())
+            .await
+            .unwrap();
+        assert_eq!(
+            stored(&services).await.session(),
+            Some(&session("conv", LlmSessionMode::New))
+        );
+
+        update(&["--session-name", "review", "--session-mode", "resume"])
+            .execute(services.steps())
+            .await
+            .unwrap();
+        assert_eq!(
+            stored(&services).await.session(),
+            Some(&session("review", LlmSessionMode::Resume))
+        );
+
+        update(&[
+            "--prompt", "second", "--model", "opus", "--skill", "review", "--name", "Renamed",
+        ])
+        .execute(services.steps())
+        .await
+        .unwrap();
+        let step = stored(&services).await;
+        assert_eq!(step.prompt(), Some("second"));
+        assert_eq!(
+            step.session(),
+            Some(&session("review", LlmSessionMode::Resume))
+        );
+
+        update(&["--clear-session"])
+            .execute(services.steps())
+            .await
+            .unwrap();
+        let step = stored(&services).await;
+        assert_eq!(step.session(), None);
+        assert_eq!(step.prompt(), Some("second"));
+    }
+
+    #[test]
+    fn update_patch_sends_only_the_session_key() {
+        let patch = vertebrae_core::StepUpdate::new()
+            .with_session(Some(&session("conv", LlmSessionMode::New)));
+        assert_eq!(
+            serde_json::Value::Object(patch.config.unwrap()),
+            json!({"session": {"name": "conv", "mode": "new"}})
+        );
+        let patch = vertebrae_core::StepUpdate::new().with_session(None);
+        assert_eq!(
+            serde_json::Value::Object(patch.config.unwrap()),
+            json!({"session": null})
+        );
+    }
+
+    #[tokio::test]
+    async fn show_and_list_report_the_session() {
+        let (services, workflow) = mk_workflow().await;
+        add(
+            &workflow,
+            &["--session-name", "conv", "--session-mode", "resume"],
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        let text = StepShowCommand {
+            id: STEP.to_string(),
+        }
+        .execute(services.steps())
+        .await
+        .unwrap();
+        assert!(text.contains("Session:       conv (resume)"), "{text}");
+
+        let CommandResult::Json(shown) = Command::Step(StepCommand::Show(StepShowCommand {
+            id: STEP.to_string(),
+        }))
+        .execute_json(&services)
+        .await
+        .unwrap() else {
+            panic!("step show --json should return JSON output");
+        };
+        assert_eq!(
+            shown["config"]["session"],
+            json!({"name": "conv", "mode": "resume"})
+        );
+
+        let CommandResult::Json(listed) = Command::Step(StepCommand::List(StepListCommand {
+            workflow: workflow.clone(),
+        }))
+        .execute_json(&services)
+        .await
+        .unwrap() else {
+            panic!("step list --json should return JSON output");
+        };
+        assert_eq!(
+            listed[0]["config"]["session"],
+            json!({"name": "conv", "mode": "resume"})
+        );
+
+        update(&["--clear-session"])
+            .execute(services.steps())
+            .await
+            .unwrap();
+        let text = StepShowCommand {
+            id: STEP.to_string(),
+        }
+        .execute(services.steps())
+        .await
+        .unwrap();
+        assert!(text.contains("Session:       (none)"), "{text}");
     }
 }

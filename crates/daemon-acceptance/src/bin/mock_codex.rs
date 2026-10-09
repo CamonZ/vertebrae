@@ -3,13 +3,19 @@
 //! Implements `codex app-server daemon version|start` and the daemon's Unix
 //! control socket. Scenario-specific notifications are read from the fixture
 //! envelope passed as the first turn's text input.
+//!
+//! Every `thread/start` gets a new thread id that later connections to the
+//! same daemon can `thread/resume`. Resuming an id the daemon never started, or
+//! one whose turn envelope set `forget_session`, fails the way Codex does when
+//! a thread has no rollout.
 
 use std::{
+    collections::HashSet,
     hash::{DefaultHasher, Hash, Hasher},
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -33,6 +39,34 @@ struct Envelope {
     delay_ms: u64,
     stdout_file: Option<String>,
     stderr_file: Option<String>,
+    #[serde(default)]
+    forget_session: bool,
+}
+
+/// Threads this daemon started and can still resume.
+#[derive(Default)]
+struct Threads {
+    next: AtomicU64,
+    known: Mutex<HashSet<String>>,
+}
+
+impl Threads {
+    fn start(&self) -> String {
+        let id = format!(
+            "mock-codex-thread-{}",
+            self.next.fetch_add(1, Ordering::SeqCst) + 1
+        );
+        self.known.lock().unwrap().insert(id.clone());
+        id
+    }
+
+    fn is_known(&self, id: &str) -> bool {
+        self.known.lock().unwrap().contains(id)
+    }
+
+    fn forget(&self, id: &str) {
+        self.known.lock().unwrap().remove(id);
+    }
 }
 
 #[tokio::main]
@@ -135,6 +169,7 @@ async fn serve(socket: PathBuf) {
     let listener = UnixListener::bind(&socket)
         .unwrap_or_else(|error| panic!("mock-codex failed to bind {}: {error}", socket.display()));
     let active = Arc::new(AtomicUsize::new(0));
+    let threads = Arc::new(Threads::default());
     let last_activity = Arc::new(AtomicU64::new(now_secs()));
     {
         let active = Arc::clone(&active);
@@ -159,9 +194,10 @@ async fn serve(socket: PathBuf) {
         active.fetch_add(1, Ordering::SeqCst);
         let active = Arc::clone(&active);
         let last_activity = Arc::clone(&last_activity);
+        let threads = Arc::clone(&threads);
         tokio::spawn(async move {
             // Status probes connect and close without a WebSocket handshake.
-            if let Err(error) = serve_websocket(stream).await
+            if let Err(error) = serve_websocket(stream, &threads).await
                 && !error.contains("handshake")
             {
                 eprintln!("mock-codex WebSocket failed: {error}");
@@ -190,7 +226,7 @@ fn capture_invocation(args: &[String]) {
     std::fs::write(dir.join("cwd.txt"), cwd.to_string_lossy().as_bytes()).expect("write cwd.txt");
 }
 
-async fn serve_websocket<S>(stream: S) -> Result<(), String>
+async fn serve_websocket<S>(stream: S, threads: &Threads) -> Result<(), String>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -198,6 +234,7 @@ where
         .await
         .map_err(|error| format!("WebSocket handshake failed: {error}"))?;
     let mut turn_number = 0_u64;
+    let mut thread_id: Option<String> = None;
 
     while let Some(frame) = socket.next().await {
         let frame = frame.map_err(|error| format!("WebSocket read failed: {error}"))?;
@@ -219,13 +256,38 @@ where
             "initialize" => {
                 send_response(&mut socket, id, json!({"capabilities": {}})).await?;
             }
-            "thread/start" | "thread/resume" => {
+            "thread/start" => {
+                let started = threads.start();
                 send_response(
                     &mut socket,
                     id,
-                    json!({"thread":{"id":"mock-codex-thread"},"model":"gpt-5.5"}),
+                    json!({"thread":{"id":started},"model":"gpt-5.5"}),
                 )
                 .await?;
+                thread_id = Some(started);
+            }
+            "thread/resume" => {
+                let resumed = request["params"]["threadId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                if threads.is_known(&resumed) {
+                    send_response(
+                        &mut socket,
+                        id,
+                        json!({"thread":{"id":resumed},"model":"gpt-5.5"}),
+                    )
+                    .await?;
+                    thread_id = Some(resumed);
+                } else {
+                    send_error(
+                        &mut socket,
+                        id,
+                        -32600,
+                        &format!("no rollout found for thread id {resumed}"),
+                    )
+                    .await?;
+                }
             }
             "skills/extraRoots/set" => {
                 send_response(&mut socket, id, json!({})).await?;
@@ -247,8 +309,14 @@ where
                         delay_ms: 0,
                         stdout_file: None,
                         stderr_file: None,
+                        forget_session: false,
                     });
                 emit_script(&mut socket, &envelope).await?;
+                if envelope.forget_session
+                    && let Some(thread_id) = &thread_id
+                {
+                    threads.forget(thread_id);
+                }
             }
             "turn/interrupt" => {
                 send_response(&mut socket, id, json!({})).await?;
@@ -273,6 +341,20 @@ async fn send_response<S: AsyncRead + AsyncWrite + Unpin>(
         ))
         .await
         .map_err(|error| format!("WebSocket response failed: {error}"))
+}
+
+async fn send_error<S: AsyncRead + AsyncWrite + Unpin>(
+    socket: &mut WebSocketStream<S>,
+    id: Value,
+    code: i64,
+    message: &str,
+) -> Result<(), String> {
+    socket
+        .send(Message::Text(
+            json!({"id": id, "error": {"code": code, "message": message}}).to_string(),
+        ))
+        .await
+        .map_err(|error| format!("WebSocket error response failed: {error}"))
 }
 
 async fn emit_script<S: AsyncRead + AsyncWrite + Unpin>(

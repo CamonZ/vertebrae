@@ -69,6 +69,7 @@ pub struct MockResponse {
     stderr_rel: Option<String>,
     stdout_lines: Vec<String>,
     stderr_lines: Vec<String>,
+    forget_session: bool,
 }
 
 impl MockResponse {
@@ -84,6 +85,7 @@ impl MockResponse {
             stderr_rel: None,
             stdout_lines: Vec::new(),
             stderr_lines: Vec::new(),
+            forget_session: false,
         }
     }
 
@@ -110,6 +112,14 @@ impl MockResponse {
     /// directive line and never emit it.
     pub fn with_stdout_pause(self, ms: u64) -> Self {
         self.with_stdout_line(format!(r#"{{"{PAUSE_DIRECTIVE}":{ms}}}"#))
+    }
+
+    /// After this turn, the mock provider loses the conversation it ran in, so
+    /// a later resume of it is rejected the way the real provider rejects an
+    /// unknown conversation.
+    pub fn with_forget_session(mut self) -> Self {
+        self.forget_session = true;
+        self
     }
 
     pub fn with_stderr_line(mut self, line: impl Into<String>) -> Self {
@@ -158,12 +168,15 @@ impl MockResponse {
             .map(|s| serde_json::Value::String(s.clone()))
             .unwrap_or(serde_json::Value::Null);
 
-        let envelope = serde_json::json!({
+        let mut envelope = serde_json::json!({
             "exit_code": self.exit_code,
             "delay_ms": self.delay_ms,
             "stdout_file": stdout_value,
             "stderr_file": stderr_value,
         });
+        if self.forget_session {
+            envelope["forget_session"] = serde_json::Value::Bool(true);
+        }
 
         Ok(serde_json::to_string(&envelope).expect("envelope serialises"))
     }
