@@ -57,6 +57,15 @@ impl ExecutionKind {
     }
 }
 
+/// Named-session dispatch from Sacrum's `run_step` `session` field: start a
+/// new provider conversation, or continue the bound one.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum StepSession {
+    New,
+    Resume { resume_id: String },
+}
+
 #[derive(Debug, Clone)]
 pub struct StepConfig {
     /// Explicit workflow-step harness selection. `None` preserves legacy
@@ -76,6 +85,8 @@ pub struct StepConfig {
     /// build/spawn/stream checkpoints. Defaults to false; toggled per-step
     /// from the Sacrum `run_step` payload.
     pub verbose_daemon_logging: bool,
+    /// Present only for `llm_inference` steps that declare a named session.
+    pub session: Option<StepSession>,
 }
 
 fn structured_inference_request(
@@ -607,7 +618,7 @@ fn persistent_turn_result(
     if close.status != SessionCloseStatus::Closed {
         return Err(close
             .error
-            .unwrap_or_else(|| format!("Codex session closed with status {:?}", close.status)));
+            .unwrap_or_else(|| format!("Provider session closed with status {:?}", close.status)));
     }
     Ok(RunOutcome {
         status: turn.status,
@@ -617,6 +628,24 @@ fn persistent_turn_result(
         metrics: turn.metrics,
         error: turn.error,
     })
+}
+
+/// Records the provider conversation a session step started or resumed, so
+/// Sacrum can bind it. Without the id a later step could not resume this
+/// conversation, so failing to report it fails the step.
+async fn report_native_session_id(
+    execution_service: &dyn ExecutionService,
+    execution_id: &str,
+    native_session_id: &str,
+) -> Result<(), String> {
+    let params = vertebrae_core::execution_service::UpdateExecutionStatusParams::new(
+        vertebrae_core::models::ExecutionStatus::InProgress,
+    )
+    .with_native_session_id(native_session_id);
+    execution_service
+        .update_execution_status(execution_id, params)
+        .await
+        .map_err(|error| format!("Failed to report provider session id: {error}"))
 }
 
 impl StepExecutor {
@@ -861,7 +890,16 @@ impl StepExecutor {
             .clone()
             .unwrap_or_else(|| "Execute step".to_string());
         let actor_ref = myself.clone();
-        if resolved_harness == StepHarness::Codex {
+        let step_session = state.config.step_config.session.clone();
+        // Codex always runs a single-turn session; any harness runs one when
+        // the step names a session to start or resume.
+        if resolved_harness == StepHarness::Codex || step_session.is_some() {
+            let resume_id = match &step_session {
+                Some(StepSession::Resume { resume_id }) => Some(
+                    vertebrae_harness_core::ProviderResumeId::new(resume_id.clone()),
+                ),
+                Some(StepSession::New) | None => None,
+            };
             let session = match instance
                 .runtime
                 .start_session(
@@ -870,7 +908,7 @@ impl StepExecutor {
                             state.execution_id.clone(),
                         ),
                         stream_id,
-                        resume_id: None,
+                        resume_id,
                         config: request_config.clone(),
                     },
                     event_sink,
@@ -892,6 +930,39 @@ impl StepExecutor {
                     return Ok(());
                 }
             };
+            // A new conversation exists once its session starts: bind it in
+            // the supervisor's busy-session guard, then report it before the
+            // turn so Sacrum knows it before completion. A resumed id is
+            // reported only after its turn succeeds, because Claude confirms
+            // a resume target only when the turn runs.
+            if step_session == Some(StepSession::New) {
+                let bound = match session.provider_resume_id() {
+                    Some(native_session_id) => {
+                        let native_session_id = native_session_id.as_str().to_string();
+                        let _ = state.parent.cast(ProjectMessage::SessionBound {
+                            execution_id: state.execution_id.clone(),
+                            native_session_id: native_session_id.clone(),
+                        });
+                        report_native_session_id(
+                            state.config.execution_service.as_ref(),
+                            &state.execution_id,
+                            &native_session_id,
+                        )
+                        .await
+                    }
+                    None => Err("Harness did not report a provider session id".to_string()),
+                };
+                if let Err(error) = bound {
+                    let _ = session.close().await;
+                    let _ = state.parent.cast(ProjectMessage::StepFinished {
+                        execution_id: state.execution_id.clone(),
+                        task_id: state.task_id.clone(),
+                        result: StepResult::failed(None, error),
+                    });
+                    myself.stop(Some("native session id report failed".into()));
+                    return Ok(());
+                }
+            }
             let turn = match session
                 .send(SendTurnRequest {
                     turn_id: TurnId::new(format!("{}:turn", state.execution_id)),
@@ -918,10 +989,37 @@ impl StepExecutor {
             state.settings_guard = settings_guard;
             state.harness_session = Some(Arc::clone(&session));
             state.harness_turn = Some(Arc::clone(&turn));
+            let resumed_report =
+                matches!(step_session, Some(StepSession::Resume { .. })).then(|| {
+                    (
+                        Arc::clone(&state.config.execution_service),
+                        state.execution_id.clone(),
+                    )
+                });
             state.harness_outcome_handle = Some(tokio::spawn(async move {
                 let turn_result = turn.await_outcome().await;
                 let close_result = session.close().await;
-                let result = persistent_turn_result(turn_result, close_result);
+                let mut result = persistent_turn_result(turn_result, close_result);
+                if let Some((execution_service, execution_id)) = resumed_report
+                    && result
+                        .as_ref()
+                        .is_ok_and(|outcome| outcome.status == CompletionStatus::Completed)
+                {
+                    let reported = match session.provider_resume_id() {
+                        Some(native_session_id) => {
+                            report_native_session_id(
+                                execution_service.as_ref(),
+                                &execution_id,
+                                native_session_id.as_str(),
+                            )
+                            .await
+                        }
+                        None => Err("Harness did not report a provider session id".to_string()),
+                    };
+                    if let Err(error) = reported {
+                        result = Err(error);
+                    }
+                }
                 let _ = actor_ref.cast(StepExecutorMessage::HarnessSettled(Box::new(result)));
             }));
             return Ok(());
@@ -1191,6 +1289,7 @@ mod tests {
             agents: Vec::new(),
             skills: Vec::new(),
             verbose_daemon_logging: false,
+            session: None,
         };
         assert!(
             structured_inference_request(&base, "exec", StreamId::new("stream"), None)

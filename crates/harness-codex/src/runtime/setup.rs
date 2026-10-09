@@ -14,7 +14,7 @@ use vertebrae_harness_core::{
     ThreadDeclared, ThreadId, ThreadKind, UpdateSemantics,
 };
 
-use super::connection::{CodexConnection, is_draining};
+use super::connection::{CodexConnection, is_draining, is_missing_thread};
 use super::session::SessionState;
 use super::subscription::OwnedThreads;
 use super::trace::trace;
@@ -34,6 +34,11 @@ pub(crate) async fn setup_session(
 ) -> Result<Arc<SessionState>, HarnessError> {
     config.validate_request(&request_config)?;
     let default_output_schema = request_config.output_schema.clone();
+    // `thread/start` carries the effort for a new thread; a resumed thread
+    // gets it with each `turn/start` instead.
+    let reasoning_effort = resume_id
+        .as_ref()
+        .and(request_config.reasoning_effort.clone());
     let thread_params = thread_params(&config, &request_config);
     let (method, params) = if let Some(resume) = &resume_id {
         (
@@ -52,7 +57,13 @@ pub(crate) async fn setup_session(
         &owned_threads,
         Some((method, &params)),
     )
-    .await?;
+    .await
+    .map_err(|error| match &resume_id {
+        Some(resume) if is_missing_thread(&error) => HarnessError::SessionNotFound(format!(
+            "Codex thread {resume} cannot be resumed from this CODEX_HOME: {error}"
+        )),
+        _ => error,
+    })?;
     let sink = Arc::new(SequencedEventSink::new(
         Arc::new(EventSequencer::default()),
         event_sink,
@@ -111,6 +122,7 @@ pub(crate) async fn setup_session(
         root_session_id: root_session_id.clone(),
         root_thread_id: root_thread_id.clone(),
         default_output_schema,
+        reasoning_effort,
         root_turn_gate: AsyncMutex::new(()),
         cleanup: AsyncMutex::new(None),
         children: Mutex::new(HashMap::new()),
@@ -215,8 +227,15 @@ fn thread_params(
     params
 }
 
+/// `thread/resume` params. Codex pins developer instructions when a thread
+/// is created and has no resume `effort` field; the effort is sent with each
+/// `turn/start` instead.
 fn resume_params(thread_params: &Value, thread_id: &str) -> Value {
     let mut params = thread_params.clone();
+    if let Some(params) = params.as_object_mut() {
+        params.remove("effort");
+        params.remove("developerInstructions");
+    }
     params["threadId"] = json!(thread_id);
     params["excludeTurns"] = json!(true);
     params

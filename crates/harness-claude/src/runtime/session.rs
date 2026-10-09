@@ -63,6 +63,12 @@ pub(super) async fn run_persistent_process_v2(
     let mut close_error = Some("Claude stdout closed unexpectedly".to_string());
     let mut stdout_closed = false;
     let mut stderr_closed = false;
+    // A failed result before system/init means the process never started a
+    // conversation (for example an unknown --resume id). It is the session's
+    // failure reason whatever happens afterwards, and on a resume it means
+    // the requested conversation cannot be opened here.
+    let mut startup_error: Option<String> = None;
+    let resuming = decoder.context().provider_resume_id.is_some();
 
     trace(
         decoder.context().root_thread_id.as_str(),
@@ -134,7 +140,27 @@ pub(super) async fn run_persistent_process_v2(
                                 let _ = response.send(Ok(()));
                             }
                         }
-                        Err(error) => {
+                        Err(BeginTurnError::StdinClosed(turn, error)) if !initialized => {
+                            // The process stopped reading before it started a
+                            // conversation, so it is exiting. Keep reading its
+                            // output: its startup failure (for example an
+                            // unknown resume id) is the reason this turn fails.
+                            close_status = SessionCloseStatus::Failed;
+                            close_error = Some(error);
+                            pending_turn = Some(turn);
+                            initialization_timer.as_mut().reset(tokio::time::Instant::now() + initialization_timeout);
+                            initialization_timer_armed = true;
+                        }
+                        Err(BeginTurnError::StdinClosed(turn, error)) => {
+                            let _ = turn.outcome_tx.send(OutcomeState::Failed(error.clone()));
+                            if let Some(response) = turn.response {
+                                let _ = response.send(Err(error.clone()));
+                            }
+                            close_status = SessionCloseStatus::Failed;
+                            close_error = Some(error);
+                            break 'process;
+                        }
+                        Err(BeginTurnError::Failed(error)) => {
                             close_status = SessionCloseStatus::Failed;
                             close_error = Some(error);
                             break 'process;
@@ -310,6 +336,17 @@ pub(super) async fn run_persistent_process_v2(
                                 close_status = SessionCloseStatus::Failed;
                                 close_error = Some(error.to_string());
                                 break 'process;
+                            }
+                            if !initialized
+                                && let Some((_, outcome)) = &terminal
+                                && outcome.status == CompletionStatus::Failed
+                            {
+                                let error = outcome.error.clone().unwrap_or_else(|| {
+                                    "Claude session failed before initialization".into()
+                                });
+                                close_status = SessionCloseStatus::Failed;
+                                close_error = Some(error.clone());
+                                startup_error = Some(error);
                             }
                             if saw_root_declaration {
                                 initialized = true;
@@ -497,6 +534,11 @@ pub(super) async fn run_persistent_process_v2(
         }
     }
 
+    // Record a missing resumed conversation before answering any pending
+    // command, so callers see the provider reason rather than a broken pipe.
+    if resuming && let Some(error) = &startup_error {
+        let _ = close_tx.send(OutcomeState::SessionNotFound(error.clone()));
+    }
     for draft in decoder.unresolved_diagnostics() {
         if sequenced.emit(draft).await.is_err() {
             close_status = SessionCloseStatus::Failed;
@@ -577,6 +619,10 @@ pub(super) async fn run_persistent_process_v2(
         close_status = SessionCloseStatus::Failed;
         close_error = Some(format!("Claude exited with status {status}"));
     }
+    if let Some(error) = &startup_error {
+        close_status = SessionCloseStatus::Failed;
+        close_error = Some(error.clone());
+    }
     let outcome = SessionCloseOutcome {
         status: close_status,
         error: close_error,
@@ -601,7 +647,9 @@ pub(super) async fn run_persistent_process_v2(
         )),
         None,
     );
-    let _ = close_tx.send(OutcomeState::Ready(outcome.clone()));
+    if !(resuming && startup_error.is_some()) {
+        let _ = close_tx.send(OutcomeState::Ready(outcome.clone()));
+    }
     if let Some(response) = close_response {
         let _ = response.send(Ok(outcome));
     }
@@ -647,11 +695,11 @@ pub(super) async fn begin_persistent_turn(
     response: oneshot::Sender<Result<(), String>>,
     decoder: &mut ClaudeStreamDecoder,
     sink: &SequencedEventSink,
-) -> Result<PendingTurn, String> {
+) -> Result<PendingTurn, BeginTurnError> {
     if request.output_schema.is_some() {
         let error = "per-turn output schemas require a new Claude process".to_string();
         let _ = response.send(Err(error.clone()));
-        return Err(error);
+        return Err(BeginTurnError::Failed(error));
     }
     decoder.clear_pending_background_turn();
     let context = decoder.context().clone();
@@ -676,10 +724,17 @@ pub(super) async fn begin_persistent_turn(
             Some(&error.to_string()),
             None,
         );
-        let error = format!("failed to write Claude stdin: {error}");
-        let _ = outcome_tx.send(OutcomeState::Failed(error.clone()));
-        let _ = response.send(Err(error.clone()));
-        return Err(error);
+        let turn = PendingTurn {
+            id: request.turn_id,
+            content: request.content,
+            input_emitted: false,
+            response: Some(response),
+            outcome_tx,
+        };
+        return Err(BeginTurnError::StdinClosed(
+            turn,
+            format!("failed to write Claude stdin: {error}"),
+        ));
     }
     decoder.context_mut().turn_id = Some(request.turn_id.clone());
     let mut pending = PendingTurn {
@@ -696,9 +751,18 @@ pub(super) async fn begin_persistent_turn(
         if let Some(response) = pending.response.take() {
             let _ = response.send(Err(error.clone()));
         }
-        return Err(error);
+        return Err(BeginTurnError::Failed(error));
     }
     Ok(pending)
+}
+
+/// Why a turn could not be handed to the Claude process.
+pub(super) enum BeginTurnError {
+    /// Writing the prompt failed; the turn is returned unanswered so the
+    /// caller decides how it settles.
+    StdinClosed(PendingTurn, String),
+    /// The turn was rejected and already answered.
+    Failed(String),
 }
 
 pub(super) async fn emit_pending_turn_input(

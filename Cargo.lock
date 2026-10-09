@@ -7796,6 +7796,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
  "vertebrae-harness-core",
 ]
 

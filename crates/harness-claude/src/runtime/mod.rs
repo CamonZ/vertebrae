@@ -149,12 +149,18 @@ impl HarnessRuntime for ClaudeRuntime {
         event_sink: Arc<dyn vertebrae_harness_core::EventSink>,
         control_sink: Arc<dyn vertebrae_harness_core::ControlSink>,
     ) -> Result<Arc<dyn SessionHandle>, HarnessError> {
-        let spec = self.config.command_spec(
-            ClaudeLaunchMode::Persistent {
-                resume_id: request.resume_id.as_ref().map(ProviderResumeId::as_str),
+        // A new conversation gets an engine-chosen id so callers know the
+        // provider id before Claude emits system/init on the first turn.
+        let new_session_id = uuid::Uuid::new_v4().to_string();
+        let mode = match &request.resume_id {
+            Some(resume_id) => ClaudeLaunchMode::Persistent {
+                resume_id: Some(resume_id.as_str()),
             },
-            &request.config,
-        )?;
+            None => ClaudeLaunchMode::PersistentNew {
+                session_id: &new_session_id,
+            },
+        };
+        let spec = self.config.command_spec(mode, &request.config)?;
         let mut child = spawn_process(&spec, true).await?;
         let stdin = child.stdin.take().ok_or_else(|| {
             HarnessError::Operation("Claude process was spawned without piped stdin".into())
@@ -205,7 +211,12 @@ impl HarnessRuntime for ClaudeRuntime {
             // identity arrives through SessionStarted; these request values
             // keep the handle usable while that first turn is in flight.
             session_id: request.session_id,
-            provider_resume_id: request.resume_id,
+            provider_resume_id: Some(
+                request
+                    .resume_id
+                    .unwrap_or_else(|| ProviderResumeId::new(new_session_id)),
+            ),
+            process_output_schema: request.config.output_schema,
             command_tx,
             close_rx,
         }))

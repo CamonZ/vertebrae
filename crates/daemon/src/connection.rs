@@ -71,7 +71,8 @@ mod tests {
     async fn reject_with_body(listener: &tokio::net::TcpListener, status: &str, body: &str) {
         let (mut stream, _) = listener.accept().await.unwrap();
         let mut request = vec![0; 4096];
-        stream.read(&mut request).await.unwrap();
+        // Drain the handshake; its length is irrelevant to the rejection.
+        let _ = stream.read(&mut request).await.unwrap();
         stream
             .write_all(
                 format!(

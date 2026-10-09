@@ -187,7 +187,8 @@ pub const UPDATE_EXECUTION: &str = r#"
         $duration_ms: Int,
         $model: String,
         $model_provider: String,
-        $harness: String
+        $harness: String,
+        $native_session_id: String
     ) {
         update_step_execution(
             id: $id,
@@ -200,7 +201,8 @@ pub const UPDATE_EXECUTION: &str = r#"
             duration_ms: $duration_ms,
             model: $model,
             model_provider: $model_provider,
-            harness: $harness
+            harness: $harness,
+            native_session_id: $native_session_id
         ) {
             id
         }
