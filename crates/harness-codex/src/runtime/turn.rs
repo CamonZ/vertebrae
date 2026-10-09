@@ -67,6 +67,9 @@ impl SessionState {
             if let Some(schema) = output_schema {
                 params["outputSchema"] = schema;
             }
+            if let Some(effort) = &self.reasoning_effort {
+                params["effort"] = json!(effort);
+            }
             self.config.permission.apply_to_params(&mut params);
             let mut connection = self.connection_for_turn().await?;
             let mut retried_drain = false;

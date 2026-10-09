@@ -610,6 +610,185 @@ async fn custom_model_provider_is_selected_on_thread_start() {
     server.abort();
 }
 
+/// Serves `thread/start` and `thread/resume` for `root-thread` (or rejects
+/// the resume like Codex does for a thread without a rollout) and captures
+/// thread and turn params.
+async fn resume_server(
+    missing_thread: bool,
+) -> (
+    String,
+    tokio::task::JoinHandle<()>,
+    tokio::sync::mpsc::UnboundedReceiver<(String, Value)>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (params_tx, params_rx) = tokio::sync::mpsc::unbounded_channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        while let Some(frame) = socket.next().await {
+            let Ok(Message::Text(text)) = frame else {
+                break;
+            };
+            let request: Value = serde_json::from_str(&text).unwrap();
+            let (Some(method), Some(id)) = (
+                request.get("method").and_then(Value::as_str),
+                request.get("id"),
+            ) else {
+                continue;
+            };
+            let _ = params_tx.send((method.to_string(), request["params"].clone()));
+            let response = match method {
+                "initialize" => json!({"id": id, "result": {"capabilities": {}}}),
+                "thread/resume" if missing_thread => json!({"id": id, "error": {
+                    "code": -32600,
+                    "message": "no rollout found for thread id root-thread",
+                }}),
+                "thread/start" | "thread/resume" => {
+                    json!({"id": id, "result": {"thread": {"id": "root-thread"}}})
+                }
+                "turn/start" => json!({"id": id, "result": {"turn": {"id": "provider-turn"}}}),
+                _ => json!({"id": id, "result": {}}),
+            };
+            socket
+                .send(Message::Text(response.to_string()))
+                .await
+                .unwrap();
+        }
+    });
+    (format!("ws://{address}"), server, params_rx)
+}
+
+async fn captured_params(
+    params: &mut tokio::sync::mpsc::UnboundedReceiver<(String, Value)>,
+    method: &str,
+) -> Value {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let (captured, value) = params.recv().await.unwrap();
+            if captured == method {
+                return value;
+            }
+        }
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn resume_keeps_the_thread_and_sends_effort_per_turn() {
+    let (url, server, mut params) = resume_server(false).await;
+    let session = runtime(url)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::new("execution-1"),
+                stream_id: StreamId::new("stream"),
+                resume_id: Some("root-thread".into()),
+                config: vertebrae_harness_core::RequestConfig {
+                    model: Some("gpt-test".into()),
+                    reasoning_effort: Some("high".into()),
+                    developer_instructions: Some("standing rules".into()),
+                    ..Default::default()
+                },
+            },
+            Arc::new(CapturingSink::default()),
+            Arc::new(AutomaticControl),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        session.provider_resume_id().unwrap().as_str(),
+        "root-thread"
+    );
+
+    let resume = captured_params(&mut params, "thread/resume").await;
+    assert_eq!(resume["threadId"], "root-thread");
+    assert_eq!(resume["model"], "gpt-test");
+    assert!(resume.get("effort").is_none(), "{resume}");
+    assert!(resume.get("developerInstructions").is_none(), "{resume}");
+
+    let _turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::new("turn"),
+            content: "continue".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+    let turn = captured_params(&mut params, "turn/start").await;
+    assert_eq!(turn["threadId"], "root-thread");
+    assert_eq!(turn["effort"], "high");
+    let _ = session.close().await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn new_thread_sends_effort_only_with_thread_start() {
+    let (url, server, mut params) = resume_server(false).await;
+    let session = runtime(url)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::new("execution-1"),
+                stream_id: StreamId::new("stream"),
+                resume_id: None,
+                config: vertebrae_harness_core::RequestConfig {
+                    reasoning_effort: Some("high".into()),
+                    ..Default::default()
+                },
+            },
+            Arc::new(CapturingSink::default()),
+            Arc::new(AutomaticControl),
+        )
+        .await
+        .unwrap();
+    let start = captured_params(&mut params, "thread/start").await;
+    assert_eq!(start["effort"], "high", "{start}");
+
+    let _turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::new("turn"),
+            content: "work".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+    let turn = captured_params(&mut params, "turn/start").await;
+    assert!(turn.get("effort").is_none(), "{turn}");
+    let _ = session.close().await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn resume_of_a_thread_without_a_rollout_is_session_not_found() {
+    let (url, server, _params) = resume_server(true).await;
+    let runtime = CodexRuntime::new(CodexProviderConfig {
+        launcher: Some(Arc::new(TestLauncher { url })),
+        launch_attempts: 1,
+        ..Default::default()
+    });
+    let error = match runtime
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::new("execution-2"),
+                stream_id: StreamId::new("stream"),
+                resume_id: Some("root-thread".into()),
+                config: Default::default(),
+            },
+            Arc::new(CapturingSink::default()),
+            Arc::new(AutomaticControl),
+        )
+        .await
+    {
+        Ok(_) => panic!("an unknown thread must not start a session"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(&error, HarnessError::SessionNotFound(message) if message.contains("root-thread")),
+        "unexpected error: {error:?}"
+    );
+    server.abort();
+}
+
 #[tokio::test]
 async fn one_shot_emits_run_finished_and_cleans_up() {
     let (url, server, _) = mock_server().await;

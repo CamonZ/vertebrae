@@ -70,6 +70,13 @@ pub(crate) fn is_draining(error: &HarnessError) -> bool {
     text.contains("draining") && text.contains("(-32600)")
 }
 
+/// Codex rejects `thread/resume` for a thread without a rollout under this
+/// `CODEX_HOME` with `-32600 no rollout found for thread id …`.
+pub(crate) fn is_missing_thread(error: &HarnessError) -> bool {
+    let text = error.to_string();
+    text.contains("no rollout found") && text.contains("(-32600)")
+}
+
 pub(crate) struct CodexConnection {
     writer: Arc<AsyncMutex<WsSink>>,
     pending: Arc<AsyncMutex<HashMap<String, PendingResponse>>>,

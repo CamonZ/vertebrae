@@ -63,9 +63,12 @@ impl ClaudeStreamDecoder {
             context_window: Some(result_context_window(object)),
             total_cost_usd,
         };
+        // Startup failures such as an unknown --resume id carry no result
+        // text, only `errors`.
         let error = failed.then(|| {
             result_text
                 .clone()
+                .or_else(|| result_errors(object))
                 .unwrap_or_else(|| "Claude run failed".into())
         });
         let payload = if self.context.run_id.is_some() {
@@ -141,6 +144,16 @@ pub(super) fn result_context_window(object: &Map<String, Value>) -> u64 {
         })
         .max()
         .unwrap_or(super::DEFAULT_CONTEXT_WINDOW)
+}
+
+fn result_errors(object: &Map<String, Value>) -> Option<String> {
+    let errors = object
+        .get("errors")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    (!errors.is_empty()).then(|| errors.join("; "))
 }
 
 fn u64_field(object: &Map<String, Value>, key: &str) -> u64 {

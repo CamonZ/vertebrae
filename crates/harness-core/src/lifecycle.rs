@@ -202,6 +202,11 @@ pub enum HarnessError {
     Unsupported(String),
     #[error("invalid harness request: {0}")]
     InvalidRequest(String),
+    /// A resume named a provider conversation this harness cannot find, for
+    /// example one stored on another machine. Never answered by starting a
+    /// new conversation.
+    #[error("provider session not found: {0}")]
+    SessionNotFound(String),
     #[error("harness operation failed: {0}")]
     Operation(String),
     #[error("event sink failed: {0}")]

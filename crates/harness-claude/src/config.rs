@@ -213,8 +213,19 @@ impl Default for ClaudeProviderConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClaudeLaunchMode<'a> {
-    Persistent { resume_id: Option<&'a str> },
-    OneShot { prompt: &'a str },
+    /// Stream-json session that resumes `resume_id`, or starts a conversation
+    /// whose id Claude assigns when it emits `system/init`.
+    Persistent {
+        resume_id: Option<&'a str>,
+    },
+    /// Stream-json session that starts a conversation with a caller-chosen
+    /// id, so the id is known before the first turn.
+    PersistentNew {
+        session_id: &'a str,
+    },
+    OneShot {
+        prompt: &'a str,
+    },
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -301,7 +312,7 @@ impl ClaudeProviderConfig {
         }
         args.extend(self.prelude.args.clone());
         match mode {
-            ClaudeLaunchMode::Persistent { .. } => {
+            ClaudeLaunchMode::Persistent { .. } | ClaudeLaunchMode::PersistentNew { .. } => {
                 args.extend([
                     "--print".into(),
                     "--output-format".into(),
@@ -347,11 +358,14 @@ impl ClaudeProviderConfig {
             args.push("--json-schema".into());
             args.push(schema.to_string());
         }
+        // Claude pins the system prompt when a conversation is created and
+        // ignores --append-system-prompt on --resume.
+        let resuming = matches!(mode, ClaudeLaunchMode::Persistent { resume_id: Some(_) });
         if let Some(instructions) = request
             .developer_instructions
             .as_deref()
             .map(str::trim)
-            .filter(|instructions| !instructions.is_empty())
+            .filter(|instructions| !instructions.is_empty() && !resuming)
         {
             args.push("--append-system-prompt".into());
             args.push(instructions.into());
@@ -361,6 +375,10 @@ impl ClaudeProviderConfig {
                 if let Some(resume_id) = resume_id {
                     args.push(format!("--resume={resume_id}"));
                 }
+            }
+            ClaudeLaunchMode::PersistentNew { session_id } => {
+                args.push("--session-id".into());
+                args.push(session_id.into());
             }
             ClaudeLaunchMode::OneShot { prompt } => {
                 args.extend([
@@ -550,12 +568,7 @@ mod tests {
         };
 
         let spec = config
-            .command_spec(
-                ClaudeLaunchMode::OneShot {
-                    prompt: "do work".into(),
-                },
-                &request,
-            )
+            .command_spec(ClaudeLaunchMode::OneShot { prompt: "do work" }, &request)
             .expect("command spec");
 
         let model_flag = spec
@@ -581,12 +594,7 @@ mod tests {
         };
 
         let spec = config
-            .command_spec(
-                ClaudeLaunchMode::OneShot {
-                    prompt: "do work".into(),
-                },
-                &request,
-            )
+            .command_spec(ClaudeLaunchMode::OneShot { prompt: "do work" }, &request)
             .expect("command spec");
 
         let model_flag = spec

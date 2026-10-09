@@ -20,6 +20,7 @@ use vertebrae_core::{ProviderId, StepHarness, VertebraeServices};
 
 use crate::actors::step_executor::{
     ExecutionKind, StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult,
+    StepSession,
 };
 use crate::capabilities::{DaemonCapabilities, SharedDaemonCapabilities};
 use crate::output_validator::SchemaValidationError;
@@ -89,6 +90,12 @@ pub enum ProjectMessage {
         task_id: String,
         result: StepResult,
     },
+    /// A session step started a new provider conversation. Sent before the
+    /// id reaches Sacrum, so a resume of it is dispatched only afterwards.
+    SessionBound {
+        execution_id: String,
+        native_session_id: String,
+    },
     /// A script child persisted shutdown after joining its evaluation.
     ScriptStopped {
         execution_id: String,
@@ -133,6 +140,14 @@ impl std::fmt::Debug for ProjectMessage {
                 .field("execution_id", execution_id)
                 .field("task_id", task_id)
                 .field("result", result)
+                .finish(),
+            Self::SessionBound {
+                execution_id,
+                native_session_id,
+            } => f
+                .debug_struct("SessionBound")
+                .field("execution_id", execution_id)
+                .field("native_session_id", native_session_id)
                 .finish(),
             Self::Shutdown => write!(f, "Shutdown"),
             Self::ScriptStopped { execution_id } => {
@@ -249,6 +264,10 @@ pub struct RunStepPayload {
     /// when false, so older daemons (and the non-verbose path) see no change.
     #[serde(default)]
     pub verbose_daemon_logging: bool,
+    /// Named session for `llm_inference` steps: `{mode: "new"}` or
+    /// `{mode: "resume", resume_id}`. Absent for steps without a session.
+    #[serde(default)]
+    pub session: Option<StepSession>,
 }
 
 /// Parsed payload for a `cancel_step` channel event from Sacrum.
@@ -275,7 +294,14 @@ pub fn parse_run_step_payload(payload: &serde_json::Value) -> Result<RunStepPayl
         return Err("execute fields require explicit step_type='execute'".into());
     }
     if payload.get("step_type").and_then(serde_json::Value::as_str) == Some("execute") {
-        for forbidden in ["harness", "agent_config", "provider", "model", "input"] {
+        for forbidden in [
+            "harness",
+            "agent_config",
+            "provider",
+            "model",
+            "input",
+            "session",
+        ] {
             if payload.get(forbidden).is_some() {
                 return Err(format!("execute run_step must omit {forbidden}"));
             }
@@ -416,6 +442,7 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepCo
             agents: Vec::new(),
             skills: Vec::new(),
             verbose_daemon_logging: payload.verbose_daemon_logging,
+            session: None,
         });
     }
     if let Some(kind) = payload.step_type.as_deref()
@@ -444,6 +471,15 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepCo
         }
     };
 
+    if let Some(session) = &payload.session {
+        if structured_inference {
+            return Err("structured_inference steps cannot use a named session".into());
+        }
+        if matches!(session, StepSession::Resume { resume_id } if resume_id.trim().is_empty()) {
+            return Err("session mode 'resume' requires a non-empty resume_id".into());
+        }
+    }
+
     // Step-level contract from Sacrum overrides agent_config.
     if let Some(schema) = payload.output_schema.as_ref().filter(|v| !v.is_null()) {
         agent_config = agent_config.with_json_schema(schema.clone());
@@ -463,6 +499,7 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepCo
         agents: payload.agents.clone(),
         skills: payload.skills.clone(),
         verbose_daemon_logging: payload.verbose_daemon_logging,
+        session: payload.session.clone(),
     })
 }
 
@@ -557,6 +594,11 @@ pub struct ProjectState {
     /// StepExecutor (which owned the original) has stopped.
     pending_metadata: HashMap<String, ExecutionMetadata>,
     script_completions: HashMap<String, Arc<ScriptCompletion>>,
+    /// Provider session each running session step started or resumed,
+    /// keyed by execution id. One native session must never run two turns at
+    /// once: Claude silently forks the transcript and Codex rejects the
+    /// second writer.
+    active_sessions: HashMap<String, String>,
 }
 
 /// Per-project supervisor actor.
@@ -590,6 +632,7 @@ impl Actor for ProjectSupervisor {
             running_executors: HashMap::new(),
             pending_metadata: HashMap::new(),
             script_completions: HashMap::new(),
+            active_sessions: HashMap::new(),
         })
     }
 
@@ -633,6 +676,16 @@ impl Actor for ProjectSupervisor {
             } => {
                 self.handle_step_finished(&execution_id, &task_id, &result, state)
                     .await;
+            }
+            ProjectMessage::SessionBound {
+                execution_id,
+                native_session_id,
+            } => {
+                if state.running_executors.contains_key(&execution_id) {
+                    state
+                        .active_sessions
+                        .insert(execution_id, native_session_id);
+                }
             }
             ProjectMessage::Shutdown => {
                 self.handle_shutdown(myself, state);
@@ -976,6 +1029,36 @@ impl ProjectSupervisor {
         if state.running_executors.contains_key(execution_id) {
             return Ok(());
         }
+        let resume_id = match &step_config.session {
+            Some(StepSession::Resume { resume_id }) => Some(resume_id.clone()),
+            Some(StepSession::New) | None => None,
+        };
+        if let Some(resume_id) = &resume_id
+            && let Some((busy_execution, _)) =
+                state.active_sessions.iter().find(|(execution, session)| {
+                    *session == resume_id && state.running_executors.contains_key(*execution)
+                })
+        {
+            let params =
+                UpdateExecutionStatusParams::new(ExecutionStatus::Failed).with_output(format!(
+                    "Provider session {resume_id} is already running a turn in execution \
+                     {busy_execution}; parallel steps must fork the session instead of resuming it"
+                ));
+            if let Err(error) = state
+                .services
+                .executions()
+                .update_execution_status(execution_id, params)
+                .await
+            {
+                tracing::error!(
+                    "[project:{}] Failed to fail execution {} on a busy session: {}",
+                    state.project_id,
+                    execution_id,
+                    error
+                );
+            }
+            return Ok(());
+        }
         let metadata = if matches!(step_config.execution_kind, ExecutionKind::Execute(_)) {
             None
         } else {
@@ -1056,6 +1139,11 @@ impl ProjectSupervisor {
                 state
                     .running_executors
                     .insert(execution_id.to_string(), executor_ref.clone());
+                if let Some(resume_id) = resume_id {
+                    state
+                        .active_sessions
+                        .insert(execution_id.to_string(), resume_id);
+                }
 
                 if let Err(e) = executor_ref.cast(StepExecutorMessage::Execute) {
                     tracing::error!(
@@ -1134,6 +1222,7 @@ impl ProjectSupervisor {
     ) {
         // Remove from running executors map (it may already be removed by cancel).
         state.running_executors.remove(execution_id);
+        state.active_sessions.remove(execution_id);
         let metadata = state.pending_metadata.remove(execution_id);
         if let Some(completion) = state.script_completions.remove(execution_id)
             && !completion.claim_persistence()
@@ -1596,6 +1685,456 @@ mod tests {
     // ===== Test helpers =====
 
     /// Build a PhoenixMessage for testing.
+    #[test]
+    fn run_step_session_parses_new_resume_and_absent() {
+        let base = serde_json::json!({
+            "id": "exec-1",
+            "task_id": "task-1",
+            "step_type": "llm_inference",
+            "prompt": "work",
+        });
+        let config =
+            build_step_config_from_payload(&parse_run_step_payload(&base).unwrap()).unwrap();
+        assert_eq!(config.session, None);
+
+        let mut new = base.clone();
+        new["session"] = serde_json::json!({"mode": "new"});
+        let config =
+            build_step_config_from_payload(&parse_run_step_payload(&new).unwrap()).unwrap();
+        assert_eq!(config.session, Some(StepSession::New));
+
+        let mut resume = base.clone();
+        resume["session"] = serde_json::json!({"mode": "resume", "resume_id": "native-1"});
+        let config =
+            build_step_config_from_payload(&parse_run_step_payload(&resume).unwrap()).unwrap();
+        assert_eq!(
+            config.session,
+            Some(StepSession::Resume {
+                resume_id: "native-1".into()
+            })
+        );
+    }
+
+    #[test]
+    fn run_step_session_rejects_malformed_or_misplaced_sessions() {
+        let base = serde_json::json!({
+            "id": "exec-1",
+            "task_id": "task-1",
+            "step_type": "llm_inference",
+            "prompt": "work",
+        });
+        for session in [
+            serde_json::json!({"mode": "fork"}),
+            serde_json::json!({"mode": "resume"}),
+            serde_json::json!({"resume_id": "native-1"}),
+        ] {
+            let mut payload = base.clone();
+            payload["session"] = session.clone();
+            assert!(
+                parse_run_step_payload(&payload).is_err(),
+                "session {session} must not parse"
+            );
+        }
+
+        let mut blank = base.clone();
+        blank["session"] = serde_json::json!({"mode": "resume", "resume_id": " "});
+        assert!(
+            build_step_config_from_payload(&parse_run_step_payload(&blank).unwrap())
+                .unwrap_err()
+                .contains("non-empty resume_id")
+        );
+
+        let mut structured = base.clone();
+        structured["step_type"] = serde_json::json!("structured_inference");
+        structured["session"] = serde_json::json!({"mode": "new"});
+        assert!(
+            build_step_config_from_payload(&parse_run_step_payload(&structured).unwrap())
+                .unwrap_err()
+                .contains("named session")
+        );
+
+        let mut execute = execute_payload();
+        execute["session"] = serde_json::json!({"mode": "new"});
+        assert!(
+            parse_run_step_payload(&execute)
+                .unwrap_err()
+                .contains("omit session")
+        );
+    }
+
+    /// Fake Claude Code CLI: records its argv, then answers like the real
+    /// one in one-shot or stream-json mode. The conversation id is the
+    /// `--session-id` or `--resume=` value it was launched with. While a
+    /// `hold` file exists in `dir`, a stream-json turn marks `turn-started`
+    /// and waits for the test to remove `hold`.
+    fn fake_claude(dir: &std::path::Path, args_file: &std::path::Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("claude");
+        std::fs::write(
+            &path,
+            format!(
+                r#"#!/bin/sh
+printf '%s\n' "$@" > '{args}'
+sid=one-shot-session
+persistent=0
+prev=
+for arg in "$@"; do
+  case "$arg" in
+    --resume=*) sid="${{arg#--resume=}}" ;;
+    --input-format) persistent=1 ;;
+  esac
+  if [ "$prev" = "--session-id" ]; then sid="$arg"; fi
+  prev="$arg"
+done
+if [ "$sid" = missing-conversation ]; then
+  printf '%s\n' '{{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["No conversation found with session ID: missing-conversation"]}}'
+  exit 1
+fi
+init='{{"type":"system","subtype":"init","session_id":"'"$sid"'","model":"sonnet"}}'
+result='{{"type":"result","subtype":"success","result":"done"}}'
+if [ "$persistent" -eq 0 ]; then
+  printf '%s\n%s\n' "$init" "$result"
+  exit 0
+fi
+initialized=0
+while IFS= read -r _; do
+  if [ "$initialized" -eq 0 ]; then printf '%s\n' "$init"; initialized=1; fi
+  if [ -f '{hold}' ]; then
+    : > '{started}'
+    while [ -f '{hold}' ]; do sleep 0.02; done
+  fi
+  printf '%s\n' "$result"
+done
+"#,
+                args = args_file.display(),
+                hold = dir.join("hold").display(),
+                started = dir.join("turn-started").display(),
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        path
+    }
+
+    async fn provider_execution_server() -> wiremock::MockServer {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{body_string_contains, method, path},
+        };
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("create_session_log"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"data":{"create_session_log":{"id":"log-1"}}}),
+                ),
+            )
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"data":{"update_step_execution":{"id":"session-attempt"}}}),
+            ))
+            .with_priority(2)
+            .mount(&server)
+            .await;
+        server
+    }
+
+    /// Spawns a project whose Claude binary is the fake CLI.
+    async fn fake_claude_project(
+        temp: &tempfile::TempDir,
+        server: &wiremock::MockServer,
+    ) -> (
+        ActorRef<ProjectMessage>,
+        ractor::concurrency::JoinHandle<()>,
+    ) {
+        let executable = fake_claude(temp.path(), &temp.path().join("args.txt"));
+        let mut config = test_execute_config(server, Arc::new(ScriptWorker::default()));
+        let mut capabilities = (*config.capabilities).clone();
+        capabilities.provider_binaries.anthropic = Some(executable);
+        capabilities.shell_path = std::env::var("PATH").unwrap_or_default();
+        config.capabilities = Arc::new(capabilities);
+        config.project_root = temp.path().to_path_buf();
+        Actor::spawn(None, ProjectSupervisor, config).await.unwrap()
+    }
+
+    fn claude_step_payload(id: &str, session: Option<serde_json::Value>) -> serde_json::Value {
+        let mut payload = serde_json::json!({
+            "id": id,
+            "task_id": "session-task",
+            "project_id": "execute-project",
+            "step_type": "llm_inference",
+            "harness": "claude",
+            "prompt": "do the work",
+        });
+        if let Some(session) = session {
+            payload["session"] = session;
+        }
+        payload
+    }
+
+    /// Ordered `updateStepExecution` variables, once `done` accepts them.
+    async fn execution_updates(
+        server: &wiremock::MockServer,
+        done: impl Fn(&[serde_json::Value]) -> bool,
+    ) -> Vec<serde_json::Value> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let updates: Vec<serde_json::Value> = server
+                    .received_requests()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|request| {
+                        serde_json::from_slice::<serde_json::Value>(&request.body).unwrap()
+                    })
+                    .filter(|body| {
+                        body["query"]
+                            .as_str()
+                            .is_some_and(|query| query.contains("update_step_execution"))
+                    })
+                    .map(|body| body["variables"].clone())
+                    .collect();
+                if done(&updates) {
+                    return updates;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("expected execution updates did not arrive")
+    }
+
+    /// Runs one Claude `llm_inference` step against the fake CLI and returns
+    /// the ordered `updateStepExecution` variables and the CLI's argv.
+    async fn run_claude_step(
+        session: Option<serde_json::Value>,
+    ) -> (Vec<serde_json::Value>, String) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let server = provider_execution_server().await;
+        let (project, handle) = fake_claude_project(&temp, &server).await;
+        project
+            .cast(ProjectMessage::ChannelEvent(msg(
+                "daemon:test",
+                "run_step",
+                claude_step_payload("session-attempt", session),
+            )))
+            .unwrap();
+        let updates = execution_updates(&server, |updates| {
+            updates
+                .iter()
+                .any(|update| update["status"] != "in_progress")
+        })
+        .await;
+        project
+            .stop_and_wait(None, Some(Duration::from_secs(5)))
+            .await
+            .unwrap();
+        handle.await.unwrap();
+        let args = std::fs::read_to_string(temp.path().join("args.txt")).unwrap();
+        (updates, args)
+    }
+
+    async fn wait_for_file(path: &std::path::Path) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !path.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{} was not created", path.display()));
+    }
+
+    /// With the first step's turn held open, dispatches a resume of
+    /// `resume_id` and returns the second step's updates once it settles.
+    async fn resume_while_held(
+        temp: &tempfile::TempDir,
+        server: &wiremock::MockServer,
+        project: &ActorRef<ProjectMessage>,
+        resume_id: &str,
+    ) -> Vec<serde_json::Value> {
+        project
+            .cast(ProjectMessage::ChannelEvent(msg(
+                "daemon:test",
+                "run_step",
+                claude_step_payload(
+                    "second-attempt",
+                    Some(serde_json::json!({"mode": "resume", "resume_id": resume_id})),
+                ),
+            )))
+            .unwrap();
+        execution_updates(server, |updates| {
+            updates
+                .iter()
+                .any(|update| update["id"] == "second-attempt")
+        })
+        .await;
+        std::fs::remove_file(temp.path().join("hold")).unwrap();
+        let updates = execution_updates(server, |updates| {
+            updates
+                .iter()
+                .any(|update| update["id"] == "first-attempt" && update["status"] == "completed")
+        })
+        .await;
+        updates
+            .into_iter()
+            .filter(|update| update["id"] == "second-attempt")
+            .collect()
+    }
+
+    fn assert_rejected_as_busy(second: &[serde_json::Value]) {
+        assert_eq!(second.len(), 1, "{second:?}");
+        assert_eq!(second[0]["status"], "failed");
+        assert!(
+            second[0]["output"].as_str().is_some_and(
+                |output| output.contains("already running a turn in execution first-attempt")
+            ),
+            "{second:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_resume_of_a_busy_session_fails_without_starting_a_turn() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let server = provider_execution_server().await;
+        let (project, handle) = fake_claude_project(&temp, &server).await;
+        std::fs::write(temp.path().join("hold"), "").unwrap();
+        project
+            .cast(ProjectMessage::ChannelEvent(msg(
+                "daemon:test",
+                "run_step",
+                claude_step_payload(
+                    "first-attempt",
+                    Some(serde_json::json!({"mode": "resume", "resume_id": "held-conversation"})),
+                ),
+            )))
+            .unwrap();
+        wait_for_file(&temp.path().join("turn-started")).await;
+        let second = resume_while_held(&temp, &server, &project, "held-conversation").await;
+        project
+            .stop_and_wait(None, Some(Duration::from_secs(5)))
+            .await
+            .unwrap();
+        handle.await.unwrap();
+        assert_rejected_as_busy(&second);
+    }
+
+    #[tokio::test]
+    async fn resume_of_a_session_whose_creator_is_still_running_fails() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let server = provider_execution_server().await;
+        let (project, handle) = fake_claude_project(&temp, &server).await;
+        std::fs::write(temp.path().join("hold"), "").unwrap();
+        project
+            .cast(ProjectMessage::ChannelEvent(msg(
+                "daemon:test",
+                "run_step",
+                claude_step_payload("first-attempt", Some(serde_json::json!({"mode": "new"}))),
+            )))
+            .unwrap();
+        let updates = execution_updates(&server, |updates| {
+            updates
+                .iter()
+                .any(|update| update["native_session_id"].is_string())
+        })
+        .await;
+        let native_id = native_session_ids(&updates)[0].to_string();
+        wait_for_file(&temp.path().join("turn-started")).await;
+        let second = resume_while_held(&temp, &server, &project, &native_id).await;
+        project
+            .stop_and_wait(None, Some(Duration::from_secs(5)))
+            .await
+            .unwrap();
+        handle.await.unwrap();
+        assert_rejected_as_busy(&second);
+    }
+
+    fn native_session_ids(updates: &[serde_json::Value]) -> Vec<&str> {
+        updates
+            .iter()
+            .filter_map(|update| update["native_session_id"].as_str())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn step_without_a_session_keeps_the_one_shot_launch() {
+        let (updates, args) = run_claude_step(None).await;
+        assert_eq!(
+            updates.last().unwrap()["status"],
+            "completed",
+            "{updates:?}"
+        );
+        assert!(native_session_ids(&updates).is_empty(), "{updates:?}");
+        assert!(args.contains("--print\ndo the work\n"), "{args}");
+        assert!(!args.contains("--session-id"), "{args}");
+        assert!(!args.contains("--resume="), "{args}");
+    }
+
+    #[tokio::test]
+    async fn new_session_step_reports_its_engine_chosen_id_before_completion() {
+        let (updates, args) = run_claude_step(Some(serde_json::json!({"mode": "new"}))).await;
+        let completed = updates
+            .iter()
+            .position(|update| update["status"] == "completed")
+            .unwrap_or_else(|| panic!("step must complete: {updates:?}"));
+        let reported = updates
+            .iter()
+            .position(|update| update["native_session_id"].is_string())
+            .unwrap_or_else(|| panic!("native id must be reported: {updates:?}"));
+        assert!(reported < completed, "{updates:?}");
+        assert_eq!(updates[reported]["status"], "in_progress");
+        let native_id = updates[reported]["native_session_id"].as_str().unwrap();
+        assert!(uuid::Uuid::parse_str(native_id).is_ok(), "{native_id}");
+        assert!(
+            args.contains(&format!("--session-id\n{native_id}\n")),
+            "{args}"
+        );
+        assert!(args.contains("--input-format\nstream-json\n"), "{args}");
+    }
+
+    #[tokio::test]
+    async fn resume_session_step_continues_and_reports_the_bound_id() {
+        let (updates, args) = run_claude_step(Some(
+            serde_json::json!({"mode": "resume", "resume_id": "bound-conversation"}),
+        ))
+        .await;
+        assert_eq!(
+            updates.last().unwrap()["status"],
+            "completed",
+            "{updates:?}"
+        );
+        assert_eq!(native_session_ids(&updates), vec!["bound-conversation"]);
+        assert!(args.contains("--resume=bound-conversation\n"), "{args}");
+        assert!(!args.contains("--session-id"), "{args}");
+        assert!(!args.contains("--append-system-prompt"), "{args}");
+    }
+
+    #[tokio::test]
+    async fn resume_of_an_unknown_session_fails_instead_of_starting_fresh() {
+        let (updates, args) = run_claude_step(Some(
+            serde_json::json!({"mode": "resume", "resume_id": "missing-conversation"}),
+        ))
+        .await;
+        let terminal = updates.last().unwrap();
+        assert_eq!(terminal["status"], "failed", "{updates:?}");
+        assert!(
+            terminal["output"].as_str().is_some_and(|output| {
+                output.contains("provider session not found")
+                    && output.contains("No conversation found")
+            }),
+            "{terminal}"
+        );
+        assert!(native_session_ids(&updates).is_empty(), "{updates:?}");
+        assert!(args.contains("--resume=missing-conversation\n"), "{args}");
+        assert!(!args.contains("--session-id"), "{args}");
+    }
+
     fn msg(topic: &str, event: &str, payload: serde_json::Value) -> PhoenixMessage {
         PhoenixMessage {
             join_ref: None,
@@ -1808,6 +2347,7 @@ mod tests {
                 agents: Vec::new(),
                 skills: Vec::new(),
                 verbose_daemon_logging: false,
+                session: None,
             }),
             worktree: None,
         };
@@ -2438,6 +2978,7 @@ mod tests {
                 agents: Vec::new(),
                 skills: Vec::new(),
                 verbose_daemon_logging: false,
+                session: None,
             }),
             worktree: Some(PathBuf::from("/home/user/code/worktree-abc")),
         };
@@ -2559,6 +3100,7 @@ mod tests {
             step_type: None,
             harness: None,
             verbose_daemon_logging: false,
+            session: None,
         };
 
         let config = build_step_config_from_payload(&payload).unwrap();

@@ -525,7 +525,7 @@ done
         .await
         .unwrap();
     assert_eq!(session.session_id().as_str(), "requested-session");
-    assert!(session.provider_resume_id().is_none());
+    assert!(session.provider_resume_id().is_some());
 
     for (id, content) in [("turn-1", "first\nexact"), ("turn-2", "second exact")] {
         let turn = session
@@ -1534,6 +1534,252 @@ while IFS= read -r _; do :; done
     assert!(launch.contains("arg=--input-format\narg=stream-json\n"));
     assert!(launch.contains("arg=--resume=resume-canonical\n"));
     session.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn new_session_launches_with_its_engine_chosen_provider_id() {
+    let temp = TempDir::new().unwrap();
+    let capture = temp.path().join("launch.txt");
+    let executable = script(
+        &temp,
+        "new-session",
+        &format!(
+            r#"#!/bin/sh
+printf 'arg=%s\n' "$@" > '{}.tmp'
+mv '{}.tmp' '{}'
+while IFS= read -r _; do :; done
+"#,
+            capture.display(),
+            capture.display(),
+            capture.display()
+        ),
+    );
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("execution-1"),
+                stream_id: StreamId::from("new-stream"),
+                resume_id: None,
+                config: RequestConfig {
+                    developer_instructions: Some("standing rules".into()),
+                    ..RequestConfig::default()
+                },
+            },
+            Arc::new(CollectSink::default()),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let provider_id = session.provider_resume_id().unwrap().as_str().to_owned();
+    assert_ne!(provider_id, "execution-1");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !capture.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let launch = fs::read_to_string(capture).unwrap();
+    assert!(
+        launch.contains(&format!("arg=--session-id\narg={provider_id}\n")),
+        "captured launch:\n{launch}"
+    );
+    assert!(launch.contains("arg=--append-system-prompt\narg=standing rules\n"));
+    assert!(!launch.contains("arg=--resume="));
+    session.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn resumed_session_omits_creation_only_system_prompt() {
+    let temp = TempDir::new().unwrap();
+    let capture = temp.path().join("launch.txt");
+    let executable = script(
+        &temp,
+        "resume-instructions",
+        &format!(
+            r#"#!/bin/sh
+printf 'arg=%s\n' "$@" > '{}.tmp'
+mv '{}.tmp' '{}'
+while IFS= read -r _; do :; done
+"#,
+            capture.display(),
+            capture.display(),
+            capture.display()
+        ),
+    );
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("execution-2"),
+                stream_id: StreamId::from("resume-stream"),
+                resume_id: Some(vertebrae_harness_core::ProviderResumeId::from("bound")),
+                config: RequestConfig {
+                    model: Some("sonnet".into()),
+                    developer_instructions: Some("standing rules".into()),
+                    ..RequestConfig::default()
+                },
+            },
+            Arc::new(CollectSink::default()),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !capture.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let launch = fs::read_to_string(capture).unwrap();
+    assert!(
+        launch.contains("arg=--resume=bound\n"),
+        "captured launch:\n{launch}"
+    );
+    assert!(launch.contains("arg=--model\narg=sonnet\n"));
+    assert!(!launch.contains("--append-system-prompt"));
+    assert!(!launch.contains("--session-id"));
+    session.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn resume_of_an_unknown_conversation_fails_with_the_provider_reason() {
+    // The provider may exit before or after the first turn is sent.
+    for send_delay in [Duration::ZERO, Duration::from_millis(500)] {
+        assert_unknown_resume_fails_with_provider_reason(MISSING_RESUME, send_delay).await;
+    }
+}
+
+#[tokio::test]
+async fn unknown_resume_that_closes_stdin_before_reporting_fails_with_the_provider_reason() {
+    // The prompt write fails with a broken pipe; the reason arrives after it.
+    let report = MISSING_RESUME.strip_prefix("#!/bin/sh\n").unwrap();
+    let script = format!("#!/bin/sh\nexec </dev/null\nsleep 0.5\n{report}");
+    assert_unknown_resume_fails_with_provider_reason(&script, Duration::from_millis(100)).await;
+}
+
+const MISSING_RESUME: &str = r#"#!/bin/sh
+printf '%s\n' 'No conversation found with session ID: missing' >&2
+printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"session_id":"missing","errors":["No conversation found with session ID: missing"]}'
+exit 1
+"#;
+
+async fn assert_unknown_resume_fails_with_provider_reason(body: &str, send_delay: Duration) {
+    let temp = TempDir::new().unwrap();
+    let executable = script(&temp, "resume-missing", body);
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("execution-3"),
+                stream_id: StreamId::from("missing-stream"),
+                resume_id: Some(vertebrae_harness_core::ProviderResumeId::from("missing")),
+                config: RequestConfig::default(),
+            },
+            Arc::new(CollectSink::default()),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    tokio::time::sleep(send_delay).await;
+    let send = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("turn-1"),
+            content: "continue".into(),
+            output_schema: None,
+        })
+        .await;
+    let error = match send {
+        Err(error) => {
+            assert!(
+                matches!(error, HarnessError::SessionNotFound(_)),
+                "unexpected send error: {error:?}"
+            );
+            error.to_string()
+        }
+        Ok(turn) => {
+            let outcome = tokio::time::timeout(Duration::from_secs(3), turn.await_outcome())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(outcome.status, CompletionStatus::Failed);
+            outcome.error.unwrap()
+        }
+    };
+    assert!(
+        error.contains("No conversation found with session ID: missing"),
+        "unexpected error: {error}"
+    );
+    let close = session.close().await.unwrap_err();
+    assert!(
+        matches!(&close, HarnessError::SessionNotFound(message) if message.contains("No conversation found")),
+        "unexpected close: {close:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_turn_may_restate_the_process_output_schema() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "schema",
+        r#"#!/bin/sh
+initialized=0
+while IFS= read -r line; do
+  if [ "$initialized" -eq 0 ]; then
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"schema-session","model":"sonnet"}'
+    initialized=1
+  fi
+  printf '%s\n' '{"type":"result","subtype":"success","result":"","structured_output":{"ok":true}}'
+done
+"#,
+    );
+    let schema = serde_json::json!({"type": "object"});
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("execution-4"),
+                stream_id: StreamId::from("schema-stream"),
+                resume_id: None,
+                config: RequestConfig {
+                    output_schema: Some(schema.clone()),
+                    ..RequestConfig::default()
+                },
+            },
+            Arc::new(CollectSink::default()),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("turn-1"),
+            content: "answer".into(),
+            output_schema: Some(schema),
+        })
+        .await
+        .unwrap();
+    let outcome = tokio::time::timeout(Duration::from_secs(3), turn.await_outcome())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(outcome.status, CompletionStatus::Completed);
+    assert_eq!(
+        outcome.structured_output,
+        Some(serde_json::json!({"ok": true}))
+    );
+
+    let error = match session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("turn-2"),
+            content: "answer".into(),
+            output_schema: Some(serde_json::json!({"type": "array"})),
+        })
+        .await
+    {
+        Ok(_) => panic!("a different per-turn schema must be rejected"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("new Claude process"));
 }
 
 #[tokio::test]

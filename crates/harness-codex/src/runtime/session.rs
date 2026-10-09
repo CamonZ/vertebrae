@@ -42,6 +42,10 @@ pub(crate) struct SessionState {
     pub(super) root_session_id: SessionId,
     pub(super) root_thread_id: ThreadId,
     pub(super) default_output_schema: Option<Value>,
+    /// Reasoning effort sent with every `turn/start` of a resumed thread;
+    /// `thread/resume` has no effort field. `None` for new threads, whose
+    /// `thread/start` already carried it.
+    pub(super) reasoning_effort: Option<String>,
     pub(super) root_turn_gate: AsyncMutex<()>,
     pub(super) cleanup: AsyncMutex<Option<watch::Receiver<Option<SessionCloseOutcome>>>>,
     pub(super) children: Mutex<HashMap<String, ChildInfo>>,

@@ -47,6 +47,8 @@ pub struct UpdateExecutionStatusParams {
     pub model_provider: Option<String>,
     /// Optional harness that ran the execution (`claude`, `codex`, `typesafe`).
     pub harness: Option<String>,
+    /// Optional provider conversation id the execution started or resumed.
+    pub native_session_id: Option<String>,
 }
 
 /// Target used when requesting a durable TaskRun stop.
@@ -71,6 +73,7 @@ impl UpdateExecutionStatusParams {
             model: None,
             model_provider: None,
             harness: None,
+            native_session_id: None,
         }
     }
 
@@ -119,6 +122,12 @@ impl UpdateExecutionStatusParams {
 
     pub fn with_harness(mut self, harness: impl Into<String>) -> Self {
         self.harness = non_blank(harness.into());
+        self
+    }
+
+    /// Set the provider conversation id. Blank input is treated as unset.
+    pub fn with_native_session_id(mut self, id: impl Into<String>) -> Self {
+        self.native_session_id = non_blank(id.into());
         self
     }
 }
