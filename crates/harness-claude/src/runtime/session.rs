@@ -36,6 +36,7 @@ pub(super) async fn run_persistent_process_v2(
     mut commands: mpsc::UnboundedReceiver<SessionCommand>,
     close_tx: watch::Sender<OutcomeState<SessionCloseOutcome>>,
     context: ClaudeDecodeContext,
+    resuming: bool,
     event_sink: Arc<dyn EventSink>,
     control_sink: Arc<dyn ControlSink>,
     cleanup_timeout: std::time::Duration,
@@ -65,10 +66,9 @@ pub(super) async fn run_persistent_process_v2(
     let mut stderr_closed = false;
     // A failed result before system/init means the process never started a
     // conversation (for example an unknown --resume id). It is the session's
-    // failure reason whatever happens afterwards, and on a resume it means
-    // the requested conversation cannot be opened here.
+    // failure reason whatever happens afterwards, and on a resume or fork it
+    // means the requested conversation cannot be opened here.
     let mut startup_error: Option<String> = None;
-    let resuming = decoder.context().provider_resume_id.is_some();
 
     trace(
         decoder.context().root_thread_id.as_str(),

@@ -10,8 +10,8 @@ use tokio::sync::{Mutex as AsyncMutex, watch};
 use vertebrae_harness_core::{
     ControlSink, DiagnosticEvent, EventCorrelation, EventSequencer, EventSink, HarnessError,
     HarnessEventDraftV1, HarnessEventPayloadV1, ProviderResumeId, ProviderThreadRef,
-    SequencedEventSink, SessionCloseStatus, SessionId, SessionStarted, SpeedTier, StreamId,
-    ThreadDeclared, ThreadId, ThreadKind, UpdateSemantics,
+    SequencedEventSink, SessionCloseStatus, SessionId, SessionMode, SessionStarted, SpeedTier,
+    StreamId, ThreadDeclared, ThreadId, ThreadKind, UpdateSemantics,
 };
 
 use super::connection::{CodexConnection, is_draining, is_missing_thread};
@@ -28,27 +28,29 @@ pub(crate) async fn setup_session(
     config: Arc<CodexProviderConfig>,
     stream_id: StreamId,
     request_config: vertebrae_harness_core::RequestConfig,
-    resume_id: Option<ProviderResumeId>,
+    mode: SessionMode,
     event_sink: Arc<dyn EventSink>,
     control_sink: Arc<dyn ControlSink>,
 ) -> Result<Arc<SessionState>, HarnessError> {
     config.validate_request(&request_config)?;
     let default_output_schema = request_config.output_schema.clone();
-    // `thread/start` carries the effort for a new thread; a resumed thread
-    // gets it with each `turn/start` instead.
-    let reasoning_effort = resume_id
-        .as_ref()
+    // `thread/start` carries the effort for a new thread; a resumed or
+    // forked thread gets it with each `turn/start` instead.
+    let reasoning_effort = mode
+        .source_id()
         .and(request_config.reasoning_effort.clone());
     let thread_params = thread_params(&config, &request_config);
-    let (method, params) = if let Some(resume) = &resume_id {
-        (
+    let (method, params) = match &mode {
+        SessionMode::New => {
+            let mut params = thread_params.clone();
+            params["serviceName"] = json!("vertebrae");
+            ("thread/start", params)
+        }
+        SessionMode::Resume(resume) => (
             "thread/resume",
             resume_params(&thread_params, resume.as_str()),
-        )
-    } else {
-        let mut params = thread_params.clone();
-        params["serviceName"] = json!("vertebrae");
-        ("thread/start", params)
+        ),
+        SessionMode::Fork(source) => ("thread/fork", fork_params(&thread_params, source.as_str())),
     };
     let owned_threads = Arc::new(OwnedThreads::default());
     let (connection, response, skill_root_warnings) = attach(
@@ -58,9 +60,9 @@ pub(crate) async fn setup_session(
         Some((method, &params)),
     )
     .await
-    .map_err(|error| match &resume_id {
-        Some(resume) if is_missing_thread(&error) => HarnessError::SessionNotFound(format!(
-            "Codex thread {resume} cannot be resumed from this CODEX_HOME: {error}"
+    .map_err(|error| match mode.source_id() {
+        Some(source) if is_missing_thread(&error) => HarnessError::SessionNotFound(format!(
+            "Codex thread {source} cannot be resumed from this CODEX_HOME: {error}"
         )),
         _ => error,
     })?;
@@ -238,6 +240,17 @@ fn resume_params(thread_params: &Value, thread_id: &str) -> Value {
     }
     params["threadId"] = json!(thread_id);
     params["excludeTurns"] = json!(true);
+    params
+}
+
+/// `thread/fork` params: the `thread/resume` params for the source thread,
+/// which `thread/fork` copies into a new thread. Fork has no personality;
+/// it stays pinned from the source thread.
+fn fork_params(thread_params: &Value, source_id: &str) -> Value {
+    let mut params = resume_params(thread_params, source_id);
+    if let Some(params) = params.as_object_mut() {
+        params.remove("personality");
+    }
     params
 }
 

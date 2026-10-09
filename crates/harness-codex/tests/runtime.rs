@@ -17,7 +17,7 @@ use vertebrae_harness_codex::{
 };
 use vertebrae_harness_core::{
     CompletionStatus, ControlResolution, ControlSink, EventSink, HarnessError,
-    HarnessEventPayloadV1, HarnessRuntime, RunRequest, SendTurnRequest, SessionId,
+    HarnessEventPayloadV1, HarnessRuntime, RunRequest, SendTurnRequest, SessionId, SessionMode,
     StartSessionRequest, StreamId, TurnId, TurnInputProvenance,
 };
 
@@ -373,7 +373,7 @@ async fn start_test_session(
             StartSessionRequest {
                 session_id: SessionId::new("surface-session"),
                 stream_id: StreamId::new("stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: Default::default(),
             },
             sink,
@@ -394,7 +394,7 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
             StartSessionRequest {
                 session_id: SessionId::new("surface-session"),
                 stream_id: StreamId::new("stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: Default::default(),
             },
             events.clone(),
@@ -640,13 +640,14 @@ async fn resume_server(
             let _ = params_tx.send((method.to_string(), request["params"].clone()));
             let response = match method {
                 "initialize" => json!({"id": id, "result": {"capabilities": {}}}),
-                "thread/resume" if missing_thread => json!({"id": id, "error": {
+                "thread/resume" | "thread/fork" if missing_thread => json!({"id": id, "error": {
                     "code": -32600,
                     "message": "no rollout found for thread id root-thread",
                 }}),
                 "thread/start" | "thread/resume" => {
                     json!({"id": id, "result": {"thread": {"id": "root-thread"}}})
                 }
+                "thread/fork" => json!({"id": id, "result": {"thread": {"id": "forked-thread"}}}),
                 "turn/start" => json!({"id": id, "result": {"turn": {"id": "provider-turn"}}}),
                 _ => json!({"id": id, "result": {}}),
             };
@@ -683,7 +684,7 @@ async fn resume_keeps_the_thread_and_sends_effort_per_turn() {
             StartSessionRequest {
                 session_id: SessionId::new("execution-1"),
                 stream_id: StreamId::new("stream"),
-                resume_id: Some("root-thread".into()),
+                mode: SessionMode::Resume("root-thread".into()),
                 config: vertebrae_harness_core::RequestConfig {
                     model: Some("gpt-test".into()),
                     reasoning_effort: Some("high".into()),
@@ -730,7 +731,7 @@ async fn new_thread_sends_effort_only_with_thread_start() {
             StartSessionRequest {
                 session_id: SessionId::new("execution-1"),
                 stream_id: StreamId::new("stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: vertebrae_harness_core::RequestConfig {
                     reasoning_effort: Some("high".into()),
                     ..Default::default()
@@ -759,7 +760,66 @@ async fn new_thread_sends_effort_only_with_thread_start() {
 }
 
 #[tokio::test]
+async fn fork_reports_the_new_thread_and_sends_effort_per_turn() {
+    let (url, server, mut params) = resume_server(false).await;
+    let session = runtime(url)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::new("execution-3"),
+                stream_id: StreamId::new("stream"),
+                mode: SessionMode::Fork("root-thread".into()),
+                config: vertebrae_harness_core::RequestConfig {
+                    model: Some("gpt-test".into()),
+                    reasoning_effort: Some("high".into()),
+                    personality: Some("pragmatic".into()),
+                    developer_instructions: Some("standing rules".into()),
+                    ..Default::default()
+                },
+            },
+            Arc::new(CapturingSink::default()),
+            Arc::new(AutomaticControl),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        session.provider_resume_id().unwrap().as_str(),
+        "forked-thread"
+    );
+
+    let fork = captured_params(&mut params, "thread/fork").await;
+    assert_eq!(fork["threadId"], "root-thread");
+    assert_eq!(fork["model"], "gpt-test");
+    assert!(fork.get("lastTurnId").is_none(), "{fork}");
+    for creation_only in ["effort", "developerInstructions", "personality"] {
+        assert!(fork.get(creation_only).is_none(), "{fork}");
+    }
+
+    let _turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::new("turn"),
+            content: "branch".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+    let turn = captured_params(&mut params, "turn/start").await;
+    assert_eq!(turn["threadId"], "forked-thread");
+    assert_eq!(turn["effort"], "high");
+    let _ = session.close().await;
+    server.abort();
+}
+
+#[tokio::test]
 async fn resume_of_a_thread_without_a_rollout_is_session_not_found() {
+    assert_missing_source_is_session_not_found(SessionMode::Resume("root-thread".into())).await;
+}
+
+#[tokio::test]
+async fn fork_of_a_thread_without_a_rollout_is_session_not_found() {
+    assert_missing_source_is_session_not_found(SessionMode::Fork("root-thread".into())).await;
+}
+
+async fn assert_missing_source_is_session_not_found(mode: SessionMode) {
     let (url, server, _params) = resume_server(true).await;
     let runtime = CodexRuntime::new(CodexProviderConfig {
         launcher: Some(Arc::new(TestLauncher { url })),
@@ -771,7 +831,7 @@ async fn resume_of_a_thread_without_a_rollout_is_session_not_found() {
             StartSessionRequest {
                 session_id: SessionId::new("execution-2"),
                 stream_id: StreamId::new("stream"),
-                resume_id: Some("root-thread".into()),
+                mode,
                 config: Default::default(),
             },
             Arc::new(CapturingSink::default()),

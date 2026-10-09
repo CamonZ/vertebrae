@@ -25,8 +25,8 @@ use vertebrae_harness_core::{
     EventId, EventSink, FileChange, FileChangeEvent, FileChangeKind, HarnessError,
     HarnessEventPayloadV1, HarnessEventV1, HarnessProjection, HarnessRuntime, ProviderResumeId,
     ProviderThreadRef, RequestConfig, ResolutionSource, RunId, RunRequest, SendTurnRequest,
-    SessionId, StartSessionRequest, StreamId, ToolCallId, ToolStatus, TurnId, TurnInputProvenance,
-    UpdateSemantics,
+    SessionId, SessionMode, StartSessionRequest, StreamId, ToolCallId, ToolStatus, TurnId,
+    TurnInputProvenance, UpdateSemantics,
 };
 
 /// These events differ because one surface owns a reusable session while the
@@ -213,7 +213,7 @@ async fn interruption_and_cancellation_keep_their_distinct_lifecycle_contract() 
             StartSessionRequest {
                 session_id: SessionId::from("placeholder"),
                 stream_id: StreamId::from("persistent-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig {
                     verbosity: None,
                     output_schema: Some(json!({"type": "object"})),
@@ -741,7 +741,9 @@ async fn run_persistent(
             StartSessionRequest {
                 session_id: SessionId::from("placeholder"),
                 stream_id: StreamId::from("persistent-stream"),
-                resume_id: resume_id.map(ProviderResumeId::from),
+                mode: resume_id.map_or(SessionMode::New, |id| {
+                    SessionMode::Resume(ProviderResumeId::from(id))
+                }),
                 config: RequestConfig {
                     verbosity: None,
                     output_schema: Some(json!({"type": "object"})),

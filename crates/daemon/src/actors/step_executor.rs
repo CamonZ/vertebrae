@@ -24,8 +24,8 @@ use vertebrae_harness_core::{
     CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
     ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
     RequestConfig, ResolutionSource, RunHandle, RunOutcome, SendTurnRequest, SessionCloseStatus,
-    SessionHandle, SessionUsage, StartSessionRequest, StreamId, TurnHandle, TurnId, TurnOutcome,
-    interrupt_close_and_await,
+    SessionHandle, SessionMode, SessionUsage, StartSessionRequest, StreamId, TurnHandle, TurnId,
+    TurnOutcome, interrupt_close_and_await,
 };
 
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
@@ -57,13 +57,26 @@ impl ExecutionKind {
     }
 }
 
-/// Named-session dispatch from Sacrum's `run_step` `session` field: start a
-/// new provider conversation, or continue the bound one.
+/// Session dispatch from Sacrum's `run_step` `session` field: start a new
+/// provider conversation, continue the bound one, or branch a new one from
+/// it. `resume_id` names the existing conversation for both resume and fork.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum StepSession {
     New,
     Resume { resume_id: String },
+    Fork { resume_id: String },
+}
+
+impl StepSession {
+    /// The provider-neutral harness mode for this dispatch.
+    fn harness_mode(&self) -> SessionMode {
+        match self {
+            Self::New => SessionMode::New,
+            Self::Resume { resume_id } => SessionMode::Resume(resume_id.clone().into()),
+            Self::Fork { resume_id } => SessionMode::Fork(resume_id.clone().into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -85,7 +98,7 @@ pub struct StepConfig {
     /// build/spawn/stream checkpoints. Defaults to false; toggled per-step
     /// from the Sacrum `run_step` payload.
     pub verbose_daemon_logging: bool,
-    /// Present only for `llm_inference` steps that declare a named session.
+    /// Present only for `llm_inference` steps dispatched with a session.
     pub session: Option<StepSession>,
 }
 
@@ -892,14 +905,8 @@ impl StepExecutor {
         let actor_ref = myself.clone();
         let step_session = state.config.step_config.session.clone();
         // Codex always runs a single-turn session; any harness runs one when
-        // the step names a session to start or resume.
+        // the step names a session to start, resume or fork.
         if resolved_harness == StepHarness::Codex || step_session.is_some() {
-            let resume_id = match &step_session {
-                Some(StepSession::Resume { resume_id }) => Some(
-                    vertebrae_harness_core::ProviderResumeId::new(resume_id.clone()),
-                ),
-                Some(StepSession::New) | None => None,
-            };
             let session = match instance
                 .runtime
                 .start_session(
@@ -908,7 +915,9 @@ impl StepExecutor {
                             state.execution_id.clone(),
                         ),
                         stream_id,
-                        resume_id,
+                        mode: step_session
+                            .as_ref()
+                            .map_or(SessionMode::New, StepSession::harness_mode),
                         config: request_config.clone(),
                     },
                     event_sink,
@@ -932,9 +941,9 @@ impl StepExecutor {
             };
             // A new conversation exists once its session starts: bind it in
             // the supervisor's busy-session guard, then report it before the
-            // turn so Sacrum knows it before completion. A resumed id is
-            // reported only after its turn succeeds, because Claude confirms
-            // a resume target only when the turn runs.
+            // turn so Sacrum knows it before completion. A resumed or forked
+            // id is reported only after its turn succeeds, because Claude
+            // confirms a resume or fork source only when the turn runs.
             if step_session == Some(StepSession::New) {
                 let bound = match session.provider_resume_id() {
                     Some(native_session_id) => {
@@ -989,13 +998,16 @@ impl StepExecutor {
             state.settings_guard = settings_guard;
             state.harness_session = Some(Arc::clone(&session));
             state.harness_turn = Some(Arc::clone(&turn));
-            let resumed_report =
-                matches!(step_session, Some(StepSession::Resume { .. })).then(|| {
-                    (
-                        Arc::clone(&state.config.execution_service),
-                        state.execution_id.clone(),
-                    )
-                });
+            let resumed_report = matches!(
+                step_session,
+                Some(StepSession::Resume { .. } | StepSession::Fork { .. })
+            )
+            .then(|| {
+                (
+                    Arc::clone(&state.config.execution_service),
+                    state.execution_id.clone(),
+                )
+            });
             state.harness_outcome_handle = Some(tokio::spawn(async move {
                 let turn_result = turn.await_outcome().await;
                 let close_result = session.close().await;

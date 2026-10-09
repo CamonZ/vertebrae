@@ -6,8 +6,8 @@ use tokio::sync::{mpsc, oneshot, watch};
 use vertebrae_harness_core::{
     HarnessCapabilities, HarnessError, HarnessRuntime, ModelCapability, PermissionModeCapability,
     ProviderResumeId, QuestionCapabilities, RunHandle, RunRequest, SendTurnRequest,
-    SessionCloseOutcome, SessionHandle, SessionId, SpeedTier, StartSessionRequest, TurnId,
-    TurnOutcome,
+    SessionCloseOutcome, SessionHandle, SessionId, SessionMode, SpeedTier, StartSessionRequest,
+    TurnId, TurnOutcome,
 };
 
 use crate::{
@@ -149,17 +149,28 @@ impl HarnessRuntime for ClaudeRuntime {
         event_sink: Arc<dyn vertebrae_harness_core::EventSink>,
         control_sink: Arc<dyn vertebrae_harness_core::ControlSink>,
     ) -> Result<Arc<dyn SessionHandle>, HarnessError> {
-        // A new conversation gets an engine-chosen id so callers know the
-        // provider id before Claude emits system/init on the first turn.
+        // A new or forked conversation gets an engine-chosen id so callers
+        // know the provider id before Claude emits system/init on the first
+        // turn.
         let new_session_id = uuid::Uuid::new_v4().to_string();
-        let mode = match &request.resume_id {
-            Some(resume_id) => ClaudeLaunchMode::Persistent {
+        let resume_id = match &request.mode {
+            SessionMode::Resume(resume_id) => Some(resume_id.clone()),
+            SessionMode::New | SessionMode::Fork(_) => None,
+        };
+        let mode = match &request.mode {
+            SessionMode::New => ClaudeLaunchMode::PersistentNew {
+                session_id: &new_session_id,
+            },
+            SessionMode::Resume(resume_id) => ClaudeLaunchMode::Persistent {
                 resume_id: Some(resume_id.as_str()),
             },
-            None => ClaudeLaunchMode::PersistentNew {
+            SessionMode::Fork(source_id) => ClaudeLaunchMode::PersistentFork {
+                source_id: source_id.as_str(),
                 session_id: &new_session_id,
             },
         };
+        // A missing resume or fork source is reported as SessionNotFound.
+        let opens_existing = request.mode.source_id().is_some();
         let spec = self.config.command_spec(mode, &request.config)?;
         let mut child = spawn_process(&spec, true).await?;
         let stdin = child.stdin.take().ok_or_else(|| {
@@ -177,15 +188,14 @@ impl HarnessRuntime for ClaudeRuntime {
             // A newly created Claude session has no provider conversation id
             // until the first input causes Claude to emit system/init. A
             // resumed session can safely send its known provider id.
-            session_id: request
-                .resume_id
+            session_id: resume_id
                 .as_ref()
                 .map(|resume_id| SessionId::new(resume_id.as_str())),
             root_thread_id: vertebrae_harness_core::ThreadId::new(request.session_id.as_str()),
             root_stream_id: request.stream_id,
             turn_id: None,
             run_id: None,
-            provider_resume_id: request.resume_id.clone(),
+            provider_resume_id: resume_id.clone(),
             requested_speed_tier: request.config.speed_tier,
         };
         let cleanup_timeout = self.config.cleanup_timeout;
@@ -199,6 +209,7 @@ impl HarnessRuntime for ClaudeRuntime {
             command_rx,
             close_tx,
             context,
+            opens_existing,
             event_sink,
             control_sink,
             cleanup_timeout,
@@ -212,9 +223,7 @@ impl HarnessRuntime for ClaudeRuntime {
             // keep the handle usable while that first turn is in flight.
             session_id: request.session_id,
             provider_resume_id: Some(
-                request
-                    .resume_id
-                    .unwrap_or_else(|| ProviderResumeId::new(new_session_id)),
+                resume_id.unwrap_or_else(|| ProviderResumeId::new(new_session_id)),
             ),
             process_output_schema: request.config.output_schema,
             command_tx,

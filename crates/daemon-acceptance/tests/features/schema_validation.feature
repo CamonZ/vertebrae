@@ -17,7 +17,7 @@ Feature: Schema validation failure
     Given a configured daemon test environment
     And a workflow with one inference step and an output schema
     And a task assigned to the workflow
-    When the mock is scripted to succeed without a result line
+    When the mock is scripted to succeed with an empty result
     And I start a TaskRun
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"

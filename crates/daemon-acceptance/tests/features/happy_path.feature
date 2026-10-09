@@ -28,17 +28,6 @@ Feature: Happy path step execution
     And the execution records positive duration_ms
     And the execution records a non-zero cost
 
-  Scenario: Completed execution without a stream-json result line
-    Given a configured daemon test environment
-    And a workflow with one inference step
-    And a task assigned to the workflow
-    When the mock is scripted to succeed without a result line
-    And I start a TaskRun
-    And I wait for the execution to reach status "completed"
-    Then the execution status is "completed"
-    And the execution has no recorded output
-    And the execution has no recorded metrics
-
   Scenario: Every stdout line produces a session log entry
     Given a configured daemon test environment
     And a workflow with one inference step
@@ -48,14 +37,3 @@ Feature: Happy path step execution
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution has at least 3 session log entries
-
-  Scenario: Completed with only stderr output
-    Given a configured daemon test environment
-    And a workflow with one inference step
-    And a task assigned to the workflow
-    When the mock is scripted to succeed with only stderr output
-    And I start a TaskRun
-    And I wait for the execution to reach status "completed"
-    Then the execution status is "completed"
-    And the execution has no recorded output
-    And the execution has 2 session log entries

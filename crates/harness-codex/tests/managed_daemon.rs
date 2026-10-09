@@ -15,7 +15,7 @@ use vertebrae_harness_codex::{
 use vertebrae_harness_core::{
     CompletionStatus, ControlResolution, ControlSink, EventSink, HarnessError,
     HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, SendTurnRequest, SessionHandle,
-    SessionId, StartSessionRequest, TurnId,
+    SessionId, SessionMode, StartSessionRequest, TurnId,
 };
 
 struct TestLauncher {
@@ -165,7 +165,7 @@ async fn start(runtime: &CodexRuntime, events: Arc<CapturingSink>) -> Arc<dyn Se
                 session_id: SessionId::new("surface-session"),
                 stream_id: "stream".into(),
                 config: Default::default(),
-                resume_id: None,
+                mode: SessionMode::New,
             },
             events,
             Arc::new(AllowControl),
