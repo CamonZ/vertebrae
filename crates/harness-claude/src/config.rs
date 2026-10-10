@@ -223,6 +223,12 @@ pub enum ClaudeLaunchMode<'a> {
     PersistentNew {
         session_id: &'a str,
     },
+    /// Stream-json session that starts conversation `session_id` as a copy
+    /// of `source_id`, leaving the source unchanged.
+    PersistentFork {
+        source_id: &'a str,
+        session_id: &'a str,
+    },
     OneShot {
         prompt: &'a str,
     },
@@ -312,7 +318,9 @@ impl ClaudeProviderConfig {
         }
         args.extend(self.prelude.args.clone());
         match mode {
-            ClaudeLaunchMode::Persistent { .. } | ClaudeLaunchMode::PersistentNew { .. } => {
+            ClaudeLaunchMode::Persistent { .. }
+            | ClaudeLaunchMode::PersistentNew { .. }
+            | ClaudeLaunchMode::PersistentFork { .. } => {
                 args.extend([
                     "--print".into(),
                     "--output-format".into(),
@@ -359,8 +367,12 @@ impl ClaudeProviderConfig {
             args.push(schema.to_string());
         }
         // Claude pins the system prompt when a conversation is created and
-        // ignores --append-system-prompt on --resume.
-        let resuming = matches!(mode, ClaudeLaunchMode::Persistent { resume_id: Some(_) });
+        // ignores --append-system-prompt on --resume, forks included.
+        let resuming = matches!(
+            mode,
+            ClaudeLaunchMode::Persistent { resume_id: Some(_) }
+                | ClaudeLaunchMode::PersistentFork { .. }
+        );
         if let Some(instructions) = request
             .developer_instructions
             .as_deref()
@@ -377,6 +389,15 @@ impl ClaudeProviderConfig {
                 }
             }
             ClaudeLaunchMode::PersistentNew { session_id } => {
+                args.push("--session-id".into());
+                args.push(session_id.into());
+            }
+            ClaudeLaunchMode::PersistentFork {
+                source_id,
+                session_id,
+            } => {
+                args.push(format!("--resume={source_id}"));
+                args.push("--fork-session".into());
                 args.push("--session-id".into());
                 args.push(session_id.into());
             }

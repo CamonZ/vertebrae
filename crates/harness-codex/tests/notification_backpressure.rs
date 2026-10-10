@@ -17,7 +17,7 @@ use vertebrae_harness_codex::{
 };
 use vertebrae_harness_core::{
     CompletionStatus, ControlResolution, ControlSink, EventSink, HarnessError,
-    HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, SendTurnRequest, SessionId,
+    HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, SendTurnRequest, SessionId, SessionMode,
     StartSessionRequest, StreamId, TurnId, UpdateSemantics,
 };
 
@@ -87,7 +87,7 @@ async fn start_test_session(
             StartSessionRequest {
                 session_id: SessionId::new("surface-session"),
                 stream_id: StreamId::new("stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: Default::default(),
             },
             sink,

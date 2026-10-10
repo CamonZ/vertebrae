@@ -22,7 +22,8 @@ use crate::CodexProviderConfig;
 use vertebrae_harness_core::{
     ApprovalCategory, CompletionStatus, ControlSink, EventSink, HarnessCapabilities, HarnessError,
     HarnessRuntime, OutcomeMetrics, QuestionCapabilities, RunHandle, RunOutcome, RunRequest,
-    SessionCloseStatus, SessionHandle, StartSessionRequest, TurnId, TurnInputProvenance,
+    SessionCloseStatus, SessionHandle, SessionMode, StartSessionRequest, TurnId,
+    TurnInputProvenance,
 };
 
 use handles::{CodexRunHandle, CodexSessionHandle, OutcomeState};
@@ -88,7 +89,7 @@ impl HarnessRuntime for CodexRuntime {
             Arc::clone(&self.config),
             request.stream_id,
             request.config,
-            request.resume_id,
+            request.mode,
             event_sink,
             control_sink,
         )
@@ -111,7 +112,7 @@ impl HarnessRuntime for CodexRuntime {
             Arc::clone(&self.config),
             request.stream_id,
             request.config,
-            None,
+            SessionMode::New,
             event_sink,
             control_sink,
         )

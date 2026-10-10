@@ -264,8 +264,9 @@ pub struct RunStepPayload {
     /// when false, so older daemons (and the non-verbose path) see no change.
     #[serde(default)]
     pub verbose_daemon_logging: bool,
-    /// Named session for `llm_inference` steps: `{mode: "new"}` or
-    /// `{mode: "resume", resume_id}`. Absent for steps without a session.
+    /// Session for `llm_inference` steps: `{mode: "new"}`,
+    /// `{mode: "resume", resume_id}` or `{mode: "fork", resume_id}`. Absent
+    /// for steps without a session.
     #[serde(default)]
     pub session: Option<StepSession>,
 }
@@ -475,8 +476,14 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> Result<StepCo
         if structured_inference {
             return Err("structured_inference steps cannot use a named session".into());
         }
-        if matches!(session, StepSession::Resume { resume_id } if resume_id.trim().is_empty()) {
-            return Err("session mode 'resume' requires a non-empty resume_id".into());
+        match session {
+            StepSession::Resume { resume_id } if resume_id.trim().is_empty() => {
+                return Err("session mode 'resume' requires a non-empty resume_id".into());
+            }
+            StepSession::Fork { resume_id } if resume_id.trim().is_empty() => {
+                return Err("session mode 'fork' requires a non-empty resume_id".into());
+            }
+            _ => {}
         }
     }
 
@@ -1029,9 +1036,11 @@ impl ProjectSupervisor {
         if state.running_executors.contains_key(execution_id) {
             return Ok(());
         }
+        // A fork never writes to its source, so it neither waits for nor
+        // claims it; its own id is reported only after its turn.
         let resume_id = match &step_config.session {
             Some(StepSession::Resume { resume_id }) => Some(resume_id.clone()),
-            Some(StepSession::New) | None => None,
+            Some(StepSession::New | StepSession::Fork { .. }) | None => None,
         };
         if let Some(resume_id) = &resume_id
             && let Some((busy_execution, _)) =
@@ -1713,6 +1722,17 @@ mod tests {
                 resume_id: "native-1".into()
             })
         );
+
+        let mut fork = base.clone();
+        fork["session"] = serde_json::json!({"mode": "fork", "resume_id": "native-1"});
+        let config =
+            build_step_config_from_payload(&parse_run_step_payload(&fork).unwrap()).unwrap();
+        assert_eq!(
+            config.session,
+            Some(StepSession::Fork {
+                resume_id: "native-1".into()
+            })
+        );
     }
 
     #[test]
@@ -1736,13 +1756,17 @@ mod tests {
             );
         }
 
-        let mut blank = base.clone();
-        blank["session"] = serde_json::json!({"mode": "resume", "resume_id": " "});
-        assert!(
-            build_step_config_from_payload(&parse_run_step_payload(&blank).unwrap())
-                .unwrap_err()
-                .contains("non-empty resume_id")
-        );
+        for mode in ["resume", "fork"] {
+            let mut blank = base.clone();
+            blank["session"] = serde_json::json!({"mode": mode, "resume_id": " "});
+            assert!(
+                build_step_config_from_payload(&parse_run_step_payload(&blank).unwrap())
+                    .unwrap_err()
+                    .contains(&format!(
+                        "session mode '{mode}' requires a non-empty resume_id"
+                    ))
+            );
+        }
 
         let mut structured = base.clone();
         structured["step_type"] = serde_json::json!("structured_inference");
@@ -1776,17 +1800,18 @@ mod tests {
                 r#"#!/bin/sh
 printf '%s\n' "$@" > '{args}'
 sid=one-shot-session
+source=
 persistent=0
 prev=
 for arg in "$@"; do
   case "$arg" in
-    --resume=*) sid="${{arg#--resume=}}" ;;
+    --resume=*) source="${{arg#--resume=}}"; sid="$source" ;;
     --input-format) persistent=1 ;;
   esac
   if [ "$prev" = "--session-id" ]; then sid="$arg"; fi
   prev="$arg"
 done
-if [ "$sid" = missing-conversation ]; then
+if [ "$source" = missing-conversation ]; then
   printf '%s\n' '{{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["No conversation found with session ID: missing-conversation"]}}'
   exit 1
 fi
@@ -2133,6 +2158,97 @@ done
         assert!(native_session_ids(&updates).is_empty(), "{updates:?}");
         assert!(args.contains("--resume=missing-conversation\n"), "{args}");
         assert!(!args.contains("--session-id"), "{args}");
+    }
+
+    #[tokio::test]
+    async fn fork_session_step_branches_the_source_and_reports_its_new_id() {
+        let (updates, args) = run_claude_step(Some(
+            serde_json::json!({"mode": "fork", "resume_id": "source-conversation"}),
+        ))
+        .await;
+        assert_eq!(
+            updates.last().unwrap()["status"],
+            "completed",
+            "{updates:?}"
+        );
+        let native_ids = native_session_ids(&updates);
+        assert_eq!(native_ids.len(), 1, "{updates:?}");
+        let forked = native_ids[0];
+        assert!(uuid::Uuid::parse_str(forked).is_ok(), "{forked}");
+        assert!(
+            args.contains(&format!(
+                "--resume=source-conversation\n--fork-session\n--session-id\n{forked}\n"
+            )),
+            "{args}"
+        );
+        assert!(!args.contains("--append-system-prompt"), "{args}");
+    }
+
+    #[tokio::test]
+    async fn fork_of_an_unknown_session_fails_instead_of_starting_fresh() {
+        let (updates, args) = run_claude_step(Some(
+            serde_json::json!({"mode": "fork", "resume_id": "missing-conversation"}),
+        ))
+        .await;
+        let terminal = updates.last().unwrap();
+        assert_eq!(terminal["status"], "failed", "{updates:?}");
+        assert!(
+            terminal["output"].as_str().is_some_and(|output| {
+                output.contains("provider session not found")
+                    && output.contains("No conversation found")
+            }),
+            "{terminal}"
+        );
+        assert!(native_session_ids(&updates).is_empty(), "{updates:?}");
+        assert!(
+            args.contains("--resume=missing-conversation\n--fork-session\n"),
+            "{args}"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_forks_of_one_source_run_concurrently() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let server = provider_execution_server().await;
+        let (project, handle) = fake_claude_project(&temp, &server).await;
+        let fork = serde_json::json!({"mode": "fork", "resume_id": "source-conversation"});
+        std::fs::write(temp.path().join("hold"), "").unwrap();
+        let started = temp.path().join("turn-started");
+        for id in ["first-fork", "second-fork"] {
+            project
+                .cast(ProjectMessage::ChannelEvent(msg(
+                    "daemon:test",
+                    "run_step",
+                    claude_step_payload(id, Some(fork.clone())),
+                )))
+                .unwrap();
+            // Each fork's turn is in flight before the next is dispatched.
+            wait_for_file(&started).await;
+            std::fs::remove_file(&started).unwrap();
+        }
+        std::fs::remove_file(temp.path().join("hold")).unwrap();
+        let updates = execution_updates(&server, |updates| {
+            ["first-fork", "second-fork"].iter().all(|id| {
+                updates
+                    .iter()
+                    .any(|update| update["id"] == *id && update["status"] == "completed")
+            })
+        })
+        .await;
+        project
+            .stop_and_wait(None, Some(Duration::from_secs(5)))
+            .await
+            .unwrap();
+        handle.await.unwrap();
+        assert!(
+            updates.iter().all(|update| update["status"] != "failed"),
+            "{updates:?}"
+        );
+        let mut native_ids = native_session_ids(&updates);
+        native_ids.sort_unstable();
+        native_ids.dedup();
+        assert_eq!(native_ids.len(), 2, "{updates:?}");
+        assert!(!native_ids.contains(&"source-conversation"), "{updates:?}");
     }
 
     fn msg(topic: &str, event: &str, payload: serde_json::Value) -> PhoenixMessage {

@@ -611,7 +611,7 @@ async fn start_request_preserves_identity_resume_working_directory_model_and_rea
     assert_eq!(request.session_id.as_str(), "backend-1");
     assert_eq!(request.stream_id.as_str(), "local-chat:backend-1");
     assert_eq!(
-        request.resume_id.as_ref().unwrap().as_str(),
+        request.mode.source_id().unwrap().as_str(),
         "resume-request-1"
     );
     assert_eq!(
@@ -688,7 +688,7 @@ async fn claude_5_5_selections_reaches_fresh_and_resumed_chat_requests() {
             assert_eq!(requests.len(), 1);
             assert_eq!(requests[0].config.model.as_deref(), Some(model_id));
             assert_eq!(
-                requests[0].resume_id.as_ref().map(|id| id.as_str()),
+                requests[0].mode.source_id().map(|id| id.as_str()),
                 resume_id.as_deref()
             );
         }

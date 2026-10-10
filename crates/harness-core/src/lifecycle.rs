@@ -42,12 +42,36 @@ pub struct RequestConfig {
     pub environment: BTreeMap<String, String>,
 }
 
+/// How a started session enters its provider conversation.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "source_id", rename_all = "snake_case")]
+pub enum SessionMode {
+    /// Start a new conversation.
+    #[default]
+    New,
+    /// Continue the conversation, keeping its provider id.
+    Resume(ProviderResumeId),
+    /// Start a new conversation branched from the source, which is left
+    /// unchanged and can be resumed or forked again.
+    Fork(ProviderResumeId),
+}
+
+impl SessionMode {
+    /// The existing conversation a resume or fork opens.
+    pub fn source_id(&self) -> Option<&ProviderResumeId> {
+        match self {
+            Self::New => None,
+            Self::Resume(id) | Self::Fork(id) => Some(id),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StartSessionRequest {
     pub session_id: SessionId,
     pub stream_id: StreamId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resume_id: Option<ProviderResumeId>,
+    #[serde(default)]
+    pub mode: SessionMode,
     #[serde(default)]
     pub config: RequestConfig,
 }
@@ -202,9 +226,9 @@ pub enum HarnessError {
     Unsupported(String),
     #[error("invalid harness request: {0}")]
     InvalidRequest(String),
-    /// A resume named a provider conversation this harness cannot find, for
-    /// example one stored on another machine. Never answered by starting a
-    /// new conversation.
+    /// A resume or fork named a provider conversation this harness cannot
+    /// find, for example one stored on another machine. Never answered by
+    /// starting a new conversation.
     #[error("provider session not found: {0}")]
     SessionNotFound(String),
     #[error("harness operation failed: {0}")]

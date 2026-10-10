@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 use vertebrae_harness_core::{
     CompletionStatus, ControlRequestEnvelope, ControlResolution, ControlSink, EventSink,
     HarnessCapabilities, HarnessError, HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime,
-    RequestConfig, RunId, RunRequest, StartSessionRequest, StreamId, StructuredInferenceRequest,
-    UsageEvent,
+    RequestConfig, RunId, RunRequest, SessionMode, StartSessionRequest, StreamId,
+    StructuredInferenceRequest, UsageEvent,
 };
 use vertebrae_harness_typesafe::{
     DEFAULT_MODEL, Question, SystemOneRequest, TypeSafeClient, TypeSafeClientConfig,
@@ -135,7 +135,7 @@ async fn persistent_sessions_and_agent_options_are_rejected_without_network_work
             StartSessionRequest {
                 session_id: "session-1".into(),
                 stream_id: "stream-1".into(),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             event_sink.clone(),

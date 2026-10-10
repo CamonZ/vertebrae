@@ -18,8 +18,8 @@ use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRunt
 use vertebrae_harness_core::{
     interrupt_close_and_await, CompletionStatus, EventSink, HarnessError, HarnessEventPayloadV1,
     HarnessEventV1, ProviderResumeId, ProviderThreadRef, RequestConfig, SendTurnRequest,
-    SessionCloseStatus, SessionHandle, SessionId, SpeedTier, StartSessionRequest, StreamId, TurnId,
-    TurnInputProvenance, UpdateSemantics,
+    SessionCloseStatus, SessionHandle, SessionId, SessionMode, SpeedTier, StartSessionRequest,
+    StreamId, TurnId, TurnInputProvenance, UpdateSemantics,
 };
 
 use crate::commands::AppState;
@@ -813,7 +813,12 @@ impl ClaudeSessionRuntime {
         let mut request = StartSessionRequest {
             session_id: SessionId::new(backend_session_id.clone()),
             stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
-            resume_id: input.provider_resume_id.clone().map(ProviderResumeId::new),
+            mode: input
+                .provider_resume_id
+                .clone()
+                .map_or(SessionMode::New, |id| {
+                    SessionMode::Resume(ProviderResumeId::new(id))
+                }),
             config: RequestConfig {
                 verbosity: None,
                 working_directory: Some(working_dir),

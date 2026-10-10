@@ -22,7 +22,7 @@ use vertebrae_harness_core::{
     CompactionState, CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope,
     ControlResolution, ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1,
     HarnessEventV1, HarnessProjection, HarnessRuntime, ProviderThreadRef, QuestionAnswer,
-    RequestConfig, ResolutionSource, RunId, RunRequest, SendTurnRequest, SessionId,
+    RequestConfig, ResolutionSource, RunId, RunRequest, SendTurnRequest, SessionId, SessionMode,
     StartSessionRequest, StreamId, ThreadKind, ToolStatus, TurnId, TurnInputProvenance,
     UpdateSemantics,
 };
@@ -516,7 +516,7 @@ done
             StartSessionRequest {
                 session_id: SessionId::from("requested-session"),
                 stream_id: StreamId::from("session-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             sink.clone(),
@@ -622,7 +622,7 @@ done
             StartSessionRequest {
                 session_id: SessionId::from("requested-notification-session"),
                 stream_id: StreamId::from("notification-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             sink.clone(),
@@ -731,7 +731,7 @@ done
             StartSessionRequest {
                 session_id: SessionId::from("requested-compact-session"),
                 stream_id: StreamId::from("compact-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             sink.clone(),
@@ -1001,7 +1001,7 @@ printf '%s\n' '{{"type":"result","subtype":"success","result":"done"}}'
             StartSessionRequest {
                 session_id: SessionId::from("timeout-session-request"),
                 stream_id: StreamId::from("timeout-session-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             persistent_sink.clone(),
@@ -1174,7 +1174,7 @@ exit 9
             StartSessionRequest {
                 session_id: SessionId::from("requested"),
                 stream_id: StreamId::from("lost-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             sink.clone(),
@@ -1219,7 +1219,7 @@ sleep 30
             StartSessionRequest {
                 session_id: SessionId::from("close-requested"),
                 stream_id: StreamId::from("close-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             sink.clone(),
@@ -1266,7 +1266,7 @@ sleep 30
             StartSessionRequest {
                 session_id: SessionId::from("requested"),
                 stream_id: StreamId::from("interrupt-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             sink.clone(),
@@ -1313,7 +1313,7 @@ sleep 30
             StartSessionRequest {
                 session_id: SessionId::from("ordered-requested"),
                 stream_id: StreamId::from("ordered-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             sink.clone(),
@@ -1377,7 +1377,7 @@ sleep 30
             StartSessionRequest {
                 session_id: SessionId::from("interrupt-ordered-requested"),
                 stream_id: StreamId::from("interrupt-ordered-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             sink.clone(),
@@ -1435,7 +1435,7 @@ sleep 30
             StartSessionRequest {
                 session_id: SessionId::from("sink-failure-requested"),
                 stream_id: StreamId::from("sink-failure-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             sink.clone(),
@@ -1493,7 +1493,7 @@ while IFS= read -r _; do :; done
             StartSessionRequest {
                 session_id: SessionId::from("placeholder"),
                 stream_id: StreamId::from("resume-stream"),
-                resume_id: Some(vertebrae_harness_core::ProviderResumeId::from(
+                mode: SessionMode::Resume(vertebrae_harness_core::ProviderResumeId::from(
                     "resume-canonical",
                 )),
                 config: RequestConfig {
@@ -1559,7 +1559,7 @@ while IFS= read -r _; do :; done
             StartSessionRequest {
                 session_id: SessionId::from("execution-1"),
                 stream_id: StreamId::from("new-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig {
                     developer_instructions: Some("standing rules".into()),
                     ..RequestConfig::default()
@@ -1612,7 +1612,7 @@ while IFS= read -r _; do :; done
             StartSessionRequest {
                 session_id: SessionId::from("execution-2"),
                 stream_id: StreamId::from("resume-stream"),
-                resume_id: Some(vertebrae_harness_core::ProviderResumeId::from("bound")),
+                mode: SessionMode::Resume(vertebrae_harness_core::ProviderResumeId::from("bound")),
                 config: RequestConfig {
                     model: Some("sonnet".into()),
                     developer_instructions: Some("standing rules".into()),
@@ -1658,6 +1658,71 @@ async fn unknown_resume_that_closes_stdin_before_reporting_fails_with_the_provid
     assert_unknown_resume_fails_with_provider_reason(&script, Duration::from_millis(100)).await;
 }
 
+#[tokio::test]
+async fn fork_of_an_unknown_conversation_fails_with_the_provider_reason() {
+    let missing = vertebrae_harness_core::ProviderResumeId::from("missing");
+    assert_unknown_source_fails_with_provider_reason(
+        SessionMode::Fork(missing),
+        MISSING_RESUME,
+        Duration::ZERO,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn fork_starts_a_new_conversation_from_the_source_and_reports_its_id() {
+    let temp = TempDir::new().unwrap();
+    let capture = temp.path().join("launch.txt");
+    let executable = script(
+        &temp,
+        "fork",
+        &format!(
+            r#"#!/bin/sh
+printf 'arg=%s\n' "$@" > '{}.tmp'
+mv '{}.tmp' '{}'
+while IFS= read -r _; do :; done
+"#,
+            capture.display(),
+            capture.display(),
+            capture.display()
+        ),
+    );
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("execution-5"),
+                stream_id: StreamId::from("fork-stream"),
+                mode: SessionMode::Fork(vertebrae_harness_core::ProviderResumeId::from("source")),
+                config: RequestConfig {
+                    developer_instructions: Some("standing rules".into()),
+                    ..RequestConfig::default()
+                },
+            },
+            Arc::new(CollectSink::default()),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let forked = session.provider_resume_id().unwrap().as_str().to_string();
+    assert!(uuid::Uuid::parse_str(&forked).is_ok(), "fork id: {forked}");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !capture.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let launch = fs::read_to_string(capture).unwrap();
+    assert!(
+        launch.contains(&format!(
+            "arg=--resume=source\narg=--fork-session\narg=--session-id\narg={forked}\n"
+        )),
+        "captured launch:\n{launch}"
+    );
+    assert!(!launch.contains("--append-system-prompt"));
+    session.close().await.unwrap();
+}
+
 const MISSING_RESUME: &str = r#"#!/bin/sh
 printf '%s\n' 'No conversation found with session ID: missing' >&2
 printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"session_id":"missing","errors":["No conversation found with session ID: missing"]}'
@@ -1665,6 +1730,20 @@ exit 1
 "#;
 
 async fn assert_unknown_resume_fails_with_provider_reason(body: &str, send_delay: Duration) {
+    let missing = vertebrae_harness_core::ProviderResumeId::from("missing");
+    assert_unknown_source_fails_with_provider_reason(
+        SessionMode::Resume(missing),
+        body,
+        send_delay,
+    )
+    .await;
+}
+
+async fn assert_unknown_source_fails_with_provider_reason(
+    mode: SessionMode,
+    body: &str,
+    send_delay: Duration,
+) {
     let temp = TempDir::new().unwrap();
     let executable = script(&temp, "resume-missing", body);
     let session = runtime(executable)
@@ -1672,7 +1751,7 @@ async fn assert_unknown_resume_fails_with_provider_reason(body: &str, send_delay
             StartSessionRequest {
                 session_id: SessionId::from("execution-3"),
                 stream_id: StreamId::from("missing-stream"),
-                resume_id: Some(vertebrae_harness_core::ProviderResumeId::from("missing")),
+                mode,
                 config: RequestConfig::default(),
             },
             Arc::new(CollectSink::default()),
@@ -1739,7 +1818,7 @@ done
             StartSessionRequest {
                 session_id: SessionId::from("execution-4"),
                 stream_id: StreamId::from("schema-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig {
                     output_schema: Some(schema.clone()),
                     ..RequestConfig::default()
@@ -1803,7 +1882,7 @@ async fn initialization_timeout_fails_and_reaps_instead_of_hanging() {
             StartSessionRequest {
                 session_id: SessionId::from("placeholder"),
                 stream_id: StreamId::from("timeout-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             Arc::new(CollectSink::default()),
@@ -1926,7 +2005,7 @@ async fn never_resolving_controls_do_not_block_cancel_or_interrupt() {
             StartSessionRequest {
                 session_id: SessionId::from("placeholder"),
                 stream_id: StreamId::from("never-session-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             session_sink.clone(),

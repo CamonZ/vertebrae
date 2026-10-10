@@ -369,7 +369,7 @@ impl HarnessRuntime for MockRuntime {
         };
         Ok(Arc::new(MockSession {
             id: request.session_id,
-            resume_id: request.resume_id,
+            resume_id: request.mode.source_id().cloned(),
             closed: AtomicBool::new(false),
             close_status,
         }))
@@ -406,7 +406,7 @@ async fn resumed_and_new_sessions_use_one_start_path_and_survive_turn_completion
             StartSessionRequest {
                 session_id: SessionId::from("session"),
                 stream_id: StreamId::from("stream"),
-                resume_id: Some(ProviderResumeId::from("provider-resume")),
+                mode: SessionMode::Resume(ProviderResumeId::from("provider-resume")),
                 config: RequestConfig::default(),
             },
             events.clone(),
@@ -471,7 +471,7 @@ async fn resumed_and_new_sessions_use_one_start_path_and_survive_turn_completion
             StartSessionRequest {
                 session_id: SessionId::from("new"),
                 stream_id: StreamId::from("new-stream"),
-                resume_id: None,
+                mode: SessionMode::New,
                 config: RequestConfig::default(),
             },
             events,
@@ -560,7 +560,7 @@ async fn one_shot_and_session_handles_preserve_all_terminal_scopes() {
                 StartSessionRequest {
                     session_id: SessionId::from(session_id),
                     stream_id: StreamId::from(format!("stream-{session_id}")),
-                    resume_id: None,
+                    mode: SessionMode::New,
                     config: RequestConfig::default(),
                 },
                 events.clone(),

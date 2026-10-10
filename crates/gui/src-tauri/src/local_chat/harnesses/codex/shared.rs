@@ -6,7 +6,7 @@ use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
     interrupt_close_and_await, EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId,
-    SpeedTier, StartSessionRequest, StreamId, TurnHandle, TurnId,
+    SessionMode, SpeedTier, StartSessionRequest, StreamId, TurnHandle, TurnId,
 };
 
 use crate::helpers::{build_augmented_path_from, find_codex_binary_with_shell_environment};
@@ -416,7 +416,7 @@ fn codex_start_request(
     StartSessionRequest {
         session_id: SessionId::new(backend_session_id),
         stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
-        resume_id: resume_id.map(Into::into),
+        mode: resume_id.map_or(SessionMode::New, |id| SessionMode::Resume(id.into())),
         config: vertebrae_harness_core::RequestConfig {
             verbosity: None,
             working_directory: working_dir.map(PathBuf::from),
@@ -476,7 +476,7 @@ mod tests {
         assert_eq!(request.session_id.as_str(), "backend-codex");
         assert_eq!(request.stream_id.as_str(), "local-chat:backend-codex");
         assert_eq!(
-            request.resume_id.as_ref().map(|id| id.as_str()),
+            request.mode.source_id().map(|id| id.as_str()),
             Some("resume-1")
         );
         assert_eq!(

@@ -115,13 +115,28 @@ pub async fn script_schema_violation(world: &mut DaemonWorld) {
     set_prompt(world, builder).await;
 }
 
+#[when("the mock is scripted to succeed with an empty result")]
+pub async fn script_empty_result(world: &mut DaemonWorld) {
+    let result_line = r#"{"type":"result","subtype":"success","cost_usd":0.0,"duration_ms":1.0,"is_error":false,"result":"","session_id":"sess-empty","usage":{"input_tokens":1,"output_tokens":1} }"#;
+    let builder = world
+        .mock_response("empty-result")
+        .with_exit_code(0)
+        .with_stdout_line(r#"{"type":"system","subtype":"init","session_id":"sess-empty"}"#)
+        .with_stdout_line(result_line);
+    set_prompt(world, builder).await;
+}
+
+/// A turn that works for `ms` before ending with a result, so cancels and
+/// stops land mid-turn.
 #[when(expr = "the mock is scripted to sleep {int} milliseconds")]
 pub async fn script_sleep(world: &mut DaemonWorld, ms: u64) {
+    let result_line = r#"{"type":"result","subtype":"success","cost_usd":0.0,"duration_ms":1.0,"is_error":false,"result":"done","session_id":"sess-cancel","usage":{"input_tokens":1,"output_tokens":1} }"#;
     let builder = world
         .mock_response("cancel")
         .with_exit_code(0)
-        .with_delay_ms(ms)
-        .with_stdout_line(r#"{"type":"system","subtype":"init","session_id":"sess-cancel"}"#);
+        .with_stdout_line(r#"{"type":"system","subtype":"init","session_id":"sess-cancel"}"#)
+        .with_stdout_pause(ms)
+        .with_stdout_line(result_line);
     set_prompt(world, builder).await;
 }
 

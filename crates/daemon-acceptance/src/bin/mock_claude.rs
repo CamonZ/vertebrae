@@ -13,9 +13,10 @@
 //! invoked the CLI. The envelope prompt is not required for capture, which lets
 //! scenarios exercise the daemon's empty-prompt fallback.
 //!
-//! When invoked without a prompt flag and with `--input-format stream-json`, it also
-//! serves the GUI local-chat acceptance path by reading stdin prompts and
-//! emitting Claude `stream-json` stdout events.
+//! When invoked without a prompt flag and with `--input-format stream-json`, it
+//! runs as a persistent session reading stdin turns. A turn whose content is
+//! an envelope plays that envelope, as the daemon sends step prompts to
+//! sessions; any other turn gets the GUI local-chat acceptance reply.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Component, Path, PathBuf};
@@ -59,7 +60,7 @@ fn main() -> ExitCode {
         );
         ExitCode::from(0)
     } else if prompt.is_none() && uses_stdin_stream_json(&args) {
-        run_stdin_stream_json()
+        run_stdin_stream_json(&args)
     } else {
         ExitCode::from(0)
     }
@@ -145,7 +146,7 @@ fn has_arg_value(args: &[String], flag: &str, value: &str) -> bool {
     false
 }
 
-fn run_stdin_stream_json() -> ExitCode {
+fn run_stdin_stream_json(args: &[String]) -> ExitCode {
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let mut initialized = false;
@@ -164,6 +165,13 @@ fn run_stdin_stream_json() -> ExitCode {
                 eprintln!("mock-claude: failed to read stdin stream-json: {err}");
                 return ExitCode::from(1);
             }
+        }
+        if let Some(envelope) = turn_content(&message).and_then(|content| parse_envelope(&content))
+        {
+            if let Some(exit) = play_envelope_turn(&envelope, args, &mut initialized) {
+                return exit;
+            }
+            continue;
         }
         let session_id = session_id_from_input(&message)
             .or_else(|| std::env::var("VTB_CLAUDE_SESSION_ID").ok())
@@ -259,6 +267,87 @@ fn run_stdin_stream_json() -> ExitCode {
     }
 
     ExitCode::from(0)
+}
+
+/// Plays `envelope` as one stream-json turn. Claude declares the conversation
+/// before any other output, so a fixture without its own `system/init` gets
+/// one for the launch's session id. The process exits as a one-shot run would
+/// when the envelope fails or its fixture never ends the turn with a result;
+/// otherwise it waits for the next turn.
+fn play_envelope_turn(
+    envelope: &Envelope,
+    args: &[String],
+    initialized: &mut bool,
+) -> Option<ExitCode> {
+    let mock_dir =
+        PathBuf::from(std::env::var_os("MOCK_OUTPUT_DIR").expect("MOCK_OUTPUT_DIR env var"));
+    let stdout_file = envelope
+        .stdout_file
+        .as_ref()
+        .map(|rel| resolve_fixture(&mock_dir, rel));
+    let stdout_lines = stdout_file
+        .as_ref()
+        .map(|path| {
+            std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("failed to open fixture {}: {e}", path.display()))
+        })
+        .unwrap_or_default();
+    let records: Vec<serde_json::Value> = stdout_lines
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    let declares_session = records
+        .first()
+        .is_some_and(|record| record["type"] == "system" && record["subtype"] == "init");
+    if !*initialized && !declares_session {
+        write_json_line(serde_json::json!({
+            "type": "system",
+            "subtype": "init",
+            "session_id": launch_session_id(args),
+        }));
+    }
+    *initialized = true;
+
+    if let Some(path) = stdout_file {
+        stream_lines(&path, StreamTarget::Stdout);
+    }
+    if let Some(ref rel) = envelope.stderr_file {
+        stream_lines(&resolve_fixture(&mock_dir, rel), StreamTarget::Stderr);
+    }
+    if envelope.delay_ms > 0 {
+        interruptible_sleep(Duration::from_millis(envelope.delay_ms));
+    }
+
+    let ends_turn = records.iter().any(|record| record["type"] == "result");
+    (envelope.exit_code != 0 || !ends_turn).then(|| ExitCode::from(envelope.exit_code as u8))
+}
+
+/// The text content of a stream-json user turn.
+fn turn_content(line: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()?
+        .pointer("/message/content")?
+        .as_str()
+        .map(ToOwned::to_owned)
+}
+
+/// The conversation this launch opens: the engine-chosen `--session-id` of a
+/// new session or fork, else the `--resume` target.
+fn launch_session_id(args: &[String]) -> String {
+    let mut iter = args.iter();
+    let mut resume_id = None;
+    while let Some(arg) = iter.next() {
+        if arg == "--session-id" {
+            if let Some(session_id) = iter.next() {
+                return session_id.clone();
+            }
+        } else if arg == "--resume" {
+            resume_id = iter.next().cloned();
+        } else if let Some(rest) = arg.strip_prefix("--resume=") {
+            resume_id = Some(rest.to_owned());
+        }
+    }
+    resume_id.unwrap_or_else(|| "mock-session".to_string())
 }
 
 fn session_id_from_input(line: &str) -> Option<String> {
