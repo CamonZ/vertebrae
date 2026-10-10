@@ -30,7 +30,13 @@ export type Kind =
 export type Role = "entry" | "process" | "exit";
 
 /** Edge category — intra-workflow forward/loop, or cross-workflow handoff. */
-export type EdgeKind = "forward" | "loop" | "cross";
+/**
+ * `forward`: implied next-in-order link (synthesised in layoutFull) ·
+ * `branch`: a route step's transition that jumps past its next step ·
+ * `loop`: a transition back to an earlier (or the same) step ·
+ * `cross`: a workflow handoff.
+ */
+export type EdgeKind = "forward" | "branch" | "loop" | "cross";
 
 /* ── model (geometry-free) ──────────────────────────────────────── */
 
@@ -115,6 +121,11 @@ export interface AtlasModel {
   steps: AtlasStep[];
   edges: AtlasEdge[];
   phases: AtlasPhase[];
+  /**
+   * Route-decision labels for implied forward links, keyed
+   * `"<fromRef>-><toRef>"` (loop and branch edges carry theirs on the edge).
+   */
+  forwardLabels?: Record<string, string>;
 }
 
 /* ── positioned geometry (layout output) ────────────────────────── */

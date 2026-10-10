@@ -2,14 +2,22 @@
 //!
 //! Implements `codex app-server daemon version|start` and the daemon's Unix
 //! control socket. Scenario-specific notifications are read from the fixture
-//! envelope passed as the first turn's text input.
+//! envelope passed as the first turn's text input; its `next_file` scripts
+//! later runs of the same step (see `daemon_acceptance::scripted_turn`).
+//!
+//! Each `thread/start` creates a distinct thread. `thread/resume` and
+//! `thread/fork` accept only threads this server created and still holds;
+//! like Codex without a rollout, any other id gets `-32600 no rollout found
+//! for thread id <id>`. An envelope with `discard_session` drops its thread
+//! once the turn ends.
 
 use std::{
+    collections::HashSet,
     hash::{DefaultHasher, Hash, Hasher},
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -33,6 +41,35 @@ struct Envelope {
     delay_ms: u64,
     stdout_file: Option<String>,
     stderr_file: Option<String>,
+    #[serde(default)]
+    discard_session: bool,
+}
+
+/// Threads this server has created and not discarded, shared by every
+/// connection like a Codex home's rollouts.
+#[derive(Default)]
+struct Threads {
+    next: AtomicU64,
+    live: Mutex<HashSet<String>>,
+}
+
+impl Threads {
+    fn create(&self) -> String {
+        let id = format!(
+            "mock-codex-thread-{}",
+            self.next.fetch_add(1, Ordering::SeqCst) + 1
+        );
+        self.live.lock().unwrap().insert(id.clone());
+        id
+    }
+
+    fn contains(&self, id: &str) -> bool {
+        self.live.lock().unwrap().contains(id)
+    }
+
+    fn discard(&self, id: &str) {
+        self.live.lock().unwrap().remove(id);
+    }
 }
 
 #[tokio::main]
@@ -136,6 +173,7 @@ async fn serve(socket: PathBuf) {
         .unwrap_or_else(|error| panic!("mock-codex failed to bind {}: {error}", socket.display()));
     let active = Arc::new(AtomicUsize::new(0));
     let last_activity = Arc::new(AtomicU64::new(now_secs()));
+    let threads = Arc::new(Threads::default());
     {
         let active = Arc::clone(&active);
         let last_activity = Arc::clone(&last_activity);
@@ -159,9 +197,10 @@ async fn serve(socket: PathBuf) {
         active.fetch_add(1, Ordering::SeqCst);
         let active = Arc::clone(&active);
         let last_activity = Arc::clone(&last_activity);
+        let threads = Arc::clone(&threads);
         tokio::spawn(async move {
             // Status probes connect and close without a WebSocket handshake.
-            if let Err(error) = serve_websocket(stream).await
+            if let Err(error) = serve_websocket(stream, &threads).await
                 && !error.contains("handshake")
             {
                 eprintln!("mock-codex WebSocket failed: {error}");
@@ -190,7 +229,7 @@ fn capture_invocation(args: &[String]) {
     std::fs::write(dir.join("cwd.txt"), cwd.to_string_lossy().as_bytes()).expect("write cwd.txt");
 }
 
-async fn serve_websocket<S>(stream: S) -> Result<(), String>
+async fn serve_websocket<S>(stream: S, threads: &Threads) -> Result<(), String>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -219,11 +258,39 @@ where
             "initialize" => {
                 send_response(&mut socket, id, json!({"capabilities": {}})).await?;
             }
-            "thread/start" | "thread/resume" => {
+            "thread/start" => {
+                let thread = threads.create();
                 send_response(
                     &mut socket,
                     id,
-                    json!({"thread":{"id":"mock-codex-thread"},"model":"gpt-5.5"}),
+                    json!({"thread":{"id":thread},"model":"gpt-5.5"}),
+                )
+                .await?;
+            }
+            "thread/resume" | "thread/fork" => {
+                let source = request
+                    .pointer("/params/threadId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !threads.contains(source) {
+                    send_error(
+                        &mut socket,
+                        id,
+                        -32600,
+                        &format!("no rollout found for thread id {source}"),
+                    )
+                    .await?;
+                    continue;
+                }
+                let thread = if method == "thread/fork" {
+                    threads.create()
+                } else {
+                    source.to_string()
+                };
+                send_response(
+                    &mut socket,
+                    id,
+                    json!({"thread":{"id":thread},"model":"gpt-5.5"}),
                 )
                 .await?;
             }
@@ -241,14 +308,21 @@ where
                     .and_then(|input| input.first())
                     .and_then(|input| input.get("text"))
                     .and_then(Value::as_str)
-                    .and_then(parse_envelope)
+                    .and_then(|raw| parse_envelope(&scripted(raw)))
                     .unwrap_or(Envelope {
                         exit_code: 0,
                         delay_ms: 0,
                         stdout_file: None,
                         stderr_file: None,
+                        discard_session: false,
                     });
                 emit_script(&mut socket, &envelope).await?;
+                if envelope.discard_session
+                    && let Some(thread) =
+                        request.pointer("/params/threadId").and_then(Value::as_str)
+                {
+                    threads.discard(thread);
+                }
             }
             "turn/interrupt" => {
                 send_response(&mut socket, id, json!({})).await?;
@@ -273,6 +347,34 @@ async fn send_response<S: AsyncRead + AsyncWrite + Unpin>(
         ))
         .await
         .map_err(|error| format!("WebSocket response failed: {error}"))
+}
+
+async fn send_error<S: AsyncRead + AsyncWrite + Unpin>(
+    socket: &mut WebSocketStream<S>,
+    id: Value,
+    code: i64,
+    message: &str,
+) -> Result<(), String> {
+    socket
+        .send(Message::Text(
+            json!({"id": id, "error": {"code": code, "message": message}}).to_string(),
+        ))
+        .await
+        .map_err(|error| format!("WebSocket error response failed: {error}"))
+}
+
+/// The envelope this run of the step plays.
+fn scripted(raw: &str) -> String {
+    match std::env::var_os("MOCK_OUTPUT_DIR") {
+        Some(output_dir) => daemon_acceptance::scripted_turn(
+            raw,
+            Path::new(&output_dir),
+            std::env::var_os("MOCK_CAPTURE_DIR")
+                .map(PathBuf::from)
+                .as_deref(),
+        ),
+        None => raw.to_string(),
+    }
 }
 
 async fn emit_script<S: AsyncRead + AsyncWrite + Unpin>(

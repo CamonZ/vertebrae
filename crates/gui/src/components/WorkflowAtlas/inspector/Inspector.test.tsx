@@ -21,7 +21,7 @@ import { WorkflowInspector } from "./WorkflowInspector";
 import type { AtlasSelection } from "./selection";
 
 /* `useStep` (from the hooks barrel) hits the Tauri bridge — mock it. */
-vi.mock("../../../hooks", () => ({ useStep: vi.fn() }));
+vi.mock("../../../hooks", () => ({ useStep: vi.fn(), useSteps: vi.fn() }));
 vi.mock("../../../bindings", () => ({
   commands: {
     createStep: vi.fn(),
@@ -30,7 +30,7 @@ vi.mock("../../../bindings", () => ({
     updateWorkflow: vi.fn(),
   },
 }));
-import { useStep } from "../../../hooks";
+import { useStep, useSteps } from "../../../hooks";
 
 /* ── fixtures ──────────────────────────────────────────────────── */
 
@@ -115,6 +115,31 @@ SUMMARY.workflows[0].transitions = [
 ];
 
 const MODEL = buildAtlasModel(SUMMARY);
+const SESSION_ROUTE = {
+  version: 1,
+  match_policy: "exactly_one",
+  rules: [
+    {
+      id: "again",
+      transition: { type: "intra_workflow", step_id: "s1" },
+      session: { mode: "resume" },
+    },
+    {
+      id: "revise",
+      transition: { type: "intra_workflow", step_id: "s2" },
+      session: { mode: "resume", step_id: "s1" },
+    },
+    {
+      id: "handoff",
+      transition: { type: "inter_workflow", workflow_id: "wf-review" },
+    },
+    { id: "plain", transition: { type: "intra_workflow", step_id: "s1" } },
+  ],
+  default: {
+    transition: { type: "intra_workflow", step_id: "s2" },
+    session: { mode: "fork" },
+  },
+};
 const STOP_MODEL = buildAtlasModel({
   workflows: [
     makeWorkflow("wf-stop", [
@@ -185,6 +210,7 @@ beforeEach(() => {
     data: stepFixture({ id: "new-step" }),
   });
   mockUseStep(stepFixture());
+  vi.mocked(useSteps).mockReturnValue([]);
 });
 
 describe("WorkflowInspector", () => {
@@ -661,6 +687,137 @@ describe("StepInspector", () => {
     );
     expect(screen.getByTestId("route-config-unconfigured")).toHaveTextContent(
       "Unconfigured route draft"
+    );
+  });
+
+  it("lists a route branch as a forward transition that selects its step", () => {
+    const branchModel = buildAtlasModel({
+      workflows: [
+        makeWorkflow("wf-branch", [
+          makeStep("route", "wf-branch", 0, {
+            name: "Router",
+            step_type: "route",
+            transitions_to: ["next", "end"],
+          }),
+          makeStep("next", "wf-branch", 1, { name: "Next" }),
+          makeStep("end", "wf-branch", 2, {
+            name: "End",
+            step_type: "finish",
+          }),
+        ]),
+      ],
+    });
+    const onSelect = vi.fn();
+    mockUseStep(
+      stepFixture({
+        id: "route",
+        name: "Router",
+        step_type: "route",
+        config: { version: 1, route_config: null },
+      })
+    );
+    render(
+      <StepInspector
+        model={branchModel}
+        workflowId="wf-branch"
+        stepId="route"
+        onSelect={onSelect}
+        onClose={vi.fn()}
+      />
+    );
+    const end = screen.getByRole("button", { name: /End/ });
+    expect(end).not.toHaveClass("loop");
+    fireEvent.click(end);
+    expect(onSelect).toHaveBeenCalledWith({
+      type: "step",
+      workflowId: "wf-branch",
+      stepId: "end",
+    });
+  });
+
+  it("lists each route decision's target and session directive", () => {
+    const onSelect = vi.fn();
+    mockUseStep(
+      stepFixture({
+        id: "s3",
+        name: "Ship",
+        step_type: "route",
+        config: { version: 1, route_config: SESSION_ROUTE },
+      })
+    );
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s3"
+        onSelect={onSelect}
+        onClose={vi.fn()}
+      />
+    );
+
+    const rows = screen.getAllByTestId("route-decision");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "again→Planresume",
+      "revise→Executeresume · Plan",
+      "handoff→wf-review—",
+      "plain→Plannew (implicit)",
+      "default→Executefork",
+    ]);
+    fireEvent.click(within(rows[1]).getByRole("button", { name: /Execute/ }));
+    expect(onSelect).toHaveBeenCalledWith({
+      type: "step",
+      workflowId: "wf-build",
+      stepId: "s2",
+    });
+  });
+
+  it("shows the route decisions that enter an llm step or continue its conversation", () => {
+    const onSelect = vi.fn();
+    vi.mocked(useSteps).mockReturnValue([
+      stepFixture({
+        id: "s3",
+        name: "Ship",
+        step_type: "route",
+        config: { version: 1, route_config: SESSION_ROUTE },
+      }),
+    ]);
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={onSelect}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(useSteps).toHaveBeenCalledWith(["s3"], true);
+    const entries = screen.getAllByTestId("step-conversation-entry");
+    expect(entries.map((entry) => entry.textContent)).toEqual([
+      "Ship · againresume",
+      "Ship · reviseresume → Execute",
+      "Ship · plainnew (implicit)",
+    ]);
+    fireEvent.click(within(entries[0]).getByRole("button"));
+    expect(onSelect).toHaveBeenCalledWith({
+      type: "step",
+      workflowId: "wf-build",
+      stepId: "s3",
+    });
+  });
+
+  it("says an llm step without route decisions starts new conversations", () => {
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("step-conversation-section")).toHaveTextContent(
+      "every entry starts a new conversation"
     );
   });
 

@@ -29,6 +29,15 @@ fn execute_roundtrip_config() -> Value {
     })
 }
 
+fn revise_route_rule() -> Value {
+    json!({
+        "id": "revise",
+        "when": {"all": [{"ref": "task.tags", "op": "contains", "value": "revise"}]},
+        "transition": {"type": "intra_workflow", "step_ref": "revise"},
+        "session": {"mode": "resume", "step_ref": "start"}
+    })
+}
+
 #[when("I stage the built-in workflow bundle fixture")]
 async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
     let mut fixture: serde_json::Value = serde_json::from_str(include_str!(
@@ -100,7 +109,39 @@ async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
         "config": execute_roundtrip_config(),
         "persistence_options": null
     }));
+    // A route rule that resumes Start's conversation in a new llm_inference
+    // step exercises the portable session.step_ref.
+    let build_steps = fixture["workflows"][0]["steps"].as_array_mut().unwrap();
+    build_steps.push(json!({
+        "step_ref": "revise",
+        "name": "Revise",
+        "goal": "Continue the start conversation",
+        "step_type": "llm_inference",
+        "step_order": 6,
+        "harness": null,
+        // Resuming Start's conversation requires Start's harness.
+        "config": {"version": 1, "agent_config": {"provider": "openai"}},
+        "persistence_options": null
+    }));
+    let route = build_steps
+        .iter_mut()
+        .find(|step| step["step_ref"] == "route")
+        .unwrap();
+    route["config"]["route_config"]["rules"]
+        .as_array_mut()
+        .unwrap()
+        .push(revise_route_rule());
     let edges = fixture["step_edges"].as_array_mut().unwrap();
+    edges.push(json!({
+        "from": {"workflow_ref": "build", "step_ref": "route"},
+        "to": {"workflow_ref": "build", "step_ref": "revise"},
+        "label": "revise"
+    }));
+    edges.push(json!({
+        "from": {"workflow_ref": "build", "step_ref": "revise"},
+        "to": {"workflow_ref": "build", "step_ref": "finish"},
+        "label": "revised"
+    }));
     let review_edge = edges
         .iter_mut()
         .find(|edge| {
@@ -305,6 +346,48 @@ async fn roundtrip_bundles_should_preserve_authored_execute_step(world: &mut Smo
         assert_eq!(step.harness, None);
         assert_eq!(step.config, Some(execute_roundtrip_config()));
         assert!(step.config.as_ref().unwrap().get("context").is_none());
+    }
+}
+
+#[then("the roundtrip bundles should preserve the route session directive")]
+async fn roundtrip_bundles_should_preserve_route_session(world: &mut SmokeWorld) {
+    for key in [
+        "source_workflow_bundle_path",
+        "destination_workflow_bundle_path",
+    ] {
+        let bundle = read_workflow_bundle(world, key);
+        let steps: Vec<_> = bundle
+            .workflows
+            .iter()
+            .flat_map(|workflow| &workflow.steps)
+            .collect();
+        let step_ref_named = |name: &str| {
+            steps
+                .iter()
+                .find(|step| step.name == name)
+                .unwrap_or_else(|| panic!("{key} must contain step {name}"))
+                .step_ref
+                .clone()
+        };
+        let route = steps
+            .iter()
+            .find(|step| step.step_type == vertebrae_core::StepType::Route)
+            .unwrap_or_else(|| panic!("{key} must contain the route step"));
+        let rule = route.config.as_ref().unwrap()["route_config"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|rule| rule["id"] == "revise")
+            .unwrap_or_else(|| panic!("{key} must keep the revise rule"));
+        assert_eq!(
+            rule["session"],
+            json!({"mode": "resume", "step_ref": step_ref_named("Start")}),
+            "{key} must write the session step as a portable step_ref"
+        );
+        assert_eq!(
+            rule["transition"]["step_ref"],
+            json!(step_ref_named("Revise"))
+        );
     }
 }
 
@@ -603,8 +686,8 @@ async fn workflow_import_json_should_contain_complete_mappings(world: &mut Smoke
     assert_eq!(value["workflow_mappings"].as_object().unwrap().len(), 2);
     assert_eq!(value["step_mappings"].as_object().unwrap().len(), 2);
     assert_eq!(value["workflow_count"], 2);
-    assert_eq!(value["step_count"], 10);
-    assert_eq!(value["step_edge_count"], 10);
+    assert_eq!(value["step_count"], 11);
+    assert_eq!(value["step_edge_count"], 12);
     assert_eq!(value["workflow_edge_count"], 2);
 }
 

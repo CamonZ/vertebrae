@@ -27,7 +27,7 @@ export { useTaskRunChangeListener } from "./useTaskRunChangeListener";
 export { useWorkflows } from "./useWorkflows";
 export { useWorkflow } from "./useWorkflow";
 export { useWorkflowChangeListener } from "./useWorkflowChangeListener";
-export { useStep } from "./useStep";
+export { useStep, useSteps } from "./useStep";
 export { useStepChangeListener } from "./useStepChangeListener";
 export { useStepExecutionChangeListener } from "./useStepExecutionChangeListener";
 export { useSectionChangeListener } from "./useSectionChangeListener";

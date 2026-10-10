@@ -4136,10 +4136,15 @@ html.light ::selection {
   stroke-dasharray: none;
 }
 
-/* trace states — handoffs accent on a live trace; step links only recede.
-   (k-step.lit intentionally has no accent rule: it renders like base.) */
+/* trace states — handoffs accent on a live trace; step links light only when
+   a step trace reaches them, in the accent (out) or, via .back, white (in). */
 .gedge.dim {
   stroke-opacity: var(--edge-o-dim);
+}
+.gedge.k-step.lit {
+  stroke: var(--edge-color-lit);
+  stroke-width: var(--edge-w-lit);
+  stroke-opacity: 1;
 }
 .gedge.k-handoff.lit {
   stroke: var(--edge-color-lit);

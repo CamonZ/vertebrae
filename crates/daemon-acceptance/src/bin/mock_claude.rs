@@ -9,14 +9,22 @@
 //! SIGKILL path works.
 //!
 //! When `MOCK_CAPTURE_DIR` is set, writes `argv.json` (array of strings) and
-//! `cwd.txt` to that directory on startup so tests can assert on how the daemon
-//! invoked the CLI. The envelope prompt is not required for capture, which lets
-//! scenarios exercise the daemon's empty-prompt fallback.
+//! `cwd.txt` to that directory on startup, and appends the argv to
+//! `invocations.jsonl`, so tests can assert on how the daemon invoked the CLI.
+//! The envelope prompt is not required for capture, which lets scenarios
+//! exercise the daemon's empty-prompt fallback.
 //!
 //! When invoked without a prompt flag and with `--input-format stream-json`, it
 //! runs as a persistent session reading stdin turns. A turn whose content is
 //! an envelope plays that envelope, as the daemon sends step prompts to
-//! sessions; any other turn gets the GUI local-chat acceptance reply.
+//! sessions; any other turn gets the GUI local-chat acceptance reply. Envelope
+//! records echo the launch's conversation id (`--session-id`, else the
+//! `--resume` target) as their `session_id`, and an envelope's `next_file`
+//! scripts later runs of the same step (see `daemon_acceptance::scripted_turn`).
+//! An envelope with `discard_session` forgets its conversation after the turn;
+//! like Claude, a later launch resuming or forking it reports
+//! `No conversation found with session ID: <id>` and exits 1 before reading
+//! any turn.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Component, Path, PathBuf};
@@ -35,10 +43,26 @@ fn main() -> ExitCode {
         return ExitCode::from(0);
     }
 
+    if let Some(missing) = resume_target(&args).filter(|id| {
+        state_dir().is_some_and(|dir| daemon_acceptance::is_forgotten_session(&dir, id))
+    }) {
+        let error = format!("No conversation found with session ID: {missing}");
+        eprintln!("{error}");
+        write_json_line(serde_json::json!({
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": true,
+            "num_turns": 0,
+            "session_id": missing,
+            "errors": [error]
+        }));
+        return ExitCode::from(1);
+    }
+
     let prompt = extract_prompt(&args);
     // Empty-prompt fallback sends `-p "Execute step"` — not an envelope. Skip
     // streaming and sleeping in that case; capture alone is enough.
-    if let Some(envelope) = prompt.and_then(parse_envelope) {
+    if let Some(envelope) = prompt.and_then(|raw| parse_envelope(&scripted(raw))) {
         let mock_dir =
             PathBuf::from(std::env::var_os("MOCK_OUTPUT_DIR").expect("MOCK_OUTPUT_DIR env var"));
 
@@ -69,9 +93,33 @@ fn main() -> ExitCode {
 fn capture_invocation(dir: &Path, args: &[String]) {
     std::fs::create_dir_all(dir).expect("create MOCK_CAPTURE_DIR");
     let argv_json = serde_json::to_string(args).expect("argv serialises");
-    std::fs::write(dir.join("argv.json"), argv_json).expect("write argv.json");
+    std::fs::write(dir.join("argv.json"), &argv_json).expect("write argv.json");
     let cwd = std::env::current_dir().expect("current_dir");
     std::fs::write(dir.join("cwd.txt"), cwd.to_string_lossy().as_bytes()).expect("write cwd.txt");
+    let mut invocations = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("invocations.jsonl"))
+        .expect("open invocations.jsonl");
+    writeln!(invocations, "{argv_json}").expect("append invocations.jsonl");
+}
+
+fn state_dir() -> Option<PathBuf> {
+    std::env::var_os("MOCK_CAPTURE_DIR").map(PathBuf::from)
+}
+
+fn mock_output_dir() -> PathBuf {
+    PathBuf::from(std::env::var_os("MOCK_OUTPUT_DIR").expect("MOCK_OUTPUT_DIR env var"))
+}
+
+/// The envelope this run of the step plays.
+fn scripted(raw: &str) -> String {
+    match std::env::var_os("MOCK_OUTPUT_DIR") {
+        Some(output_dir) => {
+            daemon_acceptance::scripted_turn(raw, Path::new(&output_dir), state_dir().as_deref())
+        }
+        None => raw.to_string(),
+    }
 }
 
 #[derive(Debug)]
@@ -80,6 +128,7 @@ struct Envelope {
     delay_ms: u64,
     stdout_file: Option<String>,
     stderr_file: Option<String>,
+    discard_session: bool,
 }
 
 fn extract_prompt(args: &[String]) -> Option<&str> {
@@ -124,6 +173,9 @@ fn parse_envelope(raw: &str) -> Option<Envelope> {
         delay_ms: delay_ms as u64,
         stdout_file: optional_string(obj, "stdout_file"),
         stderr_file: optional_string(obj, "stderr_file"),
+        discard_session: obj
+            .get("discard_session")
+            .is_some_and(|value| value.as_bool() == Some(true)),
     })
 }
 
@@ -166,7 +218,8 @@ fn run_stdin_stream_json(args: &[String]) -> ExitCode {
                 return ExitCode::from(1);
             }
         }
-        if let Some(envelope) = turn_content(&message).and_then(|content| parse_envelope(&content))
+        if let Some(envelope) =
+            turn_content(&message).and_then(|content| parse_envelope(&scripted(&content)))
         {
             if let Some(exit) = play_envelope_turn(&envelope, args, &mut initialized) {
                 return exit;
@@ -279,8 +332,8 @@ fn play_envelope_turn(
     args: &[String],
     initialized: &mut bool,
 ) -> Option<ExitCode> {
-    let mock_dir =
-        PathBuf::from(std::env::var_os("MOCK_OUTPUT_DIR").expect("MOCK_OUTPUT_DIR env var"));
+    let mock_dir = mock_output_dir();
+    let session_id = launch_session_id(args);
     let stdout_file = envelope
         .stdout_file
         .as_ref()
@@ -303,13 +356,13 @@ fn play_envelope_turn(
         write_json_line(serde_json::json!({
             "type": "system",
             "subtype": "init",
-            "session_id": launch_session_id(args),
+            "session_id": session_id,
         }));
     }
     *initialized = true;
 
     if let Some(path) = stdout_file {
-        stream_lines(&path, StreamTarget::Stdout);
+        stream_session_lines(&path, &session_id);
     }
     if let Some(ref rel) = envelope.stderr_file {
         stream_lines(&resolve_fixture(&mock_dir, rel), StreamTarget::Stderr);
@@ -318,8 +371,40 @@ fn play_envelope_turn(
         interruptible_sleep(Duration::from_millis(envelope.delay_ms));
     }
 
+    if envelope.discard_session
+        && let Some(dir) = state_dir()
+    {
+        daemon_acceptance::forget_session(&dir, &session_id);
+    }
+
     let ends_turn = records.iter().any(|record| record["type"] == "result");
     (envelope.exit_code != 0 || !ends_turn).then(|| ExitCode::from(envelope.exit_code as u8))
+}
+
+/// Streams a fixture's records with their `session_id` set to the launch's
+/// conversation, as Claude echoes the id it was started or resumed with.
+/// Non-JSON lines and pause directives behave as in `stream_lines`.
+fn stream_session_lines(path: &Path, session_id: &str) {
+    let body = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to open fixture {}: {e}", path.display()));
+    let mut stdout = std::io::stdout().lock();
+    for line in body.lines() {
+        if let Some(ms) = daemon_acceptance::stdout_pause_ms(line) {
+            stdout.flush().expect("fixture flush");
+            interruptible_sleep(Duration::from_millis(ms));
+            continue;
+        }
+        let line = match serde_json::from_str::<serde_json::Value>(line) {
+            Ok(mut record) if record.get("session_id").is_some_and(|id| id.is_string()) => {
+                record["session_id"] = serde_json::Value::String(session_id.to_string());
+                record.to_string()
+            }
+            _ => line.to_string(),
+        };
+        stdout.write_all(line.as_bytes()).expect("fixture write");
+        stdout.write_all(b"\n").expect("fixture write");
+    }
+    stdout.flush().expect("fixture flush");
 }
 
 /// The text content of a stream-json user turn.
@@ -334,20 +419,28 @@ fn turn_content(line: &str) -> Option<String> {
 /// The conversation this launch opens: the engine-chosen `--session-id` of a
 /// new session or fork, else the `--resume` target.
 fn launch_session_id(args: &[String]) -> String {
+    flag_value(args, "--session-id")
+        .or_else(|| resume_target(args))
+        .unwrap_or_else(|| "mock-session".to_string())
+}
+
+/// The conversation a `--resume` launch continues or forks from.
+fn resume_target(args: &[String]) -> Option<String> {
+    flag_value(args, "--resume")
+}
+
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    let prefix = format!("{flag}=");
     let mut iter = args.iter();
-    let mut resume_id = None;
     while let Some(arg) = iter.next() {
-        if arg == "--session-id" {
-            if let Some(session_id) = iter.next() {
-                return session_id.clone();
-            }
-        } else if arg == "--resume" {
-            resume_id = iter.next().cloned();
-        } else if let Some(rest) = arg.strip_prefix("--resume=") {
-            resume_id = Some(rest.to_owned());
+        if arg == flag {
+            return iter.next().cloned();
+        }
+        if let Some(rest) = arg.strip_prefix(&prefix) {
+            return Some(rest.to_owned());
         }
     }
-    resume_id.unwrap_or_else(|| "mock-session".to_string())
+    None
 }
 
 fn session_id_from_input(line: &str) -> Option<String> {
@@ -440,7 +533,30 @@ fn interruptible_sleep(total: Duration) {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_prompt;
+    use super::{extract_prompt, launch_session_id, resume_target};
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(|arg| (*arg).to_owned()).collect()
+    }
+
+    #[test]
+    fn launch_session_id_prefers_the_new_id_over_the_resume_source() {
+        let fork = argv(&[
+            "mock-claude",
+            "--resume=source",
+            "--fork-session",
+            "--session-id",
+            "forked",
+        ]);
+        assert_eq!(launch_session_id(&fork), "forked");
+        assert_eq!(resume_target(&fork).as_deref(), Some("source"));
+        let resume = argv(&["mock-claude", "--resume", "source"]);
+        assert_eq!(launch_session_id(&resume), "source");
+        let new = argv(&["mock-claude", "--session-id", "fresh"]);
+        assert_eq!(launch_session_id(&new), "fresh");
+        assert_eq!(resume_target(&new), None);
+        assert_eq!(launch_session_id(&argv(&["mock-claude"])), "mock-session");
+    }
 
     #[test]
     fn extracts_prompt_from_claude_print_flag() {

@@ -830,6 +830,9 @@ Goal:          {}
                     "Route Config:  {}\n",
                     pretty_json(config.route_config.as_ref())
                 ));
+                if let Some(sessions) = config.route_config.as_ref().map(route_sessions) {
+                    output.push_str(&sessions);
+                }
             }
             Some(StepConfig::WaitChildren(config)) => {
                 output.push_str(&format!(
@@ -860,6 +863,51 @@ Goal:          {}
         ));
 
         Ok(output)
+    }
+}
+
+/// Summarizes each route decision's session directive. Decisions without one
+/// enter their destination with a new conversation.
+fn route_sessions(route_config: &serde_json::Value) -> String {
+    let rules = route_config
+        .get("rules")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .map(|(index, rule)| {
+            let id = rule
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?");
+            (format!("rules[{index}] {id}"), rule.get("session"))
+        });
+    let default = route_config
+        .get("default")
+        .filter(|default| !default.is_null())
+        .map(|default| ("default".to_string(), default.get("session")));
+    let lines = rules
+        .chain(default)
+        .map(|(decision, session)| format!("  {decision}: {}\n", session_directive(session)))
+        .collect::<String>();
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("Route Sessions:\n{lines}")
+    }
+}
+
+fn session_directive(session: Option<&serde_json::Value>) -> String {
+    let Some(session) = session else {
+        return "(none)".to_string();
+    };
+    let Some(mode) = session.get("mode").and_then(serde_json::Value::as_str) else {
+        return session.to_string();
+    };
+    match session.get("step_id").and_then(serde_json::Value::as_str) {
+        Some(step_id) => format!("{mode} step {step_id}"),
+        None if mode == "new" => mode.to_string(),
+        None => format!("{mode} destination"),
     }
 }
 
@@ -2669,5 +2717,26 @@ mod tests {
             }
             _ => panic!("Expected Update command"),
         }
+    }
+
+    #[test]
+    fn route_sessions_summarize_every_decision() {
+        let route_config = serde_json::json!({
+            "rules": [
+                {"id": "again", "session": {"mode": "resume"}},
+                {"id": "other", "session": {"mode": "fork", "step_id": "step-a"}},
+                {"id": "fresh", "session": {"mode": "new"}},
+                {"id": "plain"}
+            ],
+            "default": {"session": {"mode": "resume", "step_id": "step-b"}}
+        });
+        assert_eq!(
+            route_sessions(&route_config),
+            "Route Sessions:\n  rules[0] again: resume destination\n  rules[1] other: fork step step-a\n  rules[2] fresh: new\n  rules[3] plain: (none)\n  default: resume step step-b\n"
+        );
+        assert_eq!(
+            route_sessions(&serde_json::json!({"rules": [], "default": null})),
+            ""
+        );
     }
 }

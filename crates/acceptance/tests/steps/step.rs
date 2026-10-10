@@ -114,6 +114,42 @@ fn replacement_route_config_for(target_id: &str) -> String {
     .to_string()
 }
 
+fn session_route_config_for(target_id: &str, source_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "version": 1,
+        "match_policy": "exactly_one",
+        "rules": [
+            {
+                "id": "approved",
+                "when": {"ref": "previous_output.route.result", "op": "eq", "value": "approved"},
+                "transition": {"type": "intra_workflow", "step_id": target_id},
+                "session": {"mode": "resume", "step_id": source_id}
+            },
+            {
+                "id": "rejected",
+                "when": {"ref": "previous_output.route.result", "op": "eq", "value": "rejected"},
+                "transition": {"type": "intra_workflow", "step_id": target_id},
+                "session": {"mode": "new"}
+            }
+        ],
+        "default": {
+            "transition": {"type": "intra_workflow", "step_id": target_id},
+            "session": {"mode": "fork"}
+        }
+    })
+}
+
+/// Replaces `<name>` placeholders with the stored IDs of the named steps.
+fn with_step_ids(world: &SmokeWorld, template: &str) -> String {
+    world
+        .stored_ids
+        .iter()
+        .filter_map(|(key, id)| key.strip_prefix("step:").map(|name| (name, id)))
+        .fold(template.to_string(), |text, (name, id)| {
+            text.replace(&format!("<{name}>"), id)
+        })
+}
+
 fn invalid_route_config_for(target_id: &str) -> String {
     serde_json::json!({
         "version": 1,
@@ -885,6 +921,53 @@ async fn when_update_configured_route_with_invalid_reference(world: &mut SmokeWo
         .await;
 }
 
+#[when(expr = "I replace the route config for step {string} with session directives")]
+async fn when_replace_route_config_with_sessions(world: &mut SmokeWorld, name: String) {
+    let route_id = stored_step_id(world, &name);
+    let route_config = session_route_config_for(
+        &stored_step_id(world, "done"),
+        &stored_step_id(world, "backlog"),
+    );
+    world
+        .run_vtb(&with_step_harness(&[
+            "step",
+            "update",
+            &route_id,
+            "--route-config",
+            &route_config.to_string(),
+        ]))
+        .await;
+}
+
+/// Points the first rule at `target` with `session` (`<step>` placeholders
+/// resolve to stored step IDs) and keeps the second rule unchanged.
+#[when(
+    expr = "I set the first rule of route step {string} to target {string} with session {string}"
+)]
+async fn when_set_first_rule_session(
+    world: &mut SmokeWorld,
+    name: String,
+    target: String,
+    session: String,
+) {
+    let route_id = stored_step_id(world, &name);
+    let mut route_config: serde_json::Value =
+        serde_json::from_str(&route_config_for(&stored_step_id(world, "done"))).unwrap();
+    route_config["rules"][0]["transition"]["step_id"] =
+        serde_json::Value::String(stored_step_id(world, &target));
+    route_config["rules"][0]["session"] = serde_json::from_str(&with_step_ids(world, &session))
+        .expect("session directive should be valid JSON");
+    world
+        .run_vtb(&with_step_harness(&[
+            "step",
+            "update",
+            &route_id,
+            "--route-config",
+            &route_config.to_string(),
+        ]))
+        .await;
+}
+
 /// Update a step with a flag that takes no value (e.g. --clear-output-schema)
 #[when(expr = "I update the step {string} in the workflow with flag {string} and no value")]
 async fn when_update_step_with_flag_no_value(world: &mut SmokeWorld, name: String, flag: String) {
@@ -1195,6 +1278,55 @@ async fn then_step_show_json_should_contain_replacement_route_config(world: &mut
     let expected: serde_json::Value = serde_json::from_str(&replacement_route_config_for(&done_id))
         .expect("replacement route fixture should be valid JSON");
     assert_eq!(json["config"]["route_config"], expected);
+}
+
+#[then("the step show JSON should contain the session route config")]
+async fn then_step_show_json_should_contain_session_route_config(world: &mut SmokeWorld) {
+    assert_eq!(
+        world.last_exit_code, 0,
+        "step show JSON failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&world.last_stdout).expect("step show JSON should be valid JSON");
+    let expected = session_route_config_for(
+        &stored_step_id(world, "done"),
+        &stored_step_id(world, "backlog"),
+    );
+    assert_eq!(json["config"]["route_config"], expected);
+}
+
+#[then(expr = "the step list JSON should report the session directives of route step {string}")]
+async fn then_step_list_json_should_report_sessions(world: &mut SmokeWorld, name: String) {
+    let step = get_step_json(world, &name)
+        .await
+        .unwrap_or_else(|| panic!("step '{name}' should be listed"));
+    let route_config = &step["config"]["route_config"];
+    assert_eq!(
+        route_config["rules"][0]["session"],
+        serde_json::json!({"mode": "resume", "step_id": stored_step_id(world, "backlog")})
+    );
+    assert_eq!(
+        route_config["rules"][1]["session"],
+        serde_json::json!({"mode": "new"})
+    );
+    assert_eq!(
+        route_config["default"]["session"],
+        serde_json::json!({"mode": "fork"})
+    );
+}
+
+#[then("the output should show the session directive of each route decision")]
+async fn then_output_should_show_route_sessions(world: &mut SmokeWorld) {
+    let backlog_id = stored_step_id(world, "backlog");
+    let expected = format!(
+        "Route Sessions:\n  rules[0] approved: resume step {backlog_id}\n  rules[1] rejected: new\n  default: fork destination\n"
+    );
+    assert!(
+        world.last_stdout.contains(&expected),
+        "expected {expected:?} in step show output:\n{}",
+        world.last_stdout
+    );
 }
 
 #[then("the step show JSON should have null route_config")]

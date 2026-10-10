@@ -256,6 +256,30 @@ fn validation_failures_are_table_driven_and_actionable() {
             },
             "config.route_config.rules[0].transition.step_ref",
         ),
+        (
+            "persisted session step_id",
+            |bundle: &mut WorkflowBundleManifest| {
+                bundle.workflows[0].steps[1].config.as_mut().unwrap()["route_config"]["rules"][0]
+                    ["session"] = serde_json::json!({"mode": "resume", "step_id": "uuid"})
+            },
+            "config.route_config.rules[0].session.step_id",
+        ),
+        (
+            "unresolved session step ref",
+            |bundle: &mut WorkflowBundleManifest| {
+                bundle.workflows[0].steps[1].config.as_mut().unwrap()["route_config"]["default"]["session"] =
+                    serde_json::json!({"mode": "fork", "step_ref": "missing"})
+            },
+            "config.route_config.default.session.step_ref",
+        ),
+        (
+            "foreign session step ref",
+            |bundle: &mut WorkflowBundleManifest| {
+                bundle.workflows[0].steps[1].config.as_mut().unwrap()["route_config"]["rules"][0]
+                    ["session"] = serde_json::json!({"mode": "resume", "step_ref": "review"})
+            },
+            "config.route_config.rules[0].session.step_ref",
+        ),
     ];
     for (name, mutate, path) in cases {
         let mut bundle = golden();
@@ -263,6 +287,20 @@ fn validation_failures_are_table_driven_and_actionable() {
         let error = bundle.validate().expect_err(name);
         assert!(error.path.contains(path), "{name}: {error}");
     }
+}
+
+#[test]
+fn session_step_ref_may_name_any_step_of_the_route_workflow() {
+    let mut bundle = golden();
+    let route_config = &mut bundle.workflows[0].steps[1].config.as_mut().unwrap()["route_config"];
+    route_config["rules"][0]["session"] =
+        serde_json::json!({"mode": "resume", "step_ref": "start"});
+    route_config["rules"][1]["session"] = serde_json::json!({"mode": "new"});
+    bundle
+        .validate()
+        .expect("session step_ref need not be an outgoing edge");
+    let reparsed = parse_manifest(&bundle.canonical_json().unwrap()).unwrap();
+    assert_eq!(reparsed, bundle.canonicalize());
 }
 
 #[test]
@@ -311,18 +349,41 @@ fn route_symbolization_only_rewrites_known_targets() {
             "id": "approved",
             "when": {"value": "00000000-0000-0000-0000-000000000099"},
             "transition": {"type": "intra_workflow", "step_id": "step-id"},
-            "handoff": {"id": "00000000-0000-0000-0000-000000000099"}
+            "handoff": {"id": "00000000-0000-0000-0000-000000000099"},
+            "session": {"mode": "resume", "step_id": "other-step-id"}
+        }, {
+            "id": "fresh",
+            "when": {"value": true},
+            "transition": {"type": "intra_workflow", "step_id": "step-id"},
+            "session": {"mode": "new"}
         }],
-        "default": {"transition": {"type": "inter_workflow", "workflow_id": "workflow-id"}}
+        "default": {
+            "transition": {"type": "inter_workflow", "workflow_id": "workflow-id"},
+            "session": {"mode": "fork", "step_id": "step-id"}
+        }
     });
     let mut refs = RouteTargetRefs::default();
     refs.step_refs.insert("step-id".into(), "finish".into());
+    refs.step_refs
+        .insert("other-step-id".into(), "start".into());
     refs.workflow_refs
         .insert("workflow-id".into(), "review".into());
     let converted = symbolize_route_config(&config, &refs).unwrap();
     assert_eq!(converted["rules"][0]["transition"]["step_ref"], "finish");
     assert!(converted["rules"][0]["transition"].get("step_id").is_none());
     assert_eq!(converted["default"]["transition"]["workflow_ref"], "review");
+    assert_eq!(
+        converted["rules"][0]["session"],
+        serde_json::json!({"mode": "resume", "step_ref": "start"})
+    );
+    assert_eq!(
+        converted["rules"][1]["session"],
+        config["rules"][1]["session"]
+    );
+    assert_eq!(
+        converted["default"]["session"],
+        serde_json::json!({"mode": "fork", "step_ref": "finish"})
+    );
     assert_eq!(
         converted["rules"][0]["when"]["value"],
         config["rules"][0]["when"]["value"]

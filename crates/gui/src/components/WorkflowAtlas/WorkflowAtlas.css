@@ -741,6 +741,38 @@
   opacity: 0.2;
 }
 
+/* ── Hover traces (the board carries the mode) ──
+   Workflow and step hovers dim the rest mildly rather than blacking it out;
+   inspector edge-hover keeps the full contrast. A workflow hover is quiet: its
+   handoffs keep their in/out colour at resting width with no glow, and
+   connected workflows only tint their name. */
+.uv-board:is(.trace-wf, .trace-step) .uv-wf.dim,
+.uv-board:is(.trace-wf, .trace-step) .ag-step.s-dim {
+  opacity: 0.65;
+}
+.uv-board:is(.trace-wf, .trace-step) .gedge.dim {
+  stroke-opacity: 0.4;
+}
+.uv-board:is(.trace-wf, .trace-step) :is(.ag-cond, .al-cond).dim {
+  opacity: 0.55;
+}
+.uv-board.trace-wf .gedge.lit {
+  stroke-width: var(--edge-w);
+  filter: none;
+}
+.uv-board.trace-wf .uv-wf.lit:not(.graph-lane) {
+  box-shadow: var(--shadow-1);
+}
+.uv-board.trace-wf .uv-wf.lit:not(.graph-lane):not(:hover) {
+  border-color: var(--line-strong);
+}
+.uv-board.trace-wf .uv-wf.lit .al-name {
+  color: var(--accent);
+}
+.uv-board.trace-wf .al-cond.lit {
+  box-shadow: none;
+}
+
 /* ── Role-specific step forms (graph nodes are positioned by ELK) ── */
 .ag-step {
   position: absolute;
@@ -1991,4 +2023,15 @@
   color: var(--step-route-fg);
   background: var(--step-route-wash);
   border-color: var(--panel-border);
+}
+
+/* ── Route session directives (route decisions · conversation entries) ── */
+.wfd-session {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.wfd-session.resume,
+.wfd-session.fork {
+  color: var(--accent);
+  background: var(--accent-wash);
 }

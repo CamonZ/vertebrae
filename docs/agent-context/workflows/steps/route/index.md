@@ -10,5 +10,7 @@ A backend-side step that evaluates a deterministic `route_config` and moves the 
   Load when: `route_config_ambiguous`, `route_config_uncovered`, save accepted but run failed.
 - [Loops](loops.md): routing back to an earlier step or workflow, visit counts, feedback.
   Load when: retry/revise loops, `execution.step_visit_count`, "send it back with feedback".
+- [Session directives](sessions.md): whether the destination llm_inference step starts, resumes or forks a conversation.
+  Load when: "continue the same conversation", resume/fork, `session` in a rule, `$.rules[<i>].session` errors, `session_not_found`.
 - [Handoff templating](../../../templating/handoffs.md): passing data to the next step.
   Load when: `handoff`, `execution.handoff` in prompts, `route_handoff_template_invalid`.
