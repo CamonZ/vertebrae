@@ -16,6 +16,7 @@
 //! of exhibiting baffling runtime behaviour.
 
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 
 /// Substrings that would trigger Sacrum's Liquid template pass on the prompt.
@@ -24,6 +25,69 @@ const PROHIBITED_SEQUENCES: [&str; 4] = ["{{", "}}", "{%", "%}"];
 
 /// Key of the stdout fixture line written by [`MockResponse::with_stdout_pause`].
 const PAUSE_DIRECTIVE: &str = "mock_pause_ms";
+
+/// Returns the envelope a mock plays for this delivery of `raw`. A provider
+/// receives the same step prompt every time the step runs, so an envelope
+/// built with [`MockResponse::followed_by`] names the next delivery's envelope
+/// in `next_file`; the last one repeats. Deliveries are counted under
+/// `state_dir` (the scenario's `MOCK_CAPTURE_DIR`); without one every
+/// delivery plays `raw`.
+pub fn scripted_turn(raw: &str, output_dir: &Path, state_dir: Option<&Path>) -> String {
+    let Some(state_dir) = state_dir else {
+        return raw.to_string();
+    };
+    let mut hasher = DefaultHasher::new();
+    raw.hash(&mut hasher);
+    let counter = state_dir
+        .join("turns")
+        .join(format!("{:016x}", hasher.finish()));
+    let delivered = fs::read_to_string(&counter)
+        .ok()
+        .and_then(|count| count.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    fs::create_dir_all(counter.parent().expect("counter has a parent")).expect("create turns dir");
+    fs::write(&counter, (delivered + 1).to_string()).expect("write turn counter");
+
+    let mut envelope = raw.to_string();
+    for _ in 0..delivered {
+        let next = serde_json::from_str::<serde_json::Value>(&envelope)
+            .ok()
+            .and_then(|value| value.get("next_file")?.as_str().map(str::to_owned));
+        let Some(next) = next else { break };
+        validate_relative_path(&next).expect("next_file is a relative fixture path");
+        envelope = fs::read_to_string(output_dir.join(&next))
+            .unwrap_or_else(|error| panic!("read next envelope {next}: {error}"));
+    }
+    envelope
+}
+
+/// Records that the provider no longer has conversation `id`, so a later
+/// resume or fork of it is rejected.
+pub fn forget_session(state_dir: &Path, id: &str) {
+    let dir = state_dir.join("forgotten_sessions");
+    fs::create_dir_all(&dir).expect("create forgotten_sessions dir");
+    fs::write(dir.join(session_file_name(id)), id).expect("record forgotten session");
+}
+
+/// Whether [`forget_session`] recorded conversation `id`.
+pub fn is_forgotten_session(state_dir: &Path, id: &str) -> bool {
+    state_dir
+        .join("forgotten_sessions")
+        .join(session_file_name(id))
+        .exists()
+}
+
+fn session_file_name(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
 
 /// The pause duration when `line` is a pause directive, otherwise `None`.
 pub fn stdout_pause_ms(line: &str) -> Option<u64> {
@@ -69,6 +133,8 @@ pub struct MockResponse {
     stderr_rel: Option<String>,
     stdout_lines: Vec<String>,
     stderr_lines: Vec<String>,
+    discard_session: bool,
+    next: Option<Box<MockResponse>>,
 }
 
 impl MockResponse {
@@ -84,7 +150,24 @@ impl MockResponse {
             stderr_rel: None,
             stdout_lines: Vec::new(),
             stderr_lines: Vec::new(),
+            discard_session: false,
+            next: None,
         }
+    }
+
+    /// The provider forgets this turn's conversation once the turn ends, so
+    /// a later resume or fork of it is rejected as an unknown id.
+    pub fn with_discarded_session(mut self) -> Self {
+        self.discard_session = true;
+        self
+    }
+
+    /// The next delivery of this envelope plays `next` (see
+    /// [`scripted_turn`]). `next` needs its own step label so its fixtures
+    /// do not overwrite these.
+    pub fn followed_by(mut self, next: MockResponse) -> Self {
+        self.next = Some(Box::new(next));
+        self
     }
 
     pub fn with_exit_code(mut self, code: i32) -> Self {
@@ -158,12 +241,24 @@ impl MockResponse {
             .map(|s| serde_json::Value::String(s.clone()))
             .unwrap_or(serde_json::Value::Null);
 
-        let envelope = serde_json::json!({
+        let mut envelope = serde_json::json!({
             "exit_code": self.exit_code,
             "delay_ms": self.delay_ms,
             "stdout_file": stdout_value,
             "stderr_file": stderr_value,
         });
+        if self.discard_session {
+            envelope["discard_session"] = serde_json::Value::Bool(true);
+        }
+        if let Some(next) = self.next {
+            let next_rel = format!("{}.next.json", self.stem);
+            validate_relative_path(&next_rel)?;
+            check_no_prohibited_sequence(&next_rel, "next_file")?;
+            let output_dir = self.output_dir.clone();
+            let next_envelope = next.build()?;
+            write_fixture(&output_dir, &next_rel, &[next_envelope])?;
+            envelope["next_file"] = serde_json::Value::String(next_rel);
+        }
 
         Ok(serde_json::to_string(&envelope).expect("envelope serialises"))
     }
@@ -429,6 +524,44 @@ mod tests {
                 other => panic!("expected LiquidTrigger for {trigger:?}, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn followed_by_scripts_later_deliveries_and_repeats_the_last() {
+        let dir = tmp_dir();
+        let state = tmp_dir();
+        let envelope = MockResponse::new(&dir, "feat", "seq", "first")
+            .with_stdout_line(r#"{"turn":1}"#)
+            .followed_by(
+                MockResponse::new(&dir, "feat", "seq", "second")
+                    .with_stdout_line(r#"{"turn":2}"#)
+                    .with_discarded_session(),
+            )
+            .build()
+            .unwrap();
+        assert!(!envelope.contains("}}"), "{envelope}");
+        let stdout_of = |raw: &str| {
+            let value: serde_json::Value = serde_json::from_str(raw).unwrap();
+            value["stdout_file"].as_str().unwrap().to_string()
+        };
+        let first = scripted_turn(&envelope, &dir, Some(&state));
+        let second = scripted_turn(&envelope, &dir, Some(&state));
+        let third = scripted_turn(&envelope, &dir, Some(&state));
+        assert_eq!(stdout_of(&first), "feat__seq__first.stdout.jsonl");
+        assert_eq!(stdout_of(&second), "feat__seq__second.stdout.jsonl");
+        assert_eq!(third, second);
+        let second: serde_json::Value = serde_json::from_str(&second).unwrap();
+        assert_eq!(second["discard_session"], true);
+        assert_eq!(scripted_turn(&envelope, &dir, None), envelope);
+    }
+
+    #[test]
+    fn forgotten_sessions_are_recorded_per_id() {
+        let state = tmp_dir();
+        assert!(!is_forgotten_session(&state, "sess/1"));
+        forget_session(&state, "sess/1");
+        assert!(is_forgotten_session(&state, "sess/1"));
+        assert!(!is_forgotten_session(&state, "sess-2"));
     }
 
     #[test]

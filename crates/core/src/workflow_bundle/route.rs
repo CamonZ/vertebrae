@@ -11,7 +11,8 @@ pub struct RouteTargetRefs {
     pub workflow_refs: BTreeMap<String, WorkflowRef>,
 }
 
-// Only documented target fields are rewritten; predicates and metadata stay opaque.
+// Only documented target fields (transitions and session.step_id) are
+// rewritten; predicates and metadata stay opaque.
 pub fn symbolize_route_config(
     route_config: &Value,
     refs: &RouteTargetRefs,
@@ -37,6 +38,11 @@ pub fn symbolize_route_config(
                 refs,
                 format!("route_config.rules[{index}].transition"),
             )?;
+            rewrite_route_session(
+                rule.get_mut("session"),
+                refs,
+                format!("route_config.rules[{index}].session"),
+            )?;
         }
     }
     match object.get_mut("default") {
@@ -51,6 +57,11 @@ pub fn symbolize_route_config(
                 default.get_mut("transition"),
                 refs,
                 "route_config.default.transition".to_string(),
+            )?;
+            rewrite_route_session(
+                default.get_mut("session"),
+                refs,
+                "route_config.default.session".to_string(),
             )?;
         }
         _ => {}
@@ -105,6 +116,27 @@ fn rewrite_route_transition(
             format!("unsupported route transition type {other:?}"),
         )),
     }
+}
+
+// A session directive without step_id targets the destination and stays as-is.
+fn rewrite_route_session(
+    session: Option<&mut Value>,
+    refs: &RouteTargetRefs,
+    path: String,
+) -> Result<(), ManifestValidationError> {
+    let Some(session) = session.and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+    if !session.contains_key("step_id") {
+        return Ok(());
+    }
+    rewrite_target(
+        session,
+        "step_id",
+        "step_ref",
+        &refs.step_refs,
+        format!("{path}.step_id"),
+    )
 }
 
 fn rewrite_target(
@@ -196,6 +228,12 @@ pub(super) fn validate_route_config(
             outgoing_workflows,
             format!("{rule_path}.transition"),
         )?;
+        validate_route_session(
+            rule.get("session"),
+            workflow_ref,
+            local_steps,
+            format!("{rule_path}.session"),
+        )?;
     }
     match object.get("default") {
         Some(default) if !default.is_null() => {
@@ -211,10 +249,50 @@ pub(super) fn validate_route_config(
                 outgoing_workflows,
                 format!("{path}.default.transition"),
             )?;
+            validate_route_session(
+                default.get("session"),
+                workflow_ref,
+                local_steps,
+                format!("{path}.default.session"),
+            )?;
         }
         _ => {}
     }
     Ok(())
+}
+
+// Sacrum validates mode and destination; the bundle only checks that the
+// referenced step is portable and belongs to the route's workflow.
+fn validate_route_session(
+    session: Option<&Value>,
+    workflow_ref: &str,
+    local_steps: &BTreeMap<String, usize>,
+    path: String,
+) -> Result<(), ManifestValidationError> {
+    let Some(session) = session else {
+        return Ok(());
+    };
+    let session = session.as_object().ok_or_else(|| {
+        ManifestValidationError::new(path.clone(), "session must be a JSON object")
+    })?;
+    if session.contains_key("step_id") {
+        return Err(ManifestValidationError::new(
+            format!("{path}.step_id"),
+            "persisted step_id is not portable; use step_ref",
+        ));
+    }
+    match session.get("step_ref") {
+        None => Ok(()),
+        Some(Value::String(step_ref)) if local_steps.contains_key(step_ref) => Ok(()),
+        Some(Value::String(step_ref)) => Err(ManifestValidationError::new(
+            format!("{path}.step_ref"),
+            format!("unresolved step ref {step_ref:?} in workflow {workflow_ref:?}"),
+        )),
+        Some(_) => Err(ManifestValidationError::new(
+            format!("{path}.step_ref"),
+            "step_ref must be a string",
+        )),
+    }
 }
 
 fn validate_route_transition(

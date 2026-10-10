@@ -9,12 +9,14 @@
    ────────────────────────────────────────────────────────────────── */
 
 import type {
+  JsonValue,
   PipelineStep,
   PipelineSummary,
   PipelineWorkflow,
   StepType,
 } from "../../../bindings";
 import { hearthStepKind } from "../../WorkflowPipeline/stepTypeStyling";
+import { routeTransitionLabels } from "../inspector/routeSessions";
 import {
   type AtlasEdge,
   type AtlasModel,
@@ -171,12 +173,20 @@ function resolveTargetStep(
  *  - `workflows` with derived `phase` + task `total`/`running`.
  *  - `steps` with derived `kind`/`role`.
  *  - `edges`: intra-workflow `loop` edges (from `transitions_to` that point
- *    backward) and cross-workflow `handoff` edges (synthesised refs each end).
- *    Forward intra links are NOT emitted — `layoutFull` generates them from
+ *    backward), `branch` edges (a route step's transitions that jump past its
+ *    next step) and cross-workflow `handoff` edges (synthesised refs each end).
+ *    Next-in-order links are NOT emitted — `layoutFull` generates them from
  *    step order.
  *  - `phases`: ordered phase columns.
+ *  - `forwardLabels`: route-decision labels (`<rule> · <mode>`) for implied
+ *    next-in-order links out of route steps. Loop and branch edges out of a
+ *    route step carry theirs in `label`. `routeConfigs` maps route step ids to
+ *    their `route_config`; without one a route's edges are unlabeled.
  */
-export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
+export function buildAtlasModel(
+  summary: PipelineSummary,
+  routeConfigs: ReadonlyMap<string, JsonValue | null> = new Map()
+): AtlasModel {
   const wfById = new Map(summary.workflows.map((w) => [w.id, w]));
 
   const orderedPhases = orderPhases(summary.workflows);
@@ -190,6 +200,7 @@ export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
   const workflows: AtlasWorkflow[] = [];
   const steps: AtlasStep[] = [];
   const edges: AtlasEdge[] = [];
+  const forwardLabels: Record<string, string> = {};
 
   for (const wf of summary.workflows) {
     const ordered = wf.workflow_steps
@@ -225,22 +236,36 @@ export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
         running,
       });
 
-      // ── intra-workflow loop-backs ──
-      // A transition into an earlier (or same) step in order is a loop; forward
-      // transitions are implied by step order and synthesised in layoutFull.
+      // ── intra-workflow loop-backs and route branches ──
+      // A transition into an earlier (or same) step in order is a loop. The
+      // next-in-order link is implied and synthesised in layoutFull; a route
+      // step's jumps further ahead are emitted as branches so every decision
+      // has an edge. Route edges are labelled with their decisions.
+      const routeLabels =
+        kind === "route"
+          ? routeTransitionLabels(routeConfigs.get(s.id))
+          : new Map<string, string>();
       for (const targetId of s.transitions_to) {
         const fromIdx = i;
         const toIdx = orderIndex.get(targetId);
         if (toIdx === undefined) continue; // target outside this workflow
-        if (toIdx > fromIdx) continue; // forward link — skip
+        const label = routeLabels.get(targetId) ?? null;
+        if (toIdx === fromIdx + 1) {
+          if (label)
+            forwardLabels[
+              `${stepRef(wf.id, s.id)}->${stepRef(wf.id, targetId)}`
+            ] = label;
+          continue;
+        }
+        if (toIdx > fromIdx && kind !== "route") continue; // implied by order
         edges.push({
-          id: `L_${wf.id}_${s.id}_${targetId}`,
-          kind: "loop",
+          id: `${toIdx > fromIdx ? "B" : "L"}_${wf.id}_${s.id}_${targetId}`,
+          kind: toIdx > fromIdx ? "branch" : "loop",
           from: stepRef(wf.id, s.id),
           to: stepRef(wf.id, targetId),
           fromWorkflow: wf.id,
           toWorkflow: wf.id,
-          label: null,
+          label,
         });
       }
     });
@@ -284,5 +309,5 @@ export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
     }
   }
 
-  return { workflows, steps, edges, phases };
+  return { workflows, steps, edges, phases, forwardLabels };
 }

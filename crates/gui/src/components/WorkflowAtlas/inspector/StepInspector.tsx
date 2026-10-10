@@ -10,12 +10,16 @@
    Transitions — the implicit forward step plus every explicit out-edge — are
    clickable so you can walk the topology without leaving the panel.
 
+   Route steps list each decision's target and session directive; llm_inference
+   steps list the route decisions that enter them or continue their
+   conversation, read from the workflow's route steps' cached configs.
+
    Ported from docs/design/wf-detail.jsx (WfInspector, step branch).
    ────────────────────────────────────────────────────────────────── */
 import { useEffect, useMemo, useState } from "react";
 import { CloseIcon, IconButton } from "../../panels";
 import { IdChip } from "../../shared/HearthPrimitives";
-import { useStep } from "../../../hooks";
+import { useStep, useSteps } from "../../../hooks";
 import {
   commands,
   type JsonValue,
@@ -35,6 +39,11 @@ import type { AtlasSelection } from "./selection";
 import { kindClass } from "./selection";
 import { StructuredInferenceQuestions } from "./StructuredInferenceQuestions";
 import { RhaiScript } from "./RhaiScript";
+import {
+  routeDecisions,
+  sessionEntriesFor,
+  type RouteDecision,
+} from "./routeSessions";
 import {
   EMPTY_STRUCTURED_INPUT,
   structuredInferenceConfig,
@@ -115,6 +124,15 @@ export function StepInspector({
 
   // Rich config — fetched live; PipelineStep has no goal/prompt/agents/etc.
   const { step: cfg, isLoading } = useStep(stepId);
+  const routeStepIds = useMemo(
+    () =>
+      model.steps
+        .filter((s) => s.workflowId === workflowId && s.kind === "route")
+        .map((s) => s.stepId),
+    [model.steps, workflowId]
+  );
+  // Sibling route configs, shared with useStep's cache, for "Conversation".
+  const routeSteps = useSteps(routeStepIds, cfg?.step_type === "llm_inference");
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -205,10 +223,12 @@ export function StepInspector({
     for (const e of model.edges) {
       if (e.from !== ref) continue;
       const [tw, ts] = splitRef(e.to);
-      const loop = tw === wf.id;
-      // loop → name the target step (ts is a bare step id); handoff → name the
-      // target workflow. Fall back to the raw id only if it can't be resolved.
-      const label = loop
+      const intra = tw === wf.id;
+      const loop = e.kind === "loop";
+      // loop / route branch → name the target step (ts is a bare step id);
+      // handoff → name the target workflow. Fall back to the raw id only if it
+      // can't be resolved.
+      const label = intra
         ? (model.steps.find((s) => s.id === `${wf.id}.${ts}`)?.name ?? ts)
         : (wfById.get(tw)?.name ?? tw);
       list.push({
@@ -216,7 +236,7 @@ export function StepInspector({
         label,
         loop,
         onClick: () =>
-          loop
+          intra
             ? onSelect({ type: "step", workflowId: wf.id, stepId: ts })
             : onSelect({ type: "workflow", workflowId: tw }),
       });
@@ -244,7 +264,45 @@ export function StepInspector({
     return list;
   }, [model.edges, model.steps, wf, step, idx, ref, wfById, onSelect]);
 
+  const sessionEntries =
+    cfg?.step_type === "llm_inference"
+      ? sessionEntriesFor(
+          stepId,
+          routeStepIds.map((routeStepId, index) => {
+            const routeStep = routeSteps[index];
+            return {
+              routeStepId,
+              routeConfig:
+                routeStep?.step_type === "route"
+                  ? (routeStep.config as RouteStepConfig | null)?.route_config
+                  : null,
+            };
+          })
+        )
+      : [];
+
   if (!wf || !step) return null;
+
+  const stepName = (id: string) =>
+    model.steps.find((s) => s.id === `${wf.id}.${id}`)?.name ?? id;
+  const selectStep = (id: string) =>
+    onSelect({ type: "step", workflowId: wf.id, stepId: id });
+  const sessionTag = (entry: RouteDecision, testId: string) =>
+    entry.session ? (
+      <span
+        data-testid={testId}
+        className={"wfd-tag wfd-session " + entry.session.mode}
+      >
+        {entry.session.mode}
+        {entry.session.stepId && entry.session.stepId !== entry.targetStepId ? (
+          <> · {stepName(entry.session.stepId)}</>
+        ) : null}
+      </span>
+    ) : (
+      <span data-testid={testId} className="wfd-placeholder">
+        {entry.targetStepId ? "new (implicit)" : "—"}
+      </span>
+    );
 
   const kindCls = kindClass(step.kind);
   const isFinish = step.kind === "finish";
@@ -871,6 +929,100 @@ export function StepInspector({
             </div>
           )}
         </section>
+
+        {isInference ? (
+          <section className="wfd-sec" data-testid="step-conversation-section">
+            <div className="wfd-lbl">
+              Conversation <span className="n">{sessionEntries.length}</span>
+            </div>
+            {sessionEntries.length ? (
+              <div className="wfd-rows">
+                {sessionEntries.map((entry) => (
+                  <div
+                    key={entry.key}
+                    className="wfd-row"
+                    data-testid="step-conversation-entry"
+                  >
+                    <button
+                      className="wfd-trans loop"
+                      onClick={() => selectStep(entry.routeStepId)}
+                      type="button"
+                    >
+                      {stepName(entry.routeStepId)} · {entry.decision.label}
+                    </button>
+                    {entry.role === "destination" ? (
+                      sessionTag(entry.decision, "step-conversation-mode")
+                    ) : (
+                      <span
+                        data-testid="step-conversation-mode"
+                        className={
+                          "wfd-tag wfd-session " + entry.decision.session?.mode
+                        }
+                      >
+                        {entry.decision.session?.mode} →{" "}
+                        {entry.decision.targetStepId
+                          ? stepName(entry.decision.targetStepId)
+                          : "?"}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="wfd-placeholder">
+                No route decisions — every entry starts a new conversation
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {cfg?.step_type === "route" && hasRouteConfig ? (
+          <section className="wfd-sec" data-testid="route-decisions-section">
+            <div className="wfd-lbl">
+              Decisions{" "}
+              <span className="n">
+                {routeDecisions(route?.route_config).length}
+              </span>
+            </div>
+            <div className="wfd-rows">
+              {routeDecisions(route?.route_config).map((entry) => (
+                <div
+                  key={entry.key}
+                  className="wfd-row"
+                  data-testid="route-decision"
+                >
+                  <span className="rk">{entry.label}</span>
+                  {entry.targetStepId ? (
+                    <button
+                      className="wfd-trans"
+                      onClick={() => selectStep(entry.targetStepId!)}
+                      type="button"
+                    >
+                      <span className="arr">→</span>
+                      {stepName(entry.targetStepId)}
+                    </button>
+                  ) : entry.targetWorkflowId ? (
+                    <button
+                      className="wfd-trans"
+                      onClick={() =>
+                        onSelect({
+                          type: "workflow",
+                          workflowId: entry.targetWorkflowId!,
+                        })
+                      }
+                      type="button"
+                    >
+                      <span className="arr">→</span>
+                      {wfById.get(entry.targetWorkflowId)?.name ??
+                        entry.targetWorkflowId}
+                    </button>
+                  ) : null}
+                  {sessionTag(entry, "route-decision-session")}
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {cfg?.step_type === "route" ? (
           <section className="wfd-sec" data-testid="route-config-section">

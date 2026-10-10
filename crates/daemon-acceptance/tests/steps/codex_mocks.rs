@@ -2,7 +2,7 @@ use cucumber::when;
 
 use crate::DaemonWorld;
 
-fn notification(method: &str, params: serde_json::Value) -> String {
+pub(crate) fn notification(method: &str, params: serde_json::Value) -> String {
     let mut encoded = serde_json::json!({"method": method, "params": params}).to_string();
     // Sacrum treats `}}` as a Liquid-template trigger while the fixture
     // envelope is transported through the prompt field. Whitespace between
@@ -14,7 +14,7 @@ fn notification(method: &str, params: serde_json::Value) -> String {
     encoded
 }
 
-fn usage_updated(input_tokens: i64, output_tokens: i64) -> String {
+pub(crate) fn usage_updated(input_tokens: i64, output_tokens: i64) -> String {
     notification(
         "thread/tokenUsage/updated",
         serde_json::json!({
@@ -38,7 +38,7 @@ fn usage_updated(input_tokens: i64, output_tokens: i64) -> String {
     )
 }
 
-fn completed_turn() -> String {
+pub(crate) fn completed_turn() -> String {
     notification(
         "turn/completed",
         serde_json::json!({"turn": {"status": "completed", "durationMs": 1234}}),

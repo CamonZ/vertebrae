@@ -11,6 +11,7 @@ pub mod host_reads;
 pub mod host_rollup;
 pub mod host_writes;
 pub mod mocks;
+pub mod sessions;
 pub mod setup;
 pub mod stop;
 pub mod telemetry;

@@ -258,6 +258,37 @@ Feature: Step questions: prompt and agent-config
     When I show the step "Router" as JSON
     Then the step show JSON should have null route_config
 
+  Scenario: Route decisions carry session directives unchanged
+    When I add and configure a deterministic route step "SessionRouter" to the workflow
+    And I replace the route config for step "SessionRouter" with session directives
+    Then the command should succeed
+    When I show the step "SessionRouter" as JSON
+    Then the step show JSON should contain the session route config
+    And the step list JSON should report the session directives of route step "SessionRouter"
+    When I show the step "SessionRouter"
+    Then the output should show the session directive of each route decision
+
+  Scenario: Route session directives without sessions show none
+    When I add and configure a deterministic route step "PlainRouter" to the workflow
+    And I show the step "PlainRouter"
+    Then the output should contain "rules[0] approved: (none)"
+
+  Scenario Outline: Sacrum rejects invalid route session directives with their path
+    When I add and configure a deterministic route step "BadSessionRouter" to the workflow
+    And I add a step "CodexPeer" to the workflow with flag "--provider" and value "openai"
+    And I set the first rule of route step "BadSessionRouter" to target "<target>" with session '<session>'
+    Then the command should fail with "<path>"
+    And the error should contain "<message>"
+
+    Examples:
+      | target           | session                                          | path                       | message                       |
+      | done             | {"mode":"continue"}                              | $.rules[0].session.mode    | must be new, resume, or fork  |
+      | done             | {"mode":"resume","name":"x"}                     | $.rules[0].session.name    | is not allowed                |
+      | done             | {"mode":"new","step_id":"<backlog>"}             | $.rules[0].session.step_id | is not allowed with mode new  |
+      | done             | {"mode":"resume","step_id":"<BadSessionRouter>"} | $.rules[0].session.step_id | must be an llm_inference step |
+      | done             | {"mode":"fork","step_id":"<CodexPeer>"}          | $.rules[0].session.step_id | must use the same harness     |
+      | BadSessionRouter | {"mode":"resume"}                                | $.rules[0].session         | to an llm_inference step      |
+
   Scenario: Route drafts and local route JSON validation
     When I add a step "DraftRouter" to the workflow with flag "--step-type" and value "route"
     Then the command should succeed

@@ -88,15 +88,28 @@ function approxLabelW(t: string): number {
   return Math.max(28, t.length * 6.0 + 10);
 }
 
+/** ELK label reservation for an intra-workflow route-decision chip (`.ag-cond`). */
+function stepEdgeLabels(label: string | null) {
+  return label
+    ? [
+        {
+          text: label,
+          width: Math.max(28, label.length * 6.8 + 16),
+          height: 18,
+        },
+      ]
+    : [];
+}
+
 /** Per-edge metadata threaded through ELK and rebuilt onto the output edges. */
 interface EdgeMeta {
   fromWorkflow: string;
   toWorkflow: string;
   kind: EdgeKind;
   label: string | null;
-  /** Source step ref (cross edges only). */
+  /** Source step ref (cross, forward and branch edges). */
   from?: string;
-  /** Target step ref (cross edges only). */
+  /** Target step ref (cross, forward and branch edges). */
   to?: string;
   /** Cross edge that bypasses ELK (hub overlay). */
   hub?: boolean;
@@ -234,18 +247,43 @@ export async function layoutFull(
     // forward step links — implied by order, synthesised here (NOT in adapter)
     for (let i = 0; i < wSteps.length - 1; i++) {
       const id = `F_${w.id}_${i}`;
+      const from = wSteps[i].id;
+      const to = wSteps[i + 1].id;
+      const label = model.forwardLabels?.[`${from}->${to}`] ?? null;
       node.edges!.push({
         id,
-        sources: [wSteps[i].id],
-        targets: [wSteps[i + 1].id],
+        sources: [from],
+        targets: [to],
+        labels: stepEdgeLabels(label),
       });
       meta[id] = {
         fromWorkflow: w.id,
         toWorkflow: w.id,
         kind: "forward",
-        label: null,
+        label,
+        from,
+        to,
       };
     }
+    // route branches that jump past the next step — laid out in the lane
+    model.edges.forEach((e, idx) => {
+      if (e.kind !== "branch" || e.fromWorkflow !== w.id) return;
+      const id = "B" + idx;
+      node.edges!.push({
+        id,
+        sources: [e.from],
+        targets: [e.to],
+        labels: stepEdgeLabels(e.label),
+      });
+      meta[id] = {
+        fromWorkflow: w.id,
+        toWorkflow: w.id,
+        kind: "branch",
+        label: e.label,
+        from: e.from,
+        to: e.to,
+      };
+    });
     return node;
   });
 
@@ -265,6 +303,7 @@ export async function layoutFull(
   const loops: PendingLoop[] = [];
 
   model.edges.forEach((e, idx) => {
+    if (e.kind === "branch") return; // laid out inside its workflow container
     if (e.fromWorkflow === e.toWorkflow) {
       // intra-workflow link from the model is a loop-back (forwards are synthesised)
       loops.push({
@@ -412,11 +451,10 @@ export async function layoutFull(
         toWorkflow: lp.workflowId,
         label: lp.label,
         points,
-        labelPos: {
-          text: lp.label ?? "",
-          x: (from.x + gutterX) / 2,
-          y: sourceY,
-        },
+        // on the gutter's vertical run, clear of the step boxes
+        labelPos: lp.label
+          ? { text: lp.label, x: gutterX, y: (sourceY + targetY) / 2 }
+          : null,
       };
     })
     .filter((x): x is PlacedEdge => x !== null);

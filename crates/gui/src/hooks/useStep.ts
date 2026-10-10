@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { commands } from "../bindings";
 import type { Step } from "../bindings";
 import { errorMessage, queryClient, queryKeys, unwrapCommand } from "../query";
@@ -36,4 +36,21 @@ export function useStep(stepId: string | null | undefined) {
     },
     applyUpdate,
   };
+}
+
+/**
+ * Fetch several steps through the same per-step cache as {@link useStep}, so
+ * WebSocket step updates reach every reader. Returns one entry per id, null
+ * until loaded (or when `enabled` is false).
+ */
+export function useSteps(stepIds: string[], enabled = true): (Step | null)[] {
+  const generation = useProjectScopeGeneration();
+  const queries = useQueries({
+    queries: stepIds.map((stepId) => ({
+      queryKey: queryKeys.steps.byId(generation, stepId),
+      queryFn: () => unwrapCommand(commands.getStep(stepId)),
+      enabled: enabled && Boolean(stepId),
+    })),
+  });
+  return queries.map((query) => query.data ?? null);
 }

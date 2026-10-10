@@ -109,8 +109,9 @@ export function WorkflowInspector({
         toWorkflow: tw,
         label: e.label,
       };
-      if (fw === wf.id && tw === wf.id) loops.push(edge);
-      else if (fw === wf.id) out.push(edge);
+      if (fw === wf.id && tw === wf.id) {
+        if (e.kind === "loop") loops.push(edge);
+      } else if (fw === wf.id) out.push(edge);
       else if (tw === wf.id) inb.push(edge);
     }
     return { out, inb, loops };

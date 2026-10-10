@@ -15,6 +15,8 @@ Use this when: creating a new workflow or factory.
 4. **Step transitions**: `--transition-to` on each step (see edge rules in [transitions](transitions.md)).
 5. **Route configs**: `vtb step update <route> --route-config "$(cat route.json)"` last,
    because the backend validates refs against predecessor schemas and targets against existing edges.
+   Add a rule's [session directive](steps/route/sessions.md) here too; its steps must
+   already exist with their final harness.
 
 ## Why this order
 Route validation needs the predecessor's output schema, the step edges and

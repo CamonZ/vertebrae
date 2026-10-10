@@ -18,6 +18,9 @@ Use this when: writing or reading a route.
   transitions) or `inter_workflow` + `workflow_id` (must be a workflow
   transition from this workflow; enters at its target step or the destination's entry).
 - `handoff`: optional object, see [handoff templating](../../../templating/handoffs.md). `{}` means none.
+- `session`: optional `{"mode": "new" | "resume" | "fork", "step_id"?}` choosing
+  how an intra_workflow llm_inference destination enters a conversation, see
+  [session directives](sessions.md). Omitted means a new conversation.
 - `default`: optional decision used when no rule matches.
 
 ## References and operators
@@ -38,4 +41,4 @@ A missing value at runtime never matches, and `not` of a missing value is
 still missing, so such cases fall to `default` (or `route_no_match` without one).
 
 ## Related
-[Partitions](partitions.md) · [Transitions](../../transitions.md)
+[Partitions](partitions.md) · [Session directives](sessions.md) · [Transitions](../../transitions.md)

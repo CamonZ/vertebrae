@@ -844,7 +844,8 @@ describe("WorkflowAtlas — morph (P6)", () => {
 });
 
 /* ── P7 hover-trace ────────────────────────────────────────────────
-   Hovering a workflow lights its connected set and dims the rest, per view. */
+   Hovering a workflow lights its connected set and dims the rest, per view;
+   hovering a step traces that step's own edges. */
 describe("WorkflowAtlas — hover-trace (P7)", () => {
   /** The travelling box wrapper for a workflow, found via its graph-face name. */
   function graphBox(name: string): HTMLElement {
@@ -920,6 +921,114 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
     fireEvent.mouseLeave(stepNode);
     expect(build.className).not.toContain("lit");
     expect(document.querySelector(".ag-step.s-hover")).not.toBeInTheDocument();
+  });
+
+  /** `stubLayout` plus each workflow's next-step links (synthesised, as
+   *  layoutFull does) and its model loops and branches, positioned. */
+  function stubLayoutWithIntra(model: AtlasModel): FullLayout {
+    const layout = stubLayout(model);
+    const points = [
+      { x: 40, y: 100 },
+      { x: 200, y: 100 },
+    ];
+    return {
+      ...layout,
+      workflows: layout.workflows.map((w) => ({
+        ...w,
+        intra: [
+          ...w.steps.slice(1).map((to, i) => ({
+            id: `F_${w.steps[i].id}_${to.id}`,
+            kind: "forward" as const,
+            from: w.steps[i].id,
+            to: to.id,
+            fromWorkflow: w.id,
+            toWorkflow: w.id,
+            label: null,
+            points,
+            labelPos: null,
+          })),
+          ...model.edges
+            .filter((e) => e.kind !== "cross" && e.fromWorkflow === w.id)
+            .map((e) => ({ ...e, points, labelPos: null })),
+        ],
+      })),
+    };
+  }
+
+  async function renderTraceable() {
+    mockSummary.mockReturnValue({
+      summary: ALL_IN_FACTORY_FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) =>
+      stubLayoutWithIntra(model)
+    );
+    render(<WorkflowAtlas />);
+    await waitFor(() =>
+      expect(document.querySelector(".gedge.k-loop")).toBeInTheDocument()
+    );
+  }
+
+  function stepNode(name: string): HTMLElement {
+    // Finish steps carry their name for screen readers only.
+    return Array.from(
+      document.querySelectorAll<HTMLElement>(".ag-step-name, .ag-sr-only")
+    )
+      .find((n) => n.textContent === name)!
+      .closest(".ag-step") as HTMLElement;
+  }
+
+  it("keeps a workflow hover quiet: steps and loops stay at rest", async () => {
+    await renderTraceable();
+    const board = document.querySelector(".uv-board")!;
+
+    fireEvent.mouseEnter(graphBox("Build"));
+    expect(board.className).toContain("trace-wf");
+    expect(stepNode("Plan").className).not.toMatch(/s-(lit|dim)/);
+    const loop = document.querySelector(".gedge.k-loop")!;
+    expect(loop.getAttribute("class")).not.toMatch(/\b(lit|dim)\b/);
+    expect(document.querySelector(".gedge.k-step.lit")).toBeNull();
+    // Review is outside Build's connected set: its step recedes.
+    expect(stepNode("Approve").className).toContain("s-dim");
+
+    fireEvent.mouseLeave(graphBox("Build"));
+    expect(board.className).not.toContain("trace-wf");
+  });
+
+  it("traces the edges entering and leaving a hovered step", async () => {
+    await renderTraceable();
+    const board = document.querySelector(".uv-board")!;
+
+    // Plan → Execute leaves Plan; the Execute → Plan loop lands on it.
+    fireEvent.mouseEnter(stepNode("Plan"));
+    expect(board.className).toContain("trace-step");
+    expect(board.className).not.toContain("trace-wf");
+
+    const litLinks = document.querySelectorAll(".gedge.k-step.lit");
+    expect(litLinks).toHaveLength(1);
+    expect(litLinks[0].getAttribute("class")).not.toContain("back");
+    // Execute → Ship does not touch Plan.
+    expect(document.querySelectorAll(".gedge.k-step.dim")).toHaveLength(1);
+    const loop = document.querySelector(".gedge.k-loop")!;
+    expect(loop.getAttribute("class")).toContain("lit");
+    expect(loop.getAttribute("class")).toContain("back");
+
+    // The neighbour lights softly; unrelated steps recede.
+    expect(stepNode("Execute").className).toContain("s-lit");
+    expect(stepNode("Ship").className).toContain("s-dim");
+    expect(stepNode("Approve").className).toContain("s-dim");
+    expect(graphBox("Build").className).toContain("lit");
+
+    // From Execute, the loop leaves the step: it reads OUT, not back.
+    fireEvent.mouseLeave(stepNode("Plan"));
+    fireEvent.mouseEnter(stepNode("Execute"));
+    expect(document.querySelectorAll(".gedge.k-step.lit")).toHaveLength(2);
+    expect(
+      document.querySelector(".gedge.k-loop")!.getAttribute("class")
+    ).not.toContain("back");
+    expect(stepNode("Plan").className).toContain("s-lit");
+    expect(stepNode("Ship").className).toContain("s-lit");
   });
 
   it("lights the matching canvas edge while an inspector transition row is hovered", async () => {

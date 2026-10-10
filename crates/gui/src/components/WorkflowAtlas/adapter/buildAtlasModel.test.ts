@@ -235,6 +235,56 @@ describe("buildAtlasModel", () => {
     expect(model.edges.some((e) => e.kind === "forward")).toBe(false);
   });
 
+  it("labels route edges with their decisions and draws route branches", () => {
+    const summary: PipelineSummary = {
+      workflows: [
+        makeWorkflow("wf", [
+          makeStep("work", "wf", 0, { transitions_to: ["route"] }),
+          makeStep("route", "wf", 1, {
+            step_type: "route",
+            transitions_to: ["work", "review", "done"],
+          }),
+          makeStep("review", "wf", 2, { transitions_to: ["skip"] }),
+          makeStep("skip", "wf", 3),
+          makeStep("done", "wf", 4, { step_type: "finish" }),
+        ]),
+      ],
+    };
+    const t = (step_id: string) => ({ type: "intra_workflow", step_id });
+    const routeConfigs = new Map([
+      [
+        "route",
+        {
+          rules: [
+            { id: "again", transition: t("work"), session: { mode: "resume" } },
+            { id: "ok", transition: t("review") },
+            { id: "ship", transition: t("done"), session: { mode: "fork" } },
+            { id: "late", transition: t("done") },
+          ],
+        },
+      ],
+    ]);
+
+    const model = buildAtlasModel(summary, routeConfigs);
+    const ref = (id: string) => stepRef("wf", id);
+    expect(model.edges.map((e) => [e.kind, e.from, e.to, e.label])).toEqual([
+      ["loop", ref("route"), ref("work"), "again · resume"],
+      ["branch", ref("route"), ref("done"), "ship · fork, late · new"],
+    ]);
+    expect(model.forwardLabels).toEqual({
+      [`${ref("route")}->${ref("review")}`]: "ok · new",
+    });
+
+    // without configs the branch is still drawn, just unlabelled; a non-route
+    // step's jump ahead stays implied
+    const bare = buildAtlasModel(summary);
+    expect(bare.edges.map((e) => [e.kind, e.label])).toEqual([
+      ["loop", null],
+      ["branch", null],
+    ]);
+    expect(bare.forwardLabels).toEqual({});
+  });
+
   it("synthesises cross-workflow edge refs on both ends", () => {
     const summary: PipelineSummary = {
       workflows: [

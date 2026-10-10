@@ -23,13 +23,17 @@
    frames). The board is sized to `max(full, cond)` so neither layout clips
    mid-flight. Pan/zoom persists across the toggle (the hook is never remounted).
 
-   HOVER-TRACE (P7) — hovering (or, later, selecting) a workflow lights its
-   connected set and dims the rest. The connected set is computed per view:
-   graph cross-edges vs. condensed map edges. High-degree hub edges (e.g. Human
-   Review) stay hidden at rest and only appear when tracing one of their
-   endpoints. Lit edges are z-sorted last so they paint over the dimmed ones.
-   Search and trace compose: a query dims non-matches; a trace overrides with
-   lit/dim within (or across) the matches.
+   HOVER-TRACE (P7) — hovering a workflow is a quiet trace: its handoffs show
+   at full opacity in their in/out colour (no glow), connected workflows tint
+   their name, and the rest dims mildly; its loops stay at rest. The connected
+   set is computed per view: graph cross-edges vs. condensed map edges.
+   Hovering a step (graph view) traces that step instead: every edge entering
+   or leaving it (step links, branches, loops, handoffs) lights in its in/out
+   colour with its route chip, its neighbour steps light softly, and the rest
+   dims mildly. High-degree hub edges (e.g. Human Review) stay hidden at rest
+   and only appear when a trace reaches them. Lit edges are z-sorted last so
+   they paint over the dimmed ones. Search and trace compose: a query dims
+   non-matches; a trace overrides with lit/dim within (or across) the matches.
 
    Re-layout discipline (plan risk #5): the ELK graph layout is async and
    expensive, so it is memoised on a STRUCTURAL key (workflow/step ids + kinds +
@@ -55,6 +59,8 @@ import {
   filterByFactory,
 } from "../../utils/workflowFactory";
 import { usePipelineSummary } from "../../hooks/usePipelineSummary";
+import { useSteps } from "../../hooks/useStep";
+import type { JsonValue, RouteStepConfig } from "../../bindings";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import type { AtlasSelection } from "./inspector/selection";
 import { ColumnHeader } from "./ColumnHeader";
@@ -109,9 +115,14 @@ export function layoutKey(model: AtlasModel): string {
     .join("|");
   const steps = model.steps.map((s) => `${s.id}=${s.kind}`).join(",");
   const edges = model.edges
-    .map((e) => `${e.kind}:${e.from}->${e.to}`)
+    .map((e) => `${e.kind}:${e.from}->${e.to}:${e.label ?? ""}`)
     .join(";");
-  return `${wfs}#${steps}#${edges}`;
+  // Route-decision labels reserve space in the layout, so they key it too.
+  const forwardLabels = Object.entries(model.forwardLabels ?? {})
+    .map(([key, label]) => `${key}=${label}`)
+    .sort()
+    .join(";");
+  return `${wfs}#${steps}#${edges}#${forwardLabels}`;
 }
 
 export function WorkflowAtlas() {
@@ -159,15 +170,40 @@ export function WorkflowAtlas() {
     }
   }, [factoryFilter, setFactoryFilter, summary]);
 
+  // Route configs label the edges leaving route steps with their decisions.
+  // PipelineSummary carries no step config, so read the scoped route steps
+  // through the shared per-step cache (realtime step updates refresh them).
+  const routeStepIds = useMemo(
+    () =>
+      (scopedSummary?.workflows ?? []).flatMap((workflow) =>
+        workflow.workflow_steps
+          .filter((step) => step.step_type === "route")
+          .map((step) => step.id)
+      ),
+    [scopedSummary]
+  );
+  const routeSteps = useSteps(routeStepIds, !showFactoryOverview);
+  const routeConfigsKey = JSON.stringify(
+    routeSteps.map((step) =>
+      step?.step_type === "route"
+        ? ((step.config as RouteStepConfig | null)?.route_config ?? null)
+        : null
+    )
+  );
+  const routeConfigs = useMemo(() => {
+    const configs = JSON.parse(routeConfigsKey) as (JsonValue | null)[];
+    return new Map(routeStepIds.map((id, index) => [id, configs[index]]));
+  }, [routeConfigsKey, routeStepIds]);
+
   // The global entity selection is also the canvas highlight. The global host
   // renders the inspector; this component only projects the same selection onto
   // the atlas so the page cannot mount a second detail surface.
   const model = useMemo(
     () =>
       !showFactoryOverview && scopedSummary
-        ? buildAtlasModel(scopedSummary)
+        ? buildAtlasModel(scopedSummary, routeConfigs)
         : null,
-    [scopedSummary, showFactoryOverview]
+    [scopedSummary, showFactoryOverview, routeConfigs]
   );
 
   // A selection from another factory should not remain open beside a scoped
@@ -373,11 +409,31 @@ export function WorkflowAtlas() {
     return m;
   }, [model]);
 
+  // ── STEP-TRACE: the hovered step node's edges (graph view only), the steps
+  // at their other ends, and the workflows those live in. null ⇒ no step
+  // hovered; the workflow trace below then applies.
+  const traceStep = isGraph ? hoverStep : null;
+  const stepTrace = useMemo(() => {
+    if (!traceStep) return null;
+    const edges = new Set<string>();
+    const steps = new Set<string>([traceStep]);
+    const workflows = new Set<string>(hover ? [hover] : []);
+    for (const e of [...graphCross, ...intra]) {
+      if (e.from !== traceStep && e.to !== traceStep) continue;
+      edges.add(e.id);
+      steps.add(e.from);
+      steps.add(e.to);
+      workflows.add(e.fromWorkflow);
+      workflows.add(e.toWorkflow);
+    }
+    return { edges, steps, workflows };
+  }, [traceStep, hover, graphCross, intra]);
+
   // ── HOVER-TRACE (P7): the connected set of the hovered workflow, computed per
   // view. Graph traces cross-workflow handoffs; map traces aggregated map edges.
-  // null ⇒ nothing hovered (no trace active).
+  // null ⇒ no workflow hovered, or a step trace is active.
   const connected = useMemo<Set<string> | null>(() => {
-    if (!hover) return null;
+    if (!hover || traceStep) return null;
     const set = new Set<string>([hover]);
     if (isGraph) {
       full?.cross.forEach((e) => {
@@ -391,7 +447,7 @@ export function WorkflowAtlas() {
       });
     }
     return set;
-  }, [hover, isGraph, full, cond]);
+  }, [hover, traceStep, isGraph, full, cond]);
 
   // Search composes UNDER the trace: a query dims non-matching cards; an active
   // trace overrides resting/search state with lit/dim.
@@ -426,9 +482,26 @@ export function WorkflowAtlas() {
   /** Visual state of a workflow box / its step nodes. */
   const wfState = (id: string): WfBoxState => {
     if (hoverEndpoints) return hoverEndpoints.has(id) ? "lit" : "dim";
+    if (stepTrace) return stepTrace.workflows.has(id) ? "lit" : "dim";
     if (connected) return connected.has(id) ? "lit" : "dim";
     if (q) return matches(id) ? "lit" : "dim";
     return "";
+  };
+
+  /** Visual state of a step node — a step trace lights the hovered step and
+   *  its neighbours; a workflow trace only dims (its steps stay at rest). */
+  const stepState = (workflowId: string, ref: string): TraceState => {
+    if (!hoverEndpoints && stepTrace)
+      return stepTrace.steps.has(ref) ? "lit" : "dim";
+    const st = wfState(workflowId);
+    return connected && st === "lit" ? "" : st;
+  };
+
+  /** Visual state of a step link or branch: lit only on a step trace. */
+  const stepEdgeState = (e: PlacedEdge & { wf: string }): TraceState => {
+    if (!activeHoverEdge && stepTrace)
+      return stepTrace.edges.has(e.id) ? "lit" : "dim";
+    return wfState(e.wf) === "dim" ? "dim" : "";
   };
 
   /** Visual state of a graph cross-edge — edge-hover first (a single edge by its
@@ -439,6 +512,7 @@ export function WorkflowAtlas() {
         ? "lit"
         : "dim";
     }
+    if (stepTrace) return stepTrace.edges.has(e.id) ? "lit" : "dim";
     if (connected)
       return e.fromWorkflow === hover || e.toWorkflow === hover ? "lit" : "dim";
     if (q) return matches(e.fromWorkflow) && matches(e.toWorkflow) ? "" : "dim";
@@ -453,7 +527,9 @@ export function WorkflowAtlas() {
         ? "lit"
         : "dim";
     }
-    if (connected) return hover === e.wf ? "lit" : "dim";
+    if (stepTrace) return stepTrace.edges.has(e.id) ? "lit" : "dim";
+    // A workflow trace leaves the hovered workflow's loops at rest.
+    if (connected) return hover === e.wf ? "" : "dim";
     if (q) return matches(e.wf) ? "" : "dim";
     return "";
   };
@@ -519,6 +595,24 @@ export function WorkflowAtlas() {
     }
     return crossIsBack(fromWorkflow, toWorkflow);
   };
+
+  /** Direction of a graph edge: on a step trace an edge reads IN (white) when it
+   *  lands on the hovered step and OUT (accent) when it leaves it. */
+  const graphEdgeBack = (e: PlacedEdge, fallback: boolean): boolean =>
+    !activeHoverEdge && stepTrace?.edges.has(e.id)
+      ? e.to === traceStep
+      : fallback;
+
+  // A trace's mode, as a board class: the CSS softens the dim (both traces) and
+  // quiets lit handoffs (workflow trace). Inspector edge-hover keeps the full
+  // contrast.
+  const traceClass = activeHoverEdge
+    ? ""
+    : stepTrace
+      ? " trace-step"
+      : connected
+        ? " trace-wf"
+        : "";
 
   const ready =
     showFactoryOverview || (isGraph ? !!full && !!model : !!cond && !!model);
@@ -608,7 +702,7 @@ export function WorkflowAtlas() {
             style={{ transform: pz.transform }}
           >
             <div
-              className="uv-board"
+              className={"uv-board" + traceClass}
               style={{ width: board.w, height: board.h }}
             >
               {/* ── MAP chrome: phase-column headers ─────────────────── */}
@@ -687,18 +781,26 @@ export function WorkflowAtlas() {
                           key={e.id}
                           kind="handoff"
                           state={st}
-                          back={edgeBack(e.fromWorkflow, e.toWorkflow)}
+                          back={graphEdgeBack(
+                            e,
+                            edgeBack(e.fromWorkflow, e.toWorkflow)
+                          )}
                           d={roundedPath(e.points, 10)}
                         />
                       );
                     })}
                   {intra
-                    .filter((e) => e.kind === "forward")
+                    .filter((e) => e.kind === "forward" || e.kind === "branch")
+                    .sort(
+                      (a, b) =>
+                        litLast(stepEdgeState(a)) - litLast(stepEdgeState(b))
+                    )
                     .map((e) => (
                       <GraphEdge
                         key={e.id}
                         kind="step"
-                        state={wfState(e.wf) === "dim" ? "dim" : ""}
+                        state={stepEdgeState(e)}
+                        back={graphEdgeBack(e, false)}
                         d={roundedPath(e.points, 6)}
                       />
                     ))}
@@ -728,7 +830,6 @@ export function WorkflowAtlas() {
                   }
                 >
                   {full.workflows.map((w) => {
-                    const st = wfState(w.id);
                     return w.steps.map((s) => {
                       const c = stepCountById.get(s.id);
                       return (
@@ -737,7 +838,7 @@ export function WorkflowAtlas() {
                           step={s}
                           total={c?.total ?? 0}
                           running={c?.running ?? 0}
-                          state={st}
+                          state={stepState(w.id, s.id)}
                           hovered={hoverStep === s.id}
                           onSelect={(workflowId, stepId) =>
                             setSel({ type: "step", workflowId, stepId })
@@ -799,13 +900,31 @@ export function WorkflowAtlas() {
                           key={e.id}
                           kind="loop"
                           state={st}
-                          back
+                          back={graphEdgeBack(e, true)}
                           d={roundedPath(e.points, 7)}
                         />
                       );
                     })}
                 </svg>
               )}
+
+              {/* ── GRAPH chrome: route-decision chips on step edges ──── */}
+              {showGraphChrome &&
+                intra.map((e) => {
+                  if (!e.labelPos || !e.label) return null;
+                  return (
+                    <EdgeLabel
+                      key={`graph-step-${e.id}`}
+                      labels={[e.label]}
+                      left={e.labelPos.x}
+                      top={e.labelPos.y}
+                      state={
+                        e.kind === "loop" ? loopEdgeState(e) : stepEdgeState(e)
+                      }
+                      variant="graph"
+                    />
+                  );
+                })}
 
               {/* ── MAP chrome: condition chips on the handoffs ───────── */}
               {showMapChrome &&

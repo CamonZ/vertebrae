@@ -175,6 +175,25 @@ JSON envelope with this schema:
   `MOCK_OUTPUT_DIR`, which is `/mocks/` in the container) to fixture files whose
   contents are emitted verbatim to stdout/stderr. Absolute paths and `..`
   components are rejected.
+- `next_file` (string, optional) — written by `MockResponse::followed_by`: the
+  envelope played the next time the same prompt is delivered (a step that runs
+  again in one TaskRun receives the same prompt). The last envelope in the chain
+  repeats. Deliveries are counted in the scenario's `MOCK_CAPTURE_DIR`.
+- `discard_session` (bool, optional) — written by
+  `MockResponse::with_discarded_session`: the provider forgets this turn's
+  conversation afterwards. A later Claude launch resuming or forking it prints
+  `No conversation found with session ID: <id>`, emits an
+  `error_during_execution` result and exits 1 before reading a turn; Codex
+  answers `thread/resume`/`thread/fork` with `-32600 no rollout found for
+  thread id <id>`.
+
+In persistent stream-json sessions mock-claude rewrites each fixture record's
+`session_id` to the launch's conversation (`--session-id`, else the `--resume`
+target), as Claude echoes it, and appends every argv to
+`MOCK_CAPTURE_DIR/invocations.jsonl`. mock-codex gives each `thread/start` a
+distinct thread id and rejects resuming or forking a thread it did not create.
+`route_sessions.feature` uses these to prove route-driven new, resume and
+rejected-resume conversations on both harnesses.
 
 Fixture files live under `crates/daemon-acceptance/mocks/` and are mounted at
 `/mocks/` inside the container. Per-scenario isolation requires unique fixture

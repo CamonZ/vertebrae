@@ -226,7 +226,9 @@ Human-readable output is a flat detail view with the step ID and name, workflow
 ID, order, step type, goal, agents, skills, model, output schema, route config,
 transitions, and persistence configuration, and created/updated timestamps.
 Missing optional fields are shown as `(none)`, and missing timestamps are shown
-as `-`.
+as `-`. A configured route also lists each decision's session directive under
+`Route Sessions:`, one line per rule (`rules[<i>] <id>`) and the default:
+`new`, `resume destination`, `fork step <step-id>`, or `(none)`.
 
 `--json` returns the raw `Step` object with fields such as `id`, `name`,
 `workflow_id`, `order`, `goal`, `step_type`, `config`, `persistence_options`,
@@ -234,7 +236,9 @@ as `-`.
 It does not wrap the result in an `output` field.
 
 `route_config` is nullable opaque JSON. An empty object is distinct from `null`;
-the CLI preserves the value without interpreting or normalizing the route AST.
+the CLI preserves the value without interpreting or normalizing the route AST,
+so rule and default `session` directives appear exactly as saved in `step show`
+and `step list` JSON.
 
 If a full UUID reaches `step show` but no matching step exists, the command
 fails with `Step not found: <id>`. If an 8-character hex short ID cannot be
@@ -378,7 +382,8 @@ nullable field; setting `{}` is accepted by Sacrum as an empty configuration,
 but it does not create an artifact and is not equivalent to clearing the field.
 For a `route` step, `--prompt` and `--output-schema` are rejected. Route configuration is semantically validated by Sacrum, and
 nested diagnostics retain
-their `route_config` field paths. Clearing route configuration leaves an
+their `route_config` field paths, such as `$.rules[0].session.step_id` for a
+rejected session directive. Clearing route configuration leaves an
 unconfigured, non-runnable route draft.
 Provider/model mismatches, Codex upstream provider usage when the resulting
 provider is Anthropic, Anthropic reasoning effort, and Anthropic verbosity are
@@ -470,6 +475,58 @@ Use persisted graph targets and let Sacrum validate the complete graph. A route
 can be created without configuration as a draft; `--clear-route-config` returns
 a configured route to that state. Route steps accept only `route_config` inside their config. They cannot
 be converted from another step type; create a new route step instead.
+
+### Route session directives
+
+Every `llm_inference` execution runs in a provider conversation. How it enters
+one is chosen by the route decision that led to it, never by the step: there
+are no session flags or config fields on `llm_inference` steps. Each rule and
+the default decision may carry a `session` directive beside `transition` and
+`handoff`:
+
+```json
+{
+  "id": "needs_changes",
+  "when": {"ref": "previous_output.verdict", "op": "eq", "value": "needs_changes"},
+  "transition": {"type": "intra_workflow", "step_id": "<implement-step-id>"},
+  "handoff": {"feedback": "{{ previous_output.explanation }}"},
+  "session": {"mode": "resume"}
+}
+```
+
+- `mode` is `new`, `resume`, or `fork`.
+  - `new` starts a fresh conversation.
+  - `resume` continues a conversation as its next turn.
+  - `fork` starts a new conversation that branches from a conversation's
+    latest turn and leaves the original untouched.
+- `step_id` names the step whose conversation is resumed or forked. It
+  defaults to the destination step and is not allowed with `new`.
+- A step entered without a directive (the first step, a linear transition, a
+  decision without `session`) starts a new conversation, so every
+  `llm_inference` execution records a native session id that a later decision
+  can resume or fork.
+- Resume follows a conversation across steps within one TaskRun. A step's
+  conversation is the one its latest completed execution belongs to, and the
+  resumed turn is that conversation's latest one, whichever step added it: if
+  A starts a conversation and B resumes it, resuming A later continues after
+  B's turn. Other TaskRuns and failed executions are never resumed.
+- Resume and fork need the same harness: the destination and the `step_id`
+  step must be `llm_inference` steps of this workflow on one harness.
+- Nothing resumable fails instead of starting fresh. A step with no completed
+  execution in the TaskRun fails the TaskRun with `dispatch_failed` (its
+  reason is the step id; Sacrum logs `session_not_found`) without launching
+  the provider, and a provider that no longer has the conversation fails the
+  execution with its reason.
+- One conversation never runs two turns at once. Give parallel branches
+  `fork`, not concurrent `resume`s of one conversation.
+
+Sacrum validates directives when the route config is saved: unknown keys or
+modes, `step_id` with `new`, a directive on a decision whose destination is not
+an `intra_workflow` `llm_inference` step, and a `step_id` that is not an
+`llm_inference` step of the same workflow on the destination's harness are
+rejected with the `$.rules[<i>].session` or `$.default.session` path. In
+workflow bundles the directive's step is written as `session.step_ref`, like
+transition targets, and resolved back to `session.step_id` on import.
 
 ### Persistence Options
 

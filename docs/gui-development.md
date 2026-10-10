@@ -78,6 +78,34 @@ optional `harness` when creating it. `StepInspector.tsx` edits the same field
 and displays the stored choice, or `Sacrum default` when it is unset. The
 selector values are the generated `StepHarness` contract: `claude`, `codex`,
 and `typesafe`. Model and request settings remain separate step configuration.
+
+### Route session directives
+
+`StepInspector.tsx` reads route session directives from the opaque
+`route_config` without editing them (`inspector/routeSessions.ts`). A route
+step lists each rule and the default with its target and session mode
+(`new (implicit)` when the decision has no directive). An `llm_inference` step
+shows a Conversation section: the route decisions that enter it and those that
+resume or fork its conversation into another step. The workflow's route steps
+are loaded with `useSteps`, which shares `useStep`'s per-step query cache so
+realtime step updates reach both.
+
+On the Atlas graph, every edge leaving a route step carries a chip naming the
+decisions that take it as `<rule> · <mode>` (`new` when a decision has no
+directive), on loop-backs, next-step links and the `branch` edges drawn for
+route transitions that jump past the next step. `WorkflowAtlas.tsx` loads the
+scoped route steps with `useSteps` and passes their `route_config`s to
+`buildAtlasModel`; the labels are part of `layoutKey`, so a route config
+change re-runs the layout.
+
+Hovering a workflow on the Atlas is a quiet trace: its handoffs keep their
+in/out colour at resting width without glow, its loops stay at rest, and other
+workflows dim mildly. Hovering a step on the graph traces that step instead:
+the step links, branches, loops and handoffs entering (white) or leaving
+(accent) it light with their chips, its neighbour steps light, and the rest
+dims mildly. The board carries the mode as `trace-wf` or `trace-step`; hovering
+an inspector transition row keeps the full-contrast single-edge highlight.
+
 After changing the Rust Tauri types, regenerate bindings with
 `npm run generate:types` and keep `src/bindings.ts` limited to the reviewed
 contract changes.
