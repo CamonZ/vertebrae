@@ -44,6 +44,7 @@ function step(id: string, workflowId: string, order: number): AtlasStep {
     role: "process",
     order,
     transitionsTo: [],
+    transitionSessions: {},
     total: 0,
     running: 0,
   };

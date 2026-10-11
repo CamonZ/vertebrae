@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::StepHarness;
-use crate::models::{StepType, Workflow};
+use crate::models::{SessionMode, StepType, Workflow};
 
 mod route;
 #[cfg(test)]
@@ -112,6 +112,19 @@ pub struct StepEdge {
     pub to: StepAddress,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<StepEdgeSession>,
+}
+
+/// A step edge's session directive. The conversation step is named by
+/// `step_ref` within the edge's workflow; a persisted `step_id` is not
+/// portable and is rejected as an unknown field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StepEdgeSession {
+    pub mode: SessionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_ref: Option<StepRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

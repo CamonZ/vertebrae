@@ -24,9 +24,27 @@ The backend saves a graph that breaks these rules; the run fails when it reaches
 the step (`multiple_outgoing_transitions`, `no_outgoing_transitions`). A
 non-route step never branches: put a `route` after it.
 
+## Session directives on step transitions
+A step transition into an llm_inference step may carry a
+[session directive](steps/route/sessions.md) `{mode: new|resume|fork, step_id?}`
+that decides how the destination enters a conversation when a run follows the
+edge. It is how consecutive llm_inference steps share one conversation without
+a route between them. Author it with
+`--transition-session <to>=<mode>[:<step>]` on `vtb step add/update`; `<step>`
+defaults to the destination and is not allowed with `new`. Transitions leaving a
+route step cannot carry one: the route's decisions do.
+
+The backend validates it when the transitions are saved, with the same rules
+as route directives, and reports `$.session` plus the edge's endpoints.
+`vtb step show` lists directives under `Transition Sessions:`; `step show/list`
+JSON maps destination step IDs to them in `transition_sessions`.
+
 ## Doing it
 `vtb step update <id> --transition-to <next>` replaces the whole list;
-`--clear-transitions` empties it. `vtb workflow transition list` shows workflow edges.
+`--clear-transitions` empties it. Transitions kept in the new list keep their
+label and session directive. `vtb step update <id> --transition-session <next>=resume`
+sets one directive without touching the list, and `<next>=none` clears it.
+`vtb workflow transition list` shows workflow edges.
 
 ## Gotchas
 - `vtb workflow transition delete` takes the two workflow IDs, not a transition ID.
@@ -34,4 +52,4 @@ non-route step never branches: put a `route` after it.
   branch and breaks runs; move tasks with `vtb transition-to --skip-validation` instead (with consent).
 
 ## Related
-[Authoring order](authoring-order.md) · [Route](steps/route/index.md)
+[Authoring order](authoring-order.md) · [Route](steps/route/index.md) · [Session directives](steps/route/sessions.md)

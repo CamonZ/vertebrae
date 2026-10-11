@@ -16,7 +16,10 @@ import type {
   StepType,
 } from "../../../bindings";
 import { hearthStepKind } from "../../WorkflowPipeline/stepTypeStyling";
-import { routeTransitionLabels } from "../inspector/routeSessions";
+import {
+  routeTransitionLabels,
+  transitionSessionLabels,
+} from "../inspector/routeSessions";
 import {
   type AtlasEdge,
   type AtlasModel,
@@ -179,8 +182,10 @@ function resolveTargetStep(
  *    step order.
  *  - `phases`: ordered phase columns.
  *  - `forwardLabels`: route-decision labels (`<rule> · <mode>`) for implied
- *    next-in-order links out of route steps. Loop and branch edges out of a
- *    route step carry theirs in `label`. `routeConfigs` maps route step ids to
+ *    next-in-order links out of route steps, and session-directive labels
+ *    (`<mode>`, or `<mode> · <step>` when it continues another step's
+ *    conversation) for those out of other steps. Loop and branch edges carry
+ *    theirs in `label`. `routeConfigs` maps route step ids to
  *    their `route_config`; without one a route's edges are unlabeled.
  */
 export function buildAtlasModel(
@@ -232,6 +237,7 @@ export function buildAtlasModel(
         role,
         order: s.step_order,
         transitionsTo: s.transitions_to,
+        transitionSessions: s.transition_sessions ?? {},
         total,
         running,
       });
@@ -240,11 +246,16 @@ export function buildAtlasModel(
       // A transition into an earlier (or same) step in order is a loop. The
       // next-in-order link is implied and synthesised in layoutFull; a route
       // step's jumps further ahead are emitted as branches so every decision
-      // has an edge. Route edges are labelled with their decisions.
+      // has an edge. Route edges are labelled with their decisions; other
+      // edges with their session directive, when they carry one.
       const routeLabels =
         kind === "route"
           ? routeTransitionLabels(routeConfigs.get(s.id))
-          : new Map<string, string>();
+          : transitionSessionLabels(
+              s.transition_sessions,
+              (id) =>
+                ordered.find((candidate) => candidate.id === id)?.name ?? id
+            );
       for (const targetId of s.transitions_to) {
         const fromIdx = i;
         const toIdx = orderIndex.get(targetId);

@@ -968,7 +968,73 @@ async fn when_set_first_rule_session(
         .await;
 }
 
-/// Update a step with a flag that takes no value (e.g. --clear-output-schema)
+/// `directive` is a `--transition-session` value after `<TO>=`, with `<step>`
+/// placeholders for stored step IDs.
+#[when(expr = "I set the session of the transition from {string} to {string} to {string}")]
+async fn when_set_transition_session(
+    world: &mut SmokeWorld,
+    from: String,
+    to: String,
+    directive: String,
+) {
+    let from_id = stored_step_id(world, &from);
+    let session = format!(
+        "{}={}",
+        stored_step_id(world, &to),
+        with_step_ids(world, &directive)
+    );
+    world
+        .run_vtb(&["step", "update", &from_id, "--transition-session", &session])
+        .await;
+}
+
+/// Adds `to` to the outgoing transitions of `from` (if missing) with a
+/// directive on it.
+#[when(expr = "I add the transition from {string} to {string} with session {string}")]
+async fn when_add_transition_with_session(
+    world: &mut SmokeWorld,
+    from: String,
+    to: String,
+    directive: String,
+) {
+    let from_id = stored_step_id(world, &from);
+    let to_id = stored_step_id(world, &to);
+    let mut destinations = transitions_of(world, &from).await;
+    if !destinations.contains(&to_id) {
+        destinations.push(to_id.clone());
+    }
+    let session = format!("{to_id}={}", with_step_ids(world, &directive));
+    let mut args = vec!["step", "update", from_id.as_str()];
+    for destination in &destinations {
+        args.extend(["--transition-to", destination.as_str()]);
+    }
+    args.extend(["--transition-session", session.as_str()]);
+    world.run_vtb(&args).await;
+}
+
+#[when(expr = "I reset the transitions of step {string} to their current destinations")]
+async fn when_reset_transitions(world: &mut SmokeWorld, name: String) {
+    let step_id = stored_step_id(world, &name);
+    let destinations = transitions_of(world, &name).await;
+    let mut args = vec!["step", "update", step_id.as_str()];
+    for destination in &destinations {
+        args.extend(["--transition-to", destination.as_str()]);
+    }
+    world.run_vtb(&args).await;
+}
+
+async fn transitions_of(world: &mut SmokeWorld, name: &str) -> Vec<String> {
+    get_step_json(world, name)
+        .await
+        .unwrap_or_else(|| panic!("step '{name}' should be listed"))["transitions_to"]
+        .as_array()
+        .expect("transitions_to is an array")
+        .iter()
+        .map(|id| id.as_str().expect("transition id").to_string())
+        .collect()
+}
+
+/// Update a step with a flag that takes no value (e.g. --clear-output-schema)/// Update a step with a flag that takes no value (e.g. --clear-output-schema)
 #[when(expr = "I update the step {string} in the workflow with flag {string} and no value")]
 async fn when_update_step_with_flag_no_value(world: &mut SmokeWorld, name: String, flag: String) {
     let step_id = world
@@ -1325,6 +1391,75 @@ async fn then_output_should_show_route_sessions(world: &mut SmokeWorld) {
     assert!(
         world.last_stdout.contains(&expected),
         "expected {expected:?} in step show output:\n{}",
+        world.last_stdout
+    );
+}
+
+/// `session` is the expected directive JSON (with `<step>` placeholders) or
+/// `none`; step list and step show JSON must agree.
+#[then(expr = "the transition from {string} to {string} should have session {string}")]
+async fn then_transition_should_have_session(
+    world: &mut SmokeWorld,
+    from: String,
+    to: String,
+    session: String,
+) {
+    let to_id = stored_step_id(world, &to);
+    let expected = if session == "none" {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(&with_step_ids(world, &session)).expect("session directive JSON")
+    };
+    let listed = get_step_json(world, &from)
+        .await
+        .unwrap_or_else(|| panic!("step '{from}' should be listed"));
+    let from_id = stored_step_id(world, &from);
+    let shown = world
+        .run_vtb_json(&["step", "show", &from_id])
+        .await
+        .expect("step show JSON");
+    for json in [listed, shown] {
+        let actual = json
+            .get("transition_sessions")
+            .and_then(|sessions| sessions.get(&to_id))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        assert_eq!(actual, expected, "transition sessions in {json}");
+    }
+}
+
+#[then(
+    expr = "the step show output for {string} should list the transition to {string} with session {string}"
+)]
+async fn then_show_should_list_transition_session(
+    world: &mut SmokeWorld,
+    name: String,
+    to: String,
+    session: String,
+) {
+    let step_id = stored_step_id(world, &name);
+    world.run_vtb(&["step", "show", &step_id]).await;
+    assert_command_succeeded(world, "show the step");
+    let expected = format!(
+        "Transition Sessions:\n  -> {}: {}\n",
+        stored_step_id(world, &to),
+        with_step_ids(world, &session)
+    );
+    assert!(
+        world.last_stdout.contains(&expected),
+        "expected {expected:?} in step show output:\n{}",
+        world.last_stdout
+    );
+}
+
+#[then(expr = "the step show output for {string} should not list transition sessions")]
+async fn then_show_should_not_list_transition_sessions(world: &mut SmokeWorld, name: String) {
+    let step_id = stored_step_id(world, &name);
+    world.run_vtb(&["step", "show", &step_id]).await;
+    assert_command_succeeded(world, "show the step");
+    assert!(
+        !world.last_stdout.contains("Transition Sessions:"),
+        "{}",
         world.last_stdout
     );
 }

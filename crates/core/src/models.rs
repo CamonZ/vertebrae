@@ -6,6 +6,7 @@
 use crate::{OutputVerbosity, ProviderId, SpeedTier, StepHarness};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Default workflow ID for new tasks
 pub const DEFAULT_WORKFLOW_ID: &str = "default";
@@ -2020,6 +2021,67 @@ impl StepConfig {
     }
 }
 
+/// How a path into an `llm_inference` step enters a provider conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMode {
+    New,
+    Resume,
+    Fork,
+}
+
+impl SessionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Resume => "resume",
+            Self::Fork => "fork",
+        }
+    }
+}
+
+impl std::fmt::Display for SessionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for SessionMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "new" => Ok(Self::New),
+            "resume" => Ok(Self::Resume),
+            "fork" => Ok(Self::Fork),
+            other => Err(format!(
+                "unknown session mode '{other}' (expected new, resume, or fork)"
+            )),
+        }
+    }
+}
+
+/// The session directive a step transition carries into its destination.
+///
+/// `step_id` names the step whose conversation is resumed or forked and
+/// defaults to the destination; Sacrum rejects it with `new`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionDirective {
+    pub mode: SessionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<String>,
+}
+
+impl std::fmt::Display for SessionDirective {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (&self.step_id, self.mode) {
+            (Some(step_id), mode) => write!(f, "{mode} step {step_id}"),
+            (None, SessionMode::New) => f.write_str("new"),
+            (None, mode) => write!(f, "{mode} destination"),
+        }
+    }
+}
+
 /// A workflow step entity (domain model)
 #[derive(Debug, Clone, Serialize)]
 pub struct Step {
@@ -2057,6 +2119,12 @@ pub struct Step {
     /// Step IDs this step can transition to
     pub transitions_to: Vec<String>,
 
+    /// Session directives of outgoing transitions, keyed by destination step
+    /// ID. Transitions without one enter their destination in a new
+    /// conversation.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub transition_sessions: BTreeMap<String, SessionDirective>,
+
     /// Ordering index
     pub order: i32,
 
@@ -2083,6 +2151,7 @@ impl Step {
             harness: None,
             persistence_options: None,
             transitions_to: Vec::new(),
+            transition_sessions: BTreeMap::new(),
             order: 0,
             created_at: None,
             updated_at: None,
@@ -2220,6 +2289,16 @@ impl Step {
     /// Set all transitions
     pub fn with_transitions_to(mut self, transitions: Vec<String>) -> Self {
         self.transitions_to = transitions;
+        self
+    }
+
+    /// Set the session directive of the transition to `step_id`.
+    pub fn with_transition_session(
+        mut self,
+        step_id: impl Into<String>,
+        session: SessionDirective,
+    ) -> Self {
+        self.transition_sessions.insert(step_id.into(), session);
         self
     }
 
@@ -2959,6 +3038,10 @@ pub struct StepUpdate {
     pub persistence_options: Option<Option<serde_json::Value>>,
     /// New transitions_to list (string IDs)
     pub transitions_to: Option<Vec<String>>,
+    /// Session directives to write on outgoing transitions, keyed by
+    /// destination step ID (`None` clears one). Kept transitions not named
+    /// here keep their label and directive.
+    pub transition_sessions: BTreeMap<String, Option<SessionDirective>>,
     /// New order value
     pub order: Option<i32>,
 }
@@ -3040,6 +3123,22 @@ impl StepUpdate {
     pub fn with_transitions_to(mut self, transitions: Vec<String>) -> Self {
         self.transitions_to = Some(transitions);
         self
+    }
+
+    /// Set (`Some`) or clear (`None`) the session directive of the transition
+    /// to `step_id`.
+    pub fn with_transition_session(
+        mut self,
+        step_id: impl Into<String>,
+        session: Option<SessionDirective>,
+    ) -> Self {
+        self.transition_sessions.insert(step_id.into(), session);
+        self
+    }
+
+    /// Whether this update rewrites the step's outgoing transitions.
+    pub fn changes_transitions(&self) -> bool {
+        self.transitions_to.is_some() || !self.transition_sessions.is_empty()
     }
 
     /// Set the order

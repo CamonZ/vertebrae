@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use vertebrae_core::StepHarness;
 use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::models::{Artifact, ArtifactLinkMetadata};
+use vertebrae_core::models::{Artifact, ArtifactLinkMetadata, SessionDirective};
 
 /// Artifact response returned by Sacrum's GraphQL API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -462,6 +462,8 @@ pub struct WorkflowExportStepTransition {
     pub id: String,
     pub to_step_id: String,
     pub label: Option<String>,
+    #[serde(default)]
+    pub session: Option<SessionDirective>,
 }
 
 /// An inter-workflow edge in an exported workflow graph.
@@ -550,6 +552,8 @@ pub struct StepTransitionResponse {
     pub to_step_id: String,
     #[serde(default)]
     pub label: Option<String>,
+    #[serde(default)]
+    pub session: Option<SessionDirective>,
 }
 
 /// Step execution response from Sacrum API (matches StepExecutionJSON)
@@ -820,6 +824,9 @@ pub struct PipelineStepTransitionResponse {
     pub to_step_id: String,
     #[serde(default)]
     pub label: Option<String>,
+    /// How an llm_inference destination enters its provider conversation.
+    #[serde(default)]
+    pub session: Option<SessionDirective>,
 }
 
 /// Workflow step entry in the `pipelineSummary` payload — includes the
@@ -1698,7 +1705,8 @@ mod tests {
                         "active_count": 3,
                         "running_count": 3,
                         "transitions": [
-                            { "id": "t-1", "from_step_id": "step-1", "to_step_id": "step-2", "label": "next" }
+                            { "id": "t-1", "from_step_id": "step-1", "to_step_id": "step-2", "label": "next",
+                              "session": { "mode": "resume", "step_id": "step-1" } }
                         ]
                     }
                 ],
@@ -1743,6 +1751,13 @@ mod tests {
         assert_eq!(step.transitions[0].from_step_id, "step-1");
         assert_eq!(step.transitions[0].to_step_id, "step-2");
         assert_eq!(step.transitions[0].label.as_deref(), Some("next"));
+        assert_eq!(
+            step.transitions[0].session,
+            Some(SessionDirective {
+                mode: vertebrae_core::SessionMode::Resume,
+                step_id: Some("step-1".to_string()),
+            })
+        );
 
         assert_eq!(wf.transitions.len(), 1);
         assert_eq!(wf.transitions[0].from_workflow_id, "wf-1");

@@ -78,9 +78,10 @@ pub use step_constraints::{apply_config_patch, validate_config_fields, validate_
 pub use step_harness::StepHarness;
 pub use step_service::StepService;
 pub use workflow_bundle::{
-    ManifestError, ManifestValidationError, RouteTargetRefs, StepAddress, StepEdge, StepManifest,
-    StepRef, WorkflowBundle, WorkflowBundleManifest, WorkflowBundleNameConflict, WorkflowEdge,
-    WorkflowManifest, WorkflowRef, parse_manifest, symbolize_route_config,
+    ManifestError, ManifestValidationError, RouteTargetRefs, StepAddress, StepEdge,
+    StepEdgeSession, StepManifest, StepRef, WorkflowBundle, WorkflowBundleManifest,
+    WorkflowBundleNameConflict, WorkflowEdge, WorkflowManifest, WorkflowRef, parse_manifest,
+    symbolize_route_config,
 };
 pub use workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowBundleImportInput,
@@ -92,8 +93,9 @@ pub use workflow_service::{
 pub use models::{
     AgentConfig, Artifact, ArtifactLinkMetadata, BlockerNode, CodeRef, CreateArtifactInput,
     ExecuteConfig, ExecutionStatus, GetArtifactByLogicalNameInput, Level, LlmInferenceConfig,
-    PermissionMode, Priority, RouteConfig, STEP_CONFIG_VERSION, Section, SectionType, SessionLog,
-    Step, StepConfig, StepExecution, StepType, StepUpdate, StructuredInferenceConfig, Task,
-    TaskFilter, TaskRun, TaskRunControls, TaskRunStatus, TaskRunSummary, TaskRunTrace, TaskUpdate,
-    Thing, TokenUsage, UpdateArtifactInput, WaitChildrenConfig, Workflow, WorkflowTransition,
+    PermissionMode, Priority, RouteConfig, STEP_CONFIG_VERSION, Section, SectionType,
+    SessionDirective, SessionLog, SessionMode, Step, StepConfig, StepExecution, StepType,
+    StepUpdate, StructuredInferenceConfig, Task, TaskFilter, TaskRun, TaskRunControls,
+    TaskRunStatus, TaskRunSummary, TaskRunTrace, TaskUpdate, Thing, TokenUsage,
+    UpdateArtifactInput, WaitChildrenConfig, Workflow, WorkflowTransition,
 };

@@ -27,6 +27,7 @@ function createStep(id: string, name: string, order: number): Step {
     },
     step_type: "llm_inference",
     transitions_to: [],
+    transition_sessions: {},
     order,
     created_at: null,
     updated_at: null,

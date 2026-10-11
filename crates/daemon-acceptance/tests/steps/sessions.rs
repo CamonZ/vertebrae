@@ -1,8 +1,9 @@
-//! Route-owned session directives: a route decision chooses whether its
-//! destination llm_inference step starts, resumes, or forks a provider
+//! Session directives: a route decision or a step transition chooses whether
+//! its destination llm_inference step starts, resumes, or forks a provider
 //! conversation. Scenarios author the directive through
-//! `vtb step update --route-config` and assert on how the daemon launched the
-//! provider mock and on the native session ids Sacrum recorded.
+//! `vtb step update --route-config` or `--transition-session` and assert on
+//! how the daemon launched the provider mock and on the native session ids
+//! Sacrum recorded.
 
 use std::time::{Duration, Instant};
 
@@ -94,18 +95,7 @@ async fn llm_step(world: &mut DaemonWorld, name: &str, harness: &str, order: &st
 /// rules are authored per scenario.
 #[given(expr = "a session workflow on the {string} harness")]
 pub async fn given_session_workflow(world: &mut DaemonWorld, harness: String) {
-    let name = format!("daemon-acc-session-{}", uuid::Uuid::new_v4().simple());
-    world.run_vtb(&["workflow", "add", &name]).await;
-    world.assert_vtb_ok("workflow add");
-    let workflow_id = world
-        .last_stdout
-        .trim()
-        .strip_prefix("Created workflow: ")
-        .unwrap_or_else(|| panic!("unexpected workflow output: {}", world.last_stdout))
-        .trim()
-        .to_string();
-    world.workflow_id = Some(workflow_id.clone());
-    world.created_workflow_ids.push(workflow_id);
+    create_session_workflow(world).await;
 
     let work = llm_step(world, "work", &harness, "0").await;
     let route = add_step(
@@ -203,6 +193,78 @@ pub async fn given_route_session(
     world.assert_vtb_ok("step update --route-config");
 }
 
+async fn create_session_workflow(world: &mut DaemonWorld) {
+    let name = format!("daemon-acc-session-{}", uuid::Uuid::new_v4().simple());
+    world.run_vtb(&["workflow", "add", &name]).await;
+    world.assert_vtb_ok("workflow add");
+    let workflow_id = world
+        .last_stdout
+        .trim()
+        .strip_prefix("Created workflow: ")
+        .unwrap_or_else(|| panic!("unexpected workflow output: {}", world.last_stdout))
+        .trim()
+        .to_string();
+    world.workflow_id = Some(workflow_id.clone());
+    world.created_workflow_ids.push(workflow_id);
+}
+
+/// draft -> revise -> finish. `directive` is the draft -> revise
+/// `--transition-session` value with step names in place of ids
+/// (`resume:draft`).
+#[given(
+    expr = "a linear session workflow on the {string} harness whose draft -> revise edge carries {string}"
+)]
+pub async fn given_linear_session_workflow(
+    world: &mut DaemonWorld,
+    harness: String,
+    directive: String,
+) {
+    create_session_workflow(world).await;
+    let draft = llm_step(world, "draft", &harness, "0").await;
+    let revise = llm_step(world, "revise", &harness, "1").await;
+    let finish = add_step(
+        world,
+        "finish",
+        &[
+            "--step-type",
+            "finish",
+            "--order",
+            "2",
+            "--harness",
+            "claude",
+        ],
+    )
+    .await;
+
+    let session = format!("{revise}={}", directive.replace("draft", &draft));
+    world
+        .run_vtb(&[
+            "step",
+            "update",
+            &draft,
+            "--transition-to",
+            &revise,
+            "--transition-session",
+            &session,
+        ])
+        .await;
+    world.assert_vtb_ok("step update --transition-session");
+    world
+        .run_vtb(&["step", "update", &revise, "--transition-to", &finish])
+        .await;
+    world.assert_vtb_ok("step update --transition-to");
+
+    world.step_id = Some(draft.clone());
+    for (role, id) in [
+        ("harness", harness),
+        ("draft", draft),
+        ("revise", revise),
+        ("finish", finish),
+    ] {
+        world.fixture_ids.insert(role.to_string(), id);
+    }
+}
+
 fn answer(world: &DaemonWorld, label: &str, verdict: &str) -> daemon_acceptance::MockResponse {
     let output = json!({"verdict": verdict});
     let response = world.mock_response(label);
@@ -221,13 +283,29 @@ fn answer(world: &DaemonWorld, label: &str, verdict: &str) -> daemon_acceptance:
     }
 }
 
-async fn set_work_prompt(world: &mut DaemonWorld, response: daemon_acceptance::MockResponse) {
+async fn set_prompt(
+    world: &mut DaemonWorld,
+    role: &str,
+    response: daemon_acceptance::MockResponse,
+) {
     let envelope = response.build().expect("MockResponse envelope builds");
-    let work = fixture(world, "work");
+    let step = fixture(world, role);
     world
-        .run_vtb(&["step", "update", &work, "--prompt", &envelope])
+        .run_vtb(&["step", "update", &step, "--prompt", &envelope])
         .await;
     world.assert_vtb_ok("step update --prompt");
+}
+
+async fn set_work_prompt(world: &mut DaemonWorld, response: daemon_acceptance::MockResponse) {
+    set_prompt(world, "work", response).await;
+}
+
+#[when(expr = "the draft and revise steps each answer {string}")]
+pub async fn draft_and_revise_answer(world: &mut DaemonWorld, verdict: String) {
+    for role in ["draft", "revise"] {
+        let response = answer(world, role, &verdict);
+        set_prompt(world, role, response).await;
+    }
 }
 
 #[when(expr = "the work step answers {string} then {string}")]
@@ -287,12 +365,16 @@ async fn session_executions(world: &DaemonWorld) -> Vec<SessionExecution> {
         .collect()
 }
 
-async fn work_executions(world: &DaemonWorld) -> Vec<SessionExecution> {
+async fn executions_of(world: &DaemonWorld, step_name: &str) -> Vec<SessionExecution> {
     session_executions(world)
         .await
         .into_iter()
-        .filter(|execution| execution.step_name == "work")
+        .filter(|execution| execution.step_name == step_name)
         .collect()
+}
+
+async fn work_executions(world: &DaemonWorld) -> Vec<SessionExecution> {
+    executions_of(world, "work").await
 }
 
 #[when(expr = "I wait for {int} work execution(s) to reach status {string}")]
@@ -490,5 +572,32 @@ pub async fn review_never_dispatched(world: &mut DaemonWorld) {
         assert_eq!(codex_requests(world, "turn/start").len(), 1);
     } else {
         assert_eq!(claude_launches(world).len(), 1);
+    }
+}
+
+#[then("the revise execution resumed the draft conversation")]
+pub async fn revise_resumed_draft(world: &mut DaemonWorld) {
+    let draft = executions_of(world, "draft").await;
+    let revise = executions_of(world, "revise").await;
+    assert_eq!((draft.len(), revise.len()), (1, 1), "{draft:?} {revise:?}");
+    let conversation = native_id(&draft[0]);
+    assert_eq!(native_id(&revise[0]), conversation, "{revise:?}");
+    if is_codex(world) {
+        assert_eq!(codex_requests(world, "thread/start").len(), 1);
+        let resumes = codex_requests(world, "thread/resume");
+        assert_eq!(resumes.len(), 1, "{resumes:?}");
+        assert_eq!(resumes[0]["params"]["threadId"], json!(conversation));
+        let turns = codex_requests(world, "turn/start");
+        assert_eq!(turns.len(), 2, "{turns:?}");
+        assert_eq!(turns[1]["params"]["threadId"], json!(conversation));
+    } else {
+        let launches = claude_launches(world);
+        assert_eq!(launches.len(), 2, "{launches:?}");
+        assert_eq!(
+            flag_value(&launches[0], "--session-id"),
+            Some(conversation.clone())
+        );
+        assert_eq!(flag_value(&launches[1], "--resume"), Some(conversation));
+        assert_eq!(flag_value(&launches[1], "--session-id"), None);
     }
 }

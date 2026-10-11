@@ -289,6 +289,46 @@ Feature: Step questions: prompt and agent-config
       | done             | {"mode":"fork","step_id":"<CodexPeer>"}          | $.rules[0].session.step_id | must use the same harness     |
       | BadSessionRouter | {"mode":"resume"}                                | $.rules[0].session         | to an llm_inference step      |
 
+  Scenario: Transitions carry session directives unchanged
+    When I set the session of the transition from "backlog" to "done" to "resume"
+    Then the command should succeed
+    And the transition from "backlog" to "done" should have session '{"mode":"resume"}'
+    And the step show output for "backlog" should list the transition to "done" with session "resume destination"
+    When I set the session of the transition from "backlog" to "done" to "fork:<backlog>"
+    Then the command should succeed
+    And the transition from "backlog" to "done" should have session '{"mode":"fork","step_id":"<backlog>"}'
+    And the step show output for "backlog" should list the transition to "done" with session "fork step <backlog>"
+    When I reset the transitions of step "backlog" to their current destinations
+    Then the command should succeed
+    And the transition from "backlog" to "done" should have session '{"mode":"fork","step_id":"<backlog>"}'
+    When I set the session of the transition from "backlog" to "done" to "none"
+    Then the command should succeed
+    And the transition from "backlog" to "done" should have session "none"
+    And the step show output for "backlog" should not list transition sessions
+
+  Scenario: A session directive must name an outgoing transition
+    When I set the session of the transition from "done" to "backlog" to "resume"
+    Then the command should fail with "not an outgoing transition"
+
+  Scenario Outline: Sacrum rejects invalid transition session directives
+    When I add a step "CodexPeer" to the workflow with flag "--provider" and value "openai"
+    And I add a step "Gate" to the workflow with flag "--step-type" and value "human_input"
+    And I add the transition from "<from>" to "<to>" with session "<directive>"
+    Then the command should fail with "<path>"
+    And the error should contain "<message>"
+
+    Examples:
+      | from    | to   | directive          | path      | message                                  |
+      | backlog | done | resume:<CodexPeer> | $.session | must use the same harness                |
+      | backlog | done | fork:<Gate>        | $.session | must be an llm_inference step            |
+      | backlog | Gate | resume:<backlog>   | $.session | requires an llm_inference destination    |
+
+  Scenario: Transitions leaving a route step cannot carry a session directive
+    When I add and configure a deterministic route step "EdgeRouter" to the workflow
+    And I set the session of the transition from "EdgeRouter" to "done" to "resume"
+    Then the command should fail with "$.session"
+    And the error should contain "not allowed on a transition leaving a route step"
+
   Scenario: Route drafts and local route JSON validation
     When I add a step "DraftRouter" to the workflow with flag "--step-type" and value "route"
     Then the command should succeed

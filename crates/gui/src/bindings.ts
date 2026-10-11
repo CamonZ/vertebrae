@@ -1559,6 +1559,10 @@ export type PipelineStep = { id: string; name: string; workflow_id: string; goal
  */
 transitions_to: string[];
 /**
+ * Session directives on those transitions, keyed by destination step id.
+ */
+transition_sessions: Partial<{ [key in string]: SessionDirective }>;
+/**
  * Per-level task counts for tasks currently parked at this step.
  */
 task_counts: PipelineTaskCounts;
@@ -1706,6 +1710,11 @@ export type ServiceState =
  */
 { kind: "not_loaded" }
 /**
+ * Session directive on a step transition. `step_id` names the step whose
+ * conversation is resumed or forked; null means the destination.
+ */
+export type SessionDirective = { mode: SessionMode; step_id: string | null }
+/**
  * Session log entry - mirrors db::SessionLog
  */
 export type SessionLog = {
@@ -1745,6 +1754,10 @@ export type SessionLogCreatedEvent = { log_id: string; step_execution_id: string
  * `session_log` carries the full deserialized entity when available.
  */
 export type SessionLogUpdatedEvent = { log_id: string; step_execution_id: string; session_log: SessionLog | null }
+/**
+ * How an llm_inference destination enters its provider conversation.
+ */
+export type SessionMode = "new" | "resume" | "fork"
 /**
  * Workflow step entity - mirrors core::Step
  */
@@ -1786,6 +1799,10 @@ persistence_options?: JsonValue | null;
  * List of step IDs this step can transition to
  */
 transitions_to: string[];
+/**
+ * Session directives on outgoing transitions, keyed by destination step id.
+ */
+transition_sessions: Partial<{ [key in string]: SessionDirective }>;
 /**
  * Ordering index for sequential fallback (0-based, Sacrum: `step_order`).
  */

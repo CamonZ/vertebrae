@@ -141,6 +141,8 @@ export function usePipelineSummary() {
           applyToCache((summary) =>
             applyStepTransitionCreated(summary, event.payload)
           );
+          // The event carries no session directive; refetch to pick it up.
+          invalidateSummary();
           return;
         }
         if (change_type === "Deleted") {

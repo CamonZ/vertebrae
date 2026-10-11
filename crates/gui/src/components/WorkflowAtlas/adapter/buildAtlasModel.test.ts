@@ -24,6 +24,7 @@ function makeStep(
     step_order: order,
     step_type: "llm_inference",
     transitions_to: [],
+    transition_sessions: {},
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
     active_count: 0,
@@ -283,6 +284,45 @@ describe("buildAtlasModel", () => {
       ["branch", null],
     ]);
     expect(bare.forwardLabels).toEqual({});
+  });
+
+  it("labels other steps' edges with their session directives", () => {
+    const summary: PipelineSummary = {
+      workflows: [
+        makeWorkflow("wf", [
+          makeStep("draft", "wf", 0, {
+            name: "Draft",
+            transitions_to: ["revise"],
+            transition_sessions: {
+              revise: { mode: "resume", step_id: "draft" },
+            },
+          }),
+          makeStep("revise", "wf", 1, {
+            transitions_to: ["check"],
+            transition_sessions: { check: { mode: "new", step_id: null } },
+          }),
+          makeStep("check", "wf", 2, {
+            step_type: "execute",
+            transitions_to: ["revise", "done"],
+            transition_sessions: { revise: { mode: "fork", step_id: null } },
+          }),
+          makeStep("done", "wf", 3, { step_type: "finish" }),
+        ]),
+      ],
+    };
+
+    const model = buildAtlasModel(summary);
+    const ref = (id: string) => stepRef("wf", id);
+    expect(model.forwardLabels).toEqual({
+      [`${ref("draft")}->${ref("revise")}`]: "resume · Draft",
+      [`${ref("revise")}->${ref("check")}`]: "new",
+    });
+    expect(model.edges.map((e) => [e.kind, e.from, e.to, e.label])).toEqual([
+      ["loop", ref("check"), ref("revise"), "fork"],
+    ]);
+    expect(
+      model.steps.find((s) => s.stepId === "draft")!.transitionSessions
+    ).toEqual({ revise: { mode: "resume", step_id: "draft" } });
   });
 
   it("synthesises cross-workflow edge refs on both ends", () => {

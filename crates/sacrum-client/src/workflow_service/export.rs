@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde_json::json;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::{
-    StepAddress, StepEdge, StepManifest, StepType, WorkflowBundleManifest, WorkflowEdge,
-    WorkflowManifest, symbolize_route_config,
+    SessionDirective, StepAddress, StepEdge, StepEdgeSession, StepManifest, StepType,
+    WorkflowBundleManifest, WorkflowEdge, WorkflowManifest, symbolize_route_config,
 };
 
 use crate::api_types::{
@@ -351,10 +351,22 @@ fn snapshot_to_bundle(snapshot: &WorkflowExportSnapshot) -> ServiceResult<Workfl
                             ),
                         )
                     })?;
+                let session = transition
+                    .session
+                    .as_ref()
+                    .map(|session| edge_session(session, &from, &refs))
+                    .transpose()
+                    .map_err(|step_id| {
+                        ServiceError::invalid_input(format!(
+                            "step transition {} session names step {step_id}, which is not a step of its workflow {}",
+                            transition.id, workflow.id
+                        ))
+                    })?;
                 step_edges.push(StepEdge {
                     from: from.clone(),
                     to,
                     label: transition.label.clone(),
+                    session,
                 });
             }
         }
@@ -416,6 +428,29 @@ fn snapshot_to_bundle(snapshot: &WorkflowExportSnapshot) -> ServiceResult<Workfl
         ServiceError::invalid_input(format!("workflow export validation failed: {error}"))
     })?;
     Ok(bundle)
+}
+
+/// Names an edge directive's conversation step by its ref in the edge's
+/// workflow; a step outside that workflow is returned as the error.
+fn edge_session(
+    session: &SessionDirective,
+    from: &StepAddress,
+    refs: &ReferenceMaps,
+) -> Result<StepEdgeSession, String> {
+    let step_ref = session
+        .step_id
+        .as_ref()
+        .map(|step_id| match refs.step_addresses.get(step_id) {
+            Some(address) if address.workflow_ref == from.workflow_ref => {
+                Ok(address.step_ref.clone())
+            }
+            _ => Err(step_id.clone()),
+        })
+        .transpose()?;
+    Ok(StepEdgeSession {
+        mode: session.mode,
+        step_ref,
+    })
 }
 
 fn convert_step(
@@ -585,6 +620,7 @@ mod tests {
                     id: format!("edge-{index}"),
                     to_step_id: to_step_id.to_string(),
                     label: Some(format!("label-{index}")),
+                    session: None,
                 })
                 .collect(),
             inserted_at: Some("timestamp".to_string()),
@@ -657,6 +693,42 @@ mod tests {
                 ],
             )],
         }
+    }
+
+    #[test]
+    fn edge_sessions_export_their_step_as_a_step_ref() {
+        let mut snapshot = snapshot();
+        snapshot.workflows[0].workflow_steps[1].transitions[0].session = Some(SessionDirective {
+            mode: vertebrae_core::SessionMode::Fork,
+            step_id: Some("first-step-id".to_string()),
+        });
+
+        let bundle = snapshot_to_bundle(&snapshot).unwrap();
+        let value: Value = serde_json::from_str(&bundle.canonical_json().unwrap()).unwrap();
+        assert_eq!(
+            value["step_edges"][0]["session"],
+            json!({"mode": "fork", "step_ref": "first"})
+        );
+
+        snapshot.workflows[0].workflow_steps[1].transitions[0].session = Some(SessionDirective {
+            mode: vertebrae_core::SessionMode::Resume,
+            step_id: None,
+        });
+        let bundle = snapshot_to_bundle(&snapshot).unwrap();
+        let value: Value = serde_json::from_str(&bundle.canonical_json().unwrap()).unwrap();
+        assert_eq!(value["step_edges"][0]["session"], json!({"mode": "resume"}));
+    }
+
+    #[test]
+    fn edge_session_outside_the_workflow_fails_export() {
+        let mut snapshot = snapshot();
+        snapshot.workflows[0].workflow_steps[1].transitions[0].session = Some(SessionDirective {
+            mode: vertebrae_core::SessionMode::Resume,
+            step_id: Some("foreign-step-id".to_string()),
+        });
+
+        let error = snapshot_to_bundle(&snapshot).unwrap_err().to_string();
+        assert!(error.contains("foreign-step-id"), "{error}");
     }
 
     #[test]

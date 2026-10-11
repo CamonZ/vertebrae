@@ -20,7 +20,7 @@ Feature: Workflow bundle import
     And the workflow import JSON should contain complete mappings
 
   @workflow_round_trip
-  Scenario: Rich workflow graph including an execute step and a route session directive survives export, import, and re-export
+  Scenario: Rich workflow graph including an execute step and route and edge session directives survives export, import, and re-export
     When I clear the acceptance project's existing workflows
     And I stage the built-in workflow bundle fixture
     And I import the staged workflow bundle
@@ -36,6 +36,7 @@ Feature: Workflow bundle import
     Then the command should succeed
     And the roundtrip bundles should preserve the authored execute step
     And the roundtrip bundles should preserve the route session directive
+    And the roundtrip bundles should preserve the edge session directive
     And the source and destination workflow bundles should have matching canonical semantics
     And the destination workflow graph should match the import mappings
 

@@ -84,6 +84,7 @@ export function createMockStep(overrides?: Partial<Step>): Step {
       agent_config: createMockAgentConfig({ model: "claude-3-sonnet" }),
     },
     transitions_to: [],
+    transition_sessions: {},
     order: 0,
     created_at: null,
     updated_at: null,

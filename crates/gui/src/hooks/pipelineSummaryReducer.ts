@@ -227,6 +227,7 @@ function pipelineStepFromStep(step: Step): PipelineStep {
     step_type:
       typeof step.step_type === "string" ? step.step_type : null,
     transitions_to: step.transitions_to ?? [],
+    transition_sessions: step.transition_sessions ?? {},
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
     active_count: 0,
@@ -365,7 +366,11 @@ export function applyStepDeleted(
     .filter((s) => s.id !== stepId)
     .map((s) =>
       s.transitions_to.includes(stepId)
-        ? { ...s, transitions_to: s.transitions_to.filter((id) => id !== stepId) }
+        ? {
+            ...s,
+            transitions_to: s.transitions_to.filter((id) => id !== stepId),
+            transition_sessions: withoutSession(s.transition_sessions, stepId),
+          }
         : s,
     );
   const nextWorkflows = summary.workflows.slice();
@@ -373,10 +378,23 @@ export function applyStepDeleted(
   return { ...summary, workflows: nextWorkflows };
 }
 
+function withoutSession(
+  sessions: PipelineStep["transition_sessions"],
+  toStepId: string,
+): PipelineStep["transition_sessions"] {
+  if (!sessions || !(toStepId in sessions)) return sessions;
+  const rest = { ...sessions };
+  delete rest[toStepId];
+  return rest;
+}
+
 function mutateStepTransitionsTo(
   summary: PipelineSummary,
   fromStepId: string,
   apply: (current: string[]) => string[],
+  applySessions: (
+    current: PipelineStep["transition_sessions"],
+  ) => PipelineStep["transition_sessions"] = (current) => current,
 ): PipelineSummary | null {
   for (let wi = 0; wi < summary.workflows.length; wi++) {
     const wf = summary.workflows[wi];
@@ -384,9 +402,18 @@ function mutateStepTransitionsTo(
     if (si < 0) continue;
     const step = wf.workflow_steps[si];
     const nextTransitions = apply(step.transitions_to);
-    if (nextTransitions === step.transitions_to) return null;
+    const nextSessions = applySessions(step.transition_sessions);
+    if (
+      nextTransitions === step.transitions_to &&
+      nextSessions === step.transition_sessions
+    )
+      return null;
     const nextSteps = wf.workflow_steps.slice();
-    nextSteps[si] = { ...step, transitions_to: nextTransitions };
+    nextSteps[si] = {
+      ...step,
+      transitions_to: nextTransitions,
+      transition_sessions: nextSessions,
+    };
     const nextWorkflows = summary.workflows.slice();
     nextWorkflows[wi] = { ...wf, workflow_steps: nextSteps };
     return { ...summary, workflows: nextWorkflows };
@@ -414,10 +441,14 @@ export function applyStepTransitionDeleted(
   const { from_step_id, to_step_id } = event;
   if (!from_step_id || !to_step_id) return summary;
 
-  const next = mutateStepTransitionsTo(summary, from_step_id, (current) =>
-    current.includes(to_step_id)
-      ? current.filter((id) => id !== to_step_id)
-      : current,
+  const next = mutateStepTransitionsTo(
+    summary,
+    from_step_id,
+    (current) =>
+      current.includes(to_step_id)
+        ? current.filter((id) => id !== to_step_id)
+        : current,
+    (sessions) => withoutSession(sessions, to_step_id),
   );
   return next ?? summary;
 }

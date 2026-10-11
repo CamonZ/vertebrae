@@ -3,6 +3,8 @@ import {
   routeDecisions,
   routeTransitionLabels,
   sessionEntriesFor,
+  transitionSessionEntriesFor,
+  transitionSessionLabels,
 } from "./routeSessions";
 
 describe("routeDecisions", () => {
@@ -130,5 +132,66 @@ describe("routeTransitionLabels", () => {
       ["b", "default · fork"],
     ]);
     expect(routeTransitionLabels(null).size).toBe(0);
+  });
+});
+
+describe("transitionSessionEntriesFor", () => {
+  const steps = [
+    {
+      stepId: "draft",
+      transitionSessions: {
+        revise: { mode: "resume" as const, step_id: "draft" },
+      },
+    },
+    {
+      stepId: "check",
+      transitionSessions: { revise: { mode: "fork" as const, step_id: null } },
+    },
+  ];
+
+  it("separates transitions entering the step from those continuing its conversation", () => {
+    expect(
+      transitionSessionEntriesFor("revise", steps).map((entry) => [
+        entry.fromStepId,
+        entry.decision.label,
+        entry.decision.session,
+        entry.role,
+      ])
+    ).toEqual([
+      [
+        "draft",
+        "transition",
+        { mode: "resume", stepId: "draft" },
+        "destination",
+      ],
+      ["check", "transition", { mode: "fork", stepId: null }, "destination"],
+    ]);
+    expect(
+      transitionSessionEntriesFor("draft", steps).map((entry) => [
+        entry.fromStepId,
+        entry.decision.targetStepId,
+        entry.role,
+      ])
+    ).toEqual([["draft", "revise", "source"]]);
+    expect(transitionSessionEntriesFor("z", steps)).toEqual([]);
+  });
+});
+
+describe("transitionSessionLabels", () => {
+  it("names the mode, and the continued step when it is not the target", () => {
+    const labels = transitionSessionLabels(
+      {
+        b: { mode: "resume", step_id: "a" },
+        c: { mode: "fork", step_id: "c" },
+        d: { mode: "new", step_id: null },
+      },
+      (id) => id.toUpperCase()
+    );
+    expect([...labels]).toEqual([
+      ["b", "resume · A"],
+      ["c", "fork"],
+      ["d", "new"],
+    ]);
+    expect(transitionSessionLabels(null, (id) => id).size).toBe(0);
   });
 });

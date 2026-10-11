@@ -5,10 +5,11 @@
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
     AgentConfig, BuiltinProvider, ExecuteConfig, OutputVerbosity, ProviderId, STEP_CONFIG_VERSION,
-    ServiceError, SpeedTier, Step, StepConfig, StepHarness, StepService, StepType, StepUpdate,
-    VertebraeServices, apply_config_patch, normalize_harness_personality,
-    normalize_harness_reasoning_effort, normalize_personality, validate_config_fields,
-    validate_harness_agent_config, validate_provider_model_with_codex_provider,
+    ServiceError, SessionDirective, SessionMode, SpeedTier, Step, StepConfig, StepHarness,
+    StepService, StepType, StepUpdate, VertebraeServices, apply_config_patch,
+    normalize_harness_personality, normalize_harness_reasoning_effort, normalize_personality,
+    validate_config_fields, validate_harness_agent_config,
+    validate_provider_model_with_codex_provider,
 };
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -109,6 +110,69 @@ fn validate_step_transitions(
         ));
     }
 
+    Ok(())
+}
+
+/// A `--transition-session <TO>=<MODE>[:<STEP>]` directive; `<TO>=none`
+/// (update only) clears the transition's directive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransitionSessionArg {
+    pub to: String,
+    pub session: Option<SessionDirective>,
+}
+
+fn parse_step_id_arg(value: &str, field: &str) -> Result<String, String> {
+    if crate::commands::is_short_id(value) || uuid::Uuid::parse_str(value).is_ok() {
+        Ok(value.to_lowercase())
+    } else {
+        Err(format!(
+            "{field} '{value}' is not a valid UUID or short ID \
+             (expected: 8 hex characters or xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
+        ))
+    }
+}
+
+pub fn parse_transition_session(value: &str) -> Result<TransitionSessionArg, String> {
+    let (to, directive) = value
+        .split_once('=')
+        .ok_or_else(|| format!("expected <TO>=<MODE>[:<STEP>], got '{value}'"))?;
+    let to = parse_step_id_arg(to, "transition target ID")?;
+    if directive == "none" {
+        return Ok(TransitionSessionArg { to, session: None });
+    }
+    let (mode, step_id) = match directive.split_once(':') {
+        Some((mode, step_id)) => (mode, Some(parse_step_id_arg(step_id, "session step ID")?)),
+        None => (directive, None),
+    };
+    let mode: SessionMode = mode.parse()?;
+    if mode == SessionMode::New && step_id.is_some() {
+        return Err("a session step is not allowed with mode new".to_string());
+    }
+    Ok(TransitionSessionArg {
+        to,
+        session: Some(SessionDirective { mode, step_id }),
+    })
+}
+
+fn validate_transition_sessions(
+    sessions: &[TransitionSessionArg],
+    transitions_to: &[String],
+) -> Result<(), ServiceError> {
+    let mut named = std::collections::BTreeSet::new();
+    for arg in sessions {
+        if !named.insert(&arg.to) {
+            return Err(ServiceError::validation_failed(format!(
+                "--transition-session names transition {} more than once",
+                arg.to
+            )));
+        }
+        if !transitions_to.contains(&arg.to) {
+            return Err(ServiceError::validation_failed(format!(
+                "--transition-session names {}, which is not an outgoing transition",
+                arg.to
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -355,6 +419,13 @@ pub struct StepAddCommand {
     /// IDs of steps this step can transition to (can be specified multiple times)
     #[arg(long = "transition-to", short = 't', value_parser = crate::commands::parse_uuid("transition target ID"))]
     pub transitions_to: Vec<String>,
+
+    /// Session directive for the transition to an llm_inference step:
+    /// `<TO>=<new|resume|fork>[:<STEP>]`, where STEP is the step whose
+    /// conversation is resumed or forked (default: the destination).
+    /// Repeat for each transition
+    #[arg(long = "transition-session", value_name = "TO=MODE[:STEP]", value_parser = parse_transition_session)]
+    pub transition_sessions: Vec<TransitionSessionArg>,
 }
 
 #[derive(Debug, Clone)]
@@ -589,6 +660,7 @@ impl StepAddCommand {
             .map(|id| id.to_lowercase())
             .collect();
         validate_step_transitions(&step_type, &transitions_to)?;
+        validate_transition_sessions(&self.transition_sessions, &transitions_to)?;
         validate_config_fields(&step_type, self.config_fields(&step_type))?;
 
         let persistence_options =
@@ -600,6 +672,16 @@ impl StepAddCommand {
             .with_config(config)
             .with_order(self.order)
             .with_transitions_to(transitions_to);
+
+        for arg in &self.transition_sessions {
+            let session = arg.session.clone().ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "--transition-session {}=none only applies to vtb step update",
+                    arg.to
+                ))
+            })?;
+            step = step.with_transition_session(&arg.to, session);
+        }
 
         if let Some(harness) = self.harness {
             step = step.with_harness(harness.into());
@@ -777,6 +859,7 @@ impl StepShowCommand {
         } else {
             s.transitions_to.join(", ")
         };
+        let transition_sessions = transition_sessions(&s);
 
         let persistence_options = pretty_json(s.persistence_options.as_ref());
 
@@ -851,9 +934,10 @@ Goal:          {}
         }
 
         output.push_str(&format!(
-            "Persistence:   {}\nTransitions:   {}\nCreated:       {}\nUpdated:       {}",
+            "Persistence:   {}\nTransitions:   {}\n{}Created:       {}\nUpdated:       {}",
             persistence_options,
             transitions,
+            transition_sessions,
             s.created_at
                 .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_else(|| "-".to_string()),
@@ -864,6 +948,26 @@ Goal:          {}
 
         Ok(output)
     }
+}
+
+/// Summarizes each outgoing transition's session directive. Transitions
+/// without one enter their destination with a new conversation.
+fn transition_sessions(step: &Step) -> String {
+    if step.transition_sessions.is_empty() {
+        return String::new();
+    }
+    let lines = step
+        .transitions_to
+        .iter()
+        .map(|to| {
+            let session = step
+                .transition_sessions
+                .get(to)
+                .map_or_else(|| "(none)".to_string(), SessionDirective::to_string);
+            format!("  -> {to}: {session}\n")
+        })
+        .collect::<String>();
+    format!("Transition Sessions:\n{lines}")
 }
 
 /// Summarizes each route decision's session directive. Decisions without one
@@ -1073,6 +1177,12 @@ pub struct StepUpdateCommand {
     /// Clear all transitions
     #[arg(long)]
     pub clear_transitions: bool,
+
+    /// Set the session directive of an outgoing transition:
+    /// `<TO>=<new|resume|fork>[:<STEP>]`, or `<TO>=none` to clear it.
+    /// Transitions not named keep their directive. Repeat for each transition
+    #[arg(long = "transition-session", value_name = "TO=MODE[:STEP]", value_parser = parse_transition_session)]
+    pub transition_sessions: Vec<TransitionSessionArg>,
 }
 
 impl StepUpdateCommand {
@@ -1198,6 +1308,11 @@ impl StepUpdateCommand {
             existing.transitions_to.clone()
         };
         validate_step_transitions(&existing.step_type, &resulting_transitions)?;
+        let resulting_transitions: Vec<String> = resulting_transitions
+            .iter()
+            .map(|id| id.to_lowercase())
+            .collect();
+        validate_transition_sessions(&self.transition_sessions, &resulting_transitions)?;
 
         let mut updates = StepUpdate::new();
 
@@ -1319,6 +1434,9 @@ impl StepUpdateCommand {
                 .map(|id| id.to_lowercase())
                 .collect();
             updates = updates.with_transitions_to(transitions);
+        }
+        for arg in &self.transition_sessions {
+            updates = updates.with_transition_session(&arg.to, arg.session.clone());
         }
 
         if existing.step_type == StepType::Execute
@@ -2738,5 +2856,127 @@ mod tests {
             route_sessions(&serde_json::json!({"rules": [], "default": null})),
             ""
         );
+    }
+
+    const STEP_A: &str = "a1b2c3d4-0000-4000-8000-00000000000a";
+    const STEP_B: &str = "a1b2c3d4-0000-4000-8000-00000000000b";
+
+    #[test]
+    fn transition_session_flag_parses_mode_source_and_clear() {
+        let resume = parse_transition_session(&format!("{STEP_A}=resume")).unwrap();
+        assert_eq!(resume.to, STEP_A);
+        assert_eq!(
+            resume.session,
+            Some(SessionDirective {
+                mode: SessionMode::Resume,
+                step_id: None,
+            })
+        );
+
+        let fork = parse_transition_session(&format!("{STEP_A}=fork:A1B2C3D4")).unwrap();
+        assert_eq!(
+            fork.session,
+            Some(SessionDirective {
+                mode: SessionMode::Fork,
+                step_id: Some("a1b2c3d4".to_string()),
+            })
+        );
+
+        let clear = parse_transition_session(&format!("{STEP_A}=none")).unwrap();
+        assert_eq!(clear.session, None);
+
+        for (value, message) in [
+            (STEP_A.to_string(), "expected <TO>=<MODE>[:<STEP>]"),
+            (format!("{STEP_A}=continue"), "unknown session mode"),
+            (
+                format!("{STEP_A}=new:{STEP_B}"),
+                "not allowed with mode new",
+            ),
+            (format!("{STEP_A}=resume:step-a"), "session step ID"),
+            ("nope=resume".to_string(), "transition target ID"),
+        ] {
+            let error = parse_transition_session(&value).unwrap_err();
+            assert!(error.contains(message), "{value}: {error}");
+        }
+    }
+
+    #[test]
+    fn step_add_and_update_accept_repeated_transition_sessions() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            STEP_B,
+            "--transition-session",
+            &format!("{STEP_A}=resume"),
+            "--transition-session",
+            &format!("{STEP_B}=none"),
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => assert_eq!(cmd.transition_sessions.len(), 2),
+            _ => panic!("Expected Update command"),
+        }
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Draft",
+            "--workflow",
+            STEP_B,
+            "--harness",
+            "claude",
+            "--transition-to",
+            STEP_A,
+            "--transition-session",
+            &format!("{STEP_A}=fork:{STEP_B}"),
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => assert_eq!(cmd.transition_sessions.len(), 1),
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn transition_sessions_must_name_distinct_outgoing_transitions() {
+        let arg = |to: &str| TransitionSessionArg {
+            to: to.to_string(),
+            session: None,
+        };
+        let transitions = vec![STEP_A.to_string()];
+        assert!(validate_transition_sessions(&[arg(STEP_A)], &transitions).is_ok());
+        let error = validate_transition_sessions(&[arg(STEP_B)], &transitions).unwrap_err();
+        assert!(error.to_string().contains("not an outgoing transition"));
+        let error =
+            validate_transition_sessions(&[arg(STEP_A), arg(STEP_A)], &transitions).unwrap_err();
+        assert!(error.to_string().contains("more than once"));
+    }
+
+    #[test]
+    fn transition_sessions_summarize_every_transition() {
+        let step = Step::new("Draft", "wf")
+            .with_transitions_to(vec![
+                "step-a".to_string(),
+                "step-b".to_string(),
+                "step-c".to_string(),
+            ])
+            .with_transition_session(
+                "step-a",
+                SessionDirective {
+                    mode: SessionMode::Resume,
+                    step_id: None,
+                },
+            )
+            .with_transition_session(
+                "step-b",
+                SessionDirective {
+                    mode: SessionMode::Fork,
+                    step_id: Some("step-x".to_string()),
+                },
+            );
+        assert_eq!(
+            transition_sessions(&step),
+            "Transition Sessions:\n  -> step-a: resume destination\n  -> step-b: fork step step-x\n  -> step-c: (none)\n"
+        );
+        assert_eq!(transition_sessions(&Step::new("Plain", "wf")), "");
     }
 }

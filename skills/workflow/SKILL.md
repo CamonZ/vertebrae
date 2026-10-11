@@ -51,6 +51,13 @@ accepted. Selected exports are closed bundles, so workflow transitions and
 route targets must stay within the selected set. If a reference points to an
 omitted workflow, add that workflow ID or use `--all`.
 
+Steps are referenced by portable `step_ref`s, never persisted IDs. A step
+transition's session directive is written on its edge as
+`step_edges[].session` (`{"mode": "resume"}`, or
+`{"mode": "fork", "step_ref": "<step-ref>"}` when it names a step other than
+the destination); route decision directives carry `session.step_ref` inside the
+route config.
+
 ## workflow import
 
 Import a versioned JSON bundle into the active project:
@@ -61,7 +68,9 @@ vtb workflow import workflows.json --dry-run
 vtb workflow import workflows.json --json
 ```
 
-The command validates the manifest locally, checks destination workflow names
+The command validates the manifest locally (including that every
+`session.step_ref` names a step of its own workflow and that no `session`
+carries a persisted `step_id`), checks destination workflow names
 using create-only semantics, and submits one Sacrum bulk mutation only after a
 clean preflight. Existing or duplicate workflow names fail; imports never
 overwrite, merge, assign tasks, or delete rows implicitly. `--dry-run` performs
@@ -91,7 +100,8 @@ vtb workflow export --all --output destination-workflows.json
 ```
 
 The V1 bundle preserves workflow and step order, initial steps, step and
-workflow edges, edge labels, route rules and defaults, workflow metadata,
+workflow edges, edge labels, edge and route session directives
+(`session.step_ref`), route rules and defaults, workflow metadata,
 agent configuration, prompts, output schemas, persistence options, and other
 opaque JSON values. Import remaps persistence IDs; compare canonical semantic
 content rather than raw IDs or timestamps. Use the returned workflow and
@@ -101,7 +111,8 @@ so matching exporter and importer omissions cannot make a round-trip test pass.
 The rich-graph acceptance fixture includes multiple workflows, every supported
 step type, distinct goal and prompt values including valid null and empty
 prompts, nested metadata/configuration, strict schemas, persistence options,
-route rule/default targets, labels, and explicit cross-workflow entry steps.
+route rule/default targets, labels, route and edge session directives, and
+explicit cross-workflow entry steps.
 Run this coverage only against the isolated Docker Sacrum environment; do not
 use the local task-management database as the acceptance backend.
 

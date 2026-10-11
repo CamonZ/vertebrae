@@ -4,10 +4,10 @@ use std::fmt;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::models::StepType;
+use crate::models::{SessionMode, StepType};
 
 use super::route::validate_route_config;
-use super::{StepAddress, WorkflowBundleManifest};
+use super::{StepAddress, StepEdgeSession, WorkflowBundleManifest};
 
 pub(super) fn validate_bundle(
     bundle: &WorkflowBundleManifest,
@@ -112,6 +112,9 @@ pub(super) fn validate_bundle(
                 format!("step_edges[{index}].to"),
                 format!("unresolved step ref {:?}", edge.to),
             ));
+        }
+        if let Some(session) = &edge.session {
+            validate_edge_session(session, &edge.from, &step_addresses, &path)?;
         }
         let key = (edge.from.clone(), edge.to.clone());
         if !step_edges.insert(key) {
@@ -306,6 +309,35 @@ impl fmt::Display for ManifestValidationError {
 }
 
 impl std::error::Error for ManifestValidationError {}
+
+// Sacrum validates the step's type and harness; the bundle only checks that
+// the referenced step belongs to the edge's workflow.
+fn validate_edge_session(
+    session: &StepEdgeSession,
+    from: &StepAddress,
+    step_addresses: &BTreeSet<StepAddress>,
+    path: &str,
+) -> Result<(), ManifestValidationError> {
+    let Some(step_ref) = &session.step_ref else {
+        return Ok(());
+    };
+    if session.mode == SessionMode::New {
+        return Err(ManifestValidationError::new(
+            format!("{path}.session.step_ref"),
+            "step_ref is not allowed with mode new",
+        ));
+    }
+    if !step_addresses.contains(&StepAddress::new(&from.workflow_ref, step_ref)) {
+        return Err(ManifestValidationError::new(
+            format!("{path}.session.step_ref"),
+            format!(
+                "unresolved step ref {step_ref:?} in workflow {:?}",
+                from.workflow_ref
+            ),
+        ));
+    }
+    Ok(())
+}
 
 fn validate_step_address(
     address: &StepAddress,

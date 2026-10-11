@@ -23,7 +23,7 @@ pub const STEP_FIELDS: &str = r#"
         inserted_at
         updated_at
         transitions {
-            id to_step_id label
+            id to_step_id label session
         }
     }
 "#;
@@ -57,6 +57,7 @@ pub const WORKFLOW_EXPORT_STEP_FIELDS: &str = r#"
             id
             to_step_id
             label
+            session
         }
     }
 "#;

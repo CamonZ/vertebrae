@@ -3,15 +3,19 @@
 //! Implements the StepService trait by making GraphQL calls to the Sacrum API.
 //! Full CRUD operations are available for workflow steps.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use serde_json::json;
 use vertebrae_core::StepHarness;
 use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::models::{Step, StepConfig, StepType, StepUpdate};
+use vertebrae_core::models::{SessionDirective, Step, StepConfig, StepType, StepUpdate};
 use vertebrae_core::step_service::StepService;
 use vertebrae_core::validate_step_config;
 
-use crate::api_types::{ShortIdResponse, WorkflowResponse, WorkflowStepResponse};
+use crate::api_types::{
+    ShortIdResponse, StepTransitionResponse, WorkflowResponse, WorkflowStepResponse,
+};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::error::SacrumClientError;
 use crate::queries::steps::{
@@ -37,6 +41,12 @@ impl SacrumStepService {
             .as_ref()
             .map(|ts| ts.iter().map(|t| t.to_step_id.clone()).collect())
             .unwrap_or_default();
+        let transition_sessions = response
+            .transitions
+            .iter()
+            .flatten()
+            .filter_map(|t| Some((t.to_step_id.clone(), t.session.clone()?)))
+            .collect();
 
         let created_at = response
             .inserted_at
@@ -75,6 +85,7 @@ impl SacrumStepService {
             config,
             persistence_options: response.persistence_options.clone(),
             transitions_to,
+            transition_sessions,
             order: response.step_order,
             created_at,
             updated_at,
@@ -94,6 +105,49 @@ impl SacrumStepService {
         Ok(())
     }
 
+    fn validate_transition_sessions<'a>(
+        destinations: &[String],
+        sessions: impl IntoIterator<Item = &'a String>,
+    ) -> ServiceResult<()> {
+        match sessions
+            .into_iter()
+            .find(|to_id| !destinations.contains(to_id))
+        {
+            Some(to_id) => Err(ServiceError::validation_failed(format!(
+                "transition session names step {to_id}, which is not an outgoing transition"
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// One `StepTransitionInput` per destination. Sacrum replaces the whole
+    /// outgoing set, so a kept transition carries its current label and
+    /// session directive unless `sessions` sets or clears the directive.
+    fn transition_inputs(
+        destinations: &[String],
+        existing: &[StepTransitionResponse],
+        sessions: &BTreeMap<String, Option<SessionDirective>>,
+    ) -> ServiceResult<Vec<serde_json::Value>> {
+        destinations
+            .iter()
+            .map(|to_id| {
+                let current = existing.iter().find(|t| &t.to_step_id == to_id);
+                let session = match sessions.get(to_id) {
+                    Some(session) => session.as_ref(),
+                    None => current.and_then(|t| t.session.as_ref()),
+                };
+                let mut input = json!({ "to_step_id": to_id });
+                if let Some(label) = current.and_then(|t| t.label.as_ref()) {
+                    input["label"] = json!(label);
+                }
+                if let Some(session) = session {
+                    input["session"] = json!(Self::json_variable(session, "session")?);
+                }
+                Ok(input)
+            })
+            .collect()
+    }
+
     fn json_variable(value: &impl serde::Serialize, label: &str) -> ServiceResult<String> {
         serde_json::to_string(value)
             .map_err(|e| ServiceError::validation_failed(format!("Invalid {label}: {e}")))
@@ -104,6 +158,7 @@ impl SacrumStepService {
 impl StepService for SacrumStepService {
     async fn create_step(&self, step: &Step) -> ServiceResult<Step> {
         Self::validate_stop_transitions(&step.step_type, &step.transitions_to)?;
+        Self::validate_transition_sessions(&step.transitions_to, step.transition_sessions.keys())?;
         validate_step_config(step)?;
 
         let execute = matches!(step.step_type, StepType::Execute);
@@ -149,11 +204,12 @@ impl StepService for SacrumStepService {
             && let Some(step_id) = &created.id
         {
             let sync_query = with_fragments(SYNC_STEP_TRANSITIONS, &[STEP_FIELDS]);
-            let transitions: Vec<serde_json::Value> = step
-                .transitions_to
+            let sessions = step
+                .transition_sessions
                 .iter()
-                .map(|to_id| json!({"to_step_id": to_id}))
+                .map(|(to_id, session)| (to_id.clone(), Some(session.clone())))
                 .collect();
+            let transitions = Self::transition_inputs(&step.transitions_to, &[], &sessions)?;
             let sync_vars = json!({
                 "id": step_id,
                 "transitions": transitions,
@@ -262,6 +318,32 @@ impl StepService for SacrumStepService {
     }
 
     async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String> {
+        // Resolve the outgoing set before writing anything so a directive for
+        // a missing transition fails without a partial update.
+        let transitions = if updates.changes_transitions() {
+            let current: WorkflowStepResponse = self
+                .client
+                .execute(
+                    &with_fragments(GET_STEP, &[STEP_FIELDS]),
+                    json!({ "id": id }),
+                    "workflow_step",
+                )
+                .await?;
+            let existing = current.transitions.unwrap_or_default();
+            let destinations = updates
+                .transitions_to
+                .clone()
+                .unwrap_or_else(|| existing.iter().map(|t| t.to_step_id.clone()).collect());
+            Self::validate_transition_sessions(&destinations, updates.transition_sessions.keys())?;
+            Some(Self::transition_inputs(
+                &destinations,
+                &existing,
+                &updates.transition_sessions,
+            )?)
+        } else {
+            None
+        };
+
         let query = with_fragments(&update_step_query(updates), &[STEP_FIELDS]);
         let mut variables = json!({ "id": id });
 
@@ -300,13 +382,9 @@ impl StepService for SacrumStepService {
             .execute(&query, variables, "update_workflow_step")
             .await?;
 
-        // If transitions_to is being updated, sync them separately
-        if let Some(transitions_to) = &updates.transitions_to {
+        // If transitions are being updated, sync them separately
+        if let Some(transitions) = transitions {
             let sync_query = with_fragments(SYNC_STEP_TRANSITIONS, &[STEP_FIELDS]);
-            let transitions: Vec<serde_json::Value> = transitions_to
-                .iter()
-                .map(|to_id| json!({"to_step_id": to_id}))
-                .collect();
             let sync_vars = json!({
                 "id": id,
                 "transitions": transitions,
@@ -423,6 +501,7 @@ mod tests {
                 id: "t-1".to_string(),
                 to_step_id: "step-2".to_string(),
                 label: Some("next".to_string()),
+                session: None,
             }]),
             inserted_at: Some("2024-01-01T00:00:00Z".to_string()),
             ..step_response(
@@ -1502,6 +1581,7 @@ mod tests {
 
         let response = json!({
             "data": {
+                "workflow_step": make_step_response("step-1", "Pause", "wf-1", 0),
                 "update_workflow_step": make_step_response("step-1", "Pause", "wf-1", 0),
                 "sync_step_transitions": make_step_response("step-1", "Pause", "wf-1", 0)
             }
@@ -1517,12 +1597,164 @@ mod tests {
         service.update_step("step-1", &updates).await.unwrap();
 
         let requests = server.received_requests().await.unwrap();
-        assert_eq!(requests.len(), 2, "update and transition sync requests");
-        let sync_body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(
+            requests.len(),
+            3,
+            "current transitions, update and transition sync requests"
+        );
+        let sync_body: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
         assert_eq!(
             sync_body["variables"]["transitions"],
             json!([{ "to_step_id": "step-next" }])
         );
+    }
+
+    fn step_with_transitions(transitions: serde_json::Value) -> serde_json::Value {
+        let mut step = make_step_response("step-1", "Draft", "wf-1", 0);
+        step["transitions"] = transitions;
+        step
+    }
+
+    #[tokio::test]
+    async fn test_update_step_keeps_kept_transition_labels_and_sessions() {
+        let server = MockServer::start().await;
+        let current = step_with_transitions(json!([
+            {"id": "t-1", "to_step_id": "step-a", "label": "draft",
+             "session": {"mode": "resume"}},
+            {"id": "t-2", "to_step_id": "step-b", "label": null,
+             "session": {"mode": "fork", "step_id": "step-1"}}
+        ]));
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "workflow_step": current,
+                    "update_workflow_step": make_step_response("step-1", "Draft", "wf-1", 0),
+                    "sync_step_transitions": make_step_response("step-1", "Draft", "wf-1", 0)
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let updates = StepUpdate::new()
+            .with_transitions_to(vec![
+                "step-a".to_string(),
+                "step-b".to_string(),
+                "step-c".to_string(),
+            ])
+            .with_transition_session("step-b", None)
+            .with_transition_session(
+                "step-c",
+                Some(SessionDirective {
+                    mode: vertebrae_core::SessionMode::Resume,
+                    step_id: Some("step-1".to_string()),
+                }),
+            );
+        service.update_step("step-1", &updates).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let sync_body: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
+        assert_eq!(
+            sync_body["variables"]["transitions"],
+            json!([
+                {"to_step_id": "step-a", "label": "draft", "session": r#"{"mode":"resume"}"#},
+                {"to_step_id": "step-b"},
+                {"to_step_id": "step-c", "session": r#"{"mode":"resume","step_id":"step-1"}"#}
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_step_session_for_missing_transition_fails_before_writing() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(graphql_response(
+                "workflow_step",
+                step_with_transitions(json!([
+                    {"id": "t-1", "to_step_id": "step-a", "label": null}
+                ])),
+            )))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let updates = StepUpdate::new().with_transition_session(
+            "step-z",
+            Some(SessionDirective {
+                mode: vertebrae_core::SessionMode::Resume,
+                step_id: None,
+            }),
+        );
+        let error = service.update_step("step-1", &updates).await.unwrap_err();
+
+        assert!(error.to_string().contains("step-z"), "{error}");
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "only the current transitions are read");
+    }
+
+    #[tokio::test]
+    async fn test_create_step_sends_transition_sessions_and_reads_them_back() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "create_workflow_step": make_step_response("step-1", "Draft", "wf-1", 0),
+                    "sync_step_transitions": step_with_transitions(json!([
+                        {"id": "t-1", "to_step_id": "step-a", "label": null,
+                         "session": {"mode": "resume"}},
+                        {"id": "t-2", "to_step_id": "step-b", "label": null, "session": null}
+                    ]))
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let step = Step::new("Draft", "wf-1")
+            .with_harness(StepHarness::Claude)
+            .with_transitions_to(vec!["step-a".to_string(), "step-b".to_string()])
+            .with_transition_session(
+                "step-a",
+                SessionDirective {
+                    mode: vertebrae_core::SessionMode::Resume,
+                    step_id: None,
+                },
+            );
+        let created = service.create_step(&step).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let sync_body: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+        assert_eq!(
+            sync_body["variables"]["transitions"],
+            json!([
+                {"to_step_id": "step-a", "session": r#"{"mode":"resume"}"#},
+                {"to_step_id": "step-b"}
+            ])
+        );
+        assert_eq!(created.transition_sessions.len(), 1);
+        assert_eq!(
+            created.transition_sessions["step-a"].mode,
+            vertebrae_core::SessionMode::Resume
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_step_rejects_session_without_transition() {
+        let service = create_wiremock_service("http://localhost:4000");
+        let step = Step::new("Draft", "wf-1").with_transition_session(
+            "step-a",
+            SessionDirective {
+                mode: vertebrae_core::SessionMode::Resume,
+                step_id: None,
+            },
+        );
+
+        let error = service.create_step(&step).await.unwrap_err();
+
+        assert!(error.to_string().contains("step-a"), "{error}");
     }
 
     #[tokio::test]
