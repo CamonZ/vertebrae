@@ -193,7 +193,9 @@ target), as Claude echoes it, and appends every argv to
 `MOCK_CAPTURE_DIR/invocations.jsonl`. mock-codex gives each `thread/start` a
 distinct thread id and rejects resuming or forking a thread it did not create.
 `route_sessions.feature` uses these to prove route-driven new, resume and
-rejected-resume conversations on both harnesses.
+rejected-resume conversations on both harnesses, and
+`transition_sessions.feature` proves that a step entered over a resume edge
+(`--transition-session`) continues the previous step's conversation.
 
 Fixture files live under `crates/daemon-acceptance/mocks/` and are mounted at
 `/mocks/` inside the container. Per-scenario isolation requires unique fixture

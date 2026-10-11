@@ -357,6 +357,21 @@ pub(crate) async fn resolve_step_id(
     .await
 }
 
+/// Resolve the destination and session step of each `--transition-session`.
+async fn resolve_transition_sessions(
+    sessions: &mut [step::TransitionSessionArg],
+    workflow_id: Option<&str>,
+    services: &VertebraeServices,
+) -> Result<(), ServiceError> {
+    for arg in sessions {
+        arg.to = resolve_step_id(&arg.to, workflow_id, services).await?;
+        if let Some(step_id) = arg.session.as_mut().and_then(|s| s.step_id.as_mut()) {
+            *step_id = resolve_step_id(step_id, workflow_id, services).await?;
+        }
+    }
+    Ok(())
+}
+
 /// Resolve an optional ID field in place using `resolver`.
 ///
 /// `resolver` already short-circuits non-short-id input, so we just need to
@@ -516,6 +531,8 @@ impl Command {
                     for t in &mut c.transitions_to {
                         *t = resolve_step_id(t, Some(&wf), services).await?;
                     }
+                    resolve_transition_sessions(&mut c.transition_sessions, Some(&wf), services)
+                        .await?;
                 }
                 step::StepCommand::List(c) => {
                     c.workflow = resolve_workflow_id(&c.workflow, services).await?;
@@ -530,6 +547,7 @@ impl Command {
                     for t in &mut c.transitions_to {
                         *t = resolve_step_id(t, None, services).await?;
                     }
+                    resolve_transition_sessions(&mut c.transition_sessions, None, services).await?;
                 }
                 step::StepCommand::Delete(c) => {
                     c.id = resolve_step_id(&c.id, None, services).await?;

@@ -391,6 +391,32 @@ async fn roundtrip_bundles_should_preserve_route_session(world: &mut SmokeWorld)
     }
 }
 
+#[then("the roundtrip bundles should preserve the edge session directive")]
+async fn roundtrip_bundles_should_preserve_edge_session(world: &mut SmokeWorld) {
+    for key in [
+        "source_workflow_bundle_path",
+        "destination_workflow_bundle_path",
+    ] {
+        let bundle = read_workflow_bundle(world, key);
+        let review = bundle
+            .workflows
+            .iter()
+            .flat_map(|workflow| &workflow.steps)
+            .find(|step| step.name == "Review")
+            .unwrap_or_else(|| panic!("{key} must contain step Review"));
+        let retry = bundle
+            .step_edges
+            .iter()
+            .find(|edge| edge.label.as_deref() == Some("retry"))
+            .unwrap_or_else(|| panic!("{key} must keep the retry edge"));
+        assert_eq!(
+            serde_json::to_value(&retry.session).unwrap(),
+            json!({"mode": "fork", "step_ref": review.step_ref}),
+            "{key} must write the edge session step as a portable step_ref"
+        );
+    }
+}
+
 fn mapped_id<'a>(mappings: &'a Map<String, Value>, reference: &str) -> &'a str {
     mappings
         .get(reference)

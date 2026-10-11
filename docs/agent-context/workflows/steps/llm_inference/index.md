@@ -3,8 +3,9 @@
 The step's harness (`claude` or `codex`) runs the step's rendered prompt in the task's working directory.
 
 Each execution runs in a provider conversation. The step has no session
-settings: it starts a new conversation unless the route decision that led to it
-carries a `session` directive to resume or fork one.
+settings: it starts a new conversation unless the path that led to it carries a
+`session` directive to resume or fork one, either the route decision or the
+step transition it was entered over.
 
 - [Prompt templating](../../../templating/prompts.md): Liquid syntax and the variables a prompt can use.
   Load when: writing or debugging the prompt, `{{ task.* }}`, loops over sections, empty values.
@@ -16,7 +17,7 @@ carries a `session` directive to resume or fork one.
   Load when: model choice, fast mode, deeper reasoning, replacing the agent config.
 - [Guardrails](guardrails.md): restricting what the agent may do (tools, permission mode, budget).
   Load when: "don't let it change code/push/comment", `disallowed_tools`, read-only review steps.
-- [Session directives](../route/sessions.md): continuing or branching a conversation across steps.
-  Load when: "keep the same session", "resume the implementer", parallel branches sharing context.
+- [Session directives](../route/sessions.md): continuing or branching a conversation across steps, from a route decision or a step transition.
+  Load when: "keep the same session", "resume the implementer", "continue in the next step", `--transition-session`, parallel branches sharing context.
 - [Templating context](../../../templating/context.md): everything available to interpolate.
   Load when: you need to know what data exists (previous output, handoff, other steps' outputs).

@@ -684,6 +684,51 @@ impl From<StepHarness> for vertebrae_core::StepHarness {
     }
 }
 
+/// How an llm_inference destination enters its provider conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMode {
+    New,
+    Resume,
+    Fork,
+}
+
+impl From<vertebrae_core::SessionMode> for SessionMode {
+    fn from(mode: vertebrae_core::SessionMode) -> Self {
+        match mode {
+            vertebrae_core::SessionMode::New => Self::New,
+            vertebrae_core::SessionMode::Resume => Self::Resume,
+            vertebrae_core::SessionMode::Fork => Self::Fork,
+        }
+    }
+}
+
+/// Session directive on a step transition. `step_id` names the step whose
+/// conversation is resumed or forked; null means the destination.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SessionDirective {
+    pub mode: SessionMode,
+    pub step_id: Option<String>,
+}
+
+impl From<vertebrae_core::SessionDirective> for SessionDirective {
+    fn from(directive: vertebrae_core::SessionDirective) -> Self {
+        SessionDirective {
+            mode: directive.mode.into(),
+            step_id: directive.step_id,
+        }
+    }
+}
+
+fn session_directives(
+    sessions: std::collections::BTreeMap<String, vertebrae_core::SessionDirective>,
+) -> std::collections::BTreeMap<String, SessionDirective> {
+    sessions
+        .into_iter()
+        .map(|(to, directive)| (to, directive.into()))
+        .collect()
+}
+
 /// Config of an `llm_inference` step.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct LlmInferenceStepConfig {
@@ -815,6 +860,8 @@ pub struct Step {
     pub persistence_options: Option<serde_json::Value>,
     /// List of step IDs this step can transition to
     pub transitions_to: Vec<String>,
+    /// Session directives on outgoing transitions, keyed by destination step id.
+    pub transition_sessions: std::collections::BTreeMap<String, SessionDirective>,
     /// Ordering index for sequential fallback (0-based, Sacrum: `step_order`).
     pub order: i32,
     /// Creation timestamp (ISO 8601 string)
@@ -868,6 +915,7 @@ impl<'de> Deserialize<'de> for Step {
             config: config.map(Into::into),
             persistence_options: wire.persistence_options,
             transitions_to: wire.transitions_to,
+            transition_sessions: Default::default(),
             order: wire.order,
             created_at: wire.created_at,
             updated_at: wire.updated_at,
@@ -887,6 +935,7 @@ impl From<vertebrae_core::Step> for Step {
             config: step.config.map(Into::into),
             persistence_options: step.persistence_options,
             transitions_to: step.transitions_to,
+            transition_sessions: session_directives(step.transition_sessions),
             order: step.order,
             created_at: step.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: step.updated_at.map(|dt| dt.to_rfc3339()),
@@ -1510,6 +1559,8 @@ pub struct PipelineStep {
     pub step_type: Option<String>,
     /// IDs of the steps that this step transitions into within the same workflow.
     pub transitions_to: Vec<String>,
+    /// Session directives on those transitions, keyed by destination step id.
+    pub transition_sessions: std::collections::BTreeMap<String, SessionDirective>,
     /// Per-level task counts for tasks currently parked at this step.
     pub task_counts: PipelineTaskCounts,
     /// Canonical per-step counts from Sacrum, including active TaskRun count.
@@ -1588,6 +1639,15 @@ impl From<vertebrae_sacrum_client::PipelineStepResponse> for PipelineStep {
             .iter()
             .map(|t| t.to_step_id.clone())
             .collect();
+        let transition_sessions = step
+            .transitions
+            .iter()
+            .filter_map(|t| {
+                t.session
+                    .clone()
+                    .map(|session| (t.to_step_id.clone(), session.into()))
+            })
+            .collect();
         let task_counts = step.effective_task_counts();
         let active_count = step.effective_active_count();
         PipelineStep {
@@ -1598,6 +1658,7 @@ impl From<vertebrae_sacrum_client::PipelineStepResponse> for PipelineStep {
             step_order: step.step_order,
             step_type: step.step_type,
             transitions_to,
+            transition_sessions,
             task_counts: PipelineTaskCounts {
                 epic: task_counts.epic,
                 ticket: task_counts.ticket,
@@ -3259,5 +3320,42 @@ mod tests {
 
         let log: SessionLog = serde_json::from_value(payload).expect("should deserialize");
         assert_eq!(log.created_at, "2026-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn steps_carry_transition_session_directives_by_destination() {
+        let resume = vertebrae_core::SessionDirective {
+            mode: vertebrae_core::SessionMode::Resume,
+            step_id: Some("draft".to_string()),
+        };
+        let step = Step::from(
+            vertebrae_core::Step::new("draft", "wf1")
+                .with_transitions_to(vec!["revise".to_string()])
+                .with_transition_session("revise", resume.clone()),
+        );
+        let expected = SessionDirective {
+            mode: SessionMode::Resume,
+            step_id: Some("draft".to_string()),
+        };
+        assert_eq!(step.transition_sessions.get("revise"), Some(&expected));
+        assert_eq!(
+            serde_json::to_value(&step).unwrap()["transition_sessions"],
+            serde_json::json!({"revise": {"mode": "resume", "step_id": "draft"}})
+        );
+
+        let pipeline: vertebrae_sacrum_client::PipelineStepResponse =
+            serde_json::from_value(serde_json::json!({
+                "id": "draft", "name": "Draft", "workflow_id": "wf1",
+                "transitions": [
+                    {"id": "t1", "from_step_id": "draft", "to_step_id": "revise",
+                     "session": {"mode": "resume", "step_id": "draft"}},
+                    {"id": "t2", "from_step_id": "draft", "to_step_id": "done"}
+                ]
+            }))
+            .unwrap();
+        let pipeline = PipelineStep::from(pipeline);
+        assert_eq!(pipeline.transitions_to, vec!["revise", "done"]);
+        assert_eq!(pipeline.transition_sessions.len(), 1);
+        assert_eq!(pipeline.transition_sessions.get("revise"), Some(&expected));
     }
 }

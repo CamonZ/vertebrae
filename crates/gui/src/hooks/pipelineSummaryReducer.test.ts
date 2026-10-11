@@ -49,6 +49,7 @@ function makeStep(
     step_order: order,
     step_type: "llm_inference",
     transitions_to: [],
+    transition_sessions: {},
     task_counts: taskCounts,
     pipeline_counts: { ...taskCounts, active: activeCount },
     active_count: activeCount,
@@ -485,6 +486,7 @@ function fakeStep(
       agent_config: createMockAgentConfig({ model: null }),
     },
     transitions_to: [],
+    transition_sessions: {},
     order,
     created_at: null,
     updated_at: null,
@@ -710,6 +712,10 @@ describe("applyStepDeleted", () => {
     const stepWithTransition: PipelineStep = {
       ...makeStep("s1", "wf-1", "todo", 0),
       transitions_to: ["s2", "s3"],
+      transition_sessions: {
+        s2: { mode: "resume", step_id: null },
+        s3: { mode: "fork", step_id: null },
+      },
     };
     const summary = makeSummary([
       makeWorkflow("wf-1", [
@@ -722,6 +728,9 @@ describe("applyStepDeleted", () => {
     const next = applyStepDeleted(summary, "s2", "wf-1");
 
     expect(next.workflows[0].workflow_steps[0].transitions_to).toEqual(["s3"]);
+    expect(next.workflows[0].workflow_steps[0].transition_sessions).toEqual({
+      s3: { mode: "fork", step_id: null },
+    });
   });
 
   it("no-ops when the step is unknown", () => {
@@ -771,10 +780,11 @@ describe("applyStepTransitionCreated", () => {
 });
 
 describe("applyStepTransitionDeleted", () => {
-  it("removes the transition using event endpoints", () => {
+  it("removes the transition and its session using event endpoints", () => {
     const step: PipelineStep = {
       ...makeStep("s1", "wf-1", "todo", 0),
       transitions_to: ["s2", "s3"],
+      transition_sessions: { s2: { mode: "resume", step_id: null } },
     };
     const summary = makeSummary([makeWorkflow("wf-1", [step])]);
 
@@ -786,6 +796,7 @@ describe("applyStepTransitionDeleted", () => {
     });
 
     expect(next.workflows[0].workflow_steps[0].transitions_to).toEqual(["s3"]);
+    expect(next.workflows[0].workflow_steps[0].transition_sessions).toEqual({});
   });
 
   it("no-ops when endpoints are missing", () => {

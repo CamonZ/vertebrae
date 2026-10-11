@@ -114,6 +114,7 @@ function makeStep(id: string, order: number): PipelineStep {
     step_order: order,
     step_type: "llm_inference",
     transitions_to: [],
+    transition_sessions: {},
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
     active_count: 0,

@@ -340,7 +340,11 @@
         "workflow_ref": "review",
         "step_ref": "review"
       },
-      "label": "retry"
+      "label": "retry",
+      "session": {
+        "mode": "fork",
+        "step_ref": "review"
+      }
     },
     {
       "from": {

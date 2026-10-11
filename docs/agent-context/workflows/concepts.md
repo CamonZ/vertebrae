@@ -26,7 +26,9 @@ escalations are explicit edges. The [multi-workflow factory](../recipes/multi-wo
 ## Doing it
 `vtb workflow add "Bug Intake" --factory-name "Bug Triage" -d "..."`, then add
 workflow transitions and steps; see [authoring order](authoring-order.md).
-`vtb workflow export` produces a portable bundle for sharing.
+`vtb workflow export` produces a portable bundle for sharing. Bundles name
+steps by `step_ref`, including the step a session directive resumes or forks:
+`session.step_ref` in route configs and on `step_edges[].session`.
 
 ## Related
 [Transitions](transitions.md) · [Steps](steps/index.md) · [Multi-workflow factory](../recipes/multi-workflow-factory.md)

@@ -1,7 +1,8 @@
 //! GraphQL query bindings for the `pipeline_summary` query.
 //!
 //! Returns the full set of workflows for a project with their workflow steps,
-//! intra-workflow step transitions, inter-workflow transitions, plus per-step
+//! intra-workflow step transitions with their session directives,
+//! inter-workflow transitions, plus per-step
 //! `pipeline_counts` (epic/ticket/task/active) aggregates. The resolver
 //! computes all aggregates with a fixed number of SQL queries independent of
 //! workflow / step / task count, so the client just calls it.
@@ -44,6 +45,7 @@ pub const PIPELINE_SUMMARY: &str = r#"
                     from_step_id
                     to_step_id
                     label
+                    session
                 }
             }
             transitions {

@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use super::*;
 use crate::StepHarness;
+use crate::models::SessionMode;
 
 const GOLDEN: &str = include_str!("../../tests/fixtures/workflow_bundle.json");
 type ValidationCase = (&'static str, fn(&mut WorkflowBundleManifest), &'static str);
@@ -280,6 +281,26 @@ fn validation_failures_are_table_driven_and_actionable() {
             },
             "config.route_config.rules[0].session.step_ref",
         ),
+        (
+            "foreign edge session step ref",
+            |bundle: &mut WorkflowBundleManifest| {
+                retry_edge(bundle).session = Some(StepEdgeSession {
+                    mode: SessionMode::Resume,
+                    step_ref: Some("start".into()),
+                })
+            },
+            "session.step_ref",
+        ),
+        (
+            "edge session step ref with mode new",
+            |bundle: &mut WorkflowBundleManifest| {
+                retry_edge(bundle).session = Some(StepEdgeSession {
+                    mode: SessionMode::New,
+                    step_ref: Some("review".into()),
+                })
+            },
+            "session.step_ref",
+        ),
     ];
     for (name, mutate, path) in cases {
         let mut bundle = golden();
@@ -287,6 +308,49 @@ fn validation_failures_are_table_driven_and_actionable() {
         let error = bundle.validate().expect_err(name);
         assert!(error.path.contains(path), "{name}: {error}");
     }
+}
+
+fn retry_edge(bundle: &mut WorkflowBundleManifest) -> &mut StepEdge {
+    bundle
+        .step_edges
+        .iter_mut()
+        .find(|edge| edge.label.as_deref() == Some("retry"))
+        .expect("golden bundle has a retry edge")
+}
+
+#[test]
+fn edge_sessions_round_trip_and_reject_persisted_step_ids() {
+    let mut bundle = golden();
+    assert_eq!(
+        retry_edge(&mut bundle).session,
+        Some(StepEdgeSession {
+            mode: SessionMode::Fork,
+            step_ref: Some("review".into()),
+        })
+    );
+    retry_edge(&mut bundle).session = Some(StepEdgeSession {
+        mode: SessionMode::Resume,
+        step_ref: None,
+    });
+    bundle
+        .validate()
+        .expect("step_ref defaults to the destination");
+    let reparsed = parse_manifest(&bundle.canonical_json().unwrap()).unwrap();
+    assert_eq!(reparsed, bundle.canonicalize());
+
+    let mut value: Value = serde_json::from_str(GOLDEN).unwrap();
+    let edge = value["step_edges"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|edge| edge["label"] == "retry")
+        .unwrap();
+    edge["session"] = serde_json::json!({"mode": "resume", "step_id": "uuid"});
+    let error = parse_manifest(&value.to_string()).unwrap_err().to_string();
+    assert!(
+        error.contains("session") && error.contains("step_id"),
+        "{error}"
+    );
 }
 
 #[test]

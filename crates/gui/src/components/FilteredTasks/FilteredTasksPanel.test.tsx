@@ -29,6 +29,7 @@ function createStep(overrides?: Partial<Step>): Step {
     goal: null,
     order: 0,
     transitions_to: [],
+    transition_sessions: {},
     step_type: "llm_inference",
     config: {
       version: 1,

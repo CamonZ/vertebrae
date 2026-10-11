@@ -79,24 +79,35 @@ and displays the stored choice, or `Sacrum default` when it is unset. The
 selector values are the generated `StepHarness` contract: `claude`, `codex`,
 and `typesafe`. Model and request settings remain separate step configuration.
 
-### Route session directives
+### Session directives
 
-`StepInspector.tsx` reads route session directives from the opaque
-`route_config` without editing them (`inspector/routeSessions.ts`). A route
-step lists each rule and the default with its target and session mode
-(`new (implicit)` when the decision has no directive). An `llm_inference` step
-shows a Conversation section: the route decisions that enter it and those that
-resume or fork its conversation into another step. The workflow's route steps
-are loaded with `useSteps`, which shares `useStep`'s per-step query cache so
-realtime step updates reach both.
+`StepInspector.tsx` displays session directives without editing them
+(`inspector/routeSessions.ts`). Route decisions carry theirs in the opaque
+`route_config`; other steps' transitions carry theirs in the pipeline
+summary's `transition_sessions`, keyed by destination step id. A route step
+lists each rule and the default with its target and session mode
+(`new (implicit)` when the decision has no directive). Every other step tags
+each transition that carries a directive with its mode, plus the continued
+step when it is not the destination. An `llm_inference` step shows a
+Conversation section: the route decisions and transitions that enter it, and
+those that resume or fork its conversation into another step. The workflow's
+route steps are loaded with `useSteps`, which shares `useStep`'s per-step query
+cache so realtime step updates reach both.
 
 On the Atlas graph, every edge leaving a route step carries a chip naming the
 decisions that take it as `<rule> · <mode>` (`new` when a decision has no
 directive), on loop-backs, next-step links and the `branch` edges drawn for
-route transitions that jump past the next step. `WorkflowAtlas.tsx` loads the
-scoped route steps with `useSteps` and passes their `route_config`s to
-`buildAtlasModel`; the labels are part of `layoutKey`, so a route config
-change re-runs the layout.
+route transitions that jump past the next step. Loop-backs and next-step links
+leaving other steps carry `<mode>`, or `<mode> · <step>` when the directive
+continues another step's conversation; edges without a directive have no chip.
+`WorkflowAtlas.tsx` loads the scoped route steps with `useSteps` and passes
+their `route_config`s to `buildAtlasModel`; the labels are part of
+`layoutKey`, so a directive change re-runs the layout.
+
+Sacrum's `step_transition_created` event carries no directive, so
+`usePipelineSummary` refetches the summary after applying it. Sacrum sends no
+event when a kept transition's directive changes; the Atlas shows that change
+after the next summary fetch, such as on reconnect or reload.
 
 Hovering a workflow on the Atlas is a quiet trace: its handoffs keep their
 in/out colour at resting width without glow, its loops stay at rest, and other

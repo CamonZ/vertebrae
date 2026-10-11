@@ -13,6 +13,8 @@ Use this when: creating a new workflow or factory.
    Give every step that feeds a route an output schema (structured_inference
    steps get one from their questions).
 4. **Step transitions**: `--transition-to` on each step (see edge rules in [transitions](transitions.md)).
+   An edge's `--transition-session` names steps, so author the step it resumes
+   or forks first, with its final harness.
 5. **Route configs**: `vtb step update <route> --route-config "$(cat route.json)"` last,
    because the backend validates refs against predecessor schemas and targets against existing edges.
    Add a rule's [session directive](steps/route/sessions.md) here too; its steps must

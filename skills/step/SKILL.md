@@ -69,6 +69,11 @@ vtb step add "Testing" -w <workflow-id> --harness claude \
 vtb step add "Approved" -w <workflow-id> --harness claude --step-type finish
 vtb step add "Needs Work" -w <workflow-id> --harness claude --transition-to <step-id>
 
+# Continue the draft step's conversation in the next llm_inference step
+vtb step add "Draft" -w <workflow-id> --harness claude \
+  --transition-to <revise-step-id> \
+  --transition-session <revise-step-id>=resume
+
 # With step type and structured output schema
 vtb step add "Evaluate" -w <workflow-id> --harness claude \
   --step-type llm_inference \
@@ -124,9 +129,11 @@ vtb --json step add "Review" -w <workflow-id> --harness claude
 | `--persistence-options` | | Sacrum-owned JSON configuration for persisting structured output as a task artifact |
 | `--order` | `-o` | Step order (default: 0) |
 | `--transition-to` | `-t` | Steps this can transition to (repeatable) |
+| `--transition-session` | | Session directive for one outgoing transition: `<TO>=<new\|resume\|fork>[:<STEP>]` (repeatable) |
 
-The required positional argument is `<name>`. `--workflow` and
-`--transition-to` accept full UUIDs or 8-character short IDs. `--json` returns a
+The required positional argument is `<name>`. `--workflow`,
+`--transition-to`, and the step IDs in `--transition-session` accept full UUIDs
+or 8-character short IDs. `--json` returns a
 creation envelope with `command`, `status`, `step_id`, and `workflow_id`.
 
 `--reasoning-effort` is only valid with the OpenAI/Codex provider. Supported
@@ -149,6 +156,12 @@ valid for `route` steps. A route may be created without it as a non-runnable
 draft; configure it after the workflow graph and predecessor contracts exist.
 Route authoring rejects `--prompt` and `--output-schema`; neither is a routing
 mechanism.
+
+`--transition-session <TO>=<MODE>[:<STEP>]` sets how the `llm_inference` step
+`<TO>` enters a conversation when a run follows this step's transition to it;
+`<TO>` must be one of the `--transition-to` destinations. `<STEP>` is the step
+whose conversation is resumed or forked and defaults to `<TO>`; it is rejected
+with `new`. See [Session directives](#session-directives).
 
 `structured_inference` steps take only `--provider`, `--model`, `--state`, and
 `--fields`, and Sacrum requires all four on create. Agent, prompt, and output
@@ -195,8 +208,11 @@ No steps found for workflow '<workflow-id>'
 
 `--json` returns the raw array of `Step` objects with fields such as `id`,
 `name`, `workflow_id`, `order`, `step_type`, `config`,
-`persistence_options`, `transitions_to`, and
-timestamps. It does not wrap the result in an `output` field.
+`persistence_options`, `transitions_to`, `transition_sessions`, and
+timestamps. `transition_sessions` maps a destination step ID to its
+transition's directive (`{"mode": "resume"}`,
+`{"mode": "fork", "step_id": "<step-id>"}`) and is omitted when no transition
+carries one. It does not wrap the result in an `output` field.
 
 ---
 
@@ -228,11 +244,14 @@ transitions, and persistence configuration, and created/updated timestamps.
 Missing optional fields are shown as `(none)`, and missing timestamps are shown
 as `-`. A configured route also lists each decision's session directive under
 `Route Sessions:`, one line per rule (`rules[<i>] <id>`) and the default:
-`new`, `resume destination`, `fork step <step-id>`, or `(none)`.
+`new`, `resume destination`, `fork step <step-id>`, or `(none)`. When any
+outgoing transition carries a directive, `Transition Sessions:` follows
+`Transitions:` with one `-> <step-id>: <directive>` line per transition in the
+same wording.
 
 `--json` returns the raw `Step` object with fields such as `id`, `name`,
 `workflow_id`, `order`, `goal`, `step_type`, `config`, `persistence_options`,
-`transitions_to`, and timestamps.
+`transitions_to`, `transition_sessions`, and timestamps.
 It does not wrap the result in an `output` field.
 
 `route_config` is nullable opaque JSON. An empty object is distinct from `null`;
@@ -351,6 +370,7 @@ vtb --json step update <step-id> --goal "New goal"
 | `--order` | `-o` | New 0-indexed step order |
 | `--transition-to` | `-t` | Replace transitions list; repeatable |
 | `--clear-transitions` | | Clear all transitions |
+| `--transition-session` | | Set one outgoing transition's session directive, `<TO>=<new\|resume\|fork>[:<STEP>]`, or clear it with `<TO>=none`; repeatable |
 | `--speed-tier` | | New provider serving speed preference: `default` or `fast` |
 | `--personality` | | New provider style identifier; Codex accepts `none`, `friendly`, or `pragmatic` when supported by the selected model |
 | `--verbosity` | | New output detail level: `low`, `medium`, or `high`; alias `--output-verbosity`; currently valid with OpenAI/Codex |
@@ -360,6 +380,16 @@ vtb --json step update <step-id> --goal "New goal"
 
 The required positional argument is `<id>`, the step ID to update. It accepts a
 full UUID or an 8-character short ID and resolves case-insensitively.
+
+A transition kept by `--transition-to` keeps its label and session directive.
+`--transition-session` changes only the transitions it names, which must be
+among the step's resulting transitions, so it can be used alone:
+
+```bash
+vtb step update <draft-step-id> --transition-session <revise-step-id>=resume
+vtb step update <draft-step-id> --transition-session <revise-step-id>=fork:<other-step-id>
+vtb step update <draft-step-id> --transition-session <revise-step-id>=none
+```
 
 `--agent`, `--skill`, and `--transition-to` replace their entire existing lists.
 Use the matching `--clear-*` flag to persist an empty list. `--agent-config`
@@ -383,7 +413,8 @@ but it does not create an artifact and is not equivalent to clearing the field.
 For a `route` step, `--prompt` and `--output-schema` are rejected. Route configuration is semantically validated by Sacrum, and
 nested diagnostics retain
 their `route_config` field paths, such as `$.rules[0].session.step_id` for a
-rejected session directive. Clearing route configuration leaves an
+rejected session directive. Sacrum rejects an invalid transition directive with
+the `$.session` path and the transition's endpoints. Clearing route configuration leaves an
 unconfigured, non-runnable route draft.
 Provider/model mismatches, Codex upstream provider usage when the resulting
 provider is Anthropic, Anthropic reasoning effort, and Anthropic verbosity are
@@ -476,13 +507,22 @@ can be created without configuration as a draft; `--clear-route-config` returns
 a configured route to that state. Route steps accept only `route_config` inside their config. They cannot
 be converted from another step type; create a new route step instead.
 
-### Route session directives
+### Session directives
 
 Every `llm_inference` execution runs in a provider conversation. How it enters
-one is chosen by the route decision that led to it, never by the step: there
-are no session flags or config fields on `llm_inference` steps. Each rule and
-the default decision may carry a `session` directive beside `transition` and
-`handoff`:
+one is chosen by the path that led to it, never by the step: there are no
+session flags or config fields on `llm_inference` steps. Two carriers hold the
+same `session` directive:
+
+- A route decision: each rule and the default may carry `session` beside
+  `transition` and `handoff`. Use it when the continuation depends on the
+  route's outcome (loop back and resume on `needs_changes`, start fresh on
+  `approved`).
+- A step transition: an outgoing edge into an `llm_inference` step may carry
+  one, authored with `--transition-session`. Use it for a fixed continuation,
+  such as consecutive `llm_inference` steps that share one conversation with
+  different prompts, without a route step between them. Transitions leaving a
+  route step cannot carry one; the route's decisions own those.
 
 ```json
 {
@@ -494,17 +534,22 @@ the default decision may carry a `session` directive beside `transition` and
 }
 ```
 
+```bash
+vtb step update <draft-step-id> --transition-to <revise-step-id> \
+  --transition-session <revise-step-id>=resume
+```
+
 - `mode` is `new`, `resume`, or `fork`.
   - `new` starts a fresh conversation.
   - `resume` continues a conversation as its next turn.
   - `fork` starts a new conversation that branches from a conversation's
     latest turn and leaves the original untouched.
-- `step_id` names the step whose conversation is resumed or forked. It
-  defaults to the destination step and is not allowed with `new`.
-- A step entered without a directive (the first step, a linear transition, a
-  decision without `session`) starts a new conversation, so every
-  `llm_inference` execution records a native session id that a later decision
-  can resume or fork.
+- `step_id` (the `:<STEP>` of `--transition-session`) names the step whose
+  conversation is resumed or forked. It defaults to the destination step and is
+  not allowed with `new`.
+- A step entered without a directive (the first step, a transition or decision
+  without `session`) starts a new conversation, so every `llm_inference`
+  execution records a native session id that a later path can resume or fork.
 - Resume follows a conversation across steps within one TaskRun. A step's
   conversation is the one its latest completed execution belongs to, and the
   resumed turn is that conversation's latest one, whichever step added it: if
@@ -520,13 +565,15 @@ the default decision may carry a `session` directive beside `transition` and
 - One conversation never runs two turns at once. Give parallel branches
   `fork`, not concurrent `resume`s of one conversation.
 
-Sacrum validates directives when the route config is saved: unknown keys or
-modes, `step_id` with `new`, a directive on a decision whose destination is not
-an `intra_workflow` `llm_inference` step, and a `step_id` that is not an
+Sacrum validates directives when they are saved: unknown keys or modes,
+`step_id` with `new`, a directive whose destination is not an `llm_inference`
+step (for routes, an `intra_workflow` one), and a `step_id` that is not an
 `llm_inference` step of the same workflow on the destination's harness are
-rejected with the `$.rules[<i>].session` or `$.default.session` path. In
-workflow bundles the directive's step is written as `session.step_ref`, like
-transition targets, and resolved back to `session.step_id` on import.
+rejected. Route directives report the `$.rules[<i>].session` or
+`$.default.session` path; transition directives report `$.session`, including
+one on a transition leaving a route step. In workflow bundles the directive's
+step is written as `session.step_ref`, in the route config and on
+`step_edges[].session`, and resolved back to `session.step_id` on import.
 
 ### Persistence Options
 
@@ -552,6 +599,8 @@ the task and updates dependent-task readiness when a task reaches a finish step.
 
 ### Transitions
 By default, steps can transition to any other step. Use `--transition-to` to restrict valid transitions.
+A transition into an `llm_inference` step may carry a session directive; see
+[Session directives](#session-directives).
 
 ### Agents
 Steps can have associated agent files that provide prompts and configuration for AI-assisted execution.

@@ -7,6 +7,8 @@
    and emit positioned geometry (`FullLayout` / `CondensedLayout`).
    ────────────────────────────────────────────────────────────────── */
 
+import type { SessionDirective } from "../../../bindings";
+
 /* ── kinds & roles ──────────────────────────────────────────────── */
 
 /**
@@ -56,6 +58,8 @@ export interface AtlasStep {
   order: number;
   /** Bare backend step ids this step transitions into (same workflow). */
   transitionsTo: string[];
+  /** Session directives on those transitions, keyed by target step id. */
+  transitionSessions: Partial<Record<string, SessionDirective>>;
   /** All work items (epic + ticket + task) parked at this step. */
   total: number;
   /** How many of those have an active TaskRun. `running <= total`. */

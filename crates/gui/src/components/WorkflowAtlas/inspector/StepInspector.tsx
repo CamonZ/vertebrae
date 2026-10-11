@@ -26,6 +26,7 @@ import {
   type ExecuteStepConfig,
   type LlmInferenceStepConfig,
   type RouteStepConfig,
+  type SessionMode,
   type StepHarness,
   type StructuredInferenceStepConfig,
   type WaitChildrenStepConfig,
@@ -42,6 +43,7 @@ import { RhaiScript } from "./RhaiScript";
 import {
   routeDecisions,
   sessionEntriesFor,
+  transitionSessionEntriesFor,
   type RouteDecision,
 } from "./routeSessions";
 import {
@@ -68,6 +70,9 @@ interface Transition {
   key: string;
   label: string;
   loop: boolean;
+  /** Session directive on this intra-workflow transition, if any; `source`
+   *  names the step whose conversation continues when not the target. */
+  session: { mode: SessionMode; source: string | null } | null;
   onClick: () => void;
 }
 
@@ -206,6 +211,19 @@ export function StepInspector({
   const transitions = useMemo<Transition[]>(() => {
     if (!wf || !step) return [];
     const list: Transition[] = [];
+    const nameOf = (id: string) =>
+      model.steps.find((s) => s.id === `${wf.id}.${id}`)?.name ?? id;
+    const sessionTo = (targetId: string): Transition["session"] => {
+      const session = step.transitionSessions[targetId];
+      if (!session) return null;
+      return {
+        mode: session.mode,
+        source:
+          session.step_id && session.step_id !== targetId
+            ? nameOf(session.step_id)
+            : null,
+      };
+    };
     // implicit forward step (next in order)
     const nextStepId =
       idx >= 0 && idx < wf.stepIds.length - 1 ? wf.stepIds[idx + 1] : null;
@@ -215,6 +233,7 @@ export function StepInspector({
         key: "next",
         label: next?.name ?? nextStepId,
         loop: false,
+        session: sessionTo(nextStepId),
         onClick: () =>
           onSelect({ type: "step", workflowId: wf.id, stepId: nextStepId }),
       });
@@ -235,6 +254,7 @@ export function StepInspector({
         key: e.id,
         label,
         loop,
+        session: intra ? sessionTo(ts) : null,
         onClick: () =>
           intra
             ? onSelect({ type: "step", workflowId: wf.id, stepId: ts })
@@ -256,6 +276,7 @@ export function StepInspector({
               (candidate) => candidate.id === `${wf.id}.${targetId}`
             )?.name ?? targetId,
           loop: false,
+          session: sessionTo(targetId),
           onClick: () =>
             onSelect({ type: "step", workflowId: wf.id, stepId: targetId }),
         });
@@ -266,19 +287,25 @@ export function StepInspector({
 
   const sessionEntries =
     cfg?.step_type === "llm_inference"
-      ? sessionEntriesFor(
-          stepId,
-          routeStepIds.map((routeStepId, index) => {
-            const routeStep = routeSteps[index];
-            return {
-              routeStepId,
-              routeConfig:
-                routeStep?.step_type === "route"
-                  ? (routeStep.config as RouteStepConfig | null)?.route_config
-                  : null,
-            };
-          })
-        )
+      ? [
+          ...sessionEntriesFor(
+            stepId,
+            routeStepIds.map((routeStepId, index) => {
+              const routeStep = routeSteps[index];
+              return {
+                routeStepId,
+                routeConfig:
+                  routeStep?.step_type === "route"
+                    ? (routeStep.config as RouteStepConfig | null)?.route_config
+                    : null,
+              };
+            })
+          ),
+          ...transitionSessionEntriesFor(
+            stepId,
+            model.steps.filter((s) => s.workflowId === workflowId)
+          ),
+        ]
       : [];
 
   if (!wf || !step) return null;
@@ -849,6 +876,15 @@ export function StepInspector({
                 >
                   <span className="arr">→</span>
                   {tr.label}
+                  {tr.session ? (
+                    <span
+                      data-testid="step-transition-session"
+                      className={"wfd-tag wfd-session " + tr.session.mode}
+                    >
+                      {tr.session.mode}
+                      {tr.session.source ? <> · {tr.session.source}</> : null}
+                    </span>
+                  ) : null}
                 </button>
               ))}
             </div>
@@ -945,10 +981,10 @@ export function StepInspector({
                   >
                     <button
                       className="wfd-trans loop"
-                      onClick={() => selectStep(entry.routeStepId)}
+                      onClick={() => selectStep(entry.fromStepId)}
                       type="button"
                     >
-                      {stepName(entry.routeStepId)} · {entry.decision.label}
+                      {stepName(entry.fromStepId)} · {entry.decision.label}
                     </button>
                     {entry.role === "destination" ? (
                       sessionTag(entry.decision, "step-conversation-mode")
@@ -970,7 +1006,7 @@ export function StepInspector({
               </div>
             ) : (
               <div className="wfd-placeholder">
-                No route decisions — every entry starts a new conversation
+                No session directives — every entry starts a new conversation
               </div>
             )}
           </section>

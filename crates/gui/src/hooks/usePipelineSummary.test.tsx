@@ -4,6 +4,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   PipelineSummary,
+  StepTransitionChangedEvent,
   TaskChangedEvent,
   TaskStepChangedEvent,
 } from "../bindings";
@@ -14,15 +15,23 @@ import {
 } from "../stores/projectScopedStores";
 import { createMockTask } from "../test/test-utils";
 
-const { taskHandlers, taskStepHandlers, emptyListen, getPipelineSummary } =
-  vi.hoisted(() => ({
-    taskHandlers: [] as Array<(event: { payload: TaskChangedEvent }) => void>,
-    taskStepHandlers: [] as Array<
-      (event: { payload: TaskStepChangedEvent }) => void
-    >,
-    emptyListen: vi.fn(async () => vi.fn()),
-    getPipelineSummary: vi.fn(),
-  }));
+const {
+  taskHandlers,
+  taskStepHandlers,
+  transitionHandlers,
+  emptyListen,
+  getPipelineSummary,
+} = vi.hoisted(() => ({
+  taskHandlers: [] as Array<(event: { payload: TaskChangedEvent }) => void>,
+  taskStepHandlers: [] as Array<
+    (event: { payload: TaskStepChangedEvent }) => void
+  >,
+  transitionHandlers: [] as Array<
+    (event: { payload: StepTransitionChangedEvent }) => void
+  >,
+  emptyListen: vi.fn(async () => vi.fn()),
+  getPipelineSummary: vi.fn(),
+}));
 
 vi.mock("../bindings", () => ({
   commands: { getPipelineSummary },
@@ -45,7 +54,14 @@ vi.mock("../bindings", () => ({
     },
     taskRunStepChangedEvent: { listen: emptyListen },
     stepChangedEvent: { listen: emptyListen },
-    stepTransitionChangedEvent: { listen: emptyListen },
+    stepTransitionChangedEvent: {
+      listen: vi.fn(
+        (handler: (event: { payload: StepTransitionChangedEvent }) => void) => {
+          transitionHandlers.push(handler);
+          return Promise.resolve(vi.fn());
+        }
+      ),
+    },
     workflowChangedEvent: { listen: emptyListen },
     workflowTransitionChangedEvent: { listen: emptyListen },
   },
@@ -80,6 +96,7 @@ const summary = (
           step_order: 0,
           step_type: "llm_inference",
           transitions_to: [],
+          transition_sessions: {},
           task_counts: { epic: 0, ticket: ticketCount, task: 0 },
           pipeline_counts: {
             epic: 0,
@@ -97,6 +114,7 @@ const summary = (
           step_order: 1,
           step_type: "llm_inference",
           transitions_to: [],
+          transition_sessions: {},
           task_counts: {
             epic: 0,
             ticket: secondStepTicketCount,
@@ -125,6 +143,7 @@ describe("usePipelineSummary", () => {
     queryClient.clear();
     taskHandlers.length = 0;
     taskStepHandlers.length = 0;
+    transitionHandlers.length = 0;
     vi.clearAllMocks();
     getPipelineSummary.mockResolvedValue({ status: "ok", data: summary() });
   });
@@ -408,5 +427,37 @@ describe("usePipelineSummary", () => {
       ])
     );
     expect(getPipelineSummary.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("refetches a created transition to read its session directive", async () => {
+    const withSession = summary();
+    withSession.workflows[0].workflow_steps[0].transitions_to = ["step-2"];
+    withSession.workflows[0].workflow_steps[0].transition_sessions = {
+      "step-2": { mode: "resume", step_id: "step-1" },
+    };
+    getPipelineSummary
+      .mockResolvedValueOnce({ status: "ok", data: summary() })
+      .mockResolvedValue({ status: "ok", data: withSession });
+    const { result } = renderHook(() => usePipelineSummary(), { wrapper });
+    await waitFor(() => expect(result.current.summary).not.toBeNull());
+
+    act(() => {
+      transitionHandlers[0]({
+        payload: {
+          transition_id: "transition-1",
+          from_step_id: "step-1",
+          to_step_id: "step-2",
+          change_type: "Created",
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(
+        result.current.summary?.workflows[0].workflow_steps[0]
+          .transition_sessions
+      ).toEqual({ "step-2": { mode: "resume", step_id: "step-1" } })
+    );
+    expect(getPipelineSummary).toHaveBeenCalledTimes(2);
   });
 });

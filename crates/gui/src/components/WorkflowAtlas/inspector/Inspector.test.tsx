@@ -48,6 +48,7 @@ function makeStep(
     step_order: order,
     step_type: "llm_inference",
     transitions_to: [],
+    transition_sessions: {},
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
     active_count: 0,
@@ -179,6 +180,7 @@ const stepFixture = (overrides: Partial<Step> = {}): Step => ({
     agent_config: createMockAgentConfig({ model: "claude-opus" }),
   },
   transitions_to: [],
+  transition_sessions: {},
   order: 0,
   created_at: null,
   updated_at: null,
@@ -804,6 +806,60 @@ describe("StepInspector", () => {
       workflowId: "wf-build",
       stepId: "s3",
     });
+  });
+
+  it("shows transition session directives on transitions and in Conversation", () => {
+    const model = buildAtlasModel({
+      workflows: [
+        makeWorkflow("wf-edit", [
+          makeStep("d", "wf-edit", 0, {
+            name: "Draft",
+            transitions_to: ["v"],
+            transition_sessions: { v: { mode: "resume", step_id: "d" } },
+          }),
+          makeStep("v", "wf-edit", 1, {
+            name: "Revise",
+            transitions_to: ["d"],
+            transition_sessions: { d: { mode: "fork", step_id: null } },
+          }),
+        ]),
+      ],
+    });
+    const renderStep = (stepId: string) =>
+      render(
+        <StepInspector
+          model={model}
+          workflowId="wf-edit"
+          stepId={stepId}
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+
+    const draft = renderStep("d");
+    expect(
+      screen
+        .getAllByTestId("step-transition-session")
+        .map((tag) => tag.textContent)
+    ).toEqual(["resume · Draft"]);
+    expect(
+      screen
+        .getAllByTestId("step-conversation-entry")
+        .map((entry) => entry.textContent)
+    ).toEqual(["Draft · transitionresume → Revise", "Revise · transitionfork"]);
+    draft.unmount();
+
+    renderStep("v");
+    expect(
+      screen
+        .getAllByTestId("step-transition-session")
+        .map((tag) => tag.textContent)
+    ).toEqual(["fork"]);
+    expect(
+      screen
+        .getAllByTestId("step-conversation-entry")
+        .map((entry) => entry.textContent)
+    ).toEqual(["Draft · transitionresume · Draft"]);
   });
 
   it("says an llm step without route decisions starts new conversations", () => {

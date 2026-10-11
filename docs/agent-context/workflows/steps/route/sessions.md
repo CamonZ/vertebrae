@@ -1,8 +1,20 @@
 # Session directives
 
-Purpose: choose how the step a route sends work to enters a provider conversation.
+Purpose: choose how an llm_inference step enters a provider conversation, from
+a route decision or a step transition.
 Use this when: a loop should continue the earlier step's conversation, a later
 step should pick up where another left off, or parallel branches need their own copy.
+
+## Route decision or step transition
+The same directive has two carriers:
+- **Route decision**: the continuation depends on the route's outcome (resume
+  on `needs_changes`, start fresh on `approved`).
+- **Step transition**: a fixed continuation, such as A -> B, two llm_inference
+  steps with different prompts in one conversation. No route step is needed.
+  See [transitions](../../transitions.md).
+
+Transitions leaving a route step cannot carry a directive; put it on the
+route's decisions instead.
 
 ## Shape
 A rule or the default decision may set `session` beside `transition` and `handoff`:
@@ -19,10 +31,16 @@ A rule or the default decision may set `session` beside `transition` and `handof
 - `step_id`: the step whose conversation is resumed or forked. Defaults to the
   destination; not allowed with `new`.
 
+On a step transition the same directive is authored per edge:
+```bash
+vtb step update <draft> --transition-to <revise> --transition-session <revise>=resume
+vtb step update <draft> --transition-session <revise>=fork:<other-step>
+```
+
 ## How it works
 - Every llm_inference execution runs in a conversation. Entering without a
-  directive (the first step, a linear transition, a decision without
-  `session`) starts a new one, so each execution records a native session id.
+  directive (the first step, a transition or decision without `session`)
+  starts a new one, so each execution records a native session id.
 - A step's conversation is the one its latest completed execution in this
   TaskRun belongs to; resume continues from that conversation's latest turn,
   whichever step added it. If A starts and B resumes A, resuming A later
@@ -35,12 +53,15 @@ A rule or the default decision may set `session` beside `transition` and `handof
   attempt did.
 
 ## Doing it
-Save with `vtb step update <route> --route-config "$(cat route.json)"`. The
-backend rejects unknown keys or modes, `step_id` with `new`, a directive whose
-destination is not an `intra_workflow` llm_inference step, and a `step_id`
-outside this workflow, not llm_inference, or on another harness, with the
-`$.rules[<i>].session` or `$.default.session` path. `vtb step show <route>`
-lists each decision's directive under `Route Sessions:`.
+Save a route's directives with `vtb step update <route> --route-config "$(cat route.json)"`,
+and an edge's with `--transition-session` (above). The backend rejects unknown
+keys or modes, `step_id` with `new`, a directive whose destination is not an
+llm_inference step (for routes, an `intra_workflow` one), and a `step_id`
+outside this workflow, not llm_inference, or on another harness. Route errors
+carry the `$.rules[<i>].session` or `$.default.session` path; edge errors carry
+`$.session` and the edge's endpoints. `vtb step show` lists a route's
+directives under `Route Sessions:` and a step's edge directives under
+`Transition Sessions:`.
 
 ## Gotchas
 - Nothing resumable fails rather than starting fresh: a step with no completed
@@ -48,8 +69,9 @@ lists each decision's directive under `Route Sessions:`.
   no longer has the conversation fails the execution.
 - One conversation never runs two turns at once. Parallel branches use `fork`,
   not concurrent `resume`s of the same conversation.
-- In an exported bundle the directive's step is `session.step_ref`; import
-  resolves it back to `session.step_id`.
+- In an exported bundle the directive's step is `session.step_ref`, in the
+  route config and on `step_edges[].session`; import resolves it back to
+  `session.step_id`. A bundle with a persisted `session.step_id` is rejected.
 
 ## Related
-[Envelope](envelope.md) · [Loops](loops.md) · [Failure table](../../../debugging/failure-table.md)
+[Envelope](envelope.md) · [Loops](loops.md) · [Transitions](../../transitions.md) · [Failure table](../../../debugging/failure-table.md)

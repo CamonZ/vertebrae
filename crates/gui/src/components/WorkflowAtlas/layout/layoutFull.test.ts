@@ -17,6 +17,7 @@ function step(
     role: "process",
     order,
     transitionsTo: [],
+    transitionSessions: {},
     total: 0,
     running: 0,
   };
