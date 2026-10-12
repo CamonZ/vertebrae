@@ -27,10 +27,18 @@ Feature: Exclusive entity detail panels
     And the GUI should not show an element with test id "artifact-inspector-panel" within 5 seconds
 
   Scenario: A task link from chat replaces the selected task panel on the board
-    Given the GUI is on the kanban board
-    When I create a task "Board chat target" via the CLI
+    Given I create a workflow with:
+      | name          | Board Chat Workflow |
+      | kanban_column | Board Chat Column   |
+    And I create a step "Test Step" in the workflow "Board Chat Workflow" via the CLI
+    And the GUI is on the kanban board
+    When I create a task with:
+      | title    | Board chat target   |
+      | workflow | Board Chat Workflow |
     And I configure the mock local chat reply with a link to the current task
-    And I create a task "Existing board task panel" via the CLI
+    And I create a task with:
+      | title    | Existing board task panel |
+      | workflow | Board Chat Workflow       |
     Then the GUI should show "Existing board task panel" within 10 seconds
     When I click on the element containing text "Existing board task panel"
     And I press the "Escape" key

@@ -70,14 +70,13 @@ describe("Sidebar Traces nav", () => {
     );
     expect(order).toEqual([
       "sidebar-nav-tasks",
-      "sidebar-nav-board",
       "sidebar-nav-artifacts",
       "sidebar-nav-daemons",
       "sidebar-nav-design",
       "sidebar-nav-traces",
     ]);
 
-    for (const label of ["tasks", "board", "design", "traces"]) {
+    for (const label of ["tasks", "design", "traces"]) {
       const svg = screen
         .getByTestId(`sidebar-nav-${label}`)
         .querySelector("svg");
@@ -418,7 +417,7 @@ describe("Sidebar rail connection readout", () => {
 
   function renderSidebar() {
     render(
-      <MemoryRouter initialEntries={["/board"]}>
+      <MemoryRouter initialEntries={["/design"]}>
         <Sidebar />
       </MemoryRouter>
     );

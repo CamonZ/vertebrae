@@ -35,6 +35,11 @@
    they paint over the dimmed ones. Search and trace compose: a query dims
    non-matches; a trace overrides with lit/dim within (or across) the matches.
 
+   BOARD view — the factory's Kanban board (`KanbanBoard`). Columns come from
+   the same `kanban_column` values the map uses as phases, so the board only
+   exists while a factory scope is selected; it replaces the pan/zoom canvas
+   and takes no part in the morph.
+
    Re-layout discipline (plan risk #5): the ELK graph layout is async and
    expensive, so it is memoised on a STRUCTURAL key (workflow/step ids + kinds +
    phases + edge topology). The condensed map layout is pure + synchronous and is
@@ -52,8 +57,12 @@ import {
   useState,
 } from "react";
 import { SearchInput } from "../molecules/SearchInput";
-import { SegmentedControl } from "../molecules/SegmentedControl";
+import {
+  SegmentedControl,
+  type SegmentedOption,
+} from "../molecules/SegmentedControl";
 import { FactoryFilter } from "../FactoryFilter";
+import { KanbanBoard } from "../KanbanBoard";
 import {
   factoryScopeExists,
   filterByFactory,
@@ -71,7 +80,7 @@ import { KindLegend } from "./KindLegend";
 import { FactoryOverview } from "./FactoryOverview";
 import { RunConsole } from "./RunConsole";
 import { StepNodeGeo } from "./StepNodeGeo";
-import { WfBox, type WfBoxState } from "./WfBox";
+import { WfBox, type WfBoxState, type WfBoxView } from "./WfBox";
 import { ZoomWidget } from "./ZoomWidget";
 import { buildAtlasModel } from "./adapter/buildAtlasModel";
 import { selectionFromWorkflowTarget } from "./inspector/selection";
@@ -98,7 +107,16 @@ const COND_OPTS = { boxW: 264, boxH: 140 } as const;
 const MORPH_FIT_DELAY = 30;
 const MORPH_END = 800;
 
-export type AtlasView = "graph" | "map";
+export type AtlasView = WfBoxView | "board";
+
+const TOPOLOGY_VIEW_OPTIONS: ReadonlyArray<SegmentedOption<AtlasView>> = [
+  { value: "map", label: "Map" },
+  { value: "graph", label: "Graph" },
+];
+const BOARD_VIEW_OPTION: SegmentedOption<AtlasView> = {
+  value: "board",
+  label: "Board",
+};
 
 /** Trace/search visual state applied to a box, edge, or step. */
 type TraceState = "" | "lit" | "dim";
@@ -147,6 +165,16 @@ export function WorkflowAtlas() {
   const entitySelection = useEntityPanelStore((state) => state.selection);
 
   const showFactoryOverview = summary !== null && factoryFilter === null;
+  const isBoard = view === "board";
+  // The topology layouts and the factory overview only know Graph and Map;
+  // Board stands in for Map there.
+  const canvasView: WfBoxView = isBoard ? "map" : view;
+
+  // The board needs a factory scope. Clearing the scope while on Board returns
+  // to the factory overview, which has no Board option.
+  useEffect(() => {
+    if (showFactoryOverview && isBoard) setView("map");
+  }, [showFactoryOverview, isBoard]);
 
   // Keep the topology input scoped before deriving the Atlas model. This makes
   // the same literal factory comparison govern both Graph and Map layouts.
@@ -335,7 +363,7 @@ export function WorkflowAtlas() {
   const pz = usePanZoom(canvasRef, dims, {
     min: 0.12,
     max: 2.4,
-    enabled: !showFactoryOverview,
+    enabled: !showFactoryOverview && !isBoard,
   });
   const pzRef = useRef(pz);
   pzRef.current = pz;
@@ -343,12 +371,21 @@ export function WorkflowAtlas() {
   // ── THE MORPH (P6): on every view change after the first, arm the `morphing`
   // flag (which hides chrome + freezes pointer events), then glide the camera to
   // the new layout via setTimeout (NOT rAF — rAF is paused in background tabs).
-  // The flag clears once the box transition has landed.
+  // The flag clears once the box transition has landed. The board replaces the
+  // canvas outright, so entering it skips the morph and leaving it only refits.
   const firstView = useRef(true);
+  const previousView = useRef(view);
   useLayoutEffect(() => {
+    const from = previousView.current;
+    previousView.current = view;
     if (firstView.current) {
       firstView.current = false;
       return;
+    }
+    if (view === "board") return;
+    if (from === "board") {
+      const tFit = setTimeout(() => pzRef.current.fit(), MORPH_FIT_DELAY);
+      return () => clearTimeout(tFit);
     }
     setMorphing(true); // arm the transition first…
     const tFit = setTimeout(() => pzRef.current.fit(), MORPH_FIT_DELAY); // …then move
@@ -615,9 +652,12 @@ export function WorkflowAtlas() {
         : "";
 
   const ready =
-    showFactoryOverview || (isGraph ? !!full && !!model : !!cond && !!model);
+    showFactoryOverview ||
+    isBoard ||
+    (isGraph ? !!full && !!model : !!cond && !!model);
   const empty =
     !showFactoryOverview &&
+    !isBoard &&
     !!summary &&
     model !== null &&
     model.workflows.length === 0;
@@ -634,20 +674,23 @@ export function WorkflowAtlas() {
             <div className="crumb">design · workflow topology · elk</div>
           )}
           <h1>
-            Workflow <em>{isGraph ? "Graph" : "Atlas"}</em>
+            Workflow <em>{isBoard ? "Board" : isGraph ? "Graph" : "Atlas"}</em>
           </h1>
         </div>
         <div className="uv-controls">
-          {/* Search fills the toolbar in both views; the view toggle sits at the end. */}
+          {/* Search fills the toolbar in the topology views (the board has its
+              own task search); the view toggle sits at the end. */}
           <div className="uv-search">
-            <SearchInput
-              value={query}
-              onChange={setQuery}
-              placeholder={
-                showFactoryOverview ? "Find a factory…" : "Find a workflow…"
-              }
-              hint="/"
-            />
+            {!isBoard && (
+              <SearchInput
+                value={query}
+                onChange={setQuery}
+                placeholder={
+                  showFactoryOverview ? "Find a factory…" : "Find a workflow…"
+                }
+                hint="/"
+              />
+            )}
           </div>
           <FactoryFilter
             id="atlas-factory-filter"
@@ -657,10 +700,11 @@ export function WorkflowAtlas() {
           />
           <SegmentedControl<AtlasView>
             ariaLabel="Workflow view"
-            options={[
-              { value: "map", label: "Map" },
-              { value: "graph", label: "Graph" },
-            ]}
+            options={
+              showFactoryOverview
+                ? TOPOLOGY_VIEW_OPTIONS
+                : [...TOPOLOGY_VIEW_OPTIONS, BOARD_VIEW_OPTION]
+            }
             value={view}
             onChange={setView}
           />
@@ -671,7 +715,9 @@ export function WorkflowAtlas() {
         {(isLoading || (!ready && !empty && !error && !layoutError)) && (
           <div className="uv-loading">
             <div className="sp" />
-            laying out workflow {isGraph ? "graph" : "map"}…
+            {isBoard
+              ? "loading workflows…"
+              : `laying out workflow ${isGraph ? "graph" : "map"}…`}
           </div>
         )}
 
@@ -691,12 +737,18 @@ export function WorkflowAtlas() {
             <FactoryOverview
               summary={summary}
               query={query}
-              view={view}
+              view={canvasView}
               onSelect={setFactoryFilter}
             />
           )}
 
-        {!showFactoryOverview && ready && (
+        {isBoard && factoryFilter !== null && (
+          <div className="uv-kanban" data-no-pan>
+            <KanbanBoard factoryName={factoryFilter} />
+          </div>
+        )}
+
+        {!showFactoryOverview && !isBoard && ready && (
           <div
             className={"uv-scaler" + (morphing ? " morphing" : "")}
             style={{ transform: pz.transform }}
@@ -869,7 +921,7 @@ export function WorkflowAtlas() {
                     rect={rect}
                     shape={mapShapeById.get(w.id) ?? []}
                     stepCount={w.stepIds.length}
-                    view={view}
+                    view={canvasView}
                     state={wfState(w.id)}
                     onTitlePort={reportWorkflowTitlePort}
                     onHover={setHover}
@@ -944,7 +996,7 @@ export function WorkflowAtlas() {
           </div>
         )}
 
-        {!showFactoryOverview && ready && (
+        {!showFactoryOverview && !isBoard && ready && (
           <ZoomWidget
             onZoomIn={pz.zoomIn}
             onZoomOut={pz.zoomOut}
@@ -958,7 +1010,7 @@ export function WorkflowAtlas() {
         <RunConsole summary={scopedSummary} factoryName={factoryFilter} />
       </div>
 
-      {!showFactoryOverview && <KindLegend />}
+      {!showFactoryOverview && !isBoard && <KindLegend />}
 
       {/* The global entity host renders the one workflow/step inspector. */}
     </main>

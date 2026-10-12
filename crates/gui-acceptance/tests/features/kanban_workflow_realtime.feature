@@ -3,7 +3,10 @@ Feature: Real-time workflow rendering on kanban board
   should appear on the kanban board in real-time without requiring a page reload.
 
   Scenario: Workflow created via CLI appears as kanban column
-    Given the GUI is on the kanban board
+    Given I create a workflow with:
+      | name          | KWT Seed Workflow |
+      | kanban_column | KWT Seed Column   |
+    And the GUI is on the kanban board
     When I create a workflow with:
       | name          | Kanban Workflow Test |
       | kanban_column | KWT Board Column     |

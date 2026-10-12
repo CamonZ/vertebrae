@@ -5,18 +5,18 @@ import type {
   TaskLevel,
   TaskFilterOptions,
   WorkflowTransition,
-} from "../bindings";
-import { useTasks } from "../hooks/useTasks";
-import { useWorkflows } from "../hooks/useWorkflows";
-import { useWorkflowTransitions } from "../hooks/useWorkflowTransitions";
-import { useShellHeader } from "../hooks/useShellHeader";
-import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
-import { FactoryFilter } from "../components/FactoryFilter";
-import { factoryScopeExists, filterByFactory } from "../utils/workflowFactory";
-import { SearchInput } from "../components/molecules/SearchInput";
-import { Select } from "../components/atoms/Select";
-import { useEntityPanelStore } from "../stores/entityPanelStore";
-import { useFactoryFilterStore } from "../stores/factoryFilterStore";
+} from "../../bindings";
+import { useTasks } from "../../hooks/useTasks";
+import { useWorkflows } from "../../hooks/useWorkflows";
+import { useWorkflowTransitions } from "../../hooks/useWorkflowTransitions";
+import { KanbanColumn } from "./KanbanColumn";
+import {
+  filterByFactory,
+  type FactoryFilterValue,
+} from "../../utils/workflowFactory";
+import { SearchInput } from "../molecules/SearchInput";
+import { Select } from "../atoms/Select";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
 
 const UNASSIGNED_COLUMN = "Unassigned";
 
@@ -172,16 +172,26 @@ function matchesTaskSearch(task: Task, normalizedSearch: string): boolean {
   );
 }
 
-export function BoardPage() {
+/** A concrete factory scope: a factory name or the synthetic No Factory scope. */
+export type KanbanFactoryScope = Exclude<FactoryFilterValue, null>;
+
+interface KanbanBoardProps {
+  /** The factory whose workflows define the board's columns and tasks. */
+  factoryName: KanbanFactoryScope;
+}
+
+/**
+ * Kanban board for one factory. Columns come from the factory's workflow
+ * `kanban_column` values, ordered by the transitions between them; a board only
+ * reads coherently within one factory, so the Workflow Atlas renders it as a
+ * factory-scoped view and owns the factory selection.
+ */
+export function KanbanBoard({ factoryName }: KanbanBoardProps) {
   const openTask = useEntityPanelStore((state) => state.openTask);
   const selectedTaskId = useEntityPanelStore((state) =>
     state.selection?.type === "task" ? state.selection.taskId : null
   );
   const [levelFilter, setLevelFilter] = useState<TaskLevel | "">("");
-  const factoryFilter = useFactoryFilterStore((state) => state.factoryName);
-  const setFactoryFilter = useFactoryFilterStore(
-    (state) => state.setFactoryName
-  );
   const [search, setSearch] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -221,8 +231,8 @@ export function BoardPage() {
   // A factory is a literal workflow field, so the selected workflow set is
   // the source of truth for both board columns and task membership.
   const scopedWorkflows = useMemo(
-    () => filterByFactory(workflows, factoryFilter),
-    [workflows, factoryFilter]
+    () => filterByFactory(workflows, factoryName),
+    [workflows, factoryName]
   );
   const scopedWorkflowIds = useMemo(
     () =>
@@ -238,24 +248,6 @@ export function BoardPage() {
       ),
     [transitions, scopedWorkflowIds]
   );
-
-  // If a realtime update removes the selected factory from the project, return
-  // to the unscoped board instead of leaving a value with no option.
-  useEffect(() => {
-    if (workflowsLoading || workflowsError) return;
-    if (
-      factoryFilter !== null &&
-      !factoryScopeExists(workflows, factoryFilter)
-    ) {
-      setFactoryFilter(null);
-    }
-  }, [
-    factoryFilter,
-    setFactoryFilter,
-    workflows,
-    workflowsError,
-    workflowsLoading,
-  ]);
 
   const handleTaskSelect = useCallback(
     (task: Task) => {
@@ -274,7 +266,6 @@ export function BoardPage() {
 
   const handleClearFilters = () => {
     setLevelFilter("");
-    setFactoryFilter(null);
     setSearch("");
   };
 
@@ -302,16 +293,13 @@ export function BoardPage() {
     [allKanbanColumns, scopedTransitions, workflowColumnMap]
   );
 
-  // Filter tasks by level and search, then group by kanban_column
+  // Keep the factory's tasks, filter by level and search, then group by
+  // kanban_column
   const { columns, columnOrder, totalFiltered } = useMemo(() => {
-    let filtered = tasks;
-
-    if (factoryFilter !== null) {
-      filtered = filtered.filter(
-        (task) =>
-          task.workflow_id !== null && scopedWorkflowIds.has(task.workflow_id)
-      );
-    }
+    let filtered = tasks.filter(
+      (task) =>
+        task.workflow_id !== null && scopedWorkflowIds.has(task.workflow_id)
+    );
 
     if (levelFilter) {
       filtered = filtered.filter((t) => t.level === levelFilter);
@@ -362,7 +350,6 @@ export function BoardPage() {
     };
   }, [
     tasks,
-    factoryFilter,
     scopedWorkflowIds,
     levelFilter,
     search,
@@ -373,39 +360,13 @@ export function BoardPage() {
 
   const isLoading = tasksLoading || workflowsLoading;
   const error = tasksError || workflowsError;
-  const hasActiveFilters =
-    levelFilter !== "" || factoryFilter !== null || search !== "";
-
-  const headerActions = useMemo(
-    () =>
-      totalFiltered > 0 ? (
-        <div className="flex items-center gap-3 text-eyebrow">
-          <span className="text-[var(--color-fg-mute)]">
-            <b className="font-semibold text-[var(--color-fg)]">
-              {totalFiltered}
-            </b>{" "}
-            task{totalFiltered !== 1 ? "s" : ""}
-          </span>
-        </div>
-      ) : null,
-    [totalFiltered]
-  );
-
-  useShellHeader("Board", headerActions);
+  const hasActiveFilters = levelFilter !== "" || search !== "";
 
   return (
-    <div className="flex min-h-0 flex-1">
-      {/* Main board area */}
+    <div className="flex min-h-0 flex-1" data-testid="kanban-board">
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Visually-hidden heading: the visible page title lives in the shell
-            header via useShellHeader above. We keep an in-page <h1> so screen
-            readers and route/page-isolation tests see a stable heading even
-            when the AppShell wrapper isn't mounted in a test environment. */}
-        <h1 className="sr-only">Board</h1>
-        {/* Title + filters bar */}
+        {/* Filters bar. The factory scope comes from the Atlas header. */}
         <div className="relative flex h-12 items-center gap-4 border-b border-border bg-bg px-6">
-          <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
-
           <div className="relative flex flex-1 items-center gap-3">
             {/* Search input */}
             <div className="min-w-48 flex-1">
@@ -415,7 +376,7 @@ export function BoardPage() {
                 onChange={handleSearchChange}
                 debounceMs={0}
                 hint="/"
-                placeholder="Search tasks by title, id, or tag…"
+                placeholder="Search tasks by title or id…"
                 aria-label="Search tasks by title or ID"
                 data-testid="board-task-search-input"
               />
@@ -432,13 +393,6 @@ export function BoardPage() {
                 aria-label="Filter by level"
               />
             </div>
-
-            <FactoryFilter
-              id="board-factory-filter"
-              workflows={workflows}
-              value={factoryFilter}
-              onChange={setFactoryFilter}
-            />
 
             {/* Clear filters */}
             {hasActiveFilters && (
@@ -463,6 +417,18 @@ export function BoardPage() {
                 </svg>
                 Clear
               </button>
+            )}
+
+            {totalFiltered > 0 && (
+              <span
+                className="text-eyebrow text-[var(--color-fg-mute)]"
+                data-testid="board-task-count"
+              >
+                <b className="font-semibold text-[var(--color-fg)]">
+                  {totalFiltered}
+                </b>{" "}
+                task{totalFiltered !== 1 ? "s" : ""}
+              </span>
             )}
           </div>
         </div>

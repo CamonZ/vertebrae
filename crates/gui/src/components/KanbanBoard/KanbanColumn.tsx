@@ -1,6 +1,5 @@
-import type { Step, Task } from "../../bindings";
+import type { Task } from "../../bindings";
 import { KanbanCard } from "./KanbanCard";
-import { stepTypeStyle } from "../WorkflowPipeline/stepTypeStyling";
 import { Count } from "../atoms";
 
 interface KanbanColumnProps {
@@ -8,12 +7,6 @@ interface KanbanColumnProps {
   tasks: Task[];
   selectedTaskId?: string | null;
   onTaskSelect?: (task: Task) => void;
-  /**
-   * The workflow step backing this column. When provided, the column gets a
-   * 2px left border tinted with the step-type color so the board view shares
-   * the same visual vocabulary as the pipeline DAG.
-   */
-  step?: Step | null;
 }
 
 export function KanbanColumn({
@@ -21,45 +14,18 @@ export function KanbanColumn({
   tasks,
   selectedTaskId,
   onTaskSelect,
-  step,
 }: KanbanColumnProps) {
-  const typeStyle = stepTypeStyle(step?.step_type);
   const isEmpty = tasks.length === 0;
 
   return (
     <div
       className="flex h-full min-w-72 max-w-md shrink-0 grow basis-0 flex-col overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[color-mix(in_oklch,var(--color-bg-1)_50%,var(--color-bg))]"
-      style={{ borderLeft: `2px solid var(${typeStyle.barVar})` }}
       role="region"
       aria-label={`${columnName} column, ${tasks.length} tasks`}
-      data-step-kind={typeStyle.kind}
     >
       <div className="flex items-center justify-between border-b border-[var(--color-line)] px-4 py-3">
-        <h2 className="flex min-w-0 items-center gap-2 font-mono text-eyebrow font-medium uppercase tracking-eyebrow text-[var(--color-fg-mute)]">
-          <span
-            aria-hidden
-            className="h-2 w-2 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
-            style={{
-              color: `var(${typeStyle.fgVar})`,
-              backgroundColor: "currentColor",
-            }}
-          />
-          {step && (
-            <span
-              aria-hidden
-              className="text-xs leading-none"
-              style={{ color: `var(${typeStyle.fgVar})` }}
-              title={typeStyle.label}
-            >
-              {typeStyle.icon}
-            </span>
-          )}
-          <span
-            className="truncate"
-            style={{ color: `var(${typeStyle.fgVar})` }}
-          >
-            {columnName}
-          </span>
+        <h2 className="min-w-0 truncate font-mono text-eyebrow font-medium uppercase tracking-eyebrow text-[var(--color-fg-mute)]">
+          {columnName}
         </h2>
         <Count
           data-testid="kanban-column-count"

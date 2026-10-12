@@ -252,7 +252,6 @@ pub async fn wait_for_js(
 pub async fn wait_for_page(client: &Client, path: &str, project: Option<&str>) {
     let selector = match path.split('?').next().unwrap_or(path) {
         "/tasks" => "[data-testid='task-search-input']",
-        "/board" => "[data-testid='board-task-search-input']",
         "/design" => ".uv-controls",
         "/artifacts" => "[role='tree'][aria-label='Project artifacts']",
         "/welcome" => "[data-testid='welcome-install']",

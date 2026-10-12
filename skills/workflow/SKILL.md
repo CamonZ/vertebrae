@@ -157,10 +157,18 @@ vtb workflow add "Automation" --json
 | `--description <DESCRIPTION>` | `-d` | Optional workflow description |
 | `--step <STEPS>` | `-s` | Step in `name:model` format (repeatable) |
 | `--order <ORDER>` | `-o` | Display order; lower values appear first (default: 0) |
-| `--kanban-column <KANBAN_COLUMN>` | | Kanban column for board placement |
+| `--kanban-column <KANBAN_COLUMN>` | | Kanban column for board placement and Atlas map phase (recommended) |
 | `--factory-name <FACTORY_NAME>` | | Optional factory name used to group related workflows |
 | `--default` | | Mark this workflow as the default for new tasks |
 | `--json` | | Global flag; output machine-readable JSON |
+
+Set `--kanban-column` on every workflow you create. The GUI uses it in two
+places: the Atlas map view groups workflows into phase columns by it, and the
+Atlas board view (one factory's Kanban board) turns it into board columns,
+ordered by workflow transitions.
+A workflow without one lands in the map's "Unphased" column and contributes no
+board column, so its tasks show up under "Unassigned". Workflows in the same
+factory that represent the same stage can share a column name.
 
 The `<NAME>` positional argument is required. `--step` is optional; when
 omitted, the workflow is created without initial steps and can be populated with

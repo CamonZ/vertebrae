@@ -44,43 +44,67 @@ Feature: Task search
     And the GUI should not show "GUI UUID Prefix Search Miss" within 10 seconds
 
   Scenario: Search board tasks by title
-    Given the GUI is on the kanban board
+    Given I create a workflow with:
+      | name          | Board Search Workflow |
+      | kanban_column | Board Search Column   |
+    And I create a step "Test Step" in the workflow "Board Search Workflow" via the CLI
+    And the GUI is on the kanban board
     When I create a task with:
       | title | GUI Board Title Search Target |
+      | workflow | Board Search Workflow |
     And I create a task with:
       | title | GUI Board Title Search Miss |
+      | workflow | Board Search Workflow |
     And I type "GUI Board Title Search Target" into the element with test id "board-task-search-input"
     Then the GUI should show "GUI Board Title Search Target" within 10 seconds
     And the GUI should not show "GUI Board Title Search Miss" within 10 seconds
 
   Scenario: Search board tasks by description
-    Given the GUI is on the kanban board
+    Given I create a workflow with:
+      | name          | Board Search Workflow |
+      | kanban_column | Board Search Column   |
+    And I create a step "Test Step" in the workflow "Board Search Workflow" via the CLI
+    And the GUI is on the kanban board
     When I create a task with:
       | title       | GUI Board Description Search Target |
+      | workflow    | Board Search Workflow |
       | description | GUI board description needle         |
     And I create a task with:
       | title       | GUI Board Description Search Miss |
+      | workflow    | Board Search Workflow |
       | description | Unrelated board description       |
     And I type "board description needle" into the element with test id "board-task-search-input"
     Then the GUI should show "GUI Board Description Search Target" within 10 seconds
     And the GUI should not show "GUI Board Description Search Miss" within 10 seconds
 
   Scenario: Search board tasks by full UUID
-    Given the GUI is on the kanban board
+    Given I create a workflow with:
+      | name          | Board Search Workflow |
+      | kanban_column | Board Search Column   |
+    And I create a step "Test Step" in the workflow "Board Search Workflow" via the CLI
+    And the GUI is on the kanban board
     When I create a task with:
       | title | GUI Board Full UUID Search Miss |
+      | workflow | Board Search Workflow |
     And I create a task with:
       | title | GUI Board Full UUID Search Target |
+      | workflow | Board Search Workflow |
     And I type the current task ID into the element with test id "board-task-search-input"
     Then the GUI should show "GUI Board Full UUID Search Target" within 10 seconds
     And the GUI should not show "GUI Board Full UUID Search Miss" within 10 seconds
 
   Scenario: Search board tasks by UUID prefix
-    Given the GUI is on the kanban board
+    Given I create a workflow with:
+      | name          | Board Search Workflow |
+      | kanban_column | Board Search Column   |
+    And I create a step "Test Step" in the workflow "Board Search Workflow" via the CLI
+    And the GUI is on the kanban board
     When I create a task with:
       | title | GUI Board UUID Prefix Search Miss |
+      | workflow | Board Search Workflow |
     And I create a task with:
       | title | GUI Board UUID Prefix Search Target |
+      | workflow | Board Search Workflow |
     And I type the current task short ID into the element with test id "board-task-search-input"
     Then the GUI should show "GUI Board UUID Prefix Search Target" within 10 seconds
     And the GUI should not show "GUI Board UUID Prefix Search Miss" within 10 seconds

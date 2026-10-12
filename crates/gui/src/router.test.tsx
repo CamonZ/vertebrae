@@ -75,10 +75,10 @@ import { commands } from "./bindings";
 // Import page components
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { TasksPage } from "./pages/TasksPage";
-import { BoardPage } from "./pages/BoardPage";
 import { TracesPage } from "./pages/TracesPage";
 import { DaemonsPage } from "./pages/DaemonsPage";
 import { hasAllRequiredBinaries } from "./utils/installation";
+import { appRoutes } from "./router";
 
 /**
  * Helper to create a test router with the new route structure
@@ -89,10 +89,6 @@ function createTestRouter(initialEntries: string[]) {
       {
         path: "/",
         element: <Navigate to="/tasks" replace />,
-      },
-      {
-        path: "/board",
-        element: <BoardPage />,
       },
       {
         path: "/design",
@@ -270,24 +266,6 @@ describe("Router Acceptance Tests", () => {
           updated_at: null,
         },
       ],
-    });
-  });
-
-  describe("Board route ('/board')", () => {
-    it("renders BoardPage at /board", async () => {
-      const router = createTestRouter(["/board"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole("heading", { name: "Board" })
-        ).toBeInTheDocument();
-      });
     });
   });
 
@@ -492,10 +470,7 @@ describe("Router Acceptance Tests", () => {
     });
 
     it("primary routes render distinct pages", async () => {
-      const routes = [
-        { path: "/board", heading: "Board" },
-        { path: "/tasks", heading: "Tasks" },
-      ];
+      const routes = [{ path: "/tasks", heading: "Tasks" }];
 
       for (const route of routes) {
         const router = createTestRouter([route.path]);
@@ -657,6 +632,15 @@ describe("Router Acceptance Tests", () => {
   });
 
   describe("Removed routes", () => {
+    it("the app route config has no top-level board route", () => {
+      // The Kanban board is a factory-scoped view inside the Workflow Atlas.
+      const paths = appRoutes.flatMap((route) =>
+        (route.children ?? []).map((child) => child.path)
+      );
+      expect(paths).toContain("design");
+      expect(paths).not.toContain("board");
+    });
+
     it("'/workflows' does not match any route", () => {
       const router = createTestRouter(["/workflows"]);
 

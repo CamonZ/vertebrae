@@ -20,6 +20,11 @@ Create, list, show, update, delete, export and import workflows
   (the next run continues the stopped run's conversation), and into child runs
   (each child forks the parent's). Without a directive a step starts fresh.
 - A factory is only a label grouping related workflows (GUI and export).
+- Give every workflow a kanban column (`--kanban-column`). The GUI's Atlas
+  map view groups workflows into phase columns by it, and the Atlas board view
+  (one factory's Kanban board) builds its columns from it. Without one, a
+  workflow shows as "Unphased" on the map and its tasks fall into the board's
+  "Unassigned" column.
 
 ## Design rule: one decision per workflow boundary
 Keep each workflow a linear chain ending in at most one `route`, and let that
@@ -28,7 +33,7 @@ testable, each decision is visible as a workflow transition, and loops or
 escalations are explicit edges. The [multi-workflow factory](../recipes/multi-workflow-factory.md) recipe follows this rule.
 
 ## Doing it
-`vtb workflow add "Bug Intake" --factory-name "Bug Triage" -d "..."`, then add
+`vtb workflow add "Bug Intake" --factory-name "Bug Triage" --kanban-column "Intake" -d "..."`, then add
 workflow transitions and steps; see [authoring order](authoring-order.md).
 `vtb workflow export` produces a portable bundle for sharing. Bundles name
 steps by `step_ref`, including the step a session directive resumes or forks:

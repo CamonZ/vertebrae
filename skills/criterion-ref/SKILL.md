@@ -41,7 +41,8 @@ vtb criterion-ref <task-id> 1 "tests/auth_test.rs:L42" --json
 ## File Specification
 
 Uses the same file spec syntax as `/ref`: file only, `:L<line>`, or
-`:L<start>-<end>`. File paths do not need to exist at command time. Missing
+`:L<start>-<end>`. The `L` is required: `tests/auth_test.rs:42-60` is stored
+as a file path, not a line range. File paths do not need to exist at command time. Missing
 files are accepted and reported as a warning so criteria can be linked before
 tests are created.
 
