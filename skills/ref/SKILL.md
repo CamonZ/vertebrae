@@ -23,6 +23,13 @@ vtb ref <task-id> "src/auth.rs:L42-60"
 vtb ref <task-id> "src/auth.rs:L42" --name "verify_token" --desc "Token validation logic"
 ```
 
+Line numbers must have an `L` prefix: `file:L42` or `file:L42-60`. A spec
+without it, such as `src/auth.rs:42-60`, is stored as a file path named
+`src/auth.rs:42-60`, and the CLI only prints
+`Warning: file '...' does not exist`. If you see that warning, remove the bad
+ref with `vtb unref <task-id> "<exact stored path>"` and add it again with the
+`L`.
+
 ## View/remove references
 
 ```bash

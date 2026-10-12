@@ -8,6 +8,10 @@ Use this when: a process has stages with different outcomes.
   most one decision (a route), or in `finish` for the last stage.
 - Typical stages: `<intake>` (gather and triage), `<work>`, one or more
   `<gate>` stages ([decision gate](decision-gate.md)), and `<outcome>`.
+- Give each stage a kanban column (`--kanban-column`) naming its phase, e.g.
+  Intake, Work, Review, Done. The Atlas map lays the factory out by these
+  phases and the factory's Kanban board (the Atlas board view) uses them as
+  its columns.
 - A route that only leaves its workflow uses workflow transitions and has no
   step transitions. Every other step has exactly one outgoing step transition.
 - Author in order: workflows, workflow transitions, steps, step transitions,

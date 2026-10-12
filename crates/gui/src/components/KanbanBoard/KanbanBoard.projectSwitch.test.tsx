@@ -5,19 +5,20 @@ import {
   waitFor,
   createMockTask,
   createMockWorkflow,
-} from "../test/test-utils";
-import type { TaskFilterOptions } from "../bindings";
+} from "../../test/test-utils";
+import type { TaskFilterOptions } from "../../bindings";
 import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
-} from "../stores/projectScopedStores";
-import { queryClient, queryKeys } from "../query";
+} from "../../stores/projectScopedStores";
+import { queryClient, queryKeys } from "../../query";
+import { NO_FACTORY_SCOPE } from "../../utils/workflowFactory";
 
 const mockListTasks = vi.fn();
 const mockListWorkflows = vi.fn();
 const mockListWorkflowTransitions = vi.fn();
 
-vi.mock("../bindings", () => ({
+vi.mock("../../bindings", () => ({
   commands: {
     listTasks: (...args: unknown[]) => mockListTasks(...args),
     listWorkflows: (...args: unknown[]) => mockListWorkflows(...args),
@@ -26,7 +27,7 @@ vi.mock("../bindings", () => ({
   },
 }));
 
-import { BoardPage } from "./BoardPage";
+import { KanbanBoard } from "./KanbanBoard";
 
 const TASK_FILTER: TaskFilterOptions = {
   step_names: null,
@@ -39,7 +40,7 @@ const TASK_FILTER: TaskFilterOptions = {
   step_id: null,
 };
 
-describe("BoardPage project switch state hygiene", () => {
+describe("KanbanBoard project switch state hygiene", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetProjectScopedStores();
@@ -74,7 +75,7 @@ describe("BoardPage project switch state hygiene", () => {
     mockListWorkflows.mockResolvedValue({ status: "ok", data: [newWorkflow] });
     mockListWorkflowTransitions.mockResolvedValue({ status: "ok", data: [] });
 
-    render(<BoardPage />);
+    render(<KanbanBoard factoryName={NO_FACTORY_SCOPE} />);
 
     await screen.findByText("New Project Task");
     await waitFor(() => {

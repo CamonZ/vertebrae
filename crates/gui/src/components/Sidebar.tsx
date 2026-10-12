@@ -422,17 +422,6 @@ const RAIL_NAV_ITEMS = [
     ),
   },
   {
-    id: "board",
-    to: "/board",
-    label: "Board",
-    icon: (
-      <Icon size="sm" strokeWidth={2}>
-        <rect x="3" y="3" width="7" height="18" rx="1" />
-        <rect x="14" y="3" width="7" height="11" rx="1" />
-      </Icon>
-    ),
-  },
-  {
     id: "artifacts",
     to: "/artifacts",
     label: "Artifacts",

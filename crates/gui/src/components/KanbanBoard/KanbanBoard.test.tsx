@@ -7,34 +7,26 @@ import {
   createMockTask,
   createMockWorkflow,
   waitFor,
-} from "../test/test-utils";
-import { BoardPage, topologicalColumnSort } from "./BoardPage";
-import { GlobalEntityPanelHost } from "../components/GlobalEntityPanelHost";
-import { useShellStore } from "../stores/shellStore";
-import { useEntityPanelStore } from "../stores/entityPanelStore";
-import { useFactoryFilterStore } from "../stores/factoryFilterStore";
-import type { Task, Workflow, WorkflowTransition } from "../bindings";
+} from "../../test/test-utils";
+import {
+  KanbanBoard,
+  topologicalColumnSort,
+  type KanbanFactoryScope,
+} from "./KanbanBoard";
+import { GlobalEntityPanelHost } from "../GlobalEntityPanelHost";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
+import { NO_FACTORY_SCOPE } from "../../utils/workflowFactory";
+import type { Task, Workflow, WorkflowTransition } from "../../bindings";
 
-/**
- * The page title ("Board") and the task-count readout live in the shell header
- * now, surfaced via useShellHeader. The shell chrome isn't mounted in this
- * isolated render, so we mount the stored header actions alongside the page to
- * assert on them.
- */
-function BoardPageWithHeader() {
-  const headerActions = useShellStore((s) => s.headerActions);
-  return (
-    <>
-      <BoardPage />
-      <div data-testid="shell-header-actions">{headerActions}</div>
-    </>
-  );
+/** Mock workflows default to no factory, so the No Factory board shows them. */
+function renderBoard(factoryName: KanbanFactoryScope = NO_FACTORY_SCOPE) {
+  return render(<KanbanBoard factoryName={factoryName} />);
 }
 
-function BoardPageWithEntityHost() {
+function BoardWithEntityHost() {
   return (
     <>
-      <BoardPage />
+      <KanbanBoard factoryName={NO_FACTORY_SCOPE} />
       <GlobalEntityPanelHost />
     </>
   );
@@ -49,7 +41,7 @@ let mockWorkflowsLoading = false;
 let mockTasksError: string | null = null;
 let mockWorkflowsError: string | null = null;
 
-vi.mock("../hooks/useTasks", () => ({
+vi.mock("../../hooks/useTasks", () => ({
   useTasks: () => ({
     tasks: mockTasks,
     isLoading: mockTasksLoading,
@@ -58,7 +50,7 @@ vi.mock("../hooks/useTasks", () => ({
   }),
 }));
 
-vi.mock("../hooks/useWorkflows", () => ({
+vi.mock("../../hooks/useWorkflows", () => ({
   useWorkflows: () => ({
     workflows: mockWorkflows,
     isLoading: mockWorkflowsLoading,
@@ -67,7 +59,7 @@ vi.mock("../hooks/useWorkflows", () => ({
   }),
 }));
 
-vi.mock("../hooks/useWorkflowTransitions", () => ({
+vi.mock("../../hooks/useWorkflowTransitions", () => ({
   useWorkflowTransitions: () => ({
     transitions: mockTransitions,
     isLoading: false,
@@ -77,7 +69,7 @@ vi.mock("../hooks/useWorkflowTransitions", () => ({
 }));
 
 // Mock TaskDetailPanel to keep tests focused on the board logic
-vi.mock("../components/TaskDetail", () => ({
+vi.mock("../TaskDetail", () => ({
   TaskDetailPanel: ({
     taskId,
     onClose,
@@ -95,7 +87,7 @@ vi.mock("../components/TaskDetail", () => ({
     ) : null,
 }));
 
-describe("BoardPage", () => {
+describe("KanbanBoard", () => {
   beforeEach(() => {
     mockTasks = [];
     mockWorkflows = [];
@@ -105,20 +97,19 @@ describe("BoardPage", () => {
     mockTasksError = null;
     mockWorkflowsError = null;
     useEntityPanelStore.getState().reset();
-    useFactoryFilterStore.getState().reset();
   });
 
   describe("loading state", () => {
     it("shows loading spinner when tasks are loading", () => {
       mockTasksLoading = true;
-      render(<BoardPage />);
+      renderBoard();
 
       expect(screen.getByText("Loading board...")).toBeInTheDocument();
     });
 
     it("shows loading spinner when workflows are loading", () => {
       mockWorkflowsLoading = true;
-      render(<BoardPage />);
+      renderBoard();
 
       expect(screen.getByText("Loading board...")).toBeInTheDocument();
     });
@@ -127,14 +118,14 @@ describe("BoardPage", () => {
   describe("error state", () => {
     it("shows error message from tasks fetch", () => {
       mockTasksError = "Failed to fetch tasks";
-      render(<BoardPage />);
+      renderBoard();
 
       expect(screen.getByText("Failed to fetch tasks")).toBeInTheDocument();
     });
 
     it("shows error message from workflows fetch", () => {
       mockWorkflowsError = "Failed to load workflows";
-      render(<BoardPage />);
+      renderBoard();
 
       expect(screen.getByText("Failed to load workflows")).toBeInTheDocument();
     });
@@ -144,7 +135,7 @@ describe("BoardPage", () => {
     it("shows empty state when there are no tasks at all", () => {
       mockTasks = [];
       mockWorkflows = [];
-      render(<BoardPage />);
+      renderBoard();
 
       expect(
         screen.getByText("No tasks with kanban columns assigned")
@@ -191,7 +182,7 @@ describe("BoardPage", () => {
           workflow_name: "Done WF",
         }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       expect(screen.getByText("Backlog")).toBeInTheDocument();
       expect(screen.getByText("Active")).toBeInTheDocument();
@@ -220,7 +211,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-2",
         }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       // Check that Todo column has 2 tasks and In Progress has 1
       const todoRegion = screen.getByRole("region", {
@@ -251,7 +242,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-2",
         }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       expect(
         screen.getByRole("region", { name: /Unassigned column, 1 tasks/i })
@@ -259,7 +250,7 @@ describe("BoardPage", () => {
       expect(screen.getByText("Unassigned Task")).toBeInTheDocument();
     });
 
-    it("places tasks with no workflow in Unassigned column", () => {
+    it("leaves tasks with no workflow off the factory board", () => {
       mockWorkflows = [
         createMockWorkflow({ id: "wf-1", kanban_column: "Active" }),
       ];
@@ -271,25 +262,27 @@ describe("BoardPage", () => {
         }),
         createMockTask({ id: "t-2", title: "No Workflow", workflow_id: null }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
+      expect(screen.getByText("Has Workflow")).toBeInTheDocument();
+      expect(screen.queryByText("No Workflow")).not.toBeInTheDocument();
       expect(
-        screen.getByRole("region", { name: /Unassigned column, 1 tasks/i })
-      ).toBeInTheDocument();
-      expect(screen.getByText("No Workflow")).toBeInTheDocument();
+        screen.queryByRole("region", { name: /Unassigned column/i })
+      ).not.toBeInTheDocument();
     });
 
     it("orders columns alphabetically when no transitions exist, with Unassigned at the end", () => {
       mockWorkflows = [
         createMockWorkflow({ id: "wf-1", kanban_column: "Zebra" }),
         createMockWorkflow({ id: "wf-2", kanban_column: "Alpha" }),
+        createMockWorkflow({ id: "wf-3", kanban_column: null }),
       ];
       mockTasks = [
         createMockTask({ id: "t-1", title: "Z Task", workflow_id: "wf-1" }),
         createMockTask({ id: "t-2", title: "A Task", workflow_id: "wf-2" }),
-        createMockTask({ id: "t-3", title: "Orphan", workflow_id: null }),
+        createMockTask({ id: "t-3", title: "Orphan", workflow_id: "wf-3" }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       const regions = screen.getAllByRole("region");
       const regionNames = regions.map((r) => r.getAttribute("aria-label"));
@@ -338,7 +331,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-backlog",
         }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       const regions = screen.getAllByRole("region");
       const regionNames = regions.map((r) => r.getAttribute("aria-label"));
@@ -375,7 +368,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-1",
         }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       // All 3 visible initially
       expect(screen.getByText("My Epic")).toBeInTheDocument();
@@ -392,7 +385,7 @@ describe("BoardPage", () => {
     });
   });
 
-  describe("filtering by factory", () => {
+  describe("factory scope", () => {
     it("shows only tasks and columns belonging to the exact factory", () => {
       mockWorkflows = [
         createMockWorkflow({
@@ -423,11 +416,7 @@ describe("BoardPage", () => {
           workflow_id: null,
         }),
       ];
-      render(<BoardPage />);
-
-      fireEvent.change(screen.getByLabelText("Filter by factory"), {
-        target: { value: "Factory A" },
-      });
+      renderBoard("Factory A");
 
       expect(screen.getByText("Factory A task")).toBeInTheDocument();
       expect(screen.queryByText("Factory B task")).not.toBeInTheDocument();
@@ -461,14 +450,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-none",
         }),
       ];
-      render(<BoardPage />);
-
-      const noFactoryOption = screen.getByRole("option", {
-        name: "No Factory",
-      });
-      fireEvent.change(screen.getByLabelText("Filter by factory"), {
-        target: { value: noFactoryOption.getAttribute("value") },
-      });
+      renderBoard(NO_FACTORY_SCOPE);
 
       expect(screen.getByText("No Factory task")).toBeInTheDocument();
       expect(screen.queryByText("Factory A task")).not.toBeInTheDocument();
@@ -496,11 +478,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-b",
         }),
       ];
-      render(<BoardPage />);
-
-      fireEvent.change(screen.getByLabelText("Filter by factory"), {
-        target: { value: "Factory A" },
-      });
+      renderBoard("Factory A");
 
       expect(
         screen.getByRole("region", {
@@ -509,6 +487,50 @@ describe("BoardPage", () => {
       ).toBeInTheDocument();
       expect(screen.queryByText("Factory B column")).not.toBeInTheDocument();
       expect(screen.queryByText("Factory B task")).not.toBeInTheDocument();
+    });
+
+    it("updates columns and tasks when the factory scope changes", () => {
+      mockWorkflows = [
+        createMockWorkflow({
+          id: "wf-a",
+          factory_name: "Factory A",
+          kanban_column: "Factory A column",
+        }),
+        createMockWorkflow({
+          id: "wf-b",
+          factory_name: "Factory B",
+          kanban_column: "Factory B column",
+        }),
+      ];
+      mockTasks = [
+        createMockTask({
+          id: "t-a",
+          title: "Factory A task",
+          workflow_id: "wf-a",
+        }),
+        createMockTask({
+          id: "t-b",
+          title: "Factory B task",
+          workflow_id: "wf-b",
+        }),
+      ];
+      const { rerender } = renderBoard("Factory A");
+      expect(screen.getByText("Factory A task")).toBeInTheDocument();
+
+      rerender(<KanbanBoard factoryName="Factory B" />);
+
+      expect(screen.getByText("Factory B task")).toBeInTheDocument();
+      expect(screen.getByText("Factory B column")).toBeInTheDocument();
+      expect(screen.queryByText("Factory A task")).not.toBeInTheDocument();
+      expect(screen.queryByText("Factory A column")).not.toBeInTheDocument();
+    });
+
+    it("does not render its own factory filter", () => {
+      renderBoard("Factory A");
+
+      expect(
+        screen.queryByLabelText("Filter by factory")
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -535,7 +557,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-2",
         }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       const searchInput = screen.getByLabelText("Search tasks by title or ID");
       fireEvent.change(searchInput, { target: { value: "feature" } });
@@ -556,7 +578,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-1",
         }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       const searchInput = screen.getByLabelText("Search tasks by title or ID");
       fireEvent.change(searchInput, { target: { value: "login" } });
@@ -582,7 +604,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-1",
         }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       const searchInput = screen.getByLabelText("Search tasks by title or ID");
       fireEvent.change(searchInput, { target: { value: "search needle" } });
@@ -607,7 +629,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-1",
         }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       const searchInput = screen.getByLabelText("Search tasks by title or ID");
       fireEvent.change(searchInput, {
@@ -634,7 +656,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-1",
         }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       const searchInput = screen.getByLabelText("Search tasks by title or ID");
       fireEvent.change(searchInput, { target: { value: "5d7658d4" } });
@@ -652,7 +674,7 @@ describe("BoardPage", () => {
       mockTasks = [
         createMockTask({ id: "t-1", title: "Task", workflow_id: "wf-1" }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       // No clear button initially
       expect(screen.queryByText("Clear")).not.toBeInTheDocument();
@@ -673,7 +695,7 @@ describe("BoardPage", () => {
         createMockTask({ id: "t-1", title: "Find Me", workflow_id: "wf-1" }),
         createMockTask({ id: "t-2", title: "Hidden", workflow_id: "wf-1" }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       // Apply search
       const searchInput = screen.getByLabelText("Search tasks by title or ID");
@@ -701,7 +723,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-1",
         }),
       ];
-      render(<BoardPageWithEntityHost />);
+      render(<BoardWithEntityHost />);
 
       // Panel not visible initially
       expect(screen.queryByTestId("task-detail-panel")).not.toBeInTheDocument();
@@ -727,7 +749,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-1",
         }),
       ];
-      render(<BoardPageWithEntityHost />);
+      render(<BoardWithEntityHost />);
 
       // Open panel
       fireEvent.click(screen.getByText("Open Me"));
@@ -753,7 +775,7 @@ describe("BoardPage", () => {
           workflow_id: "wf-1",
         }),
       ];
-      render(<BoardPageWithEntityHost />);
+      render(<BoardWithEntityHost />);
 
       fireEvent.click(screen.getByText("Open Me"));
       act(() => useEntityPanelStore.getState().openTask("task-linked"));
@@ -765,13 +787,7 @@ describe("BoardPage", () => {
     });
   });
 
-  describe("header", () => {
-    it("sets the Board page title in the shell header", () => {
-      render(<BoardPageWithHeader />);
-
-      expect(useShellStore.getState().pageTitle).toBe("Board");
-    });
-
+  describe("task count", () => {
     it("shows total task count", () => {
       mockWorkflows = [
         createMockWorkflow({ id: "wf-1", kanban_column: "Col" }),
@@ -780,9 +796,9 @@ describe("BoardPage", () => {
         createMockTask({ id: "t-1", title: "Task 1", workflow_id: "wf-1" }),
         createMockTask({ id: "t-2", title: "Task 2", workflow_id: "wf-1" }),
       ];
-      render(<BoardPageWithHeader />);
+      renderBoard();
 
-      expect(screen.getByTestId("shell-header-actions")).toHaveTextContent(
+      expect(screen.getByTestId("board-task-count")).toHaveTextContent(
         "2 tasks"
       );
     });
@@ -794,9 +810,9 @@ describe("BoardPage", () => {
       mockTasks = [
         createMockTask({ id: "t-1", title: "Only One", workflow_id: "wf-1" }),
       ];
-      render(<BoardPageWithHeader />);
+      renderBoard();
 
-      expect(screen.getByTestId("shell-header-actions")).toHaveTextContent(
+      expect(screen.getByTestId("board-task-count")).toHaveTextContent(
         "1 task"
       );
     });
@@ -812,7 +828,7 @@ describe("BoardPage", () => {
       mockTasks = [
         createMockTask({ id: "t-1", title: "Only Task", workflow_id: "wf-1" }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       // All three columns appear, even though only Backlog has a task
       expect(
@@ -833,7 +849,7 @@ describe("BoardPage", () => {
       mockTasks = [
         createMockTask({ id: "t-1", title: "Task", workflow_id: "wf-1" }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       const regions = screen.getAllByRole("region");
       const regionNames = regions.map((r) => r.getAttribute("aria-label"));
@@ -861,7 +877,7 @@ describe("BoardPage", () => {
         createMockTask({ id: "t-1", title: "From WF1", workflow_id: "wf-1" }),
         createMockTask({ id: "t-2", title: "From WF2", workflow_id: "wf-2" }),
       ];
-      render(<BoardPage />);
+      renderBoard();
 
       // Single Review column with 2 tasks
       const region = screen.getByRole("region", {

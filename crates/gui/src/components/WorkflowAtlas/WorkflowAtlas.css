@@ -84,6 +84,14 @@
   background: var(--bg);
   touch-action: none;
 }
+/* Board view: the factory's Kanban board fills the canvas in place of the
+   pan/zoom world. */
+.uv-kanban {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  cursor: auto;
+}
 .uv-canvas.is-grabbing {
   cursor: grabbing;
 }

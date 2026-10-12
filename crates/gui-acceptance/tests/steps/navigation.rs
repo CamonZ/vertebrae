@@ -35,9 +35,34 @@ async fn gui_showing_project_artifacts(world: &mut GuiWorld) {
     navigate_to(world, "/artifacts", "nav-artifacts").await;
 }
 
+/// The board is the Atlas's Board view, scoped to the "No Factory" workflows.
+/// Scenarios must create a workflow without a factory before this step.
 #[given("the GUI is on the kanban board")]
 async fn gui_on_kanban_board(world: &mut GuiWorld) {
-    navigate_to(world, "/board", "nav-board").await;
+    navigate_to(world, "/design", "nav-pipeline").await;
+    select_factory(world, "No Factory".to_string()).await;
+
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath(
+            "//*[@role='radiogroup'][@aria-label='Workflow view']//button[@role='radio'][normalize-space(.)='Board']",
+        ),
+        "Atlas Board view option",
+    )
+    .await;
+    client
+        .wait()
+        .at_most(std::time::Duration::from_secs(10))
+        .for_element(Locator::Css("[data-testid='board-task-search-input']"))
+        .await
+        .expect("the Atlas Board view should show the board search input");
+    world.screenshot(&client, "nav-board").await;
 }
 
 #[given("the GUI is on the pipeline view")]

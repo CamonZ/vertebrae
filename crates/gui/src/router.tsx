@@ -12,7 +12,6 @@ import {
   ProjectSetupPage,
   WelcomeInstallPage,
   TasksPage,
-  BoardPage,
   TracesPage,
   ArtifactsPage,
   SettingsPage,
@@ -159,7 +158,7 @@ function GuardedRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
-const appRoutes: RouteObject[] = [
+export const appRoutes: RouteObject[] = [
   {
     path: "/welcome",
     element: <WelcomeInstallPage />,
@@ -176,14 +175,6 @@ const appRoutes: RouteObject[] = [
         index: true,
         // The default view is the Tasks page.
         element: <Navigate to="/tasks" replace />,
-      },
-      {
-        path: "board",
-        element: (
-          <GuardedRoute>
-            <BoardPage />
-          </GuardedRoute>
-        ),
       },
       {
         path: "design",

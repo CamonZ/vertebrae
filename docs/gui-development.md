@@ -120,6 +120,13 @@ the step links, branches, loops and handoffs entering (white) or leaving
 dims mildly. The board carries the mode as `trace-wf` or `trace-step`; hovering
 an inspector transition row keeps the full-contrast single-edge highlight.
 
+The Kanban board is the Atlas's third view (Map | Graph | Board), not a page of
+its own. It is offered only while a factory scope is selected, because its
+columns come from the scoped workflows' `kanban_column` values, the same values
+the map uses as phases. `KanbanBoard` takes the scope from the Atlas factory
+filter and replaces the pan/zoom canvas; it takes no part in the morph, and
+clearing the factory returns to the factory overview in Map view.
+
 After changing the Rust Tauri types, regenerate bindings with
 `npm run generate:types` and keep `src/bindings.ts` limited to the reviewed
 contract changes.

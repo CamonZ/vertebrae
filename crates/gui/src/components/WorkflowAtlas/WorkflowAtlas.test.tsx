@@ -35,6 +35,16 @@ vi.mock("./layout/layoutFull", () => ({ layoutFull: vi.fn() }));
 // have to stand up the Tauri command/event plumbing it needs.
 vi.mock("./RunConsole", () => ({ RunConsole: () => null }));
 
+// The board's own data flow is covered by KanbanBoard tests; here it only
+// needs to show which factory scope the Atlas hands it.
+vi.mock("../KanbanBoard", () => ({
+  KanbanBoard: ({ factoryName }: { factoryName: unknown }) => (
+    <div data-testid="kanban-board-stub">
+      {typeof factoryName === "string" ? factoryName : "no-factory"}
+    </div>
+  ),
+}));
+
 const mockSummary = vi.fn();
 vi.mock("../../hooks/usePipelineSummary", () => ({
   usePipelineSummary: () => mockSummary(),
@@ -773,6 +783,85 @@ describe("WorkflowAtlas — MAP view", () => {
     expect(within(legend).queryByText("entry")).not.toBeInTheDocument();
     expect(within(legend).queryByText("final")).not.toBeInTheDocument();
     expect(within(legend).queryByText("done")).not.toBeInTheDocument();
+  });
+});
+
+describe("WorkflowAtlas — BOARD view", () => {
+  beforeEach(() => {
+    mockSummary.mockReturnValue({
+      summary: FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+  });
+
+  it("offers Board only while a factory is selected", async () => {
+    useFactoryFilterStore.getState().reset();
+    render(<WorkflowAtlas />);
+
+    expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("radio", { name: "Board" })
+    ).not.toBeInTheDocument();
+
+    act(() => useFactoryFilterStore.getState().setFactoryName("Factory A"));
+
+    expect(screen.getByRole("radio", { name: "Board" })).toBeInTheDocument();
+  });
+
+  it("renders the selected factory's board in place of the canvas", async () => {
+    render(<WorkflowAtlas />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Board" }));
+
+    expect(screen.getByTestId("kanban-board-stub")).toHaveTextContent(
+      "Factory A"
+    );
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Workflow Board"
+    );
+    expect(document.querySelector(".uv-scaler")).not.toBeInTheDocument();
+    expect(document.querySelector(".uv-legend")).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText(/find a workflow/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it("follows the Atlas factory filter", async () => {
+    render(<WorkflowAtlas />);
+    fireEvent.click(screen.getByRole("radio", { name: "Board" }));
+
+    act(() => useFactoryFilterStore.getState().setFactoryName("Factory B"));
+
+    expect(screen.getByTestId("kanban-board-stub")).toHaveTextContent(
+      "Factory B"
+    );
+  });
+
+  it("returns to the factory overview when the factory is cleared", async () => {
+    render(<WorkflowAtlas />);
+    fireEvent.click(screen.getByRole("radio", { name: "Board" }));
+
+    act(() => useFactoryFilterStore.getState().setFactoryName(null));
+
+    expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
+    expect(screen.queryByTestId("kanban-board-stub")).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Map" })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
+  });
+
+  it("goes back to the topology canvas when leaving Board", async () => {
+    render(<WorkflowAtlas />);
+    fireEvent.click(screen.getByRole("radio", { name: "Board" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
+
+    expect(screen.queryByTestId("kanban-board-stub")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(document.querySelector(".uv-scaler")).toBeInTheDocument()
+    );
   });
 });
 
