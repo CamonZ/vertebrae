@@ -505,7 +505,11 @@ async fn step_id_by_name(world: &mut DaemonWorld, wf_id: &str, name: &str) -> St
     step["id"].as_str().unwrap().to_string()
 }
 
-async fn create_task(world: &mut DaemonWorld, title: &str, parent: Option<&str>) -> String {
+pub(crate) async fn create_task(
+    world: &mut DaemonWorld,
+    title: &str,
+    parent: Option<&str>,
+) -> String {
     let mut args: Vec<&str> = vec!["add", title];
     if let Some(p) = parent {
         args.push("--parent");
@@ -664,7 +668,11 @@ async fn find_wait_children_execution(world: &DaemonWorld, task_id: &str) -> ser
         .clone()
 }
 
-async fn wait_for_tasks_completed(world: &DaemonWorld, ids: &[String], timeout: Duration) {
+pub(crate) async fn wait_for_tasks_completed(
+    world: &DaemonWorld,
+    ids: &[String],
+    timeout: Duration,
+) {
     let deadline = Instant::now() + timeout;
     loop {
         let mut pending: Option<String> = None;

@@ -53,3 +53,33 @@ Feature: Parent/child orchestration via wait_children
     And the parent's work execution started after child 3 completed
     And the parent's waiting execution has status "completed"
     And the parent task is done
+
+  Scenario: Claude children fork the parent conversation
+    Given a configured daemon test environment
+    And a parent workflow on the "claude" harness whose children fork its plan conversation
+    And 2 child tasks assigned to a workflow whose entry step is llm_inference
+    When I orchestrate the parent task
+    And I wait for all children to reach completion
+    And I wait for the TaskRun to reach status "completed"
+    Then each child forked the parent's plan conversation
+    And the parent's review resumed its plan conversation unchanged
+
+  Scenario: Codex children fork the parent thread
+    Given a configured daemon test environment
+    And a parent workflow on the "codex" harness whose children fork its plan conversation
+    And 2 child tasks assigned to a workflow whose entry step is llm_inference
+    When I orchestrate the parent task
+    And I wait for all children to reach completion
+    And I wait for the TaskRun to reach status "completed"
+    Then each child forked the parent's plan conversation
+    And the parent's review resumed its plan conversation unchanged
+
+  # Sacrum logs session_requires_llm_inference; each child TaskRun records only
+  # the entry step it could not enter, so that is what the scenario asserts.
+  Scenario: A child whose entry step is not llm_inference fails at dispatch naming that step
+    Given a configured daemon test environment
+    And a parent workflow on the "claude" harness whose children fork its plan conversation
+    And 1 child tasks assigned to a workflow whose entry step is human_input
+    When I orchestrate the parent task
+    And I wait for every child TaskRun to fail at dispatch naming the gate step
+    Then no child ran a provider turn

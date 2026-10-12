@@ -14,11 +14,15 @@ Use this when: creating a new workflow or factory.
    steps get one from their questions).
 4. **Step transitions**: `--transition-to` on each step (see edge rules in [transitions](transitions.md)).
    An edge's `--transition-session` names steps, so author the step it resumes
-   or forks first, with its final harness.
+   or forks first, with its final harness. The same holds for a stop step's
+   edge (continued by the next run) and for a `wait_children` step's
+   `--children-session fork:<step>`, which names a parent-workflow step.
 5. **Route configs**: `vtb step update <route> --route-config "$(cat route.json)"` last,
    because the backend validates refs against predecessor schemas and targets against existing edges.
    Add a rule's [session directive](steps/route/sessions.md) here too; its steps must
-   already exist with their final harness.
+   already exist with their final harness. An `inter_workflow` rule's directive
+   must name `step_id` in the route's workflow; the destination's entry step
+   must be llm_inference on that harness (checked only at run time).
 
 ## Why this order
 Route validation needs the predecessor's output schema, the step edges and

@@ -1,4 +1,4 @@
-use cucumber::{then, when};
+use cucumber::{given, then, when};
 
 use crate::SmokeWorld;
 
@@ -968,6 +968,132 @@ async fn when_set_first_rule_session(
         .await;
 }
 
+/// Creates a workflow with one llm_inference step that the scenario workflow
+/// hands off to over a workflow transition, so route rules can target it.
+#[given(expr = "a second workflow {string} with step {string} reachable from the workflow")]
+async fn given_reachable_second_workflow(world: &mut SmokeWorld, name: String, step_name: String) {
+    let step_spec = format!("{step_name}:default");
+    world
+        .run_vtb(&["workflow", "add", &name, "--step", &step_spec])
+        .await;
+    assert_command_succeeded(world, "create the second workflow");
+    let second_id = world
+        .last_stdout
+        .trim()
+        .strip_prefix("Created workflow: ")
+        .unwrap_or_else(|| panic!("unexpected workflow output: {}", world.last_stdout))
+        .trim()
+        .to_string();
+    world.created_workflow_ids.push(second_id.clone());
+    world
+        .stored_ids
+        .insert("second_workflow_id".to_string(), second_id.clone());
+
+    let steps = world
+        .run_vtb_json(&["step", "list", &second_id])
+        .await
+        .expect("second workflow steps should list");
+    let step_id = steps
+        .as_array()
+        .and_then(|steps| {
+            steps
+                .iter()
+                .find(|s| s["name"].as_str() == Some(step_name.as_str()))
+        })
+        .and_then(|s| s["id"].as_str())
+        .unwrap_or_else(|| panic!("step '{step_name}' should be listed in {steps}"))
+        .to_string();
+    world
+        .stored_ids
+        .insert(format!("step:{step_name}"), step_id);
+
+    let wf_id = workflow_id(world);
+    world
+        .run_vtb(&[
+            "workflow",
+            "transition",
+            "add",
+            &wf_id,
+            &second_id,
+            "--label",
+            "handoff",
+        ])
+        .await;
+    assert_command_succeeded(world, "add the workflow transition");
+}
+
+/// Points the first rule at the second workflow (an inter_workflow decision)
+/// with `session`, whose `<step>` placeholders resolve to stored step IDs.
+#[when(
+    expr = "I set the first rule of route step {string} to hand off to the second workflow with session {string}"
+)]
+async fn when_set_first_rule_inter_workflow_session(
+    world: &mut SmokeWorld,
+    name: String,
+    session: String,
+) {
+    let route_id = stored_step_id(world, &name);
+    let second_id = world
+        .stored_ids
+        .get("second_workflow_id")
+        .cloned()
+        .expect("no second workflow stored");
+    let mut route_config: serde_json::Value =
+        serde_json::from_str(&route_config_for(&stored_step_id(world, "done"))).unwrap();
+    route_config["rules"][0]["transition"] =
+        serde_json::json!({"type": "inter_workflow", "workflow_id": second_id});
+    route_config["rules"][0]["session"] = serde_json::from_str(&with_step_ids(world, &session))
+        .expect("session directive should be valid JSON");
+    world
+        .run_vtb(&with_step_harness(&[
+            "step",
+            "update",
+            &route_id,
+            "--route-config",
+            &route_config.to_string(),
+        ]))
+        .await;
+}
+
+/// `directive` is a `--children-session` value with `<step>` placeholders.
+#[when(expr = "I add a wait_children step {string} to the workflow with children session {string}")]
+async fn when_add_wait_children_with_session(
+    world: &mut SmokeWorld,
+    name: String,
+    directive: String,
+) {
+    let wf_id = workflow_id(world);
+    let directive = with_step_ids(world, &directive);
+    world
+        .run_vtb(&with_step_harness(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--step-type",
+            "wait_children",
+            "--children-session",
+            &directive,
+        ]))
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
+/// `directive` is a `--children-session` value, or `none` to clear it.
+#[when(expr = "I set the children session of step {string} to {string}")]
+async fn when_set_children_session(world: &mut SmokeWorld, name: String, directive: String) {
+    let step_id = stored_step_id(world, &name);
+    let directive = with_step_ids(world, &directive);
+    let mut args = vec!["step", "update", step_id.as_str()];
+    if directive == "none" {
+        args.push("--clear-children-session");
+    } else {
+        args.extend(["--children-session", directive.as_str()]);
+    }
+    world.run_vtb(&args).await;
+}
+
 /// `directive` is a `--transition-session` value after `<TO>=`, with `<step>`
 /// placeholders for stored step IDs.
 #[when(expr = "I set the session of the transition from {string} to {string} to {string}")]
@@ -1460,6 +1586,85 @@ async fn then_show_should_not_list_transition_sessions(world: &mut SmokeWorld, n
     assert!(
         !world.last_stdout.contains("Transition Sessions:"),
         "{}",
+        world.last_stdout
+    );
+}
+
+/// `session` is the expected directive JSON (with `<step>` placeholders);
+/// step show and step list JSON must agree, and step show text lists it.
+#[then(
+    expr = "the first rule of route step {string} should carry session {string} shown as {string}"
+)]
+async fn then_first_rule_should_carry_session(
+    world: &mut SmokeWorld,
+    name: String,
+    session: String,
+    shown: String,
+) {
+    let expected: serde_json::Value =
+        serde_json::from_str(&with_step_ids(world, &session)).expect("session directive JSON");
+    let step_id = stored_step_id(world, &name);
+    let listed = get_step_json(world, &name)
+        .await
+        .unwrap_or_else(|| panic!("step '{name}' should be listed"));
+    let shown_json = world
+        .run_vtb_json(&["step", "show", &step_id])
+        .await
+        .expect("step show JSON");
+    for json in [listed, shown_json] {
+        let rule = &json["config"]["route_config"]["rules"][0];
+        assert_eq!(rule["transition"]["type"], "inter_workflow", "{json}");
+        assert_eq!(rule["session"], expected, "{json}");
+    }
+    world.run_vtb(&["step", "show", &step_id]).await;
+    assert_command_succeeded(world, "show the route step");
+    let expected_line = format!("  rules[0] approved: {}\n", with_step_ids(world, &shown));
+    assert!(
+        world.last_stdout.contains(&expected_line),
+        "expected {expected_line:?} in step show output:\n{}",
+        world.last_stdout
+    );
+}
+
+/// `session` is the expected directive JSON (with `<step>` placeholders) or
+/// `none`; step show and step list JSON must agree, and step show text lists
+/// `shown`.
+#[then(
+    expr = "the wait_children step {string} should carry children session {string} shown as {string}"
+)]
+async fn then_wait_children_should_carry_session(
+    world: &mut SmokeWorld,
+    name: String,
+    session: String,
+    shown: String,
+) {
+    let expected = if session == "none" {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(&with_step_ids(world, &session)).expect("session directive JSON")
+    };
+    let step_id = stored_step_id(world, &name);
+    let listed = get_step_json(world, &name)
+        .await
+        .unwrap_or_else(|| panic!("step '{name}' should be listed"));
+    let shown_json = world
+        .run_vtb_json(&["step", "show", &step_id])
+        .await
+        .expect("step show JSON");
+    for json in [listed, shown_json] {
+        assert_eq!(json["step_type"], "wait_children", "{json}");
+        let actual = json["config"]
+            .get("session")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        assert_eq!(actual, expected, "{json}");
+    }
+    world.run_vtb(&["step", "show", &step_id]).await;
+    assert_command_succeeded(world, "show the wait_children step");
+    let expected_line = format!("Children Session: {}\n", with_step_ids(world, &shown));
+    assert!(
+        world.last_stdout.contains(&expected_line),
+        "expected {expected_line:?} in step show output:\n{}",
         world.last_stdout
     );
 }

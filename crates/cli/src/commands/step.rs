@@ -140,6 +140,15 @@ pub fn parse_transition_session(value: &str) -> Result<TransitionSessionArg, Str
     if directive == "none" {
         return Ok(TransitionSessionArg { to, session: None });
     }
+    Ok(TransitionSessionArg {
+        to,
+        session: Some(parse_session_directive(directive)?),
+    })
+}
+
+/// Parses `<MODE>[:<STEP>]`. Sacrum decides which modes and steps a surface
+/// accepts; only a step with mode new is rejected here.
+pub fn parse_session_directive(directive: &str) -> Result<SessionDirective, String> {
     let (mode, step_id) = match directive.split_once(':') {
         Some((mode, step_id)) => (mode, Some(parse_step_id_arg(step_id, "session step ID")?)),
         None => (directive, None),
@@ -148,10 +157,7 @@ pub fn parse_transition_session(value: &str) -> Result<TransitionSessionArg, Str
     if mode == SessionMode::New && step_id.is_some() {
         return Err("a session step is not allowed with mode new".to_string());
     }
-    Ok(TransitionSessionArg {
-        to,
-        session: Some(SessionDirective { mode, step_id }),
-    })
+    Ok(SessionDirective { mode, step_id })
 }
 
 fn validate_transition_sessions(
@@ -385,7 +391,8 @@ pub struct StepAddCommand {
     /// declared by the type: llm_inference takes the prompt, output schema,
     /// agent, skill, and agent-config flags; structured_inference takes
     /// --provider, --model, --state, and --questions; route takes
-    /// --route-config; wait_children takes --output-schema; execute requires
+    /// --route-config; wait_children takes --output-schema and
+    /// --children-session; execute requires
     /// --script and --output-schema and has no harness; the others take none.
     #[arg(long, value_enum, default_value = "llm_inference")]
     pub step_type: CliStepType,
@@ -411,6 +418,12 @@ pub struct StepAddCommand {
     /// Deterministic route configuration (raw JSON string)
     #[arg(long, value_name = "JSON")]
     pub route_config: Option<String>,
+
+    /// Session every child run of a wait_children step enters with:
+    /// `fork:<STEP>`, where STEP is an llm_inference step of this workflow
+    /// whose conversation in the parent run each child forks
+    #[arg(long, value_name = "fork:STEP", value_parser = parse_session_directive)]
+    pub children_session: Option<SessionDirective>,
 
     /// Step order (0-indexed, defaults to 0)
     #[arg(long, short, default_value = "0")]
@@ -570,6 +583,7 @@ impl StepAddCommand {
             ("skills", !self.skill.is_empty()),
             ("agent_config", self.agent_config_flags_present(step_type)),
             ("route_config", self.route_config.is_some()),
+            ("session", self.children_session.is_some()),
             ("provider", structured && self.provider.is_some()),
             ("model", structured && self.model.is_some()),
             ("state", self.state.is_some()),
@@ -630,7 +644,10 @@ impl StepAddCommand {
                 config.questions = parse_questions_flag(self.questions.as_deref())?;
             }
             Some(StepConfig::Route(config)) => config.route_config = route_config,
-            Some(StepConfig::WaitChildren(config)) => config.output_schema = output_schema,
+            Some(StepConfig::WaitChildren(config)) => {
+                config.output_schema = output_schema;
+                config.session = self.children_session.clone();
+            }
             Some(StepConfig::Execute(_)) | None => {}
         }
         Ok(config)
@@ -919,8 +936,12 @@ Goal:          {}
             }
             Some(StepConfig::WaitChildren(config)) => {
                 output.push_str(&format!(
-                    "Output Schema: {}\n",
-                    pretty_json(config.output_schema.as_ref())
+                    "Output Schema: {}\nChildren Session: {}\n",
+                    pretty_json(config.output_schema.as_ref()),
+                    config
+                        .session
+                        .as_ref()
+                        .map_or_else(|| "(none)".to_string(), SessionDirective::to_string),
                 ));
             }
             Some(StepConfig::Execute(config)) => {
@@ -1166,6 +1187,15 @@ pub struct StepUpdateCommand {
     #[arg(long)]
     pub clear_route_config: bool,
 
+    /// Set the session every child run of a wait_children step enters with:
+    /// `fork:<STEP>`, where STEP is an llm_inference step of this workflow
+    #[arg(long, value_name = "fork:STEP", value_parser = parse_session_directive)]
+    pub children_session: Option<SessionDirective>,
+
+    /// Clear the wait_children session; children start new conversations
+    #[arg(long)]
+    pub clear_children_session: bool,
+
     /// New order for the step
     #[arg(long, short)]
     pub order: Option<i32>,
@@ -1238,6 +1268,10 @@ impl StepUpdateCommand {
                 "route_config",
                 self.route_config.is_some() || self.clear_route_config,
             ),
+            (
+                "session",
+                self.children_session.is_some() || self.clear_children_session,
+            ),
             ("provider", structured && self.provider.is_some()),
             ("model", structured && self.model.is_some()),
             ("state", self.state.is_some()),
@@ -1283,6 +1317,11 @@ impl StepUpdateCommand {
                 self.route_config.is_some(),
                 self.clear_route_config,
                 "--route-config and --clear-route-config",
+            ),
+            (
+                self.children_session.is_some(),
+                self.clear_children_session,
+                "--children-session and --clear-children-session",
             ),
         ] {
             if set && clear {
@@ -1373,6 +1412,15 @@ impl StepUpdateCommand {
             parse_json_flag(self.route_config.as_deref(), "--route-config")?
         {
             updates = updates.with_route_config(Some(route_config));
+        }
+
+        if self.clear_children_session {
+            updates = updates.with_config_field("session", serde_json::Value::Null);
+        } else if let Some(session) = &self.children_session {
+            let session = serde_json::to_value(session).map_err(|e| {
+                ServiceError::validation_failed(format!("Invalid --children-session: {e}"))
+            })?;
+            updates = updates.with_config_field("session", session);
         }
 
         if let Some(order) = self.order {

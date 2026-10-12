@@ -11,8 +11,10 @@
    clickable so you can walk the topology without leaving the panel.
 
    Route steps list each decision's target and session directive; llm_inference
-   steps list the route decisions that enter them or continue their
-   conversation, read from the workflow's route steps' cached configs.
+   steps list the route decisions, transitions and wait_children steps that
+   enter them or continue their conversation, read from the workflow's route
+   and wait_children steps' cached configs. wait_children steps show the
+   conversation their children fork.
 
    Ported from docs/design/wf-detail.jsx (WfInspector, step branch).
    ────────────────────────────────────────────────────────────────── */
@@ -41,6 +43,7 @@ import { kindClass } from "./selection";
 import { StructuredInferenceQuestions } from "./StructuredInferenceQuestions";
 import { RhaiScript } from "./RhaiScript";
 import {
+  childSessionEntriesFor,
   routeDecisions,
   sessionEntriesFor,
   transitionSessionEntriesFor,
@@ -129,15 +132,23 @@ export function StepInspector({
 
   // Rich config — fetched live; PipelineStep has no goal/prompt/agents/etc.
   const { step: cfg, isLoading } = useStep(stepId);
-  const routeStepIds = useMemo(
+  const sessionStepIds = useMemo(
     () =>
       model.steps
-        .filter((s) => s.workflowId === workflowId && s.kind === "route")
+        .filter(
+          (s) =>
+            s.workflowId === workflowId &&
+            (s.kind === "route" || s.kind === "wait")
+        )
         .map((s) => s.stepId),
     [model.steps, workflowId]
   );
-  // Sibling route configs, shared with useStep's cache, for "Conversation".
-  const routeSteps = useSteps(routeStepIds, cfg?.step_type === "llm_inference");
+  // Sibling route and wait_children configs, shared with useStep's cache,
+  // for "Conversation".
+  const sessionSteps = useSteps(
+    sessionStepIds,
+    cfg?.step_type === "llm_inference"
+  );
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -290,13 +301,28 @@ export function StepInspector({
       ? [
           ...sessionEntriesFor(
             stepId,
-            routeStepIds.map((routeStepId, index) => {
-              const routeStep = routeSteps[index];
+            sessionStepIds.map((sessionStepId, index) => {
+              const sessionStep = sessionSteps[index];
               return {
-                routeStepId,
+                routeStepId: sessionStepId,
                 routeConfig:
-                  routeStep?.step_type === "route"
-                    ? (routeStep.config as RouteStepConfig | null)?.route_config
+                  sessionStep?.step_type === "route"
+                    ? (sessionStep.config as RouteStepConfig | null)
+                        ?.route_config
+                    : null,
+              };
+            })
+          ),
+          ...childSessionEntriesFor(
+            stepId,
+            sessionStepIds.map((waitStepId, index) => {
+              const waitStep = sessionSteps[index];
+              return {
+                waitStepId,
+                session:
+                  waitStep?.step_type === "wait_children"
+                    ? ((waitStep.config as WaitChildrenStepConfig | null)
+                        ?.session ?? null)
                     : null,
               };
             })
@@ -353,6 +379,10 @@ export function StepInspector({
   const outputConfig =
     cfg?.step_type === "llm_inference" || cfg?.step_type === "wait_children"
       ? (cfg.config as LlmInferenceStepConfig | WaitChildrenStepConfig | null)
+      : null;
+  const childrenSession =
+    cfg?.step_type === "wait_children"
+      ? ((cfg.config as WaitChildrenStepConfig | null)?.session ?? null)
       : null;
   const agents = inference?.agents ?? [];
   const skills = inference?.skills ?? [];
@@ -998,7 +1028,10 @@ export function StepInspector({
                         {entry.decision.session?.mode} →{" "}
                         {entry.decision.targetStepId
                           ? stepName(entry.decision.targetStepId)
-                          : "?"}
+                          : entry.decision.targetWorkflowId
+                            ? (wfById.get(entry.decision.targetWorkflowId)
+                                ?.name ?? entry.decision.targetWorkflowId)
+                            : entry.decision.label}
                       </span>
                     )}
                   </div>
@@ -1007,6 +1040,37 @@ export function StepInspector({
             ) : (
               <div className="wfd-placeholder">
                 No session directives — every entry starts a new conversation
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {cfg?.step_type === "wait_children" ? (
+          <section className="wfd-sec" data-testid="children-session-section">
+            <div className="wfd-lbl">Children Session</div>
+            {childrenSession ? (
+              <div className="wfd-rows">
+                <div className="wfd-row">
+                  <span
+                    data-testid="children-session"
+                    className={"wfd-tag wfd-session " + childrenSession.mode}
+                  >
+                    {childrenSession.mode}
+                  </span>
+                  {childrenSession.step_id ? (
+                    <button
+                      className="wfd-trans loop"
+                      onClick={() => selectStep(childrenSession.step_id!)}
+                      type="button"
+                    >
+                      {stepName(childrenSession.step_id)}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="wfd-placeholder">
+                {isLoading ? "Loading…" : "Children start new conversations"}
               </div>
             )}
           </section>

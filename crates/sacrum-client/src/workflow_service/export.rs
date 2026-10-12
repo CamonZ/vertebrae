@@ -5,6 +5,7 @@ use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::{
     SessionDirective, StepAddress, StepEdge, StepEdgeSession, StepManifest, StepType,
     WorkflowBundleManifest, WorkflowEdge, WorkflowManifest, symbolize_route_config,
+    symbolize_wait_children_config,
 };
 
 use crate::api_types::{
@@ -488,6 +489,19 @@ fn convert_step(
         })?;
     }
 
+    if step_type == StepType::WaitChildren
+        && let Some(wait_config) = config.as_mut()
+    {
+        let session_refs = refs.route_target_refs(workflow_ref);
+        *wait_config =
+            symbolize_wait_children_config(wait_config, &session_refs).map_err(|error| {
+                ServiceError::invalid_input(format!(
+                    "step {} in workflow {workflow_id} has an invalid wait_children session: {error}",
+                    step.id
+                ))
+            })?;
+    }
+
     Ok(StepManifest {
         step_ref,
         name: step.name.clone(),
@@ -717,6 +731,109 @@ mod tests {
         let bundle = snapshot_to_bundle(&snapshot).unwrap();
         let value: Value = serde_json::from_str(&bundle.canonical_json().unwrap()).unwrap();
         assert_eq!(value["step_edges"][0]["session"], json!({"mode": "resume"}));
+    }
+
+    #[test]
+    fn wait_children_sessions_export_their_fork_source_as_a_step_ref() {
+        let mut snapshot = snapshot();
+        let wait = &mut snapshot.workflows[0].workflow_steps[0];
+        wait.step_type = Some("wait_children".to_string());
+        wait.config = Some(json!({
+            "version": 1,
+            "output_schema": null,
+            "session": {"mode": "fork", "step_id": "first-step-id"}
+        }));
+
+        let bundle = snapshot_to_bundle(&snapshot).unwrap();
+        let value: Value = serde_json::from_str(&bundle.canonical_json().unwrap()).unwrap();
+        let wait = value["workflows"][0]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|step| step["step_ref"] == "second")
+            .unwrap();
+        assert_eq!(
+            wait["config"]["session"],
+            json!({"mode": "fork", "step_ref": "first"})
+        );
+
+        snapshot.workflows[0].workflow_steps[0].config =
+            Some(json!({"version": 1, "output_schema": null, "session": null}));
+        let bundle = snapshot_to_bundle(&snapshot).unwrap();
+        let wait = bundle.workflows[0]
+            .steps
+            .iter()
+            .find(|step| step.step_ref == "second")
+            .unwrap();
+        assert_eq!(
+            wait.config,
+            Some(json!({"version": 1, "output_schema": null}))
+        );
+
+        snapshot.workflows[0].workflow_steps[0].config = Some(json!({
+            "version": 1,
+            "session": {"mode": "fork", "step_id": "foreign-step-id"}
+        }));
+        let error = snapshot_to_bundle(&snapshot).unwrap_err().to_string();
+        assert!(error.contains("invalid wait_children session"), "{error}");
+        assert!(error.contains("foreign-step-id"), "{error}");
+
+        snapshot.workflows[0].workflow_steps[0].config =
+            Some(json!({"version": 1, "session": {"mode": "fork"}}));
+        let error = snapshot_to_bundle(&snapshot).unwrap_err().to_string();
+        assert!(error.contains("step_id is required"), "{error}");
+
+        snapshot.workflows[0].workflow_steps[0].config =
+            Some(json!({"version": 1, "session": "fork:first-step-id"}));
+        let error = snapshot_to_bundle(&snapshot).unwrap_err().to_string();
+        assert!(error.contains("session must be a JSON object"), "{error}");
+    }
+
+    #[test]
+    fn inter_workflow_route_sessions_export_their_step_as_a_step_ref() {
+        let mut snapshot = snapshot();
+        let route = &mut snapshot.workflows[0].workflow_steps[0];
+        route.step_type = Some("route".to_string());
+        route.config = Some(json!({
+            "version": 1,
+            "route_config": {
+                "version": 1,
+                "match_policy": "exactly_one",
+                "rules": [{
+                    "id": "review",
+                    "when": {"value": true},
+                    "transition": {"type": "inter_workflow", "workflow_id": "review-id"},
+                    "session": {"mode": "resume", "step_id": "first-step-id"}
+                }]
+            }
+        }));
+        snapshot.workflows[0]
+            .transitions
+            .push(WorkflowExportTransition {
+                id: "cross-edge".to_string(),
+                to_workflow_id: "review-id".to_string(),
+                target_step_id: None,
+                label: None,
+            });
+        snapshot.workflows.push(workflow(
+            "review-id",
+            "Review",
+            2,
+            vec![step("review-step-id", "Review", 0, vec![])],
+        ));
+
+        let bundle = snapshot_to_bundle(&snapshot).unwrap();
+        let route = bundle.workflows[0]
+            .steps
+            .iter()
+            .find(|step| step.step_ref == "second")
+            .unwrap();
+        let rule = &route.config.as_ref().unwrap()["route_config"]["rules"][0];
+        assert_eq!(rule["transition"]["workflow_ref"], "review");
+        assert_eq!(
+            rule["session"],
+            json!({"mode": "resume", "step_ref": "first"})
+        );
     }
 
     #[test]

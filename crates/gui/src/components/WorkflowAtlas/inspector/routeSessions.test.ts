@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  childSessionEntriesFor,
   routeDecisions,
   routeTransitionLabels,
   sessionEntriesFor,
@@ -193,5 +194,30 @@ describe("transitionSessionLabels", () => {
       ["d", "new"],
     ]);
     expect(transitionSessionLabels(null, (id) => id).size).toBe(0);
+  });
+});
+
+describe("childSessionEntriesFor", () => {
+  it("lists the wait_children steps whose children fork the step", () => {
+    expect(
+      childSessionEntriesFor("plan", [
+        { waitStepId: "wait", session: { mode: "fork", step_id: "plan" } },
+        { waitStepId: "other", session: { mode: "fork", step_id: "review" } },
+        { waitStepId: "plain", session: null },
+      ])
+    ).toEqual([
+      {
+        key: "wait:children:source",
+        fromStepId: "wait",
+        decision: {
+          key: "children",
+          label: "children",
+          targetStepId: null,
+          targetWorkflowId: null,
+          session: { mode: "fork", stepId: "plan" },
+        },
+        role: "source",
+      },
+    ]);
   });
 });

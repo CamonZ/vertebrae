@@ -44,8 +44,15 @@ For the known Sacrum route envelope, `rules[*].transition` and
 `workflow_ref` for inter-workflow targets. Route targets must name an outgoing
 manifest edge, as they do in Sacrum. The export helper
 `symbolize_route_config` converts only persisted `step_id`/`workflow_id` at
-those locations and leaves rule IDs, predicates, handoffs, and other opaque
-values unchanged.
+those locations, and a decision's `session.step_id` (on intra- and
+inter-workflow decisions alike) to `session.step_ref` in the route's own
+workflow, and leaves rule IDs, predicates, handoffs, and other opaque values
+unchanged. A `wait_children` step's `config.session` is
+`{"mode": "fork", "step_ref"}` naming a step of the same workflow;
+`symbolize_wait_children_config` writes it on export and drops a null session.
+A step edge's `session` carries an optional `step_ref` in the edge's workflow.
+A persisted `session.step_id` or a `step_ref` outside the owning workflow fails
+validation at its path.
 
 Canonical serialization sorts workflows, steps, and graph edges while retaining
 the order of arrays inside config values. JSON object keys are emitted

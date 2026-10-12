@@ -70,3 +70,29 @@ Feature: Route decisions choose how an llm_inference step enters a conversation
     And I start a TaskRun
     And I wait for the TaskRun to reach status "failed" with outcome "retry_exhausted"
     Then the later work executions failed with "no rollout found for thread id" without a new conversation
+
+  Scenario: Claude resumes a conversation across an inter_workflow route
+    Given a configured daemon test environment
+    And a handoff workflow on the "claude" harness whose route resumes work into a llm_inference entry step
+    And a task assigned to the workflow
+    When I start a TaskRun
+    And I wait for the TaskRun to reach status "completed"
+    Then the followup execution resumed the work conversation in the same TaskRun
+
+  Scenario: Codex resumes a thread across an inter_workflow route
+    Given a configured daemon test environment
+    And a handoff workflow on the "codex" harness whose route resumes work into a llm_inference entry step
+    And a task assigned to the workflow
+    When I start a TaskRun
+    And I wait for the TaskRun to reach status "completed"
+    Then the followup execution resumed the work conversation in the same TaskRun
+
+  # Sacrum logs session_requires_llm_inference; the TaskRun records only the
+  # step it could not enter, so that is what the scenario asserts.
+  Scenario: Resuming into a non-llm_inference destination fails the run at dispatch naming that step
+    Given a configured daemon test environment
+    And a handoff workflow on the "claude" harness whose route resumes work into a human_input entry step
+    And a task assigned to the workflow
+    When I start a TaskRun
+    And I wait for the TaskRun to reach status "failed" with outcome "dispatch_failed"
+    Then the TaskRun failed at dispatch naming the gate step and the provider ran once

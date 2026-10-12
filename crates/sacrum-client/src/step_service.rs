@@ -595,8 +595,47 @@ mod tests {
                 vertebrae_core::WaitChildrenConfig {
                     version: 1,
                     output_schema: Some(json!({"type": "object"})),
+                    session: None,
                 }
             ))
+        );
+
+        let step = SacrumStepService::response_to_step(&step_response(
+            Some("wait_children"),
+            json!({
+                "version": 1,
+                "output_schema": null,
+                "session": {"mode": "fork", "step_id": "parent-step"}
+            }),
+        ))
+        .unwrap();
+        let Some(StepConfig::WaitChildren(config)) = step.config else {
+            panic!("expected a wait_children config");
+        };
+        assert_eq!(
+            config.session,
+            Some(SessionDirective {
+                mode: vertebrae_core::SessionMode::Fork,
+                step_id: Some("parent-step".to_string()),
+            })
+        );
+
+        let step = SacrumStepService::response_to_step(&step_response(
+            Some("wait_children"),
+            json!({"version": 1, "output_schema": null, "session": null}),
+        ))
+        .unwrap();
+        let Some(StepConfig::WaitChildren(config)) = step.config else {
+            panic!("expected a wait_children config");
+        };
+        assert_eq!(config.session, None);
+
+        assert!(
+            SacrumStepService::response_to_step(&step_response(
+                Some("wait_children"),
+                json!({"version": 1, "session": "fork:parent-step"}),
+            ))
+            .is_err()
         );
     }
 

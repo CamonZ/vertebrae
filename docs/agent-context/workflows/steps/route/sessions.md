@@ -1,17 +1,20 @@
 # Session directives
 
 Purpose: choose how an llm_inference step enters a provider conversation, from
-a route decision or a step transition.
+a route decision, a step transition, or a wait_children step.
 Use this when: a loop should continue the earlier step's conversation, a later
-step should pick up where another left off, or parallel branches need their own copy.
+step should pick up where another left off, or parallel branches or child runs
+need their own copy.
 
-## Route decision or step transition
-The same directive has two carriers:
+## Route decision, step transition or wait_children
+The same directive has three carriers:
 - **Route decision**: the continuation depends on the route's outcome (resume
   on `needs_changes`, start fresh on `approved`).
 - **Step transition**: a fixed continuation, such as A -> B, two llm_inference
   steps with different prompts in one conversation. No route step is needed.
   See [transitions](../../transitions.md).
+- **wait_children step**: forks a parent conversation into every child run
+  ([cross-run sessions](cross-run-sessions.md)).
 
 Transitions leaving a route step cannot carry a directive; put it on the
 route's decisions instead.
@@ -45,23 +48,22 @@ vtb step update <draft> --transition-session <revise>=fork:<other-step>
   TaskRun belongs to; resume continues from that conversation's latest turn,
   whichever step added it. If A starts and B resumes A, resuming A later
   continues after B's turn.
-- Only completed executions of the current TaskRun count: other runs and
-  failed attempts are never resumed.
+- Only completed executions of the directly linked run count: this TaskRun,
+  or for a stop step's edge the run that stopped there, or for children the
+  parent run ([cross-run sessions](cross-run-sessions.md)). Failed attempts
+  and other runs are never resumed.
 - Resume and fork stay on one harness: the destination and `step_id` must be
-  llm_inference steps of this workflow on the same harness.
-- A retry of a failed step enters its conversation the same way the failed
-  attempt did.
+  llm_inference steps on the same harness (checked on save within a workflow,
+  at dispatch across workflows or runs).
 
 ## Doing it
-Save a route's directives with `vtb step update <route> --route-config "$(cat route.json)"`,
+Save a route's directives with `vtb step update <route> --route-config "$(cat route.json)"`
 and an edge's with `--transition-session` (above). The backend rejects unknown
-keys or modes, `step_id` with `new`, a directive whose destination is not an
-llm_inference step (for routes, an `intra_workflow` one), and a `step_id`
-outside this workflow, not llm_inference, or on another harness. Route errors
-carry the `$.rules[<i>].session` or `$.default.session` path; edge errors carry
-`$.session` and the edge's endpoints. `vtb step show` lists a route's
-directives under `Route Sessions:` and a step's edge directives under
-`Transition Sessions:`.
+keys or modes, `step_id` with `new`, an `intra_workflow` destination that is
+not llm_inference, and a `step_id` outside this workflow, not llm_inference, or
+on another harness, at `$.rules[<i>].session`/`$.default.session` (routes) or
+`$.session` plus the endpoints (edges). `vtb step show` lists them under
+`Route Sessions:` and `Transition Sessions:`.
 
 ## Gotchas
 - Nothing resumable fails rather than starting fresh: a step with no completed
@@ -69,9 +71,10 @@ directives under `Route Sessions:` and a step's edge directives under
   no longer has the conversation fails the execution.
 - One conversation never runs two turns at once. Parallel branches use `fork`,
   not concurrent `resume`s of the same conversation.
-- In an exported bundle the directive's step is `session.step_ref`, in the
-  route config and on `step_edges[].session`; import resolves it back to
-  `session.step_id`. A bundle with a persisted `session.step_id` is rejected.
+- In an exported bundle the directive's step is `session.step_ref` (route
+  config, `step_edges[].session`, wait_children `config.session`); import
+  resolves it to `session.step_id`. A persisted `session.step_id`, or a
+  `step_ref` outside the owning workflow, is rejected.
 
 ## Related
-[Envelope](envelope.md) · [Loops](loops.md) · [Transitions](../../transitions.md) · [Failure table](../../../debugging/failure-table.md)
+[Envelope](envelope.md) · [Loops](loops.md) · [Transitions](../../transitions.md) · [stop](../stop.md) · [wait_children](../wait_children.md) · [Failure table](../../../debugging/failure-table.md)

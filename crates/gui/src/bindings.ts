@@ -2339,7 +2339,12 @@ export type WaitChildrenStepConfig = { version: number;
 /**
  * JSON Schema describing the expected output of this step
  */
-output_schema: JsonValue | null }
+output_schema: JsonValue | null;
+/**
+ * Fork directive every child run enters with; `step_id` names the
+ * parent workflow's llm_inference step whose conversation is forked
+ */
+session: SessionDirective | null }
 /**
  * Workflow - mirrors db::Workflow
  */

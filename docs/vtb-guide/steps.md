@@ -183,7 +183,8 @@ Updated:       2026-05-30 16:48
 
 The config lines depend on the step type: `structured_inference` steps show
 `Provider`, `Model`, `State`, and `Fields`; `route` steps show `Route Config`;
-`wait_children` steps show `Output Schema`; `execute` definitions show `Script`
+`wait_children` steps show `Output Schema` and `Children Session` (the fork
+set with `--children-session fork:<step>`, or `(none)`); `execute` definitions show `Script`
 and `Output Schema`; config-less types show
 `Config: (none)`.
 

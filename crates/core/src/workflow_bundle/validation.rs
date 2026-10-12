@@ -178,6 +178,20 @@ pub(super) fn validate_bundle(
             .get(&workflow.workflow_ref)
             .expect("step map is created with every workflow");
         for (step_index, step) in workflow.steps.iter().enumerate() {
+            if step.step_type == StepType::WaitChildren
+                && let Some(session) = step
+                    .config
+                    .as_ref()
+                    .and_then(|config| config.get("session"))
+                    .filter(|session| !session.is_null())
+            {
+                validate_wait_children_session(
+                    session,
+                    &workflow.workflow_ref,
+                    steps,
+                    format!("workflows[{workflow_index}].steps[{step_index}].config.session"),
+                )?;
+            }
             if let Some(route_config) = step
                 .config
                 .as_ref()
@@ -337,6 +351,40 @@ fn validate_edge_session(
         ));
     }
     Ok(())
+}
+
+// Sacrum validates the mode and the step's type; the bundle only checks that
+// the fork source is portable and belongs to the parent's workflow.
+fn validate_wait_children_session(
+    session: &Value,
+    workflow_ref: &str,
+    local_steps: &BTreeMap<String, usize>,
+    path: String,
+) -> Result<(), ManifestValidationError> {
+    let session = session.as_object().ok_or_else(|| {
+        ManifestValidationError::new(path.clone(), "session must be a JSON object")
+    })?;
+    if session.contains_key("step_id") {
+        return Err(ManifestValidationError::new(
+            format!("{path}.step_id"),
+            "persisted step_id is not portable; use step_ref",
+        ));
+    }
+    match session.get("step_ref") {
+        Some(Value::String(step_ref)) if local_steps.contains_key(step_ref) => Ok(()),
+        Some(Value::String(step_ref)) => Err(ManifestValidationError::new(
+            format!("{path}.step_ref"),
+            format!("unresolved step ref {step_ref:?} in workflow {workflow_ref:?}"),
+        )),
+        Some(_) => Err(ManifestValidationError::new(
+            format!("{path}.step_ref"),
+            "step_ref must be a string",
+        )),
+        None => Err(ManifestValidationError::new(
+            format!("{path}.step_ref"),
+            "symbolic step_ref is required",
+        )),
+    }
 }
 
 fn validate_step_address(

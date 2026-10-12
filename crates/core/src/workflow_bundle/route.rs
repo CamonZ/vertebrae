@@ -11,8 +11,14 @@ pub struct RouteTargetRefs {
     pub workflow_refs: BTreeMap<String, WorkflowRef>,
 }
 
-// Only documented target fields (transitions and session.step_id) are
-// rewritten; predicates and metadata stay opaque.
+/// Names a route's targets by their bundle refs. Only documented target
+/// fields (transitions and `session.step_id`) are rewritten; predicates and
+/// metadata stay opaque.
+///
+/// # Errors
+///
+/// Fails when a target is missing, is not a string, or names a step or
+/// workflow absent from `refs`, i.e. outside the exported bundle.
 pub fn symbolize_route_config(
     route_config: &Value,
     refs: &RouteTargetRefs,
@@ -65,6 +71,43 @@ pub fn symbolize_route_config(
             )?;
         }
         _ => {}
+    }
+    Ok(result)
+}
+
+/// Names a `wait_children` session's fork source by its step ref. A null
+/// session is dropped so steps without one export as before.
+///
+/// # Errors
+///
+/// Fails when the session is not a JSON object, has no string `step_id`, or
+/// names a step absent from `refs`, i.e. outside the parent workflow.
+pub fn symbolize_wait_children_config(
+    config: &Value,
+    refs: &RouteTargetRefs,
+) -> Result<Value, ManifestValidationError> {
+    let mut result = config.clone();
+    let Some(object) = result.as_object_mut() else {
+        return Ok(result);
+    };
+    match object.get_mut("session") {
+        Some(Value::Null) => {
+            object.remove("session");
+        }
+        Some(Value::Object(session)) => rewrite_target(
+            session,
+            "step_id",
+            "step_ref",
+            &refs.step_refs,
+            "session.step_id".to_string(),
+        )?,
+        Some(_) => {
+            return Err(ManifestValidationError::new(
+                "session",
+                "session must be a JSON object",
+            ));
+        }
+        None => {}
     }
     Ok(result)
 }

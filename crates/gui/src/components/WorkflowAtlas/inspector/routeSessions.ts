@@ -6,9 +6,13 @@
    `session: {mode: "new" | "resume" | "fork", step_id?}` choosing how its
    llm_inference destination enters a provider conversation; `step_id` names
    the step whose conversation is resumed or forked and defaults to the
-   destination. A decision without one starts a new conversation. A non-route
-   step's transition may carry the same directive. The inspector and the
-   Atlas only display these; Sacrum validates them.
+   destination. A decision without one starts a new conversation. An
+   inter_workflow decision must name `step_id`, a step of the route's own
+   workflow, because its destination is chosen at route time. A non-route
+   step's transition may carry the same directive, and a wait_children step's
+   config may carry `{mode: "fork", step_id}` that every child run enters
+   with. The inspector and the Atlas only display these; Sacrum validates
+   them.
    ────────────────────────────────────────────────────────────────── */
 import type {
   JsonValue,
@@ -175,6 +179,34 @@ export function transitionSessionEntriesFor(
     }
   }
   return entries;
+}
+
+/**
+ * The wait_children steps whose children fork `stepId`'s conversation, each
+ * shaped as a decision labelled `children` with no destination step.
+ */
+export function childSessionEntriesFor(
+  stepId: string,
+  waits: { waitStepId: string; session: TransitionSession | null }[]
+): SessionEntry[] {
+  return waits.flatMap(({ waitStepId, session }) =>
+    session?.step_id === stepId
+      ? [
+          {
+            key: `${waitStepId}:children:source`,
+            fromStepId: waitStepId,
+            decision: {
+              key: "children",
+              label: "children",
+              targetStepId: null,
+              targetWorkflowId: null,
+              session: { mode: session.mode, stepId: session.step_id },
+            },
+            role: "source" as const,
+          },
+        ]
+      : []
+  );
 }
 
 /**

@@ -20,6 +20,12 @@ Use this when: the user wants to run a task or asks about a run's state.
 - Assign a workflow first; a task at the wrong step starts from that step.
 - A new run has no `steps.*` history. Starting mid-workflow breaks templates
   that reference earlier steps (see [templating context](../templating/context.md)).
+- A run started past a `stop` step continues the stopped run's provider
+  conversation only when the stop's edge carries a
+  [session directive](../workflows/steps/route/sessions.md); otherwise its first
+  llm_inference step starts fresh. Child runs of a `wait_children` step with
+  `--children-session` fork the parent run's conversation. No other run's
+  conversation is ever used.
 - After asking to start a run, do not poll it unless the user asks you to monitor.
 
 ## Related

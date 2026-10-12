@@ -55,8 +55,19 @@ Steps are referenced by portable `step_ref`s, never persisted IDs. A step
 transition's session directive is written on its edge as
 `step_edges[].session` (`{"mode": "resume"}`, or
 `{"mode": "fork", "step_ref": "<step-ref>"}` when it names a step other than
-the destination); route decision directives carry `session.step_ref` inside the
-route config.
+the destination); route decision directives, on `intra_workflow` and
+`inter_workflow` decisions alike, carry `session.step_ref` inside the route
+config, naming a step of the route's own workflow; and a `wait_children` step's
+fork directive is `config.session` (`{"mode": "fork", "step_ref": "<step-ref>"}`),
+naming a step of the parent's workflow. A `wait_children` step without one
+exports no `session` key.
+
+These directives are how a conversation crosses a boundary: an
+`inter_workflow` decision keeps the TaskRun and resumes or forks a conversation
+of the route's workflow in the destination's entry step; the edge leaving a
+`stop` step lets the next TaskRun continue the conversation of the run that
+stopped there; and a `wait_children` fork gives each child run a branch of the
+parent run's conversation. See the step skill's session directives.
 
 ## workflow import
 
@@ -69,8 +80,10 @@ vtb workflow import workflows.json --json
 ```
 
 The command validates the manifest locally (including that every
-`session.step_ref` names a step of its own workflow and that no `session`
-carries a persisted `step_id`), checks destination workflow names
+`session.step_ref`, in a route config, on an edge, or in a `wait_children`
+config, names a step of its own workflow, that a `wait_children` session has
+one, and that no `session` carries a persisted `step_id`), checks destination
+workflow names
 using create-only semantics, and submits one Sacrum bulk mutation only after a
 clean preflight. Existing or duplicate workflow names fail; imports never
 overwrite, merge, assign tasks, or delete rows implicitly. `--dry-run` performs
@@ -100,8 +113,8 @@ vtb workflow export --all --output destination-workflows.json
 ```
 
 The V1 bundle preserves workflow and step order, initial steps, step and
-workflow edges, edge labels, edge and route session directives
-(`session.step_ref`), route rules and defaults, workflow metadata,
+workflow edges, edge labels, edge, route and `wait_children` session
+directives (`session.step_ref`), route rules and defaults, workflow metadata,
 agent configuration, prompts, output schemas, persistence options, and other
 opaque JSON values. Import remaps persistence IDs; compare canonical semantic
 content rather than raw IDs or timestamps. Use the returned workflow and
@@ -111,8 +124,9 @@ so matching exporter and importer omissions cannot make a round-trip test pass.
 The rich-graph acceptance fixture includes multiple workflows, every supported
 step type, distinct goal and prompt values including valid null and empty
 prompts, nested metadata/configuration, strict schemas, persistence options,
-route rule/default targets, labels, route and edge session directives, and
-explicit cross-workflow entry steps.
+route rule/default targets, labels, route (including `inter_workflow`), edge
+and `wait_children` session directives, and explicit cross-workflow entry
+steps.
 Run this coverage only against the isolated Docker Sacrum environment; do not
 use the local task-management database as the acceptance backend.
 
