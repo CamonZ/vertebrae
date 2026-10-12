@@ -193,9 +193,20 @@ target), as Claude echoes it, and appends every argv to
 `MOCK_CAPTURE_DIR/invocations.jsonl`. mock-codex gives each `thread/start` a
 distinct thread id and rejects resuming or forking a thread it did not create.
 `route_sessions.feature` uses these to prove route-driven new, resume and
-rejected-resume conversations on both harnesses, and
+rejected-resume conversations on both harnesses, including a resume across an
+`inter_workflow` route and its failure into a non-`llm_inference` step, and
 `transition_sessions.feature` proves that a step entered over a resume edge
-(`--transition-session`) continues the previous step's conversation.
+(`--transition-session`) continues the previous step's conversation, also past
+a stop step from the run that stopped there (and fails when that run has no
+turn). `parent_child.feature` proves that `--children-session` children fork
+the parent's conversation while the parent resumes its own, and that a child
+whose entry step is not `llm_inference` fails. These scenarios assert the
+provider launch (`--resume`/`--fork-session`, `thread/resume`/`thread/fork`)
+and the lineage Sacrum records (`resume_session_id`,
+`conversation_root_execution_id`, `forked_from_execution_id`). The failure
+scenarios assert `dispatch_failed` and the step id in `outcome_context.reason`;
+Sacrum keeps the error code (`session_requires_llm_inference`,
+`session_not_found`) in its log only, so they cannot tell the two apart.
 
 Fixture files live under `crates/daemon-acceptance/mocks/` and are mounted at
 `/mocks/` inside the container. Per-scenario isolation requires unique fixture

@@ -17,7 +17,7 @@ pub const EXECUTION_FIELDS: &str = r#"
             ... on StructuredInferenceStepConfig { version provider model state questions }
             ... on ExecuteStepConfig { version script context output_schema }
             ... on RouteStepConfig { version route_config }
-            ... on WaitChildrenStepConfig { version output_schema }
+            ... on WaitChildrenStepConfig { version output_schema session }
         }
         output
         transition_result

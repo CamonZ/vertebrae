@@ -282,6 +282,62 @@ fn validation_failures_are_table_driven_and_actionable() {
             "config.route_config.rules[0].session.step_ref",
         ),
         (
+            "foreign inter_workflow session step ref",
+            |bundle: &mut WorkflowBundleManifest| {
+                bundle.workflows[0].steps[1].config.as_mut().unwrap()["route_config"]["rules"][1]
+                    ["session"] = serde_json::json!({"mode": "resume", "step_ref": "classify"})
+            },
+            "config.route_config.rules[1].session.step_ref",
+        ),
+        (
+            "persisted inter_workflow session step_id",
+            |bundle: &mut WorkflowBundleManifest| {
+                bundle.workflows[0].steps[1].config.as_mut().unwrap()["route_config"]["rules"][1]
+                    ["session"] = serde_json::json!({"mode": "fork", "step_id": "uuid"})
+            },
+            "config.route_config.rules[1].session.step_id",
+        ),
+        (
+            "persisted wait_children session step_id",
+            |bundle: &mut WorkflowBundleManifest| {
+                wait_step(bundle).config.as_mut().unwrap()["session"] =
+                    serde_json::json!({"mode": "fork", "step_id": "uuid"})
+            },
+            "steps[3].config.session.step_id",
+        ),
+        (
+            "foreign wait_children session step ref",
+            |bundle: &mut WorkflowBundleManifest| {
+                wait_step(bundle).config.as_mut().unwrap()["session"] =
+                    serde_json::json!({"mode": "fork", "step_ref": "review"})
+            },
+            "steps[3].config.session.step_ref",
+        ),
+        (
+            "wait_children session without step ref",
+            |bundle: &mut WorkflowBundleManifest| {
+                wait_step(bundle).config.as_mut().unwrap()["session"] =
+                    serde_json::json!({"mode": "fork"})
+            },
+            "steps[3].config.session.step_ref",
+        ),
+        (
+            "wait_children session with a non-string step ref",
+            |bundle: &mut WorkflowBundleManifest| {
+                wait_step(bundle).config.as_mut().unwrap()["session"] =
+                    serde_json::json!({"mode": "fork", "step_ref": 7})
+            },
+            "steps[3].config.session.step_ref",
+        ),
+        (
+            "wait_children session that is not an object",
+            |bundle: &mut WorkflowBundleManifest| {
+                wait_step(bundle).config.as_mut().unwrap()["session"] =
+                    serde_json::json!("fork:start")
+            },
+            "steps[3].config.session",
+        ),
+        (
             "foreign edge session step ref",
             |bundle: &mut WorkflowBundleManifest| {
                 retry_edge(bundle).session = Some(StepEdgeSession {
@@ -308,6 +364,68 @@ fn validation_failures_are_table_driven_and_actionable() {
         let error = bundle.validate().expect_err(name);
         assert!(error.path.contains(path), "{name}: {error}");
     }
+}
+
+fn wait_step(bundle: &mut WorkflowBundleManifest) -> &mut StepManifest {
+    bundle.workflows[0]
+        .steps
+        .iter_mut()
+        .find(|step| step.step_ref == "wait")
+        .expect("golden bundle has a wait_children step")
+}
+
+#[test]
+fn cross_run_sessions_round_trip_as_step_refs() {
+    let mut bundle = golden();
+    let route_config = &bundle.workflows[0].steps[1].config.as_ref().unwrap()["route_config"];
+    assert_eq!(
+        route_config["rules"][1]["transition"]["type"],
+        "inter_workflow"
+    );
+    assert_eq!(
+        route_config["rules"][1]["session"],
+        serde_json::json!({"mode": "resume", "step_ref": "start"})
+    );
+    assert_eq!(
+        wait_step(&mut bundle).config.as_ref().unwrap()["session"],
+        serde_json::json!({"mode": "fork", "step_ref": "start"})
+    );
+    let reparsed = parse_manifest(&bundle.canonical_json().unwrap()).unwrap();
+    assert_eq!(reparsed, bundle.canonicalize());
+}
+
+#[test]
+fn wait_children_symbolization_names_the_fork_source_by_ref() {
+    let mut refs = RouteTargetRefs::default();
+    refs.step_refs.insert("step-id".into(), "start".into());
+    let config = serde_json::json!({
+        "version": 1,
+        "output_schema": null,
+        "session": {"mode": "fork", "step_id": "step-id"}
+    });
+    assert_eq!(
+        symbolize_wait_children_config(&config, &refs).unwrap(),
+        serde_json::json!({
+            "version": 1,
+            "output_schema": null,
+            "session": {"mode": "fork", "step_ref": "start"}
+        })
+    );
+
+    let without_session = serde_json::json!({"version": 1, "output_schema": null, "session": null});
+    assert_eq!(
+        symbolize_wait_children_config(&without_session, &refs).unwrap(),
+        serde_json::json!({"version": 1, "output_schema": null})
+    );
+
+    let foreign =
+        serde_json::json!({"version": 1, "session": {"mode": "fork", "step_id": "other"}});
+    let error = symbolize_wait_children_config(&foreign, &refs).unwrap_err();
+    assert_eq!(error.path, "session.step_id");
+
+    let malformed = serde_json::json!({"version": 1, "session": "fork:step-id"});
+    let error = symbolize_wait_children_config(&malformed, &refs).unwrap_err();
+    assert_eq!(error.path, "session");
 }
 
 fn retry_edge(bundle: &mut WorkflowBundleManifest) -> &mut StepEdge {

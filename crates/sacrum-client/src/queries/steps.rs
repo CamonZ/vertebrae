@@ -14,7 +14,7 @@ pub const STEP_FIELDS: &str = r#"
             ... on StructuredInferenceStepConfig { version provider model state questions }
             ... on ExecuteStepConfig { version script context output_schema }
             ... on RouteStepConfig { version route_config }
-            ... on WaitChildrenStepConfig { version output_schema }
+            ... on WaitChildrenStepConfig { version output_schema session }
         }
         persistence_options
         step_order
@@ -45,7 +45,7 @@ pub const WORKFLOW_EXPORT_STEP_FIELDS: &str = r#"
             ... on StructuredInferenceStepConfig { version provider model state questions }
             ... on ExecuteStepConfig { version script output_schema }
             ... on RouteStepConfig { version route_config }
-            ... on WaitChildrenStepConfig { version output_schema }
+            ... on WaitChildrenStepConfig { version output_schema session }
         }
         persistence_options
         step_order
@@ -220,7 +220,10 @@ mod tests {
             ));
             assert!(fragment.contains("... on ExecuteStepConfig"));
             assert!(fragment.contains("... on RouteStepConfig { version route_config }"));
-            assert!(fragment.contains("... on WaitChildrenStepConfig { version output_schema }"));
+            assert!(
+                fragment
+                    .contains("... on WaitChildrenStepConfig { version output_schema session }")
+            );
         }
         assert!(
             STEP_FIELDS

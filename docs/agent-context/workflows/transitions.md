@@ -36,6 +36,17 @@ route step cannot carry one: the route's decisions do.
 
 The backend validates it when the transitions are saved, with the same rules
 as route directives, and reports `$.session` plus the edge's endpoints.
+
+### Edges leaving a stop step
+A [stop](steps/stop.md) step's single edge is followed by the next TaskRun, so
+its directive continues a conversation across the run boundary: the
+destination resumes or forks `<step>`'s conversation in the run that stopped
+at the boundary.
+`vtb step update <pause> --transition-session <revise>=resume:<draft>` makes the
+post-boundary `revise` continue the pre-boundary `draft` conversation. If that
+run has no completed turn for `<step>`, the new run fails with
+`dispatch_failed` (Sacrum logs `session_not_found`) instead of starting fresh.
+Without a directive the destination starts a new conversation.
 `vtb step show` lists directives under `Transition Sessions:`; `step show/list`
 JSON maps destination step IDs to them in `transition_sessions`.
 

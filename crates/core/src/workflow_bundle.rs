@@ -12,7 +12,7 @@ mod route;
 mod tests;
 mod validation;
 
-pub use route::{RouteTargetRefs, symbolize_route_config};
+pub use route::{RouteTargetRefs, symbolize_route_config, symbolize_wait_children_config};
 pub use validation::ManifestValidationError;
 
 pub type WorkflowRef = String;

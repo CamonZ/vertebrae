@@ -130,6 +130,7 @@ vtb --json step add "Review" -w <workflow-id> --harness claude
 | `--order` | `-o` | Step order (default: 0) |
 | `--transition-to` | `-t` | Steps this can transition to (repeatable) |
 | `--transition-session` | | Session directive for one outgoing transition: `<TO>=<new\|resume\|fork>[:<STEP>]` (repeatable) |
+| `--children-session` | | `wait_children` only: `fork:<STEP>`, the parent conversation every child run forks |
 
 The required positional argument is `<name>`. `--workflow`,
 `--transition-to`, and the step IDs in `--transition-session` accept full UUIDs
@@ -162,6 +163,11 @@ mechanism.
 `<TO>` must be one of the `--transition-to` destinations. `<STEP>` is the step
 whose conversation is resumed or forked and defaults to `<TO>`; it is rejected
 with `new`. See [Session directives](#session-directives).
+
+`--children-session fork:<STEP>` is only valid for `wait_children` steps: every
+child run the step creates forks the conversation of `<STEP>`, an
+`llm_inference` step of this workflow, in the parent run. Sacrum accepts only
+`fork` and requires `<STEP>`. See [Session directives](#session-directives).
 
 `structured_inference` steps take only `--provider`, `--model`, `--state`, and
 `--fields`, and Sacrum requires all four on create. Agent, prompt, and output
@@ -247,11 +253,13 @@ as `-`. A configured route also lists each decision's session directive under
 `new`, `resume destination`, `fork step <step-id>`, or `(none)`. When any
 outgoing transition carries a directive, `Transition Sessions:` follows
 `Transitions:` with one `-> <step-id>: <directive>` line per transition in the
-same wording.
+same wording. A `wait_children` step shows `Children Session:` as
+`fork step <step-id>` or `(none)`.
 
 `--json` returns the raw `Step` object with fields such as `id`, `name`,
 `workflow_id`, `order`, `goal`, `step_type`, `config`, `persistence_options`,
-`transitions_to`, `transition_sessions`, and timestamps.
+`transitions_to`, `transition_sessions`, and timestamps. A `wait_children`
+step's `config.session` is `{"mode": "fork", "step_id": "<step-id>"}` when set.
 It does not wrap the result in an `output` field.
 
 `route_config` is nullable opaque JSON. An empty object is distinct from `null`;
@@ -371,6 +379,8 @@ vtb --json step update <step-id> --goal "New goal"
 | `--transition-to` | `-t` | Replace transitions list; repeatable |
 | `--clear-transitions` | | Clear all transitions |
 | `--transition-session` | | Set one outgoing transition's session directive, `<TO>=<new\|resume\|fork>[:<STEP>]`, or clear it with `<TO>=none`; repeatable |
+| `--children-session` | | `wait_children` only: set the fork every child run enters with, `fork:<STEP>` |
+| `--clear-children-session` | | `wait_children` only: clear it; children start new conversations |
 | `--speed-tier` | | New provider serving speed preference: `default` or `fast` |
 | `--personality` | | New provider style identifier; Codex accepts `none`, `friendly`, or `pragmatic` when supported by the selected model |
 | `--verbosity` | | New output detail level: `low`, `medium`, or `high`; alias `--output-verbosity`; currently valid with OpenAI/Codex |
@@ -511,18 +521,24 @@ be converted from another step type; create a new route step instead.
 
 Every `llm_inference` execution runs in a provider conversation. How it enters
 one is chosen by the path that led to it, never by the step: there are no
-session flags or config fields on `llm_inference` steps. Two carriers hold the
+session flags or config fields on `llm_inference` steps. Three carriers hold the
 same `session` directive:
 
 - A route decision: each rule and the default may carry `session` beside
   `transition` and `handoff`. Use it when the continuation depends on the
   route's outcome (loop back and resume on `needs_changes`, start fresh on
-  `approved`).
+  `approved`). An `inter_workflow` decision may resume or fork a conversation
+  of the route's own workflow in the destination workflow's entry step.
 - A step transition: an outgoing edge into an `llm_inference` step may carry
   one, authored with `--transition-session`. Use it for a fixed continuation,
   such as consecutive `llm_inference` steps that share one conversation with
   different prompts, without a route step between them. Transitions leaving a
-  route step cannot carry one; the route's decisions own those.
+  route step cannot carry one; the route's decisions own those. The edge
+  leaving a `stop` step is entered by the next TaskRun and continues the
+  conversation of the run that stopped there.
+- A `wait_children` step: `--children-session fork:<STEP>` gives every child
+  run it creates a fork of the parent run's `<STEP>` conversation, entered by
+  the child workflow's first step.
 
 ```json
 {
@@ -537,6 +553,24 @@ same `session` directive:
 ```bash
 vtb step update <draft-step-id> --transition-to <revise-step-id> \
   --transition-session <revise-step-id>=resume
+```
+
+An `inter_workflow` decision must name the step, because the destination's
+entry step is chosen when the route runs:
+
+```json
+{
+  "id": "handoff",
+  "when": {"ref": "previous_output.verdict", "op": "eq", "value": "ready"},
+  "transition": {"type": "inter_workflow", "workflow_id": "<review-workflow-id>"},
+  "session": {"mode": "resume", "step_id": "<implement-step-id>"}
+}
+```
+
+```bash
+vtb step add "Wait for children" -w <workflow-id> --step-type wait_children \
+  --harness claude --children-session fork:<plan-step-id>
+vtb step update <wait-step-id> --clear-children-session
 ```
 
 - `mode` is `new`, `resume`, or `fork`.
@@ -554,14 +588,34 @@ vtb step update <draft-step-id> --transition-to <revise-step-id> \
   conversation is the one its latest completed execution belongs to, and the
   resumed turn is that conversation's latest one, whichever step added it: if
   A starts a conversation and B resumes it, resuming A later continues after
-  B's turn. Other TaskRuns and failed executions are never resumed.
+  B's turn. Failed executions are never resumed.
+- Only the directly linked run is searched: the same TaskRun (route decisions,
+  transitions, and `inter_workflow` decisions, which keep the run), the run
+  that stopped at a `stop` step (for the edge leaving it, entered by the next
+  run), and the parent run (for `wait_children` children). No other run is
+  ever resumed.
+- Children only fork, so no two runs take turns in one provider conversation;
+  siblings fork independently and the parent's later turns are unaffected.
+  The fork applies to every child of the step; per-child selection is not
+  supported.
 - Resume and fork need the same harness: the destination and the `step_id`
-  step must be `llm_inference` steps of this workflow on one harness.
+  step must be `llm_inference` steps on one harness. Within a workflow this is
+  checked on save; for an `inter_workflow` destination or a child's entry step
+  it is checked at dispatch (`session_harness_mismatch`).
+- A resume or fork that reaches a step other than `llm_inference` (an
+  `inter_workflow` destination or a child workflow whose entry step is, say,
+  `human_input`) fails the TaskRun with `dispatch_failed`, its reason the step
+  id (Sacrum logs `session_requires_llm_inference`).
+- Claude stores sessions per working directory. A Claude child forks only a
+  parent conversation it can find from its own directory, so keep children in
+  the parent's checkout rather than in their own worktree; Codex threads are
+  not scoped by directory.
 - Nothing resumable fails instead of starting fresh. A step with no completed
-  execution in the TaskRun fails the TaskRun with `dispatch_failed` (its
-  reason is the step id; Sacrum logs `session_not_found`) without launching
-  the provider, and a provider that no longer has the conversation fails the
-  execution with its reason.
+  execution in the searched run (for a stop step's edge, the run that stopped
+  there) fails the TaskRun with `dispatch_failed` (its reason is the step id;
+  Sacrum logs `session_not_found`) without launching the provider, and a
+  provider that no longer has the conversation fails the execution with its
+  reason.
 - One conversation never runs two turns at once. Give parallel branches
   `fork`, not concurrent `resume`s of one conversation.
 
@@ -569,11 +623,20 @@ Sacrum validates directives when they are saved: unknown keys or modes,
 `step_id` with `new`, a directive whose destination is not an `llm_inference`
 step (for routes, an `intra_workflow` one), and a `step_id` that is not an
 `llm_inference` step of the same workflow on the destination's harness are
-rejected. Route directives report the `$.rules[<i>].session` or
-`$.default.session` path; transition directives report `$.session`, including
-one on a transition leaving a route step. In workflow bundles the directive's
-step is written as `session.step_ref`, in the route config and on
-`step_edges[].session`, and resolved back to `session.step_id` on import.
+rejected. An `inter_workflow` decision's `resume` or `fork` without `step_id`
+fails with `$.rules[<i>].session.step_id: is required with mode resume or fork`,
+and one naming a step outside the route's workflow, or not `llm_inference`,
+with `must be an llm_inference step in this workflow`. Route directives report
+the `$.rules[<i>].session` or `$.default.session` path; transition directives
+report `$.session`, including one on a transition leaving a route step. A
+`wait_children` session reports `$.session.mode: must be fork` for `resume` or
+`new`, `$.session.step_id: is required` without a step, and
+`$.session.step_id: must be an llm_inference step in this workflow` for a step
+outside the workflow or of another type. In workflow bundles the directive's
+step is written as `session.step_ref`, in the route config (for `intra_workflow`
+and `inter_workflow` decisions), on `step_edges[].session`, and in a
+`wait_children` step's `config.session`, and resolved back to `session.step_id`
+on import.
 
 ### Persistence Options
 

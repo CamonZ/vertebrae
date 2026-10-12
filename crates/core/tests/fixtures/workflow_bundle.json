@@ -77,6 +77,10 @@
                   },
                   "handoff": {
                     "source": "route"
+                  },
+                  "session": {
+                    "mode": "resume",
+                    "step_ref": "start"
                   }
                 },
                 {
@@ -167,7 +171,11 @@
           "step_type": "wait_children",
           "step_order": 3,
           "config": {
-            "version": 1
+            "version": 1,
+            "session": {
+              "mode": "fork",
+              "step_ref": "start"
+            }
           },
           "persistence_options": null
         },

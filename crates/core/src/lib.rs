@@ -81,7 +81,7 @@ pub use workflow_bundle::{
     ManifestError, ManifestValidationError, RouteTargetRefs, StepAddress, StepEdge,
     StepEdgeSession, StepManifest, StepRef, WorkflowBundle, WorkflowBundleManifest,
     WorkflowBundleNameConflict, WorkflowEdge, WorkflowManifest, WorkflowRef, parse_manifest,
-    symbolize_route_config,
+    symbolize_route_config, symbolize_wait_children_config,
 };
 pub use workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowBundleImportInput,

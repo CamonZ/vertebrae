@@ -162,6 +162,49 @@ async fn stage_workflow_bundle_fixture(world: &mut SmokeWorld) {
     );
 }
 
+/// Stages the shared fixture with one cross-run session replaced by `session`
+/// JSON: `surface` is `inter_workflow route` (the review rule) or
+/// `wait_children` (the wait step's config).
+#[when(expr = "I stage the built-in workflow bundle fixture with the {word} session {string}")]
+async fn stage_workflow_bundle_fixture_with_session(
+    world: &mut SmokeWorld,
+    surface: String,
+    session: String,
+) {
+    let mut fixture: Value = serde_json::from_str(include_str!(
+        "../../../core/tests/fixtures/workflow_bundle.json"
+    ))
+    .expect("built-in workflow bundle fixture should be valid JSON");
+    let session: Value = serde_json::from_str(&session).expect("session JSON");
+    let steps = fixture["workflows"][0]["steps"].as_array_mut().unwrap();
+    let step_ref = match surface.as_str() {
+        "inter_workflow" => "route",
+        "wait_children" => "wait",
+        other => panic!("unknown session surface {other:?}"),
+    };
+    let step = steps
+        .iter_mut()
+        .find(|step| step["step_ref"] == step_ref)
+        .unwrap();
+    if step_ref == "route" {
+        let rule = step["config"]["route_config"]["rules"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|rule| rule["transition"]["type"] == "inter_workflow")
+            .unwrap();
+        rule["session"] = session;
+    } else {
+        step["config"]["session"] = session;
+    }
+    let contents = serde_json::to_string(&fixture).expect("workflow fixture should serialize");
+    let path = world.write_temp_file(&contents);
+    world.stored_ids.insert(
+        "workflow_import_path".to_string(),
+        path.display().to_string(),
+    );
+}
+
 #[when("I stage a malformed workflow bundle")]
 async fn stage_malformed_workflow_bundle(world: &mut SmokeWorld) {
     let path = world.write_temp_file(r#"{"workflows":[{"workflow_ref":"broken","name":7}]}"#);
@@ -391,6 +434,49 @@ async fn roundtrip_bundles_should_preserve_route_session(world: &mut SmokeWorld)
     }
 }
 
+#[then("the roundtrip bundles should preserve the cross-run session directives")]
+async fn roundtrip_bundles_should_preserve_cross_run_sessions(world: &mut SmokeWorld) {
+    for key in [
+        "source_workflow_bundle_path",
+        "destination_workflow_bundle_path",
+    ] {
+        let bundle = read_workflow_bundle(world, key);
+        let steps: Vec<_> = bundle
+            .workflows
+            .iter()
+            .flat_map(|workflow| &workflow.steps)
+            .collect();
+        let start = steps
+            .iter()
+            .find(|step| step.name == "Start")
+            .unwrap_or_else(|| panic!("{key} must contain step Start"));
+        let route = steps
+            .iter()
+            .find(|step| step.step_type == vertebrae_core::StepType::Route)
+            .unwrap_or_else(|| panic!("{key} must contain the route step"));
+        let handoff = route.config.as_ref().unwrap()["route_config"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|rule| rule["transition"]["type"] == "inter_workflow")
+            .unwrap_or_else(|| panic!("{key} must keep the inter_workflow rule"));
+        assert_eq!(
+            handoff["session"],
+            json!({"mode": "resume", "step_ref": start.step_ref}),
+            "{key} must write the inter_workflow session step as a portable step_ref"
+        );
+        let wait = steps
+            .iter()
+            .find(|step| step.step_type == vertebrae_core::StepType::WaitChildren)
+            .unwrap_or_else(|| panic!("{key} must contain the wait_children step"));
+        assert_eq!(
+            wait.config.as_ref().unwrap()["session"],
+            json!({"mode": "fork", "step_ref": start.step_ref}),
+            "{key} must write the wait_children session step as a portable step_ref"
+        );
+    }
+}
+
 #[then("the roundtrip bundles should preserve the edge session directive")]
 async fn roundtrip_bundles_should_preserve_edge_session(world: &mut SmokeWorld) {
     for key in [
@@ -607,6 +693,16 @@ async fn destination_workflow_graph_should_match_import_mappings(world: &mut Smo
             if let Some(route_config) = expected_config.get_mut("route_config") {
                 *route_config = materialize_route_refs(
                     route_config,
+                    workflow_mappings,
+                    step_mappings,
+                    &workflow.workflow_ref,
+                );
+            }
+            if step.step_type == vertebrae_core::StepType::WaitChildren
+                && let Some(session) = expected_config.get_mut("session")
+            {
+                *session = materialize_route_refs(
+                    session,
                     workflow_mappings,
                     step_mappings,
                     &workflow.workflow_ref,

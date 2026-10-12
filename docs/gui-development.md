@@ -90,9 +90,12 @@ lists each rule and the default with its target and session mode
 each transition that carries a directive with its mode, plus the continued
 step when it is not the destination. An `llm_inference` step shows a
 Conversation section: the route decisions and transitions that enter it, and
-those that resume or fork its conversation into another step. The workflow's
-route steps are loaded with `useSteps`, which shares `useStep`'s per-step query
-cache so realtime step updates reach both.
+those that resume or fork its conversation into another step, including an
+`inter_workflow` decision (named by its destination workflow) and a
+`wait_children` step whose children fork it (`fork → children`). A
+`wait_children` step shows a Children Session section with its fork source. The
+workflow's route and `wait_children` steps are loaded with `useSteps`, which
+shares `useStep`'s per-step query cache so realtime step updates reach both.
 
 On the Atlas graph, every edge leaving a route step carries a chip naming the
 decisions that take it as `<rule> · <mode>` (`new` when a decision has no

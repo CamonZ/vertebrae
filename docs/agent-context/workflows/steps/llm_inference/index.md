@@ -5,7 +5,13 @@ The step's harness (`claude` or `codex`) runs the step's rendered prompt in the 
 Each execution runs in a provider conversation. The step has no session
 settings: it starts a new conversation unless the path that led to it carries a
 `session` directive to resume or fork one, either the route decision or the
-step transition it was entered over.
+step transition it was entered over. A conversation can come from:
+- an earlier step of the same TaskRun (a route decision, including an
+  `inter_workflow` one entering another workflow, or a step transition);
+- the run that stopped at a `stop` step, when the stop's edge carries the
+  directive and this step is entered by the next run;
+- the parent run, as a fork, when this step is a child workflow's first step
+  and the parent's `wait_children` step carries `--children-session`.
 
 - [Prompt templating](../../../templating/prompts.md): Liquid syntax and the variables a prompt can use.
   Load when: writing or debugging the prompt, `{{ task.* }}`, loops over sections, empty values.
@@ -17,7 +23,7 @@ step transition it was entered over.
   Load when: model choice, fast mode, deeper reasoning, replacing the agent config.
 - [Guardrails](guardrails.md): restricting what the agent may do (tools, permission mode, budget).
   Load when: "don't let it change code/push/comment", `disallowed_tools`, read-only review steps.
-- [Session directives](../route/sessions.md): continuing or branching a conversation across steps, from a route decision or a step transition.
-  Load when: "keep the same session", "resume the implementer", "continue in the next step", `--transition-session`, parallel branches sharing context.
+- [Session directives](../route/sessions.md): continuing or branching a conversation across steps, workflows, a stop boundary, or into child runs.
+  Load when: "keep the same session", "resume the implementer", "continue in the next step", `--transition-session`, `--children-session`, parallel branches sharing context, "continue after the pause", "children start from the parent's context".
 - [Templating context](../../../templating/context.md): everything available to interpolate.
   Load when: you need to know what data exists (previous output, handoff, other steps' outputs).

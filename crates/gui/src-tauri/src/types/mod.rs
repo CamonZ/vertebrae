@@ -782,6 +782,9 @@ pub struct WaitChildrenStepConfig {
     pub version: i32,
     /// JSON Schema describing the expected output of this step
     pub output_schema: Option<serde_json::Value>,
+    /// Fork directive every child run enters with; `step_id` names the
+    /// parent workflow's llm_inference step whose conversation is forked
+    pub session: Option<SessionDirective>,
 }
 
 /// A step's `step_type`-specific configuration, serialized as the bare
@@ -832,6 +835,7 @@ impl From<vertebrae_core::StepConfig> for StepConfig {
                 StepConfig::WaitChildren(WaitChildrenStepConfig {
                     version: config.version,
                     output_schema: config.output_schema,
+                    session: config.session.map(Into::into),
                 })
             }
         }

@@ -287,7 +287,57 @@ Feature: Step questions: prompt and agent-config
       | done             | {"mode":"new","step_id":"<backlog>"}             | $.rules[0].session.step_id | is not allowed with mode new  |
       | done             | {"mode":"resume","step_id":"<BadSessionRouter>"} | $.rules[0].session.step_id | must be an llm_inference step |
       | done             | {"mode":"fork","step_id":"<CodexPeer>"}          | $.rules[0].session.step_id | must use the same harness     |
-      | BadSessionRouter | {"mode":"resume"}                                | $.rules[0].session         | to an llm_inference step      |
+      | BadSessionRouter | {"mode":"resume"}                                | $.rules[0].session         | an llm_inference destination  |
+
+  Scenario: inter_workflow route decisions carry session directives unchanged
+    Given a second workflow "handoff-wf" with step "reviewer" reachable from the workflow
+    When I add and configure a deterministic route step "HandoffRouter" to the workflow
+    And I set the first rule of route step "HandoffRouter" to hand off to the second workflow with session '{"mode":"resume","step_id":"<backlog>"}'
+    Then the command should succeed
+    And the first rule of route step "HandoffRouter" should carry session '{"mode":"resume","step_id":"<backlog>"}' shown as "resume step <backlog>"
+    When I set the first rule of route step "HandoffRouter" to hand off to the second workflow with session '{"mode":"fork","step_id":"<backlog>"}'
+    Then the command should succeed
+    And the first rule of route step "HandoffRouter" should carry session '{"mode":"fork","step_id":"<backlog>"}' shown as "fork step <backlog>"
+
+  Scenario Outline: Sacrum rejects invalid inter_workflow route session directives with their path
+    Given a second workflow "handoff-wf" with step "reviewer" reachable from the workflow
+    When I add and configure a deterministic route step "BadHandoffRouter" to the workflow
+    And I set the first rule of route step "BadHandoffRouter" to hand off to the second workflow with session '<session>'
+    Then the command should fail with "<path>"
+    And the error should contain "<message>"
+
+    Examples:
+      | session                              | path                       | message                                       |
+      | {"mode":"resume"}                    | $.rules[0].session.step_id | is required with mode resume or fork          |
+      | {"mode":"fork","step_id":"<reviewer>"} | $.rules[0].session.step_id | must be an llm_inference step in this workflow |
+      | {"mode":"new","step_id":"<backlog>"} | $.rules[0].session.step_id | is not allowed with mode new                  |
+
+  Scenario: wait_children steps carry a fork session directive unchanged
+    When I add a wait_children step "Children" to the workflow with children session "fork:<backlog>"
+    Then the command should succeed
+    And the wait_children step "Children" should carry children session '{"mode":"fork","step_id":"<backlog>"}' shown as "fork step <backlog>"
+    When I set the children session of step "Children" to "none"
+    Then the command should succeed
+    And the wait_children step "Children" should carry children session "none" shown as "(none)"
+    When I set the children session of step "Children" to "fork:<backlog>"
+    Then the command should succeed
+    And the wait_children step "Children" should carry children session '{"mode":"fork","step_id":"<backlog>"}' shown as "fork step <backlog>"
+
+  Scenario Outline: Sacrum rejects invalid wait_children session directives with their path
+    When I add a step "Gate" to the workflow with flag "--step-type" and value "human_input"
+    And I add a wait_children step "BadChildren" to the workflow with children session "<directive>"
+    Then the command should fail with "<path>"
+    And the error should contain "<message>"
+
+    Examples:
+      | directive        | path              | message                                        |
+      | resume:<backlog> | $.session.mode    | must be fork                                   |
+      | fork             | $.session.step_id | is required                                    |
+      | fork:<Gate>      | $.session.step_id | must be an llm_inference step in this workflow |
+
+  Scenario: Only wait_children steps take a children session
+    When I add a step "Plain" to the workflow with flag "--children-session" and value "fork:a1b2c3d4"
+    Then the command should fail with "$.session: is not supported for llm_inference steps"
 
   Scenario: Transitions carry session directives unchanged
     When I set the session of the transition from "backlog" to "done" to "resume"

@@ -215,7 +215,7 @@ async fn step_id_by_name(world: &mut DaemonWorld, workflow_id: &str, name: &str)
         .unwrap_or_else(|| panic!("step {name:?} not found in workflow: {steps}"))
 }
 
-async fn list_task_runs(world: &DaemonWorld, task_id: &str) -> Vec<TaskRunResponse> {
+pub(crate) async fn list_task_runs(world: &DaemonWorld, task_id: &str) -> Vec<TaskRunResponse> {
     let client = world
         .graphql_client
         .as_ref()

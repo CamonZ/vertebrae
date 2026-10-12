@@ -39,7 +39,7 @@ fn verdict_schema() -> String {
     .to_string()
 }
 
-fn fixture(world: &DaemonWorld, role: &str) -> String {
+pub(crate) fn fixture(world: &DaemonWorld, role: &str) -> String {
     world
         .fixture_ids
         .get(role)
@@ -51,9 +51,18 @@ fn is_codex(world: &DaemonWorld) -> bool {
     fixture(world, "harness") == "codex"
 }
 
-async fn add_step(world: &mut DaemonWorld, name: &str, extra: &[&str]) -> String {
+pub(crate) async fn add_step(world: &mut DaemonWorld, name: &str, extra: &[&str]) -> String {
     let workflow_id = world.workflow_id.clone().expect("workflow not created");
-    let mut args = vec!["step", "add", name, "--workflow", &workflow_id];
+    add_step_to(world, &workflow_id, name, extra).await
+}
+
+pub(crate) async fn add_step_to(
+    world: &mut DaemonWorld,
+    workflow_id: &str,
+    name: &str,
+    extra: &[&str],
+) -> String {
+    let mut args = vec!["step", "add", name, "--workflow", workflow_id];
     args.extend_from_slice(extra);
     world.run_vtb(&args).await;
     world.assert_vtb_ok(&format!("step add {name}"));
@@ -66,7 +75,23 @@ async fn add_step(world: &mut DaemonWorld, name: &str, extra: &[&str]) -> String
         .to_string()
 }
 
-async fn llm_step(world: &mut DaemonWorld, name: &str, harness: &str, order: &str) -> String {
+pub(crate) async fn llm_step(
+    world: &mut DaemonWorld,
+    name: &str,
+    harness: &str,
+    order: &str,
+) -> String {
+    let workflow_id = world.workflow_id.clone().expect("workflow not created");
+    llm_step_in(world, &workflow_id, name, harness, order).await
+}
+
+pub(crate) async fn llm_step_in(
+    world: &mut DaemonWorld,
+    workflow_id: &str,
+    name: &str,
+    harness: &str,
+    order: &str,
+) -> String {
     let schema = verdict_schema();
     let mut args = vec![
         "--order",
@@ -88,7 +113,7 @@ async fn llm_step(world: &mut DaemonWorld, name: &str, harness: &str, order: &st
     } else {
         args.extend(["--model", "claude-sonnet-4-6"]);
     }
-    add_step(world, name, &args).await
+    add_step_to(world, workflow_id, name, &args).await
 }
 
 /// work -> route -> {work, review, finish}; review -> finish. The route's
@@ -193,7 +218,7 @@ pub async fn given_route_session(
     world.assert_vtb_ok("step update --route-config");
 }
 
-async fn create_session_workflow(world: &mut DaemonWorld) {
+pub(crate) async fn create_session_workflow(world: &mut DaemonWorld) {
     let name = format!("daemon-acc-session-{}", uuid::Uuid::new_v4().simple());
     world.run_vtb(&["workflow", "add", &name]).await;
     world.assert_vtb_ok("workflow add");
@@ -265,7 +290,11 @@ pub async fn given_linear_session_workflow(
     }
 }
 
-fn answer(world: &DaemonWorld, label: &str, verdict: &str) -> daemon_acceptance::MockResponse {
+pub(crate) fn answer(
+    world: &DaemonWorld,
+    label: &str,
+    verdict: &str,
+) -> daemon_acceptance::MockResponse {
     let output = json!({"verdict": verdict});
     let response = world.mock_response(label);
     if is_codex(world) {
@@ -283,7 +312,7 @@ fn answer(world: &DaemonWorld, label: &str, verdict: &str) -> daemon_acceptance:
     }
 }
 
-async fn set_prompt(
+pub(crate) async fn set_prompt(
     world: &mut DaemonWorld,
     role: &str,
     response: daemon_acceptance::MockResponse,
@@ -399,7 +428,7 @@ pub async fn wait_for_work_executions(world: &mut DaemonWorld, count: usize, sta
 }
 
 /// Claude launches of persistent step sessions, in order.
-fn claude_launches(world: &DaemonWorld) -> Vec<Vec<String>> {
+pub(crate) fn claude_launches(world: &DaemonWorld) -> Vec<Vec<String>> {
     let path = world.capture_dir.join("invocations.jsonl");
     std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("no captured invocations at {}: {error}", path.display()))
@@ -409,7 +438,7 @@ fn claude_launches(world: &DaemonWorld) -> Vec<Vec<String>> {
         .collect()
 }
 
-fn flag_value(argv: &[String], flag: &str) -> Option<String> {
+pub(crate) fn flag_value(argv: &[String], flag: &str) -> Option<String> {
     let prefix = format!("{flag}=");
     argv.iter().enumerate().find_map(|(index, arg)| {
         if arg == flag {
@@ -420,7 +449,7 @@ fn flag_value(argv: &[String], flag: &str) -> Option<String> {
     })
 }
 
-fn codex_requests(world: &DaemonWorld, method: &str) -> Vec<Value> {
+pub(crate) fn codex_requests(world: &DaemonWorld, method: &str) -> Vec<Value> {
     world
         .captured_codex_requests()
         .into_iter()

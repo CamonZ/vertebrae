@@ -80,6 +80,16 @@ Task abc123 has no assigned workflow
 3. The daemon executes workflow steps and reports progress back to Sacrum
 4. `stop-taskrun` asks the backend to stop the active TaskRun for the task
 
+A `stop` step ends a TaskRun at a run boundary. `start-taskrun` on a task
+positioned there creates a new TaskRun that bypasses the stop and continues
+from its single outgoing transition. That run continues a conversation only
+when the edge leaving the stop carries a session directive
+(`vtb step update <stop-step-id> --transition-session <next-step-id>=resume:<step-id>`):
+its first `llm_inference` step then resumes or forks `<step-id>`'s
+conversation in the run that stopped there, and fails with `dispatch_failed`
+(Sacrum logs `session_not_found`) if that run has no completed turn for it.
+Without a directive it starts a new conversation.
+
 ## Difference from `/run`
 
 - `/run` executes only the current step and requires a connected daemon

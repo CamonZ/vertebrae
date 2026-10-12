@@ -218,7 +218,7 @@ impl StepType {
             StepType::StructuredInference => Some(&["provider", "model", "state", "questions"]),
             StepType::Execute => Some(&["version", "script", "output_schema"]),
             StepType::Route => Some(&["route_config"]),
-            StepType::WaitChildren => Some(&["output_schema"]),
+            StepType::WaitChildren => Some(&["output_schema", "session"]),
             StepType::HumanInput | StepType::Stop | StepType::Finish => None,
             // Sacrum is the authority for types this client does not know.
             StepType::Unsupported(_) => None,
@@ -1892,6 +1892,11 @@ pub struct WaitChildrenConfig {
     /// JSON Schema describing the expected output of this step
     #[serde(default)]
     pub output_schema: Option<serde_json::Value>,
+    /// Fork directive every child run enters with: `{mode: fork, step_id}`
+    /// naming an llm_inference step of this workflow. Sacrum rejects any
+    /// other mode and a missing `step_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionDirective>,
 }
 
 impl Default for WaitChildrenConfig {
@@ -1899,6 +1904,7 @@ impl Default for WaitChildrenConfig {
         Self {
             version: STEP_CONFIG_VERSION,
             output_schema: None,
+            session: None,
         }
     }
 }
@@ -4010,7 +4016,7 @@ mod tests {
         );
         assert_eq!(
             StepType::WaitChildren.config_fields(),
-            Some(&["output_schema"][..])
+            Some(&["output_schema", "session"][..])
         );
         for step_type in [StepType::HumanInput, StepType::Stop, StepType::Finish] {
             assert_eq!(step_type.config_fields(), None);
@@ -4028,6 +4034,7 @@ mod tests {
             Some(StepConfig::WaitChildren(WaitChildrenConfig {
                 version: 1,
                 output_schema: Some(schema.clone()),
+                session: None,
             }))
         );
         assert_eq!(step.output_schema(), Some(&schema));

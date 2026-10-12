@@ -133,6 +133,7 @@ const SESSION_ROUTE = {
     {
       id: "handoff",
       transition: { type: "inter_workflow", workflow_id: "wf-review" },
+      session: { mode: "resume", step_id: "s1" },
     },
     { id: "plain", transition: { type: "intra_workflow", step_id: "s1" } },
   ],
@@ -761,7 +762,7 @@ describe("StepInspector", () => {
     expect(rows.map((row) => row.textContent)).toEqual([
       "again→Planresume",
       "revise→Executeresume · Plan",
-      "handoff→wf-review—",
+      "handoff→wf-reviewresume · Plan",
       "plain→Plannew (implicit)",
       "default→Executefork",
     ]);
@@ -798,6 +799,7 @@ describe("StepInspector", () => {
     expect(entries.map((entry) => entry.textContent)).toEqual([
       "Ship · againresume",
       "Ship · reviseresume → Execute",
+      "Ship · handoffresume → wf-review",
       "Ship · plainnew (implicit)",
     ]);
     fireEvent.click(within(entries[0]).getByRole("button"));
@@ -860,6 +862,93 @@ describe("StepInspector", () => {
         .getAllByTestId("step-conversation-entry")
         .map((entry) => entry.textContent)
     ).toEqual(["Draft · transitionresume · Draft"]);
+  });
+
+  it("shows the conversation a wait_children step's children fork", () => {
+    const onSelect = vi.fn();
+    const model = buildAtlasModel({
+      workflows: [
+        makeWorkflow("wf-parent", [
+          makeStep("plan", "wf-parent", 0, { name: "Plan" }),
+          makeStep("wait", "wf-parent", 1, {
+            name: "Wait",
+            step_type: "wait_children",
+          }),
+        ]),
+      ],
+    });
+    const waitStep = stepFixture({
+      id: "wait",
+      name: "Wait",
+      workflow_id: "wf-parent",
+      step_type: "wait_children",
+      config: {
+        version: 1,
+        output_schema: null,
+        session: { mode: "fork", step_id: "plan" },
+      },
+    });
+    mockUseStep(waitStep);
+    const wait = render(
+      <StepInspector
+        model={model}
+        workflowId="wf-parent"
+        stepId="wait"
+        onSelect={onSelect}
+        onClose={vi.fn()}
+      />
+    );
+    const section = screen.getByTestId("children-session-section");
+    expect(section).toHaveTextContent("forkPlan");
+    fireEvent.click(within(section).getByRole("button", { name: "Plan" }));
+    expect(onSelect).toHaveBeenCalledWith({
+      type: "step",
+      workflowId: "wf-parent",
+      stepId: "plan",
+    });
+    wait.unmount();
+
+    mockUseStep(
+      stepFixture({ id: "plan", name: "Plan", workflow_id: "wf-parent" })
+    );
+    vi.mocked(useSteps).mockReturnValue([waitStep]);
+    render(
+      <StepInspector
+        model={model}
+        workflowId="wf-parent"
+        stepId="plan"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    expect(useSteps).toHaveBeenCalledWith(["wait"], true);
+    expect(
+      screen
+        .getAllByTestId("step-conversation-entry")
+        .map((entry) => entry.textContent)
+    ).toEqual(["Wait · childrenfork → children"]);
+  });
+
+  it("says a wait_children step without a session starts new conversations", () => {
+    mockUseStep(
+      stepFixture({
+        id: "s3",
+        step_type: "wait_children",
+        config: { version: 1, output_schema: null, session: null },
+      })
+    );
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s3"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("children-session-section")).toHaveTextContent(
+      "Children start new conversations"
+    );
   });
 
   it("says an llm step without route decisions starts new conversations", () => {
