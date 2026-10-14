@@ -1526,58 +1526,41 @@ describe("doStartSession", () => {
     );
   });
 
-  it("infers a title for a new automatic-label session from the first prompt", async () => {
-    const deps = {
-      setBackendSessionId: vi.fn(),
-      setBackendSessionIdRef: vi.fn(),
-      addMessage: vi.fn(),
-      setSessionTitleCandidate: vi.fn(),
-      setSessionLifecycle: vi.fn(),
-    };
+  it.each(["claude", "codex"] as const)(
+    "infers a title for a new %s session without native title events",
+    async (harness) => {
+      const deps = {
+        setBackendSessionId: vi.fn(),
+        setBackendSessionIdRef: vi.fn(),
+        addMessage: vi.fn(),
+        setSessionTitleCandidate: vi.fn(),
+        setSessionLifecycle: vi.fn(),
+      };
 
-    await doStartSession(
-      makeSession({ label: "New Chat", harness: "codex" }),
-      SESSION_ID,
-      deps,
-      "Implement title inference"
-    );
+      await doStartSession(
+        makeSession({ label: "New Chat", harness }),
+        SESSION_ID,
+        deps,
+        "Implement title inference"
+      );
 
-    expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
-      harness: "codex",
-      initial_prompts: ["Implement title inference"],
-      working_dir: "/test/project",
-    });
-    await vi.waitFor(() =>
-      expect(deps.setSessionTitleCandidate).toHaveBeenCalledWith(SESSION_ID, {
-        title: "Inferred Title",
-        confidence: 0.91,
-        sufficientSignal: true,
-        userMessageCount: 1,
-      })
-    );
-  });
+      expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
+        harness,
+        initial_prompts: ["Implement title inference"],
+        working_dir: "/test/project",
+      });
+      await vi.waitFor(() =>
+        expect(deps.setSessionTitleCandidate).toHaveBeenCalledWith(SESSION_ID, {
+          title: "Inferred Title",
+          confidence: 0.91,
+          sufficientSignal: true,
+          userMessageCount: 1,
+        })
+      );
+    }
+  );
 
-  it("does not invoke inference for automatic Claude naming", async () => {
-    const deps = {
-      setBackendSessionId: vi.fn(),
-      setBackendSessionIdRef: vi.fn(),
-      addMessage: vi.fn(),
-      setSessionTitleCandidate: vi.fn(),
-      setSessionLifecycle: vi.fn(),
-    };
-
-    await doStartSession(
-      makeSession({ label: "New Chat", harness: "claude" }),
-      SESSION_ID,
-      deps,
-      "Hello"
-    );
-
-    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
-    expect(deps.setSessionTitleCandidate).not.toHaveBeenCalled();
-  });
-
-  it("does not retry inference for automatic Claude naming", async () => {
+  it("retries low-confidence Claude title inference with an additional user prompt", async () => {
     const deps = {
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
@@ -1605,9 +1588,103 @@ describe("doStartSession", () => {
       "Implement session title confidence"
     );
 
-    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
-    expect(deps.setSessionTitleCandidate).not.toHaveBeenCalled();
+    expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
+      harness: "claude",
+      initial_prompts: ["Hello", "Implement session title confidence"],
+      working_dir: "/test/project",
+    });
+    await vi.waitFor(() =>
+      expect(deps.setSessionTitleCandidate).toHaveBeenCalledWith(SESSION_ID, {
+        title: "Inferred Title",
+        confidence: 0.91,
+        sufficientSignal: true,
+        userMessageCount: 2,
+      })
+    );
   });
+
+  it("routes automatic Claude title inference through the session's custom provider", async () => {
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionTitleCandidate: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+    await doStartSession(
+      makeSession({
+        label: "New Chat",
+        harness: "claude",
+        providerId: "custom-claude",
+      }),
+      SESSION_ID,
+      deps,
+      "Implement title inference"
+    );
+    expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
+      harness: "claude",
+      provider_id: "custom-claude",
+      initial_prompts: ["Implement title inference"],
+      working_dir: "/test/project",
+    });
+  });
+
+  it.each(["generated", "manual"] as const)(
+    "preserves a %s Claude title received while inference is pending",
+    async (titleStatus) => {
+      const session = makeSession({ label: "New Chat", harness: "claude" });
+      useChatStore.setState({ sessions: { [SESSION_ID]: session } });
+      let resolve!: (
+        value: Awaited<ReturnType<typeof commands.inferLocalChatSessionTitle>>
+      ) => void;
+      mockedCommands.inferLocalChatSessionTitle.mockReturnValueOnce(
+        new Promise((res) => {
+          resolve = res;
+        })
+      );
+      const setSessionTitleCandidate = vi.fn(
+        useChatStore.getState().setSessionTitleCandidate
+      );
+      await doStartSession(
+        session,
+        SESSION_ID,
+        {
+          setBackendSessionId: vi.fn(),
+          addMessage: vi.fn(),
+          setSessionLifecycle: vi.fn(),
+          setSessionTitleCandidate,
+        },
+        "Implement title inference"
+      );
+      expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledTimes(
+        1
+      );
+      const current = useChatStore.getState().sessions[SESSION_ID];
+      useChatStore.setState({
+        sessions: {
+          [SESSION_ID]: {
+            ...current,
+            title: "Keep This Title",
+            titleStatus,
+          },
+        },
+      });
+      resolve({
+        status: "ok",
+        data: {
+          title: "Delayed Inference",
+          confidence: 0.91,
+          sufficient_signal: true,
+        },
+      });
+      await vi.waitFor(() =>
+        expect(setSessionTitleCandidate).toHaveBeenCalled()
+      );
+      expect(useChatStore.getState().sessions[SESSION_ID]).toMatchObject({
+        title: "Keep This Title",
+        titleStatus,
+      });
+    }
+  );
 
   it("does not infer a title for custom-labeled sessions", async () => {
     const deps = {
@@ -2457,17 +2534,23 @@ describe("doCloseSession", () => {
     useChatStore.getState().setBackendSessionId(id, CLAUDE_SESSION_ID);
     useChatStore.getState().updateLastAssistantMessage(id, "Stopped reply");
 
-    const closed = await doCloseSession(CLAUDE_SESSION_ID, id, {
-      markSessionClosed: (sessionId) =>
-        useChatStore.getState().setSessionLifecycle(sessionId, "idle"),
-      setSessionLifecycle: useChatStore.getState().setSessionLifecycle,
-      setBackendSessionId: useChatStore.getState().setBackendSessionId,
-      clearStreamingAssistant: useChatStore.getState().clearStreamingAssistant,
-      interruptStreamingAssistant:
-        useChatStore.getState().interruptStreamingAssistant,
-    }, {
-      preserveInterrupted: true,
-    });
+    const closed = await doCloseSession(
+      CLAUDE_SESSION_ID,
+      id,
+      {
+        markSessionClosed: (sessionId) =>
+          useChatStore.getState().setSessionLifecycle(sessionId, "idle"),
+        setSessionLifecycle: useChatStore.getState().setSessionLifecycle,
+        setBackendSessionId: useChatStore.getState().setBackendSessionId,
+        clearStreamingAssistant:
+          useChatStore.getState().clearStreamingAssistant,
+        interruptStreamingAssistant:
+          useChatStore.getState().interruptStreamingAssistant,
+      },
+      {
+        preserveInterrupted: true,
+      }
+    );
 
     expect(closed).toBe(true);
     expect(useChatStore.getState().sessions[id]).toMatchObject({
