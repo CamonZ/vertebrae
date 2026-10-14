@@ -20,6 +20,9 @@ Use this when: the user wants to run a task or asks about a run's state.
 - Assign a workflow first; a task at the wrong step starts from that step.
 - A new run has no `steps.*` history. Starting mid-workflow breaks templates
   that reference earlier steps (see [templating context](../templating/context.md)).
+  Prefer [named artifacts](../artifacts.md#designing-for-recovery) for completed
+  outputs needed across restarts, with explicit reads and validity checks in
+  consumers; artifacts do not repopulate `steps.*`.
 - A run started past a `stop` step continues the stopped run's provider
   conversation only when the stop's edge carries a
   [session directive](../workflows/steps/route/sessions.md); otherwise its first

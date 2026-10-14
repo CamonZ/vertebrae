@@ -9,10 +9,21 @@ Use this when: a run failed or is stuck.
 - Dispatch-time failures (template render, graph errors) fail the run without executing.
 - The task stays on the failing step.
 
+## Designing recoverable workflows
+Prefer [named task artifacts](../artifacts.md#designing-for-recovery) for
+completed outputs needed across TaskRun restarts. Producers need an output
+schema and `persistence_options`; consumers must explicitly read the stored
+artifact rather than relying on a previous run's `steps.*` history. Check that
+required artifacts exist and match the current inputs before reusing them;
+recompute missing or stale results. Persistence preserves completed results,
+not the progress of an interrupted step, and does not restart a run itself.
+
 ## Recovering (each action needs consent)
 1. Find the cause: [failure table](../debugging/failure-table.md), daemon logs, run outcome.
 2. Fix it (step config, route, credentials, restart the daemon).
-3. If later steps depend on `steps.*` from earlier in the run, move the task
+3. Check the intended restart step's inputs. If it reads artifacts, verify they
+   are present and valid for the current task. If later steps depend on `steps.*`
+   from earlier in the run, move the task
    back to the workflow's first step: `vtb transition-to <task> <first-step> --skip-validation`.
 4. Start a new run: `vtb start-taskrun <task>`.
 
@@ -21,4 +32,4 @@ Use this when: a run failed or is stuck.
 - Do not add "back" edges to non-route steps to make manual moves legal; it breaks runs.
 
 ## Related
-[TaskRuns](taskruns.md) · [Debugging](../debugging/index.md)
+[TaskRuns](taskruns.md) · [Artifacts](../artifacts.md) · [Debugging](../debugging/index.md)

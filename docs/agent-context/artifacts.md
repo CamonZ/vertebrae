@@ -28,6 +28,27 @@ Give every step whose result matters a logical name (e.g. `bug_summary`,
 `bug_triage`, `bug_outcome`), and end workflows with one step that composes a
 final outcome artifact (decision, reason, key signals) so there is one place to look.
 
+## Designing for recovery
+Prefer named task artifacts for completed step outputs that downstream steps
+must reuse after a TaskRun fails and a new run starts. Configure the producer
+with an output schema and `--persistence-options`, then make consumers read the
+artifact explicitly: an execute script can use
+`vtb::artifacts::read_json(task.id, "bug_triage")`
+([artifact reads](workflows/steps/execute/host-reads.md)); an agent can use the
+CLI lookup above. Artifact bindings expose IDs, not bodies.
+
+A new TaskRun has no previous run's `steps.*` history. Saving an artifact does
+not restore those bindings, automatically resume a run, or checkpoint a step
+interrupted before its output was validated and stored. Check that a saved
+result matches the current task inputs before reusing it; missing or stale
+results require recomputation. Use stable logical names and include enough
+input/version information in the output to decide whether it is still valid.
+Repeated writes replace the named result, so it is not a per-attempt archive.
+
+See [retries and recovery](running/retries-and-recovery.md) before restarting;
+steps that still depend on earlier `steps.*` outputs must be rerun from a point
+that rebuilds those dependencies.
+
 ## Gotchas
 - Task-scoped listing does not include children's artifacts; list each child.
 - A step without an output schema cannot persist; the backend rejects the options when saving.
