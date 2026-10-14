@@ -88,7 +88,15 @@ export interface ModalProps {
 export type ToastType = "success" | "error" | "warning" | "info";
 
 /** Entities currently represented by the notifications panel. */
-export type NotificationEntity = "task" | "step" | "application";
+export type NotificationEntity = "task" | "step" | "application" | "project";
+
+/** Sacrum state carried by a durable project notification. */
+export interface DurableNotificationState {
+  /** Sacrum's RFC 3339 timestamp, kept verbatim for history cursors. */
+  insertedAt: string;
+  /** When the notification was marked read in Sacrum, else null. */
+  readAt: string | null;
+}
 
 /** Input used when appending an ephemeral notification. */
 export interface NotificationInput {
@@ -99,7 +107,10 @@ export interface NotificationInput {
   timestamp?: number;
 }
 
-/** Ephemeral notification retained for the current application session. */
+/**
+ * A notification in the Activity panel: ephemeral session activity, or a
+ * durable project notification published through Sacrum when `durable` is set.
+ */
 export interface NotificationMessage {
   /** Unique identifier for the notification */
   id: string;
@@ -115,6 +126,11 @@ export interface NotificationMessage {
   timestamp: number;
   /** Whether the user has marked this notification as read */
   read: boolean;
+  /**
+   * Present on durable notifications: `id` is the Sacrum ID, `message` is
+   * Markdown and read state lives in Sacrum.
+   */
+  durable?: DurableNotificationState;
 }
 
 /**

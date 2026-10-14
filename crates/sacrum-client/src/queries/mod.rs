@@ -1,6 +1,7 @@
 pub mod artifacts;
 pub mod daemons;
 pub mod executions;
+pub mod notifications;
 pub mod pipeline;
 pub mod projects;
 pub mod steps;

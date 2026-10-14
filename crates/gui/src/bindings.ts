@@ -215,6 +215,29 @@ async listTaskArtifacts(taskId: string) : Promise<Result<Artifact[], CommandErro
 }
 },
 /**
+ * Read one page of the active project's notification history, oldest first,
+ * starting strictly after the `(after_inserted_at, after_id)` cursor.
+ */
+async listProjectNotifications(afterInsertedAt: string | null, afterId: string | null, limit: number | null, unreadOnly: boolean) : Promise<Result<NotificationPage, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_project_notifications", { afterInsertedAt, afterId, limit, unreadOnly }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Mark notifications read in Sacrum and return the ones that are now read.
+ */
+async markNotificationsRead(ids: string[]) : Promise<Result<Notification[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mark_notifications_read", { ids }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Set the parent task
  *
  * Sets the parent of the given task. If the task already has a parent, it will be replaced.
@@ -1143,6 +1166,7 @@ localChatTextEvent: LocalChatTextEvent,
 localChatToolCallEvent: LocalChatToolCallEvent,
 localChatToolResultEvent: LocalChatToolResultEvent,
 localChatTurnStartedEvent: LocalChatTurnStartedEvent,
+notificationChangedEvent: NotificationChangedEvent,
 permissionRequestEvent: PermissionRequestEvent,
 sectionChangedEvent: SectionChangedEvent,
 sessionLogCreatedEvent: SessionLogCreatedEvent,
@@ -1173,6 +1197,7 @@ localChatTextEvent: "local-chat-text-event",
 localChatToolCallEvent: "local-chat-tool-call-event",
 localChatToolResultEvent: "local-chat-tool-result-event",
 localChatTurnStartedEvent: "local-chat-turn-started-event",
+notificationChangedEvent: "notification-changed-event",
 permissionRequestEvent: "permission-request-event",
 sectionChangedEvent: "section-changed-event",
 sessionLogCreatedEvent: "session-log-created-event",
@@ -1542,6 +1567,27 @@ export type LocalChatTurnStartedEvent = { backend_session_id: string; harness: L
  * An application or editor command that can open local source/text files.
  */
 export type LocalFileEditor = { id: string; name: string; path: string }
+/**
+ * A durable project notification. `message` is Markdown exactly as
+ * published; timestamps are RFC 3339 with microseconds so they can be sent
+ * back as a history cursor.
+ */
+export type Notification = { id: string; project_id: string; message: string; severity: NotificationSeverity; inserted_at: string; read_at: string | null }
+export type NotificationChangeType = "Created" | "Updated" | "Deleted"
+/**
+ * A durable notification changed on the active Sacrum project: published,
+ * marked read, or deleted with its project or account. Every variant carries
+ * the complete notification.
+ */
+export type NotificationChangedEvent = { change_type: NotificationChangeType; notification: Notification }
+/**
+ * One page of a project's notification history, oldest first.
+ */
+export type NotificationPage = { notifications: Notification[]; has_more: boolean }
+/**
+ * How a durable notification is styled.
+ */
+export type NotificationSeverity = "info" | "success" | "warning" | "error"
 export type PermissionDecisionBehavior = "allow" | "deny"
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode

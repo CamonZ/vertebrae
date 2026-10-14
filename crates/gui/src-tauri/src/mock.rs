@@ -11,6 +11,10 @@ use vertebrae_core::artifact_service::ArtifactService;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::execution_service::{ExecutionService, StopRunTarget};
 use vertebrae_core::models::*;
+use vertebrae_core::notification_service::{
+    validate_notification_message, Notification, NotificationPage, NotificationPageQuery,
+    NotificationService, NotificationSeverity,
+};
 use vertebrae_core::service::*;
 use vertebrae_core::step_service::StepService;
 use vertebrae_core::workflow_service::*;
@@ -1463,6 +1467,86 @@ impl ArtifactService for MockArtifactService {
 }
 
 // ============================================================================
+// MockNotificationService
+// ============================================================================
+
+/// Notifications in publication order, paged and marked read like Sacrum.
+#[derive(Default)]
+pub struct MockNotificationService {
+    notifications: Mutex<Vec<Notification>>,
+}
+
+#[async_trait]
+impl NotificationService for MockNotificationService {
+    async fn publish_notification(
+        &self,
+        message: &str,
+        severity: NotificationSeverity,
+    ) -> ServiceResult<Notification> {
+        validate_notification_message(message)?;
+        let mut notifications = self.notifications.lock().unwrap();
+        // Microsecond timestamps, strictly increasing, like Sacrum's history order.
+        let now = chrono::SubsecRound::trunc_subsecs(Utc::now(), 6);
+        let inserted_at = notifications.last().map_or(now, |last| {
+            now.max(last.inserted_at + chrono::Duration::microseconds(1))
+        });
+        let notification = Notification {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id: "mock-project".into(),
+            message: message.into(),
+            severity,
+            inserted_at,
+            read_at: None,
+        };
+        notifications.push(notification.clone());
+        Ok(notification)
+    }
+
+    async fn list_notifications(
+        &self,
+        query: NotificationPageQuery,
+    ) -> ServiceResult<NotificationPage> {
+        let limit = query.limit.unwrap_or(50);
+        let mut matching: Vec<Notification> = self
+            .notifications
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|notification| !query.unread_only || notification.read_at.is_none())
+            .filter(|notification| {
+                query.after.as_ref().is_none_or(|cursor| {
+                    (notification.inserted_at, notification.id.as_str())
+                        > (cursor.inserted_at, cursor.id.as_str())
+                })
+            })
+            .cloned()
+            .collect();
+        matching.sort_by(|a, b| (a.inserted_at, &a.id).cmp(&(b.inserted_at, &b.id)));
+        let has_more = matching.len() > limit;
+        matching.truncate(limit);
+        Ok(NotificationPage {
+            notifications: matching,
+            has_more,
+        })
+    }
+
+    async fn mark_notifications_read(&self, ids: &[String]) -> ServiceResult<Vec<Notification>> {
+        let now = Utc::now();
+        Ok(self
+            .notifications
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .filter(|notification| ids.contains(&notification.id))
+            .map(|notification| {
+                notification.read_at.get_or_insert(now);
+                notification.clone()
+            })
+            .collect())
+    }
+}
+
+// ============================================================================
 // Factory function
 // ============================================================================
 
@@ -1475,5 +1559,6 @@ pub fn mock_services() -> VertebraeServices {
         Arc::new(MockExecutionService::new(state.clone())),
         Arc::new(MockStepService::new(state.clone())),
         Arc::new(MockArtifactService::new(state)),
+        Arc::new(MockNotificationService::default()),
     )
 }

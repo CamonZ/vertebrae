@@ -197,6 +197,63 @@ impl From<vertebrae_core::Artifact> for Artifact {
     }
 }
 
+/// How a durable notification is styled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationSeverity {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+impl From<vertebrae_core::NotificationSeverity> for NotificationSeverity {
+    fn from(severity: vertebrae_core::NotificationSeverity) -> Self {
+        match severity {
+            vertebrae_core::NotificationSeverity::Info => Self::Info,
+            vertebrae_core::NotificationSeverity::Success => Self::Success,
+            vertebrae_core::NotificationSeverity::Warning => Self::Warning,
+            vertebrae_core::NotificationSeverity::Error => Self::Error,
+        }
+    }
+}
+
+/// A durable project notification. `message` is Markdown exactly as
+/// published; timestamps are RFC 3339 with microseconds so they can be sent
+/// back as a history cursor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct Notification {
+    pub id: String,
+    pub project_id: String,
+    pub message: String,
+    pub severity: NotificationSeverity,
+    pub inserted_at: String,
+    pub read_at: Option<String>,
+}
+
+impl From<vertebrae_core::Notification> for Notification {
+    fn from(notification: vertebrae_core::Notification) -> Self {
+        let timestamp = |at: chrono::DateTime<chrono::Utc>| {
+            at.to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
+        };
+        Self {
+            id: notification.id,
+            project_id: notification.project_id,
+            message: notification.message,
+            severity: notification.severity.into(),
+            inserted_at: timestamp(notification.inserted_at),
+            read_at: notification.read_at.map(timestamp),
+        }
+    }
+}
+
+/// One page of a project's notification history, oldest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct NotificationPage {
+    pub notifications: Vec<Notification>,
+    pub has_more: bool,
+}
+
 /// Section content within a task
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct Section {

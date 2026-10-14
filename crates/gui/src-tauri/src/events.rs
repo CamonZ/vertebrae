@@ -64,6 +64,22 @@ pub enum ArtifactChangeType {
     Deleted,
 }
 
+/// A durable notification changed on the active Sacrum project: published,
+/// marked read, or deleted with its project or account. Every variant carries
+/// the complete notification.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct NotificationChangedEvent {
+    pub change_type: NotificationChangeType,
+    pub notification: types::Notification,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub enum NotificationChangeType {
+    Created,
+    Updated,
+    Deleted,
+}
+
 /// Event payload for task changes.
 /// Emitted when a task is created, updated, deleted, or its status changes.
 /// For create/update events, `task` carries the full deserialized entity.

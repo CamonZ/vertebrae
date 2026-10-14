@@ -1,7 +1,10 @@
+import type { MouseEvent } from "react";
+import { markDurableNotificationsRead } from "../../hooks/useNotificationChangeListener";
 import type { NotificationMessage, ToastType } from "../../types";
 import { getUnreadNotificationCount, useNotificationStore } from "../../stores";
 import { CloseIcon, FloatingDetailPanel, IconButton } from "../panels";
 import { IdChip } from "../shared/HearthPrimitives";
+import { MarkdownContent } from "../shared/MarkdownContent";
 
 const notificationTypeConfig: Record<
   ToastType,
@@ -29,16 +32,42 @@ const notificationTypeConfig: Record<
   },
 };
 
+/** Durable notifications are labelled by their severity. */
+const durableLabels: Record<ToastType, string> = {
+  success: "SUCCESS",
+  error: "ERROR",
+  warning: "WARNING",
+  info: "INFO",
+};
+
 /**
- * The session-only activity surface. It intentionally reads directly from the
- * notification store: opening the panel never performs a query or restores
- * notifications from disk.
+ * Mark notifications read: ephemeral ones locally, durable ones in Sacrum,
+ * which reports the read state back.
+ */
+function markNotificationsRead(notifications: NotificationMessage[]) {
+  const unread = notifications.filter((notification) => !notification.read);
+  useNotificationStore
+    .getState()
+    .markRead(
+      unread
+        .filter((notification) => !notification.durable)
+        .map((notification) => notification.id)
+    );
+  const durableIds = unread
+    .filter((notification) => notification.durable)
+    .map((notification) => notification.id);
+  if (durableIds.length > 0) void markDurableNotificationsRead(durableIds);
+}
+
+/**
+ * The activity surface. It reads directly from the notification store:
+ * opening the panel never performs a query. Durable project notifications
+ * reach the store through `useNotificationChangeListener`.
  */
 export function NotificationsPanel() {
   const isPanelOpen = useNotificationStore((state) => state.isPanelOpen);
   const notifications = useNotificationStore((state) => state.notifications);
   const setPanelOpen = useNotificationStore((state) => state.setPanelOpen);
-  const markAllRead = useNotificationStore((state) => state.markAllRead);
   const removeNotification = useNotificationStore(
     (state) => state.removeNotification
   );
@@ -80,7 +109,7 @@ export function NotificationsPanel() {
           <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
-              onClick={markAllRead}
+              onClick={() => markNotificationsRead(notifications)}
               disabled={unreadCount === 0}
               className="rounded-[var(--radius-sm)] px-2 py-1 font-mono text-2xs uppercase tracking-[0.1em] text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] disabled:cursor-default disabled:opacity-50"
             >
@@ -111,6 +140,7 @@ export function NotificationsPanel() {
                   key={notification.id}
                   notification={notification}
                   onDismiss={() => removeNotification(notification.id)}
+                  onMarkRead={() => markNotificationsRead([notification])}
                 />
               ))}
             </div>
@@ -129,10 +159,22 @@ export function NotificationsPanel() {
 interface NotificationItemProps {
   notification: NotificationMessage;
   onDismiss: () => void;
+  onMarkRead: () => void;
 }
 
-function NotificationItem({ notification, onDismiss }: NotificationItemProps) {
+function NotificationItem({
+  notification,
+  onDismiss,
+  onMarkRead,
+}: NotificationItemProps) {
   const config = notificationTypeConfig[notification.type];
+  const { durable } = notification;
+  // Following a link in an unread durable notification reads it.
+  const handleMessageClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (!notification.read && (event.target as Element).closest("a")) {
+      onMarkRead();
+    }
+  };
 
   return (
     <article
@@ -159,7 +201,7 @@ function NotificationItem({ notification, onDismiss }: NotificationItemProps) {
             <span
               className={`font-mono text-2xs uppercase tracking-[0.12em] ${config.colorClass}`}
             >
-              {config.label}
+              {durable ? durableLabels[notification.type] : config.label}
             </span>
             <span className="font-mono text-2xs uppercase tracking-[0.1em] text-[var(--color-fg-mute)]">
               {notification.entity}
@@ -168,24 +210,54 @@ function NotificationItem({ notification, onDismiss }: NotificationItemProps) {
               {formatNotificationAge(notification.timestamp)}
             </span>
           </div>
-          <p className="mt-1 text-sm leading-5 text-[var(--color-fg-soft)]">
-            {notification.message}
-          </p>
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <IdChip
-              id={notification.entityId}
-              kind={notification.entity}
-              testId={`notification-id-${notification.id}`}
-              className="min-w-0 max-w-full"
-            />
-            <button
-              type="button"
-              onClick={onDismiss}
-              aria-label={`Dismiss ${notification.message}`}
-              className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-2xs uppercase tracking-[0.1em] text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:visible:outline-none focus:visible:ring-1 focus:visible:ring-[var(--color-accent)] group-hover:visible"
+          {durable ? (
+            <div
+              className="mt-1 min-w-0 text-sm leading-5 text-[var(--color-fg-soft)]"
+              data-testid={`notification-markdown-${notification.id}`}
+              onClickCapture={handleMessageClick}
             >
-              Dismiss
-            </button>
+              <MarkdownContent text={notification.message} />
+            </div>
+          ) : (
+            <p className="mt-1 text-sm leading-5 text-[var(--color-fg-soft)]">
+              {notification.message}
+            </p>
+          )}
+          <div className="mt-2 flex items-center justify-between gap-2">
+            {durable ? (
+              <span />
+            ) : (
+              <IdChip
+                id={notification.entityId}
+                kind={
+                  notification.entity === "project"
+                    ? undefined
+                    : notification.entity
+                }
+                testId={`notification-id-${notification.id}`}
+                className="min-w-0 max-w-full"
+              />
+            )}
+            <div className="flex shrink-0 items-center gap-1">
+              {!notification.read && (
+                <button
+                  type="button"
+                  onClick={onMarkRead}
+                  aria-label="Mark notification read"
+                  className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-2xs uppercase tracking-[0.1em] text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:visible:outline-none focus:visible:ring-1 focus:visible:ring-[var(--color-accent)] group-hover:visible"
+                >
+                  Mark read
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onDismiss}
+                aria-label={`Dismiss ${notification.message}`}
+                className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-2xs uppercase tracking-[0.1em] text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:visible:outline-none focus:visible:ring-1 focus:visible:ring-[var(--color-accent)] group-hover:visible"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         </div>
       </div>

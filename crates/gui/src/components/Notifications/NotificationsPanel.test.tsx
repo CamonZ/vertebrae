@@ -1,11 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "../../test/test-utils";
+import type { Notification } from "../../bindings";
 import { getUnreadNotificationCount, useNotificationStore } from "../../stores";
 import type { NotificationInput } from "../../types";
+
+const { markDurableNotificationsRead } = vi.hoisted(() => ({
+  markDurableNotificationsRead: vi.fn(),
+}));
+vi.mock("../../hooks/useNotificationChangeListener", () => ({
+  markDurableNotificationsRead,
+}));
+
 import {
   NotificationsPanel,
   formatNotificationAge,
 } from "./NotificationsPanel";
+
+const TASK_ID = "3f1d9f6e-5c1b-4f8e-9f55-0b6f0c7d2a11";
+const ARTIFACT_ID = "9b7c1a52-1f0e-4f43-a0c7-2b8d7e6b1c10";
+
+function addDurable(overrides: Partial<Notification> = {}) {
+  const notification: Notification = {
+    id: "0aec77c7-319d-449d-a3b3-d6d8cdb6ffad",
+    project_id: "76267e24-a4e4-4230-88f1-33bd69cfd5ff",
+    message: `Artifact [report](vtb://artifact/${ARTIFACT_ID}) has been added to task [Ship \\[it\\]](vtb://task/${TASK_ID}).`,
+    severity: "success",
+    inserted_at: new Date(NOW).toISOString(),
+    read_at: null,
+    ...overrides,
+  };
+  useNotificationStore.getState().upsertDurableNotifications([notification]);
+  return notification;
+}
 
 const NOW = 1_700_000_000_000;
 
@@ -26,8 +52,11 @@ describe("NotificationsPanel", () => {
     act(() => {
       useNotificationStore.setState({
         notifications: [],
+        dismissedDurableIds: new Set(),
         isPanelOpen: true,
       });
+      markDurableNotificationsRead.mockReset();
+      markDurableNotificationsRead.mockResolvedValue(true);
     });
   });
 
@@ -129,6 +158,88 @@ describe("NotificationsPanel", () => {
 
     expect(screen.queryByTestId(`notification-${id}`)).not.toBeInTheDocument();
     expect(screen.getByText("0 notices")).toBeInTheDocument();
+  });
+});
+
+describe("NotificationsPanel durable notifications", () => {
+  beforeEach(() => {
+    act(() => {
+      useNotificationStore.setState({
+        notifications: [],
+        dismissedDurableIds: new Set(),
+        isPanelOpen: true,
+      });
+    });
+    markDurableNotificationsRead.mockReset();
+    markDurableNotificationsRead.mockResolvedValue(true);
+  });
+
+  it("renders the Markdown message with inline entity links", () => {
+    const notification = addDurable();
+    render(<NotificationsPanel />);
+
+    const message = screen.getByTestId(
+      `notification-markdown-${notification.id}`
+    );
+    expect(message).toHaveTextContent(
+      "Artifact report has been added to task Ship [it]."
+    );
+    const links = screen.getAllByTestId("vtb-entity-link");
+    expect(links.map((link) => link.getAttribute("data-vtb-route"))).toEqual([
+      `/artifacts?artifactId=${ARTIFACT_ID}`,
+      `/tasks?taskId=${TASK_ID}`,
+    ]);
+    expect(screen.getByText("SUCCESS")).toBeInTheDocument();
+    expect(screen.queryByTestId(/notification-id-/)).not.toBeInTheDocument();
+  });
+
+  it("marks durable notifications read in Sacrum and ephemeral ones locally", () => {
+    const notification = addDurable();
+    addNotification();
+    addDurable({
+      id: "1aec77c7-319d-449d-a3b3-d6d8cdb6ffad",
+      read_at: "2026-10-14T21:00:00.000000Z",
+    });
+    render(<NotificationsPanel />);
+    expect(screen.getByText("2 unread")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+
+    expect(markDurableNotificationsRead).toHaveBeenCalledWith([
+      notification.id,
+    ]);
+    // The durable notification stays unread until Sacrum confirms it.
+    expect(screen.getByText("1 unread")).toBeInTheDocument();
+  });
+
+  it("marks one durable notification read from its item or a followed link", () => {
+    const notification = addDurable();
+    render(<NotificationsPanel />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Mark notification read" })
+    );
+    expect(markDurableNotificationsRead).toHaveBeenLastCalledWith([
+      notification.id,
+    ]);
+
+    fireEvent.click(screen.getAllByTestId("vtb-entity-link")[1]);
+    expect(markDurableNotificationsRead).toHaveBeenCalledTimes(2);
+  });
+
+  it("dismisses a durable notification without contacting Sacrum", () => {
+    const notification = addDurable();
+    render(<NotificationsPanel />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: `Dismiss ${notification.message}` })
+    );
+
+    expect(screen.getByText("0 notices")).toBeInTheDocument();
+    expect(markDurableNotificationsRead).not.toHaveBeenCalled();
+    expect(useNotificationStore.getState().dismissedDurableIds).toContain(
+      notification.id
+    );
   });
 });
 

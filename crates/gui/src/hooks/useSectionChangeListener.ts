@@ -2,31 +2,13 @@ import { useEffect, useCallback } from "react";
 import {
   events,
   type SectionChangedEvent,
-  type SectionChangeType,
 } from "../bindings";
 import { updateTaskSectionsInQueryCache } from "../query";
-import { useNotificationStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
 import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
-
-/** Get toast message for section change type */
-function getSectionChangeMessage(
-  changeType: SectionChangeType,
-  taskId: string
-): string {
-  const shortId = taskId.slice(0, 6);
-  switch (changeType) {
-    case "Created":
-      return `Section added to task ${shortId}`;
-    case "Updated":
-      return `Section updated on task ${shortId}`;
-    case "Deleted":
-      return `Section removed from task ${shortId}`;
-  }
-}
 
 /** Options for the section change listener hook */
 interface UseSectionChangeListenerOptions {
@@ -47,9 +29,6 @@ export function useSectionChangeListener(
   options: UseSectionChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const addNotification = useNotificationStore(
-    (state) => state.addNotification
-  );
   const projectScopeGeneration = useProjectScopeGeneration();
   const fetchAndReconcileTask =
     useRefreshTaskForRealtimeChange("SectionChangeListener");
@@ -64,19 +43,6 @@ export function useSectionChangeListener(
         `[SectionChangeListener] Received ${change_type} event for task ${task_id.slice(0, 6)}`
       );
 
-      const toastType =
-        change_type === "Created"
-          ? "success"
-          : change_type === "Deleted"
-            ? "error"
-            : "info";
-      addNotification({
-        message: getSectionChangeMessage(change_type, task_id),
-        type: toastType,
-        entity: "task",
-        entityId: task_id,
-      });
-
       if (section) {
         updateTaskSectionsInQueryCache(
           task_id,
@@ -88,7 +54,7 @@ export function useSectionChangeListener(
 
       void fetchAndReconcileTask(task_id);
     },
-    [addNotification, fetchAndReconcileTask, projectScopeGeneration]
+    [fetchAndReconcileTask, projectScopeGeneration]
   );
 
   useEffect(() => {

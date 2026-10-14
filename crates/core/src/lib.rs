@@ -39,6 +39,7 @@ pub mod execution_settings;
 pub mod id_generator;
 pub mod model_catalog;
 pub mod models;
+pub mod notification_service;
 pub mod orchestrator;
 pub mod provider;
 pub mod service;
@@ -64,6 +65,11 @@ pub use model_catalog::{
     normalize_harness_reasoning_effort, normalize_harness_verbosity, normalize_personality,
     validate_harness_agent_config, validate_harness_reasoning_effort, validate_provider_model,
     validate_provider_model_with_codex_provider,
+};
+pub use notification_service::{
+    NOTIFICATION_BATCH_MAX, NOTIFICATION_MESSAGE_MAX_BYTES, Notification, NotificationCursor,
+    NotificationPage, NotificationPageQuery, NotificationService, NotificationSeverity,
+    validate_notification_message,
 };
 pub use orchestrator::{
     ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_MODEL, ORCHESTRATOR_PROMPT_TEMPLATE, OrchestratorOutput,

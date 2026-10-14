@@ -31,6 +31,7 @@ export { useStep, useSteps } from "./useStep";
 export { useStepChangeListener } from "./useStepChangeListener";
 export { useStepExecutionChangeListener } from "./useStepExecutionChangeListener";
 export { useSectionChangeListener } from "./useSectionChangeListener";
+export { useNotificationChangeListener } from "./useNotificationChangeListener";
 export { useSessionLogChangeListener } from "./useSessionLogChangeListener";
 export { useStepTransitionChangeListener } from "./useStepTransitionChangeListener";
 export { useWorkflowTransitionChangeListener } from "./useWorkflowTransitionChangeListener";

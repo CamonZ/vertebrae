@@ -156,6 +156,15 @@ and other-project targets. It runs the scratch-children sample from
 `docs/agent-context/workflows/steps/execute/host-deletes.md` (its first `rhai`
 block).
 
+`execute_notifications.feature` covers `vtb::notifications::send` and
+`escape`: messages stored byte for byte with escaped link labels, the default
+severity, separate notifications for identical sends, history paged one at a
+time, marking read (idempotent, keeping the first read time), invalid
+arguments that publish nothing, and an uncaught error failing the step. It
+runs the report sample from
+`docs/agent-context/workflows/steps/execute/host-notifications.md` (its first
+`rhai` block) and checks the stored message links the artifact and task.
+
 **Mock prompt-as-JSON envelope.** The step's `prompt` is parsed by the mock as a
 JSON envelope with this schema:
 

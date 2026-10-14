@@ -507,8 +507,8 @@ The GUI maintains a WebSocket connection to Sacrum via Phoenix channels:
   daemon CDC updates and ephemeral `daemon_metrics` telemetry from the account
   channel
 - Emits Tauri events including `TaskChangedEvent`, `WorkflowChangedEvent`,
-  `StepExecutionChangedEvent`, `DaemonChangedEvent`, and
-  `DaemonMetricsEvent`
+  `StepExecutionChangedEvent`, `NotificationChangedEvent`,
+  `DaemonChangedEvent`, and `DaemonMetricsEvent`
 
 The daemon fleet performs one account-scoped snapshot on initial load and after
 reconnect recovery. Sacrum's GraphQL fleet/detail response is authoritative for
@@ -518,6 +518,36 @@ merges only live fields into already initialized fleet/detail projections; a
 metrics event never creates a phantom daemon. Metrics are ephemeral, so a
 missed event is recovered by the next fleet/detail query rather than a periodic
 list poller.
+
+### Activity notifications
+
+The Activity panel (`NotificationsPanel`) shows two kinds of notification from
+`notificationStore`:
+
+- Ephemeral application notices: available GUI and local backend updates
+  (`update.ts`) and a chat whose provider session may not have closed
+  (`ChatWindowManager`). They live only in the session, survive project
+  switches, and their read and dismiss state is local. Realtime change
+  listeners update caches only; they don't add Activity entries.
+- Durable project notifications that execute scripts publish through Sacrum
+  (`vtb::notifications::send`). `useNotificationChangeListener` keeps them in
+  the store: when the project scope starts it pages through every unread
+  notification (`listProjectNotifications`, 200 per page); on each WebSocket
+  `connected` it pages from the newest held notification rewound 5 seconds;
+  and it applies `NotificationChangedEvent` creates, reads and deletes. Both
+  paths merge by Sacrum ID. Results and events from an earlier project scope
+  are dropped, and `resetProjectScopedStores` clears durable notifications.
+
+Durable messages are Markdown rendered with `MarkdownContent`, so `vtb://task`,
+`ticket`, `epic` and `artifact` links open their surfaces; an artifact link
+opens the Artifacts page with `?artifactId=` and selects it once listed.
+Unsupported `vtb://` types render as plain text. Read state lives in Sacrum:
+"Mark read", "Mark all read" and following a link call
+`markNotificationsRead` in batches of 200, and the item shows read once Sacrum
+returns it or a `notification_updated` event arrives; a failed call leaves it
+unread. Dismissing is local to the session and project: a dismissed durable
+notification stays hidden when history repeats it. The store keeps the newest
+50 of each kind, so a large unread backlog shows its newest 50.
 
 ## Data Flow
 

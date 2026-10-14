@@ -352,7 +352,7 @@ The CLI exposes these types through `--step-type` and their type-specific config
 |------|-------------|
 | `llm_inference` | **Default.** Runs the configured prompt through the selected agent harness. |
 | `structured_inference` | Runs resolved state and fixed questions through the TypeSafe harness and returns its JSON answer map. |
-| `execute` | Runs a Rhai JSON transformation in the daemon, which can read tasks and named artifacts in its project through `vtb::tasks` and `vtb::artifacts`, create, update, archive and delete tasks and edit their content and relationships through `vtb::tasks`, write and delete named artifacts through `vtb::artifacts`, and run local commands through `vtb::cmd`, validates its returned JSON, and completes without a provider harness. Create with `--script` and `--output-schema`. |
+| `execute` | Runs a Rhai JSON transformation in the daemon, which can read tasks and named artifacts in its project through `vtb::tasks` and `vtb::artifacts`, create, update, archive and delete tasks and edit their content and relationships through `vtb::tasks`, write and delete named artifacts through `vtb::artifacts`, send Markdown notifications to the project through `vtb::notifications`, and run local commands through `vtb::cmd`, validates its returned JSON, and completes without a provider harness. Create with `--script` and `--output-schema`. |
 | `route` | Sacrum-local deterministic control step. Evaluates `route_config`; it does not dispatch a daemon prompt or use `output_schema` as a routing program. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
 | `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. |
@@ -431,7 +431,9 @@ their content and relationships. `delete` refuses the running task and any
 task with an active TaskRun, and cascades only when asked.
 `vtb::artifacts::put` and `put_json` create or replace a named artifact on a
 task or the project and record the execution that wrote it;
-`vtb::artifacts::delete` removes one. Writes apply immediately; a failed or cancelled
+`vtb::artifacts::delete` removes one. `vtb::notifications::send` publishes a
+Markdown notification, which can link tasks and artifacts with `vtb://` URIs,
+to the project's Activity panel. Writes apply immediately; a failed or cancelled
 script does not undo them, and creating a task or adding a dependency never
 starts a TaskRun.
 The pure `vtb::regex` and `vtb::time` modules provide bounded regex operations,
@@ -448,7 +450,8 @@ CLI/GraphQL authoring, context/output example, limits, and diagnostics,
 that reads tasks and artifacts,
 [plan children created once per key](../agent-context/workflows/steps/execute/host-writes.md),
 [content and relationship edits](../agent-context/workflows/steps/execute/host-edits.md),
-[artifact writes](../agent-context/workflows/steps/execute/host-artifact-writes.md), and
+[artifact writes](../agent-context/workflows/steps/execute/host-artifact-writes.md),
+[notifications](../agent-context/workflows/steps/execute/host-notifications.md), and
 [the Docker-only demo](../testing.md#rhai-execute-demo) for isolated verification.
 
 ### Deterministic route configuration
