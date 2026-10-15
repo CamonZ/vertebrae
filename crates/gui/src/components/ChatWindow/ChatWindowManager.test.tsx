@@ -1137,7 +1137,7 @@ describe("ChatWindowManager", () => {
     expect(
       miniPanel
         .getAllByRole("heading", { level: 3 })
-        .map((heading) => heading.querySelector("span")?.textContent)
+        .map((heading) => heading.querySelector("[data-mini-history-toggle], span")?.textContent)
     ).toEqual(["new-project", "old-project", "Unknown project"]);
 
     const currentGroup = within(
@@ -1243,7 +1243,7 @@ describe("ChatWindowManager", () => {
       expect(
         miniPanel
           .getAllByRole("heading", { level: 3 })
-          .map((heading) => heading.querySelector("span")?.textContent)
+          .map((heading) => heading.querySelector("[data-mini-history-toggle], span")?.textContent)
       ).toEqual(["test-project", "old-project"]);
     });
 
@@ -1255,7 +1255,7 @@ describe("ChatWindowManager", () => {
       currentGroup.getAllByRole("button", { name: /^Load local chat/ })
     ).toHaveLength(7);
     expect(
-      currentGroup.getByRole("button", { name: "Show all (9 more)" })
+      currentGroup.getByRole("button", { name: "test-project" })
     ).toBeInTheDocument();
     expect(panel).toHaveClass("hc-panel");
     expect(screen.getByTestId("local-chat-history-drawer")).toHaveClass(
@@ -1265,7 +1265,7 @@ describe("ChatWindowManager", () => {
     expect(screen.getByTestId("chat-pane")).toHaveClass("hc-chat-pane");
 
     await user.click(
-      currentGroup.getByRole("button", { name: "Show all (9 more)" })
+      currentGroup.getByRole("button", { name: "test-project" })
     );
     await waitFor(() => {
       expect(
@@ -1287,7 +1287,7 @@ describe("ChatWindowManager", () => {
       ])
     );
     expect(
-      currentGroup.getByRole("button", { name: "Show less" })
+      currentGroup.getByRole("button", { name: "test-project" })
     ).toBeInTheDocument();
     expect(panel).toHaveStyle({ width: "1128px" });
 
@@ -1492,7 +1492,7 @@ describe("ChatWindowManager", () => {
       expect(
         miniPanel
           .getAllByRole("heading", { level: 3 })
-          .map((heading) => heading.querySelector("span")?.textContent)
+          .map((heading) => heading.querySelector("[data-mini-history-toggle], span")?.textContent)
       ).toEqual(["test-project", "old-project", "Unknown project"]);
     });
     const currentGroup = within(
@@ -1502,7 +1502,7 @@ describe("ChatWindowManager", () => {
       currentGroup.getAllByRole("button", { name: /^Load local chat/ })
     ).toHaveLength(7);
     expect(
-      currentGroup.getByRole("button", { name: "Show all (1 more)" })
+      currentGroup.getByRole("button", { name: "test-project" })
     ).toHaveAttribute("aria-expanded", "false");
     expect(
       currentGroup.queryByRole("button", {
@@ -1556,7 +1556,7 @@ describe("ChatWindowManager", () => {
       ).toHaveLength(7);
       expect(
         restoredCurrentGroup().queryByRole("button", {
-          name: "Show all (1 more)",
+          name: "test-project",
         })
       ).not.toBeInTheDocument();
       expect(
@@ -2931,7 +2931,7 @@ describe("ChatWindowManager", () => {
     expect(
       miniPanel
         .getAllByRole("heading", { level: 3 })
-        .map((heading) => heading.querySelector("span")?.textContent)
+        .map((heading) => heading.querySelector("[data-mini-history-toggle], span")?.textContent)
     ).toEqual(["new-project", "old-project", "Unknown project"]);
 
     const currentGroup = within(

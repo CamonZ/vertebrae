@@ -273,7 +273,7 @@ describe("LocalChatMiniPanel search", () => {
       })
     ).toHaveLength(7);
     expect(
-      within(body).getByRole("button", { name: "Show all (17 more)" })
+      within(body).getByRole("button", { name: "Current project" })
     ).toBeInTheDocument();
   });
 
@@ -732,9 +732,13 @@ describe("LocalChatMiniPanel session limits", () => {
     const currentSessions = makeSessions("Current", 8);
     const otherSessions = makeSessions("Other", 8);
     const shortSessions = makeSessions("Short", 7);
+    const onSelect = vi.fn();
+    const onStartProjectChat = vi.fn();
 
     render(
       <ControlledPanel
+        onSelect={onSelect}
+        onStartProjectChat={onStartProjectChat}
         sessionGroups={[
           makeGroup("current", "Current project", currentSessions),
           makeGroup("other", "Other project", otherSessions),
@@ -764,32 +768,48 @@ describe("LocalChatMiniPanel session limits", () => {
       short.getAllByRole("button", { name: /^Load local chat/ })
     ).toHaveLength(7);
     expect(
-      short.queryByRole("button", { name: /Show all/ })
+      short.queryByRole("button", { name: "Short project" })
     ).not.toBeInTheDocument();
 
-    await user.click(
-      current.getByRole("button", { name: "Show all (1 more)" })
-    );
+    await user.click(current.getByRole("button", { name: "Current project" }));
 
     expect(
       current.getAllByRole("button", { name: /^Load local chat/ })
     ).toHaveLength(8);
-    const showLess = current.getByRole("button", { name: "Show less" });
-    expect(showLess).toHaveAttribute("aria-expanded", "true");
-    expect(showLess).toHaveFocus();
+    const projectToggle = current.getByRole("button", { name: "Current project" });
+    expect(projectToggle).toHaveAttribute("aria-expanded", "true");
+    expect(projectToggle).toHaveFocus();
     expect(
       other.getAllByRole("button", { name: /^Load local chat/ })
     ).toHaveLength(7);
     expect(
-      other.getByRole("button", { name: "Show all (1 more)" })
+      other.getByRole("button", { name: "Other project" })
     ).toHaveAttribute("aria-expanded", "false");
 
-    await user.click(showLess);
+    expect(
+      document.getElementById(projectToggle.getAttribute("aria-controls")!)
+    ).toContainElement(
+      current.getAllByRole("button", { name: /^Load local chat/ })[0]
+    );
+    await user.keyboard("{Enter}");
+    expect(projectToggle).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard(" ");
+    expect(projectToggle).toHaveAttribute("aria-expanded", "true");
+    expect(onSelect).not.toHaveBeenCalled();
+    await user.click(
+      current.getByRole("button", { name: "Start new chat in Current project" })
+    );
+    expect(onStartProjectChat).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "current" })
+    );
+    expect(projectToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByText(/Show all|Show less/)).not.toBeInTheDocument();
+    await user.click(projectToggle);
     expect(
       current.getAllByRole("button", { name: /^Load local chat/ })
     ).toHaveLength(7);
     expect(
-      current.getByRole("button", { name: "Show all (1 more)" })
+      current.getByRole("button", { name: "Current project" })
     ).toHaveAttribute("aria-expanded", "false");
   });
 
@@ -802,9 +822,7 @@ describe("LocalChatMiniPanel session limits", () => {
       panel.getByRole("region", { name: "Current project chats" })
     );
 
-    await user.click(
-      current.getByRole("button", { name: "Show all (1 more)" })
-    );
+    await user.click(current.getByRole("button", { name: "Current project" }));
     expect(
       current.getAllByRole("button", { name: /^Load local chat/ })
     ).toHaveLength(8);
@@ -817,10 +835,7 @@ describe("LocalChatMiniPanel session limits", () => {
       current.getAllByRole("button", { name: /^Load local chat/ })
     ).toHaveLength(7);
     expect(
-      current.queryByRole("button", { name: "Show less" })
-    ).not.toBeInTheDocument();
-    expect(
-      current.queryByRole("button", { name: /Show all/ })
+      current.queryByRole("button", { name: "Current project" })
     ).not.toBeInTheDocument();
   });
 });

@@ -319,7 +319,20 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                     aria-label={`${group.label} chats`}
                   >
                     <h3 className="hc-mini-history-group-title">
-                      <span>{group.label}</span>
+                      {allSessionCount > LOCAL_CHAT_SESSION_ROW_LIMIT ? (
+                        <button
+                          type="button"
+                          className="hc-mini-history-toggle"
+                          data-mini-history-toggle
+                          aria-expanded={isExpanded}
+                          aria-controls={groupRowsId}
+                          onClick={() => toggleGroupExpansion(group.id)}
+                        >
+                          {group.label}
+                        </button>
+                      ) : (
+                        <span>{group.label}</span>
+                      )}
                       <button
                         type="button"
                         className="hc-mini-history-new"
@@ -350,20 +363,6 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                       </button>
                     </h3>
                     <div id={groupRowsId}>{rows}</div>
-                    {allSessionCount > LOCAL_CHAT_SESSION_ROW_LIMIT && (
-                      <button
-                        type="button"
-                        className="hc-mini-history-toggle"
-                        data-mini-history-toggle
-                        aria-expanded={isExpanded}
-                        aria-controls={groupRowsId}
-                        onClick={() => toggleGroupExpansion(group.id)}
-                      >
-                        {isExpanded
-                          ? "Show less"
-                          : `Show all (${allSessionCount - LOCAL_CHAT_SESSION_ROW_LIMIT} more)`}
-                      </button>
-                    )}
                   </section>
                 );
               }}
