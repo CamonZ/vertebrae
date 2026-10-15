@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import type { Artifact } from "../bindings";
 
 const { useProjectArtifacts } = vi.hoisted(() => ({
@@ -40,7 +41,7 @@ describe("ArtifactsPage", () => {
   });
 
   it("opens and replaces the inspector from pointer or keyboard selection", () => {
-    render(<ArtifactsPage />);
+    render(<ArtifactsPage />, { wrapper: MemoryRouter });
     fireEvent.click(screen.getByRole("treeitem", { name: /First/i }));
     expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
       "First"
@@ -56,8 +57,35 @@ describe("ArtifactsPage", () => {
     );
   });
 
+  it("selects the artifact named by an artifact link once it is listed", () => {
+    useProjectArtifacts.mockReturnValue({
+      artifacts: [],
+      isLoading: true,
+      error: null,
+    });
+    const { rerender } = render(<ArtifactsPage />, {
+      wrapper: ({ children }) => (
+        <MemoryRouter initialEntries={["/artifacts?artifactId=a-2"]}>
+          {children}
+        </MemoryRouter>
+      ),
+    });
+    expect(screen.queryByTestId("artifact-inspector-title")).toBeNull();
+
+    useProjectArtifacts.mockReturnValue({
+      artifacts: [artifact("a-1", "First"), artifact("a-2", "Second")],
+      isLoading: false,
+      error: null,
+    });
+    rerender(<ArtifactsPage />);
+
+    expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
+      "Second"
+    );
+  });
+
   it("closes only the artifact inspector", () => {
-    render(<ArtifactsPage />);
+    render(<ArtifactsPage />, { wrapper: MemoryRouter });
     fireEvent.click(screen.getByRole("treeitem", { name: /First/i }));
     fireEvent.click(screen.getByTestId("artifact-inspector-close"));
     expect(screen.queryByTestId("artifact-inspector-panel")).toHaveAttribute(
@@ -72,7 +100,7 @@ describe("ArtifactsPage", () => {
       isLoading: true,
       error: null,
     });
-    const { rerender } = render(<ArtifactsPage />);
+    const { rerender } = render(<ArtifactsPage />, { wrapper: MemoryRouter });
     expect(screen.getByLabelText("Loading artifacts")).toBeInTheDocument();
 
     useProjectArtifacts.mockReturnValueOnce({
@@ -102,7 +130,7 @@ describe("ArtifactsPage", () => {
       isLoading: false,
       error: null,
     });
-    render(<ArtifactsPage />);
+    render(<ArtifactsPage />, { wrapper: MemoryRouter });
 
     const folder = screen.getByTestId("artifact-tree-folder-folder:reports");
     expect(folder).toHaveAttribute("role", "treeitem");
@@ -151,7 +179,7 @@ describe("ArtifactsPage", () => {
       error: null,
     });
 
-    render(<ArtifactsPage />);
+    render(<ArtifactsPage />, { wrapper: MemoryRouter });
 
     expect(screen.getAllByRole("treeitem")).toHaveLength(60);
     expect(screen.getByTestId("artifact-tree-leaf-a-60")).toBeInTheDocument();
@@ -167,7 +195,7 @@ describe("ArtifactsPage", () => {
       isLoading: false,
       error: null,
     });
-    render(<ArtifactsPage />);
+    render(<ArtifactsPage />, { wrapper: MemoryRouter });
 
     fireEvent.click(screen.getByTestId("artifact-tree-leaf-a-1"));
     fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
@@ -195,7 +223,7 @@ describe("ArtifactsPage", () => {
       isLoading: false,
       error: null,
     });
-    const { rerender } = render(<ArtifactsPage />);
+    const { rerender } = render(<ArtifactsPage />, { wrapper: MemoryRouter });
 
     fireEvent.click(screen.getByTestId("artifact-tree-leaf-a-1"));
     useProjectArtifacts.mockReturnValue({

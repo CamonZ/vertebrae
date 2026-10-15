@@ -18,13 +18,13 @@ use uuid::Uuid;
 
 use crate::events::{
     ArtifactChangeType, ArtifactChangedEvent, DaemonChangeType, DaemonChangedEvent,
-    DaemonMetricsEvent, PermissionRequestEvent, SectionChangeType, SectionChangedEvent,
-    SessionLogCreatedEvent, SessionLogUpdatedEvent, StepChangeType, StepChangedEvent,
-    StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
-    StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent,
-    TaskPreviousBucketIdentity, TaskRunChangeType, TaskRunChangedEvent, TaskRunControlsPayload,
-    TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent,
-    WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
+    DaemonMetricsEvent, NotificationChangeType, NotificationChangedEvent, PermissionRequestEvent,
+    SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent,
+    StepChangeType, StepChangedEvent, StepExecutionChangeType, StepExecutionChangedEvent,
+    StepExecutionStatus, StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType,
+    TaskChangedEvent, TaskPreviousBucketIdentity, TaskRunChangeType, TaskRunChangedEvent,
+    TaskRunControlsPayload, TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangeType,
+    WorkflowChangedEvent, WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -948,6 +948,9 @@ impl SacrumSocket {
                 "section_created" | "section_updated" | "section_deleted" => {
                     Self::handle_section_event(event, payload, app_handle)?;
                 }
+                "notification_created" | "notification_updated" | "notification_deleted" => {
+                    Self::handle_notification_event(event, payload, app_handle)?;
+                }
                 "permission_request" => {
                     Self::handle_permission_request_event(payload, app_handle)?;
                 }
@@ -969,6 +972,37 @@ impl SacrumSocket {
         }
 
         Ok(())
+    }
+
+    /// Notification payloads are the complete notification, so they decode
+    /// straight into the GUI projection.
+    fn handle_notification_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let event = Self::notification_changed_event(event, payload)?;
+        app_handle
+            .emit("notification-changed-event", &event)
+            .map_err(|e| format!("Failed to emit event: {}", e))
+    }
+
+    fn notification_changed_event(
+        event: &str,
+        payload: &serde_json::Value,
+    ) -> Result<NotificationChangedEvent, String> {
+        let change_type = match event {
+            "notification_created" => NotificationChangeType::Created,
+            "notification_updated" => NotificationChangeType::Updated,
+            "notification_deleted" => NotificationChangeType::Deleted,
+            _ => return Err(format!("Unhandled notification event: {event}")),
+        };
+        let notification = serde_json::from_value::<types::Notification>(payload.clone())
+            .map_err(|e| format!("Invalid {event} payload: {e}"))?;
+        Ok(NotificationChangedEvent {
+            change_type,
+            notification,
+        })
     }
 
     fn handle_artifact_event<R: Runtime>(
@@ -3438,6 +3472,73 @@ mod tests {
         assert_eq!(event.artifact_id, "artifact-1");
         assert!(matches!(event.change_type, ArtifactChangeType::Updated));
         assert!(event.artifact.is_none());
+    }
+
+    #[test]
+    fn notification_events_emit_the_complete_notification() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let (tx, rx) = mpsc::channel();
+        app.listen_any("notification-changed-event", move |event| {
+            tx.send(event.payload().to_string()).unwrap();
+        });
+
+        let message = "Artifact [report](vtb://artifact/9b7c1a52-1f0e-4f43-a0c7-2b8d7e6b1c10) \
+                       has been added to task [Ship \\[it\\]](vtb://task/3f1d9f6e-5c1b-4f8e-9f55-0b6f0c7d2a11).";
+        for (name, change_type, read_at) in [
+            (
+                "notification_created",
+                NotificationChangeType::Created,
+                None,
+            ),
+            (
+                "notification_updated",
+                NotificationChangeType::Updated,
+                Some("2026-10-14T21:00:00.000000Z"),
+            ),
+            (
+                "notification_deleted",
+                NotificationChangeType::Deleted,
+                None,
+            ),
+        ] {
+            let payload = serde_json::json!({
+                "schema_version": 1,
+                "id": "0aec77c7-319d-449d-a3b3-d6d8cdb6ffad",
+                "project_id": "76267e24-a4e4-4230-88f1-33bd69cfd5ff",
+                "message": message,
+                "severity": "success",
+                "inserted_at": "2026-10-14T20:37:02.698001Z",
+                "read_at": read_at,
+            });
+            SacrumSocket::handle_notification_event(name, &payload, handle)
+                .expect("notification event should be forwarded");
+
+            let emitted = rx
+                .recv_timeout(StdDuration::from_secs(1))
+                .expect("notification event should emit a webview event");
+            let event: NotificationChangedEvent =
+                serde_json::from_str(&emitted).expect("event payload should deserialize");
+            assert_eq!(event.change_type, change_type);
+            assert_eq!(event.notification.message, message);
+            assert_eq!(
+                event.notification.severity,
+                types::NotificationSeverity::Success
+            );
+            assert_eq!(
+                event.notification.inserted_at,
+                "2026-10-14T20:37:02.698001Z"
+            );
+            assert_eq!(event.notification.read_at.as_deref(), read_at);
+        }
+    }
+
+    #[test]
+    fn malformed_notification_payloads_are_rejected() {
+        let payload = serde_json::json!({"id": "n1", "severity": "fatal"});
+        assert!(
+            SacrumSocket::notification_changed_event("notification_created", &payload).is_err()
+        );
     }
 
     #[test]

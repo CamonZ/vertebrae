@@ -54,6 +54,7 @@ export type {
   LoadingState,
   SelectOption,
   ModalProps,
+  DurableNotificationState,
   NotificationEntity,
   NotificationInput,
   NotificationMessage,

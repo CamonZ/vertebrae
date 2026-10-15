@@ -134,7 +134,7 @@ describe("useTaskChangeListener realtime list membership", () => {
     vi.restoreAllMocks();
   });
 
-  it("appends a task notification while reconciling the task cache", async () => {
+  it("reconciles the task cache without adding an Activity entry", async () => {
     const task = createMockTask({
       id: "task-notification",
       title: "Notification task",
@@ -159,15 +159,8 @@ describe("useTaskChangeListener realtime list membership", () => {
       archived: false,
     });
 
-    expect(useNotificationStore.getState().notifications).toEqual([
-      expect.objectContaining({
-        message: "Task task-n created",
-        type: "success",
-        entity: "task",
-        entityId: "task-notification",
-        read: false,
-      }),
-    ]);
+    expect(cachedTasks().map(({ id }) => id)).toEqual([task.id]);
+    expect(useNotificationStore.getState().notifications).toEqual([]);
   });
 
   it("updates task row projection after a manual taskStepChangedEvent", async () => {

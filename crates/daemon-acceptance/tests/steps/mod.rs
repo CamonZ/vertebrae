@@ -8,6 +8,7 @@ pub mod host_artifact_writes;
 pub mod host_commands;
 pub mod host_deletes;
 pub mod host_edits;
+pub mod host_notifications;
 pub mod host_reads;
 pub mod host_rollup;
 pub mod host_writes;

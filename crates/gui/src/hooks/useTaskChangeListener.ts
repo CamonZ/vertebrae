@@ -2,11 +2,9 @@ import { useEffect, useCallback } from "react";
 import {
   events,
   type TaskChangedEvent,
-  type TaskChangeType,
   type TaskRunStepChangedEvent,
   type TaskStepChangedEvent,
 } from "../bindings";
-import { useNotificationStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -16,24 +14,6 @@ import {
   updateTaskLocationInQueryCache,
   upsertTaskInQueryCache,
 } from "../query";
-
-/** Get toast message for task change type */
-function getTaskChangeMessage(
-  changeType: TaskChangeType,
-  taskId: string
-): string {
-  const shortId = taskId.slice(0, 6);
-  switch (changeType) {
-    case "Created":
-      return `Task ${shortId} created`;
-    case "Updated":
-      return `Task ${shortId} updated`;
-    case "Deleted":
-      return `Task ${shortId} deleted`;
-    case "StatusChanged":
-      return `Task ${shortId} status changed`;
-  }
-}
 
 /** Options for the task change listener hook */
 interface UseTaskChangeListenerOptions {
@@ -51,9 +31,6 @@ export function useTaskChangeListener(
   options: UseTaskChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const addNotification = useNotificationStore(
-    (state) => state.addNotification
-  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleTaskChanged = useCallback(
@@ -66,19 +43,6 @@ export function useTaskChangeListener(
         `[TaskChangeListener] Received ${change_type} event for task ${task_id.slice(0, 6)}`
       );
 
-      const toastType =
-        change_type === "Created"
-          ? "success"
-          : change_type === "Deleted"
-            ? "error"
-            : "info";
-      addNotification({
-        message: getTaskChangeMessage(change_type, task_id),
-        type: toastType,
-        entity: "task",
-        entityId: task_id,
-      });
-
       if (change_type === "Deleted" || archived) {
         removeTaskFromQueryCache(task_id, projectScopeGeneration);
       } else if (task) {
@@ -89,7 +53,7 @@ export function useTaskChangeListener(
         );
       }
     },
-    [addNotification, projectScopeGeneration]
+    [projectScopeGeneration]
   );
 
   const handleTaskStepChanged = useCallback(

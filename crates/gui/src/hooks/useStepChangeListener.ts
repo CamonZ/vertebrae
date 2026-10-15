@@ -3,30 +3,12 @@ import {
   events,
   type Step,
   type StepChangedEvent,
-  type StepChangeType,
 } from "../bindings";
-import { useNotificationStore } from "../stores";
 import { removeStepFromQueryCache, upsertStepInQueryCache } from "../query";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
-
-/** Get toast message for step change type */
-function getStepChangeMessage(
-  changeType: StepChangeType,
-  stepId: string
-): string {
-  const shortId = stepId.slice(0, 6);
-  switch (changeType) {
-    case "Created":
-      return `Step ${shortId} created`;
-    case "Updated":
-      return `Step ${shortId} updated`;
-    case "Deleted":
-      return `Step ${shortId} deleted`;
-  }
-}
 
 /** Options for the step change listener hook */
 interface UseStepChangeListenerOptions {
@@ -54,9 +36,6 @@ export function useStepChangeListener(
   options: UseStepChangeListenerOptions = {}
 ) {
   const { enabled = true, onCreated, onUpdated, onDeleted } = options;
-  const addNotification = useNotificationStore(
-    (state) => state.addNotification
-  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleStepChanged = useCallback(
@@ -68,19 +47,6 @@ export function useStepChangeListener(
       console.debug(
         `[StepChangeListener] Received ${change_type} event for step ${step_id.slice(0, 6)}`
       );
-
-      const toastType =
-        change_type === "Created"
-          ? "success"
-          : change_type === "Deleted"
-            ? "error"
-            : "info";
-      addNotification({
-        message: getStepChangeMessage(change_type, step_id),
-        type: toastType,
-        entity: "step",
-        entityId: step_id,
-      });
 
       if (change_type === "Deleted") {
         removeStepFromQueryCache(step_id, projectScopeGeneration);
@@ -94,7 +60,7 @@ export function useStepChangeListener(
         }
       }
     },
-    [addNotification, onCreated, onUpdated, onDeleted, projectScopeGeneration]
+    [onCreated, onUpdated, onDeleted, projectScopeGeneration]
   );
 
   useEffect(() => {

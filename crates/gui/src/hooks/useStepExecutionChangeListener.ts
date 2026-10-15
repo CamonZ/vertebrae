@@ -3,33 +3,12 @@ import {
   commands,
   events,
   type StepExecutionChangedEvent,
-  type StepExecutionStatus,
-  type StepExecutionChangeType,
 } from "../bindings";
 import { upsertStepExecutionInQueryCache } from "../query";
-import { useNotificationStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
-
-/** Get toast message for execution change */
-function getExecutionChangeMessage(
-  changeType: StepExecutionChangeType,
-  stepName: string,
-  status: StepExecutionStatus
-): string {
-  if (changeType === "Created") {
-    return `Started step: ${stepName}`;
-  }
-  if (status === "Completed") {
-    return `Step completed: ${stepName}`;
-  }
-  if (status === "Failed") {
-    return `Step failed: ${stepName}`;
-  }
-  return `Step ${stepName}: ${status}`;
-}
 
 /** Options for the step execution change listener hook */
 interface UseStepExecutionChangeListenerOptions {
@@ -48,9 +27,6 @@ export function useStepExecutionChangeListener(
   options: UseStepExecutionChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const addNotification = useNotificationStore(
-    (state) => state.addNotification
-  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleExecutionChanged = useCallback(
@@ -61,7 +37,6 @@ export function useStepExecutionChangeListener(
         execution_id,
         task_id,
         task_run_id,
-        step_name,
         status,
         change_type,
         execution,
@@ -70,19 +45,6 @@ export function useStepExecutionChangeListener(
       console.debug(
         `[StepExecutionChangeListener] Execution ${execution_id.slice(0, 6)} ${change_type}: ${status}`
       );
-
-      const toastType =
-        status === "Completed"
-          ? "success"
-          : status === "Failed"
-            ? "error"
-            : "info";
-      addNotification({
-        message: getExecutionChangeMessage(change_type, step_name, status),
-        type: toastType,
-        entity: "step",
-        entityId: execution_id,
-      });
 
       if (execution) {
         upsertStepExecutionInQueryCache(execution, {
@@ -109,7 +71,7 @@ export function useStepExecutionChangeListener(
         })
         .catch(() => {});
     },
-    [addNotification, projectScopeGeneration]
+    [projectScopeGeneration]
   );
 
   useEffect(() => {

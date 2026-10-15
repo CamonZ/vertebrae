@@ -104,6 +104,7 @@ function openTargetPanel(target: VtbEntityTarget): boolean {
       store.openStep(target.id);
       return true;
     case "project":
+    case "artifact":
       return false;
   }
 }

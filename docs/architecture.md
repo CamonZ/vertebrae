@@ -357,7 +357,11 @@ checked millisecond arithmetic. `vtb::tasks` reads (`get`, `find`, `parent`,
 the execution's project and treat a mismatch as absent. `vtb::artifacts` reads
 (`list`, `lookup`, `read`, `read_json`) address a task or `"project"` subject by
 logical name through the project-scoped `artifactByLogicalName` and subject
-listings; raw by-ID artifact reads are not exposed. `vtb::cmd::run` spawns an
+listings; raw by-ID artifact reads are not exposed. `vtb::notifications::send`
+publishes a Markdown notification to the execution's project through the
+`NotificationService` (`publishNotification`); the project comes from the
+scope, never the script, and each call creates a new notification.
+`vtb::cmd::run` spawns an
 argv command (no implicit shell) as the daemon user, unsandboxed, in its own
 process group, defaulting to the step's working directory (task worktree, else
 project root) carried on `ScriptScope`, with the login-shell `PATH` that

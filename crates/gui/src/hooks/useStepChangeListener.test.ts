@@ -52,15 +52,8 @@ describe("useStepChangeListener", () => {
     expect(
       queryClient.getQueryData(queryKeys.steps.byId(generation, step.id!))
     ).toEqual(step);
-    expect(useNotificationStore.getState().notifications).toEqual([
-      expect.objectContaining({
-        message: "Step step-1 updated",
-        entity: "step",
-        entityId: "step-1",
-        type: "info",
-        read: false,
-      }),
-    ]);
+    // Realtime changes refresh caches without adding Activity entries.
+    expect(useNotificationStore.getState().notifications).toEqual([]);
 
     act(() => {
       handler?.({

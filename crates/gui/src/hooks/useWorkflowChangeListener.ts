@@ -2,9 +2,7 @@ import { useEffect, useCallback } from "react";
 import {
   events,
   type WorkflowChangedEvent,
-  type WorkflowChangeType,
 } from "../bindings";
-import { useNotificationStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -13,26 +11,6 @@ import {
   removeWorkflowFromQueryCache,
   upsertWorkflowInQueryCache,
 } from "../query";
-
-/** Get toast message for workflow change type */
-function getWorkflowChangeMessage(
-  changeType: WorkflowChangeType,
-  workflowId: string
-): string {
-  const shortId = workflowId.slice(0, 6);
-  switch (changeType) {
-    case "Created":
-      return `Workflow ${shortId} created`;
-    case "Updated":
-      return `Workflow ${shortId} updated`;
-    case "Deleted":
-      return `Workflow ${shortId} deleted`;
-    case "TaskAssigned":
-      return `Task assigned to workflow ${shortId}`;
-    case "TaskUnassigned":
-      return `Task unassigned from workflow`;
-  }
-}
 
 /** Options for the workflow change listener hook */
 interface UseWorkflowChangeListenerOptions {
@@ -51,9 +29,6 @@ export function useWorkflowChangeListener(
   options: UseWorkflowChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const addNotification = useNotificationStore(
-    (state) => state.addNotification
-  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleWorkflowChanged = useCallback(
@@ -66,26 +41,13 @@ export function useWorkflowChangeListener(
         `[WorkflowChangeListener] Received ${change_type} event for workflow ${workflow_id.slice(0, 6)}`
       );
 
-      const toastType =
-        change_type === "Created"
-          ? "success"
-          : change_type === "Deleted"
-            ? "error"
-            : "info";
-      addNotification({
-        message: getWorkflowChangeMessage(change_type, workflow_id),
-        type: toastType,
-        entity: "task",
-        entityId: workflow_id,
-      });
-
       if (change_type === "Deleted") {
         removeWorkflowFromQueryCache(workflow_id, projectScopeGeneration);
       } else if (workflow) {
         upsertWorkflowInQueryCache(workflow, projectScopeGeneration);
       }
     },
-    [addNotification, projectScopeGeneration]
+    [projectScopeGeneration]
   );
 
   useEffect(() => {

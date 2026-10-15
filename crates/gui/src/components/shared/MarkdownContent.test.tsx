@@ -188,6 +188,34 @@ describe("MarkdownContent", () => {
       });
     });
 
+    it("routes artifact links to the artifacts page and keeps escaped labels literal", () => {
+      const artifactId = "9b7c1a52-1f0e-4f43-a0c7-2b8d7e6b1c10";
+      const taskId = "3f1d9f6e-5c1b-4f8e-9f55-0b6f0c7d2a11";
+      render(
+        <MarkdownContent
+          text={`Artifact [report](vtb://artifact/${artifactId}) has been added to task [Ship \\[it\\] \\*now\\*](vtb://task/${taskId}).`}
+        />
+      );
+
+      const [artifact, task] = screen.getAllByTestId("vtb-entity-link");
+      expect(artifact).toHaveAttribute("data-vtb-entity-type", "artifact");
+      expect(artifact).toHaveAttribute(
+        "data-vtb-route",
+        `/artifacts?artifactId=${artifactId}`
+      );
+      expect(artifact).toHaveTextContent("report");
+      expect(task).toHaveAttribute("data-vtb-entity-type", "task");
+      expect(task).toHaveTextContent("Ship [it] *now*");
+    });
+
+    it("renders unsupported Vertebrae link types as inert text", () => {
+      render(<MarkdownContent text="See [run](vtb://taskrun/abc)." />);
+      expect(screen.queryByTestId("vtb-entity-link")).toBeNull();
+      expect(screen.getByTestId("vtb-entity-link-fallback")).toHaveTextContent(
+        "run"
+      );
+    });
+
     it("renders valid inline file references and leaves traversal paths inert", () => {
       render(
         <MarkdownContent

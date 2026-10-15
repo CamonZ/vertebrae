@@ -1,21 +1,9 @@
 import { useEffect, useCallback } from "react";
-import { events, type StepTransitionChangedEvent, type StepTransitionChangeType } from "../bindings";
-import { useNotificationStore } from "../stores";
+import { events, type StepTransitionChangedEvent } from "../bindings";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
-
-/** Get toast message for step transition change type */
-function getTransitionChangeMessage(changeType: StepTransitionChangeType, transitionId: string): string {
-  const shortId = transitionId.slice(0, 6);
-  switch (changeType) {
-    case "Created":
-      return `Step transition ${shortId} created`;
-    case "Deleted":
-      return `Step transition ${shortId} deleted`;
-  }
-}
 
 /** Options for the step transition change listener hook */
 interface UseStepTransitionChangeListenerOptions {
@@ -36,9 +24,6 @@ export function useStepTransitionChangeListener(
   options: UseStepTransitionChangeListenerOptions = {}
 ) {
   const { onStepTransitionChange, enabled = true } = options;
-  const addNotification = useNotificationStore(
-    (state) => state.addNotification
-  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleStepTransitionChanged = useCallback(
@@ -51,19 +36,11 @@ export function useStepTransitionChangeListener(
         `[StepTransitionChangeListener] Received ${change_type} event for transition ${transition_id.slice(0, 6)}`
       );
 
-      const toastType = change_type === "Created" ? "success" : "error";
-      addNotification({
-        message: getTransitionChangeMessage(change_type, transition_id),
-        type: toastType,
-        entity: "step",
-        entityId: transition_id,
-      });
-
       if (onStepTransitionChange) {
         onStepTransitionChange(event.payload);
       }
     },
-    [addNotification, onStepTransitionChange, projectScopeGeneration]
+    [onStepTransitionChange, projectScopeGeneration]
   );
 
   useEffect(() => {

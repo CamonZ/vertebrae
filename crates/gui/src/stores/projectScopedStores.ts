@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { useChatStore } from "./chatStore";
 import { useEntityPanelStore } from "./entityPanelStore";
 import { useFactoryFilterStore } from "./factoryFilterStore";
+import { useNotificationStore } from "./notificationStore";
 import { useSessionLogStore } from "./sessionLogStore";
 import { queryClient } from "../query/queryClient";
 import { queryKeys } from "../query/queryKeys";
@@ -33,7 +34,8 @@ export function useProjectScopeGeneration() {
  * project. Project-scoped server queries are removed here; realtime
  * listeners and normal query fetches repopulate state for the active project.
  * Connection-scoped (account/backend) caches intentionally survive project
- * resets; only project-scoped queries are cleared.
+ * resets; only project-scoped queries are cleared. Durable notifications and
+ * their dismissals are dropped; ephemeral activity survives.
  */
 export function resetProjectScopedStores() {
   useProjectScopeStore.getState().bumpGeneration();
@@ -47,4 +49,5 @@ export function resetProjectScopedStores() {
   useFactoryFilterStore.getState().reset();
   useSessionLogStore.getState().reset();
   useChatStore.getState().reset();
+  useNotificationStore.getState().resetDurableNotifications();
 }

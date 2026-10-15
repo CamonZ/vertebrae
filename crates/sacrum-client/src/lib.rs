@@ -52,6 +52,7 @@ pub mod config;
 pub mod daemon_service;
 pub mod error;
 pub mod execution_service;
+pub mod notification_service;
 pub mod queries;
 pub mod step_service;
 pub mod task_service;
@@ -82,6 +83,7 @@ pub use daemon_service::{
 };
 pub use error::{SacrumClientError, SacrumClientResult};
 pub use execution_service::SacrumExecutionService;
+pub use notification_service::SacrumNotificationService;
 pub use step_service::SacrumStepService;
 pub use task_service::SacrumTaskService;
 pub use workflow_service::SacrumWorkflowService;
@@ -104,6 +106,7 @@ pub fn from_sacrum(client: std::sync::Arc<GraphqlClient>) -> vertebrae_core::Ver
         std::sync::Arc::new(execution_service),
         std::sync::Arc::new(step_service),
         std::sync::Arc::new(SacrumArtifactService::new((*client).clone())),
+        std::sync::Arc::new(SacrumNotificationService::new((*client).clone())),
     )
 }
 

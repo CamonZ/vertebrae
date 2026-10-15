@@ -7,6 +7,7 @@ export const VTB_ENTITY_TYPES = [
   "step",
   "workflow",
   "project",
+  "artifact",
 ] as const;
 
 export type VtbEntityType = (typeof VTB_ENTITY_TYPES)[number];
@@ -44,6 +45,8 @@ function routeFor(type: VtbEntityType, id: string): string {
       return `/design?workflowId=${encoded}`;
     case "project":
       return `/setup?project=${encoded}`;
+    case "artifact":
+      return `/artifacts?artifactId=${encoded}`;
   }
 }
 
@@ -56,6 +59,7 @@ function levelFor(type: VtbEntityType): TaskLevel | null {
     case "step":
     case "workflow":
     case "project":
+    case "artifact":
       return null;
   }
 }

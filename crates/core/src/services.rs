@@ -2,7 +2,7 @@
 //!
 //! This module provides a single entry point for accessing all service layer components.
 //! The `VertebraeServices` struct bundles all service traits (TaskService, WorkflowService,
-//! ExecutionService, StepService, ArtifactService) into a unified container for convenient access in both CLI and GUI.
+//! ExecutionService, StepService, ArtifactService, NotificationService) into a unified container for convenient access in both CLI and GUI.
 //!
 //! # Sacrum Backend Support
 //!
@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use crate::artifact_service::ArtifactService;
 use crate::execution_service::ExecutionService;
+use crate::notification_service::NotificationService;
 use crate::service::TaskService;
 use crate::step_service::StepService;
 use crate::workflow_service::WorkflowService;
@@ -35,6 +36,8 @@ use crate::workflow_service::WorkflowService;
 ///     workflow_service,
 ///     execution_service,
 ///     step_service,
+///     artifact_service,
+///     notification_service,
 /// );
 ///
 /// // Access individual services
@@ -43,6 +46,7 @@ use crate::workflow_service::WorkflowService;
 /// let executions = services.executions();
 /// let steps = services.steps();
 /// let artifacts = services.artifacts();
+/// let notifications = services.notifications();
 /// ```
 pub struct VertebraeServices {
     /// Task service implementation
@@ -55,6 +59,8 @@ pub struct VertebraeServices {
     steps: Arc<dyn StepService>,
     /// Artifact service implementation
     artifacts: Arc<dyn ArtifactService>,
+    /// Notification service implementation
+    notifications: Arc<dyn NotificationService>,
 }
 
 impl VertebraeServices {
@@ -70,6 +76,7 @@ impl VertebraeServices {
     /// * `executions` - Arc-wrapped execution service implementation
     /// * `steps` - Arc-wrapped step service implementation
     /// * `artifacts` - Arc-wrapped artifact service implementation
+    /// * `notifications` - Arc-wrapped notification service implementation
     ///
     /// # Returns
     ///
@@ -80,6 +87,7 @@ impl VertebraeServices {
         executions: Arc<dyn ExecutionService>,
         steps: Arc<dyn StepService>,
         artifacts: Arc<dyn ArtifactService>,
+        notifications: Arc<dyn NotificationService>,
     ) -> Self {
         Self {
             tasks,
@@ -87,6 +95,7 @@ impl VertebraeServices {
             executions,
             steps,
             artifacts,
+            notifications,
         }
     }
 
@@ -113,6 +122,11 @@ impl VertebraeServices {
     /// Get a reference to the artifact service
     pub fn artifacts(&self) -> &dyn ArtifactService {
         self.artifacts.as_ref()
+    }
+
+    /// Get a reference to the notification service
+    pub fn notifications(&self) -> &dyn NotificationService {
+        self.notifications.as_ref()
     }
 
     /// Get an Arc clone to the task service

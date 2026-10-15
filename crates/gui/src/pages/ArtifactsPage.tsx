@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { Artifact } from "../bindings";
 import { Badge } from "../components/atoms/Badge";
 import { ArtifactInspectorPanel } from "../components/Artifacts/ArtifactInspectorPanel";
@@ -180,6 +181,20 @@ export function ArtifactsPage() {
       setSelectedArtifactId(null);
     }
   }, [artifacts, selectedArtifactId]);
+
+  // A `vtb://artifact/<id>` link opens this page with `?artifactId=`. Select
+  // it once it is listed; an artifact outside the project, or deleted, is
+  // never listed and leaves the page without a selection.
+  const [searchParams] = useSearchParams();
+  const linkedArtifactId = searchParams.get("artifactId");
+  const appliedLinkRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!linkedArtifactId || appliedLinkRef.current === linkedArtifactId)
+      return;
+    if (!artifacts.some((artifact) => artifact.id === linkedArtifactId)) return;
+    appliedLinkRef.current = linkedArtifactId;
+    setSelectedArtifactId(linkedArtifactId);
+  }, [artifacts, linkedArtifactId]);
 
   const {
     mounted: inspectorMounted,

@@ -7,6 +7,7 @@ import {
   useStepChangeListener,
   useStepExecutionChangeListener,
   useSectionChangeListener,
+  useNotificationChangeListener,
   useSessionLogChangeListener,
   useStepTransitionChangeListener,
   useWorkflowTransitionChangeListener,
@@ -31,6 +32,7 @@ export function GlobalListeners() {
   useStepChangeListener();
   useStepExecutionChangeListener();
   useSectionChangeListener();
+  useNotificationChangeListener();
   useSessionLogChangeListener();
   useStepTransitionChangeListener();
   useWorkflowTransitionChangeListener();
