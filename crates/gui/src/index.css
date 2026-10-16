@@ -3113,12 +3113,12 @@ html.light ::selection {
   opacity: 0.4;
 }
 .hc-panel .hc-mini-history-toggle {
-  margin: var(--s-1) var(--s-2) 0;
   border: none;
   background: transparent;
   padding: 0;
-  color: var(--accent);
-  font-size: var(--text-12);
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 .hc-panel .hc-mini-history-toggle:hover,

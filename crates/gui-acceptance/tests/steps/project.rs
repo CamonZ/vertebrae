@@ -191,17 +191,14 @@ async fn click_local_chat_plus_action(world: &mut GuiWorld, project: String) {
         .clone();
     let client = wd.lock().await;
     let title = format!("Start a new chat in {slug}");
-    let element = client
-        .wait()
-        .at_most(std::time::Duration::from_secs(10))
-        .for_element(Locator::XPath(&format!("//*[@title='{title}']")))
-        .await
-        .unwrap_or_else(|_| panic!("local chat plus action for project '{slug}' not found"));
-    gui_acceptance::wait_actionable(&element).await;
-    element
-        .click()
-        .await
-        .unwrap_or_else(|_| panic!("failed to click local chat plus action for '{slug}'"));
+    // Opening history resizes the panel; wait for the plus button to stop
+    // moving before WebDriver dispatches its pointer click.
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath(&format!("//*[@title='{title}']")),
+        &format!("local chat plus action for project '{slug}'"),
+    )
+    .await;
     world
         .screenshot(&client, &format!("after-project-chat-plus-{project}"))
         .await;
@@ -370,7 +367,7 @@ async fn local_chat_history_drawer_shows_active_project(world: &mut GuiWorld, ti
         .await;
 
     let locator = Locator::XPath(&format!(
-        "//*[@data-testid='local-chat-history-drawer']//h3/span[normalize-space(.)='{}']",
+        "//*[@data-testid='local-chat-history-drawer']//h3/*[self::span or self::button[@data-mini-history-toggle]][normalize-space(.)='{}']",
         slug
     ));
     let element = client
