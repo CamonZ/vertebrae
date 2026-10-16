@@ -322,7 +322,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                       {allSessionCount > LOCAL_CHAT_SESSION_ROW_LIMIT ? (
                         <button
                           type="button"
-                          className="hc-mini-history-toggle"
+                          className="hc-mini-history-project-title hc-mini-history-toggle"
                           data-mini-history-toggle
                           aria-expanded={isExpanded}
                           aria-controls={groupRowsId}
@@ -331,7 +331,9 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                           {group.label}
                         </button>
                       ) : (
-                        <span>{group.label}</span>
+                        <span className="hc-mini-history-project-title">
+                          {group.label}
+                        </span>
                       )}
                       <button
                         type="button"
