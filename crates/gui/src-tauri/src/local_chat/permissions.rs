@@ -286,7 +286,6 @@ impl PermissionBridge {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn pending_harness_control_count_for_session(&self, session_id: &str) -> usize {
         self.pending_harness_controls
             .lock()

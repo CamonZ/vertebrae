@@ -268,6 +268,20 @@ impl LocalChatSessionManager {
         .await
     }
 
+    pub async fn compact_session(
+        &self,
+        backend_session_id: &str,
+    ) -> Result<(), LocalChatSessionError> {
+        let harness_kind = self.registry_harness(backend_session_id).await?;
+        let harness = self.harness(harness_kind)?;
+        let result = harness.compact_session(backend_session_id).await;
+        if result.is_err() && !harness.has_session(backend_session_id).await {
+            self.remove_registry_entry(backend_session_id, harness_kind)
+                .await;
+        }
+        result
+    }
+
     pub async fn close_session(
         &self,
         backend_session_id: &str,

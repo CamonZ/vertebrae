@@ -394,6 +394,18 @@ pub async fn send_local_chat_message(
         .await
 }
 
+/// Compact an idle local conversation, waiting for provider completion.
+#[tauri::command]
+#[specta::specta]
+pub async fn compact_local_chat_session(
+    local_chat_manager: State<'_, LocalChatSessionManager>,
+    backend_session_id: String,
+) -> Result<(), LocalChatSessionError> {
+    local_chat_manager
+        .compact_session(&backend_session_id)
+        .await
+}
+
 /// Close a provider-neutral local chat session.
 #[tauri::command]
 #[specta::specta]

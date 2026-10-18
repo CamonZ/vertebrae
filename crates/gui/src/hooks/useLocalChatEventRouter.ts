@@ -181,7 +181,16 @@ export function routeLocalChatSessionUsageEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
+  const session = useChatStore.getState().sessions[sessionId];
+  // Manual compaction emits session usage without creating a user chat turn.
+  // Its completion event may arrive before this IPC callback is reduced.
+  const manualCompactionUsage =
+    payload.is_root === true &&
+    !payload.turn_id &&
+    (session?.lifecycle === "compacting" ||
+      session?.compactionSummary?.trigger === "manual");
   if (
+    !manualCompactionUsage &&
     !shouldRouteContentEvent(payload.backend_session_id, sessionId, payload)
   ) {
     return false;

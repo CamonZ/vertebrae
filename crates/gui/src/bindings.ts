@@ -872,6 +872,17 @@ async sendLocalChatMessage(backendSessionId: string, content: string) : Promise<
 }
 },
 /**
+ * Compact an idle local conversation, waiting for provider completion.
+ */
+async compactLocalChatSession(backendSessionId: string) : Promise<Result<null, LocalChatSessionError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("compact_local_chat_session", { backendSessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Close a provider-neutral local chat session.
  */
 async closeLocalChatSession(backendSessionId: string) : Promise<Result<null, LocalChatSessionError>> {
@@ -1404,7 +1415,10 @@ gate?: LocalChatGateBinding | null }
  * Options for creating a workflow step.
  */
 export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; order: number; transitions_to: string[]; step_type?: StepType;
- harness?: StepHarness | null;
+/**
+ * Runtime harness to select; omission preserves Sacrum's default.
+ */
+harness?: StepHarness | null;
 /**
  * Config fields declared by `step_type` (snake_case keys; `agent_config`
  * uses the GUI `AgentConfig` shape). Omitted fields take the type's
@@ -1597,7 +1611,7 @@ export type LocalChatProviderInfo = { id: string; label: string; harness: LocalC
 models: LocalChatModelOption[] | null; default_model_id: string | null }
 export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id: string; thread_id?: string | null; is_root: boolean; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number; item_id?: string | null; completion_status?: string | null }
-export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }
+export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { CompactionFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }
 export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; error: string; item_id?: string | null }
 export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind;
 /**
@@ -1889,11 +1903,7 @@ goal: string | null;
 /**
  * Step type mirrored from core::StepType; fixed once the step exists.
  */
-step_type: StepType;
-/**
- * Optional per-step harness selection; null preserves the Sacrum default.
- */
-harness: StepHarness | null;
+step_type: StepType; harness: StepHarness | null;
 /**
  * `step_type`-specific configuration; null for stop and finish steps.
  */
@@ -2057,6 +2067,11 @@ export type StepExecutionChangedEvent = { execution_id: string; task_id: string;
  */
 export type StepExecutionStatus = "Pending" | "Running" | "Completed" | "Failed"
 /**
+ * Step runtime harness exposed to the GUI. The core enum remains the shared
+ * domain contract and this mirror is generated into the TypeScript bindings.
+ */
+export type StepHarness = "claude" | "codex" | "typesafe"
+/**
  * The type of change that occurred on a step transition.
  */
 export type StepTransitionChangeType = "Created" | "Deleted"
@@ -2075,8 +2090,6 @@ export type StepTransitionChangedEvent = { transition_id: string; from_step_id: 
  * Step type - mirrors core::StepType
  */
 export type StepType = "llm_inference" | "structured_inference" | "execute" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
-/** Harness selected for an individual workflow step. */
-export type StepHarness = "claude" | "codex" | "typesafe"
 /**
  * StopRun command input. Provide either `task_run_id` or `task_id`.
  */

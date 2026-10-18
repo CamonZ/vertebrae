@@ -646,3 +646,21 @@ async fn durable_control_events_bracket_the_live_control_exchange() {
     ));
     assert_eq!(emitted[0].correlation, emitted[1].correlation);
 }
+
+#[tokio::test]
+async fn sessions_without_manual_compaction_reject_it_explicitly() {
+    let session = MockSession {
+        id: SessionId::new("unsupported"),
+        resume_id: None,
+        closed: AtomicBool::new(false),
+        close_status: SessionCloseStatus::Closed,
+    };
+    assert!(
+        session
+            .compact()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported")
+    );
+}

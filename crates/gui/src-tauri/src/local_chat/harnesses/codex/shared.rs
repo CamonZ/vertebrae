@@ -256,6 +256,41 @@ impl LocalChatHarness for CodexLocalChatHarness {
         Ok(())
     }
 
+    async fn compact_session(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError> {
+        let session = self
+            .sessions
+            .read()
+            .await
+            .get(backend_session_id)
+            .cloned()
+            .ok_or_else(|| LocalChatSessionError::SessionNotFound(backend_session_id.into()))?;
+        if session
+            .permission_bridge
+            .pending_harness_control_count_for_session(backend_session_id)
+            > 0
+        {
+            return Err(LocalChatSessionError::SendFailed(
+                "Resolve pending controls before compacting".into(),
+            ));
+        }
+        match session.session.compact().await {
+            Ok(()) => Ok(()),
+            Err(HarnessError::InvalidRequest(error)) => {
+                Err(LocalChatSessionError::SendFailed(error))
+            }
+            Err(error) => {
+                // A failed operation may still be running remotely. Close our attachment
+                // before allowing a later send to resume this durable conversation.
+                let cleanup = self.close_session(backend_session_id).await;
+                let message = match cleanup {
+                    Ok(()) => error.to_string(),
+                    Err(cleanup) => format!("{error}; session cleanup: {cleanup}"),
+                };
+                Err(LocalChatSessionError::CompactionFailed(message))
+            }
+        }
+    }
+
     async fn has_session(&self, backend_session_id: &str) -> bool {
         self.sessions.read().await.contains_key(backend_session_id)
     }

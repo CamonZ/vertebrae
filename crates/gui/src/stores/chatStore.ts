@@ -381,6 +381,7 @@ export type LocalChatLifecycle =
   | "resuming"
   | "sending"
   | "streaming"
+  | "compacting"
   | "closing"
   | "closed"
   | "error";
@@ -591,6 +592,8 @@ interface ChatStoreActions {
   }) => Promise<string | null>;
   /** Start a new local chat without reusing an existing session */
   startFreshSession: (label: string, projectPath?: string | null) => string;
+  /** Create a fresh conversation in the source pane, retaining its settings and history. */
+  clearConversation: (sessionId: string) => string | null;
   /** Delete one local persisted session and any in-memory copy */
   deleteLocalSession: (sessionId: string) => void;
   /** Add a message to a session */
@@ -1171,6 +1174,7 @@ export function isLocalChatLifecycleBusy(
     lifecycle === "resuming" ||
     lifecycle === "sending" ||
     lifecycle === "streaming" ||
+    lifecycle === "compacting" ||
     lifecycle === "closing"
   );
 }
@@ -2302,6 +2306,39 @@ export const useChatStore = create<ChatStore>((set, get) => {
         };
       });
       return session.id;
+    },
+
+    clearConversation: (sessionId) => {
+      const source = get().sessions[sessionId];
+      if (!source) return null;
+      const fresh = {
+        ...createLocalSession("New chat", source.projectPath),
+        harness: source.harness,
+        providerId: source.providerId,
+        selectedModelId: source.selectedModelId,
+        selectedReasoningEffort: source.selectedReasoningEffort,
+        selectedSpeedTier: source.selectedSpeedTier,
+        selectedPersonality: source.selectedPersonality,
+        permissionMode: source.permissionMode,
+      };
+      persistLocalChatSession(fresh);
+      set((state) => ({
+        sessions: { ...state.sessions, [fresh.id]: fresh },
+        localSessionSummaries: upsertLocalSessionSummary(
+          state.localSessionSummaries,
+          fresh
+        ),
+        activeSessionId: fresh.id,
+        paneLayout: {
+          ...state.paneLayout,
+          panes: state.paneLayout.panes.map((pane) =>
+            pane.sessionId === sessionId
+              ? { ...pane, sessionId: fresh.id }
+              : pane
+          ),
+        },
+      }));
+      return fresh.id;
     },
 
     deleteLocalSession: (sessionId) => {

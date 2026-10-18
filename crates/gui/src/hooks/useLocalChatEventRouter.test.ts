@@ -12,6 +12,7 @@ import {
 import { useChatStore, type ChatSession } from "../stores/chatStore";
 import translationSequence from "../test/fixtures/localChatTurnTranslation.json";
 import {
+  routeLocalChatSessionUsageEvent,
   routeLocalChatSessionEndEvent,
   routeLocalChatSessionTitleEvent,
   routeLocalChatSessionErrorEvent,
@@ -1420,4 +1421,63 @@ describe("useLocalChatEventRouter route functions", () => {
       expect.objectContaining({ kind: "assistant", text: "unbegun answer" }),
     ]);
   });
+});
+
+it("routes manual compaction usage without a chat turn, including delayed completion delivery", () => {
+  resetLocalChatTurnRoutingForTests();
+  resetChatStore({
+    session: makeSession({
+      harness: "codex",
+      backendSessionId: "backend",
+      lifecycle: "compacting",
+    }),
+  });
+  const usage = {
+    backend_session_id: "backend",
+    harness: "codex" as const,
+    is_root: true,
+    turn_id: null,
+    thread_id: "thread",
+    model: "model",
+    context_tokens: 123,
+    context_window: 1000,
+    thread_total_tokens: 456,
+  };
+  expect(routeLocalChatSessionUsageEvent(usage)).toBe(true);
+  expect(useChatStore.getState().sessions.session.tokenUsage).toEqual({
+    used: 123,
+    max: 1000,
+  });
+  expect(
+    routeLocalChatCompactionEvent({
+      backend_session_id: "backend",
+      harness: "codex",
+      is_root: true,
+      turn_id: null,
+      thread_id: "thread",
+      state: "completed",
+      trigger: "manual",
+      pre_tokens: null,
+    })
+  ).toBe(true);
+  useChatStore.getState().setSessionLifecycle("session", "idle");
+  expect(
+    routeLocalChatSessionUsageEvent({ ...usage, context_tokens: 100 })
+  ).toBe(true);
+  expect(useChatStore.getState().sessions.session.tokenUsage?.used).toBe(100);
+  expect(
+    routeLocalChatTextEvent({
+      backend_session_id: "backend",
+      harness: "codex",
+      is_root: true,
+      turn_id: null,
+      thread_id: "thread",
+      text: "stale",
+      parent_tool_use_id: null,
+      is_partial: true,
+    })
+  ).toBe(false);
+  expect(
+    routeLocalChatSessionUsageEvent({ ...usage, backend_session_id: "other" })
+  ).toBe(false);
 });

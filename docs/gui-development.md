@@ -282,6 +282,21 @@ bounded and unrelated execution buckets keep their existing references. There
 is no production performance monitor or per-event correlation allocation in
 this path.
 
+### Codex local chat commands
+
+In an idle Codex local chat, submit standalone `/compact` to compact the current
+thread without clearing its transcript, or `/clear` to open a fresh conversation
+in the same pane. The old conversation remains in history and can be resumed.
+The fresh conversation keeps the project and selected provider/model settings.
+Commands are unavailable while work or a question is pending; ordinary sends are
+blocked during manual compaction. Compaction completion follows the provider's
+compaction item and terminal turn, not just its RPC acknowledgement. A failed
+compaction releases the live session; the next prompt can resume its saved thread.
+
+Only exact commands (with optional surrounding whitespace) are recognized in
+Codex chat. Arguments, autocomplete, custom prompts and commands in other
+harnesses are outside this implementation; other input retains normal chat behavior.
+
 ### Claude compaction lifecycle
 
 Claude context compaction is exposed as lifecycle state, not as transcript
