@@ -12,6 +12,12 @@ vertebrae-harness-claude = { path = "../harness-claude" }
 vertebrae-harness-codex = { path = "../harness-codex" }
 vertebrae-harness-core = { path = "../harness-core" }
 vertebrae-harness-typesafe = { path = "../harness-typesafe" }
+vertebrae-harness-mistral-vibe = { path = "../harness-mistral-vibe" }
+
+[dev-dependencies]
+json-patch = "3"
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "signal", "time"] }
 
 [lints]
 workspace = true

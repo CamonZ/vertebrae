@@ -14,6 +14,8 @@ pub enum StepHarness {
     Claude,
     Codex,
     Typesafe,
+    #[serde(rename = "mistral_vibe")]
+    MistralVibe,
 }
 
 impl StepHarness {
@@ -22,6 +24,7 @@ impl StepHarness {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Typesafe => "typesafe",
+            Self::MistralVibe => "mistral_vibe",
         }
     }
 }
@@ -42,6 +45,7 @@ mod tests {
             (StepHarness::Claude, "claude"),
             (StepHarness::Codex, "codex"),
             (StepHarness::Typesafe, "typesafe"),
+            (StepHarness::MistralVibe, "mistral_vibe"),
         ] {
             assert_eq!(
                 serde_json::to_string(&harness).unwrap(),

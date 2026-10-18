@@ -353,8 +353,9 @@ fn parse_payload_harness(
             "claude" => Ok(Some(StepHarness::Claude)),
             "codex" => Ok(Some(StepHarness::Codex)),
             "typesafe" => Ok(Some(StepHarness::Typesafe)),
+            "mistral_vibe" => Ok(Some(StepHarness::MistralVibe)),
             unsupported => Err(format!(
-                "unsupported step harness '{unsupported}'; expected 'claude', 'codex', or 'typesafe'"
+                "unsupported step harness '{unsupported}'; expected 'claude', 'codex', 'typesafe', or 'mistral_vibe'"
             )),
         },
         Some(value) => Err(format!(
@@ -1449,6 +1450,7 @@ mod tests {
             provider_binaries: crate::helpers::ProviderBinaries {
                 anthropic: None,
                 openai: None,
+                mistral_vibe: None,
             },
             shell_path: String::new(),
             installed_skills_roots: Vec::new(),
@@ -2416,6 +2418,7 @@ done
                 provider_binaries: crate::helpers::ProviderBinaries {
                     anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
                     openai: Some(PathBuf::from("/usr/local/bin/codex")),
+                    mistral_vibe: None,
                 },
                 shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
                 installed_skills_roots: Vec::new(),
@@ -2592,6 +2595,7 @@ done
             ("claude", StepHarness::Claude),
             ("codex", StepHarness::Codex),
             ("typesafe", StepHarness::Typesafe),
+            ("mistral_vibe", StepHarness::MistralVibe),
         ] {
             assert_eq!(
                 parse_payload_harness(Some(&serde_json::json!(wire))).unwrap(),
@@ -2616,7 +2620,7 @@ done
             "{error}"
         );
         assert!(
-            error.contains("'claude', 'codex', or 'typesafe'"),
+            error.contains("'claude', 'codex', 'typesafe', or 'mistral_vibe'"),
             "{error}"
         );
 

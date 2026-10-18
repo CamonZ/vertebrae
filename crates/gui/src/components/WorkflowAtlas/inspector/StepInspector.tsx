@@ -624,6 +624,7 @@ export function StepInspector({
                 <option value="claude">Claude</option>
                 <option value="codex">Codex</option>
                 <option value="typesafe">TypeSafe</option>
+                <option value="mistral_vibe">Mistral Vibe</option>
               </select>
             </label>
           ) : null}

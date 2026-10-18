@@ -44,6 +44,7 @@ fn explicit_step_harnesses_round_trip_through_workflow_bundles() {
         (StepHarness::Claude, "claude"),
         (StepHarness::Codex, "codex"),
         (StepHarness::Typesafe, "typesafe"),
+        (StepHarness::MistralVibe, "mistral_vibe"),
     ] {
         let mut manifest = golden();
         let workflow_ref = manifest.workflows[0].workflow_ref.clone();

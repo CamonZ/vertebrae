@@ -239,7 +239,7 @@ impl ProviderProfile {
                     return invalid("wire_api is only supported for the codex harness".into());
                 }
             }
-            StepHarness::Typesafe => {
+            StepHarness::Typesafe | StepHarness::MistralVibe => {
                 if self.base_url.is_some() {
                     return invalid(
                         "base_url is not supported for the typesafe harness; use url".into(),

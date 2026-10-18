@@ -478,7 +478,7 @@ fn local_chat_harness(harness: StepHarness) -> Option<LocalChatHarnessKind> {
     match harness {
         StepHarness::Claude => Some(LocalChatHarnessKind::Claude),
         StepHarness::Codex => Some(LocalChatHarnessKind::Codex),
-        StepHarness::Typesafe => None,
+        StepHarness::Typesafe | StepHarness::MistralVibe => None,
     }
 }
 

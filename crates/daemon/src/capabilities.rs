@@ -126,6 +126,13 @@ impl DaemonCapabilities {
                     }),
                 },
             ),
+            (
+                StepHarness::MistralVibe,
+                HarnessCapability {
+                    executable: provider_binaries.mistral_vibe.clone(),
+                    discovery_diagnostic: provider_diagnostics.mistral_vibe.clone(),
+                },
+            ),
         ]
         .into_iter()
         .collect();
@@ -184,6 +191,7 @@ impl DaemonCapabilities {
                     self.provider_binaries.get(profile.harness).is_some()
                 }
                 StepHarness::Typesafe => true,
+                StepHarness::MistralVibe => self.provider_binaries.get(profile.harness).is_some(),
             }
     }
 
@@ -274,6 +282,7 @@ mod tests {
             ProviderDiscoveryDiagnostics {
                 anthropic: Some("Claude Code CLI not found".to_string()),
                 openai: Some("Codex CLI not found".to_string()),
+                mistral_vibe: Some("Mistral Vibe server not found".to_string()),
             },
             Path::new("/tmp/project"),
             None,
@@ -281,7 +290,7 @@ mod tests {
             None,
         );
 
-        assert_eq!(capabilities.harnesses.len(), 3);
+        assert_eq!(capabilities.harnesses.len(), 4);
         assert_eq!(
             capabilities
                 .harnesses
@@ -294,6 +303,13 @@ mod tests {
                 .harnesses
                 .get(&StepHarness::Codex)
                 .is_some_and(|capability| capability.executable.is_none())
+        );
+        assert_eq!(
+            capabilities
+                .harnesses
+                .get(&StepHarness::MistralVibe)
+                .and_then(|capability| capability.discovery_diagnostic.as_deref()),
+            Some("Mistral Vibe server not found")
         );
         assert_eq!(
             capabilities

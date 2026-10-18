@@ -7776,11 +7776,15 @@ dependencies = [
 name = "vertebrae-harness"
 version = "0.1.0"
 dependencies = [
+ "json-patch",
  "serde_json",
+ "tempfile",
+ "tokio",
  "vertebrae-core",
  "vertebrae-harness-claude",
  "vertebrae-harness-codex",
  "vertebrae-harness-core",
+ "vertebrae-harness-mistral-vibe",
  "vertebrae-harness-typesafe",
 ]
 
@@ -7833,6 +7837,19 @@ dependencies = [
  "tokio",
  "uuid",
  "vertebrae-core",
+]
+
+[[package]]
+name = "vertebrae-harness-mistral-vibe"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "json-patch",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "vertebrae-harness-core",
 ]
 
 [[package]]
