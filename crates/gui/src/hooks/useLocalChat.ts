@@ -12,6 +12,8 @@ import type {
   LocalChatSessionErrorEvent,
   LocalChatSessionWarningEvent,
   LocalChatCompactionEvent,
+  LocalChatSessionError,
+  Result,
 } from "../bindings";
 import {
   getLocalChatLifecycle,
@@ -30,6 +32,7 @@ import {
   DEFAULT_LOCAL_CHAT_HARNESS,
   isAutomaticLocalChatLabel,
 } from "../utils/localChatPersistence";
+import { gateChatAcceptsSubmission } from "../utils/gateChat";
 import { resolveContextWindow } from "../utils/modelContextWindow";
 
 const MAX_TITLE_USER_MESSAGES = 3;
@@ -800,7 +803,11 @@ export async function doStartSession(
       permission_mode: permissionMode,
       personality,
       ...(session.providerId ? { provider_id: session.providerId } : {}),
-      ...(session.gate ? { gate: session.gate } : {}),
+      // A gate that no longer waits would fail validation; the chat resumes
+      // unbound and re-entry rebinds it live.
+      ...(session.gate && gateChatAcceptsSubmission(session.gateStatus)
+        ? { gate: session.gate }
+        : {}),
     });
     if (result.status === "error") {
       throw new Error(commandErrorMessage(result.error));
@@ -842,7 +849,14 @@ export async function doSendMessage(
     setBackendSessionId?: (id: string, backendId: string | null) => void;
     setBackendSessionIdRef?: (backendId: string | null) => void;
   } & TurnOwnershipDeps,
-  options: { addUserMessage?: boolean } = {}
+  options: {
+    addUserMessage?: boolean;
+    /**
+     * Delivers the turn in place of a plain send. Resolving `false` means
+     * nothing was sent, so the turn settles without streaming.
+     */
+    deliver?: () => Promise<Result<boolean | null, LocalChatSessionError>>;
+  } = {}
 ) {
   const activeTurnLocalId = deps.beginActiveTurn?.(sessionId) ?? null;
   const completionIsStale = makeStalenessCheck(
@@ -861,10 +875,9 @@ export async function doSendMessage(
   }
 
   try {
-    const result = await commands.sendLocalChatMessage(
-      backendSessionId,
-      content
-    );
+    const result = options.deliver
+      ? await options.deliver()
+      : await commands.sendLocalChatMessage(backendSessionId, content);
     // Gate before any write: settling or erroring unconditionally here would
     // clear whichever turn is current, including a replacement started after
     // this send was abandoned by a Stop.
@@ -880,6 +893,11 @@ export async function doSendMessage(
         "error",
         commandErrorMessage(result.error)
       );
+      return;
+    }
+    if (result.data === false) {
+      deps.settleActiveTurn?.(sessionId);
+      deps.setSessionLifecycle(sessionId, "idle");
       return;
     }
     deps.markStreamingIfSending(sessionId);

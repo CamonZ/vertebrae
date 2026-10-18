@@ -264,7 +264,8 @@ pub async fn create_local_chat_session(
 }
 
 /// Rebind a live gate chat to the currently waiting execution and send the
-/// updated hidden protocol as a turn.
+/// updated hidden protocol as a turn. Returns whether a turn was sent; the
+/// chat already bound to that execution receives nothing.
 #[tauri::command]
 #[specta::specta]
 pub async fn refresh_local_chat_session_gate(
@@ -272,7 +273,7 @@ pub async fn refresh_local_chat_session_gate(
     local_chat_manager: State<'_, LocalChatSessionManager>,
     backend_session_id: String,
     gate: crate::local_chat::LocalChatGateBinding,
-) -> Result<(), LocalChatSessionError> {
+) -> Result<bool, LocalChatSessionError> {
     let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
@@ -330,7 +331,7 @@ fn canonical_gate_binding(
         ));
     }
 
-    let latest_attempt = trace
+    let gate_attempts = trace
         .step_executions
         .iter()
         .filter(|execution| {
@@ -338,6 +339,9 @@ fn canonical_gate_binding(
                 && execution.step_name == supplied.step_name
                 && execution.step_type.as_deref() == Some("human_input")
         })
+        .collect::<Vec<_>>();
+    let latest_attempt = gate_attempts
+        .iter()
         .max_by_key(|execution| execution.started_at);
     if latest_attempt.and_then(|execution| execution.id.as_deref())
         != Some(supplied.execution_id.as_str())
@@ -372,6 +376,29 @@ fn canonical_gate_binding(
         artifact: artifact.to_string(),
         instructions: config.instructions.clone(),
         output_schema: config.output_schema.clone(),
+        revision: gate_revision(gate_attempts.len(), execution.handoff.as_deref()),
+    })
+}
+
+/// A gate visited more than once in its run is a revision; the waiting
+/// execution's handoff carries the review's verdict.
+fn gate_revision(
+    attempts: usize,
+    handoff: Option<&str>,
+) -> Option<crate::local_chat::LocalChatGateRevision> {
+    if attempts < 2 {
+        return None;
+    }
+    let verdict = handoff
+        .map(str::trim)
+        .filter(|handoff| !handoff.is_empty())
+        .map(|handoff| {
+            serde_json::from_str(handoff)
+                .unwrap_or_else(|_| serde_json::Value::String(handoff.to_string()))
+        });
+    Some(crate::local_chat::LocalChatGateRevision {
+        attempt: u32::try_from(attempts).unwrap_or(u32::MAX),
+        verdict,
     })
 }
 
@@ -800,6 +827,7 @@ mod tests {
             artifact: "forged".into(),
             instructions: Some("Forged question?".into()),
             output_schema: Some(serde_json::json!("forged")),
+            revision: None,
         }
     }
 
@@ -819,6 +847,45 @@ mod tests {
         assert_eq!(
             gate.output_schema,
             Some(serde_json::json!({ "type": "object" }))
+        );
+    }
+
+    #[test]
+    fn rebinding_a_revisited_gate_carries_the_attempt_and_verdict() {
+        let mut trace = gate_trace(vertebrae_core::TaskRunStatus::Waiting, true);
+        trace.step_executions[1].handoff = Some(r#"{"reasons":"Missing rollback plan"}"#.into());
+        let supplied = crate::local_chat::LocalChatGateBinding {
+            execution_id: "exec-2".into(),
+            revision: Some(crate::local_chat::LocalChatGateRevision {
+                attempt: 9,
+                verdict: Some(serde_json::json!("forged")),
+            }),
+            ..supplied_gate()
+        };
+
+        let gate = canonical_gate_binding(trace, supplied).expect("valid revision");
+
+        assert_eq!(
+            gate.revision,
+            Some(crate::local_chat::LocalChatGateRevision {
+                attempt: 2,
+                verdict: Some(serde_json::json!({ "reasons": "Missing rollback plan" })),
+            })
+        );
+    }
+
+    #[test]
+    fn first_gate_visits_are_not_revisions() {
+        let gate = canonical_gate_binding(
+            gate_trace(vertebrae_core::TaskRunStatus::Waiting, false),
+            supplied_gate(),
+        )
+        .expect("valid gate");
+
+        assert_eq!(gate.revision, None);
+        assert_eq!(
+            gate_revision(2, Some("not json")).and_then(|revision| revision.verdict),
+            Some(serde_json::json!("not json"))
         );
     }
 

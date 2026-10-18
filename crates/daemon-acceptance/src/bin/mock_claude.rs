@@ -11,6 +11,8 @@
 //! When `MOCK_CAPTURE_DIR` is set, writes `argv.json` (array of strings) and
 //! `cwd.txt` to that directory on startup, and appends the argv to
 //! `invocations.jsonl`, so tests can assert on how the daemon invoked the CLI.
+//! A persistent session also appends each stdin turn's text content to
+//! `stdin_turns.jsonl`.
 //! The envelope prompt is not required for capture, which lets scenarios
 //! exercise the daemon's empty-prompt fallback.
 //!
@@ -102,6 +104,17 @@ fn capture_invocation(dir: &Path, args: &[String]) {
         .open(dir.join("invocations.jsonl"))
         .expect("open invocations.jsonl");
     writeln!(invocations, "{argv_json}").expect("append invocations.jsonl");
+}
+
+fn capture_stdin_turn(dir: &Path, content: &str) {
+    std::fs::create_dir_all(dir).expect("create MOCK_CAPTURE_DIR");
+    let mut turns = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("stdin_turns.jsonl"))
+        .expect("open stdin_turns.jsonl");
+    let line = serde_json::to_string(content).expect("turn content serialises");
+    writeln!(turns, "{line}").expect("append stdin_turns.jsonl");
 }
 
 fn state_dir() -> Option<PathBuf> {
@@ -217,6 +230,9 @@ fn run_stdin_stream_json(args: &[String]) -> ExitCode {
                 eprintln!("mock-claude: failed to read stdin stream-json: {err}");
                 return ExitCode::from(1);
             }
+        }
+        if let (Some(dir), Some(content)) = (state_dir(), turn_content(&message)) {
+            capture_stdin_turn(&dir, &content);
         }
         if let Some(envelope) =
             turn_content(&message).and_then(|content| parse_envelope(&scripted(&content)))

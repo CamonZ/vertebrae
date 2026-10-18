@@ -747,6 +747,7 @@ fn gate() -> crate::local_chat::LocalChatGateBinding {
         artifact: "approval".into(),
         instructions: None,
         output_schema: None,
+        revision: None,
     }
 }
 
@@ -805,10 +806,11 @@ async fn refreshing_a_gate_rebinds_it_and_sends_the_updated_hidden_protocol() {
         instructions: Some("Updated question?".into()),
         ..gate()
     };
-    manager
+    let sent = manager
         .refresh_gate("backend-gate", updated)
         .await
         .expect("gate refresh should send");
+    assert!(sent);
 
     let calls = harness.calls();
     let Some(MockCall::Send { content, .. }) = calls.last() else {
@@ -817,6 +819,57 @@ async fn refreshing_a_gate_rebinds_it_and_sends_the_updated_hidden_protocol() {
     assert!(content.starts_with("<vertebrae-hidden-turn>"));
     assert!(content.contains("exec-2"));
     assert!(content.contains("Updated question?"));
+}
+
+#[tokio::test]
+async fn refreshing_a_gate_twice_for_the_same_execution_sends_one_turn() {
+    let bridge = PermissionBridge::new();
+    let harness = Arc::new(MockHarness::new(LocalChatHarnessKind::Claude));
+    let manager = LocalChatSessionManager::with_harnesses_and_permission_bridge(
+        vec![harness.clone()],
+        bridge.clone(),
+    );
+    let mut input = create_input(LocalChatHarnessKind::Claude, "backend-gate");
+    input.gate = Some(gate());
+    manager
+        .create_session_with_runtime(
+            input,
+            LocalChatRuntime::inert_with_permission_bridge_for_tests(bridge),
+        )
+        .await
+        .unwrap();
+
+    let revision = crate::local_chat::LocalChatGateBinding {
+        execution_id: "exec-2".into(),
+        revision: Some(crate::local_chat::LocalChatGateRevision {
+            attempt: 2,
+            verdict: Some(serde_json::json!({ "reasons": "Missing rollback plan" })),
+        }),
+        ..gate()
+    };
+    let mut sent = Vec::new();
+    for binding in [revision.clone(), revision, gate()] {
+        sent.push(
+            manager
+                .refresh_gate("backend-gate", binding)
+                .await
+                .expect("gate refresh should succeed"),
+        );
+    }
+    assert_eq!(sent, [true, false, true]);
+
+    let sends = harness
+        .calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            MockCall::Send { content, .. } => Some(content),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(sends.len(), 2, "one turn per new execution: {sends:?}");
+    assert!(sends[0].starts_with("<vertebrae-hidden-turn>\n[Vertebrae evaluation]"));
+    assert!(sends[0].contains("Missing rollback plan"));
+    assert!(sends[1].contains("exec-1"));
 }
 
 #[tokio::test]

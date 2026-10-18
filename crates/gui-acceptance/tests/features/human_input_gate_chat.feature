@@ -5,6 +5,9 @@ Feature: Resolve a human_input gate in a local chat
   speaks first, and Resolve reopens the same chat rather than starting another.
   Mock Claude writes no provider transcript, so after a frontend restart the
   reopened chat is identified by its resumable session, not replayed messages.
+  When the review loops a rejected answer back, the same chat shows the new
+  attempt and receives one hidden evaluation turn with the reasons; the chat
+  shows the gate closed once the run finishes or stops.
 
   Scenario: Resolve opens a Claude gate chat seeded with the gate protocol
     Given the daemon is running for the project
@@ -89,3 +92,47 @@ Feature: Resolve a human_input gate in a local chat
     And the Codex gate chat should open with a hidden turn
     And the local chat should show no user messages
     And the "claude" harness should have started 0 gate chats asking "Approve Gate Codex Task?" with artifact "approval"
+
+  Scenario: A rejected resolution is explained in the same chat until the run finishes
+    Given the daemon is running for the project
+    And I create a workflow with:
+      | name | Gate Review Workflow |
+    And I create a step "draft" in the workflow "Gate Review Workflow" via the CLI
+    And I create a reviewed human_input step "approve" with instructions "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Review Workflow" via the CLI
+    And the GUI is showing the task list
+    When I create a task with:
+      | title    | Gate Review Task     |
+      | workflow | Gate Review Workflow |
+    And I transition the task to step "approve" via the CLI
+    And I start the task workflow via the CLI
+    And I navigate to the traces page for the created task
+    Then the human_input gate should offer Resolve within 15 seconds
+    When I click on the element with test id "human-input-gate-resolve"
+    Then the local chat should show 1 completed assistant responses within 10 seconds
+    And the GUI should show "Drafting" within 10 seconds
+    When I resolve the waiting gate's "approval" artifact with '{"approved": false, "reason": "The rollback plan is missing."}' via the CLI
+    Then the GUI should show "Rejected · attempt 2" within 20 seconds
+    And the gate chat should receive 1 evaluation turn for attempt 2 with reasons "The rollback plan is missing."
+    And the local chat should be ready for a message within 10 seconds
+    And the local chat should show no user messages
+    When I resolve the waiting gate's "approval" artifact with '{"approved": true, "reason": "The rollback plan is attached."}' via the CLI
+    Then the GUI should show "Gate closed" within 20 seconds
+
+  Scenario: Stopping the run closes its gate chat
+    Given the daemon is running for the project
+    And I create a workflow with:
+      | name | Gate Stop Workflow |
+    And I create a step "draft" in the workflow "Gate Stop Workflow" via the CLI
+    And I create a human_input step "approve" with instructions "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Stop Workflow" via the CLI
+    And the GUI is showing the task list
+    When I create a task with:
+      | title    | Gate Stop Task     |
+      | workflow | Gate Stop Workflow |
+    And I transition the task to step "approve" via the CLI
+    And I start the task workflow via the CLI
+    And I navigate to the traces page for the created task
+    Then the human_input gate should offer Resolve within 15 seconds
+    When I click on the element with test id "human-input-gate-resolve"
+    Then the GUI should show "Drafting" within 10 seconds
+    When I stop the task workflow via the CLI
+    Then the GUI should show "Gate closed" within 20 seconds

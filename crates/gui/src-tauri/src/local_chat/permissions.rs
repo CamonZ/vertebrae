@@ -265,6 +265,23 @@ impl PermissionBridge {
         }
     }
 
+    /// Bind `gate` unless `session_id` is already bound to its execution.
+    /// Returns whether the binding changed, so a duplicate refresh for the
+    /// same waiting execution delivers nothing.
+    pub(crate) fn rebind_gate(&self, session_id: &str, gate: LocalChatGateBinding) -> bool {
+        let Ok(mut bindings) = self.gate_bindings.lock() else {
+            return false;
+        };
+        if bindings
+            .get(session_id)
+            .is_some_and(|bound| bound.execution_id == gate.execution_id)
+        {
+            return false;
+        }
+        bindings.insert(session_id.to_string(), gate);
+        true
+    }
+
     pub(crate) fn unbind_gate(&self, session_id: &str) {
         if let Ok(mut bindings) = self.gate_bindings.lock() {
             bindings.remove(session_id);

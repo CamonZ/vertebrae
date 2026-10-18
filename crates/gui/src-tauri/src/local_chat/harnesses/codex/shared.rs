@@ -546,6 +546,7 @@ mod tests {
             artifact: "approval".into(),
             instructions: Some("Ship it?".into()),
             output_schema: None,
+            revision: None,
         };
 
         let request = codex_start_request(

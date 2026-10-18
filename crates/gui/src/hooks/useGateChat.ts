@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { commands } from "../bindings";
+import { commands, type LocalChatGateBinding } from "../bindings";
 import {
   getLocalChatLifecycle,
   isLocalChatLifecycleBusy,
@@ -10,8 +10,92 @@ import type { HumanInputGateContext } from "../utils/humanInputGate";
 import {
   currentActiveTurnLocalId,
   currentBackendSessionId,
+  doSendMessage,
   doStartSession,
 } from "./useLocalChat";
+
+/**
+ * Latest execution each chat is being rebound to: repeats merge, and a
+ * refresh superseded while waiting for the chat to go idle is dropped.
+ */
+const pendingGateRefreshes = new Map<string, string>();
+
+/** Resolve once the chat is not mid-turn; false when it is gone. */
+function whenSessionIdle(sessionId: string): Promise<boolean> {
+  const settled = (): boolean | null => {
+    const session = useChatStore.getState().sessions[sessionId];
+    if (!session) return false;
+    return isLocalChatLifecycleBusy(getLocalChatLifecycle(session))
+      ? null
+      : true;
+  };
+  const now = settled();
+  if (now !== null) return Promise.resolve(now);
+  return new Promise((resolve) => {
+    const unsubscribe = useChatStore.subscribe(() => {
+      const next = settled();
+      if (next === null) return;
+      unsubscribe();
+      resolve(next);
+    });
+  });
+}
+
+/**
+ * Rebind a gate chat to the execution now waiting at its gate. A live chat
+ * receives the hidden refresh turn (the review's verdict on a revision) as
+ * its own turn once it is idle; a chat with no running session is rebound in
+ * place and gets the refreshed protocol when it resumes.
+ */
+export async function refreshGateChat(
+  sessionId: string,
+  gate: LocalChatGateBinding
+): Promise<void> {
+  if (pendingGateRefreshes.get(sessionId) === gate.execution_id) return;
+  pendingGateRefreshes.set(sessionId, gate.execution_id);
+  try {
+    if (!(await whenSessionIdle(sessionId))) return;
+    if (pendingGateRefreshes.get(sessionId) !== gate.execution_id) return;
+    const store = useChatStore.getState();
+    const backendSessionId = store.sessions[sessionId]?.backendSessionId;
+    if (!backendSessionId) {
+      store.setGateChatBinding(sessionId, gate);
+      return;
+    }
+    await doSendMessage(
+      backendSessionId,
+      sessionId,
+      "",
+      {
+        addMessage: store.addMessage,
+        setSessionLifecycle: store.setSessionLifecycle,
+        markStreamingIfSending: store.markStreamingIfSending,
+        beginActiveTurn: store.beginActiveTurn,
+        settleActiveTurn: store.settleActiveTurn,
+        setBackendSessionId: store.setBackendSessionId,
+        getActiveTurnLocalId: currentActiveTurnLocalId,
+        getBackendSessionId: currentBackendSessionId,
+      },
+      {
+        addUserMessage: false,
+        deliver: async () => {
+          const result = await commands.refreshLocalChatSessionGate(
+            backendSessionId,
+            gate
+          );
+          if (result.status === "ok") {
+            useChatStore.getState().setGateChatBinding(sessionId, gate);
+          }
+          return result;
+        },
+      }
+    );
+  } finally {
+    if (pendingGateRefreshes.get(sessionId) === gate.execution_id) {
+      pendingGateRefreshes.delete(sessionId);
+    }
+  }
+}
 
 async function currentProjectPath(): Promise<string | null> {
   try {
@@ -45,21 +129,8 @@ export async function resolveGateInChat(
   }
 
   if (session.backendSessionId) {
-    if (gateChanged) {
-      try {
-        const result = await commands.refreshLocalChatSessionGate(
-          session.backendSessionId,
-          gate
-        );
-        if (result.status === "error") throw new Error(String(result.error));
-      } catch (error) {
-        store.addMessage(sessionId, {
-          kind: "error",
-          message: error instanceof Error ? error.message : String(error),
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
+    // Delivered once the chat is idle; Resolve itself returns at once.
+    if (gateChanged) void refreshGateChat(sessionId, gate);
     return sessionId;
   }
 

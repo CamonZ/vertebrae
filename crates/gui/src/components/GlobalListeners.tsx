@@ -12,6 +12,7 @@ import {
   useStepTransitionChangeListener,
   useWorkflowTransitionChangeListener,
 } from "../hooks";
+import { useGateChatSync } from "../hooks/useGateChatSync";
 import { useLocalChatEventRouter } from "../hooks/useLocalChatEventRouter";
 
 /**
@@ -37,6 +38,7 @@ export function GlobalListeners() {
   useStepTransitionChangeListener();
   useWorkflowTransitionChangeListener();
   useLocalChatEventRouter();
+  useGateChatSync();
 
   return null;
 }
