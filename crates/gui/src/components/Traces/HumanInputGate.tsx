@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from "react";
+import { useResolveGateInChat } from "../../hooks/useGateChat";
+import { gateChatBinding } from "../../utils/gateChat";
 import { MarkdownContent } from "../shared/MarkdownContent";
 import { Spinner } from "../Spinner";
 import type { HumanInputGateContext } from "../../utils/humanInputGate";
@@ -54,6 +56,8 @@ export function HumanInputGate({
   className,
 }: HumanInputGateProps): ReactNode {
   const { run, execution, stepName, prompt, outputSchema } = context;
+  const resolveGateInChat = useResolveGateInChat();
+  const resolvable = gateChatBinding(context) !== null;
 
   const hasPrompt = !!prompt && prompt.trim().length > 0;
   const schemaJson = formatSchema(outputSchema);
@@ -113,31 +117,61 @@ export function HumanInputGate({
             </p>
           </div>
         </div>
-        {stoppable && onStop && (
+        <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
-            data-testid="human-input-gate-stop"
-            onClick={onStop}
-            disabled={isStopping}
-            className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-err)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-err)]/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-err)] disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Stop waiting run"
-            title="Stop the orchestrator for this waiting run"
+            data-testid="human-input-gate-resolve"
+            onClick={() => void resolveGateInChat(context)}
+            disabled={!resolvable}
+            className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-info)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-info)]/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-info)] disabled:cursor-not-allowed disabled:opacity-50"
+            title={
+              resolvable
+                ? "Resolve this gate in a chat"
+                : "Configure an artifact on this step to resolve it in a chat"
+            }
           >
-            {isStopping ? (
-              <Spinner />
-            ) : (
-              <svg
-                className="h-3.5 w-3.5"
-                fill="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <rect x="6" y="6" width="12" height="12" rx="1.5" />
-              </svg>
-            )}
-            <span>{isStopping ? "Stopping..." : "Stop"}</span>
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M8 10h8M8 14h5m-9 6l2.5-3H18a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v14z"
+              />
+            </svg>
+            <span>Resolve</span>
           </button>
-        )}
+          {stoppable && onStop && (
+            <button
+              type="button"
+              data-testid="human-input-gate-stop"
+              onClick={onStop}
+              disabled={isStopping}
+              className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-err)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-err)]/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-err)] disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Stop waiting run"
+              title="Stop the orchestrator for this waiting run"
+            >
+              {isStopping ? (
+                <Spinner />
+              ) : (
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                </svg>
+              )}
+              <span>{isStopping ? "Stopping..." : "Stop"}</span>
+            </button>
+          )}
+        </div>
       </div>
       <dl className="mt-3 grid grid-cols-1 gap-2 text-eyebrow sm:grid-cols-2">
         <div>

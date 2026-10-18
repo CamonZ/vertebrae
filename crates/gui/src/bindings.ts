@@ -849,6 +849,18 @@ async createLocalChatSession(input: CreateLocalChatSessionInput) : Promise<Resul
 }
 },
 /**
+ * Rebind a live gate chat to the currently waiting execution and send the
+ * updated hidden protocol as a turn.
+ */
+async refreshLocalChatSessionGate(backendSessionId: string, gate: LocalChatGateBinding) : Promise<Result<null, LocalChatSessionError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("refresh_local_chat_session_gate", { backendSessionId, gate }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Send a message to a provider-neutral local chat session.
  */
 async sendLocalChatMessage(backendSessionId: string, content: string) : Promise<Result<null, LocalChatSessionError>> {
@@ -1381,7 +1393,13 @@ export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backe
  * harness's built-in provider; custom IDs must be configured in
  * config.toml for `harness`.
  */
-provider_id?: string | null }
+provider_id?: string | null;
+/**
+ * Waiting `human_input` gate this chat resolves. New sessions append
+ * the gate protocol to their developer instructions, and the bound
+ * submission runs without an interactive permission prompt.
+ */
+gate?: LocalChatGateBinding | null }
 /**
  * Options for creating a workflow step.
  */
@@ -1539,6 +1557,28 @@ export type LocalBackendUpdateStatus = { management: string; configured: boolean
 export type LocalChatCompactionEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; state: string; trigger?: string | null; pre_tokens?: number | null }
 export type LocalChatFileChange = { path: string; kind: string; diff: string | null }
 export type LocalChatFileChangeEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; status: string; changes: LocalChatFileChange[]; parent_tool_use_id: string | null }
+/**
+ * Binds a local chat to a waiting `human_input` gate. The chat is identified
+ * by `task_run_id` + `step_name`; `execution_id`, `artifact`, `instructions`
+ * and `output_schema` describe the execution currently waiting there.
+ */
+export type LocalChatGateBinding = { task_run_id: string; step_name: string;
+/**
+ * The waiting execution the resolution is attached to.
+ */
+execution_id: string;
+/**
+ * Logical name of the artifact that resolves the gate.
+ */
+artifact: string;
+/**
+ * Rendered gate instructions; the question the user must answer.
+ */
+instructions?: string | null;
+/**
+ * JSON Schema the resolution must satisfy; absent accepts any JSON.
+ */
+output_schema?: JsonValue | null }
 export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[]; default_provider: string; providers: LocalChatProviderInfo[] }
 export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; default_reasoning_effort: string | null; reasoning_efforts: LocalChatReasoningEffortOption[]; speed_tiers?: LocalChatSpeedTierOption[]; permission_modes?: LocalChatPermissionModeOption[] | null; personality_options?: LocalChatPersonalityOption[] | null; supports_resume: boolean }
 export type LocalChatHarnessKind = "claude" | "codex"
@@ -1564,7 +1604,12 @@ export type LocalChatSessionIndexEntry = { id: string; label: string; title: str
  * Provider the session was started with; absent means the harness's
  * built-in provider.
  */
-providerId?: string | null; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; selectedPersonality: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; threadTotalTokens: number | null; messageCount: number; lifecycle: string; status: string }
+providerId?: string | null; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; selectedPersonality: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; threadTotalTokens: number | null; messageCount: number; lifecycle: string; status: string;
+/**
+ * Waiting `human_input` gate the chat resolves; Resolve reopens the chat
+ * bound to the same run and step.
+ */
+gate?: LocalChatGateBinding | null }
 export type LocalChatSessionInitEvent = { backend_session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; model: string; tools: string[]; speed_tier_status?: LocalChatSpeedTierStatus | null }
 export type LocalChatSessionTitleEvent = { backend_session_id: string; harness: LocalChatHarnessKind; title: string }
 export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; model: string; context_tokens: number; context_window: number;

@@ -743,23 +743,48 @@ describe("chatStore", () => {
     });
 
     it("interrupts a hydrated partial item using its original turn identity", async () => {
-      const id = useChatStore.getState().openSession("Replay interruption", "/repo/root");
+      const id = useChatStore
+        .getState()
+        .openSession("Replay interruption", "/repo/root");
       useChatStore.getState().setProviderResumeId(id, "conv-interrupted");
-      useChatStore.setState({sessions: {}, activeSessionId: null, panelOpen: false});
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        panelOpen: false,
+      });
       vi.spyOn(commands, "loadLocalChatSessionReplay").mockResolvedValueOnce({
-        status: "ok", data: {
-          events: [JSON.stringify({version: 1, event_id: "delta", stream_id: "stream",
-            sequence: 1, correlation: {turn_id: "original-turn", item_id: "item"},
-            timestamp: "2026-01-01T00:00:00Z", semantics: "delta", type: "text",
-            data: {text: "**received**"}})],
-          cache_key: "revision", next_cursor: null, has_more: false,
+        status: "ok",
+        data: {
+          events: [
+            JSON.stringify({
+              version: 1,
+              event_id: "delta",
+              stream_id: "stream",
+              sequence: 1,
+              correlation: { turn_id: "original-turn", item_id: "item" },
+              timestamp: "2026-01-01T00:00:00Z",
+              semantics: "delta",
+              type: "text",
+              data: { text: "**received**" },
+            }),
+          ],
+          cache_key: "revision",
+          next_cursor: null,
+          has_more: false,
         },
       });
       useChatStore.getState().openSession("Replay interruption", "/repo/root");
-      await vi.waitFor(() => expect(useChatStore.getState().sessions[id].messages).toHaveLength(1));
+      await vi.waitFor(() =>
+        expect(useChatStore.getState().sessions[id].messages).toHaveLength(1)
+      );
       useChatStore.getState().interruptStreamingAssistant(id, "original-turn");
       expect(useChatStore.getState().sessions[id].messages).toEqual([
-        expect.objectContaining({text: "**received**", turnId: "original-turn", lifecycle: "interrupted", isPartial: false}),
+        expect.objectContaining({
+          text: "**received**",
+          turnId: "original-turn",
+          lifecycle: "interrupted",
+          isPartial: false,
+        }),
       ]);
     });
 
@@ -864,7 +889,7 @@ describe("chatStore", () => {
         },
         {
           kind: "assistant",
-            turnId: "turn-1",
+          turnId: "turn-1",
           text: "hello",
           timestamp: "2026-01-01T00:00:04Z",
         },
@@ -3599,6 +3624,77 @@ describe("chatStore", () => {
 
       useChatStore.getState().setPanelOpen(false);
       expect(useChatStore.getState().panelOpen).toBe(false);
+    });
+  });
+
+  describe("openGateSession", () => {
+    const gate = {
+      task_run_id: "run-1",
+      step_name: "approve",
+      execution_id: "exec-1",
+      artifact: "approval",
+      instructions: "Ship v2?",
+      output_schema: null,
+    };
+
+    it("creates a focused chat bound to the gate", () => {
+      const { sessionId, created } = useChatStore
+        .getState()
+        .openGateSession(gate, "/repo");
+
+      const state = useChatStore.getState();
+      expect(created).toBe(true);
+      expect(state.activeSessionId).toBe(sessionId);
+      expect(state.panelOpen).toBe(true);
+      expect(state.sessions[sessionId]).toMatchObject({
+        label: "Resolve approve",
+        projectPath: "/repo",
+        gate,
+      });
+      expect(loadPersistedLocalChatSession(sessionId)?.gate).toEqual(gate);
+    });
+
+    it("reopens the same chat for the run's step and rebinds the execution", () => {
+      const first = useChatStore.getState().openGateSession(gate, "/repo");
+      useChatStore.getState().openSession("Other", "/elsewhere");
+
+      const again = useChatStore
+        .getState()
+        .openGateSession({ ...gate, execution_id: "exec-2" }, "/repo");
+
+      expect(again).toEqual({
+        sessionId: first.sessionId,
+        created: false,
+        gateChanged: true,
+      });
+      const state = useChatStore.getState();
+      expect(state.activeSessionId).toBe(first.sessionId);
+      expect(state.sessions[first.sessionId].gate?.execution_id).toBe("exec-2");
+    });
+
+    it("reopens a persisted gate chat after its tab was closed", () => {
+      const first = useChatStore.getState().openGateSession(gate, "/repo");
+      useChatStore.getState().closeSession(first.sessionId);
+      expect(useChatStore.getState().sessions[first.sessionId]).toBeUndefined();
+
+      const again = useChatStore.getState().openGateSession(gate, "/repo");
+
+      expect(again).toEqual({
+        sessionId: first.sessionId,
+        created: false,
+        gateChanged: false,
+      });
+      expect(useChatStore.getState().activeSessionId).toBe(first.sessionId);
+    });
+
+    it("keeps separate chats for different gates", () => {
+      const first = useChatStore.getState().openGateSession(gate, "/repo");
+      const other = useChatStore
+        .getState()
+        .openGateSession({ ...gate, step_name: "review" }, "/repo");
+
+      expect(other.created).toBe(true);
+      expect(other.sessionId).not.toBe(first.sessionId);
     });
   });
 });

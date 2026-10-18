@@ -159,6 +159,7 @@ fn create_input(
         permission_mode: None,
         personality: None,
         provider_id: None,
+        gate: None,
     }
 }
 
@@ -424,6 +425,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
                 permission_mode: None,
                 personality: None,
                 provider: None,
+                gate: None,
             }),
             MockCall::Send {
                 backend_session_id: "backend-claude".to_string(),
@@ -450,6 +452,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
                 permission_mode: None,
                 personality: None,
                 provider: None,
+                gate: None,
             }),
             MockCall::Send {
                 backend_session_id: "backend-codex".to_string(),
@@ -734,4 +737,108 @@ async fn unavailable_harness_returns_before_calling_create() {
         })
     );
     assert!(unavailable.calls().is_empty());
+}
+
+fn gate() -> crate::local_chat::LocalChatGateBinding {
+    crate::local_chat::LocalChatGateBinding {
+        task_run_id: "run-1".into(),
+        step_name: "approve".into(),
+        execution_id: "exec-1".into(),
+        artifact: "approval".into(),
+        instructions: None,
+        output_schema: None,
+    }
+}
+
+#[tokio::test]
+async fn gate_sessions_bind_their_submission_until_closed() {
+    let bridge = PermissionBridge::new();
+    let harness = Arc::new(MockHarness::new(LocalChatHarnessKind::Codex));
+    let manager = LocalChatSessionManager::with_harnesses_and_permission_bridge(
+        vec![harness.clone()],
+        bridge.clone(),
+    );
+    let mut input = create_input(LocalChatHarnessKind::Codex, "backend-gate");
+    input.gate = Some(gate());
+
+    manager
+        .create_session_with_runtime(
+            input,
+            LocalChatRuntime::inert_with_permission_bridge_for_tests(bridge.clone()),
+        )
+        .await
+        .expect("gate session should start");
+
+    assert!(bridge.has_gate_binding("backend-gate"));
+    assert!(matches!(
+        harness.calls().as_slice(),
+        [MockCall::Create(HarnessCreateSessionInput {
+            gate: Some(_),
+            ..
+        })]
+    ));
+
+    manager.close_session("backend-gate").await.unwrap();
+    assert!(!bridge.has_gate_binding("backend-gate"));
+}
+
+#[tokio::test]
+async fn refreshing_a_gate_rebinds_it_and_sends_the_updated_hidden_protocol() {
+    let bridge = PermissionBridge::new();
+    let harness = Arc::new(MockHarness::new(LocalChatHarnessKind::Codex));
+    let manager = LocalChatSessionManager::with_harnesses_and_permission_bridge(
+        vec![harness.clone()],
+        bridge.clone(),
+    );
+    let mut input = create_input(LocalChatHarnessKind::Codex, "backend-gate");
+    input.gate = Some(gate());
+    manager
+        .create_session_with_runtime(
+            input,
+            LocalChatRuntime::inert_with_permission_bridge_for_tests(bridge),
+        )
+        .await
+        .unwrap();
+
+    let updated = crate::local_chat::LocalChatGateBinding {
+        execution_id: "exec-2".into(),
+        instructions: Some("Updated question?".into()),
+        ..gate()
+    };
+    manager
+        .refresh_gate("backend-gate", updated)
+        .await
+        .expect("gate refresh should send");
+
+    let calls = harness.calls();
+    let Some(MockCall::Send { content, .. }) = calls.last() else {
+        panic!("expected a gate refresh send, got {calls:?}");
+    };
+    assert!(content.starts_with("<vertebrae-hidden-turn>"));
+    assert!(content.contains("exec-2"));
+    assert!(content.contains("Updated question?"));
+}
+
+#[tokio::test]
+async fn failed_gate_session_start_drops_the_binding() {
+    let bridge = PermissionBridge::new();
+    let manager = LocalChatSessionManager::with_harnesses_and_permission_bridge(
+        vec![Arc::new(
+            MockHarness::new(LocalChatHarnessKind::Claude)
+                .fail_create(LocalChatSessionError::StartFailed("boom".into())),
+        )],
+        bridge.clone(),
+    );
+    let mut input = create_input(LocalChatHarnessKind::Claude, "backend-gate");
+    input.gate = Some(gate());
+
+    let result = manager
+        .create_session_with_runtime(
+            input,
+            LocalChatRuntime::inert_with_permission_bridge_for_tests(bridge.clone()),
+        )
+        .await;
+
+    assert!(result.is_err());
+    assert!(!bridge.has_gate_binding("backend-gate"));
 }

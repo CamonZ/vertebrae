@@ -716,6 +716,7 @@ export async function doStartSession(
       permission_mode: permissionMode,
       personality,
       ...(session.providerId ? { provider_id: session.providerId } : {}),
+      ...(session.gate ? { gate: session.gate } : {}),
     });
     if (result.status === "error") {
       throw new Error(commandErrorMessage(result.error));

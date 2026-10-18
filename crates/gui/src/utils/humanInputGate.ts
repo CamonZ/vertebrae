@@ -1,6 +1,6 @@
 import type { StepExecution, TaskRun } from "../bindings";
 import { safeMs } from "../components/Traces/timeUtils";
-import { executionPrompt } from "./stepConfig";
+import { executionHumanInput } from "./stepConfig";
 
 const WAIT_CHILDREN_STEP_TYPE = "wait_children";
 
@@ -10,8 +10,11 @@ export interface HumanInputGateContext {
   run: TaskRun;
   execution: StepExecution | null;
   stepName: string | null;
+  /** Rendered gate instructions from the waiting execution's config. */
   prompt: string | null;
   outputSchema: unknown | null;
+  /** Logical name of the artifact that resolves the gate. */
+  artifact: string | null;
 }
 
 export function pickLatestExecution(
@@ -46,17 +49,18 @@ export function classifyWaitingRun(
 
 export function resolveHumanInputGate(
   run: TaskRun | null | undefined,
-  executions: readonly StepExecution[],
-  options: { outputSchema?: unknown | null } = {}
+  executions: readonly StepExecution[]
 ): HumanInputGateContext | null {
   if (!run || run.status !== "waiting") return null;
   const execution = pickLatestExecution(run, executions);
   if (classifyWaitingRun(execution) !== "human_input") return null;
+  const config = executionHumanInput(execution);
   return {
     run,
     execution,
     stepName: execution?.step_name ?? null,
-    prompt: executionPrompt(execution),
-    outputSchema: options.outputSchema ?? null,
+    prompt: config?.instructions ?? null,
+    outputSchema: config?.output_schema ?? null,
+    artifact: config?.artifact ?? null,
   };
 }

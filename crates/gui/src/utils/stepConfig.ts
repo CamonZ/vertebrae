@@ -1,4 +1,5 @@
 import type {
+  HumanInputStepConfig,
   JsonValue,
   LlmInferenceStepConfig,
   StepExecution,
@@ -32,6 +33,13 @@ export function executionPrompt(
 ): string | null {
   if (execution?.step_type !== "llm_inference") return null;
   return (execution.config as LlmInferenceStepConfig | null)?.prompt ?? null;
+}
+
+export function executionHumanInput(
+  execution: StepExecution | null | undefined
+): HumanInputStepConfig | null {
+  if (execution?.step_type !== "human_input") return null;
+  return (execution.config as HumanInputStepConfig | null) ?? null;
 }
 
 export function executionStructuredInference(

@@ -141,6 +141,7 @@ describe("UnifiedChatView (single-run threads)", () => {
           stepName: "wait_children",
           prompt: null,
           outputSchema: null,
+          artifact: null,
         }}
       />
     );

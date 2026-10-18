@@ -176,17 +176,29 @@ describe("resolveHumanInputGate", () => {
     expect(gate?.run.id).toBe("run-1");
     expect(gate?.execution?.id).toBe("e-1");
     expect(gate?.stepName).toBe("approval");
-    // human_input executions carry no rendered config, hence no prompt.
+    // Without a rendered config there is no question, schema or artifact.
     expect(gate?.prompt).toBeNull();
     expect(gate?.outputSchema).toBeNull();
+    expect(gate?.artifact).toBeNull();
   });
 
-  it("forwards an explicitly provided output schema", () => {
+  it("reads the question, schema and artifact from the rendered gate config", () => {
     const run = makeRun({ id: "run-1", status: "waiting" });
-    const exec = makeExec({ id: "e-1", step_name: "approval" });
     const schema = { type: "object", required: ["decision"] };
-    const gate = resolveHumanInputGate(run, [exec], { outputSchema: schema });
+    const exec = makeExec({
+      id: "e-1",
+      step_name: "approval",
+      config: {
+        version: 1,
+        instructions: "Ship v2?",
+        artifact: "decision",
+        output_schema: schema,
+      },
+    });
+    const gate = resolveHumanInputGate(run, [exec]);
+    expect(gate?.prompt).toBe("Ship v2?");
     expect(gate?.outputSchema).toEqual(schema);
+    expect(gate?.artifact).toBe("decision");
   });
 
   it("returns null when the run has no executions and no latest pointer", () => {

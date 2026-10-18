@@ -4,6 +4,7 @@ import {
   compareLocalChatSessionRecency,
   DEFAULT_LOCAL_CHAT_HARNESS,
   findPersistedDefaultEmptyLocalChatSession,
+  findPersistedGateChatSession,
   findPersistedLocalChatSession,
   hasLocalChatUserMessageSummary,
   isDefaultEmptyLocalChatSession,
@@ -29,12 +30,14 @@ import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
 import type {
   JsonValue,
   LoadLocalChatSessionReplayOutput,
+  LocalChatGateBinding,
   LocalChatHarnessKind,
   PermissionMode,
   UserQuestion,
 } from "../bindings";
 import { commands } from "../bindings";
 import { useLocalChatDefaultsStore } from "../utils/localChatDefaults";
+import { gateChatLabel, isSameGate } from "../utils/gateChat";
 import {
   applyInitialPage,
   applyOlderPage,
@@ -496,6 +499,11 @@ export interface ChatSession {
   updatedAt?: string;
   /** Durable local message count without persisting transcript text */
   messageCount?: number;
+  /**
+   * Durable binding to the waiting human_input gate this chat resolves.
+   * Resolve reopens the chat bound to the same run and step.
+   */
+  gate?: LocalChatGateBinding | null;
 }
 
 export interface ChatPane {
@@ -551,6 +559,15 @@ interface ChatStoreActions {
   closePane: (paneId: string) => void;
   /** Collapse split panes back to a single visible pane */
   unsplitPanes: (paneId?: string) => void;
+  /**
+   * Focus the chat bound to `gate`'s run and step, rebinding it to the
+   * currently waiting execution, or create one. `created` marks a new chat;
+   * `gateChanged` marks a live chat whose binding must be refreshed.
+   */
+  openGateSession: (
+    gate: LocalChatGateBinding,
+    projectPath?: string | null
+  ) => { sessionId: string; created: boolean; gateChanged: boolean };
   /** List persisted local chat sessions, newest first */
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
   /** Hydrate local chat metadata from the app-managed index file. */
@@ -822,7 +839,8 @@ function createLocalSession(
     harness:
       useLocalChatDefaultsStore.getState().defaultProvider?.harness ??
       DEFAULT_LOCAL_CHAT_HARNESS,
-    providerId: useLocalChatDefaultsStore.getState().defaultProvider?.id ?? null,
+    providerId:
+      useLocalChatDefaultsStore.getState().defaultProvider?.id ?? null,
     backendSessionId: null,
     providerResumeId: null,
     projectPath,
@@ -1988,6 +2006,82 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return true;
     },
 
+    openGateSession: (gate, projectPath) => {
+      const runtime = Object.values(get().sessions).find(
+        (session) => !!session.gate && isSameGate(session.gate, gate)
+      );
+      if (runtime) {
+        const previousGate = runtime.gate;
+        void updateSession(runtime.id, (session) => ({ ...session, gate }));
+        set((state) => ({
+          ...focusSessionInPaneLayout(state, runtime.id),
+          panelOpen: true,
+        }));
+        return {
+          sessionId: runtime.id,
+          created: false,
+          gateChanged:
+            previousGate?.execution_id !== gate.execution_id ||
+            previousGate?.artifact !== gate.artifact ||
+            previousGate?.instructions !== gate.instructions ||
+            previousGate?.output_schema !== gate.output_schema,
+        };
+      }
+
+      const persisted = findPersistedGateChatSession(gate);
+      if (persisted) {
+        const hydrated = hydrateLocalSession({
+          ...persisted,
+          gate,
+          projectPath: persisted.projectPath ?? projectPath ?? null,
+        });
+        persistLocalChatSession(hydrated);
+        set((state) => {
+          const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
+          return {
+            sessions: nextSessions,
+            ...focusSessionInPaneLayout(
+              { ...state, sessions: nextSessions },
+              hydrated.id
+            ),
+            panelOpen: true,
+          };
+        });
+        void hydrateProviderMessagesInPlace(hydrated.id, hydrated);
+        return {
+          sessionId: hydrated.id,
+          created: false,
+          gateChanged: false,
+        };
+      }
+
+      const session: ChatSession = {
+        ...createLocalSession(gateChatLabel(gate.step_name), projectPath),
+        gate,
+      };
+      persistLocalChatSession(session);
+      set((state) => {
+        const nextSessions = { ...state.sessions, [session.id]: session };
+        return {
+          sessions: nextSessions,
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            session
+          ),
+          ...focusSessionInPaneLayout(
+            { ...state, sessions: nextSessions },
+            session.id
+          ),
+          panelOpen: true,
+        };
+      });
+      return {
+        sessionId: session.id,
+        created: true,
+        gateChanged: false,
+      };
+    },
+
     loadOlderReplayMessages: async (sessionId) => {
       const session = get().sessions[sessionId];
       const replay = session?.providerReplay;
@@ -2228,7 +2322,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
     addMessage: (sessionId, message) => {
       const persistMessage =
         message.kind === "user" ||
-        (message.kind === "assistant" && assistantLifecycle(message) !== "streaming");
+        (message.kind === "assistant" &&
+          assistantLifecycle(message) !== "streaming");
       updateSession(
         sessionId,
         (session) => {
@@ -2410,7 +2505,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }));
     },
 
-    updateLastAssistantMessage: (sessionId, text, itemId = null, turnId = null) => {
+    updateLastAssistantMessage: (
+      sessionId,
+      text,
+      itemId = null,
+      turnId = null
+    ) => {
       updateSession(
         sessionId,
         (session) => {
@@ -2418,20 +2518,24 @@ export const useChatStore = create<ChatStore>((set, get) => {
           const current = session.streamingAssistant;
           const sameIdentity =
             !current ||
-            (!itemId || current.itemId === itemId) &&
-              (!turnId || !current.turnId || current.turnId === turnId);
+            ((!itemId || current.itemId === itemId) &&
+              (!turnId || !current.turnId || current.turnId === turnId));
           const currentText = sameIdentity ? (current?.text ?? "") : "";
           const nextStreaming: StreamingAssistantMessage = {
             text: mergeAssistantPartialText(currentText, text),
             timestamp: sameIdentity
               ? (current?.timestamp ?? new Date().toISOString())
               : new Date().toISOString(),
-            ...(itemId ? { itemId } : sameIdentity && current?.itemId
-              ? { itemId: current.itemId }
-              : {}),
-            ...(turnId ? { turnId } : sameIdentity && current?.turnId
-              ? { turnId: current.turnId }
-              : {}),
+            ...(itemId
+              ? { itemId }
+              : sameIdentity && current?.itemId
+                ? { itemId: current.itemId }
+                : {}),
+            ...(turnId
+              ? { turnId }
+              : sameIdentity && current?.turnId
+                ? { turnId: current.turnId }
+                : {}),
           };
           return {
             ...session,

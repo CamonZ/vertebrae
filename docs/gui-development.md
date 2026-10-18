@@ -153,7 +153,22 @@ never on the adapter crates directly.
 | `harnesses/codex/` | Codex model catalog and session creation |
 | `harnesses/shared.rs` | `LocalChatHarnessEventSink` — translates `HarnessEventV1` into local-chat events; `LocalChatControlSink` for approvals |
 | `permissions.rs` | Permission-mode translation and the `vtb-gate` prompt bridge |
+| `gate.rs` | `LocalChatGateBinding`, the hidden gate protocol instructions, and the bound `vtb artifact add` command check |
 | `manager.rs` | Session registry and pane/session bookkeeping |
+
+#### Gate chats
+
+The **Resolve** action on a waiting `human_input` gate opens a local chat
+bound to the gate's run and step (`ChatSession.gate`, persisted in the chat
+index), so Resolve reopens the same chat. A new gate chat passes
+`CreateLocalChatSessionInput.gate`; `session_developer_instructions()` appends
+the gate protocol, built from the waiting execution's rendered config, after
+`chat_developer_instructions()`, and each harness maps the result into its
+native additive instruction mechanism. The chat opens with a hidden turn so the
+agent speaks first; turns wrapped as hidden never appear in the thread. The
+manager binds the gate in the `PermissionBridge`, which approves exactly the
+bound `vtb artifact add` submission without a prompt on both the Claude socket
+and harness control paths; every other command still asks.
 
 ### Opt-in OpenTelemetry collection
 

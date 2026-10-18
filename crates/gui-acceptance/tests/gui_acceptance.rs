@@ -287,7 +287,10 @@ impl GuiWorld {
         );
 
         let mut cmd = Command::new(&daemon_binary);
+        // Harness capture is for the GUI's launches; daemon runs keep the
+        // uncaptured mock behaviour.
         cmd.env("HOME", &home)
+            .env_remove("MOCK_CAPTURE_DIR")
             .env("CLAUDE_CODE_PATH", claude_path)
             .env("MOCK_OUTPUT_DIR", &mock_dir)
             .env("RUST_LOG", "info")
@@ -395,6 +398,7 @@ impl GuiWorld {
         let log_dup = log.try_clone().expect("dup standalone daemon log");
         let mut cmd = Command::new(&daemon_binary);
         cmd.env("HOME", &home)
+            .env_remove("MOCK_CAPTURE_DIR")
             .env(
                 "CLAUDE_CODE_PATH",
                 std::env::var("CLAUDE_CODE_PATH").unwrap_or_default(),
@@ -545,6 +549,7 @@ async fn main() {
                 world.scenario_timing =
                     Some(gui_acceptance::Timing::new("scenario", &scenario_name));
                 let _ = std::fs::remove_file(gui_acceptance::MOCK_CHAT_RESPONSE_FILE);
+                let _ = std::fs::remove_dir_all(gui_acceptance::HARNESS_CAPTURE_DIR);
                 world.feature_slug = slugify(&feature_name);
                 world.scenario_slug = slugify(&scenario_name);
                 steps::setup::before_scenario(world, &scenario_name, first_run, multi_project)
@@ -596,6 +601,7 @@ async fn main() {
                 }
 
                 if let Some(world) = world {
+                    steps::gate_chat::reset_default_local_chat_provider(world).await;
                     // Stop the daemon first so it can't hold DB locks while we
                     // delete the workflows/tasks underneath it.
                     world.stop_daemon().await;

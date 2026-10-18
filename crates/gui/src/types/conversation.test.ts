@@ -5,6 +5,7 @@ import {
   getToolIcon,
 } from "./conversation";
 import type { SessionLog } from "../bindings";
+import { GATE_CHAT_KICKOFF } from "../utils/gateChat";
 
 describe("getToolIcon", () => {
   it("returns terminal for Bash", () => {
@@ -595,5 +596,33 @@ describe("parseHarnessJsonl", () => {
         text: "# AGENTS.md instructions for /historic/worktree",
       },
     ]);
+  });
+
+  it("hides turns Vertebrae injected on the user's behalf", () => {
+    const turn = (sequence: number, content: string): SessionLog => ({
+      id: `gate-log-${sequence}`,
+      step_execution_id: "gate-chat",
+      format: "harness",
+      created_at: `2026-10-18T00:00:0${sequence}Z`,
+      content: JSON.stringify({
+        version: 1,
+        event_id: `gate-${sequence}`,
+        stream_id: "gate-stream",
+        sequence,
+        timestamp: `2026-10-18T00:00:0${sequence}Z`,
+        semantics: "snapshot",
+        type: "turn_input",
+        data: { provenance: "human", content },
+      }),
+    });
+
+    const events = parseSessionLogs([
+      turn(1, GATE_CHAT_KICKOFF),
+      turn(2, "Yes, ship it"),
+    ]);
+
+    expect(
+      events.filter((event) => event.kind === "user_message")
+    ).toMatchObject([{ text: "Yes, ship it" }]);
   });
 });

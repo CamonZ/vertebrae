@@ -744,3 +744,119 @@ fn test_ask_user_question_round_trips_from_socket_event_to_same_connection() {
     assert!(bridge.pending_permissions.lock().unwrap().is_empty());
     drop(socket_guard);
 }
+
+fn gate_binding() -> LocalChatGateBinding {
+    LocalChatGateBinding {
+        task_run_id: "run-1".into(),
+        step_name: "approve".into(),
+        execution_id: "exec-1".into(),
+        artifact: "approval".into(),
+        instructions: None,
+        output_schema: None,
+    }
+}
+
+const GATE_SUBMISSION: &str = "vtb artifact add approval.json --subject-type step_execution --subject-id exec-1 --logical-name approval --body '{\"approved\":true}'";
+
+fn command_approval(id: &str, details: serde_json::Value) -> ControlRequestEnvelope {
+    let mut request = harness_approval_request(id);
+    if let ControlRequest::Approval(approval) = &mut request.request {
+        approval.details = Some(details);
+    }
+    request
+}
+
+#[tokio::test]
+async fn bound_gate_submission_is_approved_without_prompting_either_harness() {
+    let bridge = PermissionBridge::new();
+    bridge.bind_gate("backend-gate", gate_binding());
+    let codex = command_approval("codex", serde_json::json!({ "command": GATE_SUBMISSION }));
+    let claude = command_approval(
+        "claude",
+        serde_json::json!({ "tool_name": "Bash", "input": { "command": GATE_SUBMISSION } }),
+    );
+
+    // No app handle: a request that needed the user would fail to emit.
+    for request in [codex, claude] {
+        let resolution = bridge
+            .request_harness_control("backend-gate", None, request)
+            .await
+            .expect("bound submission resolves without a prompt");
+        assert_eq!(resolution.decision, Some(ControlDecision::AllowOnce));
+    }
+    assert_eq!(
+        bridge.pending_harness_control_count_for_session("backend-gate"),
+        0
+    );
+}
+
+#[tokio::test]
+async fn other_commands_and_sessions_still_prompt() {
+    let bridge = PermissionBridge::new();
+    bridge.bind_gate("backend-gate", gate_binding());
+    let prompts = [
+        ("backend-gate", "vtb transition-to run-1 done".to_string()),
+        ("backend-gate", GATE_SUBMISSION.replace("exec-1", "exec-2")),
+        ("backend-other", GATE_SUBMISSION.to_string()),
+    ];
+    for (session_id, command) in prompts {
+        let request = command_approval("prompt", serde_json::json!({ "command": command }));
+        let error = bridge
+            .request_harness_control(session_id, None, request)
+            .await
+            .expect_err("unbound commands need the user");
+        assert!(
+            error.to_string().contains("app handle is unavailable"),
+            "{error}"
+        );
+    }
+
+    bridge.unbind_gate("backend-gate");
+    let request = command_approval("unbound", serde_json::json!({ "command": GATE_SUBMISSION }));
+    assert!(bridge
+        .request_harness_control("backend-gate", None, request)
+        .await
+        .is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn bound_gate_submission_over_the_socket_is_approved_without_an_event() {
+    use std::io::{BufRead, Write};
+    use std::os::unix::net::UnixStream;
+    use tauri::Listener;
+
+    let bridge = PermissionBridge::new();
+    let app = tauri::test::mock_app();
+    let app_handle = app.handle().clone();
+    let (event_tx, event_rx) = std::sync::mpsc::channel();
+    app_handle.listen("permission-request-event", move |event| {
+        event_tx.send(event.payload().to_string()).unwrap();
+    });
+    let session_id = format!("gate-{}", std::process::id());
+    bridge.bind_gate(&session_id, gate_binding());
+    let socket_guard = bridge.start_socket(&session_id, app_handle).unwrap();
+
+    let mut stream = UnixStream::connect(socket_guard.path()).unwrap();
+    let input = serde_json::json!({ "command": GATE_SUBMISSION });
+    let request = serde_json::json!({
+        "request_id": "req-gate",
+        "tool_name": "Bash",
+        "tool_use_id": "tool-gate",
+        "input": input
+    });
+    writeln!(stream, "{request}").unwrap();
+    let mut response = String::new();
+    std::io::BufReader::new(stream)
+        .read_line(&mut response)
+        .unwrap();
+    let decision: LocalPermissionDecision = serde_json::from_str(response.trim()).unwrap();
+
+    assert_eq!(decision.behavior, "allow", "{:?}", decision.message);
+    assert_eq!(decision.updated_input, Some(input));
+    assert!(event_rx
+        .recv_timeout(std::time::Duration::from_millis(200))
+        .is_err());
+    assert!(bridge.pending_permissions.lock().unwrap().is_empty());
+    drop(socket_guard);
+}
