@@ -38,10 +38,12 @@ pub enum BuiltinProvider {
     Anthropic,
     Openai,
     Typesafe,
+    Mistral,
 }
 
 impl BuiltinProvider {
-    pub const ALL: [BuiltinProvider; 3] = [Self::Anthropic, Self::Openai, Self::Typesafe];
+    pub const ALL: [BuiltinProvider; 4] =
+        [Self::Anthropic, Self::Openai, Self::Typesafe, Self::Mistral];
 
     /// String form used on the CLI and in serialized agent_config JSON.
     pub const fn as_str(self) -> &'static str {
@@ -49,6 +51,7 @@ impl BuiltinProvider {
             BuiltinProvider::Anthropic => "anthropic",
             BuiltinProvider::Openai => "openai",
             BuiltinProvider::Typesafe => "typesafe",
+            BuiltinProvider::Mistral => "mistral",
         }
     }
 
@@ -68,6 +71,7 @@ impl BuiltinProvider {
             "typesafe" | "type-safe" | "type_safe" | "systemone" | "system-one" | "system_one" => {
                 Some(BuiltinProvider::Typesafe)
             }
+            "mistral" | "mistral-vibe" | "mistral_vibe" => Some(BuiltinProvider::Mistral),
             _ => None,
         }
     }
@@ -77,6 +81,7 @@ impl BuiltinProvider {
             BuiltinProvider::Anthropic => StepHarness::Claude,
             BuiltinProvider::Openai => StepHarness::Codex,
             BuiltinProvider::Typesafe => StepHarness::Typesafe,
+            BuiltinProvider::Mistral => StepHarness::MistralVibe,
         }
     }
 
@@ -85,13 +90,14 @@ impl BuiltinProvider {
             StepHarness::Claude => BuiltinProvider::Anthropic,
             StepHarness::Codex => BuiltinProvider::Openai,
             StepHarness::Typesafe => BuiltinProvider::Typesafe,
+            StepHarness::MistralVibe => BuiltinProvider::Mistral,
         }
     }
 
     pub const fn default_model(self) -> Option<&'static str> {
         match self {
             BuiltinProvider::Typesafe => Some(DEFAULT_TYPESAFE_MODEL),
-            BuiltinProvider::Anthropic | BuiltinProvider::Openai => None,
+            BuiltinProvider::Anthropic | BuiltinProvider::Openai | BuiltinProvider::Mistral => None,
         }
     }
 }
@@ -214,6 +220,7 @@ pub fn validate_provider_model_with_codex_provider(
     match classify_model(trimmed) {
         Some(detected) if detected == provider => Ok(()),
         Some(_) => Err(wrong_provider_error(provider, trimmed).expect("detected wrong provider")),
+        None if provider == BuiltinProvider::Mistral => Ok(()),
         None => Err(ProviderModelMismatch::UnknownModel {
             requested: provider,
             model: trimmed.to_string(),
@@ -275,7 +282,7 @@ pub fn validate_harness_agent_config(
     harness: StepHarness,
     config: &AgentConfig,
 ) -> Result<(), ProviderAgentOptionMismatch> {
-    if harness != StepHarness::Typesafe {
+    if !matches!(harness, StepHarness::Typesafe | StepHarness::MistralVibe) {
         return Ok(());
     }
 
@@ -798,6 +805,25 @@ mod tests {
     }
 
     #[test]
+    fn mistral_maps_to_its_harness_and_discovers_models_at_runtime() {
+        assert_eq!(BuiltinProvider::Mistral.as_str(), "mistral");
+        assert_eq!(
+            BuiltinProvider::from_id("mistral"),
+            Some(BuiltinProvider::Mistral)
+        );
+        assert_eq!(BuiltinProvider::Mistral.harness(), StepHarness::MistralVibe);
+        assert!(
+            validate_provider_model(BuiltinProvider::Mistral, Some("future-vibe-alias")).is_ok()
+        );
+        assert!(
+            validate_provider_model(BuiltinProvider::Mistral, Some("claude-opus-4-5"))
+                .expect_err("recognized non-Mistral models must still fail")
+                .to_string()
+                .contains("claude")
+        );
+    }
+
+    #[test]
     fn validate_reasoning_effort_accepts_openai_allowlist() {
         for effort in SUPPORTED_OPENAI_REASONING_EFFORTS {
             assert!(
@@ -896,6 +922,18 @@ mod tests {
             .expect_err("TypeSafe must reject tools");
         assert_eq!(error.option, "tools");
         assert!(error.to_string().contains("typesafe"));
+    }
+
+    #[test]
+    fn validate_mistral_vibe_agent_options() {
+        let config = AgentConfig::new().with_model("future-vibe-alias");
+        assert!(validate_harness_agent_config(StepHarness::MistralVibe, &config).is_ok());
+
+        let config = AgentConfig::new().with_reasoning_effort("high");
+        let error = validate_harness_agent_config(StepHarness::MistralVibe, &config)
+            .expect_err("Mistral Vibe must reject unsupported agent options");
+        assert_eq!(error.option, "reasoning_effort");
+        assert!(error.to_string().contains("mistral_vibe"));
     }
 
     #[test]

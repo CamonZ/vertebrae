@@ -161,6 +161,7 @@ mod tests {
             provider_binaries: ProviderBinaries {
                 anthropic: anthropic.map(PathBuf::from),
                 openai: openai.map(PathBuf::from),
+                mistral_vibe: None,
             },
             shell_path: "/secret/shell/path".into(),
             installed_skills_roots: vec![PathBuf::from("/secret/skills")],

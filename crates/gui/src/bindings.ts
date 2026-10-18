@@ -2090,6 +2090,10 @@ export type StepTransitionChangedEvent = { transition_id: string; from_step_id: 
  * Step type - mirrors core::StepType
  */
 export type StepType = "llm_inference" | "structured_inference" | "execute" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
+/** Step runtime harness exposed to the GUI. The core enum remains the shared
+ * domain contract and this mirror is generated into the TypeScript bindings.
+ */
+export type StepHarness = "claude" | "codex" | "typesafe" | "mistral_vibe"
 /**
  * StopRun command input. Provide either `task_run_id` or `task_id`.
  */

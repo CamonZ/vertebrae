@@ -719,6 +719,8 @@ pub enum StepHarness {
     Claude,
     Codex,
     Typesafe,
+    #[serde(rename = "mistral_vibe")]
+    MistralVibe,
 }
 
 impl From<vertebrae_core::StepHarness> for StepHarness {
@@ -727,6 +729,7 @@ impl From<vertebrae_core::StepHarness> for StepHarness {
             vertebrae_core::StepHarness::Claude => Self::Claude,
             vertebrae_core::StepHarness::Codex => Self::Codex,
             vertebrae_core::StepHarness::Typesafe => Self::Typesafe,
+            vertebrae_core::StepHarness::MistralVibe => Self::MistralVibe,
         }
     }
 }
@@ -737,6 +740,7 @@ impl From<StepHarness> for vertebrae_core::StepHarness {
             StepHarness::Claude => Self::Claude,
             StepHarness::Codex => Self::Codex,
             StepHarness::Typesafe => Self::Typesafe,
+            StepHarness::MistralVibe => Self::MistralVibe,
         }
     }
 }
@@ -2528,6 +2532,7 @@ mod tests {
             ("claude", StepHarness::Claude),
             ("codex", StepHarness::Codex),
             ("typesafe", StepHarness::Typesafe),
+            ("mistral_vibe", StepHarness::MistralVibe),
         ] {
             let step: Step = serde_json::from_value(serde_json::json!({
                 "id": "selected",
@@ -2665,6 +2670,11 @@ mod tests {
                 vertebrae_core::StepHarness::Typesafe,
                 StepHarness::Typesafe,
                 "typesafe",
+            ),
+            (
+                vertebrae_core::StepHarness::MistralVibe,
+                StepHarness::MistralVibe,
+                "mistral_vibe",
             ),
         ] {
             assert_eq!(serde_json::to_value(gui).unwrap(), wire);

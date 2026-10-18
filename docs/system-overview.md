@@ -13,9 +13,9 @@ The system solves a fundamental problem with LLM-driven development: **context i
 The platform has two components:
 
 - **Sacrum** — an Elixir/Phoenix server (GraphQL API + PostgreSQL + Phoenix Channels) that stores all state and orchestrates workflow execution
-- **Vertebrae** — a Rust client ecosystem (CLI `vtb`, desktop GUI, background daemon) that interacts with Sacrum and executes inference through shared Claude, Codex, or TypeSafe harness runtimes, and JSON transformations through a bounded Rhai worker (see [vtb Guide — Steps](vtb-guide/steps.md#steps))
+- **Vertebrae** — a Rust client ecosystem (CLI `vtb`, desktop GUI, background daemon) that interacts with Sacrum and executes inference through shared Claude, Codex, TypeSafe, or Mistral Vibe harness runtimes, and JSON transformations through a bounded Rhai worker (see [vtb Guide — Steps](vtb-guide/steps.md#steps))
 
-> Claude remains the legacy default when an inference step has no explicit harness. Inference may select `claude`, `codex`, or `typesafe`; TypeSafe supports `structured_inference`, while Claude and Codex support `llm_inference`. Execute omits the harness and provider settings.
+> Claude remains the legacy default when an inference step has no explicit harness. Inference may select `claude`, `codex`, `typesafe`, or `mistral_vibe`; TypeSafe supports `structured_inference`, while the other harnesses support `llm_inference`. Mistral Vibe discovers its model catalog from the installed Vibe 2.26.1 server and currently executes text-only one-shot turns. Execute omits the harness and provider settings.
 
 ---
 
@@ -142,7 +142,7 @@ Workflows can chain: when a workflow completes, it can hand off to another workf
 
 A workflow step has a fixed `step_type`, an optional `harness` selector, a
 `goal`, ordering and transition fields, optional `persistence_options`, and a
-type-specific `config`. The selector accepts `claude`, `codex`, or `typesafe`
+type-specific `config`. The selector accepts `claude`, `codex`, `typesafe`, or `mistral_vibe`
 and remains separate from model and request configuration. When omitted, the
 step keeps Sacrum's default and provider-backfill behavior.
 
@@ -353,7 +353,7 @@ DaemonSupervisor
 For an inference `run_step` event, `StepExecutor`:
 
 1. Builds a provider-neutral harness request from the step's `prompt` and request configuration
-2. Starts the selected Claude, Codex, or TypeSafe shared harness according to the step's `harness` (or Sacrum's default/backfill)
+2. Starts the selected Claude, Codex, TypeSafe, or Mistral Vibe shared harness according to the step's `harness` (or Sacrum's default/backfill)
 3. Persists normalized `HarnessEventV1` payloads to Sacrum as `format=harness` `SessionLog`s
 4. On exit, derives token counts, cost, and model from normalized harness data
 5. Reports `StepCompleted` or `StepFailed` back to `ProjectSupervisor`

@@ -13,6 +13,7 @@ vertebrae/
 ├── crates/harness-core/   # V1 runtime, event, and replay contracts
 ├── crates/harness-claude/ # Claude streaming CLI adapter
 ├── crates/harness-codex/  # Codex App Server streaming adapter
+├── crates/harness-mistral-vibe/ # Mistral Vibe one-shot adapter
 ├── crates/sacrum-client/  # HTTP client implementing the service traits
 ├── crates/cli/            # CLI binary (vtb)
 ├── crates/daemon/         # Background step executor (vtb-daemon)
@@ -39,6 +40,7 @@ flowchart TB
     Factory["HarnessRuntimeFactory<br/>crates/harness"]
     Claude["Claude adapter<br/>crates/harness-claude"]
     Codex["Codex adapter<br/>crates/harness-codex"]
+    Mistral["Mistral Vibe adapter<br/>crates/harness-mistral-vibe"]
 
     subgraph "Backend Client (crates/sacrum-client)"
         SC["GraphqlClient (reqwest)"]
@@ -60,7 +62,7 @@ flowchart TB
     Daemon --> VSvc
     GUI --> Factory
     Daemon --> Factory
-    Factory --> Claude & Codex
+    Factory --> Claude & Codex & Mistral
 
     VSvc --> TS & WS & ES & SS & AS
     TS -.-> STS
@@ -113,7 +115,7 @@ Key types: `Task`, `Workflow`, `Step`, `StepHarness`, `Artifact`, `Section`, `Co
 
 Steps carry:
 - `step_type: StepType` — the execution mode, such as `llm_inference` or `structured_inference`
-- `harness: Option<StepHarness>` — optional `claude`, `codex`, or `typesafe` runtime selector
+- `harness: Option<StepHarness>` — optional `claude`, `codex`, `typesafe`, or `mistral_vibe` runtime selector
 - `output_schema: Option<Value>` — JSON Schema for execute/evaluate structured output enforcement
 - `route_config: Option<Value>` — nullable opaque deterministic route program, validated and evaluated by Sacrum
 - `persistence_options: Option<Value>` — Sacrum-owned artifact persistence configuration
@@ -137,12 +139,13 @@ both live delivery and `format=harness` `SessionLog` replay.
 | `crates/harness-core` | The V1 contract: `HarnessRuntime`, `SessionHandle`/`TurnHandle`, `HarnessEventV1` + drafts, `EventSequencer`, `EventSink`, `ControlSink`, capabilities, and the canonical projection | Provider wire types, surface orchestration |
 | `crates/harness-claude` | Claude Code discovery, launch policy, live stream-json decoding, durable transcript discovery/replay, control responses, process lifetime | GUI, daemon, actor, persistence, or provider-settings code |
 | `crates/harness-codex` | Codex managed App Server daemon attachment, WebSocket JSON-RPC, durable rollout discovery/replay, model catalog, turn and control mapping | GUI, daemon, actor, persistence, or provider-settings code |
-| `crates/harness` | Runtime **selection** only: `HarnessRuntimeFactory` maps a step's explicit `harness` (`claude`, `codex`, `typesafe`) to an adapter; when absent, it preserves the legacy `AgentConfig.provider` default/backfill path | Wire protocols, event decoding |
+| `crates/harness-mistral-vibe` | Mistral Vibe 2.26.1 discovery, dynamic `config/read` model catalog, request-scoped model selection, one-shot JSON-RPC turns, and normalized V1 events | GUI, daemon, actor, persistence, or provider-settings code |
+| `crates/harness` | Runtime **selection** only: `HarnessRuntimeFactory` maps a step's explicit `harness` (`claude`, `codex`, `typesafe`, `mistral_vibe`) to an adapter; when absent, it preserves the legacy `AgentConfig.provider` default/backfill path | Wire protocols, event decoding |
 
 Only `crates/harness` depends on the adapter crates. Surfaces depend on
 `vertebrae-harness` (construction) and `vertebrae-harness-core` (contract), and
-never on `vertebrae-harness-claude` or `vertebrae-harness-codex` directly —
-that is what keeps provider knowledge out of the daemon and the GUI.
+never on a concrete adapter crate directly — that is what keeps provider
+knowledge out of the daemon and the GUI.
 
 ```
 crates/daemon ──┐                  ┌── crates/harness-claude
@@ -197,11 +200,12 @@ in `gui/src/stores/providerReplay.ts` beside the chat store.
 
 ### Harnesses and providers
 
-A **harness** (`StepHarness`: `claude`, `codex`, `typesafe`) is the runtime
-adapter; a **provider** (`ProviderId`, carried on `AgentConfig.provider`) is
-the endpoint and credential set it talks to. The built-in providers
-`anthropic`, `openai`, and `typesafe` (`BuiltinProvider`) run on the matching
-harness and need no configuration. Custom providers are per-machine
+A **harness** (`StepHarness`: `claude`, `codex`, `typesafe`, `mistral_vibe`)
+is the runtime adapter; a **provider** (`ProviderId`, carried on
+`AgentConfig.provider`) is the endpoint and credential set it talks to. The
+built-in providers `anthropic`, `openai`, `typesafe`, and `mistral`
+(`BuiltinProvider`) run on the matching harness and need no custom provider
+configuration. Custom providers are per-machine
 `[providers.<id>]` entries in config.toml (`ProviderProfile`, see
 [SACRUM_CONFIG.md](SACRUM_CONFIG.md)) bound to one harness.
 
@@ -209,9 +213,18 @@ harness and need no configuration. Custom providers are per-machine
   harness's built-in provider (Anthropic when no harness is set); a custom ID
   must have a valid profile, and an explicit step harness must match the
   provider's harness.
-- Capability rules (reasoning effort, personality, verbosity, TypeSafe-only
-  option limits) key on the harness. Built-in providers validate models against
-  the built-in catalog; custom providers accept only their profile's `models`.
+- Capability rules (reasoning effort, personality, verbosity, and one-shot
+  option limits) key on the harness. Anthropic, OpenAI, and TypeSafe validate
+  against static built-in catalogs; custom providers accept only their
+  profile's `models`.
+- `mistral_vibe` accepts arbitrary model aliases statically because availability
+  is server-dependent. Each capability probe and run reads the installed Vibe
+  2.26.1 server's `config/read`, exposes aliases as capability model IDs, and
+  launches the selected turn with that alias's canonical Vibe model name. Set
+  `MISTRAL_VIBE_SERVER` to override the discovered `vibe-app-server` executable.
+  This production slice supports text-only one-shot `llm_inference`; tools,
+  callbacks, structured inference, persistent sessions, replay, and unsupported
+  request options fail explicitly rather than being silently ignored.
 - Each adapter translates a profile into its own launch settings:
   `ClaudeProviderEndpoint` (environment), `CodexCustomModelProvider`
   (a per-thread `model_providers.<id>` table plus `modelProvider`), and the
@@ -222,8 +235,9 @@ harness and need no configuration. Custom providers are per-machine
 
 ### Adding a harness
 
-1. Add the variant to `StepHarness` and a `BuiltinProvider` for it (with its
-   models) in `crates/core/src/model_catalog.rs`.
+1. Add the variant to `StepHarness` and a `BuiltinProvider` for it in
+   `crates/core/src/model_catalog.rs` (a static model list only when the
+   provider catalog is actually fixed).
 2. Create `crates/harness-<name>` implementing `HarnessRuntime` from
    `harness-core`. Emit `HarnessEventDraftV1` — never a provider-shaped event —
    map provider approvals onto `ControlRequestEnvelope`, and own the

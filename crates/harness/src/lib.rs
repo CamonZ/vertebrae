@@ -30,6 +30,7 @@ use vertebrae_harness_core::{
     HarnessError, HarnessRuntime, ProviderThreadRef, RequestConfig, SessionId, TranscriptReplay,
     TranscriptReplayPage, TranscriptReplayPageRequest, TranscriptReplayRequest,
 };
+use vertebrae_harness_mistral_vibe::{MistralVibeConfig, MistralVibeRuntime};
 use vertebrae_harness_typesafe::{TypeSafeClientConfig, TypeSafeError, TypeSafeRuntime};
 
 /// Construction inputs owned by the surface or deployment environment.
@@ -40,10 +41,12 @@ use vertebrae_harness_typesafe::{TypeSafeClientConfig, TypeSafeError, TypeSafeRu
 pub struct HarnessFactoryConfig {
     pub anthropic_executable: Option<PathBuf>,
     pub openai_executable: Option<PathBuf>,
+    pub mistral_vibe_executable: Option<PathBuf>,
     /// Startup discovery diagnostics. When present with a missing executable,
     /// the factory returns that cached error without probing PATH again.
     pub anthropic_executable_diagnostic: Option<String>,
     pub openai_executable_diagnostic: Option<String>,
+    pub mistral_vibe_executable_diagnostic: Option<String>,
     /// Whether executable resolution was completed by a startup snapshot.
     /// When false, preserve the factory's legacy eager validation behavior.
     pub provider_resolution_cached: bool,
@@ -344,6 +347,7 @@ impl HarnessRuntimeFactory {
                 Arc::new(self.build_codex(&resolved, &options.agent_config, &request_config)?)
             }
             StepHarness::Typesafe => Arc::new(self.build_typesafe(&resolved, &request_config)?),
+            StepHarness::MistralVibe => Arc::new(self.build_mistral_vibe()?),
         };
         Ok(HarnessRuntimeInstance {
             provider: resolved.id,
@@ -402,6 +406,9 @@ impl HarnessRuntimeFactory {
             StepHarness::Typesafe => Err(HarnessError::Unsupported(format!(
                 "provider '{id}' runs on the typesafe harness, which has no CLI process"
             ))),
+            StepHarness::MistralVibe => Err(HarnessError::Unsupported(format!(
+                "provider '{id}' runs on the mistral_vibe harness, which has no custom CLI launch"
+            ))),
         }
     }
 
@@ -450,7 +457,7 @@ impl HarnessRuntimeFactory {
             StepHarness::Codex => {
                 CodexTranscriptReplay::new(self.config.transcript_home_dir.clone()).replay(request)
             }
-            StepHarness::Typesafe => Ok(None),
+            StepHarness::Typesafe | StepHarness::MistralVibe => Ok(None),
         }
     }
 
@@ -471,7 +478,7 @@ impl HarnessRuntimeFactory {
                 CodexTranscriptReplay::new(self.config.transcript_home_dir.clone())
                     .replay_page(request, page)
             }
-            StepHarness::Typesafe => Ok(None),
+            StepHarness::Typesafe | StepHarness::MistralVibe => Ok(None),
         }
     }
 
@@ -617,6 +624,33 @@ impl HarnessRuntimeFactory {
             provider.resolve_executable()?;
         }
         Ok(CodexRuntime::new(provider))
+    }
+
+    fn build_mistral_vibe(&self) -> Result<MistralVibeRuntime, HarnessError> {
+        let provider = MistralVibeConfig {
+            executable: self.config.mistral_vibe_executable.clone(),
+            search_path: self
+                .config
+                .search_path
+                .clone()
+                .or_else(|| env::var_os("PATH")),
+            environment: self.config.environment.clone(),
+            ..MistralVibeConfig::default()
+        };
+        if !self.config.provider_resolution_cached && provider.executable.is_some() {
+            provider.resolve_executable()?;
+        } else if provider.executable.is_none() {
+            if let Some(diagnostic) = &self.config.mistral_vibe_executable_diagnostic {
+                return Err(HarnessError::Unavailable(diagnostic.clone()));
+            }
+            if self.config.provider_resolution_cached {
+                return Err(HarnessError::Unavailable(
+                    "Mistral Vibe executable was not resolved at startup".into(),
+                ));
+            }
+            provider.resolve_executable()?;
+        }
+        Ok(MistralVibeRuntime::new(provider))
     }
 
     fn build_typesafe(
@@ -905,6 +939,10 @@ mod tests {
             (StepHarness::Claude, ProviderId::anthropic()),
             (StepHarness::Codex, ProviderId::openai()),
             (StepHarness::Typesafe, ProviderId::typesafe()),
+            (
+                StepHarness::MistralVibe,
+                ProviderId::new("mistral").unwrap(),
+            ),
         ] {
             let resolved = resolve_provider(Some(harness), &AgentConfig::default(), &profiles)
                 .expect("built-in selection");
@@ -933,6 +971,43 @@ mod tests {
         assert_eq!(
             instance.request_config.model.as_deref(),
             Some(vertebrae_core::DEFAULT_TYPESAFE_MODEL)
+        );
+    }
+
+    #[test]
+    fn mistral_vibe_accepts_dynamic_model_aliases_from_the_installed_server() {
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            mistral_vibe_executable: Some(executable()),
+            ..HarnessFactoryConfig::default()
+        });
+        let instance = factory
+            .create_for_harness(
+                Some(StepHarness::MistralVibe),
+                HarnessRuntimeOptions {
+                    agent_config: AgentConfig::default(),
+                    request_config: RequestConfig {
+                        model: Some("future-vibe-alias".into()),
+                        ..RequestConfig::default()
+                    },
+                },
+            )
+            .expect("Mistral Vibe model availability is validated at run time");
+        assert_eq!(instance.provider, ProviderId::new("mistral").unwrap());
+        assert_eq!(instance.harness, StepHarness::MistralVibe);
+        assert_eq!(
+            instance.request_config.model.as_deref(),
+            Some("future-vibe-alias")
+        );
+
+        let result = factory.create_for_harness(
+            Some(StepHarness::MistralVibe),
+            HarnessRuntimeOptions {
+                agent_config: AgentConfig::new().with_tools(vec!["Bash".into()]),
+                request_config: RequestConfig::default(),
+            },
+        );
+        assert!(
+            matches!(result, Err(HarnessError::InvalidRequest(message)) if message.contains("tools"))
         );
     }
 

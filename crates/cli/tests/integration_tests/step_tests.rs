@@ -3101,6 +3101,7 @@ mod provider_tests {
             vertebrae_core::StepHarness::Claude => Some(CliHarness::Claude),
             vertebrae_core::StepHarness::Codex => Some(CliHarness::Codex),
             vertebrae_core::StepHarness::Typesafe => Some(CliHarness::Typesafe),
+            vertebrae_core::StepHarness::MistralVibe => Some(CliHarness::MistralVibe),
         }
     }
 

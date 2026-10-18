@@ -76,6 +76,7 @@ fn default_import_harness(step_type: &StepType, config: Option<&serde_json::Valu
         .and_then(serde_json::Value::as_str)
     {
         Some("openai" | "codex") => StepHarness::Codex,
+        Some("mistral" | "mistral-vibe" | "mistral_vibe") => StepHarness::MistralVibe,
         _ => StepHarness::Claude,
     }
 }

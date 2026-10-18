@@ -343,6 +343,7 @@ fn sample_daemon_config() -> DaemonConfig {
     let provider_binaries = crate::helpers::ProviderBinaries {
         anthropic: Some(std::path::PathBuf::from("/usr/local/bin/claude")),
         openai: Some(std::path::PathBuf::from("/usr/local/bin/codex")),
+        mistral_vibe: None,
     };
     DaemonConfig {
         base_url: "http://localhost:4000".to_string(),

@@ -12,6 +12,7 @@ use vertebrae_core::StepHarness;
 pub struct ProviderBinaries {
     pub anthropic: Option<PathBuf>,
     pub openai: Option<PathBuf>,
+    pub mistral_vibe: Option<PathBuf>,
 }
 
 /// Best-effort diagnostics captured alongside [`ProviderBinaries`].
@@ -19,6 +20,7 @@ pub struct ProviderBinaries {
 pub struct ProviderDiscoveryDiagnostics {
     pub anthropic: Option<String>,
     pub openai: Option<String>,
+    pub mistral_vibe: Option<String>,
 }
 
 impl ProviderBinaries {
@@ -28,7 +30,7 @@ impl ProviderBinaries {
         match harness {
             StepHarness::Claude => self.anthropic.as_deref(),
             StepHarness::Codex => self.openai.as_deref(),
-            StepHarness::Typesafe => None,
+            StepHarness::Typesafe | StepHarness::MistralVibe => None,
         }
     }
 }
@@ -70,11 +72,27 @@ pub fn resolve_all_provider_binaries_with_diagnostics(
             (None, Some(err))
         }
     };
+    let (mistral_vibe, mistral_vibe_diagnostic) = match find_mistral_vibe_binary(shell_path) {
+        Ok(path) => (Some(path), None),
+        Err(err) => {
+            tracing::warn!(
+                harness = %StepHarness::MistralVibe,
+                error = %err,
+                "Mistral Vibe provider binary not resolved at startup; steps requesting it will fail"
+            );
+            (None, Some(err))
+        }
+    };
     (
-        ProviderBinaries { anthropic, openai },
+        ProviderBinaries {
+            anthropic,
+            openai,
+            mistral_vibe,
+        },
         ProviderDiscoveryDiagnostics {
             anthropic: anthropic_diagnostic,
             openai: openai_diagnostic,
+            mistral_vibe: mistral_vibe_diagnostic,
         },
     )
 }
@@ -130,6 +148,17 @@ const CLAUDE_SPEC: BinarySpec = BinarySpec {
     env_override: "CLAUDE_CODE_PATH",
     well_known: &["/usr/local/bin/claude", "/opt/homebrew/bin/claude"],
     home_relative: ".local/bin/claude",
+};
+
+const MISTRAL_VIBE_SPEC: BinarySpec = BinarySpec {
+    display_name: "Mistral Vibe App Server",
+    binary_name: "vibe-app-server",
+    env_override: "MISTRAL_VIBE_SERVER",
+    well_known: &[
+        "/usr/local/bin/vibe-app-server",
+        "/opt/homebrew/bin/vibe-app-server",
+    ],
+    home_relative: ".local/bin/vibe-app-server",
 };
 
 const CODEX_SPEC: BinarySpec = BinarySpec {
@@ -205,6 +234,10 @@ pub fn find_codex_binary(shell_path: &str) -> Result<PathBuf, String> {
     find_binary(&CODEX_SPEC, shell_path)
 }
 
+pub fn find_mistral_vibe_binary(shell_path: &str) -> Result<PathBuf, String> {
+    find_binary(&MISTRAL_VIBE_SPEC, shell_path)
+}
+
 /// Find the CLI binary for a [`StepHarness`].
 ///
 /// Errors are scoped to the requested harness so a user choosing Codex
@@ -217,6 +250,7 @@ pub fn find_provider_binary(harness: StepHarness, shell_path: &str) -> Result<Pa
             "TypeSafe provider does not use a CLI executable; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY"
                 .to_string(),
         ),
+        StepHarness::MistralVibe => find_mistral_vibe_binary(shell_path),
     }
 }
 
