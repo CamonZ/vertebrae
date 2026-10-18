@@ -1236,3 +1236,133 @@ async fn structured_output_is_validated_before_terminal_settlement() {
         let _ = server.await;
     }
 }
+
+#[tokio::test]
+async fn manual_compaction_waits_for_terminal_and_handles_failures_and_close() {
+    use vertebrae_harness_core::CompactionState;
+    for scenario in ["success", "reject", "error", "disconnect", "close"] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+        let (finish_tx, finish_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let mut ack = Some(ack_tx);
+            let mut finish = Some(finish_rx);
+            while let Some(Ok(Message::Text(text))) = socket.next().await {
+                let request: Value = serde_json::from_str(&text).unwrap();
+                let method = request["method"].as_str().unwrap_or_default();
+                let Some(id) = request.get("id") else {
+                    continue;
+                };
+                assert_ne!(
+                    method, "turn/start",
+                    "compaction must never submit prompt text"
+                );
+                let response = match method {
+                    "thread/start" => json!({"thread":{"id":"root-thread"}}),
+                    "thread/compact/start" => {
+                        assert_eq!(request["params"], json!({"threadId":"root-thread"}));
+                        if scenario == "reject" {
+                            socket
+                                .send(Message::Text(
+                                    json!({"id":id,"error":{"code":-1,"message":"rejected"}})
+                                        .to_string(),
+                                ))
+                                .await
+                                .unwrap();
+                            continue;
+                        }
+                        socket
+                            .send(Message::Text(json!({"id":id,"result":{}}).to_string()))
+                            .await
+                            .unwrap();
+                        socket.send(Message::Text(json!({"method":"turn/started","params":{"threadId":"root-thread","turn":{"id":"compact-turn"}}}).to_string())).await.unwrap();
+                        ack.take().unwrap().send(()).unwrap();
+                        finish.take().unwrap().await.unwrap();
+                        if scenario == "disconnect" {
+                            break;
+                        }
+                        if scenario == "error" {
+                            socket.send(Message::Text(json!({"method":"error","params":{"threadId":"root-thread","turnId":"compact-turn","error":{"message":"compaction failed"}}}).to_string())).await.unwrap();
+                        } else if scenario == "success" {
+                            socket.send(Message::Text(json!({"method":"item/completed","params":{"threadId":"root-thread","turnId":"compact-turn","item":{"type":"contextCompaction","id":"compact-item"}}}).to_string())).await.unwrap();
+                            // An unrelated terminal must not settle the root operation.
+                            for (thread, turn, status) in [
+                                ("child", "child-turn", "completed"),
+                                ("root-thread", "stale-turn", "completed"),
+                                ("root-thread", "compact-turn", "completed"),
+                            ] {
+                                socket.send(Message::Text(json!({"method":"turn/completed","params":{"threadId":thread,"turn":{"id":turn,"status":status}}}).to_string())).await.unwrap();
+                            }
+                        }
+                        continue;
+                    }
+                    _ => json!({}),
+                };
+                if socket
+                    .send(Message::Text(
+                        json!({"id":id,"result":response}).to_string(),
+                    ))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let sink = Arc::new(CapturingSink::default());
+        let session = start_test_session(&runtime(url), sink.clone()).await;
+        let compact_session = session.clone();
+        let compact = tokio::spawn(async move { compact_session.compact().await });
+        if scenario != "reject" {
+            ack_rx.await.unwrap();
+            assert!(
+                !compact.is_finished(),
+                "RPC acknowledgement is not completion"
+            );
+            assert!(
+                session.compact().await.is_err(),
+                "overlapping compact must reject"
+            );
+            finish_tx.send(()).unwrap();
+            if scenario == "close" {
+                session.close().await.unwrap();
+            }
+        }
+        let outcome = tokio::time::timeout(Duration::from_secs(2), compact)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            outcome.is_ok(),
+            scenario == "success",
+            "{scenario}: {outcome:?}"
+        );
+        let states: Vec<_> = sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match &event.payload {
+                HarnessEventPayloadV1::Compaction(event) => Some(event.state),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            states.last(),
+            Some(&if scenario == "success" {
+                CompactionState::Completed
+            } else {
+                CompactionState::Cleared
+            })
+        );
+        assert_eq!(
+            session.provider_resume_id().unwrap().as_str(),
+            "root-thread"
+        );
+        session.close().await.unwrap();
+        server.abort();
+    }
+}

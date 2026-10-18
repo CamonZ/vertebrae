@@ -1,3 +1,4 @@
+mod compact;
 mod connection;
 mod control;
 mod handles;

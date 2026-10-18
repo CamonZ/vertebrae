@@ -226,6 +226,8 @@ pub enum LocalChatSessionError {
     SessionNotFound(String),
     #[error("Failed to send message: {0}")]
     SendFailed(String),
+    #[error("Compaction failed; the live session was released: {0}")]
+    CompactionFailed(String),
     #[error("Failed to spawn local chat session: {0}")]
     SpawnFailed(String),
     #[error("Failed to start local chat session: {0}")]
@@ -321,6 +323,15 @@ pub(crate) trait LocalChatHarness: Send + Sync {
         backend_session_id: &str,
         content: &str,
     ) -> Result<(), LocalChatSessionError>;
+
+    async fn compact_session(
+        &self,
+        _backend_session_id: &str,
+    ) -> Result<(), LocalChatSessionError> {
+        Err(LocalChatSessionError::SendFailed(
+            "Manual compaction is unsupported".into(),
+        ))
+    }
 
     async fn close_session(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError>;
 

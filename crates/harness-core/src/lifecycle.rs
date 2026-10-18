@@ -315,6 +315,13 @@ pub trait SessionHandle: Send + Sync {
     /// matching terminal event must not begin after that start-delivery
     /// failure.
     async fn send(&self, request: SendTurnRequest) -> Result<Arc<dyn TurnHandle>, HarnessError>;
+    /// Compact the current conversation without submitting a user prompt.
+    /// Resolves only after provider completion; unsupported adapters reject it.
+    async fn compact(&self) -> Result<(), HarnessError> {
+        Err(HarnessError::Operation(
+            "Manual compaction is unsupported".into(),
+        ))
+    }
     async fn close(&self) -> Result<SessionCloseOutcome, HarnessError>;
 }
 

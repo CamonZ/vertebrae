@@ -28,6 +28,8 @@ export function lifecycleLabel(lifecycle: LocalChatLifecycle): string {
       return "Sending";
     case "streaming":
       return "Streaming";
+    case "compacting":
+      return "Compacting";
     case "closing":
       return "Closing";
     case "closed":

@@ -34,6 +34,90 @@ import { resolveContextWindow } from "../utils/modelContextWindow";
 
 const MAX_TITLE_USER_MESSAGES = 3;
 
+export function isCodexChatCommand(
+  session: ChatSession | null,
+  content: string
+): boolean {
+  return (
+    session?.harness === "codex" &&
+    ["/compact", "/clear"].includes(content.trim())
+  );
+}
+
+export async function dispatchCodexChatCommand(
+  sessionId: string,
+  content: string
+): Promise<boolean> {
+  const store = useChatStore.getState();
+  const session = store.sessions[sessionId];
+  if (!isCodexChatCommand(session ?? null, content)) return false;
+  const feedback = (text: string) =>
+    useChatStore.getState().addMessage(sessionId, {
+      kind: "error",
+      message: text,
+      timestamp: new Date().toISOString(),
+    });
+  if (
+    isLocalChatLifecycleBusy(getLocalChatLifecycle(session)) ||
+    session.compactionActive ||
+    !!session.queuedMessages?.length ||
+    session.messages.some(
+      (message) =>
+        message.kind === "user_question" && message.status === "pending"
+    )
+  ) {
+    feedback("Wait until the conversation is idle before using this command.");
+    return true;
+  }
+  const backendId = session.backendSessionId;
+  if (content.trim() === "/compact" && !backendId) {
+    feedback("Start the Codex conversation before compacting it.");
+    return true;
+  }
+  store.setSessionLifecycle(
+    sessionId,
+    content.trim() === "/compact" ? "compacting" : "closing"
+  );
+  const current = () =>
+    useChatStore.getState().sessions[sessionId]?.backendSessionId === backendId;
+  try {
+    if (content.trim() === "/clear") {
+      if (backendId) {
+        const result = await commands.closeLocalChatSession(backendId);
+        if (result.status === "error") throw result.error;
+      }
+      if (current()) {
+        store.setBackendSessionId(sessionId, null);
+        store.setSessionLifecycle(sessionId, "idle");
+        store.clearConversation(sessionId);
+      }
+    } else {
+      store.setSessionCompaction(sessionId, true);
+      const result = await commands.compactLocalChatSession(backendId!);
+      if (result.status === "error") throw result.error;
+    }
+  } catch (error) {
+    if (current()) {
+      feedback(commandErrorMessage(error));
+      if (commandErrorKind(error) === "CompactionFailed") {
+        // The adapter releases a failed compaction session; the next prompt resumes it.
+        store.setBackendSessionId(sessionId, null);
+        store.setSessionLifecycle(
+          sessionId,
+          "error",
+          commandErrorMessage(error)
+        );
+      }
+    }
+  } finally {
+    if (current()) {
+      store.setSessionCompaction(sessionId, false);
+      store.setSessionLifecycle(sessionId, "idle");
+    }
+  }
+  return true;
+}
+
 // --- Extracted event handlers (pure functions, testable without hooks) ---
 
 function commandErrorMessage(error: unknown): string {
@@ -989,6 +1073,11 @@ export function useLocalChat(sessionId: string | null) {
   const startSession = useCallback(
     async (userMessage?: string) => {
       if (!session || !sessionId) return;
+      if (
+        userMessage &&
+        (await dispatchCodexChatCommand(sessionId, userMessage))
+      )
+        return;
       const initialPrompt = userMessage?.trim();
       if (!initialPrompt) return;
       const lifecycle = getLocalChatLifecycle(session);
@@ -1033,6 +1122,12 @@ export function useLocalChat(sessionId: string | null) {
   const sendMessage = useCallback(
     async (content: string) => {
       if (!sessionId) return;
+      if (await dispatchCodexChatCommand(sessionId, content)) return;
+      if (
+        getLocalChatLifecycle(useChatStore.getState().sessions[sessionId]) ===
+        "compacting"
+      )
+        return;
       if (!session?.backendSessionId) {
         return;
       }

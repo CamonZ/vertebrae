@@ -1,5 +1,9 @@
+import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  dispatchCodexChatCommand,
+  isCodexChatCommand,
+  useLocalChat,
   handleInitEvent,
   handleUsageEvent,
   handleTextEvent,
@@ -38,6 +42,7 @@ vi.mock("../bindings", () => ({
         sufficient_signal: true,
       },
     }),
+    compactLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
     closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     getCurrentProject: vi.fn().mockResolvedValue({
@@ -2734,5 +2739,235 @@ describe("doCloseSession", () => {
     expect(deps.setBackendSessionId).not.toHaveBeenCalled();
     expect(deps.clearQueuedMessages).not.toHaveBeenCalled();
     expect(deps.settleActiveTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe("Codex local chat commands", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedCommands.compactLocalChatSession.mockResolvedValue({
+      status: "ok",
+      data: null,
+    });
+    mockedCommands.closeLocalChatSession.mockResolvedValue({
+      status: "ok",
+      data: null,
+    });
+    const session = makeSession({
+      harness: "codex",
+      backendSessionId: "backend",
+      providerResumeId: "old-thread",
+      lifecycle: "idle",
+    });
+    useChatStore.setState({
+      sessions: { [SESSION_ID]: session },
+      activeSessionId: SESSION_ID,
+      paneLayout: {
+        activePaneId: "pane",
+        panes: [{ id: "pane", sessionId: SESSION_ID }],
+      },
+    });
+  });
+
+  it("intercepts compact before prompt insertion, title inference, and queues", async () => {
+    const pending = deferredCommandResult();
+    mockedCommands.compactLocalChatSession.mockReturnValue(
+      pending.promise as ReturnType<typeof commands.compactLocalChatSession>
+    );
+    const { result } = renderHook(() => useLocalChat(SESSION_ID));
+    let operation!: Promise<void>;
+    act(() => {
+      operation = result.current.sendMessage(" /compact ");
+    });
+    expect(useChatStore.getState().sessions[SESSION_ID].lifecycle).toBe(
+      "compacting"
+    );
+    await act(async () => {
+      await result.current.sendMessage("ordinary text");
+    });
+    expect(
+      useChatStore.getState().sessions[SESSION_ID].queuedMessages ?? []
+    ).toEqual([]);
+    expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
+    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
+    expect(useChatStore.getState().sessions[SESSION_ID].messages).toEqual([]);
+    await act(async () => {
+      pending.resolve({ status: "ok" });
+      await operation;
+    });
+    expect(useChatStore.getState().sessions[SESSION_ID]).toMatchObject({
+      lifecycle: "idle",
+      providerResumeId: "old-thread",
+      backendSessionId: "backend",
+      compactionActive: false,
+    });
+  });
+
+  it.each([
+    "sending",
+    "streaming",
+    "starting",
+    "resuming",
+    "compacting",
+    "closing",
+  ] as const)(
+    "rejects commands while %s instead of queueing them",
+    async (lifecycle) => {
+      useChatStore.getState().setSessionLifecycle(SESSION_ID, lifecycle);
+      await dispatchCodexChatCommand(SESSION_ID, "/clear");
+      expect(mockedCommands.closeLocalChatSession).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().sessions[SESSION_ID].messages.slice(-1)[0]?.kind
+      ).toBe("error");
+      expect(
+        useChatStore.getState().sessions[SESSION_ID].queuedMessages ?? []
+      ).toEqual([]);
+    }
+  );
+
+  it("creates a fresh same-pane conversation with settings and preserves old history", async () => {
+    const source = useChatStore.getState().sessions[SESSION_ID];
+    Object.assign(source, {
+      projectPath: "/project",
+      providerId: "custom",
+      selectedModelId: "model",
+      selectedReasoningEffort: "high",
+      selectedSpeedTier: "fast",
+      selectedPersonality: "friendly",
+      permissionMode: "default",
+      messages: [{ kind: "user", text: "old", timestamp: "now" }],
+    });
+    await dispatchCodexChatCommand(SESSION_ID, "/clear");
+    const state = useChatStore.getState();
+    const fresh = state.sessions[state.activeSessionId!];
+    expect(fresh.id).not.toBe(SESSION_ID);
+    expect(fresh).toMatchObject({
+      harness: "codex",
+      projectPath: "/project",
+      providerId: "custom",
+      selectedModelId: "model",
+      selectedReasoningEffort: "high",
+      selectedSpeedTier: "fast",
+      selectedPersonality: "friendly",
+      permissionMode: "default",
+      messages: [],
+      providerResumeId: null,
+      backendSessionId: null,
+    });
+    expect(fresh.queuedMessages).toBeUndefined();
+    expect(state.paneLayout.panes).toEqual([
+      { id: "pane", sessionId: fresh.id },
+    ]);
+    expect(state.sessions[SESSION_ID]).toMatchObject({
+      providerResumeId: "old-thread",
+      messages: source.messages,
+    });
+  });
+
+  it("handles clear before backend startup without sending an initial prompt", async () => {
+    useChatStore.getState().setBackendSessionId(SESSION_ID, null);
+    const { result } = renderHook(() => useLocalChat(SESSION_ID));
+    await act(async () => {
+      await result.current.startSession("/clear");
+    });
+    expect(useChatStore.getState().activeSessionId).not.toBe(SESSION_ID);
+    expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
+  });
+
+  it.each(["command", "transport"])(
+    "retains the old chat when clear fails at %s",
+    async (failure) => {
+      if (failure === "command")
+        mockedCommands.closeLocalChatSession.mockResolvedValueOnce({
+          status: "error",
+          error: { SendFailed: "close failed" },
+        });
+      else
+        mockedCommands.closeLocalChatSession.mockRejectedValueOnce(
+          new Error("close failed")
+        );
+      await dispatchCodexChatCommand(SESSION_ID, "/clear");
+      expect(useChatStore.getState().activeSessionId).toBe(SESSION_ID);
+      expect(useChatStore.getState().sessions[SESSION_ID]).toMatchObject({
+        lifecycle: "idle",
+        providerResumeId: "old-thread",
+      });
+    }
+  );
+
+  it("clears busy state on compact failure and ignores stale completion after session replacement", async () => {
+    mockedCommands.compactLocalChatSession.mockResolvedValueOnce({
+      status: "error",
+      error: { CompactionFailed: "failed" },
+    });
+    await dispatchCodexChatCommand(SESSION_ID, "/compact");
+    expect(useChatStore.getState().sessions[SESSION_ID]).toMatchObject({
+      lifecycle: "error",
+      compactionActive: false,
+      backendSessionId: null,
+    });
+    useChatStore.getState().setBackendSessionId(SESSION_ID, "backend");
+    useChatStore.getState().setSessionLifecycle(SESSION_ID, "idle");
+    const pending = deferredCommandResult();
+    mockedCommands.compactLocalChatSession.mockReturnValueOnce(
+      pending.promise as ReturnType<typeof commands.compactLocalChatSession>
+    );
+    const operation = dispatchCodexChatCommand(SESSION_ID, "/compact");
+    useChatStore.getState().setBackendSessionId(SESSION_ID, "replacement");
+    useChatStore.getState().setSessionLifecycle(SESSION_ID, "streaming");
+    pending.resolve({ status: "ok" });
+    await operation;
+    expect(useChatStore.getState().sessions[SESSION_ID].lifecycle).toBe(
+      "streaming"
+    );
+  });
+
+  it("leaves other text, command arguments, and other harnesses on the ordinary path", async () => {
+    const session = useChatStore.getState().sessions[SESSION_ID];
+    expect(isCodexChatCommand(session, "/compact details")).toBe(false);
+    expect(isCodexChatCommand(session, "/clear name")).toBe(false);
+    expect(
+      isCodexChatCommand({ ...session, harness: "claude" }, "/compact")
+    ).toBe(false);
+    const { result } = renderHook(() => useLocalChat(SESSION_ID));
+    await act(async () => {
+      await result.current.sendMessage("/clear name");
+    });
+    expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledWith(
+      "backend",
+      "/clear name"
+    );
+  });
+});
+
+describe("Codex command rejection and project scope", () => {
+  it("rejects compact without a live session and does not invoke the provider", async () => {
+    vi.clearAllMocks();
+    useChatStore.setState({
+      sessions: { [SESSION_ID]: makeSession({ harness: "codex" }) },
+    });
+    expect(await dispatchCodexChatCommand(SESSION_ID, "/compact")).toBe(true);
+    expect(mockedCommands.compactLocalChatSession).not.toHaveBeenCalled();
+  });
+
+  it("does not open a fresh conversation after a project reset during clear", async () => {
+    const pending = deferredCommandResult();
+    mockedCommands.closeLocalChatSession.mockReturnValueOnce(
+      pending.promise as ReturnType<typeof commands.closeLocalChatSession>
+    );
+    useChatStore.setState({
+      sessions: {
+        [SESSION_ID]: makeSession({
+          harness: "codex",
+          backendSessionId: "old",
+        }),
+      },
+    });
+    const operation = dispatchCodexChatCommand(SESSION_ID, "/clear");
+    useChatStore.setState({ sessions: {}, activeSessionId: null });
+    pending.resolve({ status: "ok" });
+    await operation;
+    expect(useChatStore.getState().sessions).toEqual({});
+    expect(useChatStore.getState().activeSessionId).toBeNull();
   });
 });

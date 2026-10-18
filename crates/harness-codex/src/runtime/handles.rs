@@ -105,6 +105,14 @@ impl SessionHandle for CodexSessionHandle {
             outcome: rx,
         }))
     }
+    async fn compact(&self) -> Result<(), HarnessError> {
+        let _gate = self
+            .state
+            .root_turn_gate
+            .try_lock()
+            .map_err(|_| HarnessError::InvalidRequest("Codex session is busy".into()))?;
+        self.state.compact().await
+    }
     async fn close(&self) -> Result<SessionCloseOutcome, HarnessError> {
         self.state.close(SessionCloseStatus::Closed, None).await
     }
