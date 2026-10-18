@@ -251,21 +251,29 @@ impl LocalChatSessionManager {
     }
 
     /// Rebind a live gate chat and deliver a hidden protocol refresh turn.
+    /// Returns whether a turn was sent: a refresh for the execution the chat
+    /// is already bound to sends nothing, so duplicate realtime updates
+    /// inject one turn.
     pub async fn refresh_gate(
         &self,
         backend_session_id: &str,
         gate: crate::local_chat::LocalChatGateBinding,
-    ) -> Result<(), LocalChatSessionError> {
+    ) -> Result<bool, LocalChatSessionError> {
         let _lifecycle = self.lifecycle_gate.read().await;
         let harness_kind = self.registry_harness(backend_session_id).await?;
         self.harness(harness_kind)?;
-        self.permission_bridge
-            .bind_gate(backend_session_id, gate.clone());
+        if !self
+            .permission_bridge
+            .rebind_gate(backend_session_id, gate.clone())
+        {
+            return Ok(false);
+        }
         self.send_message(
             backend_session_id,
             &crate::local_chat::gate::gate_refresh_turn(&gate),
         )
-        .await
+        .await?;
+        Ok(true)
     }
 
     pub async fn compact_session(

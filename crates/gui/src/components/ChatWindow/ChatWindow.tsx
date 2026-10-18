@@ -4,6 +4,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
+import { GateChatStatusBar } from "./GateChatStatusBar";
 import { localChatSessionProjectDisplayName } from "../../utils/localChatSessionGroups";
 import type {
   PendingTextComment,
@@ -171,6 +172,12 @@ export function ChatWindow({
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
       />
+      {chat.session.gate && chat.session.gateStatus && (
+        <GateChatStatusBar
+          stepName={chat.session.gate.step_name}
+          status={chat.session.gateStatus}
+        />
+      )}
       <Profiler
         id={`${sessionId}-transcript`}
         onRender={() => renderObserver?.("transcript")}

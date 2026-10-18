@@ -753,6 +753,7 @@ fn gate_binding() -> LocalChatGateBinding {
         artifact: "approval".into(),
         instructions: None,
         output_schema: None,
+        revision: None,
     }
 }
 

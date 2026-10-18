@@ -26,6 +26,23 @@ pub struct LocalChatGateBinding {
     #[serde(default)]
     #[specta(optional)]
     pub output_schema: Option<serde_json::Value>,
+    /// Present when the run returned to this step after an earlier
+    /// resolution, so the waiting execution is a revision.
+    #[serde(default)]
+    #[specta(optional)]
+    pub revision: Option<LocalChatGateRevision>,
+}
+
+/// A later visit of a gate: the review rejected the earlier resolution and
+/// the route looped back, carrying its reasons as the execution's handoff.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct LocalChatGateRevision {
+    /// 1-based visit of this step in the run; always 2 or more.
+    pub attempt: u32,
+    /// The waiting execution's handoff: the review's verdict and reasons.
+    #[serde(default)]
+    #[specta(optional)]
+    pub verdict: Option<serde_json::Value>,
 }
 
 impl LocalChatGateBinding {
@@ -202,6 +219,11 @@ pub(crate) fn gate_developer_instructions(gate: &LocalChatGateBinding) -> String
         None => "No response schema is configured; the resolution may be any JSON document."
             .to_string(),
     };
+    let revision = gate
+        .revision
+        .as_ref()
+        .map(|revision| format!("\n\n{}", revision_section(revision)))
+        .unwrap_or_default();
     format!(
         r#"# Human input gate
 
@@ -209,7 +231,7 @@ You are helping the user resolve a human input gate in a Vertebrae workflow. Tas
 
 ## The question
 
-{question}
+{question}{revision}
 
 ## Response schema
 
@@ -229,7 +251,7 @@ Submit with exactly this command, replacing <JSON> with the resolution as compac
 4. If the command fails with invalid_human_input, fix each listed path, asking the user only for information that is missing, and run the command again.
 5. If the command fails with human_input_execution_not_waiting, tell the user the gate has closed or moved on, and stop submitting.
 6. After a successful submission, tell the user their resolution was submitted and is being reviewed.
-7. Messages that begin with [Vertebrae evaluation] come from Vertebrae, not the user, and carry the review's verdict. If the resolution was rejected, explain why in plain terms and help the user revise it.
+7. Hidden turns whose text begins with [Vertebrae evaluation] come from Vertebrae, not the user, and carry the review's verdict. If the resolution was rejected, explain why in plain terms and help the user revise it.
 8. Distinguish a revised answer from a rejection of the question itself. If the user rejects the question (it is wrong, moot, or should not be asked), do not invent an answer: tell them this gate only accepts an answer and that they can stop the run instead.
 9. Run no other command that changes Vertebrae state: never transition-to, start-taskrun, stop-taskrun or workflow assignment. Progression belongs to the workflow.
 10. Never mention commands, JSON, schemas, IDs, the review mechanics or the evaluator to the user. Talk only about the question and their answer."#,
@@ -240,11 +262,33 @@ Submit with exactly this command, replacing <JSON> with the resolution as compac
     )
 }
 
-/// A hidden turn that replaces the gate protocol when the waiting execution
-/// changes but the run and step continue to use the same chat.
-pub(crate) fn gate_refresh_turn(gate: &LocalChatGateBinding) -> String {
+fn revision_section(revision: &LocalChatGateRevision) -> String {
+    let verdict = match &revision.verdict {
+        Some(verdict) => format!(
+            "The review gave this verdict:\n\n```json\n{}\n```",
+            serde_json::to_string_pretty(verdict).unwrap_or_else(|_| verdict.to_string())
+        ),
+        None => "The review gave no reasons.".to_string(),
+    };
     format!(
-        "<vertebrae-hidden-turn>\nThe waiting execution for this human input gate changed. Replace the earlier gate protocol with this one, address the current question now, and use only its submission command.\n\n{}\n</vertebrae-hidden-turn>",
+        "## Revision\n\nThis is attempt {attempt}. The review rejected the previous resolution and the workflow returned to this gate. {verdict}",
+        attempt = revision.attempt,
+    )
+}
+
+/// A hidden turn that replaces the gate protocol when the waiting execution
+/// changes but the run and step continue to use the same chat. On a revision
+/// it opens with the review's verdict, so the agent explains the rejection.
+pub(crate) fn gate_refresh_turn(gate: &LocalChatGateBinding) -> String {
+    let opening = match &gate.revision {
+        Some(revision) => format!(
+            "[Vertebrae evaluation] The review rejected the submitted resolution, and the gate is waiting for attempt {}. Explain the verdict to the user in plain terms and help them revise their answer. Replace the earlier gate protocol with this one and use only its submission command.",
+            revision.attempt
+        ),
+        None => "The waiting execution for this human input gate changed. Replace the earlier gate protocol with this one, address the current question now, and use only its submission command.".to_string(),
+    };
+    format!(
+        "<vertebrae-hidden-turn>\n{opening}\n\n{}\n</vertebrae-hidden-turn>",
         gate_developer_instructions(gate)
     )
 }
@@ -265,7 +309,57 @@ mod tests {
                 "required": ["approved"],
                 "properties": { "approved": { "type": "boolean" } }
             })),
+            revision: None,
         }
+    }
+
+    fn revision() -> LocalChatGateBinding {
+        LocalChatGateBinding {
+            execution_id: "exec-2".into(),
+            revision: Some(LocalChatGateRevision {
+                attempt: 2,
+                verdict: Some(serde_json::json!({ "reasons": "The rollback plan is missing." })),
+            }),
+            ..gate()
+        }
+    }
+
+    #[test]
+    fn revision_instructions_carry_the_attempt_and_verdict() {
+        let first = gate_developer_instructions(&gate());
+        let revised = gate_developer_instructions(&revision());
+
+        assert!(!first.contains("## Revision"));
+        assert!(revised.contains("This is attempt 2."));
+        assert!(revised.contains("The rollback plan is missing."));
+        assert!(revised.contains("--subject-id exec-2"));
+    }
+
+    #[test]
+    fn revision_without_a_handoff_says_no_reasons_were_given() {
+        let instructions = gate_developer_instructions(&LocalChatGateBinding {
+            revision: Some(LocalChatGateRevision {
+                attempt: 3,
+                verdict: None,
+            }),
+            ..gate()
+        });
+
+        assert!(instructions.contains("This is attempt 3."));
+        assert!(instructions.contains("The review gave no reasons."));
+    }
+
+    #[test]
+    fn refresh_turns_open_with_the_evaluation_only_on_a_revision() {
+        let refreshed = gate_refresh_turn(&gate());
+        let evaluated = gate_refresh_turn(&revision());
+
+        assert!(refreshed.starts_with("<vertebrae-hidden-turn>\nThe waiting execution"));
+        assert!(!refreshed.contains("[Vertebrae evaluation] The review"));
+        assert!(evaluated.starts_with("<vertebrae-hidden-turn>\n[Vertebrae evaluation]"));
+        assert!(evaluated.contains("attempt 2"));
+        assert!(evaluated.contains("The rollback plan is missing."));
+        assert!(evaluated.trim_end().ends_with("</vertebrae-hidden-turn>"));
     }
 
     const SUBMIT: &str = r#"vtb artifact add approval.json --subject-type step_execution --subject-id exec-1 --logical-name approval --body '{"approved":true,"reason":"it'\''s ready; ship it | now"}'"#;

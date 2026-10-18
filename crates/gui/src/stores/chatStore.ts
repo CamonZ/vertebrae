@@ -37,7 +37,12 @@ import type {
 } from "../bindings";
 import { commands } from "../bindings";
 import { useLocalChatDefaultsStore } from "../utils/localChatDefaults";
-import { gateChatLabel, isSameGate } from "../utils/gateChat";
+import {
+  gateChatLabel,
+  isSameGate,
+  isSameGateChatStatus,
+  type GateChatStatus,
+} from "../utils/gateChat";
 import {
   applyInitialPage,
   applyOlderPage,
@@ -505,6 +510,8 @@ export interface ChatSession {
    * Resolve reopens the chat bound to the same run and step.
    */
   gate?: LocalChatGateBinding | null;
+  /** Runtime-only phase of the bound gate, derived from realtime run state. */
+  gateStatus?: GateChatStatus | null;
 }
 
 export interface ChatPane {
@@ -569,6 +576,10 @@ interface ChatStoreActions {
     gate: LocalChatGateBinding,
     projectPath?: string | null
   ) => { sessionId: string; created: boolean; gateChanged: boolean };
+  /** Record the derived phase of a gate chat's run. Runtime-only. */
+  setGateChatStatus: (sessionId: string, status: GateChatStatus | null) => void;
+  /** Rebind a gate chat to the execution now waiting at its gate. */
+  setGateChatBinding: (sessionId: string, gate: LocalChatGateBinding) => void;
   /** List persisted local chat sessions, newest first */
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
   /** Hydrate local chat metadata from the app-managed index file. */
@@ -2084,6 +2095,25 @@ export const useChatStore = create<ChatStore>((set, get) => {
         created: true,
         gateChanged: false,
       };
+    },
+
+    setGateChatStatus: (sessionId, status) => {
+      void updateSession(
+        sessionId,
+        (session) =>
+          isSameGateChatStatus(session.gateStatus, status)
+            ? session
+            : { ...session, gateStatus: status },
+        { persist: false }
+      );
+    },
+
+    setGateChatBinding: (sessionId, gate) => {
+      void updateSession(sessionId, (session) =>
+        session.gate?.execution_id === gate.execution_id
+          ? session
+          : { ...session, gate }
+      );
     },
 
     loadOlderReplayMessages: async (sessionId) => {

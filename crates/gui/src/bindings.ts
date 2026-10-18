@@ -850,9 +850,10 @@ async createLocalChatSession(input: CreateLocalChatSessionInput) : Promise<Resul
 },
 /**
  * Rebind a live gate chat to the currently waiting execution and send the
- * updated hidden protocol as a turn.
+ * updated hidden protocol as a turn. Returns whether a turn was sent; the
+ * chat already bound to that execution receives nothing.
  */
-async refreshLocalChatSessionGate(backendSessionId: string, gate: LocalChatGateBinding) : Promise<Result<null, LocalChatSessionError>> {
+async refreshLocalChatSessionGate(backendSessionId: string, gate: LocalChatGateBinding) : Promise<Result<boolean, LocalChatSessionError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("refresh_local_chat_session_gate", { backendSessionId, gate }) };
 } catch (e) {
@@ -1592,7 +1593,25 @@ instructions?: string | null;
 /**
  * JSON Schema the resolution must satisfy; absent accepts any JSON.
  */
-output_schema?: JsonValue | null }
+output_schema?: JsonValue | null;
+/**
+ * Present when the run returned to this step after an earlier
+ * resolution, so the waiting execution is a revision.
+ */
+revision?: LocalChatGateRevision | null }
+/**
+ * A later visit of a gate: the review rejected the earlier resolution and
+ * the route looped back, carrying its reasons as the execution's handoff.
+ */
+export type LocalChatGateRevision = {
+/**
+ * 1-based visit of this step in the run; always 2 or more.
+ */
+attempt: number;
+/**
+ * The waiting execution's handoff: the review's verdict and reasons.
+ */
+verdict?: JsonValue | null }
 export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[]; default_provider: string; providers: LocalChatProviderInfo[] }
 export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; default_reasoning_effort: string | null; reasoning_efforts: LocalChatReasoningEffortOption[]; speed_tiers?: LocalChatSpeedTierOption[]; permission_modes?: LocalChatPermissionModeOption[] | null; personality_options?: LocalChatPersonalityOption[] | null; supports_resume: boolean }
 export type LocalChatHarnessKind = "claude" | "codex"

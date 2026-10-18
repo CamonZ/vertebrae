@@ -170,6 +170,22 @@ manager binds the gate in the `PermissionBridge`, which approves exactly the
 bound `vtb artifact add` submission without a prompt on both the Claude socket
 and harness control paths; every other command still asks.
 
+`useGateChatSync` (mounted in `GlobalListeners`) keeps open gate chats in step
+with their runs. A TaskRun or StepExecution update for a bound run re-reads
+its trace, and `deriveGateChatStatus()` sets the runtime `gateStatus` phase
+shown above the thread: drafting, rejected (attempt n), under review, accepted
+once a route after the submission moves the run to another step, and closed
+when the run stops, fails or finishes. When the review loops back, the run
+waits at the gate with a new execution; `refreshGateChat()` sends a live chat
+`refresh_gate` as its own turn once the chat is idle. The canonical binding
+carries the revision (attempt and the new execution's handoff as the verdict),
+so the hidden turn opens with `[Vertebrae evaluation]` and the agent explains
+the rejection. `refresh_gate` sends nothing when the chat is already bound to
+that execution, which makes duplicate updates inject one turn. A chat with no
+running session is rebound in place and gets the verdict in its developer
+instructions when it resumes; a chat whose gate no longer waits resumes
+unbound.
+
 ### Opt-in OpenTelemetry collection
 
 The GUI reads telemetry settings from `[observability]` in the shared

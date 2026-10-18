@@ -52,7 +52,7 @@ pub(crate) use events::{
     LocalChatSessionWarningEvent, LocalChatSpeedTierStatus, LocalChatTextEvent,
     LocalChatToolCallEvent, LocalChatToolResultEvent, LocalChatTurnStartedEvent,
 };
-pub use gate::LocalChatGateBinding;
+pub use gate::{LocalChatGateBinding, LocalChatGateRevision};
 pub(crate) use harness::{
     CreateLocalChatSessionInput, HarnessCreateSessionInput, LocalChatHarness,
     LocalChatHarnessCatalog, LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
@@ -91,6 +91,7 @@ mod tests {
             artifact: "approval".into(),
             instructions: Some("Ship it?".into()),
             output_schema: None,
+            revision: None,
         };
 
         let plain = session_developer_instructions(None);
