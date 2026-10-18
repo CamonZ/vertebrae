@@ -13,6 +13,12 @@ pub const GUI_BINARY: &str = "/app/target/debug/gui";
 /// processes, so responses can contain IDs created during the scenario.
 pub const MOCK_CHAT_RESPONSE_FILE: &str = "/mocks/gui-acceptance-chat-response.txt";
 
+/// `MOCK_CAPTURE_DIR` of the harness processes the GUI launches, exported by
+/// `docker/gui-test-entrypoint.sh` before tauri-driver starts: mock Claude
+/// appends each launch's argv to `invocations.jsonl` and mock Codex each
+/// app-server request to `codex_requests.jsonl`. Cleared before every scenario.
+pub const HARNESS_CAPTURE_DIR: &str = "/tmp/gui-acceptance-harness-capture";
+
 /// Base URL for the Tauri app inside WebDriver.
 ///
 /// On Linux (WebKitGTK), Tauri v2 serves assets at `http://tauri.localhost`.

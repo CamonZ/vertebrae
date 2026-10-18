@@ -267,6 +267,7 @@ fn input(session_id: &str, initial_prompt: Option<&str>) -> HarnessCreateSession
         permission_mode: Some(PermissionMode::Plan),
         personality: None,
         provider: None,
+        gate: None,
     }
 }
 
@@ -659,6 +660,35 @@ async fn start_request_carries_reference_instructions_and_agent_context_index() 
         "(<{}>)",
         docs_root.join("permissions.md").display()
     )));
+}
+
+#[tokio::test]
+async fn start_request_appends_the_gate_protocol_for_gate_chats() {
+    let test = test_adapter("backend-gate");
+    let (runtime, _events) = LocalChatRuntime::capturing_for_tests();
+    let gate = crate::local_chat::LocalChatGateBinding {
+        task_run_id: "run-1".into(),
+        step_name: "approve".into(),
+        execution_id: "exec-1".into(),
+        artifact: "approval".into(),
+        instructions: Some("Ship it?".into()),
+        output_schema: None,
+    };
+    let mut input = input("backend-gate", None);
+    input.gate = Some(gate.clone());
+
+    test.adapter
+        .create_prepared_session(input, runtime, prepared(None))
+        .await
+        .unwrap();
+
+    let requests = test.runtime_state.start_requests.lock().unwrap();
+    assert_eq!(
+        requests[0].config.developer_instructions,
+        Some(crate::local_chat::session_developer_instructions(Some(
+            &gate
+        )))
+    );
 }
 
 #[tokio::test]

@@ -7,6 +7,7 @@
  */
 
 import type { SessionLog } from "../bindings";
+import { isHiddenTurn } from "../utils/gateChat";
 
 /** Persisted provider-neutral event emitted by the shared harness runtime. */
 interface HarnessRawEvent {
@@ -345,6 +346,7 @@ function shouldKeepUserMessage(text: string): boolean {
   const trimmed = text.trim();
   return (
     trimmed.length > 0 &&
+    !isHiddenTurn(trimmed) &&
     !trimmed.includes("# AGENTS.md instructions for ") &&
     !trimmed.includes("<recommended_plugins>") &&
     !trimmed.includes("<environment_context>")

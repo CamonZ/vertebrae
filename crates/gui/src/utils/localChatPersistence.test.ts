@@ -5,6 +5,7 @@ import {
   clearLastUsedLocalChatModelId,
   clearPersistedLocalChatSessions,
   findPersistedDefaultEmptyLocalChatSession,
+  findPersistedGateChatSession,
   findPersistedLocalChatSession,
   isLocalChatSessionCleared,
   loadLastUsedLocalChatModelId,
@@ -628,5 +629,64 @@ describe("localChatPersistence", () => {
     expect(findPersistedDefaultEmptyLocalChatSession("/repo")?.id).toBe(
       "default"
     );
+  });
+
+  describe("gate bindings", () => {
+    const gate = {
+      task_run_id: "run-1",
+      step_name: "approve",
+      execution_id: "exec-1",
+      artifact: "approval",
+      instructions: "Ship v2?",
+      output_schema: { type: "object" },
+    };
+
+    it("round-trips a gate chat's binding", () => {
+      persistLocalChatSession(makeSession({ id: "gate-chat", gate }));
+
+      expect(loadPersistedLocalChatSession("gate-chat")?.gate).toEqual(gate);
+      expect(
+        normalizeLocalChatSession({ ...makeSession(), gate })?.gate
+      ).toEqual(gate);
+    });
+
+    it("drops bindings missing an identifying field", () => {
+      for (const field of [
+        "task_run_id",
+        "step_name",
+        "execution_id",
+        "artifact",
+      ]) {
+        const broken = { ...gate, [field]: "" };
+        expect(
+          normalizeLocalChatSession({ ...makeSession(), gate: broken })?.gate
+        ).toBeNull();
+      }
+      expect(normalizeLocalChatSession(makeSession())?.gate).toBeNull();
+    });
+
+    it("finds the newest open chat bound to a run's step", () => {
+      persistLocalChatSession(
+        makeSession({ id: "older", gate, updatedAt: "2026-01-01T00:00:00Z" })
+      );
+      persistLocalChatSession(
+        makeSession({
+          id: "newer",
+          gate: { ...gate, execution_id: "exec-2" },
+          updatedAt: "2026-02-01T00:00:00Z",
+        })
+      );
+      persistLocalChatSession(
+        makeSession({ id: "closed", gate, status: "closed" })
+      );
+      persistLocalChatSession(
+        makeSession({ id: "other-step", gate: { ...gate, step_name: "x" } })
+      );
+
+      expect(findPersistedGateChatSession(gate)?.id).toBe("newer");
+      expect(
+        findPersistedGateChatSession({ ...gate, task_run_id: "run-2" })
+      ).toBeNull();
+    });
   });
 });

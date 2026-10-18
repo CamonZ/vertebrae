@@ -4,7 +4,12 @@ import type {
   ChatTitleStatus,
   LocalChatLifecycle,
 } from "../stores/chatStore";
-import type { LocalChatHarnessKind, PermissionMode } from "../bindings";
+import type {
+  JsonValue,
+  LocalChatGateBinding,
+  LocalChatHarnessKind,
+  PermissionMode,
+} from "../bindings";
 import { commands } from "../bindings";
 
 const MODEL_STORAGE_KEY = "local-chat-model:last-used:v1";
@@ -34,6 +39,7 @@ const FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 type LocalChatSessionIndexEntry = LocalChatSessionSummary & {
   status: "open" | "closed";
   permissionMode?: PermissionMode | null;
+  gate?: LocalChatGateBinding | null;
 };
 
 type LocalChatSessionIndexCommands = typeof commands & {
@@ -97,6 +103,33 @@ function normalizeHarness(value: unknown): LocalChatHarnessKind {
     VALID_LOCAL_CHAT_HARNESSES.has(value as LocalChatHarnessKind)
     ? (value as LocalChatHarnessKind)
     : DEFAULT_LOCAL_CHAT_HARNESS;
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/** A persisted gate binding, or null unless every identifying field is set. */
+function normalizeGateBinding(value: unknown): LocalChatGateBinding | null {
+  if (typeof value !== "object" || value === null) return null;
+  const gate = value as Partial<LocalChatGateBinding>;
+  if (
+    !nonEmptyString(gate.task_run_id) ||
+    !nonEmptyString(gate.step_name) ||
+    !nonEmptyString(gate.execution_id) ||
+    !nonEmptyString(gate.artifact)
+  ) {
+    return null;
+  }
+  return {
+    task_run_id: gate.task_run_id,
+    step_name: gate.step_name,
+    execution_id: gate.execution_id,
+    artifact: gate.artifact,
+    instructions:
+      typeof gate.instructions === "string" ? gate.instructions : null,
+    output_schema: (gate.output_schema ?? null) as JsonValue | null,
+  };
 }
 
 export function normalizeLocalChatSession(value: unknown): ChatSession | null {
@@ -236,6 +269,7 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     createdAt,
     updatedAt,
     messageCount,
+    gate: normalizeGateBinding(candidate.gate),
   };
 }
 
@@ -397,6 +431,7 @@ function serializeSession(
     createdAt,
     updatedAt,
     messageCount,
+    gate: session.gate ?? null,
   };
 }
 
@@ -432,6 +467,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     hasUserMessage: hasLocalChatUserMessage(session),
     lifecycle: session.lifecycle ?? "idle",
     status: session.status,
+    ...(session.gate ? { gate: session.gate } : {}),
   };
 }
 
@@ -682,6 +718,22 @@ export function findPersistedLocalChatSession(
           session.status === "open" &&
           !isDisposableClosedLocalChatSession(session) &&
           projectPathMatches(session.projectPath, projectPath)
+      )
+      .sort(compareLocalChatSessionRecency)[0] ?? null
+  );
+}
+
+/** Most recent open persisted chat bound to `gate`'s run and step. */
+export function findPersistedGateChatSession(
+  gate: Pick<LocalChatGateBinding, "task_run_id" | "step_name">
+): ChatSession | null {
+  return (
+    Object.values(readSessions())
+      .filter(
+        (session) =>
+          session.status === "open" &&
+          session.gate?.task_run_id === gate.task_run_id &&
+          session.gate.step_name === gate.step_name
       )
       .sort(compareLocalChatSessionRecency)[0] ?? null
   );

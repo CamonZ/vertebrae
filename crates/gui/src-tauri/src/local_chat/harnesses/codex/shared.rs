@@ -11,9 +11,9 @@ use vertebrae_harness_core::{
 
 use crate::helpers::{build_augmented_path_from, find_codex_binary_with_shell_environment};
 use crate::local_chat::{
-    chat_developer_instructions, HarnessCreateSessionInput, LocalChatEvent, LocalChatHarness,
-    LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionError,
-    LocalChatSessionErrorEvent,
+    session_developer_instructions, HarnessCreateSessionInput, LocalChatEvent,
+    LocalChatGateBinding, LocalChatHarness, LocalChatHarnessInfo, LocalChatHarnessKind,
+    LocalChatRuntime, LocalChatSessionError, LocalChatSessionErrorEvent,
 };
 use crate::shell_environment::{user_shell_environment, ShellEnvironment};
 
@@ -158,6 +158,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
             reasoning_effort,
             speed_tier,
             personality,
+            input.gate.as_ref(),
         );
         let adapter = Arc::new(LocalChatHarnessEventSink::new(
             backend_session_id.clone(),
@@ -403,7 +404,9 @@ fn resolve_codex_personality(
 }
 
 /// Builds the Codex session start request. Every new session carries the
-/// shared local-chat developer instructions, including the agent-context index.
+/// shared local-chat developer instructions, including the agent-context index,
+/// plus the gate protocol for gate chats.
+#[allow(clippy::too_many_arguments)]
 fn codex_start_request(
     backend_session_id: &str,
     resume_id: Option<String>,
@@ -412,6 +415,7 @@ fn codex_start_request(
     reasoning_effort: Option<String>,
     speed_tier: Option<SpeedTier>,
     personality: Option<String>,
+    gate: Option<&LocalChatGateBinding>,
 ) -> StartSessionRequest {
     StartSessionRequest {
         session_id: SessionId::new(backend_session_id),
@@ -424,7 +428,7 @@ fn codex_start_request(
             reasoning_effort,
             speed_tier,
             personality,
-            developer_instructions: Some(chat_developer_instructions()),
+            developer_instructions: Some(session_developer_instructions(gate)),
             ..Default::default()
         },
     }
@@ -471,6 +475,7 @@ mod tests {
             Some("high".into()),
             Some(SpeedTier::Fast),
             None,
+            None,
         );
 
         assert_eq!(request.session_id.as_str(), "backend-codex");
@@ -495,6 +500,36 @@ mod tests {
             "(<{}>)",
             docs_root.join("permissions.md").display()
         )));
+    }
+
+    #[test]
+    fn start_request_appends_the_gate_protocol_for_gate_chats() {
+        let gate = LocalChatGateBinding {
+            task_run_id: "run-1".into(),
+            step_name: "approve".into(),
+            execution_id: "exec-1".into(),
+            artifact: "approval".into(),
+            instructions: Some("Ship it?".into()),
+            output_schema: None,
+        };
+
+        let request = codex_start_request(
+            "backend-codex",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&gate),
+        );
+
+        assert_eq!(
+            request.config.developer_instructions,
+            Some(crate::local_chat::session_developer_instructions(Some(
+                &gate
+            )))
+        );
     }
 
     #[test]

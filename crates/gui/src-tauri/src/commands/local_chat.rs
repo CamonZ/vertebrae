@@ -160,6 +160,11 @@ pub struct LocalChatSessionIndexEntry {
     pub message_count: u32,
     pub lifecycle: String,
     pub status: String,
+    /// Waiting `human_input` gate the chat resolves; Resolve reopens the chat
+    /// bound to the same run and step.
+    #[serde(default)]
+    #[specta(optional)]
+    pub gate: Option<crate::local_chat::LocalChatGateBinding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -224,9 +229,10 @@ pub async fn get_supported_local_chat_harnesses(
 #[tauri::command]
 #[specta::specta]
 pub async fn create_local_chat_session(
+    state: State<'_, AppState>,
     local_chat_manager: State<'_, LocalChatSessionManager>,
     app_handle: tauri::AppHandle,
-    input: CreateLocalChatSessionInput,
+    mut input: CreateLocalChatSessionInput,
 ) -> Result<(), LocalChatSessionError> {
     log::info!(
         "create_local_chat_session called: harness={:?}, backend_session_id={}, working_dir={:?}, resume={:?}, model={:?}, permission_mode={:?}",
@@ -238,7 +244,135 @@ pub async fn create_local_chat_session(
         input.permission_mode
     );
 
+    let input = match input.gate {
+        Some(gate) => {
+            let service_guard = state.services.read().await;
+            let service = service_guard
+                .as_ref()
+                .ok_or(LocalChatSessionError::StartFailed(
+                    "No project selected. Please select a project first.".into(),
+                ))?;
+            let gate = validate_gate_binding(service, gate).await?;
+            drop(service_guard);
+            input.gate = Some(gate);
+            input
+        }
+        None => input,
+    };
+
     local_chat_manager.create_session(input, app_handle).await
+}
+
+/// Rebind a live gate chat to the currently waiting execution and send the
+/// updated hidden protocol as a turn.
+#[tauri::command]
+#[specta::specta]
+pub async fn refresh_local_chat_session_gate(
+    state: State<'_, AppState>,
+    local_chat_manager: State<'_, LocalChatSessionManager>,
+    backend_session_id: String,
+    gate: crate::local_chat::LocalChatGateBinding,
+) -> Result<(), LocalChatSessionError> {
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or(LocalChatSessionError::StartFailed(
+            "No project selected. Please select a project first.".into(),
+        ))?;
+    let gate = validate_gate_binding(service, gate).await?;
+    drop(service_guard);
+
+    local_chat_manager
+        .refresh_gate(&backend_session_id, gate)
+        .await
+}
+
+async fn validate_gate_binding(
+    service: &vertebrae_core::VertebraeServices,
+    supplied: crate::local_chat::LocalChatGateBinding,
+) -> Result<crate::local_chat::LocalChatGateBinding, LocalChatSessionError> {
+    let trace = service
+        .executions()
+        .task_run_trace(&supplied.task_run_id)
+        .await
+        .map_err(|error| {
+            LocalChatSessionError::StartFailed(format!("Failed to validate gate chat: {error}"))
+        })?;
+    canonical_gate_binding(trace, supplied)
+}
+
+fn canonical_gate_binding(
+    trace: vertebrae_core::TaskRunTrace,
+    supplied: crate::local_chat::LocalChatGateBinding,
+) -> Result<crate::local_chat::LocalChatGateBinding, LocalChatSessionError> {
+    let run_is_waiting = trace.task_runs.iter().any(|run| {
+        run.id == supplied.task_run_id && run.status == vertebrae_core::TaskRunStatus::Waiting
+    });
+    if !run_is_waiting {
+        return Err(LocalChatSessionError::StartFailed(
+            "The human input gate is no longer waiting".into(),
+        ));
+    }
+
+    let mut attempts = trace
+        .step_executions
+        .iter()
+        .filter(|execution| {
+            execution.id.as_deref() == Some(supplied.execution_id.as_str())
+                && execution.task_run_id.as_deref() == Some(supplied.task_run_id.as_str())
+                && execution.step_name == supplied.step_name
+                && execution.step_type.as_deref() == Some("human_input")
+        })
+        .collect::<Vec<_>>();
+    if attempts.len() != 1 {
+        return Err(LocalChatSessionError::StartFailed(
+            "The gate chat does not match a human input execution".into(),
+        ));
+    }
+
+    let latest_attempt = trace
+        .step_executions
+        .iter()
+        .filter(|execution| {
+            execution.task_run_id.as_deref() == Some(supplied.task_run_id.as_str())
+                && execution.step_name == supplied.step_name
+                && execution.step_type.as_deref() == Some("human_input")
+        })
+        .max_by_key(|execution| execution.started_at);
+    if latest_attempt.and_then(|execution| execution.id.as_deref())
+        != Some(supplied.execution_id.as_str())
+    {
+        return Err(LocalChatSessionError::StartFailed(
+            "The gate chat refers to an earlier execution of this step".into(),
+        ));
+    }
+
+    let execution = attempts.remove(0);
+    let config = execution.config.as_ref().ok_or_else(|| {
+        LocalChatSessionError::StartFailed("The human input execution has no config".into())
+    })?;
+    let vertebrae_core::StepConfig::HumanInput(config) = config else {
+        return Err(LocalChatSessionError::StartFailed(
+            "The human input execution has a non-human-input config".into(),
+        ));
+    };
+    let artifact = config
+        .artifact
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            LocalChatSessionError::StartFailed("The human input step has no artifact".into())
+        })?;
+
+    Ok(crate::local_chat::LocalChatGateBinding {
+        task_run_id: supplied.task_run_id,
+        step_name: supplied.step_name,
+        execution_id: supplied.execution_id,
+        artifact: artifact.to_string(),
+        instructions: config.instructions.clone(),
+        output_schema: config.output_schema.clone(),
+    })
 }
 
 /// Send a message to a provider-neutral local chat session.
@@ -578,6 +712,120 @@ fn permission_resolution_error(error: PermissionBridgeError) -> ResolvePermissio
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn gate_trace(
+        status: vertebrae_core::TaskRunStatus,
+        second_execution: bool,
+    ) -> vertebrae_core::TaskRunTrace {
+        let started_at = chrono::Utc::now();
+        let mut executions = vec![vertebrae_core::StepExecution {
+            id: Some("exec-1".into()),
+            task_id: "task-1".into(),
+            task_run_id: Some("run-1".into()),
+            workflow_id: "workflow-1".into(),
+            step_name: "approve".into(),
+            step_type: Some("human_input".into()),
+            started_at,
+            completed_at: None,
+            status: vertebrae_core::ExecutionStatus::InProgress,
+            context: None,
+            config: Some(vertebrae_core::StepConfig::HumanInput(
+                vertebrae_core::HumanInputConfig {
+                    instructions: Some("Authoritative question?".into()),
+                    artifact: Some("approval".into()),
+                    output_schema: Some(serde_json::json!({ "type": "object" })),
+                    ..Default::default()
+                },
+            )),
+            output: None,
+            transition_result: None,
+            model_used: None,
+            session_id: None,
+            token_usage: None,
+            cost_usd: None,
+            duration_ms: None,
+            model_provider: None,
+            handoff: None,
+        }];
+        if second_execution {
+            executions.push(vertebrae_core::StepExecution {
+                id: Some("exec-2".into()),
+                started_at: started_at + chrono::Duration::seconds(1),
+                ..executions[0].clone()
+            });
+        }
+        vertebrae_core::TaskRunTrace {
+            root_task_run_id: "run-1".into(),
+            task_runs: vec![vertebrae_core::TaskRun {
+                id: "run-1".into(),
+                task_id: "task-1".into(),
+                project_id: "project-1".into(),
+                user_id: None,
+                status,
+                max_concurrency: None,
+                started_at: None,
+                ended_at: None,
+                stop_requested_at: None,
+                latest_step_execution_id: Some("exec-1".into()),
+                outcome_kind: None,
+                outcome_context: None,
+                parent_task_run_id: None,
+                root_task_run_id: Some("run-1".into()),
+                triggered_by_step_execution_id: None,
+                inserted_at: None,
+                updated_at: None,
+            }],
+            step_executions: executions,
+            session_logs: Vec::new(),
+        }
+    }
+
+    fn supplied_gate() -> crate::local_chat::LocalChatGateBinding {
+        crate::local_chat::LocalChatGateBinding {
+            task_run_id: "run-1".into(),
+            step_name: "approve".into(),
+            execution_id: "exec-1".into(),
+            artifact: "forged".into(),
+            instructions: Some("Forged question?".into()),
+            output_schema: Some(serde_json::json!("forged")),
+        }
+    }
+
+    #[test]
+    fn gate_bindings_are_rebuilt_from_the_waiting_execution_config() {
+        let gate = canonical_gate_binding(
+            gate_trace(vertebrae_core::TaskRunStatus::Waiting, false),
+            supplied_gate(),
+        )
+        .expect("valid gate");
+
+        assert_eq!(gate.artifact, "approval");
+        assert_eq!(
+            gate.instructions.as_deref(),
+            Some("Authoritative question?")
+        );
+        assert_eq!(
+            gate.output_schema,
+            Some(serde_json::json!({ "type": "object" }))
+        );
+    }
+
+    #[test]
+    fn gate_bindings_reject_stale_executions_and_closed_runs() {
+        let stale = canonical_gate_binding(
+            gate_trace(vertebrae_core::TaskRunStatus::Waiting, true),
+            supplied_gate(),
+        )
+        .expect_err("earlier attempt must be rejected");
+        assert!(stale.to_string().contains("earlier execution"));
+
+        let closed = canonical_gate_binding(
+            gate_trace(vertebrae_core::TaskRunStatus::Completed, false),
+            supplied_gate(),
+        )
+        .expect_err("closed run must be rejected");
+        assert!(closed.to_string().contains("no longer waiting"));
+    }
 
     #[test]
     fn permission_resolution_errors_have_stable_kinds() {

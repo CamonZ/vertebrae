@@ -356,6 +356,7 @@ mod tests {
             permission_mode: Some(PermissionMode::Plan),
             personality: Some("Explanatory".to_string()),
             provider: None,
+            gate: None,
         };
 
         assert_eq!(input.backend_session_id, "backend-1");

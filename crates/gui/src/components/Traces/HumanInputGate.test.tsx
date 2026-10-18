@@ -5,6 +5,11 @@ import type { StepExecution, TaskRun } from "../../bindings";
 import { HumanInputGate } from "./HumanInputGate";
 import type { HumanInputGateContext } from "../../utils/humanInputGate";
 
+const resolveGateInChat = vi.hoisted(() => vi.fn());
+vi.mock("../../hooks/useGateChat", () => ({
+  useResolveGateInChat: () => resolveGateInChat,
+}));
+
 const RUN: TaskRun = {
   id: "run-abc-123",
   task_id: "task-1",
@@ -66,6 +71,8 @@ function makeContext(
         ? (overrides.prompt as string | null)
         : "**Approve** the change?",
     outputSchema: "outputSchema" in overrides ? overrides.outputSchema : null,
+    artifact:
+      "artifact" in overrides ? (overrides.artifact as string | null) : null,
   };
 }
 
@@ -179,5 +186,28 @@ describe("HumanInputGate", () => {
     expect(
       screen.getByTestId("human-input-gate-execution-id")
     ).toHaveTextContent("—");
+  });
+
+  it("opens the gate chat from Resolve when the gate has an artifact", async () => {
+    const user = userEvent.setup();
+    const context = makeContext({ artifact: "approval" });
+    render(<HumanInputGate context={context} />);
+
+    const resolve = screen.getByTestId("human-input-gate-resolve");
+    expect(resolve).toBeEnabled();
+    await user.click(resolve);
+
+    expect(resolveGateInChat).toHaveBeenCalledWith(context);
+  });
+
+  it("disables Resolve when no artifact resolves the gate", () => {
+    render(<HumanInputGate context={makeContext({ artifact: null })} />);
+
+    const resolve = screen.getByTestId("human-input-gate-resolve");
+    expect(resolve).toBeDisabled();
+    expect(resolve).toHaveAttribute(
+      "title",
+      "Configure an artifact on this step to resolve it in a chat"
+    );
   });
 });

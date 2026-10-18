@@ -8,9 +8,11 @@ use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 
 use vertebrae_harness_core::{
-    ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution, HarnessError,
-    QuestionAnswer, ResolutionSource,
+    ApprovalCategory, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
+    HarnessError, QuestionAnswer, ResolutionSource,
 };
+
+use crate::local_chat::gate::LocalChatGateBinding;
 
 #[cfg(unix)]
 use crate::events::{PermissionRequestEvent, UserQuestion, UserQuestionOption};
@@ -203,6 +205,9 @@ fn validate_ask_user_question_decision(
 pub(crate) struct PermissionBridge {
     pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
     pending_harness_controls: Arc<Mutex<HashMap<String, PendingHarnessControl>>>,
+    /// Gate chats by backend session ID. Their bound submission command is
+    /// approved without prompting, whichever harness asks.
+    gate_bindings: Arc<Mutex<HashMap<String, LocalChatGateBinding>>>,
 }
 
 #[cfg(unix)]
@@ -249,7 +254,36 @@ impl PermissionBridge {
         Self {
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             pending_harness_controls: Arc::new(Mutex::new(HashMap::new())),
+            gate_bindings: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Approve `session_id`'s submission for `gate` without prompting.
+    pub(crate) fn bind_gate(&self, session_id: &str, gate: LocalChatGateBinding) {
+        if let Ok(mut bindings) = self.gate_bindings.lock() {
+            bindings.insert(session_id.to_string(), gate);
+        }
+    }
+
+    pub(crate) fn unbind_gate(&self, session_id: &str) {
+        if let Ok(mut bindings) = self.gate_bindings.lock() {
+            bindings.remove(session_id);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_gate_binding(&self, session_id: &str) -> bool {
+        self.gate_bindings
+            .lock()
+            .is_ok_and(|bindings| bindings.contains_key(session_id))
+    }
+
+    fn gate_allows(&self, session_id: &str, command: &str) -> bool {
+        self.gate_bindings.lock().is_ok_and(|bindings| {
+            bindings
+                .get(session_id)
+                .is_some_and(|gate| gate.allows_command(command))
+        })
     }
 
     #[cfg(test)]
@@ -289,6 +323,11 @@ impl PermissionBridge {
         app_handle: Option<tauri::AppHandle>,
         request: ControlRequestEnvelope,
     ) -> Result<ControlResolution, HarnessError> {
+        if requested_command(&request)
+            .is_some_and(|command| self.gate_allows(backend_session_id, command))
+        {
+            return local_decision_to_control_resolution(&request, gate_submission_decision(None));
+        }
         let app_handle = app_handle.ok_or_else(|| {
             HarnessError::Control("Tauri app handle is unavailable for a control request".into())
         })?;
@@ -493,6 +532,15 @@ impl PermissionBridge {
         session_id: String,
         app_handle: tauri::AppHandle<R>,
     ) {
+        // Accepted streams inherit the listener's non-blocking mode on macOS;
+        // reading before the client writes would then fail with EAGAIN.
+        if let Err(err) = stream.set_nonblocking(false) {
+            let _ = Self::write_permission_socket_error(
+                &mut stream,
+                format!("failed to make permission socket blocking: {err}"),
+            );
+            return;
+        }
         if let Err(err) = stream.set_read_timeout(Some(PERMISSION_SOCKET_READ_TIMEOUT)) {
             let _ = Self::write_permission_socket_error(
                 &mut stream,
@@ -540,6 +588,20 @@ impl PermissionBridge {
                 return;
             }
         };
+
+        if request.tool_name == "Bash"
+            && request
+                .input
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|command| self.gate_allows(&session_id, command))
+        {
+            let decision = gate_submission_decision(Some(request.input));
+            if let Err(err) = Self::write_permission_socket_decision(&mut stream, &decision) {
+                log::warn!("Failed to approve gate submission over the permission socket: {err}");
+            }
+            return;
+        }
 
         let (response_tx, response_rx) = std::sync::mpsc::channel();
         if let Err(message) = self.register_pending_request(
@@ -654,12 +716,22 @@ impl PermissionBridge {
         stream: &mut std::os::unix::net::UnixStream,
         message: String,
     ) -> std::io::Result<()> {
-        let line = serde_json::to_string(&LocalPermissionDecision {
-            behavior: "deny".to_string(),
-            message: Some(message),
-            updated_input: None,
-        })
-        .map_err(std::io::Error::other)?;
+        Self::write_permission_socket_decision(
+            stream,
+            &LocalPermissionDecision {
+                behavior: "deny".to_string(),
+                message: Some(message),
+                updated_input: None,
+            },
+        )
+    }
+
+    #[cfg(unix)]
+    fn write_permission_socket_decision(
+        stream: &mut std::os::unix::net::UnixStream,
+        decision: &LocalPermissionDecision,
+    ) -> std::io::Result<()> {
+        let line = serde_json::to_string(decision).map_err(std::io::Error::other)?;
         stream.write_all(line.as_bytes())?;
         stream.write_all(b"\n")?;
         stream.flush()
@@ -910,6 +982,38 @@ fn validate_harness_question_decision(
         }
     }
     Ok(())
+}
+
+fn gate_submission_decision(updated_input: Option<serde_json::Value>) -> LocalPermissionDecision {
+    LocalPermissionDecision {
+        behavior: "allow".to_string(),
+        message: None,
+        updated_input,
+    }
+}
+
+/// The shell command a command-execution approval would run: Codex reports
+/// it in the request params, Claude in the tool input.
+fn requested_command(request: &ControlRequestEnvelope) -> Option<&str> {
+    let ControlRequest::Approval(approval) = &request.request else {
+        return None;
+    };
+    if approval.category != ApprovalCategory::CommandExecution {
+        return None;
+    }
+    let details = approval.details.as_ref();
+    details
+        .and_then(|details| details.get("command"))
+        .or_else(|| details?.get("input")?.get("command"))
+        .or_else(|| {
+            request
+                .presentation
+                .as_ref()?
+                .input
+                .as_ref()?
+                .get("command")
+        })
+        .and_then(serde_json::Value::as_str)
 }
 
 fn local_decision_to_control_resolution(

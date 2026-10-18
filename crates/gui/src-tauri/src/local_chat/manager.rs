@@ -214,12 +214,19 @@ impl LocalChatSessionManager {
             registry.insert(backend_session_id.clone(), harness_kind);
         }
 
+        // Bound before the harness starts: the initial turn may already
+        // submit the gate's resolution.
+        let permission_bridge = runtime.permission_bridge();
+        if let Some(gate) = &input.gate {
+            permission_bridge.bind_gate(&backend_session_id, gate.clone());
+        }
         match harness
             .create_session(input.into_harness_input(provider), runtime)
             .await
         {
             Ok(()) => Ok(()),
             Err(err) => {
+                permission_bridge.unbind_gate(&backend_session_id);
                 self.remove_registry_entry(&backend_session_id, harness_kind)
                     .await;
                 Err(err)
@@ -241,6 +248,24 @@ impl LocalChatSessionManager {
                 .await;
         }
         result
+    }
+
+    /// Rebind a live gate chat and deliver a hidden protocol refresh turn.
+    pub async fn refresh_gate(
+        &self,
+        backend_session_id: &str,
+        gate: crate::local_chat::LocalChatGateBinding,
+    ) -> Result<(), LocalChatSessionError> {
+        let _lifecycle = self.lifecycle_gate.read().await;
+        let harness_kind = self.registry_harness(backend_session_id).await?;
+        self.harness(harness_kind)?;
+        self.permission_bridge
+            .bind_gate(backend_session_id, gate.clone());
+        self.send_message(
+            backend_session_id,
+            &crate::local_chat::gate::gate_refresh_turn(&gate),
+        )
+        .await
     }
 
     pub async fn close_session(
@@ -308,6 +333,7 @@ impl LocalChatSessionManager {
         for (session_id, _) in &session_entries {
             self.permission_bridge
                 .fail_pending_permissions_for_session(session_id, permission_message);
+            self.permission_bridge.unbind_gate(session_id);
         }
 
         let results = futures::future::join_all(session_entries.into_iter().map(
@@ -413,6 +439,7 @@ impl LocalChatSessionManager {
             .is_some_and(|registered| *registered == harness_kind)
         {
             registry.remove(backend_session_id);
+            self.permission_bridge.unbind_gate(backend_session_id);
         }
     }
 }

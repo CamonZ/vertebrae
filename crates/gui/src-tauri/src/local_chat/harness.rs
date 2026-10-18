@@ -5,6 +5,7 @@ use vertebrae_core::{AgentConfig, ProviderId, ProviderProfile};
 use vertebrae_harness::HarnessFactoryConfig;
 
 use crate::local_chat::events::LocalChatEventSink;
+use crate::local_chat::gate::LocalChatGateBinding;
 use crate::local_chat::permissions::PermissionBridge;
 use crate::types::PermissionMode;
 
@@ -128,6 +129,12 @@ pub struct CreateLocalChatSessionInput {
     #[serde(default)]
     #[specta(optional)]
     pub provider_id: Option<String>,
+    /// Waiting `human_input` gate this chat resolves. New sessions append
+    /// the gate protocol to their developer instructions, and the bound
+    /// submission runs without an interactive permission prompt.
+    #[serde(default)]
+    #[specta(optional)]
+    pub gate: Option<LocalChatGateBinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,6 +194,7 @@ pub(crate) struct HarnessCreateSessionInput {
     pub(crate) permission_mode: Option<PermissionMode>,
     pub(crate) personality: Option<String>,
     pub(crate) provider: Option<LocalChatProviderSelection>,
+    pub(crate) gate: Option<LocalChatGateBinding>,
 }
 
 impl CreateLocalChatSessionInput {
@@ -205,6 +213,7 @@ impl CreateLocalChatSessionInput {
             permission_mode: self.permission_mode,
             personality: self.personality,
             provider,
+            gate: self.gate,
         }
     }
 }
@@ -252,6 +261,17 @@ impl LocalChatRuntime {
             app_handle: None,
             event_sink: LocalChatEventSink::inert_for_tests(),
             permission_bridge: PermissionBridge::new(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inert_with_permission_bridge_for_tests(
+        permission_bridge: PermissionBridge,
+    ) -> Self {
+        Self {
+            app_handle: None,
+            event_sink: LocalChatEventSink::inert_for_tests(),
+            permission_bridge,
         }
     }
 

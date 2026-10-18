@@ -1,4 +1,5 @@
 pub(crate) mod events;
+pub(crate) mod gate;
 pub(crate) mod harness;
 pub(crate) mod harnesses;
 pub(crate) mod manager;
@@ -24,6 +25,19 @@ pub(crate) fn chat_developer_instructions() -> String {
     }
 }
 
+/// Developer instructions for a new session: the shared chat instructions,
+/// followed by the hidden gate protocol when the chat resolves a gate.
+pub(crate) fn session_developer_instructions(gate: Option<&LocalChatGateBinding>) -> String {
+    let instructions = chat_developer_instructions();
+    match gate {
+        Some(gate) => format!(
+            "{instructions}\n\n{}",
+            gate::gate_developer_instructions(gate)
+        ),
+        None => instructions,
+    }
+}
+
 fn chat_developer_instructions_for(docs_root: &std::path::Path) -> String {
     format!(
         "{CHAT_REFERENCE_INSTRUCTIONS}\n\n{}",
@@ -38,6 +52,7 @@ pub(crate) use events::{
     LocalChatSessionWarningEvent, LocalChatSpeedTierStatus, LocalChatTextEvent,
     LocalChatToolCallEvent, LocalChatToolResultEvent, LocalChatTurnStartedEvent,
 };
+pub use gate::LocalChatGateBinding;
 pub(crate) use harness::{
     CreateLocalChatSessionInput, HarnessCreateSessionInput, LocalChatHarness,
     LocalChatHarnessCatalog, LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
@@ -65,5 +80,25 @@ mod tests {
         assert!(instructions.starts_with(CHAT_REFERENCE_INSTRUCTIONS));
         assert!(instructions.contains("# Vertebrae agent context"));
         assert!(instructions.contains("(</tmp/vertebrae-docs/agent-context/permissions.md>)"));
+    }
+
+    #[test]
+    fn session_developer_instructions_append_the_gate_protocol_only_for_gate_chats() {
+        let gate = LocalChatGateBinding {
+            task_run_id: "run-1".into(),
+            step_name: "approve".into(),
+            execution_id: "exec-1".into(),
+            artifact: "approval".into(),
+            instructions: Some("Ship it?".into()),
+            output_schema: None,
+        };
+
+        let plain = session_developer_instructions(None);
+        let gated = session_developer_instructions(Some(&gate));
+
+        assert_eq!(plain, chat_developer_instructions());
+        assert!(!plain.contains("# Human input gate"));
+        assert!(gated.starts_with(&plain));
+        assert!(gated.ends_with(&gate::gate_developer_instructions(&gate)));
     }
 }

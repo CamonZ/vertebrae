@@ -145,6 +145,7 @@ fn create_builder() -> Builder {
             commands::get_local_file_roots,
             commands::open_local_file,
             commands::create_local_chat_session,
+            commands::refresh_local_chat_session_gate,
             commands::send_local_chat_message,
             commands::close_local_chat_session,
             commands::infer_local_chat_session_title,
