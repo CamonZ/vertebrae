@@ -1154,6 +1154,7 @@ mod tests {
         assert!(query.contains("... on StructuredInferenceStepConfig"));
         assert!(query.contains("... on RouteStepConfig"));
         assert!(query.contains("... on WaitChildrenStepConfig"));
+        assert!(query.contains("... on HumanInputStepConfig"));
         assert!(query.contains("persistence_options"));
         assert!(query.contains("target_step_id"));
         assert!(query.contains("query ExportWorkflow"));

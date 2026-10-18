@@ -240,7 +240,8 @@ impl From<ServiceError> for HostError {
             | ServiceError::TaskBlocked { .. }
             | ServiceError::ValidationFailed { .. }
             | ServiceError::CyclicDependency
-            | ServiceError::InvalidInput(_) => HostErrorKind::Invalid,
+            | ServiceError::InvalidInput(_)
+            | ServiceError::HumanInputRejected(_) => HostErrorKind::Invalid,
             ServiceError::ApiError { .. }
             | ServiceError::NetworkError(_)
             | ServiceError::ConfigError(_) => HostErrorKind::Transport,

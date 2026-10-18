@@ -1390,7 +1390,7 @@ export type CreateStepOptions = { workflow_id: string; name: string; goal: strin
 /**
  * Config fields declared by `step_type` (snake_case keys; `agent_config`
  * uses the GUI `AgentConfig` shape). Omitted fields take the type's
- * defaults; must be null for human_input, stop, and finish steps.
+ * defaults; must be null for stop and finish steps.
  */
 config?: Partial<{ [key in string]: JsonValue }> | null; persistence_options?: JsonValue | null }
 export type Daemon = { id: string; status: string; name: string | null; display_name: string; max_concurrency: number | null; enrolled_at: string | null; removed_at: string | null; inserted_at: string | null; updated_at: string | null; daemon_version?: string | null; os?: string | null; architecture?: string | null; host?: string | null; started_at?: string | null; last_seen_at?: string | null; report_version?: number | null; capabilities?: JsonValue | null; connection_status?: string | null; health?: string | null; health_reason?: string | null }
@@ -1434,6 +1434,23 @@ export type ExecuteStepConfig = { version: number; script: string; context: Json
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
 export type GuiUpdateChannelStatus = { channel: string; endpoint: string; available: boolean; release: GuiUpdateChannelRelease | null; error: string | null }
+/**
+ * Config of a `human_input` step. On a waiting execution `instructions` is
+ * already rendered.
+ */
+export type HumanInputStepConfig = { version: number;
+/**
+ * Instructions shown to the human while the gate waits
+ */
+instructions: string | null;
+/**
+ * Logical name of the artifact that resolves the gate
+ */
+artifact: string | null;
+/**
+ * JSON Schema the response must satisfy; null accepts any response
+ */
+output_schema: JsonValue | null }
 export type InferLocalChatSessionTitleInput = { harness: LocalChatHarnessKind; initial_prompts: string[]; working_dir: string | null;
 /**
  * Provider the chat runs on. Custom providers infer titles through
@@ -1833,8 +1850,7 @@ step_type: StepType;
  */
 harness: StepHarness | null;
 /**
- * `step_type`-specific configuration; null for human_input, stop, and
- * finish steps.
+ * `step_type`-specific configuration; null for stop and finish steps.
  */
 config: StepConfig | null;
 /**
@@ -1875,7 +1891,7 @@ export type StepChangedEvent = { step_id: string; workflow_id: string; change_ty
  * A step's `step_type`-specific configuration, serialized as the bare
  * config object. Narrow it with the owning step's `step_type`.
  */
-export type StepConfig = LlmInferenceStepConfig | StructuredInferenceStepConfig | ExecuteStepConfig | RouteStepConfig | WaitChildrenStepConfig
+export type StepConfig = LlmInferenceStepConfig | StructuredInferenceStepConfig | ExecuteStepConfig | RouteStepConfig | WaitChildrenStepConfig | HumanInputStepConfig
 /**
  * Step execution record - mirrors db::StepExecution.
  *
@@ -1926,8 +1942,9 @@ status?: ExecutionStatus;
 /**
  * Step config the execution ran with, templates rendered (rendered
  * prompt for llm_inference, resolved state for structured_inference,
- * rendered script and context snapshot for execute);
- * null for human_input, stop, and finish. Narrow it with `step_type`.
+ * rendered instructions for human_input, rendered script and context
+ * snapshot for execute); null for stop and finish. Narrow it with
+ * `step_type`.
  */
 config?: StepConfig | null;
 /**

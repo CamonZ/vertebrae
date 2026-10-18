@@ -397,6 +397,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_surfaces_human_input_gate_rejections() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("CreateArtifact"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "createArtifact": null },
+                "errors": [
+                    {
+                        "message": "artifact does not satisfy the output_schema: #/approved: Type mismatch. Expected Boolean but got String.",
+                        "code": "invalid_human_input",
+                        "locations": [{"line": 2, "column": 3}],
+                        "path": ["createArtifact"]
+                    },
+                    {
+                        "message": "artifact does not satisfy the output_schema: #: Required property reason was not present.",
+                        "code": "invalid_human_input",
+                        "path": ["createArtifact"]
+                    }
+                ]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let error = service(&server)
+            .create_artifact(
+                CreateArtifactInput::new("resolution.json", r#"{"approved": "yes"}"#)
+                    .with_subject("step_execution", ARTIFACT_ID)
+                    .with_logical_name("resolution"),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Human input rejected: artifact body does not satisfy the gate's output_schema:\n  \
+             - #/approved: Type mismatch. Expected Boolean but got String.\n  \
+             - #: Required property reason was not present."
+        );
+        assert!(error.hint().is_some());
+    }
+
+    #[tokio::test]
     async fn list_maps_complete_response() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))

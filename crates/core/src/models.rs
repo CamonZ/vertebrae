@@ -205,7 +205,7 @@ impl StepType {
     }
 
     /// Config fields this step type declares, or `None` when steps of this
-    /// type carry no config (`human_input`, `stop`, `finish`).
+    /// type carry no config (`stop`, `finish`).
     pub fn config_fields(&self) -> Option<&'static [&'static str]> {
         match self {
             StepType::LlmInference => Some(&[
@@ -219,7 +219,8 @@ impl StepType {
             StepType::Execute => Some(&["version", "script", "output_schema"]),
             StepType::Route => Some(&["route_config"]),
             StepType::WaitChildren => Some(&["output_schema", "session"]),
-            StepType::HumanInput | StepType::Stop | StepType::Finish => None,
+            StepType::HumanInput => Some(&["instructions", "artifact", "output_schema"]),
+            StepType::Stop | StepType::Finish => None,
             // Sacrum is the authority for types this client does not know.
             StepType::Unsupported(_) => None,
         }
@@ -1909,6 +1910,35 @@ impl Default for WaitChildrenConfig {
     }
 }
 
+/// Config of a `human_input` step. On a waiting execution `instructions` is
+/// already rendered; attaching an artifact named `artifact` whose body
+/// satisfies `output_schema` resolves the gate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HumanInputConfig {
+    #[serde(default = "step_config_version")]
+    pub version: i32,
+    /// Liquid template shown to the human
+    #[serde(default)]
+    pub instructions: Option<String>,
+    /// Logical name of the artifact that resolves the gate
+    #[serde(default)]
+    pub artifact: Option<String>,
+    /// JSON Schema the response must satisfy; `None` accepts any response
+    #[serde(default)]
+    pub output_schema: Option<serde_json::Value>,
+}
+
+impl Default for HumanInputConfig {
+    fn default() -> Self {
+        Self {
+            version: STEP_CONFIG_VERSION,
+            instructions: None,
+            artifact: None,
+            output_schema: None,
+        }
+    }
+}
+
 fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -1929,6 +1959,7 @@ pub enum StepConfig {
     Execute(ExecuteConfig),
     Route(RouteConfig),
     WaitChildren(WaitChildrenConfig),
+    HumanInput(HumanInputConfig),
 }
 
 impl StepConfig {
@@ -1942,6 +1973,7 @@ impl StepConfig {
             )),
             StepType::Route => Some(Self::Route(RouteConfig::default())),
             StepType::WaitChildren => Some(Self::WaitChildren(WaitChildrenConfig::default())),
+            StepType::HumanInput => Some(Self::HumanInput(HumanInputConfig::default())),
             _ => None,
         }
     }
@@ -1964,6 +1996,7 @@ impl StepConfig {
             StepType::Execute => Some(Self::Execute(serde_json::from_value(value)?)),
             StepType::Route => Some(Self::Route(serde_json::from_value(value)?)),
             StepType::WaitChildren => Some(Self::WaitChildren(serde_json::from_value(value)?)),
+            StepType::HumanInput => Some(Self::HumanInput(serde_json::from_value(value)?)),
             _ => None,
         })
     }
@@ -1979,6 +2012,7 @@ impl StepConfig {
         match self {
             Self::LlmInference(config) => config.output_schema.as_ref(),
             Self::WaitChildren(config) => config.output_schema.as_ref(),
+            Self::HumanInput(config) => config.output_schema.as_ref(),
             Self::Execute(config) => Some(&config.output_schema),
             Self::StructuredInference(_) | Self::Route(_) => None,
         }
@@ -2114,8 +2148,7 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<StepHarness>,
 
-    /// `step_type`-specific configuration; `None` for human_input, stop, and
-    /// finish steps.
+    /// `step_type`-specific configuration; `None` for stop and finish steps.
     pub config: Option<StepConfig>,
 
     /// Optional orchestrator-owned persistence configuration for structured output
@@ -2260,11 +2293,13 @@ impl Step {
         self
     }
 
-    /// Set the output schema of an inference, execute, or wait_children step.
+    /// Set the output schema of an inference, execute, wait_children, or
+    /// human_input step.
     pub fn with_output_schema(mut self, schema: serde_json::Value) -> Self {
         match &mut self.config {
             Some(StepConfig::LlmInference(config)) => config.output_schema = Some(schema),
             Some(StepConfig::WaitChildren(config)) => config.output_schema = Some(schema),
+            Some(StepConfig::HumanInput(config)) => config.output_schema = Some(schema),
             Some(StepConfig::Execute(config)) => config.output_schema = schema,
             _ => panic!("{} steps have no output_schema", self.step_type),
         }
@@ -2491,8 +2526,9 @@ pub struct StepExecution {
 
     /// The step config this execution ran with, templates rendered: the
     /// rendered prompt for `llm_inference`, the resolved state for
-    /// `structured_inference`, and the rendered script/typed context snapshot for
-    /// `execute`. `None` for human_input, stop, and finish.
+    /// `structured_inference`, the rendered instructions for `human_input`, and
+    /// the rendered script/typed context snapshot for `execute`. `None` for
+    /// stop and finish.
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub config: Option<StepConfig>,
 
@@ -4018,7 +4054,11 @@ mod tests {
             StepType::WaitChildren.config_fields(),
             Some(&["output_schema", "session"][..])
         );
-        for step_type in [StepType::HumanInput, StepType::Stop, StepType::Finish] {
+        assert_eq!(
+            StepType::HumanInput.config_fields(),
+            Some(&["instructions", "artifact", "output_schema"][..])
+        );
+        for step_type in [StepType::Stop, StepType::Finish] {
             assert_eq!(step_type.config_fields(), None);
         }
     }
@@ -4382,6 +4422,36 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(matches!(wait, StepConfig::WaitChildren(_)));
+
+        let human = StepConfig::from_value(
+            &StepType::HumanInput,
+            serde_json::json!({
+                "version": 1,
+                "instructions": "Approve {{ task.title }}?",
+                "artifact": "approval",
+                "output_schema": {"type": "object"}
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            human,
+            StepConfig::HumanInput(HumanInputConfig {
+                version: 1,
+                instructions: Some("Approve {{ task.title }}?".to_string()),
+                artifact: Some("approval".to_string()),
+                output_schema: Some(serde_json::json!({"type": "object"})),
+            })
+        );
+        assert_eq!(
+            human.output_schema(),
+            Some(&serde_json::json!({"type": "object"}))
+        );
+        assert_eq!(
+            StepConfig::from_value(&StepType::HumanInput, serde_json::json!({"version": 1}))
+                .unwrap(),
+            Some(StepConfig::HumanInput(HumanInputConfig::default()))
+        );
 
         assert_eq!(
             StepConfig::from_value(&StepType::Route, serde_json::Value::Null).unwrap(),

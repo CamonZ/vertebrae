@@ -844,6 +844,19 @@ pub struct WaitChildrenStepConfig {
     pub session: Option<SessionDirective>,
 }
 
+/// Config of a `human_input` step. On a waiting execution `instructions` is
+/// already rendered.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct HumanInputStepConfig {
+    pub version: i32,
+    /// Instructions shown to the human while the gate waits
+    pub instructions: Option<String>,
+    /// Logical name of the artifact that resolves the gate
+    pub artifact: Option<String>,
+    /// JSON Schema the response must satisfy; null accepts any response
+    pub output_schema: Option<serde_json::Value>,
+}
+
 /// A step's `step_type`-specific configuration, serialized as the bare
 /// config object. Narrow it with the owning step's `step_type`.
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -854,6 +867,7 @@ pub enum StepConfig {
     Execute(ExecuteStepConfig),
     Route(RouteStepConfig),
     WaitChildren(WaitChildrenStepConfig),
+    HumanInput(HumanInputStepConfig),
 }
 
 impl From<vertebrae_core::StepConfig> for StepConfig {
@@ -895,6 +909,14 @@ impl From<vertebrae_core::StepConfig> for StepConfig {
                     session: config.session.map(Into::into),
                 })
             }
+            vertebrae_core::StepConfig::HumanInput(config) => {
+                StepConfig::HumanInput(HumanInputStepConfig {
+                    version: config.version,
+                    instructions: config.instructions,
+                    artifact: config.artifact,
+                    output_schema: config.output_schema,
+                })
+            }
         }
     }
 }
@@ -913,8 +935,7 @@ pub struct Step {
     /// Step type mirrored from core::StepType; fixed once the step exists.
     pub step_type: StepType,
     pub harness: Option<StepHarness>,
-    /// `step_type`-specific configuration; null for human_input, stop, and
-    /// finish steps.
+    /// `step_type`-specific configuration; null for stop and finish steps.
     pub config: Option<StepConfig>,
     /// Orchestrator-owned persistence configuration for this step
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1343,8 +1364,9 @@ pub struct StepExecution {
     pub status: ExecutionStatus,
     /// Step config the execution ran with, templates rendered (rendered
     /// prompt for llm_inference, resolved state for structured_inference,
-    /// rendered script and context snapshot for execute);
-    /// null for human_input, stop, and finish. Narrow it with `step_type`.
+    /// rendered instructions for human_input, rendered script and context
+    /// snapshot for execute); null for stop and finish. Narrow it with
+    /// `step_type`.
     #[serde(default)]
     pub config: Option<StepConfig>,
     /// Final output of the execution
@@ -1765,7 +1787,7 @@ pub struct CreateStepOptions {
     pub harness: Option<StepHarness>,
     /// Config fields declared by `step_type` (snake_case keys; `agent_config`
     /// uses the GUI `AgentConfig` shape). Omitted fields take the type's
-    /// defaults; must be null for human_input, stop, and finish steps.
+    /// defaults; must be null for stop and finish steps.
     #[serde(default)]
     pub config: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default)]
@@ -3077,6 +3099,39 @@ mod tests {
         });
         let exec: StepExecution = serde_json::from_value(payload).unwrap();
         assert_eq!(exec.cost.as_deref(), Some("0.0742"));
+    }
+
+    #[test]
+    fn waiting_human_input_execution_exposes_rendered_gate_config() {
+        let payload = serde_json::json!({
+            "id": "exec-gate",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "approve",
+            "step_type": "human_input",
+            "started_at": "2024-01-01T00:00:00Z",
+            "status": "waiting",
+            "config": {
+                "__type__": "human_input",
+                "version": 1,
+                "instructions": "Approve Ship parser?",
+                "artifact": "approval",
+                "output_schema": {"type": "object", "required": ["approved"]}
+            }
+        });
+        let exec: StepExecution = serde_json::from_value(payload).unwrap();
+        let Some(StepConfig::HumanInput(config)) = &exec.config else {
+            panic!("expected human_input config, got {:?}", exec.config);
+        };
+        assert_eq!(config.instructions.as_deref(), Some("Approve Ship parser?"));
+        assert_eq!(config.artifact.as_deref(), Some("approval"));
+        assert_eq!(
+            config.output_schema,
+            Some(serde_json::json!({"type": "object", "required": ["approved"]}))
+        );
+        let serialized = serde_json::to_value(&exec).unwrap();
+        assert_eq!(serialized["config"]["artifact"], "approval");
+        assert_eq!(serialized["config"]["instructions"], "Approve Ship parser?");
     }
 
     // ─── SessionLog Conversion Tests ────────────────────────────────

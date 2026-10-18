@@ -102,6 +102,13 @@ mod tests {
         assert!(validate_config_fields(&StepType::WaitChildren, ["output_schema"]).is_ok());
         assert!(
             validate_config_fields(
+                &StepType::HumanInput,
+                ["instructions", "artifact", "output_schema"]
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_config_fields(
                 &StepType::StructuredInference,
                 ["provider", "model", "state", "questions"]
             )
@@ -222,7 +229,7 @@ mod tests {
 
     #[test]
     fn rejects_any_field_for_config_less_types() {
-        for step_type in [StepType::HumanInput, StepType::Stop, StepType::Finish] {
+        for step_type in [StepType::Stop, StepType::Finish] {
             let error = validate_config_fields(&step_type, ["prompt"])
                 .unwrap_err()
                 .to_string();

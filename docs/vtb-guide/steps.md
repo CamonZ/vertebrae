@@ -59,8 +59,10 @@ vtb step add "Classify" -w <workflow-id> --harness typesafe \
   --state '{"title":"{{ task.title }}"}' \
   --questions @classify-questions.json
 
-# Add a human-input gate
-vtb step add "Needs Input" -w <workflow-id> --harness claude --step-type human_input
+# Add a human-input gate resolved by attaching an "approval" artifact
+vtb step add "Needs Input" -w <workflow-id> --harness claude --step-type human_input \
+  --instructions @approval-instructions.md --artifact approval \
+  --output-schema '{"type":"object","required":["approved"],"properties":{"approved":{"type":"boolean"}}}'
 
 # Add a Rhai transformation without a provider harness
 vtb step add "Transform" -w <workflow-id> --step-type execute \
@@ -184,7 +186,8 @@ Updated:       2026-05-30 16:48
 The config lines depend on the step type: `structured_inference` steps show
 `Provider`, `Model`, `State`, and `Fields`; `route` steps show `Route Config`;
 `wait_children` steps show `Output Schema` and `Children Session` (the fork
-set with `--children-session fork:<step>`, or `(none)`); `execute` definitions show `Script`
+set with `--children-session fork:<step>`, or `(none)`); `human_input` steps
+show `Instructions`, `Artifact`, and `Output Schema`; `execute` definitions show `Script`
 and `Output Schema`; config-less types show
 `Config: (none)`.
 
@@ -203,7 +206,7 @@ vtb --json step show <step-id>
 The JSON object includes fields such as `id`, `name`, `workflow_id`, `order`,
 `goal`, `step_type`, `config`, `transitions_to`, `created_at`, and `updated_at`.
 `config` holds the fields declared for the step type and is null for
-`human_input`, `stop`, and `finish`.
+`stop` and `finish`.
 When configured, `persistence_options` is also included; it is `null`/absent
 for steps without persistence configuration. `route_config` is nullable opaque
 JSON and an empty object is distinct from `null`.
@@ -243,6 +246,10 @@ request with no property changes before reporting success.
 | `--clear-output-schema` | | Remove an optional output schema; execute's required schema cannot be cleared |
 | `--route-config <JSON>` | | Replace the opaque deterministic route configuration |
 | `--clear-route-config` | | Remove the route configuration, leaving a route draft |
+| `--instructions <TEXT\|@PATH>` | | Replace a `human_input` step's instructions template |
+| `--clear-instructions` | | Remove the `human_input` instructions |
+| `--artifact <NAME>` | | Replace the logical name of the artifact that resolves a `human_input` step |
+| `--clear-artifact` | | Remove the `human_input` artifact name |
 | `--persistence-options <JSON>` | | Replace Sacrum's persistence configuration |
 | `--clear-persistence-options` | | Remove the persistence configuration |
 | `--order <ORDER>` | `-o` | Replace the 0-indexed step order |
@@ -355,7 +362,7 @@ The CLI exposes these types through `--step-type` and their type-specific config
 | `execute` | Runs a Rhai JSON transformation in the daemon, which can read tasks and named artifacts in its project through `vtb::tasks` and `vtb::artifacts`, create, update, archive and delete tasks and edit their content and relationships through `vtb::tasks`, write and delete named artifacts through `vtb::artifacts`, send Markdown notifications to the project through `vtb::notifications`, and run local commands through `vtb::cmd`, validates its returned JSON, and completes without a provider harness. Create with `--script` and `--output-schema`. |
 | `route` | Sacrum-local deterministic control step. Evaluates `route_config`; it does not dispatch a daemon prompt or use `output_schema` as a routing program. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
-| `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. |
+| `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. Configure it with `--instructions` (a template rendered when the run parks, inline or `@path`), `--artifact` (the logical name that resolves the gate), and `--output-schema` (the JSON Schema the response must satisfy); all are optional. |
 | `stop` | Run boundary. Ends the current TaskRun as `stopped` without completing the task or dispatching the step; it must have exactly one outgoing transition, which a later TaskRun follows. |
 | `finish` | Promptless terminal step. Completes the task immediately, has no outgoing transitions, and is never dispatched to a daemon executor. |
 
