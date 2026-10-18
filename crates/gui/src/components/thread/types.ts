@@ -296,6 +296,19 @@ export interface ErrorMessage extends BaseMessage {
   sub?: string;
 }
 
+export interface GateEvaluationMessage extends BaseMessage {
+  type: "gate_evaluation";
+  attempt: number;
+  verdict: unknown;
+}
+
+export interface ResolutionSubmissionMessage extends BaseMessage {
+  type: "resolution_submission";
+  artifact: string;
+  executionId: string;
+  values: unknown;
+}
+
 /**
  * A RESULT message — a step execution's final structured output (its `output`
  * or `handoff`). Rendered as a distinct, prominent terminal card with the body
@@ -344,6 +357,8 @@ export type Message =
   | ToolMessage
   | WaitMessage
   | ErrorMessage
+  | GateEvaluationMessage
+  | ResolutionSubmissionMessage
   | ResultMessage
   | ActivityMessage
   | SpawnMessage;

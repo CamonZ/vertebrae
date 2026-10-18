@@ -42,6 +42,7 @@ function context(
     prompt: "Ship v2?",
     outputSchema: null,
     artifact: "approval",
+    attempt: 1,
     ...overrides,
   };
 }
@@ -76,6 +77,7 @@ describe("resolveGateInChat", () => {
           artifact: "approval",
           instructions: "Ship v2?",
           output_schema: null,
+          revision: null,
         },
       })
     );
@@ -94,6 +96,54 @@ describe("resolveGateInChat", () => {
     expect(again).toBe(first);
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledTimes(1);
     expect(mockedCommands.refreshLocalChatSessionGate).not.toHaveBeenCalled();
+  });
+
+  it("shows a revision card only after the gate chat starts successfully", async () => {
+    const revised = await resolveGateInChat(
+      context({
+        attempt: 2,
+        execution: {
+          id: "exec-2",
+          handoff: '{"reasons":"The rollback plan is missing."}',
+        } as StepExecution,
+      })
+    );
+
+    expect(
+      useChatStore.getState().sessions[revised!].messages
+    ).toMatchObject([
+      {
+        kind: "gate_evaluation",
+        attempt: 2,
+        verdict: { reasons: "The rollback plan is missing." },
+      },
+    ]);
+
+  });
+
+  it("does not show a revision card when starting the chat fails", async () => {
+    mockedCommands.createLocalChatSession.mockResolvedValueOnce({
+      status: "error",
+      error: { StartFailed: "provider unavailable" },
+    });
+    const failed = await resolveGateInChat(
+      context({
+        attempt: 3,
+        execution: {
+          id: "exec-3",
+          handoff: '{"reasons":"Try again."}',
+        } as StepExecution,
+      })
+    );
+
+    const session = useChatStore.getState().sessions[failed!];
+    expect(session.lifecycle).toBe("error");
+    expect(
+      session.messages.some(
+        (message) =>
+          message.kind === "gate_evaluation" && message.attempt === 3
+      )
+    ).toBe(false);
   });
 
   it("refreshes a live chat when the waiting execution changes", async () => {
@@ -171,6 +221,27 @@ describe("refreshGateChat", () => {
     expect(session.messages.some((message) => message.kind === "user")).toBe(
       false
     );
+  });
+
+  it("adds a non-persistent verdict card when a revision is refreshed", async () => {
+    const sessionId = await liveGateChat();
+
+    await refreshGateChat(sessionId, {
+      ...revised,
+      revision: {
+        attempt: 2,
+        verdict: { reasons: "The rollback plan is missing." },
+      },
+    });
+
+    const session = useChatStore.getState().sessions[sessionId];
+    expect(session.messages).toMatchObject([
+      {
+        kind: "gate_evaluation",
+        attempt: 2,
+        verdict: { reasons: "The rollback plan is missing." },
+      },
+    ]);
   });
 
   it("settles back to idle when the chat already had that execution", async () => {

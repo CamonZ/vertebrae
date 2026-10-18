@@ -263,15 +263,22 @@ Submit with exactly this command, replacing <JSON> with the resolution as compac
 }
 
 fn revision_section(revision: &LocalChatGateRevision) -> String {
-    let verdict = match &revision.verdict {
-        Some(verdict) => format!(
-            "The review gave this verdict:\n\n```json\n{}\n```",
-            serde_json::to_string_pretty(verdict).unwrap_or_else(|_| verdict.to_string())
-        ),
-        None => "The review gave no reasons.".to_string(),
+    let null_verdict = serde_json::Value::Null;
+    let mut verdict_json =
+        serde_json::to_string_pretty(revision.verdict.as_ref().unwrap_or(&null_verdict))
+            .unwrap_or_else(|_| "{}".into());
+    verdict_json = verdict_json.replace('<', "\\u003c");
+    let machine_readable = format!(
+        "<vertebrae-evaluation attempt=\"{}\">{}</vertebrae-evaluation>",
+        revision.attempt, verdict_json
+    );
+    let verdict = if revision.verdict.is_some() {
+        "The review gave the verdict in the machine-readable block above."
+    } else {
+        "The review gave no reasons."
     };
     format!(
-        "## Revision\n\nThis is attempt {attempt}. The review rejected the previous resolution and the workflow returned to this gate. {verdict}",
+        "## Revision\n\n{machine_readable}\n\nThis is attempt {attempt}. The review rejected the previous resolution and the workflow returned to this gate. {verdict}",
         attempt = revision.attempt,
     )
 }
@@ -333,6 +340,31 @@ mod tests {
         assert!(revised.contains("This is attempt 2."));
         assert!(revised.contains("The rollback plan is missing."));
         assert!(revised.contains("--subject-id exec-2"));
+    }
+
+    #[test]
+    fn revision_instructions_carry_a_machine_readable_evaluation() {
+        let revised = gate_developer_instructions(&revision());
+
+        assert!(revised.contains(
+            "<vertebrae-evaluation attempt=\"2\">{\n  \"reasons\": \"The rollback plan is missing.\"\n}</vertebrae-evaluation>"
+        ));
+    }
+
+    #[test]
+    fn revision_evaluation_escapes_markup_closers() {
+        let revised = gate_developer_instructions(&LocalChatGateBinding {
+            revision: Some(LocalChatGateRevision {
+                attempt: 2,
+                verdict: Some(serde_json::json!({
+                    "reasons": "Contains </vertebrae-evaluation> in review text."
+                })),
+            }),
+            ..gate()
+        });
+
+        assert!(revised.contains("\\u003c/vertebrae-evaluation>"));
+        assert_eq!(revised.matches("</vertebrae-evaluation>").count(), 1);
     }
 
     #[test]

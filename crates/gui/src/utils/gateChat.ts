@@ -41,14 +41,169 @@ export function gateChatBinding(
   const { run, execution, stepName, artifact } = context;
   const executionId = execution?.id;
   if (!executionId || !stepName || !artifact || !artifact.trim()) return null;
+  const attempt = context.attempt ?? 1;
+  const revision =
+    attempt > 1
+      ? {
+          attempt,
+          verdict: handoffVerdict(context.execution?.handoff),
+        }
+      : null;
   return {
     task_run_id: run.id,
     step_name: stepName,
     execution_id: executionId,
     artifact,
     instructions: context.prompt,
-    output_schema: (context.outputSchema ?? null) as JsonValue | null,
+    output_schema: jsonValue(context.outputSchema ?? null),
+    revision,
   };
+}
+
+function handoffVerdict(handoff: string | null | undefined): JsonValue {
+  if (!handoff) return null;
+  try {
+    const parsed: unknown = JSON.parse(handoff);
+    return isJsonValue(parsed) ? parsed : handoff;
+  } catch {
+    return handoff;
+  }
+}
+
+function jsonValue(value: unknown): JsonValue | null {
+  return isJsonValue(value) ? value : null;
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (typeof value !== "object") return false;
+  return Object.values(value).every(isJsonValue);
+}
+
+export interface GateResolutionSubmission {
+  artifact: string;
+  executionId: string;
+  values: unknown;
+}
+
+export function parseGateResolutionSubmission(
+  command: string,
+  gate: LocalChatGateBinding
+): GateResolutionSubmission | null {
+  let words = shellWords(command);
+  if (
+    words.length >= 3 &&
+    /^(?:\/.*\/)?(?:ba|z|a)sh$/.test(words[0]) &&
+    (words[1] === "-c" || words[1] === "-lc")
+  ) {
+    words = shellWords(words.slice(2).join(" "));
+  }
+  const program = words[0] ?? "";
+  if (!/(?:^|\/)vtb$/.test(program)) return null;
+  if (words[1] !== "artifact" || words[2] !== "add") return null;
+
+  let filename: string | null = null;
+  let body: string | null = null;
+  let subjectType: string | null = null;
+  let subjectId: string | null = null;
+  let logicalName: string | null = null;
+  for (let index = 3; index < words.length; index++) {
+    const word = words[index];
+    if (word === "--json") continue;
+    let flag = word;
+    let value: string | null = null;
+    if (flag.startsWith("--")) {
+      const separator = flag.indexOf("=");
+      if (separator > 0) {
+        value = flag.slice(separator + 1);
+        flag = flag.slice(2, separator);
+      } else {
+        value = words[++index] ?? null;
+        flag = flag.slice(2);
+      }
+    } else {
+      if (filename) return null;
+      filename = word;
+      continue;
+    }
+    if (value === null) return null;
+    if (flag === "body") body = value;
+    else if (flag === "subject-type") subjectType = value;
+    else if (flag === "subject-id") subjectId = value;
+    else if (flag === "logical-name") logicalName = value;
+    else return null;
+  }
+  if (
+    filename !== `${gate.artifact}.json` ||
+    body === null ||
+    subjectType !== "step_execution" ||
+    !subjectId ||
+    logicalName !== gate.artifact
+  )
+    return null;
+  try {
+    return {
+      artifact: gate.artifact,
+      executionId: subjectId,
+      values: JSON.parse(body),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function shellWords(input: string): string[] {
+  const words: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  let started = false;
+  for (let index = 0; index < input.length; index++) {
+    const char = input[index];
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      if (quote === "'") current += char;
+      escaped = true;
+      continue;
+    }
+    if (quote === "'") {
+      if (char === "'") quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === "'") {
+      quote = "'";
+      started = true;
+      continue;
+    }
+    if (char === '"') {
+      quote = '"';
+      started = true;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current || started) words.push(current);
+      current = "";
+      started = false;
+      continue;
+    }
+    current += char;
+  }
+  if (quote || escaped) return [];
+  if (current || started) words.push(current);
+  return words;
 }
 
 /** Gate chats are bound to a run's step, not to one execution of it. */

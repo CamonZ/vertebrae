@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { commands } from "../../bindings";
+import { commands, type LocalChatGateBinding } from "../../bindings";
 import type {
   ChatCompactionSummary,
   ChatMessage,
@@ -132,6 +132,7 @@ type ChatRenderItem =
 function buildChatRenderItems(
   messages: readonly ChatMessage[],
   assistantLabel: string,
+  gate: LocalChatGateBinding | null | undefined,
   expandedToolIds: ReadonlySet<string>,
   onToggleTool: (toolId: string) => void,
   fullContentToolIds: ReadonlySet<string>,
@@ -148,6 +149,7 @@ function buildChatRenderItems(
       key: `thread-${segmentSeq++}`,
       thread: chatMessagesToThread(segment, {
         assistantLabel,
+        gate: gate ?? null,
         expanded: expandedToolIds,
         onToggleTool,
         fullContent: fullContentToolIds,
@@ -235,6 +237,7 @@ interface ChatMessagesProps {
   projectPath?: string | null;
   messages: readonly ChatMessage[];
   assistantLabel: string;
+  gate?: LocalChatGateBinding | null;
   isEmpty: boolean;
   isActive: boolean;
   notice?: ReactNode;
@@ -255,6 +258,7 @@ export function ChatMessages({
   projectPath,
   messages,
   assistantLabel,
+  gate,
   isEmpty,
   isActive,
   notice,
@@ -438,6 +442,7 @@ export function ChatMessages({
       buildChatRenderItems(
         messages,
         assistantLabel,
+        gate,
         expandedToolIds,
         toggleTool,
         fullContentToolIds,
@@ -445,6 +450,7 @@ export function ChatMessages({
       ),
     [
       assistantLabel,
+      gate,
       expandedToolIds,
       fullContentToolIds,
       messages,

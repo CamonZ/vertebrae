@@ -18,13 +18,15 @@
 
 import { useId, useState, type ReactNode } from "react";
 
-import { IdChip } from "../shared/HearthPrimitives";
+import { IdChip, RunChip } from "../shared/HearthPrimitives";
+import { Card } from "../molecules/Card";
 import { BoundedTextContent, MarkdownContent } from "../shared/MarkdownContent";
 
 import type {
   ActivityMessage,
   AgentMessage,
   ErrorMessage,
+  GateEvaluationMessage,
   Message,
   ResultMessage,
   StepKind,
@@ -33,6 +35,7 @@ import type {
   UserMessage,
   UserRole,
   WaitMessage,
+  ResolutionSubmissionMessage,
 } from "./types";
 
 function LogProse({
@@ -75,6 +78,94 @@ function LogProse({
     >
       {inner}
       {isStreaming ? <span className="ev-cursor" /> : null}
+    </div>
+  );
+}
+
+function prettyJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? "null";
+  } catch {
+    return String(value);
+  }
+}
+
+function GateEvaluationRow(
+  props: GateEvaluationMessage & { selected?: boolean; onClick?: () => void }
+): ReactNode {
+  return (
+    <EventCardRow
+      evt={props.evt}
+      selected={props.selected}
+      onClick={props.onClick}
+    >
+      <Card
+        header="Resolution rejected"
+        headerAction={
+          <RunChip
+            small
+            force
+            state="failed"
+            label={`Attempt ${props.attempt}`}
+          />
+        }
+        className="w-full"
+      >
+        <pre className="max-h-64 overflow-auto font-mono text-xs whitespace-pre-wrap text-[var(--color-fg-soft)]">
+          {prettyJson(props.verdict)}
+        </pre>
+      </Card>
+    </EventCardRow>
+  );
+}
+
+function ResolutionSubmissionRow(
+  props: ResolutionSubmissionMessage & {
+    selected?: boolean;
+    onClick?: () => void;
+  }
+): ReactNode {
+  return (
+    <EventCardRow
+      evt={props.evt}
+      selected={props.selected}
+      onClick={props.onClick}
+    >
+      <Card
+        header="Resolution submitted"
+        headerAction={
+          <RunChip small force state="running" label="Under review" />
+        }
+        footer={<IdChip id={props.executionId} kind="step execution" />}
+        className="w-full"
+      >
+        <pre className="max-h-64 overflow-auto font-mono text-xs whitespace-pre-wrap text-[var(--color-fg-soft)]">
+          {prettyJson(props.values)}
+        </pre>
+      </Card>
+    </EventCardRow>
+  );
+}
+
+function EventCardRow({
+  evt,
+  selected,
+  onClick,
+  children,
+}: {
+  evt?: string;
+  selected?: boolean;
+  onClick?: () => void;
+  children: ReactNode;
+}): ReactNode {
+  return (
+    <div
+      className={`evrow evrow--system${selected ? " sel" : ""}`}
+      data-evt={evt}
+      onClick={onClick}
+      {...(onClick ? { "data-clickable": "" } : {})}
+    >
+      <div className="evbody">{children}</div>
     </div>
   );
 }
@@ -364,6 +455,9 @@ export function EventRow(props: EventRowProps): ReactNode {
   if (type === "error") return <ErrorRow {...props} />;
   if (type === "result") return <ResultRow {...props} />;
   if (type === "activity") return <ActivityRow {...props} />;
+  if (type === "gate_evaluation") return <GateEvaluationRow {...props} />;
+  if (type === "resolution_submission")
+    return <ResolutionSubmissionRow {...props} />;
 
   // user / system / agent / tool
   const sel = props.selected ? " sel" : "";

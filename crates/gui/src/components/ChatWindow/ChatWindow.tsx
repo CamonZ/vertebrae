@@ -187,6 +187,7 @@ export function ChatWindow({
           projectPath={chat.session.projectPath}
           messages={chat.messages}
           assistantLabel={chat.assistantLabel}
+          gate={chat.session.gate}
           isEmpty={isEmpty}
           isActive={chat.isActive}
           isWaiting={chat.isWaiting}
