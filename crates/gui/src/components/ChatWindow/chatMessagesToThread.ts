@@ -34,6 +34,11 @@
  */
 
 import type { ChatMessage } from "../../stores/chatStore";
+import type { LocalChatGateBinding } from "../../bindings";
+import {
+  parseGateResolutionSubmission,
+  type GateResolutionSubmission,
+} from "../../utils/gateChat";
 import {
   getToolIcon,
   type ConversationEvent,
@@ -76,10 +81,47 @@ export interface ChatThreadOptions {
   isWaiting?: boolean;
   /** Provider label shown on assistant response rows. */
   assistantLabel?: string;
+  /** Gate mechanics that should replace protocol/tool mechanics with cards. */
+  gate?: LocalChatGateBinding | null;
 }
 
 /** Stable thread id for the single local-chat thread. */
 export const LOCAL_CHAT_THREAD_ID = "local-chat-thread";
+
+function toolCommand(input: string): string | null {
+  try {
+    const parsed = JSON.parse(input) as { command?: unknown };
+    return typeof parsed.command === "string" ? parsed.command : null;
+  } catch {
+    return input.includes("vtb artifact add") ? input : null;
+  }
+}
+
+function successfulGateSubmissions(
+  messages: readonly ChatMessage[],
+  gate: LocalChatGateBinding
+): Map<string, GateResolutionSubmission> {
+  const successfulResults = new Set(
+    messages
+      .filter(
+        (message): message is Extract<ChatMessage, { kind: "tool_result" }> =>
+          message.kind === "tool_result" && !message.isError
+      )
+      .map((message) => message.toolId)
+  );
+  const submissions = new Map<string, GateResolutionSubmission>();
+  for (const message of messages) {
+    if (message.kind !== "tool_call" || !successfulResults.has(message.toolId))
+      continue;
+    const command = toolCommand(message.input);
+    const submission =
+      command !== null ? parseGateResolutionSubmission(command, gate) : null;
+    if (submission) {
+      submissions.set(message.toolId, submission);
+    }
+  }
+  return submissions;
+}
 
 /** One turn's worth of buffered content before grouping. */
 interface TurnDraft {
@@ -119,6 +161,9 @@ export function chatMessagesToThread(
       )
       .map((message) => message.toolId)
   );
+  const submissionsByToolId = opts.gate
+    ? successfulGateSubmissions(messages, opts.gate)
+    : new Map<string, GateResolutionSubmission>();
 
   let current: TurnDraft | null = null;
   const openDraft = (): TurnDraft => {
@@ -151,6 +196,18 @@ export function chatMessagesToThread(
         continue;
       }
 
+      case "gate_evaluation": {
+        const draft = openDraft();
+        draft.events.push({
+          kind: "gate_evaluation",
+          attempt: m.attempt,
+          verdict: m.verdict,
+          timestamp: m.timestamp,
+        });
+        draft.endsWithPartialAssistant = false;
+        continue;
+      }
+
       case "assistant": {
         if (m.parentToolUseId) continue;
         const draft = openDraft();
@@ -175,6 +232,19 @@ export function chatMessagesToThread(
       case "tool_call": {
         if (m.parentToolUseId) continue;
         if (fileEditIds.has(m.toolId)) continue;
+        const submission = submissionsByToolId.get(m.toolId);
+        if (submission) {
+          const draft = openDraft();
+          draft.events.push({
+            kind: "resolution_submission",
+            artifact: submission.artifact,
+            executionId: submission.executionId,
+            values: submission.values,
+            timestamp: m.timestamp,
+          });
+          draft.endsWithPartialAssistant = false;
+          continue;
+        }
         if (isNonSpawnAgentControlMessage(m)) continue;
         const ev = toToolCallEvent(m);
         if (seenToolCallIds.has(m.toolId)) {
@@ -192,6 +262,7 @@ export function chatMessagesToThread(
       case "tool_result": {
         if (m.parentToolUseId) continue;
         if (fileEditIds.has(m.toolId)) continue;
+        if (submissionsByToolId.has(m.toolId)) continue;
         const draft = openDraft();
         const ev = toToolResultEvent(m);
         draft.events.push(ev);

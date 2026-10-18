@@ -47,6 +47,7 @@ import {
   parseSessionLogs,
   type AssistantMessageLifecycle,
   type ConversationEvent,
+  type GateEvaluationEvent,
   type ToolCallEvent,
   type ToolResultEvent,
   type FileEditEvent,
@@ -62,6 +63,7 @@ import type {
   ActivityMessage,
   AgentMessage,
   ErrorMessage,
+  GateEvaluationMessage,
   Message,
   ResultMessage,
   Run,
@@ -87,6 +89,20 @@ export interface RunInput {
   stepExecutions: StepExecution[];
   /** Session logs keyed by `step_execution_id`. */
   logsByExecutionId: Record<string, SessionLog[]>;
+}
+
+function gateEvaluationMessage(
+  event: GateEvaluationEvent,
+  runStartMs: number | null
+): GateEvaluationMessage {
+  return {
+    evt: nextEvt("gate-evaluation"),
+    type: "gate_evaluation",
+    at: clock(event.timestamp),
+    rel: rel(runStartMs, ms(event.timestamp)),
+    attempt: event.attempt,
+    verdict: event.verdict,
+  };
 }
 
 /** Optional chat-message shape consumed by {@link msgsToThread}. */
@@ -852,6 +868,20 @@ function eventsToMessages(
           at: clock(ev.timestamp),
           rel: rel(runStartMs, ms(ev.timestamp)),
           text: ev.text,
+        });
+        break;
+      case "gate_evaluation":
+        out.push(gateEvaluationMessage(ev, runStartMs));
+        break;
+      case "resolution_submission":
+        out.push({
+          evt: nextEvt("resolution-submission"),
+          type: "resolution_submission",
+          at: clock(ev.timestamp),
+          rel: rel(runStartMs, ms(ev.timestamp)),
+          artifact: ev.artifact,
+          executionId: ev.executionId,
+          values: ev.values,
         });
         break;
       case "session_start":

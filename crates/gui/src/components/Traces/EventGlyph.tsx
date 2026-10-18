@@ -168,6 +168,10 @@ export function resolveGlyph(input: GlyphInput): ResolvedGlyph {
       return { glyph: "flag", variant: "default", label: "task notification" };
     case "rate_limit":
       return { glyph: "flag", variant: "default", label: "rate limit" };
+    case "gate_evaluation":
+      return { glyph: "x-circle", variant: "error", label: "gate evaluation" };
+    case "resolution_submission":
+      return { glyph: "check-circle", variant: "default", label: "resolution" };
   }
 }
 

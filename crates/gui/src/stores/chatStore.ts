@@ -65,6 +65,12 @@ import {
 export type ChatMessage =
   | { kind: "user"; text: string; timestamp: string }
   | {
+      kind: "gate_evaluation";
+      attempt: number;
+      verdict: unknown;
+      timestamp: string;
+    }
+  | {
       kind: "assistant";
       text: string;
       timestamp: string;
@@ -948,6 +954,13 @@ function conversationEventToChatMessage(
   event: ConversationEvent
 ): ChatMessage | null {
   switch (event.kind) {
+    case "gate_evaluation":
+      return {
+        kind: "gate_evaluation",
+        attempt: event.attempt,
+        verdict: event.verdict,
+        timestamp: event.timestamp,
+      };
     case "user_message":
       return { kind: "user", text: event.text, timestamp: event.timestamp };
     case "assistant_message":

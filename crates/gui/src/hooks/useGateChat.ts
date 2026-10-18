@@ -20,6 +20,26 @@ import {
  */
 const pendingGateRefreshes = new Map<string, string>();
 
+function showGateEvaluationCard(
+  sessionId: string,
+  gate: LocalChatGateBinding
+): void {
+  if (!gate.revision) return;
+  const store = useChatStore.getState();
+  const alreadyShown = store.sessions[sessionId]?.messages.some(
+    (message) =>
+      message.kind === "gate_evaluation" &&
+      message.attempt === gate.revision?.attempt
+  );
+  if (alreadyShown) return;
+  store.addMessage(sessionId, {
+    kind: "gate_evaluation",
+    attempt: gate.revision.attempt,
+    verdict: gate.revision.verdict ?? null,
+    timestamp: new Date().toISOString(),
+  });
+}
+
 /** Resolve once the chat is not mid-turn; false when it is gone. */
 function whenSessionIdle(sessionId: string): Promise<boolean> {
   const settled = (): boolean | null => {
@@ -85,6 +105,7 @@ export async function refreshGateChat(
           );
           if (result.status === "ok") {
             useChatStore.getState().setGateChatBinding(sessionId, gate);
+            if (result.data !== false) showGateEvaluationCard(sessionId, gate);
           }
           return result;
         },
@@ -157,6 +178,13 @@ export async function resolveGateInChat(
     GATE_CHAT_KICKOFF,
     { addUserMessage: false }
   );
+  const settledSession = useChatStore.getState().sessions[sessionId];
+  if (
+    settledSession?.backendSessionId &&
+    getLocalChatLifecycle(settledSession) !== "error"
+  ) {
+    showGateEvaluationCard(sessionId, gate);
+  }
   return sessionId;
 }
 

@@ -52,6 +52,19 @@ export interface UserMessageEvent extends BaseEvent {
   text: string;
 }
 
+export interface GateEvaluationEvent extends BaseEvent {
+  kind: "gate_evaluation";
+  attempt: number;
+  verdict: unknown;
+}
+
+export interface ResolutionSubmissionEvent extends BaseEvent {
+  kind: "resolution_submission";
+  artifact: string;
+  executionId: string;
+  values: unknown;
+}
+
 /** Session start event emitted by the normalized harness stream. */
 export interface SessionStartEvent extends BaseEvent {
   kind: "session_start";
@@ -230,6 +243,8 @@ export interface TodoListEvent extends BaseEvent {
 /** Union of all conversation events */
 export type ConversationEvent =
   | UserMessageEvent
+  | GateEvaluationEvent
+  | ResolutionSubmissionEvent
   | SessionStartEvent
   | SessionEndEvent
   | ThinkingEvent
@@ -351,6 +366,45 @@ function shouldKeepUserMessage(text: string): boolean {
     !trimmed.includes("<recommended_plugins>") &&
     !trimmed.includes("<environment_context>")
   );
+}
+
+function parseGateEvaluation(text: string): GateEvaluationEvent | null {
+  const trimmed = text.trim();
+  const hiddenOpen = "<vertebrae-hidden-turn>";
+  const hiddenClose = "</vertebrae-hidden-turn>";
+  const marker = "[Vertebrae evaluation]";
+  if (
+    !trimmed.startsWith(hiddenOpen) ||
+    !trimmed.endsWith(hiddenClose) ||
+    !trimmed.includes(marker)
+  ) {
+    return null;
+  }
+  const markerIndex = trimmed.indexOf(marker);
+  const openingTag = "<vertebrae-evaluation attempt=\"";
+  const evaluationIndex = trimmed.indexOf(openingTag, markerIndex);
+  if (evaluationIndex === -1) return null;
+  const attemptStart = evaluationIndex + openingTag.length;
+  const attemptEnd = trimmed.indexOf('">', attemptStart);
+  if (attemptEnd === -1) return null;
+  const attempt = Number(trimmed.slice(attemptStart, attemptEnd));
+  if (!Number.isInteger(attempt) || attempt < 1) return null;
+  const contentStart = attemptEnd + 2;
+  const closingTag = "</vertebrae-evaluation>";
+  const contentEnd = trimmed.indexOf(closingTag, contentStart);
+  if (
+    contentEnd === -1 ||
+    trimmed.indexOf(closingTag, contentEnd + closingTag.length) !== -1
+  ) {
+    return null;
+  }
+  let verdict: unknown = null;
+  try {
+    verdict = JSON.parse(trimmed.slice(contentStart, contentEnd));
+  } catch {
+    return null;
+  }
+  return { kind: "gate_evaluation", attempt, verdict, timestamp: "" };
 }
 
 /**
@@ -493,11 +547,16 @@ function parseHarnessEvent(
             timestamp,
             message: notification,
           });
-        } else if (
-          text &&
-          (options.preserveRawInputs || shouldKeepUserMessage(text))
-        ) {
-          events.push({ kind: "user_message", timestamp, text });
+        } else {
+          const evaluation = text ? parseGateEvaluation(text) : null;
+          if (evaluation) {
+            events.push({ ...evaluation, timestamp });
+          } else if (
+            text &&
+            (options.preserveRawInputs || shouldKeepUserMessage(text))
+          ) {
+            events.push({ kind: "user_message", timestamp, text });
+          }
         }
       }
       break;

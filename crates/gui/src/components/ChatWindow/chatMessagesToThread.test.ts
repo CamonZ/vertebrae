@@ -21,12 +21,14 @@ function build(
     collapsed?: Set<string>;
     onToggleTool?: (toolId: string) => void;
     assistantLabel?: string;
+    gate?: Parameters<typeof chatMessagesToThread>[1]["gate"];
   }
 ) {
   return chatMessagesToThread(messages, {
     collapsed: opts?.collapsed ?? new Set<string>(),
     onToggleTool: opts?.onToggleTool,
     assistantLabel: opts?.assistantLabel,
+    gate: opts?.gate,
   });
 }
 
@@ -858,5 +860,138 @@ describe("chatMessagesToThread", () => {
       "user",
       "agent",
     ]);
+  });
+
+  it("renders gate evaluations as cards and hides injected text", () => {
+    const thread = build(
+      [
+        {
+          kind: "gate_evaluation",
+          attempt: 2,
+          verdict: { reasons: "The rollback plan is missing." },
+          timestamp: TS,
+        },
+      ],
+      {
+        gate: {
+          task_run_id: "run-1",
+          step_name: "approve",
+          execution_id: "exec-2",
+          artifact: "approval",
+        },
+      }
+    );
+
+    expect(thread.turns).toHaveLength(1);
+    expect(thread.turns[0].messages).toHaveLength(1);
+    expect(thread.turns[0].messages[0]).toMatchObject({
+      type: "gate_evaluation",
+      attempt: 2,
+      verdict: { reasons: "The rollback plan is missing." },
+    });
+  });
+
+  it("renders every gate submission as a submitted-values card", () => {
+    const gate = {
+      task_run_id: "run-1",
+      step_name: "approve",
+      execution_id: "exec-2",
+      artifact: "approval",
+    };
+    const command = (executionId: string) =>
+      JSON.stringify({
+        command: `vtb artifact add approval.json --subject-type step_execution --subject-id ${executionId} --logical-name approval --body '{"approved":true}'`,
+      });
+    const thread = build(
+      [
+        {
+          kind: "tool_call",
+          toolName: "Bash",
+          toolId: "submit-1",
+          input: command("exec-1"),
+          timestamp: TS,
+        },
+        {
+          kind: "tool_result",
+          toolId: "submit-1",
+          result: "ok",
+          isError: false,
+          timestamp: TS,
+        },
+        {
+          kind: "tool_call",
+          toolName: "Bash",
+          toolId: "submit-2",
+          input: command("exec-2"),
+          timestamp: TS,
+        },
+        {
+          kind: "tool_result",
+          toolId: "submit-2",
+          result: "ok",
+          isError: false,
+          timestamp: TS,
+        },
+      ],
+      { gate }
+    );
+
+    const submissions = thread.turns[0].messages.filter(
+      (message) => message.type === "resolution_submission"
+    );
+    expect(submissions).toHaveLength(2);
+    expect(submissions[0]).toMatchObject({
+      executionId: "exec-1",
+      values: { approved: true },
+    });
+    expect(submissions[1]).toMatchObject({
+      executionId: "exec-2",
+      values: { approved: true },
+    });
+    expect(
+      thread.turns[0].messages.some((message) => message.type === "tool")
+    ).toBe(false);
+  });
+
+  it("keeps a failed submission visible as an errored tool call", () => {
+    const gate = {
+      task_run_id: "run-1",
+      step_name: "approve",
+      execution_id: "exec-1",
+      artifact: "approval",
+    };
+    const thread = build(
+      [
+        {
+          kind: "tool_call",
+          toolName: "Bash",
+          toolId: "submit-invalid",
+          input: JSON.stringify({
+            command:
+              "vtb artifact add approval.json --subject-type step_execution --subject-id exec-1 --logical-name approval --body 'not-json'",
+          }),
+          timestamp: TS,
+        },
+        {
+          kind: "tool_result",
+          toolId: "submit-invalid",
+          result: "invalid_human_input_json",
+          isError: true,
+          timestamp: TS,
+        },
+      ],
+      { gate }
+    );
+
+    expect(
+      thread.turns[0].messages.some(
+        (message) => message.type === "resolution_submission"
+      )
+    ).toBe(false);
+    const tool = thread.turns[0].messages.find(
+      (message) => message.type === "tool"
+    ) as ToolMessage;
+    expect(tool.status).toBe("err");
+    expect(tool.body).toBe("invalid_human_input_json");
   });
 });

@@ -15,6 +15,8 @@ export interface HumanInputGateContext {
   outputSchema: unknown | null;
   /** Logical name of the artifact that resolves the gate. */
   artifact: string | null;
+  /** 1-based visit of this gate step in the run. */
+  attempt?: number;
 }
 
 export function pickLatestExecution(
@@ -55,6 +57,13 @@ export function resolveHumanInputGate(
   const execution = pickLatestExecution(run, executions);
   if (classifyWaitingRun(execution) !== "human_input") return null;
   const config = executionHumanInput(execution);
+  const attempt =
+    executions.filter(
+      (candidate) =>
+        (candidate.task_run_id ?? run.id) === run.id &&
+        candidate.step_name === execution?.step_name &&
+        candidate.step_type === "human_input"
+    ).length || 1;
   return {
     run,
     execution,
@@ -62,5 +71,6 @@ export function resolveHumanInputGate(
     prompt: config?.instructions ?? null,
     outputSchema: config?.output_schema ?? null,
     artifact: config?.artifact ?? null,
+    attempt,
   };
 }

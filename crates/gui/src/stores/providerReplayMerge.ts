@@ -41,6 +41,8 @@ function chatMessageKey(message: ChatMessage): string {
     case "error":
     case "task_notification":
       return `${message.kind}:${message.message}`;
+    case "gate_evaluation":
+      return `${message.kind}:${message.attempt}:${JSON.stringify(message.verdict)}`;
   }
 }
 

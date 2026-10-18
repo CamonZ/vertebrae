@@ -6,6 +6,7 @@ import {
   gateChatAcceptsSubmission,
   gateChatBinding,
   gateChatLabel,
+  parseGateResolutionSubmission,
   hiddenTurn,
   isHiddenTurn,
   isSameGate,
@@ -22,6 +23,7 @@ function context(
     prompt: "Ship v2?",
     outputSchema: { type: "object" },
     artifact: "approval",
+    attempt: 1,
     ...overrides,
   };
 }
@@ -35,6 +37,7 @@ describe("gateChatBinding", () => {
       artifact: "approval",
       instructions: "Ship v2?",
       output_schema: { type: "object" },
+      revision: null,
     });
   });
 
@@ -42,6 +45,56 @@ describe("gateChatBinding", () => {
     expect(
       gateChatBinding(context({ prompt: null, outputSchema: null }))
     ).toMatchObject({ instructions: null, output_schema: null });
+  });
+
+  it("derives a revision from a rejected gate's handoff", () => {
+    expect(
+      gateChatBinding(
+        context({
+          attempt: 2,
+          execution: {
+            id: "exec-2",
+            handoff: '{"reasons":"The rollback plan is missing."}',
+          } as StepExecution,
+        })
+      )
+    ).toMatchObject({
+      execution_id: "exec-2",
+      revision: {
+        attempt: 2,
+        verdict: { reasons: "The rollback plan is missing." },
+      },
+    });
+  });
+
+  it("keeps a revision and its raw handoff when the handoff is malformed JSON", () => {
+    expect(
+      gateChatBinding(
+        context({
+          attempt: 2,
+          execution: {
+            id: "exec-2",
+            handoff: "The rollback plan is missing.",
+          } as StepExecution,
+        })
+      )
+    ).toMatchObject({
+      revision: {
+        attempt: 2,
+        verdict: "The rollback plan is missing.",
+      },
+    });
+  });
+
+  it("keeps a rejected revision when its handoff is missing", () => {
+    expect(
+      gateChatBinding(
+        context({
+          attempt: 2,
+          execution: { id: "exec-2" } as StepExecution,
+        })
+      )
+    ).toMatchObject({ revision: { attempt: 2, verdict: null } });
   });
 
   it("is null when the gate cannot be resolved by artifact", () => {
@@ -76,6 +129,36 @@ describe("gate chat helpers", () => {
 
   it("labels gate chats by step", () => {
     expect(gateChatLabel("approve")).toBe("Resolve approve");
+  });
+
+  it("matches submissions for any execution of the bound gate", () => {
+    const gate = gateChatBinding(context())!;
+    const command =
+      "vtb artifact add approval.json --subject-type step_execution --subject-id exec-2 --logical-name approval --body '{\"approved\":true}'";
+
+    expect(parseGateResolutionSubmission(command, gate)).toEqual({
+      artifact: "approval",
+      executionId: "exec-2",
+      values: { approved: true },
+    });
+    expect(
+      parseGateResolutionSubmission(
+        command.replace("approval.json", "other.json"),
+        gate
+      )
+    ).toBeNull();
+  });
+
+  it("parses the prompt-prescribed apostrophe quoting", () => {
+    const gate = gateChatBinding(context())!;
+    const command =
+      "vtb artifact add approval.json --subject-type step_execution --subject-id exec-2 --logical-name approval --body '{\"answer\":\"don'\\''t ship\"}'";
+
+    expect(parseGateResolutionSubmission(command, gate)).toEqual({
+      artifact: "approval",
+      executionId: "exec-2",
+      values: { answer: "don't ship" },
+    });
   });
 });
 

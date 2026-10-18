@@ -200,6 +200,8 @@ function formatTitleInferenceEntry(message: ChatMessage): string {
       return `Session ended after ${message.numTurns} turns (${message.durationMs}ms, ${message.costUsd} USD)`;
     case "error":
       return `Error: ${message.message}`;
+    case "gate_evaluation":
+      return `Gate evaluation: attempt ${message.attempt}`;
   }
 }
 

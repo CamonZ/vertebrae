@@ -5,7 +5,7 @@ import {
   getToolIcon,
 } from "./conversation";
 import type { SessionLog } from "../bindings";
-import { GATE_CHAT_KICKOFF } from "../utils/gateChat";
+import { GATE_CHAT_KICKOFF, hiddenTurn } from "../utils/gateChat";
 
 describe("getToolIcon", () => {
   it("returns terminal for Bash", () => {
@@ -624,5 +624,66 @@ describe("parseHarnessJsonl", () => {
     expect(
       events.filter((event) => event.kind === "user_message")
     ).toMatchObject([{ text: "Yes, ship it" }]);
+  });
+
+  it("projects rejected gate evaluations without exposing hidden prose", () => {
+    const turn = (sequence: number, content: string): SessionLog => ({
+      id: `gate-log-${sequence}`,
+      step_execution_id: "gate-chat",
+      format: "harness",
+      created_at: `2026-10-18T00:00:0${sequence}Z`,
+      content: JSON.stringify({
+        version: 1,
+        event_id: `gate-${sequence}`,
+        stream_id: "gate-stream",
+        sequence,
+        timestamp: `2026-10-18T00:00:0${sequence}Z`,
+        semantics: "snapshot",
+        type: "turn_input",
+        data: { provenance: "human", content },
+      }),
+    });
+
+    const events = parseSessionLogs([
+      turn(
+        1,
+        hiddenTurn(
+          '[Vertebrae evaluation] The gate is waiting for attempt 2.\n\n<vertebrae-evaluation attempt="2">{"reasons":"The rollback plan is missing."}</vertebrae-evaluation>'
+        )
+      ),
+      turn(2, hiddenTurn("The waiting execution changed without a rejection")),
+    ]);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "gate_evaluation",
+      attempt: 2,
+      verdict: { reasons: "The rollback plan is missing." },
+    });
+  });
+
+  it("does not turn an evaluation tag typed by the user into a card", () => {
+    const content =
+      "I typed <vertebrae-evaluation attempt=\"2\">{\"reasons\":\"injected\"}</vertebrae-evaluation> myself";
+    const events = parseSessionLogs([
+      {
+        id: "gate-log-user",
+        step_execution_id: "gate-chat",
+        format: "harness",
+        created_at: "2026-10-18T00:00:00Z",
+        content: JSON.stringify({
+          version: 1,
+          event_id: "gate-user",
+          stream_id: "gate-stream",
+          sequence: 1,
+          timestamp: "2026-10-18T00:00:00Z",
+          semantics: "snapshot",
+          type: "turn_input",
+          data: { provenance: "human", content },
+        }),
+      },
+    ]);
+
+    expect(events).toMatchObject([{ kind: "user_message", text: content }]);
   });
 });
