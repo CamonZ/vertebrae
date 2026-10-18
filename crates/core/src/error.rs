@@ -69,6 +69,46 @@ pub enum ServiceError {
     /// Configuration error
     #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    /// Sacrum rejected an artifact attached to resolve a `human_input` gate;
+    /// nothing was stored.
+    #[error("Human input rejected: {0}")]
+    HumanInputRejected(HumanInputRejection),
+}
+
+/// Why Sacrum rejected an artifact attached to a waiting `human_input`
+/// execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HumanInputRejection {
+    /// The artifact body is not JSON (`invalid_human_input_json`).
+    InvalidJson { message: String },
+    /// The body violates the gate's `output_schema` (`invalid_human_input`);
+    /// each violation starts with its JSON path, such as `#/approved`.
+    SchemaViolations { violations: Vec<String> },
+    /// The execution is no longer parked on the gate
+    /// (`human_input_execution_not_waiting`).
+    NotWaiting { message: String },
+}
+
+impl std::fmt::Display for HumanInputRejection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidJson { message } => {
+                write!(f, "artifact body is not valid JSON: {message}")
+            }
+            Self::SchemaViolations { violations } => {
+                write!(
+                    f,
+                    "artifact body does not satisfy the gate's output_schema:"
+                )?;
+                for violation in violations {
+                    write!(f, "\n  - {violation}")?;
+                }
+                Ok(())
+            }
+            Self::NotWaiting { message } => write!(f, "{message}"),
+        }
+    }
 }
 
 impl ServiceError {
@@ -222,6 +262,17 @@ impl ServiceError {
             ServiceError::ConfigError(_) => {
                 Some("hint: Check your configuration settings.".to_string())
             }
+            ServiceError::HumanInputRejected(rejection) => Some(match rejection {
+                HumanInputRejection::InvalidJson { .. } => {
+                    "hint: The gate's artifact body must be a JSON document. Fix the body and attach it again.".to_string()
+                }
+                HumanInputRejection::SchemaViolations { .. } => {
+                    "hint: Fix each listed path and attach the artifact again; 'vtb step show <STEP>' prints the gate's output_schema.".to_string()
+                }
+                HumanInputRejection::NotWaiting { .. } => {
+                    "hint: The execution already completed, was cancelled, or its run moved on. Run 'vtb show <TASK>' and attach to the run's current waiting execution (latestStep=...) instead.".to_string()
+                }
+            }),
             _ => None,
         }
     }
@@ -230,6 +281,51 @@ impl ServiceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_human_input_rejections_have_distinct_messages_and_hints() {
+        let invalid_json = ServiceError::HumanInputRejected(HumanInputRejection::InvalidJson {
+            message: "unexpected byte at position 0".to_string(),
+        });
+        assert_eq!(
+            invalid_json.to_string(),
+            "Human input rejected: artifact body is not valid JSON: unexpected byte at position 0"
+        );
+        assert!(
+            invalid_json
+                .hint()
+                .unwrap()
+                .contains("must be a JSON document")
+        );
+
+        let violations = ServiceError::HumanInputRejected(HumanInputRejection::SchemaViolations {
+            violations: vec![
+                "#/approved: Type mismatch. Expected Boolean but got String.".to_string(),
+                "#: Required property reason was not present.".to_string(),
+            ],
+        });
+        assert_eq!(
+            violations.to_string(),
+            "Human input rejected: artifact body does not satisfy the gate's output_schema:\n  \
+             - #/approved: Type mismatch. Expected Boolean but got String.\n  \
+             - #: Required property reason was not present."
+        );
+        assert!(violations.hint().unwrap().contains("Fix each listed path"));
+
+        let not_waiting = ServiceError::HumanInputRejected(HumanInputRejection::NotWaiting {
+            message: "step execution is not waiting for human input".to_string(),
+        });
+        assert_eq!(
+            not_waiting.to_string(),
+            "Human input rejected: step execution is not waiting for human input"
+        );
+        assert!(
+            not_waiting
+                .hint()
+                .unwrap()
+                .contains("current waiting execution")
+        );
+    }
 
     #[test]
     fn test_task_not_found_error() {

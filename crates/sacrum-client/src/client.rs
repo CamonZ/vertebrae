@@ -460,6 +460,7 @@ mod tests {
                 "updateWorkflowStep".to_string(),
                 "routeConfig".to_string(),
             ]),
+            code: None,
             extensions: Some(serde_json::json!({
                 "rule": "reference must exist",
                 "field_path": "$.rules[0].transition.step_id"

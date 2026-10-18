@@ -131,6 +131,8 @@ vtb --json step add "Review" -w <workflow-id> --harness claude
 | `--transition-to` | `-t` | Steps this can transition to (repeatable) |
 | `--transition-session` | | Session directive for one outgoing transition: `<TO>=<new\|resume\|fork>[:<STEP>]` (repeatable) |
 | `--children-session` | | `wait_children` only: `fork:<STEP>`, the parent conversation every child run forks |
+| `--instructions` | | `human_input` only: instructions template shown while the gate waits, inline or `@path` |
+| `--artifact` | | `human_input` only: logical name of the artifact that resolves the gate |
 
 The required positional argument is `<name>`. `--workflow`,
 `--transition-to`, and the step IDs in `--transition-session` accept full UUIDs
@@ -168,6 +170,11 @@ with `new`. See [Session directives](#session-directives).
 child run the step creates forks the conversation of `<STEP>`, an
 `llm_inference` step of this workflow, in the parent run. Sacrum accepts only
 `fork` and requires `<STEP>`. See [Session directives](#session-directives).
+
+`human_input` steps take `--instructions`, `--artifact`, and `--output-schema`,
+all optional. Sacrum renders the instructions when the run parks; attaching an
+artifact with that logical name to the waiting execution resolves the gate once
+its body satisfies the output schema.
 
 `structured_inference` steps take only `--provider`, `--model`, `--state`, and
 `--fields`, and Sacrum requires all four on create. Agent, prompt, and output
@@ -381,6 +388,8 @@ vtb --json step update <step-id> --goal "New goal"
 | `--transition-session` | | Set one outgoing transition's session directive, `<TO>=<new\|resume\|fork>[:<STEP>]`, or clear it with `<TO>=none`; repeatable |
 | `--children-session` | | `wait_children` only: set the fork every child run enters with, `fork:<STEP>` |
 | `--clear-children-session` | | `wait_children` only: clear it; children start new conversations |
+| `--instructions` / `--clear-instructions` | | `human_input` only: replace or clear the instructions, inline or `@path` |
+| `--artifact` / `--clear-artifact` | | `human_input` only: replace or clear the resolving artifact's logical name |
 | `--speed-tier` | | New provider serving speed preference: `default` or `fast` |
 | `--personality` | | New provider style identifier; Codex accepts `none`, `friendly`, or `pragmatic` when supported by the selected model |
 | `--verbosity` | | New output detail level: `low`, `medium`, or `high`; alias `--output-verbosity`; currently valid with OpenAI/Codex |

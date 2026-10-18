@@ -392,7 +392,8 @@ pub struct StepAddCommand {
     /// agent, skill, and agent-config flags; structured_inference takes
     /// --provider, --model, --state, and --questions; route takes
     /// --route-config; wait_children takes --output-schema and
-    /// --children-session; execute requires
+    /// --children-session; human_input takes --instructions, --artifact, and
+    /// --output-schema; execute requires
     /// --script and --output-schema and has no harness; the others take none.
     #[arg(long, value_enum, default_value = "llm_inference")]
     pub step_type: CliStepType,
@@ -424,6 +425,16 @@ pub struct StepAddCommand {
     /// whose conversation in the parent run each child forks
     #[arg(long, value_name = "fork:STEP", value_parser = parse_session_directive)]
     pub children_session: Option<SessionDirective>,
+
+    /// Instructions a human_input step shows while it waits, inline or
+    /// `@path`; a Liquid template rendered when the run parks
+    #[arg(long, value_name = "TEXT|@PATH")]
+    pub instructions: Option<String>,
+
+    /// Logical name of the artifact that resolves a human_input step when
+    /// attached to its waiting execution
+    #[arg(long, value_name = "NAME")]
+    pub artifact: Option<String>,
 
     /// Step order (0-indexed, defaults to 0)
     #[arg(long, short, default_value = "0")]
@@ -584,6 +595,8 @@ impl StepAddCommand {
             ("agent_config", self.agent_config_flags_present(step_type)),
             ("route_config", self.route_config.is_some()),
             ("session", self.children_session.is_some()),
+            ("instructions", self.instructions.is_some()),
+            ("artifact", self.artifact.is_some()),
             ("provider", structured && self.provider.is_some()),
             ("model", structured && self.model.is_some()),
             ("state", self.state.is_some()),
@@ -647,6 +660,15 @@ impl StepAddCommand {
             Some(StepConfig::WaitChildren(config)) => {
                 config.output_schema = output_schema;
                 config.session = self.children_session.clone();
+            }
+            Some(StepConfig::HumanInput(config)) => {
+                config.instructions = self
+                    .instructions
+                    .as_deref()
+                    .map(|value| read_flag_value(value, "--instructions"))
+                    .transpose()?;
+                config.artifact = self.artifact.clone();
+                config.output_schema = output_schema;
             }
             Some(StepConfig::Execute(_)) | None => {}
         }
@@ -944,6 +966,14 @@ Goal:          {}
                         .map_or_else(|| "(none)".to_string(), SessionDirective::to_string),
                 ));
             }
+            Some(StepConfig::HumanInput(config)) => {
+                output.push_str(&format!(
+                    "Instructions:  {}\nArtifact:      {}\nOutput Schema: {}\n",
+                    config.instructions.as_deref().unwrap_or("(none)"),
+                    config.artifact.as_deref().unwrap_or("(none)"),
+                    pretty_json(config.output_schema.as_ref()),
+                ));
+            }
             Some(StepConfig::Execute(config)) => {
                 output.push_str(&format!(
                     "Script:        {}\nOutput Schema: {}\n",
@@ -1196,6 +1226,22 @@ pub struct StepUpdateCommand {
     #[arg(long)]
     pub clear_children_session: bool,
 
+    /// New instructions of a human_input step, inline or `@path`
+    #[arg(long, value_name = "TEXT|@PATH")]
+    pub instructions: Option<String>,
+
+    /// Clear the human_input instructions
+    #[arg(long)]
+    pub clear_instructions: bool,
+
+    /// New logical name of the artifact that resolves a human_input step
+    #[arg(long, value_name = "NAME")]
+    pub artifact: Option<String>,
+
+    /// Clear the human_input artifact name
+    #[arg(long)]
+    pub clear_artifact: bool,
+
     /// New order for the step
     #[arg(long, short)]
     pub order: Option<i32>,
@@ -1272,6 +1318,11 @@ impl StepUpdateCommand {
                 "session",
                 self.children_session.is_some() || self.clear_children_session,
             ),
+            (
+                "instructions",
+                self.instructions.is_some() || self.clear_instructions,
+            ),
+            ("artifact", self.artifact.is_some() || self.clear_artifact),
             ("provider", structured && self.provider.is_some()),
             ("model", structured && self.model.is_some()),
             ("state", self.state.is_some()),
@@ -1322,6 +1373,16 @@ impl StepUpdateCommand {
                 self.children_session.is_some(),
                 self.clear_children_session,
                 "--children-session and --clear-children-session",
+            ),
+            (
+                self.instructions.is_some(),
+                self.clear_instructions,
+                "--instructions and --clear-instructions",
+            ),
+            (
+                self.artifact.is_some(),
+                self.clear_artifact,
+                "--artifact and --clear-artifact",
             ),
         ] {
             if set && clear {
@@ -1421,6 +1482,21 @@ impl StepUpdateCommand {
                 ServiceError::validation_failed(format!("Invalid --children-session: {e}"))
             })?;
             updates = updates.with_config_field("session", session);
+        }
+
+        if self.clear_instructions {
+            updates = updates.with_config_field("instructions", serde_json::Value::Null);
+        } else if let Some(instructions) = &self.instructions {
+            updates = updates.with_config_field(
+                "instructions",
+                read_flag_value(instructions, "--instructions")?.into(),
+            );
+        }
+
+        if self.clear_artifact {
+            updates = updates.with_config_field("artifact", serde_json::Value::Null);
+        } else if let Some(artifact) = &self.artifact {
+            updates = updates.with_config_field("artifact", artifact.as_str().into());
         }
 
         if let Some(order) = self.order {

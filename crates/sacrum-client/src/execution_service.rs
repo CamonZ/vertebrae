@@ -778,6 +778,36 @@ mod tests {
     }
 
     #[test]
+    fn test_response_to_execution_decodes_rendered_human_input_config() {
+        let response: StepExecutionResponse = serde_json::from_value(json!({
+            "id": "exec-gate",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "approve",
+            "step_type": "human_input",
+            "status": "waiting",
+            "config": {
+                "version": 1,
+                "instructions": "Approve Ship parser?",
+                "artifact": "approval",
+                "output_schema": {"type": "object", "required": ["approved"]}
+            }
+        }))
+        .unwrap();
+
+        let execution = SacrumExecutionService::response_to_execution(&response).unwrap();
+        assert_eq!(
+            execution.config,
+            Some(StepConfig::HumanInput(vertebrae_core::HumanInputConfig {
+                version: 1,
+                instructions: Some("Approve Ship parser?".to_string()),
+                artifact: Some("approval".to_string()),
+                output_schema: Some(json!({"type": "object", "required": ["approved"]})),
+            }))
+        );
+    }
+
+    #[test]
     fn test_response_to_execution_decodes_structured_inference_config() {
         let response: StepExecutionResponse = serde_json::from_value(json!({
             "id": "exec-si",

@@ -495,6 +495,7 @@ fn graphql_item(
     crate::error::GraphqlErrorItem {
         message: message.to_string(),
         path: path.map(|path| path.into_iter().map(str::to_string).collect()),
+        code: None,
         extensions,
     }
 }

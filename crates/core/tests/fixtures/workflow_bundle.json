@@ -185,7 +185,16 @@
           "goal": "Collect approval",
           "step_type": "human_input",
           "step_order": 4,
-          "config": null,
+          "config": {
+            "version": 1,
+            "instructions": "Approve {{ task.title }}?",
+            "artifact": "approval",
+            "output_schema": {
+              "type": "object",
+              "required": ["approved"],
+              "properties": {"approved": {"type": "boolean"}}
+            }
+          },
           "persistence_options": null
         },
         {

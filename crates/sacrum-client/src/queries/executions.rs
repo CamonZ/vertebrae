@@ -18,6 +18,7 @@ pub const EXECUTION_FIELDS: &str = r#"
             ... on ExecuteStepConfig { version script context output_schema }
             ... on RouteStepConfig { version route_config }
             ... on WaitChildrenStepConfig { version output_schema session }
+            ... on HumanInputStepConfig { version instructions artifact output_schema }
         }
         output
         transition_result

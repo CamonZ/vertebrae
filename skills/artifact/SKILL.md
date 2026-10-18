@@ -39,6 +39,19 @@ Supported subject types are `project`, `task`, `task_section`, `workflow`,
 `task_run`, and `step_execution`. `--subject-type` and `--subject-id` must be
 provided together, and the destination must belong to the active project.
 
+Attaching the configured artifact of a waiting `human_input` execution resolves
+the gate. When Sacrum rejects the body, nothing is stored, the command exits
+non-zero, and it prints one of: `artifact body is not valid JSON`, each
+`output_schema` violation with its JSON path (for example `#/approved`), or
+`step execution is not waiting for human input` (look up the run's current
+waiting execution and attach to it instead).
+
+```bash
+vtb artifact add approval.json --body '{"approved": true}' \
+  --subject-type step_execution --subject-id <waiting-execution-uuid> \
+  --logical-name approval
+```
+
 Pass provenance separately from the artifact body. Use either an inline JSON
 object or a JSON file, never both. Metadata must contain the current Sacrum
 envelope: `version: 1`, non-empty `content_kind`, `format`, `origin`, and

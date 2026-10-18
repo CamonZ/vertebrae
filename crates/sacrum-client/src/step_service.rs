@@ -640,6 +640,41 @@ mod tests {
     }
 
     #[test]
+    fn test_response_to_step_decodes_human_input_config() {
+        let step = SacrumStepService::response_to_step(&step_response(
+            Some("human_input"),
+            json!({
+                "version": 1,
+                "instructions": "Approve {{ task.title }}?",
+                "artifact": "approval",
+                "output_schema": {"type": "object", "required": ["approved"]}
+            }),
+        ))
+        .unwrap();
+        assert_eq!(
+            step.config,
+            Some(StepConfig::HumanInput(vertebrae_core::HumanInputConfig {
+                version: 1,
+                instructions: Some("Approve {{ task.title }}?".to_string()),
+                artifact: Some("approval".to_string()),
+                output_schema: Some(json!({"type": "object", "required": ["approved"]})),
+            }))
+        );
+
+        let step = SacrumStepService::response_to_step(&step_response(
+            Some("human_input"),
+            json!({"version": 1, "instructions": null, "artifact": null, "output_schema": null}),
+        ))
+        .unwrap();
+        assert_eq!(
+            step.config,
+            Some(StepConfig::HumanInput(
+                vertebrae_core::HumanInputConfig::default()
+            ))
+        );
+    }
+
+    #[test]
     fn test_response_to_step_null_config_for_config_less_types() {
         for step_type in ["human_input", "stop", "finish"] {
             let step = SacrumStepService::response_to_step(&step_response(

@@ -5,20 +5,60 @@
 
 use serde::Deserialize;
 use thiserror::Error;
-use vertebrae_core::error::ServiceError;
+use vertebrae_core::error::{HumanInputRejection, ServiceError};
 
 /// Sacrum client result type
 pub type SacrumClientResult<T> = Result<T, SacrumClientError>;
 
 /// One structured error item from a GraphQL `errors` array.
 ///
-/// `extensions` is kept verbatim so callers can classify errors by
-/// structured fields instead of parsing formatted message strings.
+/// `code` and `extensions` are kept verbatim so callers can classify errors
+/// by structured fields instead of parsing formatted message strings.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GraphqlErrorItem {
     pub message: String,
     pub path: Option<Vec<String>>,
+    /// Machine-readable error code Sacrum sets beside `message`.
+    #[serde(default)]
+    pub code: Option<String>,
     pub extensions: Option<serde_json::Value>,
+}
+
+/// Prefix Sacrum puts before each `invalid_human_input` violation.
+const SCHEMA_VIOLATION_PREFIX: &str = "artifact does not satisfy the output_schema: ";
+
+/// Classify the gate errors Sacrum returns when an artifact attached to a
+/// waiting `human_input` execution is rejected.
+fn human_input_rejection(items: &[GraphqlErrorItem]) -> Option<HumanInputRejection> {
+    let with_code = |code: &'static str| {
+        items
+            .iter()
+            .filter(move |item| item.code.as_deref() == Some(code))
+    };
+    if let Some(item) = with_code("human_input_execution_not_waiting").next() {
+        return Some(HumanInputRejection::NotWaiting {
+            message: item.message.clone(),
+        });
+    }
+    if let Some(item) = with_code("invalid_human_input_json").next() {
+        let message = item.message.as_str();
+        return Some(HumanInputRejection::InvalidJson {
+            message: message
+                .strip_prefix("artifact body is not valid JSON: ")
+                .unwrap_or(message)
+                .to_string(),
+        });
+    }
+    let violations: Vec<String> = with_code("invalid_human_input")
+        .map(|item| {
+            let message = item.message.as_str();
+            message
+                .strip_prefix(SCHEMA_VIOLATION_PREFIX)
+                .unwrap_or(message)
+                .to_string()
+        })
+        .collect();
+    (!violations.is_empty()).then_some(HumanInputRejection::SchemaViolations { violations })
 }
 
 /// Errors that can occur when communicating with the Sacrum API
@@ -58,6 +98,11 @@ impl From<SacrumClientError> for ServiceError {
             } => ServiceError::TaskNotFound {
                 task_id: format!("API error (404): {message}"),
             },
+            SacrumClientError::GraphqlError { items, .. }
+                if let Some(rejection) = human_input_rejection(&items) =>
+            {
+                ServiceError::HumanInputRejected(rejection)
+            }
             SacrumClientError::GraphqlError { messages, .. } => {
                 let msg = messages.join("; ");
                 if msg.contains("not_found") || msg.contains("Not Found") {
@@ -189,6 +234,7 @@ mod tests {
             items: vec![GraphqlErrorItem {
                 message: "has already been taken".to_string(),
                 path: Some(vec!["createDaemon".to_string()]),
+                code: None,
                 extensions: Some(serde_json::json!({ "field": "name" })),
             }],
             messages: vec!["has already been taken".to_string()],
@@ -238,6 +284,74 @@ mod tests {
         let service_error: ServiceError = error.into();
         assert!(matches!(service_error, ServiceError::InvalidInput(_)));
         assert!(service_error.to_string().contains("validation failed"));
+    }
+
+    fn gate_error(items: &[(&str, &str)]) -> SacrumClientError {
+        let items: Vec<GraphqlErrorItem> = items
+            .iter()
+            .map(|(code, message)| {
+                serde_json::from_value(serde_json::json!({"message": message, "code": code}))
+                    .unwrap()
+            })
+            .collect();
+        let messages = items.iter().map(|item| item.message.clone()).collect();
+        SacrumClientError::GraphqlError {
+            items,
+            messages,
+            message: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_human_input_gate_codes_convert_to_distinct_rejections() {
+        let error: ServiceError = gate_error(&[
+            (
+                "invalid_human_input",
+                "artifact does not satisfy the output_schema: #/approved: Type mismatch.",
+            ),
+            (
+                "invalid_human_input",
+                "artifact does not satisfy the output_schema: #: Required property reason was not present.",
+            ),
+        ])
+        .into();
+        let ServiceError::HumanInputRejected(HumanInputRejection::SchemaViolations { violations }) =
+            &error
+        else {
+            panic!("expected schema violations, got {error:?}");
+        };
+        assert_eq!(
+            violations,
+            &[
+                "#/approved: Type mismatch.",
+                "#: Required property reason was not present."
+            ]
+        );
+
+        let error: ServiceError = gate_error(&[(
+            "invalid_human_input_json",
+            "artifact body is not valid JSON: unexpected byte at position 0: 0x79 (\"y\")",
+        )])
+        .into();
+        assert!(matches!(
+            &error,
+            ServiceError::HumanInputRejected(HumanInputRejection::InvalidJson { message })
+                if message == "unexpected byte at position 0: 0x79 (\"y\")"
+        ));
+
+        let error: ServiceError = gate_error(&[(
+            "human_input_execution_not_waiting",
+            "step execution is not waiting for human input",
+        )])
+        .into();
+        assert!(matches!(
+            &error,
+            ServiceError::HumanInputRejected(HumanInputRejection::NotWaiting { message })
+                if message == "step execution is not waiting for human input"
+        ));
+
+        let error: ServiceError = gate_error(&[("other_code", "something else")]).into();
+        assert!(matches!(error, ServiceError::InvalidInput(_)));
     }
 
     #[test]

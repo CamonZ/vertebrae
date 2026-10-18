@@ -1,6 +1,7 @@
 pub mod artifact;
 pub mod assertions;
 pub mod dependencies;
+pub mod human_input;
 pub mod refs;
 pub mod sections;
 pub mod setup;
