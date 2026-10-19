@@ -7,8 +7,9 @@ Use this when: creating a new workflow or factory.
 1. **Workflows**: `vtb workflow add` for each, with a shared `--factory-name`.
 2. **Workflow transitions**: `vtb workflow transition add <from> <to> --label <l>`
    for every cross-workflow path, with `--target-step` once steps exist if the entry is not the first step.
-3. **Steps**: `vtb step add` per workflow, with `--order`, type, `--harness` for
-   inference steps, and config. Author [execute](steps/execute/settings.md) with
+3. **Steps**: `vtb step add` per workflow, with `--order`, type, the required
+   `--harness` for every non-execute step, and config. Author
+   [execute](steps/execute/settings.md) with
    `--step-type execute --script @file.rhai --output-schema <JSON>` and no harness.
    Give every step that feeds a route an output schema (structured_inference
    steps get one from their questions).

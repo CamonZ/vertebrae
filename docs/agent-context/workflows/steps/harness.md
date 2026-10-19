@@ -9,9 +9,9 @@ Use this when: the user says "run this on Codex/Claude/TypeSafe", or a step fail
 - It picks the runtime only. Model, provider and request settings stay in
   their own config (`agent_config` for llm_inference, `config` for
   structured_inference).
-- Supported pairs: `claude` and `codex` run `llm_inference`; `typesafe` runs
-  `structured_inference`. Backend-side steps (route, wait_children, stop,
-  finish, human_input) ignore it.
+- Supported inference pairs: `claude` and `codex` run `llm_inference`;
+  `typesafe` runs `structured_inference`. Backend-side steps still require and
+  store a harness, but do not dispatch through a provider runtime.
 - [Execute](execute/index.md) runs Rhai directly and must omit `harness`,
   `agent_config`, provider, and model settings. Rhai is not a harness selector
   and requires no provider credentials.

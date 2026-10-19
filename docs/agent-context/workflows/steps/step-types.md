@@ -13,7 +13,7 @@ Use this when: designing a workflow or explaining a step.
 | Run a task's children and continue when they finish | wait_children |
 | End this run here and continue from the next step later | stop |
 | Mark the task done | finish |
-| Wait for a person | human_input (limited, see its doc) |
+| Wait for a person to submit validated input | human_input |
 
 ## Comparison
 | Type | Handled by | Output | Outgoing edges |
@@ -25,7 +25,7 @@ Use this when: designing a workflow or explaining a step.
 | wait_children | backend | `wait_children_status` snapshot | 1 |
 | stop | backend | none | 1 |
 | finish | backend | none | 0 |
-| human_input | backend | none | 1 |
+| human_input | backend (waiting) | artifact JSON validated by output_schema | 1 |
 
 ## Pattern
 Gather with llm_inference, judge with structured_inference, decide with route.
