@@ -18,7 +18,7 @@ Every step except an `execute` step requires `--harness`, including route,
 stop, and finish. Build this with a `vtb` binary from current `master`; older
 installed binaries may lack the human-input authoring flags.
 
-- [Configuration](configuration.md): gate schema, inference questions, state, and rendered instructions.
+- [Configuration](configuration.md): gate schema, inference questions, state, role, and rendered question.
   Load when: adapting the answer schema, evaluator inputs, or loop-back template.
 - [Route decisions](routes.md): triage and verdict JSON with concrete target IDs.
   Load when: route rules, handoff structure, predecessor schema validation.

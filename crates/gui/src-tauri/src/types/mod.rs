@@ -848,17 +848,21 @@ pub struct WaitChildrenStepConfig {
     pub session: Option<SessionDirective>,
 }
 
-/// Config of a `human_input` step. On a waiting execution `instructions` is
+/// Config of a `human_input` step. On a waiting execution `question` is
 /// already rendered.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct HumanInputStepConfig {
     pub version: i32,
-    /// Instructions shown to the human while the gate waits
-    pub instructions: Option<String>,
+    /// How the resolving agent behaves; null means the generic gate role
+    pub role: Option<String>,
+    /// What the gate asks while it waits
+    pub question: Option<String>,
     /// Logical name of the artifact that resolves the gate
     pub artifact: Option<String>,
     /// JSON Schema the response must satisfy; null accepts any response
     pub output_schema: Option<serde_json::Value>,
+    /// Top-level properties of `output_schema` in schema order
+    pub fields: Vec<crate::local_chat::gate::GateField>,
 }
 
 /// A step's `step_type`-specific configuration, serialized as the bare
@@ -916,8 +920,14 @@ impl From<vertebrae_core::StepConfig> for StepConfig {
             vertebrae_core::StepConfig::HumanInput(config) => {
                 StepConfig::HumanInput(HumanInputStepConfig {
                     version: config.version,
-                    instructions: config.instructions,
+                    role: config.role,
+                    question: config.question,
                     artifact: config.artifact,
+                    fields: config
+                        .output_schema
+                        .as_ref()
+                        .map(crate::local_chat::gate::gate_fields)
+                        .unwrap_or_default(),
                     output_schema: config.output_schema,
                 })
             }
@@ -3123,8 +3133,9 @@ mod tests {
             "status": "waiting",
             "config": {
                 "__type__": "human_input",
-                "version": 1,
-                "instructions": "Approve Ship parser?",
+                "version": 2,
+                "role": "Be a release manager",
+                "question": "Approve Ship parser?",
                 "artifact": "approval",
                 "output_schema": {"type": "object", "required": ["approved"]}
             }
@@ -3133,7 +3144,8 @@ mod tests {
         let Some(StepConfig::HumanInput(config)) = &exec.config else {
             panic!("expected human_input config, got {:?}", exec.config);
         };
-        assert_eq!(config.instructions.as_deref(), Some("Approve Ship parser?"));
+        assert_eq!(config.role.as_deref(), Some("Be a release manager"));
+        assert_eq!(config.question.as_deref(), Some("Approve Ship parser?"));
         assert_eq!(config.artifact.as_deref(), Some("approval"));
         assert_eq!(
             config.output_schema,
@@ -3141,7 +3153,7 @@ mod tests {
         );
         let serialized = serde_json::to_value(&exec).unwrap();
         assert_eq!(serialized["config"]["artifact"], "approval");
-        assert_eq!(serialized["config"]["instructions"], "Approve Ship parser?");
+        assert_eq!(serialized["config"]["question"], "Approve Ship parser?");
     }
 
     // ─── SessionLog Conversion Tests ────────────────────────────────

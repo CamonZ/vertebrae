@@ -323,6 +323,10 @@ pub struct CompactionEvent {
 
 /// Every event payload in the V1 neutral contract.
 #[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "payloads are public contract types matched by value across crates; boxing ControlRequested would change every producer and consumer"
+)]
 pub enum HarnessEventPayloadV1 {
     SessionStarted(SessionStarted),
     SessionTitle(SessionTitle),

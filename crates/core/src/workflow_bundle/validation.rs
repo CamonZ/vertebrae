@@ -256,7 +256,7 @@ fn validate_step_config(
         ));
     }
     if let Some(version) = object.get("version")
-        && version.as_i64() != Some(crate::models::STEP_CONFIG_VERSION as i64)
+        && version.as_i64() != Some(step.step_type.config_version() as i64)
     {
         return Err(ManifestValidationError::new(
             format!("{path}.version"),

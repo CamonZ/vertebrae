@@ -59,7 +59,7 @@ function attempt(
     started_at: at(startedAt),
     completed_at: completedAt === null ? null : at(completedAt),
     config: {
-      instructions: `Ship v2? (${id})`,
+      question: `Ship v2? (${id})`,
       artifact: "approval",
       output_schema: null,
     },
@@ -102,7 +102,7 @@ async function idleGateChat(): Promise<string> {
     run: { id: "run-1" } as TaskRun,
     execution: { id: "gate-1" } as StepExecution,
     stepName: "approve",
-    prompt: "Ship v2? (gate-1)",
+    question: "Ship v2? (gate-1)",
     outputSchema: null,
     artifact: "approval",
   });
@@ -161,7 +161,7 @@ describe("syncGateChatsForRun", () => {
       backendSessionId,
       expect.objectContaining({
         execution_id: "gate-2",
-        instructions: "Ship v2? (gate-2)",
+        question: "Ship v2? (gate-2)",
       })
     );
     const session = useChatStore.getState().sessions[sessionId];

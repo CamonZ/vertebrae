@@ -39,7 +39,7 @@ function context(
     run: { id: "run-1" } as TaskRun,
     execution: { id: "exec-1" } as StepExecution,
     stepName: "approve",
-    prompt: "Ship v2?",
+    question: "Ship v2?",
     outputSchema: null,
     artifact: "approval",
     attempt: 1,
@@ -75,7 +75,8 @@ describe("resolveGateInChat", () => {
           step_name: "approve",
           execution_id: "exec-1",
           artifact: "approval",
-          instructions: "Ship v2?",
+          role: null,
+          question: "Ship v2?",
           output_schema: null,
           revision: null,
         },
@@ -153,7 +154,7 @@ describe("resolveGateInChat", () => {
     const again = await resolveGateInChat(
       context({
         execution: { id: "exec-2" } as StepExecution,
-        prompt: "Ship v3?",
+        question: "Ship v3?",
       })
     );
 
@@ -164,7 +165,8 @@ describe("resolveGateInChat", () => {
         session.backendSessionId,
         expect.objectContaining({
           execution_id: "exec-2",
-          instructions: "Ship v3?",
+          role: null,
+          question: "Ship v3?",
         })
       )
     );
@@ -186,7 +188,7 @@ describe("refreshGateChat", () => {
     step_name: "approve",
     execution_id: "exec-2",
     artifact: "approval",
-    instructions: "Ship v2?",
+    question: "Ship v2?",
     output_schema: null,
   };
 

@@ -56,7 +56,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -103,7 +104,8 @@ mod step_create_tests {
             persistence_options: Some(persistence.to_string()),
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         add.execute(services.steps()).await.unwrap();
@@ -154,12 +156,14 @@ mod step_create_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         }
         .execute(services.steps())
@@ -210,12 +214,14 @@ mod step_create_tests {
             clear_persistence_options: true,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         }
         .execute(services.steps())
@@ -270,7 +276,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -324,7 +331,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -373,7 +381,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -433,7 +442,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -493,7 +503,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -545,7 +556,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -604,7 +616,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -669,7 +682,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -727,7 +741,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -787,7 +802,8 @@ mod step_create_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -861,7 +877,8 @@ mod step_list_tests {
                 persistence_options: None,
                 route_config: None,
                 children_session: None,
-                instructions: None,
+                role: None,
+                question: None,
                 artifact: None,
             };
             cmd.execute(services.steps()).await.unwrap();
@@ -923,7 +940,8 @@ mod step_list_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1012,7 +1030,8 @@ mod step_list_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1132,7 +1151,8 @@ mod step_show_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1191,7 +1211,8 @@ mod step_show_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1248,7 +1269,8 @@ mod step_show_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1314,7 +1336,8 @@ mod step_show_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1369,7 +1392,8 @@ mod step_show_tests {
             ),
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1396,8 +1420,9 @@ mod step_show_tests {
         assert_eq!(
             json["config"],
             serde_json::json!({
-                "version": 1,
-                "instructions": null,
+                "version": 2,
+                "role": null,
+                "question": null,
                 "artifact": null,
                 "output_schema": null
             })
@@ -1457,7 +1482,8 @@ mod step_update_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1497,12 +1523,14 @@ mod step_update_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -1548,7 +1576,8 @@ mod step_update_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         let error = add.execute(services.steps()).await.unwrap_err();
@@ -1615,7 +1644,8 @@ mod step_update_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1655,12 +1685,14 @@ mod step_update_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -1709,7 +1741,8 @@ mod step_update_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1749,12 +1782,14 @@ mod step_update_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -1803,7 +1838,8 @@ mod step_update_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1843,12 +1879,14 @@ mod step_update_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -1905,7 +1943,8 @@ mod step_update_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -1945,12 +1984,14 @@ mod step_update_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -1999,7 +2040,8 @@ mod step_update_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -2039,12 +2081,14 @@ mod step_update_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -2106,7 +2150,8 @@ mod step_update_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -2146,12 +2191,14 @@ mod step_update_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -2199,7 +2246,8 @@ mod step_update_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -2238,12 +2286,14 @@ mod step_update_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -2313,7 +2363,8 @@ mod step_dispatcher_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         }));
 
@@ -2375,7 +2426,8 @@ mod step_delete_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -2451,7 +2503,8 @@ mod step_delete_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -2506,7 +2559,8 @@ mod step_delete_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -2570,7 +2624,8 @@ mod step_prompt_and_agent_config_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -2622,7 +2677,8 @@ mod step_prompt_and_agent_config_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -2673,7 +2729,8 @@ mod step_prompt_and_agent_config_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -2736,7 +2793,8 @@ mod step_prompt_and_agent_config_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -2789,7 +2847,8 @@ mod step_prompt_and_agent_config_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
@@ -2828,12 +2887,14 @@ mod step_prompt_and_agent_config_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -2880,7 +2941,8 @@ mod step_prompt_and_agent_config_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
@@ -2920,12 +2982,14 @@ mod step_prompt_and_agent_config_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -2972,7 +3036,8 @@ mod step_prompt_and_agent_config_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
@@ -3011,12 +3076,14 @@ mod step_prompt_and_agent_config_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         };
 
@@ -3069,7 +3136,8 @@ mod step_prompt_and_agent_config_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         };
 
@@ -3149,7 +3217,8 @@ mod provider_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         }
     }
@@ -3194,12 +3263,14 @@ mod provider_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         }
     }
@@ -4045,7 +4116,8 @@ mod route_config_tests {
             persistence_options: None,
             route_config,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         }
     }
@@ -4086,11 +4158,13 @@ mod route_config_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         }
     }
@@ -4337,7 +4411,8 @@ mod route_config_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         }
         .execute(services.steps())
@@ -4432,7 +4507,8 @@ mod structured_inference_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         }
     }
@@ -4472,12 +4548,14 @@ mod structured_inference_tests {
             clear_persistence_options: false,
             route_config: None,
             children_session: None,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
             clear_prompt: false,
             clear_route_config: false,
             clear_children_session: false,
-            clear_instructions: false,
+            clear_role: false,
+            clear_question: false,
             clear_artifact: false,
         }
     }
@@ -5217,7 +5295,8 @@ mod wait_children_session_tests {
             persistence_options: None,
             route_config: None,
             children_session: session,
-            instructions: None,
+            role: None,
+            question: None,
             artifact: None,
         }
     }
@@ -5396,7 +5475,8 @@ mod human_input_config_tests {
             persistence_options: None,
             route_config: None,
             children_session: None,
-            instructions: Some("Approve {{ task.title }}?".to_string()),
+            role: Some("Review as a release manager".to_string()),
+            question: Some("Approve {{ task.title }}?".to_string()),
             artifact: Some("approval".to_string()),
         }
     }
@@ -5440,8 +5520,9 @@ mod human_input_config_tests {
         assert_eq!(
             gate_config(&services).await,
             HumanInputConfig {
-                version: 1,
-                instructions: Some("Approve {{ task.title }}?".to_string()),
+                version: 2,
+                role: Some("Review as a release manager".to_string()),
+                question: Some("Approve {{ task.title }}?".to_string()),
                 artifact: Some("approval".to_string()),
                 output_schema: Some(schema.clone()),
             }
@@ -5449,7 +5530,11 @@ mod human_input_config_tests {
 
         let human = show(&services).await;
         assert!(
-            human.contains("Instructions:  Approve {{ task.title }}?"),
+            human.contains("Role:          Review as a release manager"),
+            "{human}"
+        );
+        assert!(
+            human.contains("Question:      Approve {{ task.title }}?"),
             "{human}"
         );
         assert!(human.contains("Artifact:      approval"), "{human}");
@@ -5466,27 +5551,29 @@ mod human_input_config_tests {
         assert_eq!(json["config"]["artifact"], "approval");
         assert_eq!(json["config"]["output_schema"], schema);
 
-        let path =
-            std::env::temp_dir().join(format!("vtb-instructions-{}.md", uuid::Uuid::now_v7()));
+        let path = std::env::temp_dir().join(format!("vtb-question-{}.md", uuid::Uuid::now_v7()));
         std::fs::write(&path, "Review the plan").unwrap();
         let mut update = update_command("gate");
-        update.instructions = Some(format!("@{}", path.display()));
+        update.question = Some(format!("@{}", path.display()));
         update.artifact = Some("plan_review".to_string());
         update.execute(services.steps()).await.unwrap();
         std::fs::remove_file(&path).unwrap();
         let config = gate_config(&services).await;
-        assert_eq!(config.instructions.as_deref(), Some("Review the plan"));
+        assert_eq!(config.question.as_deref(), Some("Review the plan"));
+        assert_eq!(config.role.as_deref(), Some("Review as a release manager"));
         assert_eq!(config.artifact.as_deref(), Some("plan_review"));
         assert_eq!(config.output_schema, Some(schema));
 
         let mut update = update_command("gate");
-        update.clear_instructions = true;
+        update.clear_role = true;
+        update.clear_question = true;
         update.clear_artifact = true;
         update.clear_output_schema = true;
         update.execute(services.steps()).await.unwrap();
         assert_eq!(gate_config(&services).await, HumanInputConfig::default());
         let human = show(&services).await;
-        assert!(human.contains("Instructions:  (none)"), "{human}");
+        assert!(human.contains("Role:          (none)"), "{human}");
+        assert!(human.contains("Question:      (none)"), "{human}");
         assert!(human.contains("Artifact:      (none)"), "{human}");
     }
 

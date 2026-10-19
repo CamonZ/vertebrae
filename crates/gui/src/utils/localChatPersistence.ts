@@ -126,8 +126,8 @@ function normalizeGateBinding(value: unknown): LocalChatGateBinding | null {
     step_name: gate.step_name,
     execution_id: gate.execution_id,
     artifact: gate.artifact,
-    instructions:
-      typeof gate.instructions === "string" ? gate.instructions : null,
+    role: typeof gate.role === "string" ? gate.role : null,
+    question: typeof gate.question === "string" ? gate.question : null,
     output_schema: (gate.output_schema ?? null) as JsonValue | null,
   };
 }

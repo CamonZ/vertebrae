@@ -177,7 +177,8 @@ describe("resolveHumanInputGate", () => {
     expect(gate?.execution?.id).toBe("e-1");
     expect(gate?.stepName).toBe("approval");
     // Without a rendered config there is no question, schema or artifact.
-    expect(gate?.prompt).toBeNull();
+    expect(gate?.question).toBeNull();
+    expect(gate?.role).toBeNull();
     expect(gate?.outputSchema).toBeNull();
     expect(gate?.artifact).toBeNull();
   });
@@ -189,14 +190,22 @@ describe("resolveHumanInputGate", () => {
       id: "e-1",
       step_name: "approval",
       config: {
-        version: 1,
-        instructions: "Ship v2?",
+        version: 2,
+        role: "Release manager",
+        question: "Ship v2?",
         artifact: "decision",
         output_schema: schema,
+        fields: [
+          { name: "decision", required: true, type: "string", question: null },
+        ],
       },
     });
     const gate = resolveHumanInputGate(run, [exec]);
-    expect(gate?.prompt).toBe("Ship v2?");
+    expect(gate?.fields).toEqual([
+      { name: "decision", required: true, type: "string", question: null },
+    ]);
+    expect(gate?.question).toBe("Ship v2?");
+    expect(gate?.role).toBe("Release manager");
     expect(gate?.outputSchema).toEqual(schema);
     expect(gate?.artifact).toBe("decision");
   });

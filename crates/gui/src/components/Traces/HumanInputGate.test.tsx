@@ -66,11 +66,13 @@ function makeContext(
       "stepName" in overrides
         ? (overrides.stepName as string | null)
         : (EXEC.step_name ?? null),
-    prompt:
-      "prompt" in overrides
-        ? (overrides.prompt as string | null)
+    role: "role" in overrides ? (overrides.role as string | null) : null,
+    question:
+      "question" in overrides
+        ? (overrides.question as string | null)
         : "**Approve** the change?",
     outputSchema: "outputSchema" in overrides ? overrides.outputSchema : null,
+    fields: overrides.fields ?? [],
     artifact:
       "artifact" in overrides ? (overrides.artifact as string | null) : null,
   };
@@ -151,14 +153,45 @@ describe("HumanInputGate", () => {
     ).toHaveLength(2);
   });
 
-  it("renders prompt content when expanded", async () => {
+  it("renders question content when expanded", async () => {
     const user = userEvent.setup();
     render(<HumanInputGate context={makeContext()} />);
     expect(
-      screen.queryByTestId("human-input-gate-prompt")
+      screen.queryByTestId("human-input-gate-question")
     ).not.toBeInTheDocument();
-    await user.click(screen.getByTestId("human-input-gate-prompt-toggle"));
-    expect(screen.getByTestId("human-input-gate-prompt")).toBeInTheDocument();
+    await user.click(screen.getByTestId("human-input-gate-question-toggle"));
+    expect(screen.getByTestId("human-input-gate-question")).toBeInTheDocument();
+  });
+
+  it("renders the role and the schema field list when expanded", async () => {
+    const user = userEvent.setup();
+    render(
+      <HumanInputGate
+        context={makeContext({
+          role: "You are a release manager.",
+          fields: [
+            {
+              name: "approved",
+              required: true,
+              type: "boolean",
+              question: "Should v2 ship?",
+            },
+            { name: "notes", required: false, type: "string", question: null },
+          ],
+        })}
+      />
+    );
+    await user.click(screen.getByTestId("human-input-gate-role-toggle"));
+    expect(screen.getByTestId("human-input-gate-role")).toHaveTextContent(
+      "You are a release manager."
+    );
+    await user.click(screen.getByTestId("human-input-gate-fields-toggle"));
+    const fields = screen.getAllByTestId("human-input-gate-field");
+    expect(fields).toHaveLength(2);
+    expect(fields[0]).toHaveTextContent(
+      "approved (required, boolean): Should v2 ship?"
+    );
+    expect(fields[1]).toHaveTextContent("notes (optional, string)");
   });
 
   it("renders the output_schema as JSON when expanded", async () => {

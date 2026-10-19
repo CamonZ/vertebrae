@@ -61,7 +61,7 @@ vtb step add "Classify" -w <workflow-id> --harness typesafe \
 
 # Add a human-input gate resolved by attaching an "approval" artifact
 vtb step add "Needs Input" -w <workflow-id> --harness claude --step-type human_input \
-  --instructions @approval-instructions.md --artifact approval \
+  --role @approval-role.md --question @approval-question.md --artifact approval \
   --output-schema '{"type":"object","required":["approved"],"properties":{"approved":{"type":"boolean"}}}'
 
 # Add a Rhai transformation without a provider harness
@@ -187,7 +187,7 @@ The config lines depend on the step type: `structured_inference` steps show
 `Provider`, `Model`, `State`, and `Fields`; `route` steps show `Route Config`;
 `wait_children` steps show `Output Schema` and `Children Session` (the fork
 set with `--children-session fork:<step>`, or `(none)`); `human_input` steps
-show `Instructions`, `Artifact`, and `Output Schema`; `execute` definitions show `Script`
+show `Role`, `Question`, `Artifact`, and `Output Schema`; `execute` definitions show `Script`
 and `Output Schema`; config-less types show
 `Config: (none)`.
 
@@ -246,8 +246,10 @@ request with no property changes before reporting success.
 | `--clear-output-schema` | | Remove an optional output schema; execute's required schema cannot be cleared |
 | `--route-config <JSON>` | | Replace the opaque deterministic route configuration |
 | `--clear-route-config` | | Remove the route configuration, leaving a route draft |
-| `--instructions <TEXT\|@PATH>` | | Replace a `human_input` step's instructions template |
-| `--clear-instructions` | | Remove the `human_input` instructions |
+| `--role <TEXT\|@PATH>` | | Replace a `human_input` step's role (stored verbatim, never rendered) |
+| `--clear-role` | | Remove the `human_input` role; the generic gate role applies |
+| `--question <TEXT\|@PATH>` | | Replace a `human_input` step's question template |
+| `--clear-question` | | Remove the `human_input` question |
 | `--artifact <NAME>` | | Replace the logical name of the artifact that resolves a `human_input` step |
 | `--clear-artifact` | | Remove the `human_input` artifact name |
 | `--persistence-options <JSON>` | | Replace Sacrum's persistence configuration |
@@ -362,7 +364,7 @@ The CLI exposes these types through `--step-type` and their type-specific config
 | `execute` | Runs a Rhai JSON transformation in the daemon, which can read tasks and named artifacts in its project through `vtb::tasks` and `vtb::artifacts`, create, update, archive and delete tasks and edit their content and relationships through `vtb::tasks`, write and delete named artifacts through `vtb::artifacts`, send Markdown notifications to the project through `vtb::notifications`, and run local commands through `vtb::cmd`, validates its returned JSON, and completes without a provider harness. Create with `--script` and `--output-schema`. |
 | `route` | Sacrum-local deterministic control step. Evaluates `route_config`; it does not dispatch a daemon prompt or use `output_schema` as a routing program. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
-| `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. Configure it with `--instructions` (a template rendered when the run parks, inline or `@path`), `--artifact` (the logical name that resolves the gate), and `--output-schema` (the JSON Schema the response must satisfy); all are optional. |
+| `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. Configure it with `--role` (the resolving agent's role, stored verbatim, inline or `@path`), `--question` (a template rendered when the run parks, inline or `@path`), `--artifact` (the logical name that resolves the gate), and `--output-schema` (the JSON Schema the response must satisfy); all are optional. |
 | `stop` | Run boundary. Ends the current TaskRun as `stopped` without completing the task or dispatching the step; it must have exactly one outgoing transition, which a later TaskRun follows. |
 | `finish` | Promptless terminal step. Completes the task immediately, has no outgoing transitions, and is never dispatched to a daemon executor. |
 

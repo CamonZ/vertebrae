@@ -745,7 +745,8 @@ fn gate() -> crate::local_chat::LocalChatGateBinding {
         step_name: "approve".into(),
         execution_id: "exec-1".into(),
         artifact: "approval".into(),
-        instructions: None,
+        role: None,
+        question: None,
         output_schema: None,
         revision: None,
     }
@@ -803,7 +804,8 @@ async fn refreshing_a_gate_rebinds_it_and_sends_the_updated_hidden_protocol() {
 
     let updated = crate::local_chat::LocalChatGateBinding {
         execution_id: "exec-2".into(),
-        instructions: Some("Updated question?".into()),
+        role: None,
+        question: Some("Updated question?".into()),
         ..gate()
     };
     let sent = manager

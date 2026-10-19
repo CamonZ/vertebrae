@@ -751,7 +751,8 @@ fn gate_binding() -> LocalChatGateBinding {
         step_name: "approve".into(),
         execution_id: "exec-1".into(),
         artifact: "approval".into(),
-        instructions: None,
+        role: None,
+        question: None,
         output_schema: None,
         revision: None,
     }
