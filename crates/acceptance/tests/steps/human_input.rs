@@ -167,6 +167,7 @@ async fn sacrum_stores_gate_config(
             question: Some(question),
             artifact: Some(artifact),
             output_schema: Some(approval_schema()),
+            draftable: false,
         }
     );
 }
@@ -183,6 +184,7 @@ async fn sacrum_stores_cleared_gate_config(world: &mut SmokeWorld, name: String)
             question: None,
             artifact: None,
             output_schema: Some(approval_schema()),
+            draftable: false,
         }
     );
 }
@@ -260,6 +262,9 @@ async fn waiting_execution_carries_rendered_config(
             question: Some(question),
             artifact: Some(artifact),
             output_schema: Some(approval_schema()),
+            // The approval schema is booleans and strings, so Sacrum
+            // accepts it field by field.
+            draftable: true,
         }))
     );
 }
@@ -287,6 +292,16 @@ async fn attach_to_waiting_execution(world: &mut SmokeWorld, body: String, logic
     {
         world.track_artifact(id);
     }
+}
+
+/// Record answers in the waiting gate's draft, as a draftable gate chat's
+/// agent does.
+#[when(expr = "I set the waiting gate's draft to {string}")]
+async fn set_waiting_gate_draft(world: &mut SmokeWorld, values: String) {
+    let execution_id = world.resolve_vars("<step_execution_id>");
+    world
+        .run_vtb(&["gate", "set", &execution_id, "--values", &values])
+        .await;
 }
 
 #[then(expr = "the TaskRun {string} should reach status {string}")]

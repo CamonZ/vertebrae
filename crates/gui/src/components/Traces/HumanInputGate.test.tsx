@@ -1,14 +1,25 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { StepExecution, TaskRun } from "../../bindings";
 import { HumanInputGate } from "./HumanInputGate";
+import { queryClient } from "../../query";
 import type { HumanInputGateContext } from "../../utils/humanInputGate";
 
 const resolveGateInChat = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/useGateChat", () => ({
   useResolveGateInChat: () => resolveGateInChat,
 }));
+
+const draftCommands = vi.hoisted(() => ({
+  getHumanInputDraft: vi.fn(),
+  setHumanInputDraft: vi.fn(),
+  submitHumanInputDraft: vi.fn(),
+}));
+vi.mock("../../bindings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../bindings")>();
+  return { ...actual, commands: { ...actual.commands, ...draftCommands } };
+});
 
 const RUN: TaskRun = {
   id: "run-abc-123",
@@ -175,8 +186,21 @@ describe("HumanInputGate", () => {
               required: true,
               type: "boolean",
               question: "Should v2 ship?",
+              value_type: "boolean",
+              choices: null,
+              multiple: false,
+              format: null,
             },
-            { name: "notes", required: false, type: "string", question: null },
+            {
+              name: "notes",
+              required: false,
+              type: "string",
+              question: null,
+              value_type: "string",
+              choices: null,
+              multiple: false,
+              format: null,
+            },
           ],
         })}
       />
@@ -231,6 +255,186 @@ describe("HumanInputGate", () => {
     await user.click(resolve);
 
     expect(resolveGateInChat).toHaveBeenCalledWith(context);
+  });
+
+  describe("answering directly", () => {
+    const fields = [
+      {
+        name: "approved",
+        required: true,
+        type: "boolean",
+        question: "Ship it?",
+        value_type: "boolean",
+        choices: null,
+        multiple: false,
+        format: null,
+      },
+      {
+        name: "reason",
+        required: true,
+        type: "string",
+        question: "Why?",
+        value_type: "string",
+        choices: null,
+        multiple: false,
+        format: null,
+      },
+    ];
+    const draft = {
+      execution_id: EXEC.id!,
+      values: {},
+      missing: ["approved", "reason"],
+      invalid: [],
+      complete: false,
+    };
+
+    beforeEach(() => {
+      queryClient.clear();
+      vi.clearAllMocks();
+      draftCommands.getHumanInputDraft.mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+      draftCommands.setHumanInputDraft.mockResolvedValue({
+        status: "ok",
+        data: { ...draft, complete: true, missing: [] },
+      });
+      draftCommands.submitHumanInputDraft.mockResolvedValue({
+        status: "ok",
+        data: { ...draft, complete: true, missing: [] },
+      });
+    });
+
+    it("is not offered when the gate is not draftable", async () => {
+      render(
+        <HumanInputGate
+          context={makeContext({ artifact: "approval", fields })}
+        />
+      );
+
+      await waitFor(() =>
+        expect(draftCommands.getHumanInputDraft).toHaveBeenCalledWith(EXEC.id)
+      );
+      expect(
+        screen.queryByTestId("human-input-gate-answer-directly")
+      ).not.toBeInTheDocument();
+    });
+
+    it("keeps dirty edits while untouched answers follow realtime draft updates", async () => {
+      const user = userEvent.setup();
+      draftCommands.getHumanInputDraft.mockResolvedValue({
+        status: "ok",
+        data: draft,
+      });
+      const context = makeContext({ artifact: "approval", fields });
+      const { rerender } = render(<HumanInputGate context={context} />);
+      await user.click(
+        await screen.findByTestId("human-input-gate-answer-directly")
+      );
+      await user.type(screen.getByRole("textbox"), "Still typing");
+      draftCommands.getHumanInputDraft.mockResolvedValue({
+        status: "ok",
+        data: {
+          ...draft,
+          values: { approved: true, reason: "Agent's answer" },
+        },
+      });
+      rerender(
+        <HumanInputGate
+          context={{
+            ...context,
+            execution: { ...EXEC, draft_updated_at: "2026-10-20T12:00:00Z" },
+          }}
+        />
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("radio", { name: "Yes" })).toHaveAttribute(
+          "aria-checked",
+          "true"
+        )
+      );
+      expect(screen.getByRole("textbox")).toHaveValue("Still typing");
+    });
+
+    it("submits a draftable gate through its draft once every required field is filled", async () => {
+      const user = userEvent.setup();
+      draftCommands.getHumanInputDraft.mockResolvedValue({
+        status: "ok",
+        data: draft,
+      });
+      render(
+        <HumanInputGate
+          context={makeContext({ artifact: "approval", fields })}
+        />
+      );
+
+      await user.click(
+        await screen.findByTestId("human-input-gate-answer-directly")
+      );
+      const submit = screen.getByTestId("human-input-gate-answer-form-submit");
+      expect(submit).toBeDisabled();
+      await user.click(screen.getByRole("radio", { name: "Yes" }));
+      expect(submit).toBeDisabled();
+      await user.type(screen.getByRole("textbox"), "Tested");
+      expect(submit).toBeEnabled();
+      await user.click(submit);
+
+      await waitFor(() =>
+        expect(draftCommands.submitHumanInputDraft).toHaveBeenCalledWith(
+          EXEC.id
+        )
+      );
+      expect(draftCommands.setHumanInputDraft).toHaveBeenCalledWith(EXEC.id, {
+        approved: true,
+        reason: "Tested",
+      });
+      expect(
+        draftCommands.setHumanInputDraft.mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        draftCommands.submitHumanInputDraft.mock.invocationCallOrder[0]
+      );
+      expect(
+        screen.queryByTestId("human-input-gate-direct-answer")
+      ).not.toBeInTheDocument();
+    });
+
+    it("keeps the form open and shows why a submission failed", async () => {
+      const user = userEvent.setup();
+      draftCommands.getHumanInputDraft.mockResolvedValue({
+        status: "ok",
+        data: {
+          ...draft,
+          values: { approved: false, reason: "No" },
+          missing: [],
+        },
+      });
+      draftCommands.submitHumanInputDraft.mockResolvedValue({
+        status: "error",
+        error: {
+          message:
+            "Human input rejected: draft is missing required fields: reason",
+        },
+      });
+      render(
+        <HumanInputGate
+          context={makeContext({ artifact: "approval", fields })}
+        />
+      );
+
+      await user.click(
+        await screen.findByTestId("human-input-gate-answer-directly")
+      );
+      await user.click(
+        screen.getByTestId("human-input-gate-answer-form-submit")
+      );
+
+      expect(
+        await screen.findByTestId("human-input-gate-answer-form-error")
+      ).toHaveTextContent("draft is missing required fields: reason");
+      expect(
+        screen.getByTestId("human-input-gate-direct-answer")
+      ).toBeInTheDocument();
+    });
   });
 
   it("disables Resolve when no artifact resolves the gate", () => {

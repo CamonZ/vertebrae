@@ -9,8 +9,8 @@ use serde_json::json;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::execution_service::{ExecutionService, StopRunTarget};
 use vertebrae_core::models::{
-    ExecutionStatus, SessionLog, StepConfig, StepExecution, StepType, TaskRun, TaskRunStatus,
-    TaskRunTrace,
+    ExecutionStatus, HumanInputDraft, SessionLog, StepConfig, StepExecution, StepType, TaskRun,
+    TaskRunStatus, TaskRunTrace,
 };
 
 use crate::api_types::{
@@ -18,9 +18,10 @@ use crate::api_types::{
 };
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::executions::{
-    ACTIVE_RUN, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS, LIST_LOGS,
-    ORCHESTRATE_TASK, RUN_WORKFLOW, SESSION_LOG_FIELDS, STOP_ORCHESTRATOR, STOP_RUN, TASK_RUN,
-    TASK_RUN_FIELDS, TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS, UPDATE_EXECUTION,
+    ACTIVE_RUN, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, HUMAN_INPUT_DRAFT, LIST_EXECUTIONS,
+    LIST_LOGS, ORCHESTRATE_TASK, RUN_WORKFLOW, SESSION_LOG_FIELDS, SET_HUMAN_INPUT_DRAFT,
+    STOP_ORCHESTRATOR, STOP_RUN, SUBMIT_HUMAN_INPUT_DRAFT, TASK_RUN, TASK_RUN_FIELDS,
+    TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS, UPDATE_EXECUTION,
 };
 
 /// Response shape for mutations that return only an id
@@ -111,6 +112,7 @@ impl SacrumExecutionService {
             duration_ms: response.duration_ms.map(|v| v as u64),
             model_provider: response.model_provider.clone(),
             handoff: response.handoff.as_ref().map(json_value_to_string),
+            draft: response.draft.clone(),
         })
     }
 
@@ -406,6 +408,41 @@ impl ExecutionService for SacrumExecutionService {
 
         Ok(response.as_ref().map(Self::response_to_task_run))
     }
+
+    async fn human_input_draft(&self, execution_id: &str) -> ServiceResult<HumanInputDraft> {
+        let variables = json!({ "execution_id": execution_id });
+        Ok(self
+            .client
+            .execute(HUMAN_INPUT_DRAFT, variables, "human_input_draft")
+            .await?)
+    }
+
+    async fn set_human_input_draft(
+        &self,
+        execution_id: &str,
+        values: serde_json::Map<String, serde_json::Value>,
+    ) -> ServiceResult<HumanInputDraft> {
+        // The Json scalar parses its input from a string.
+        let values = serde_json::to_string(&values)
+            .map_err(|e| ServiceError::validation_failed(format!("Invalid draft values: {e}")))?;
+        let variables = json!({ "execution_id": execution_id, "values": values });
+        Ok(self
+            .client
+            .execute(SET_HUMAN_INPUT_DRAFT, variables, "set_human_input_draft")
+            .await?)
+    }
+
+    async fn submit_human_input_draft(&self, execution_id: &str) -> ServiceResult<HumanInputDraft> {
+        let variables = json!({ "execution_id": execution_id });
+        Ok(self
+            .client
+            .execute(
+                SUBMIT_HUMAN_INPUT_DRAFT,
+                variables,
+                "submit_human_input_draft",
+            )
+            .await?)
+    }
 }
 
 #[cfg(test)]
@@ -455,6 +492,7 @@ mod tests {
             cost: Some(0.05),
             duration_ms: Some(1500),
             handoff: Some(serde_json::json!({"to": "next-task"})),
+            draft: None,
             inserted_at: Some("2024-01-01T00:00:00Z".to_string()),
             updated_at: Some("2024-01-01T00:01:00Z".to_string()),
         };
@@ -508,6 +546,7 @@ mod tests {
             cost: None,
             duration_ms: None,
             handoff: None,
+            draft: None,
             inserted_at: None,
             updated_at: None,
         };
@@ -548,6 +587,7 @@ mod tests {
             cost: None,
             duration_ms: None,
             handoff: None,
+            draft: None,
             inserted_at: None,
             updated_at: None,
         };
@@ -592,6 +632,7 @@ mod tests {
             cost: None,
             duration_ms: None,
             handoff: None,
+            draft: None,
             inserted_at: None,
             updated_at: None,
         };
@@ -791,7 +832,16 @@ mod tests {
                 "role": "Review as a release manager",
                 "question": "Approve Ship parser?",
                 "artifact": "approval",
-                "output_schema": {"type": "object", "required": ["approved"]}
+                "output_schema": {"type": "object", "required": ["approved"]},
+                "draftable": true
+            },
+            "draft": {
+                "execution_id": "exec-gate",
+                "values": {"approved": "yes"},
+                "missing": [],
+                "invalid": [{"path": "/approved", "message": "Type mismatch."}],
+                "complete": false,
+                "updated_at": "2026-10-19T17:15:58.123456Z"
             }
         }))
         .unwrap();
@@ -805,7 +855,85 @@ mod tests {
                 question: Some("Approve Ship parser?".to_string()),
                 artifact: Some("approval".to_string()),
                 output_schema: Some(json!({"type": "object", "required": ["approved"]})),
+                draftable: true,
             }))
+        );
+        let draft = execution.draft.expect("draftable gates carry their draft");
+        assert_eq!(draft.values["approved"], json!("yes"));
+        assert_eq!(draft.invalid[0].path, "/approved");
+        assert!(!draft.complete);
+        assert!(draft.updated_at.is_some());
+        // Sacrum computes draftable; a read config reused as a definition
+        // must not send it back.
+        let definition = serde_json::to_value(execution.config.unwrap()).unwrap();
+        assert!(definition.get("draftable").is_none());
+    }
+
+    #[tokio::test]
+    async fn draft_operations_send_the_execution_and_string_encoded_values() {
+        let server = MockServer::start().await;
+        let draft = json!({
+            "execution_id": "11111111-1111-4111-8111-111111111111",
+            "values": {"approved": true},
+            "missing": ["reason"],
+            "invalid": [],
+            "complete": false,
+            "updated_at": "2026-10-19T17:15:58Z"
+        });
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "set_human_input_draft": draft,
+                    "human_input_draft": draft,
+                    "submit_human_input_draft": draft
+                }
+            })))
+            .mount(&server)
+            .await;
+        let service = create_wiremock_service(&server.uri());
+        let execution_id = "11111111-1111-4111-8111-111111111111";
+
+        let mut values = serde_json::Map::new();
+        values.insert("approved".to_string(), json!(true));
+        values.insert("reason".to_string(), serde_json::Value::Null);
+        let set = service
+            .set_human_input_draft(execution_id, values)
+            .await
+            .unwrap();
+        assert_eq!(set.missing, vec!["reason".to_string()]);
+        service.human_input_draft(execution_id).await.unwrap();
+        service
+            .submit_human_input_draft(execution_id)
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        let bodies: Vec<serde_json::Value> = requests
+            .iter()
+            .map(|request| serde_json::from_slice(&request.body).unwrap())
+            .collect();
+        assert!(
+            bodies[0]["query"]
+                .as_str()
+                .unwrap()
+                .contains("set_human_input_draft(execution_id: $execution_id, values: $values)")
+        );
+        assert_eq!(bodies[0]["variables"]["execution_id"], json!(execution_id));
+        let sent: serde_json::Value =
+            serde_json::from_str(bodies[0]["variables"]["values"].as_str().unwrap()).unwrap();
+        assert_eq!(sent, json!({"approved": true, "reason": null}));
+        assert!(
+            bodies[1]["query"]
+                .as_str()
+                .unwrap()
+                .contains("human_input_draft(execution_id")
+        );
+        assert!(
+            bodies[2]["query"]
+                .as_str()
+                .unwrap()
+                .contains("submit_human_input_draft(execution_id")
         );
     }
 

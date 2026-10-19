@@ -32,6 +32,14 @@ export const GATE_CHAT_KICKOFF = hiddenTurn(
 );
 
 /**
+ * Opening turn of a gate chat that replaces one whose session ended. The
+ * gate protocol carries the draft, so the agent continues from it.
+ */
+export const GATE_CHAT_RECOVERY_KICKOFF = hiddenTurn(
+  "The user returned to resolve the human input gate after the earlier chat ended. The answers recorded so far are in the gate protocol: briefly recap them and ask only for what is still needed."
+);
+
+/**
  * Binding for a gate chat, or null when the waiting execution cannot be
  * resolved by artifact: no execution ID, step name, or configured artifact.
  */
@@ -58,6 +66,7 @@ export function gateChatBinding(
     question: context.question,
     output_schema: jsonValue(context.outputSchema ?? null),
     revision,
+    fields: context.fields ?? null,
   };
 }
 
@@ -161,6 +170,93 @@ export function parseGateResolutionSubmission(
   }
 }
 
+/** Read the authoritative snapshot returned by `vtb --json gate submit`.
+ * Older human-readable results remain tool output rather than guessed cards.
+ */
+export function parseGateDraftSubmission(
+  output: string,
+  executionId: string,
+  artifact: string
+): GateResolutionSubmission | null {
+  try {
+    const snapshot: unknown = JSON.parse(output);
+    if (
+      !snapshot ||
+      typeof snapshot !== "object" ||
+      !("execution_id" in snapshot) ||
+      snapshot.execution_id !== executionId ||
+      !("complete" in snapshot) ||
+      snapshot.complete !== true ||
+      !("values" in snapshot) ||
+      !snapshot.values ||
+      typeof snapshot.values !== "object" ||
+      Array.isArray(snapshot.values) ||
+      !isJsonValue(snapshot.values)
+    )
+      return null;
+    return { artifact, executionId, values: snapshot.values };
+  } catch {
+    return null;
+  }
+}
+
+export type GateDraftCommand =
+  | { action: "set"; executionId: string; values: Record<string, JsonValue> }
+  | { action: "show" | "submit"; executionId: string };
+
+/** A `vtb gate set|show|submit` command, or null for any other command. */
+export function parseGateDraftCommand(
+  command: string
+): GateDraftCommand | null {
+  let words = shellWords(command);
+  if (
+    words.length >= 3 &&
+    /^(?:\/.*\/)?(?:ba|z|a)sh$/.test(words[0]) &&
+    (words[1] === "-c" || words[1] === "-lc")
+  ) {
+    words = shellWords(words.slice(2).join(" "));
+  }
+  words = words.filter((word, index) => index === 0 || word !== "--json");
+  if (!/(?:^|\/)vtb$/.test(words[0] ?? "") || words[1] !== "gate") return null;
+  const action = words[2];
+  let execution: string | null = null;
+  let values: string | null = null;
+  for (let index = 3; index < words.length; index++) {
+    const word = words[index];
+    if (word.startsWith("--values=")) {
+      values = word.slice("--values=".length);
+    } else if (word === "--values") {
+      values = words[++index] ?? null;
+    } else if (word.startsWith("--")) {
+      return null;
+    } else if (execution === null) {
+      execution = word;
+    } else {
+      return null;
+    }
+  }
+  if (execution === null) return null;
+  if (action === "show" || action === "submit") {
+    return values === null ? { action, executionId: execution } : null;
+  }
+  if (action !== "set" || values === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(values);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return isJsonValue(parsed)
+      ? {
+          action,
+          executionId: execution,
+          values: parsed as Record<string, JsonValue>,
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function shellWords(input: string): string[] {
   const words: string[] = [];
   let current = "";
@@ -170,17 +266,24 @@ function shellWords(input: string): string[] {
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
     if (escaped) {
+      // Inside double quotes a backslash escapes only a double quote,
+      // backslash, dollar sign or backtick.
+      if (quote === '"' && !'"\\$`'.includes(char)) current += "\\";
       current += char;
       escaped = false;
       continue;
     }
+    if (quote === "'") {
+      if (char === "'") quote = null;
+      else current += char;
+      continue;
+    }
     if (char === "\\") {
-      if (quote === "'") current += char;
       escaped = true;
       continue;
     }
-    if (quote === "'") {
-      if (char === "'") quote = null;
+    if (quote === '"') {
+      if (char === '"') quote = null;
       else current += char;
       continue;
     }
@@ -240,6 +343,10 @@ export interface GateChatStatus {
   attempt: number;
   /** The execution currently waiting at the gate, if any. */
   waitingExecutionId: string | null;
+  /** When the waiting execution started: the gate's latest (re-)entry. */
+  waitingSince: string | null;
+  /** When the waiting execution's draft last changed, if it is draftable. */
+  draftUpdatedAt: string | null;
 }
 
 const CLOSED_RUN_STATUSES = new Set<TaskRun["status"]>([
@@ -280,13 +387,21 @@ export function deriveGateChatStatus(
   const attempt = attempts.length;
 
   if (CLOSED_RUN_STATUSES.has(run.status)) {
-    return { phase: "closed", attempt, waitingExecutionId: null };
+    return {
+      phase: "closed",
+      attempt,
+      waitingExecutionId: null,
+      waitingSince: null,
+      draftUpdatedAt: null,
+    };
   }
   if (run.status === "waiting" && !latest.completed_at && latest.id) {
     return {
       phase: attempt > 1 ? "rejected" : "drafting",
       attempt,
       waitingExecutionId: latest.id,
+      waitingSince: latest.started_at || null,
+      draftUpdatedAt: latest.draft_updated_at ?? null,
     };
   }
 
@@ -308,10 +423,22 @@ export function deriveGateChatStatus(
           startedMs(execution) >= routedMs
       );
     if (movedOn) {
-      return { phase: "accepted", attempt, waitingExecutionId: null };
+      return {
+        phase: "accepted",
+        attempt,
+        waitingExecutionId: null,
+        waitingSince: null,
+        draftUpdatedAt: null,
+      };
     }
   }
-  return { phase: "under_review", attempt, waitingExecutionId: null };
+  return {
+    phase: "under_review",
+    attempt,
+    waitingExecutionId: null,
+    waitingSince: null,
+    draftUpdatedAt: null,
+  };
 }
 
 export function isSameGateChatStatus(
@@ -321,7 +448,9 @@ export function isSameGateChatStatus(
   return (
     a?.phase === b?.phase &&
     a?.attempt === b?.attempt &&
-    a?.waitingExecutionId === b?.waitingExecutionId
+    a?.waitingExecutionId === b?.waitingExecutionId &&
+    a?.waitingSince === b?.waitingSince &&
+    a?.draftUpdatedAt === b?.draftUpdatedAt
   );
 }
 

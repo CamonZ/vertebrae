@@ -137,6 +137,8 @@ describe("syncGateChatsForRun", () => {
       phase: "drafting",
       attempt: 1,
       waitingExecutionId: "gate-1",
+      waitingSince: expect.any(String),
+      draftUpdatedAt: null,
     });
     expect(mockedCommands.refreshLocalChatSessionGate).not.toHaveBeenCalled();
   });
@@ -182,6 +184,8 @@ describe("syncGateChatsForRun", () => {
       phase: "closed",
       attempt: 1,
       waitingExecutionId: null,
+      waitingSince: null,
+      draftUpdatedAt: null,
     });
     expect(mockedCommands.refreshLocalChatSessionGate).not.toHaveBeenCalled();
   });

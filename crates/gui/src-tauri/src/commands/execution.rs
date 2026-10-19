@@ -163,6 +163,69 @@ pub async fn get_task_run_trace(
     Ok(trace.into())
 }
 
+/// Read the draft of a waiting human_input gate. `None` when the gate is not
+/// draftable, which Sacrum decides from its `output_schema`.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_human_input_draft(
+    state: State<'_, AppState>,
+    execution_id: String,
+) -> Result<Option<crate::local_chat::gate::GateDraft>, CommandError> {
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+    match service.executions().human_input_draft(&execution_id).await {
+        Ok(draft) => Ok(Some(draft.into())),
+        Err(vertebrae_core::ServiceError::HumanInputRejected(
+            vertebrae_core::HumanInputRejection::NotDraftable { .. },
+        )) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Merge answers into a waiting gate's draft; a null value clears a field.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_human_input_draft(
+    state: State<'_, AppState>,
+    execution_id: String,
+    values: serde_json::Value,
+) -> Result<crate::local_chat::gate::GateDraft, CommandError> {
+    let serde_json::Value::Object(values) = values else {
+        return Err(CommandError {
+            message: "Draft values must be a JSON object".to_string(),
+        });
+    };
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+    let draft = service
+        .executions()
+        .set_human_input_draft(&execution_id, values)
+        .await?;
+    Ok(draft.into())
+}
+
+/// Resolve a waiting gate from its complete draft.
+#[tauri::command]
+#[specta::specta]
+pub async fn submit_human_input_draft(
+    state: State<'_, AppState>,
+    execution_id: String,
+) -> Result<crate::local_chat::gate::GateDraft, CommandError> {
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+    let draft = service
+        .executions()
+        .submit_human_input_draft(&execution_id)
+        .await?;
+    Ok(draft.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

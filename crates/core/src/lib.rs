@@ -98,10 +98,11 @@ pub use workflow_service::{
 // Re-export domain models for convenience
 pub use models::{
     AgentConfig, Artifact, ArtifactLinkMetadata, BlockerNode, CodeRef, CreateArtifactInput,
-    ExecuteConfig, ExecutionStatus, GetArtifactByLogicalNameInput, HumanInputConfig, Level,
-    LlmInferenceConfig, PermissionMode, Priority, RouteConfig, STEP_CONFIG_VERSION, Section,
-    SectionType, SessionDirective, SessionLog, SessionMode, Step, StepConfig, StepExecution,
-    StepType, StepUpdate, StructuredInferenceConfig, Task, TaskFilter, TaskRun, TaskRunControls,
-    TaskRunStatus, TaskRunSummary, TaskRunTrace, TaskUpdate, Thing, TokenUsage,
-    UpdateArtifactInput, WaitChildrenConfig, Workflow, WorkflowTransition,
+    ExecuteConfig, ExecutionStatus, GetArtifactByLogicalNameInput, HumanInputConfig,
+    HumanInputDraft, HumanInputDraftViolation, Level, LlmInferenceConfig, PermissionMode, Priority,
+    RouteConfig, STEP_CONFIG_VERSION, Section, SectionType, SessionDirective, SessionLog,
+    SessionMode, Step, StepConfig, StepExecution, StepType, StepUpdate, StructuredInferenceConfig,
+    Task, TaskFilter, TaskRun, TaskRunControls, TaskRunStatus, TaskRunSummary, TaskRunTrace,
+    TaskUpdate, Thing, TokenUsage, UpdateArtifactInput, WaitChildrenConfig, Workflow,
+    WorkflowTransition,
 };

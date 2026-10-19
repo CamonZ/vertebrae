@@ -432,7 +432,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "Human input rejected: artifact body does not satisfy the gate's output_schema:\n  \
+            "Human input rejected: the response does not satisfy the gate's output_schema:\n  \
              - #/approved: Type mismatch. Expected Boolean but got String.\n  \
              - #: Required property reason was not present."
         );

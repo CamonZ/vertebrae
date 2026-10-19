@@ -872,6 +872,33 @@ describe("SettingsPage", () => {
     ).toHaveValue("futuristic");
   });
 
+  it("persists when stalled gate chats are steered", async () => {
+    const user = userEvent.setup();
+    useUIStore.setState({
+      gateSteeringThresholds: { soft: 3, form: 6, escape: 9 },
+    });
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    const form = await screen.findByTestId("settings-gate-steering-form");
+    expect(form).toHaveValue(6);
+    await user.clear(form);
+    await user.type(form, "4");
+
+    expect(useUIStore.getState().gateSteeringThresholds).toEqual({
+      soft: 3,
+      form: 4,
+      escape: 9,
+    });
+    expect(
+      JSON.parse(localStorage.getItem("vertebrae-ui-storage") ?? "{}").state
+        .gateSteeringThresholds
+    ).toEqual({ soft: 3, form: 4, escape: 9 });
+  });
+
   it("saves model and permission changes", async () => {
     const user = userEvent.setup();
     render(

@@ -36,6 +36,8 @@
 import type { ChatMessage } from "../../stores/chatStore";
 import type { LocalChatGateBinding } from "../../bindings";
 import {
+  parseGateDraftCommand,
+  parseGateDraftSubmission,
   parseGateResolutionSubmission,
   type GateResolutionSubmission,
 } from "../../utils/gateChat";
@@ -93,7 +95,9 @@ function toolCommand(input: string): string | null {
     const parsed = JSON.parse(input) as { command?: unknown };
     return typeof parsed.command === "string" ? parsed.command : null;
   } catch {
-    return input.includes("vtb artifact add") ? input : null;
+    return input.includes("vtb artifact add") || input.includes("vtb gate ")
+      ? input
+      : null;
   }
 }
 
@@ -101,23 +105,35 @@ function successfulGateSubmissions(
   messages: readonly ChatMessage[],
   gate: LocalChatGateBinding
 ): Map<string, GateResolutionSubmission> {
-  const successfulResults = new Set(
+  const successfulResults = new Map(
     messages
       .filter(
         (message): message is Extract<ChatMessage, { kind: "tool_result" }> =>
           message.kind === "tool_result" && !message.isError
       )
-      .map((message) => message.toolId)
+      .map((message) => [message.toolId, message.result])
   );
   const submissions = new Map<string, GateResolutionSubmission>();
   for (const message of messages) {
     if (message.kind !== "tool_call" || !successfulResults.has(message.toolId))
       continue;
     const command = toolCommand(message.input);
-    const submission =
-      command !== null ? parseGateResolutionSubmission(command, gate) : null;
+    if (command === null) continue;
+    const submission = parseGateResolutionSubmission(command, gate);
     if (submission) {
       submissions.set(message.toolId, submission);
+      continue;
+    }
+    const draftCommand = parseGateDraftCommand(command);
+    if (draftCommand?.action === "submit") {
+      // Only the successful command's durable response knows the submitted
+      // answers: forms and other clients can edit them outside this chat.
+      const snapshot = parseGateDraftSubmission(
+        successfulResults.get(message.toolId)!,
+        draftCommand.executionId,
+        gate.artifact
+      );
+      if (snapshot) submissions.set(message.toolId, snapshot);
     }
   }
   return submissions;

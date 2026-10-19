@@ -2,9 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StepExecution, TaskRun } from "../bindings";
 import { commands } from "../bindings";
 import { useChatStore } from "../stores/chatStore";
-import { GATE_CHAT_KICKOFF } from "../utils/gateChat";
+import {
+  GATE_CHAT_KICKOFF,
+  GATE_CHAT_RECOVERY_KICKOFF,
+} from "../utils/gateChat";
 import type { HumanInputGateContext } from "../utils/humanInputGate";
 import { clearPersistedLocalChatSessions } from "../utils/localChatPersistence";
+import { resetProjectScopedStores } from "../stores/projectScopedStores";
 import { refreshGateChat, resolveGateInChat } from "./useGateChat";
 import {
   currentActiveTurnLocalId,
@@ -19,6 +23,7 @@ vi.mock("../bindings", () => ({
       data: "/test/project",
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    getHumanInputDraft: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     refreshLocalChatSessionGate: vi
       .fn()
       .mockResolvedValue({ status: "ok", data: true }),
@@ -61,6 +66,25 @@ describe("resolveGateInChat", () => {
     });
   });
 
+  it("retires a pending draft read when the project switches", async () => {
+    let finish!: (value: { status: "ok"; data: null }) => void;
+    mockedCommands.getHumanInputDraft.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    const resolving = resolveGateInChat(context());
+    await vi.waitFor(() =>
+      expect(mockedCommands.getHumanInputDraft).toHaveBeenCalled()
+    );
+    resetProjectScopedStores();
+    finish({ status: "ok", data: null });
+    expect(await resolving).toBeNull();
+    expect(useChatStore.getState().sessions).toEqual({});
+    expect(useChatStore.getState().localSessionSummaries).toEqual({});
+    expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
+  });
+
   it("starts a gate chat whose hidden opening turn lets the agent speak first", async () => {
     const sessionId = await resolveGateInChat(context());
 
@@ -79,6 +103,9 @@ describe("resolveGateInChat", () => {
           question: "Ship v2?",
           output_schema: null,
           revision: null,
+          fields: null,
+          draftable: false,
+          draft: null,
         },
       })
     );
@@ -110,16 +137,13 @@ describe("resolveGateInChat", () => {
       })
     );
 
-    expect(
-      useChatStore.getState().sessions[revised!].messages
-    ).toMatchObject([
+    expect(useChatStore.getState().sessions[revised!].messages).toMatchObject([
       {
         kind: "gate_evaluation",
         attempt: 2,
         verdict: { reasons: "The rollback plan is missing." },
       },
     ]);
-
   });
 
   it("does not show a revision card when starting the chat fails", async () => {
@@ -141,8 +165,7 @@ describe("resolveGateInChat", () => {
     expect(session.lifecycle).toBe("error");
     expect(
       session.messages.some(
-        (message) =>
-          message.kind === "gate_evaluation" && message.attempt === 3
+        (message) => message.kind === "gate_evaluation" && message.attempt === 3
       )
     ).toBe(false);
   });
@@ -173,6 +196,73 @@ describe("resolveGateInChat", () => {
     expect(useChatStore.getState().sessions[first!].gate?.execution_id).toBe(
       "exec-2"
     );
+  });
+
+  describe("a draftable gate whose chat session ended", () => {
+    const draft = {
+      execution_id: "exec-1",
+      values: { approved: true },
+      missing: ["reason"],
+      invalid: [],
+      complete: false,
+    };
+
+    async function endedChat(): Promise<string> {
+      mockedCommands.getHumanInputDraft.mockResolvedValue({
+        status: "ok",
+        data: draft,
+      });
+      const sessionId = (await resolveGateInChat(context()))!;
+      const store = useChatStore.getState();
+      store.addMessage(sessionId, {
+        kind: "user",
+        text: "Approve it",
+        timestamp: new Date().toISOString(),
+      });
+      store.setSessionLifecycle(sessionId, "idle");
+      store.setBackendSessionId(sessionId, null);
+      mockedCommands.createLocalChatSession.mockClear();
+      return sessionId;
+    }
+
+    it("starts a new chat from the persisted draft and keeps the old one as history", async () => {
+      const ended = await endedChat();
+
+      const recovered = await resolveGateInChat(context());
+
+      expect(recovered).toBeTruthy();
+      expect(recovered).not.toBe(ended);
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledTimes(1);
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          initial_prompt: GATE_CHAT_RECOVERY_KICKOFF,
+          gate: expect.objectContaining({
+            execution_id: "exec-1",
+            draftable: true,
+            draft,
+          }),
+        })
+      );
+      const sessions = useChatStore.getState().sessions;
+      expect(sessions[ended].gate).toBeNull();
+      expect(sessions[ended].messages).toHaveLength(1);
+      expect(sessions[recovered!].gate?.execution_id).toBe("exec-1");
+    });
+
+    it("keeps resuming in place for a gate that is not draftable", async () => {
+      const ended = await endedChat();
+      mockedCommands.getHumanInputDraft.mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+
+      const reopened = await resolveGateInChat(context());
+
+      expect(reopened).toBe(ended);
+      expect(useChatStore.getState().sessions[ended].gate?.execution_id).toBe(
+        "exec-1"
+      );
+    });
   });
 
   it("does nothing for gates that cannot be resolved by artifact", async () => {
@@ -333,6 +423,8 @@ describe("starting a gate chat", () => {
       phase,
       attempt: 2,
       waitingExecutionId: phase === "rejected" ? "exec-1" : null,
+      waitingSince: null,
+      draftUpdatedAt: null,
     });
     mockedCommands.createLocalChatSession.mockClear();
     const session = useChatStore.getState().sessions[sessionId];

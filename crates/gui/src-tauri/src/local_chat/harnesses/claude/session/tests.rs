@@ -675,6 +675,9 @@ async fn start_request_appends_the_gate_protocol_for_gate_chats() {
         question: Some("Ship it?".into()),
         output_schema: None,
         revision: None,
+        draftable: None,
+        draft: None,
+        fields: None,
     };
     let mut input = input("backend-gate", None);
     input.gate = Some(gate.clone());

@@ -755,6 +755,9 @@ fn gate_binding() -> LocalChatGateBinding {
         question: None,
         output_schema: None,
         revision: None,
+        draftable: None,
+        draft: None,
+        fields: None,
     }
 }
 

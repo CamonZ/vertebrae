@@ -1421,6 +1421,10 @@ pub struct StepExecution {
     /// Provider session identifier (e.g. Claude session ID)
     #[serde(default)]
     pub session_id: Option<String>,
+    /// When the draft of a draftable human_input execution last changed;
+    /// a change means its missing/complete report must be read again.
+    #[serde(default)]
+    pub draft_updated_at: Option<String>,
 }
 
 /// Wire shape of a step execution in Sacrum channel payloads; `config` stays
@@ -1469,6 +1473,8 @@ struct StepExecutionWire {
     handoff: Option<String>,
     #[serde(default)]
     session_id: Option<String>,
+    #[serde(default)]
+    draft_updated_at: Option<String>,
 }
 
 impl StepExecution {
@@ -1510,6 +1516,7 @@ impl<'de> Deserialize<'de> for StepExecution {
             duration_ms: wire.duration_ms,
             handoff: wire.handoff,
             session_id: wire.session_id,
+            draft_updated_at: wire.draft_updated_at,
         })
     }
 }
@@ -1551,6 +1558,10 @@ impl From<vertebrae_core::StepExecution> for StepExecution {
             duration_ms: exec.duration_ms.map(saturating_u64_to_u32),
             handoff: exec.handoff,
             session_id: exec.session_id,
+            draft_updated_at: exec
+                .draft
+                .and_then(|draft| draft.updated_at)
+                .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)),
         }
     }
 }

@@ -15,7 +15,13 @@ describe("GateChatStatusBar", () => {
       render(
         <GateChatStatusBar
           stepName="approve"
-          status={{ phase, attempt, waitingExecutionId: null }}
+          status={{
+            phase,
+            attempt,
+            waitingExecutionId: null,
+            waitingSince: null,
+            draftUpdatedAt: null,
+          }}
         />
       );
 

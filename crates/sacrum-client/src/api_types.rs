@@ -606,6 +606,9 @@ pub struct StepExecutionResponse {
     pub duration_ms: Option<i64>,
     #[serde(default)]
     pub handoff: Option<serde_json::Value>,
+    /// Draft of a draftable human_input execution; null for the rest.
+    #[serde(default)]
+    pub draft: Option<vertebrae_core::HumanInputDraft>,
     #[serde(default)]
     pub inserted_at: Option<String>,
     #[serde(default)]

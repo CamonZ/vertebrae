@@ -251,6 +251,8 @@ interface ChatMessagesProps {
   replayError?: string | null;
   onLoadOlderMessages?: () => Promise<boolean>;
   onAddComment?: (anchor: TextSelectionAnchor, body: string) => void;
+  /** Rendered inline after the last message, such as gate steering. */
+  footer?: ReactNode;
 }
 
 export function ChatMessages({
@@ -272,6 +274,7 @@ export function ChatMessages({
   replayError = null,
   onLoadOlderMessages,
   onAddComment = () => undefined,
+  footer = null,
 }: ChatMessagesProps) {
   const resolveUserQuestion = useChatStore(
     (state) => state.resolveUserQuestion
@@ -640,6 +643,7 @@ export function ChatMessages({
               </span>
             </div>
           )}
+          {footer}
         </div>
         {selectionAction && !commentEditorOpen
           ? createPortal(

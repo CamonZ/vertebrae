@@ -410,6 +410,28 @@ mod tests {
         async fn stop_run(&self, _target: StopRunTarget) -> ServiceResult<Option<TaskRun>> {
             unused()
         }
+
+        async fn human_input_draft(
+            &self,
+            _execution_id: &str,
+        ) -> ServiceResult<vertebrae_core::HumanInputDraft> {
+            unused()
+        }
+
+        async fn set_human_input_draft(
+            &self,
+            _execution_id: &str,
+            _values: serde_json::Map<String, serde_json::Value>,
+        ) -> ServiceResult<vertebrae_core::HumanInputDraft> {
+            unused()
+        }
+
+        async fn submit_human_input_draft(
+            &self,
+            _execution_id: &str,
+        ) -> ServiceResult<vertebrae_core::HumanInputDraft> {
+            unused()
+        }
     }
 
     #[tokio::test]

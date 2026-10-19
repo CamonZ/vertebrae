@@ -8,6 +8,11 @@ Feature: Resolve a human_input gate in a local chat
   When the review loops a rejected answer back, the same chat shows the new
   attempt and receives one hidden evaluation turn with the reasons; the chat
   shows the gate closed once the run finishes or stops.
+  A gate whose output schema Sacrum accepts field by field is answered through
+  its durable draft instead: the protocol records answers with vtb gate, the
+  chat shows each field's progress, stalled conversations are steered back to
+  what is still needed, a chat whose session ended is replaced by one that
+  starts from the draft, and simple gates can be answered without a chat.
 
   Scenario: Resolve opens a Claude gate chat seeded with the gate protocol
     Given the daemon is running for the project
@@ -136,3 +141,160 @@ Feature: Resolve a human_input gate in a local chat
     Then the GUI should show "Drafting" within 10 seconds
     When I stop the task workflow via the CLI
     Then the GUI should show "Gate closed" within 20 seconds
+
+  Scenario: A draftable gate chat records answers through the draft and shows their progress
+    Given the daemon is running for the project
+    And I create a workflow with:
+      | name | Gate Draft Workflow |
+    And I create a step "draft" in the workflow "Gate Draft Workflow" via the CLI
+    And I create a draftable human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Draft Workflow" via the CLI
+    And the GUI is showing the task list
+    When I create a task with:
+      | title    | Gate Draft Task     |
+      | workflow | Gate Draft Workflow |
+    And I transition the task to step "approve" via the CLI
+    And I start the task workflow via the CLI
+    And I navigate to the traces page for the created task
+    Then the human_input gate should offer Resolve within 15 seconds
+    When I click on the element with test id "human-input-gate-resolve"
+    Then the "claude" harness should have started 1 draft gate chat asking "Approve Gate Draft Task?"
+    And the gate draft progress should show "approved" as "missing" within 10 seconds
+    And the gate draft progress should show "reason" as "missing" within 5 seconds
+    When I set the waiting gate's draft to '{"approved": true}' via the CLI
+    Then the vtb output should contain "Still needed: reason"
+    And the gate draft progress should show "approved" as "answered" within 10 seconds
+    And the gate draft progress should show "reason" as "missing" within 5 seconds
+    When I set the waiting gate's draft to '{"reason": "The rollback plan is attached."}' via the CLI
+    Then the vtb output should contain "Complete — confirm with the user, then submit."
+    When I submit the waiting gate's draft via the CLI
+    Then the GUI should show "Gate closed" within 20 seconds
+
+  Scenario: A rejected draft returns with its answers kept for revision
+    Given the daemon is running for the project
+    And I create a workflow with:
+      | name | Gate Draft Review Workflow |
+    And I create a step "draft" in the workflow "Gate Draft Review Workflow" via the CLI
+    And I create a reviewed draftable human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Draft Review Workflow" via the CLI
+    And the GUI is showing the task list
+    When I create a task with:
+      | title    | Gate Draft Review Task     |
+      | workflow | Gate Draft Review Workflow |
+    And I transition the task to step "approve" via the CLI
+    And I start the task workflow via the CLI
+    And I navigate to the traces page for the created task
+    Then the human_input gate should offer Resolve within 15 seconds
+    When I click on the element with test id "human-input-gate-resolve"
+    Then the local chat should show 1 completed assistant responses within 10 seconds
+    When I set the waiting gate's draft to '{"approved": false, "reason": "The rollback plan is missing."}' via the CLI
+    And I submit the waiting gate's draft via the CLI
+    Then the GUI should show "Rejected · attempt 2" within 20 seconds
+    And the gate chat should receive 1 evaluation turn for attempt 2 with reasons "The rollback plan is missing."
+    And the evaluation turn should present 'reason: "The rollback plan is missing."' as a previous answer
+    And the gate draft progress should show "reason" as "answered" within 10 seconds
+
+  Scenario: A stalled draftable gate chat is steered back to what is still needed
+    Given the daemon is running for the project
+    And gate chats are steered after 1, 2 and 3 stalled turns
+    And I create a workflow with:
+      | name | Gate Steering Workflow |
+    And I create a step "draft" in the workflow "Gate Steering Workflow" via the CLI
+    And I create a draftable human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Steering Workflow" via the CLI
+    And the GUI is showing the task list
+    When I create a task with:
+      | title    | Gate Steering Task     |
+      | workflow | Gate Steering Workflow |
+    And I transition the task to step "approve" via the CLI
+    And I start the task workflow via the CLI
+    And I navigate to the traces page for the created task
+    Then the human_input gate should offer Resolve within 15 seconds
+    When I click on the element with test id "human-input-gate-resolve"
+    Then the local chat should be ready for a message within 10 seconds
+    When I type "What is this about?" into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the gate chat should receive 1 steering turn naming "approved (Should it ship?); reason (Why?)"
+    And the local chat should be ready for a message within 10 seconds
+    When I type "Tell me more first." into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the GUI should show an element with test id "gate-steering-form" within 10 seconds
+    And the GUI should not show an element with test id "gate-steering-escape" within 1 seconds
+    When I click on the element with test id "gate-answer-input-approved-yes"
+    And I click on the element with test id "gate-steering-answer-form-submit"
+    Then the gate chat should receive a form turn reporting "approved: true"
+    And the gate draft progress should show "approved" as "answered" within 10 seconds
+    And the GUI should not show an element with test id "gate-steering-form" within 5 seconds
+    And the local chat should be ready for a message within 10 seconds
+    When I type "Still thinking." into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the gate chat should receive 2 steering turns naming "reason (Why?)"
+    And the local chat should be ready for a message within 10 seconds
+    When I type "Hmm." into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the local chat should be ready for a message within 10 seconds
+    When I type "Not sure." into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the GUI should show an element with test id "gate-steering-escape" within 10 seconds
+    When I click on the element with test id "gate-steering-keep-going"
+    Then the GUI should not show an element with test id "gate-steering" within 5 seconds
+    And the local chat should show 5 user messages, none of them from Vertebrae
+
+  Scenario: Resolve continues an ended draftable gate chat in a new chat from the draft
+    Given the daemon is running for the project
+    And I create a workflow with:
+      | name | Gate Recovery Workflow |
+    And I create a step "draft" in the workflow "Gate Recovery Workflow" via the CLI
+    And I create a draftable human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Recovery Workflow" via the CLI
+    And the GUI is showing the task list
+    When I create a task with:
+      | title    | Gate Recovery Task     |
+      | workflow | Gate Recovery Workflow |
+    And I transition the task to step "approve" via the CLI
+    And I start the task workflow via the CLI
+    And I navigate to the traces page for the created task
+    Then the human_input gate should offer Resolve within 15 seconds
+    When I click on the element with test id "human-input-gate-resolve"
+    Then the local chat should show 1 completed assistant responses within 10 seconds
+    When I set the waiting gate's draft to '{"approved": true}' via the CLI
+    And I reload the traces page for the created task
+    Then the human_input gate should offer Resolve within 15 seconds
+    When I click on the element with test id "human-input-gate-resolve"
+    Then the "claude" harness should have started 2 draft gate chats asking "Approve Gate Recovery Task?"
+    And the latest "claude" gate chat asking "Approve Gate Recovery Task?" should start from the answer "approved: true" with "reason" still needed
+    And the gate chat should open with the recovery turn
+    And the local chat should show no user messages
+
+  Scenario: A draftable gate is answered directly without a chat
+    Given the daemon is running for the project
+    And I create a workflow with:
+      | name | Gate Direct Workflow |
+    And I create a step "draft" in the workflow "Gate Direct Workflow" via the CLI
+    And I create a draftable human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Direct Workflow" via the CLI
+    And the GUI is showing the task list
+    When I create a task with:
+      | title    | Gate Direct Task     |
+      | workflow | Gate Direct Workflow |
+    And I transition the task to step "approve" via the CLI
+    And I start the task workflow via the CLI
+    And I navigate to the traces page for the created task
+    Then the GUI should show an element with test id "human-input-gate-answer-directly" within 15 seconds
+    When I click on the element with test id "human-input-gate-answer-directly"
+    And I click on the element with test id "gate-answer-input-approved-yes"
+    And I type "Ready to ship." into the element with test id "gate-answer-input-reason"
+    And I click on the element with test id "human-input-gate-answer-form-submit"
+    Then the GUI should not show an element with test id "human-input-gate" within 20 seconds
+    And the "claude" harness should have started 0 draft gate chats asking "Approve Gate Direct Task?"
+
+  Scenario: A whole-artifact gate offers no direct answer
+    Given the daemon is running for the project
+    And I create a workflow with:
+      | name | Gate Artifact Workflow |
+    And I create a step "draft" in the workflow "Gate Artifact Workflow" via the CLI
+    And I create a human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Artifact Workflow" via the CLI
+    And the GUI is showing the task list
+    When I create a task with:
+      | title    | Gate Artifact Task     |
+      | workflow | Gate Artifact Workflow |
+    And I transition the task to step "approve" via the CLI
+    And I start the task workflow via the CLI
+    And I navigate to the traces page for the created task
+    Then the human_input gate should offer Resolve within 15 seconds
+    And the GUI should not show an element with test id "human-input-gate-answer-directly" within 3 seconds

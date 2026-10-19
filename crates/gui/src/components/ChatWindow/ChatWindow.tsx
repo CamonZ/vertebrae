@@ -5,6 +5,9 @@ import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
 import { GateChatStatusBar } from "./GateChatStatusBar";
+import { GateDraftProgress } from "./GateDraftProgress";
+import { GateSteering } from "./GateSteering";
+import { useHumanInputDraft } from "../../hooks/useHumanInputDraft";
 import { localChatSessionProjectDisplayName } from "../../utils/localChatSessionGroups";
 import type {
   PendingTextComment,
@@ -130,6 +133,20 @@ export function ChatWindow({
     [chat.handleStartSession, updatePendingComments]
   );
 
+  // A draftable gate's draft, read again whenever realtime updates report
+  // that it changed; null for every other chat.
+  const gate = chat.session?.gate ?? null;
+  const gateStatus = chat.session?.gateStatus ?? null;
+  const waitingExecutionId =
+    gate &&
+    (gateStatus?.phase === "drafting" || gateStatus?.phase === "rejected")
+      ? gateStatus.waitingExecutionId
+      : null;
+  const { draft: gateDraft } = useHumanInputDraft(
+    waitingExecutionId,
+    gateStatus?.draftUpdatedAt
+  );
+
   // Focus the composer when this chat window is the foreground pane.
   useEffect(() => {
     if (!autoFocusComposer) return;
@@ -172,10 +189,14 @@ export function ChatWindow({
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
       />
-      {chat.session.gate && chat.session.gateStatus && (
-        <GateChatStatusBar
-          stepName={chat.session.gate.step_name}
-          status={chat.session.gateStatus}
+      {gate && gateStatus && (
+        <GateChatStatusBar stepName={gate.step_name} status={gateStatus} />
+      )}
+      {gate && gateStatus && gateDraft && (gate.fields?.length ?? 0) > 0 && (
+        <GateDraftProgress
+          fields={gate.fields ?? []}
+          draft={gateDraft}
+          attempt={gateStatus.attempt}
         />
       )}
       <Profiler
@@ -204,6 +225,16 @@ export function ChatWindow({
           replayError={chat.session.providerReplay?.error ?? null}
           onLoadOlderMessages={() => loadOlderReplayMessages(sessionId)}
           onAddComment={handleAddComment}
+          footer={
+            gate && gateStatus && gateDraft ? (
+              <GateSteering
+                sessionId={sessionId}
+                gate={gate}
+                status={gateStatus}
+                draft={gateDraft}
+              />
+            ) : null
+          }
         />
       </Profiler>
       <Profiler

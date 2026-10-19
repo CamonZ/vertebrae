@@ -4,7 +4,9 @@
 //! defines the interface for reading and updating step executions plus managing session logs.
 
 use crate::error::ServiceResult;
-use crate::models::{ExecutionStatus, SessionLog, StepExecution, TaskRun, TaskRunTrace};
+use crate::models::{
+    ExecutionStatus, HumanInputDraft, SessionLog, StepExecution, TaskRun, TaskRunTrace,
+};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -289,6 +291,22 @@ pub trait ExecutionService: Send + Sync {
 
     /// Stop a durable TaskRun by explicit run ID or by task ID fallback.
     async fn stop_run(&self, target: StopRunTarget) -> ServiceResult<Option<TaskRun>>;
+
+    /// Read the draft of a draftable `human_input` execution.
+    async fn human_input_draft(&self, execution_id: &str) -> ServiceResult<HumanInputDraft>;
+
+    /// Merge-patch the draft of a waiting `human_input` execution: each key
+    /// is an `output_schema` property and a null value removes it. All or
+    /// nothing: when any key is rejected, nothing is stored.
+    async fn set_human_input_draft(
+        &self,
+        execution_id: &str,
+        values: serde_json::Map<String, serde_json::Value>,
+    ) -> ServiceResult<HumanInputDraft>;
+
+    /// Resolve a waiting gate from its complete draft, exactly as attaching
+    /// its artifact does.
+    async fn submit_human_input_draft(&self, execution_id: &str) -> ServiceResult<HumanInputDraft>;
 }
 
 #[cfg(test)]

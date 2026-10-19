@@ -13,6 +13,7 @@ import { Icon } from "../components/atoms/Icon";
 import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
 import { Modal } from "../components/molecules/Modal";
+import { Input } from "../components/atoms/Input";
 import { Select } from "../components/atoms/Select";
 import {
   GUI_UPDATE_CHANNELS,
@@ -37,6 +38,7 @@ import {
   relaunchGuiApplication,
 } from "../update";
 import { useUIStore, type ThinkingIndicatorStyle } from "../stores/uiStore";
+import type { GateSteeringThresholds } from "../utils/gateDraft";
 import {
   hasStaleModelDefault,
   hasStalePermissionDefault,
@@ -107,6 +109,93 @@ function SettingRow({
   );
 }
 
+const GATE_STEERING_TIERS: {
+  key: keyof GateSteeringThresholds;
+  label: string;
+  description: string;
+}[] = [
+  {
+    key: "soft",
+    label: "Hint after",
+    description:
+      "User turns without progress on a gate's answers before the agent is quietly reminded what is still needed.",
+  },
+  {
+    key: "form",
+    label: "Show the form after",
+    description:
+      "User turns without progress before the remaining fields appear as a form in the chat.",
+  },
+  {
+    key: "escape",
+    label: "Offer to stop after",
+    description:
+      "User turns without progress before the chat offers to keep going or stop the run.",
+  },
+];
+
+/** A positive whole number of turns; only valid entries are saved. */
+function TurnCountInput({
+  label,
+  testId,
+  value,
+  onCommit,
+}: {
+  label: string;
+  testId: string;
+  value: number;
+  onCommit: (turns: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  return (
+    <Input
+      type="number"
+      min={1}
+      step={1}
+      aria-label={label}
+      data-testid={testId}
+      value={text}
+      invalid={!/^[1-9]\d*$/.test(text)}
+      onChange={(event) => {
+        setText(event.target.value);
+        if (/^[1-9]\d*$/.test(event.target.value)) {
+          onCommit(Number(event.target.value));
+        }
+      }}
+      onBlur={() => setText(String(value))}
+    />
+  );
+}
+
+function GateSteeringSettings({ onSaved }: { onSaved: () => void }) {
+  const thresholds = useUIStore((state) => state.gateSteeringThresholds);
+  const setThresholds = useUIStore((state) => state.setGateSteeringThresholds);
+  return (
+    <div className="mt-8 border-t border-[var(--color-line)]">
+      <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+        Gate chats
+      </p>
+      {GATE_STEERING_TIERS.map((tier) => (
+        <SettingRow
+          key={tier.key}
+          label={tier.label}
+          description={tier.description}
+        >
+          <TurnCountInput
+            label={tier.label}
+            testId={`settings-gate-steering-${tier.key}`}
+            value={thresholds[tier.key]}
+            onCommit={(turns) => {
+              setThresholds({ ...thresholds, [tier.key]: turns });
+              onSaved();
+            }}
+          />
+        </SettingRow>
+      ))}
+    </div>
+  );
+}
+
 function SaveIndicator({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return (
@@ -140,7 +229,9 @@ function HarnessDefaultsSection({
   // Defaults are saved per provider. Built-in providers keep their harness
   // test IDs; custom providers are addressed by provider ID.
   const providerId = provider.id;
-  const testIdPrefix = provider.custom ? `provider-${provider.id}` : info.harness;
+  const testIdPrefix = provider.custom
+    ? `provider-${provider.id}`
+    : info.harness;
   const saved = useLocalChatDefaultsStore(
     (state) => state.defaults[providerId]
   );
@@ -404,13 +495,14 @@ function HarnessDefaultsSection({
           />
           {stalePersonality && (
             <p className="mt-1 text-xs text-[var(--color-warn)]">
-              Saved {info.harness === "claude" ? "style" : "personality"} is unavailable;
-              new chats use the provider default.
+              Saved {info.harness === "claude" ? "style" : "personality"} is
+              unavailable; new chats use the provider default.
             </p>
           )}
           {!info.available && personalityOptions.length === 0 && (
             <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
-              Unavailable until this harness is installed and its capabilities are discovered.
+              Unavailable until this harness is installed and its capabilities
+              are discovered.
             </p>
           )}
         </SettingRow>
@@ -2080,6 +2172,7 @@ export function SettingsPage({
                 </SettingRow>
               </div>
               {fileLinkSettings}
+              <GateSteeringSettings onSaved={() => setSavedFeedback(true)} />
               {isLoading ? (
                 <div
                   className="mt-8 text-sm text-[var(--color-fg-mute)]"

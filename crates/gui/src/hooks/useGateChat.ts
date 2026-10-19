@@ -5,7 +5,17 @@ import {
   isLocalChatLifecycleBusy,
   useChatStore,
 } from "../stores/chatStore";
-import { GATE_CHAT_KICKOFF, gateChatBinding } from "../utils/gateChat";
+import {
+  GATE_CHAT_KICKOFF,
+  GATE_CHAT_RECOVERY_KICKOFF,
+  gateChatBinding,
+  hiddenTurn,
+} from "../utils/gateChat";
+import {
+  getProjectScopeGeneration,
+  isCurrentProjectScopeGeneration,
+} from "../stores/projectScopedStores";
+import { readGateDraft } from "./useHumanInputDraft";
 import type { HumanInputGateContext } from "../utils/humanInputGate";
 import {
   currentActiveTurnLocalId,
@@ -41,7 +51,7 @@ function showGateEvaluationCard(
 }
 
 /** Resolve once the chat is not mid-turn; false when it is gone. */
-function whenSessionIdle(sessionId: string): Promise<boolean> {
+export function whenSessionIdle(sessionId: string): Promise<boolean> {
   const settled = (): boolean | null => {
     const session = useChatStore.getState().sessions[sessionId];
     if (!session) return false;
@@ -118,6 +128,45 @@ export async function refreshGateChat(
   }
 }
 
+function turnDeps() {
+  const store = useChatStore.getState();
+  return {
+    addMessage: store.addMessage,
+    setSessionLifecycle: store.setSessionLifecycle,
+    markStreamingIfSending: store.markStreamingIfSending,
+    beginActiveTurn: store.beginActiveTurn,
+    settleActiveTurn: store.settleActiveTurn,
+    setBackendSessionId: store.setBackendSessionId,
+    getActiveTurnLocalId: currentActiveTurnLocalId,
+    getBackendSessionId: currentBackendSessionId,
+  };
+}
+
+/**
+ * Send `text` to a live gate chat as a hidden Vertebrae turn once it is
+ * idle: the agent reads it, the thread never shows it. Resolves whether a
+ * turn was sent; a chat without a running session receives nothing.
+ */
+export async function sendGateHiddenTurn(
+  sessionId: string,
+  text: string
+): Promise<boolean> {
+  if (!(await whenSessionIdle(sessionId))) return false;
+  const backendSessionId =
+    useChatStore.getState().sessions[sessionId]?.backendSessionId;
+  if (!backendSessionId) return false;
+  await doSendMessage(
+    backendSessionId,
+    sessionId,
+    hiddenTurn(text),
+    turnDeps(),
+    {
+      addUserMessage: false,
+    }
+  );
+  return true;
+}
+
 async function currentProjectPath(): Promise<string | null> {
   try {
     const result = await commands.getCurrentProjectPath();
@@ -136,18 +185,44 @@ async function currentProjectPath(): Promise<string | null> {
 export async function resolveGateInChat(
   context: HumanInputGateContext
 ): Promise<string | null> {
-  const gate = gateChatBinding(context);
-  if (!gate) return null;
+  const binding = gateChatBinding(context);
+  if (!binding) return null;
+  // Sacrum decides whether the gate is draftable; its draft carries the
+  // answers a new chat starts from.
+  const generation = getProjectScopeGeneration();
   const projectPath = await currentProjectPath();
-  const { sessionId, gateChanged } = useChatStore
+  if (!isCurrentProjectScopeGeneration(generation)) return null;
+  const draft = await readGateDraft(binding.execution_id);
+  if (!isCurrentProjectScopeGeneration(generation)) return null;
+  const gate = { ...binding, draftable: draft !== null, draft };
+  let { sessionId, gateChanged } = useChatStore
     .getState()
     .openGateSession(gate, projectPath);
 
-  const store = useChatStore.getState();
-  const session = store.sessions[sessionId];
+  let session = useChatStore.getState().sessions[sessionId];
   if (!session) {
     return sessionId;
   }
+
+  // The bound chat's session ended: a draftable gate continues in a new
+  // chat that starts from the durable draft, so nothing is asked twice.
+  const recovering =
+    draft !== null &&
+    !session.backendSessionId &&
+    (session.messages.length > 0 ||
+      (session.messageCount ?? 0) > 0 ||
+      !!session.providerResumeId) &&
+    !isLocalChatLifecycleBusy(getLocalChatLifecycle(session));
+  if (recovering) {
+    useChatStore.getState().detachGateChat(sessionId);
+    ({ sessionId, gateChanged } = useChatStore
+      .getState()
+      .openGateSession(gate, projectPath));
+    session = useChatStore.getState().sessions[sessionId];
+    if (!session) return sessionId;
+  }
+
+  const store = useChatStore.getState();
 
   if (session.backendSessionId) {
     // Delivered once the chat is idle; Resolve itself returns at once.
@@ -175,9 +250,10 @@ export async function resolveGateInChat(
       getActiveTurnLocalId: currentActiveTurnLocalId,
       getBackendSessionId: currentBackendSessionId,
     },
-    GATE_CHAT_KICKOFF,
+    recovering ? GATE_CHAT_RECOVERY_KICKOFF : GATE_CHAT_KICKOFF,
     { addUserMessage: false }
   );
+  if (!isCurrentProjectScopeGeneration(generation)) return null;
   const settledSession = useChatStore.getState().sessions[sessionId];
   if (
     settledSession?.backendSessionId &&

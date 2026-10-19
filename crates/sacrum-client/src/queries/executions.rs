@@ -18,8 +18,9 @@ pub const EXECUTION_FIELDS: &str = r#"
             ... on ExecuteStepConfig { version script context output_schema }
             ... on RouteStepConfig { version route_config }
             ... on WaitChildrenStepConfig { version output_schema session }
-            ... on HumanInputStepConfig { version role question artifact output_schema }
+            ... on HumanInputStepConfig { version role question artifact output_schema draftable }
         }
+        draft { execution_id values missing invalid { path message } complete updated_at }
         output
         transition_result
         model
@@ -155,6 +156,34 @@ pub const STOP_RUN: &str = r#"
         }
     }
 "#;
+
+/// Fields of a `HumanInputDraft`, selected inline by the draft operations.
+macro_rules! human_input_draft_selection {
+    () => {
+        "{ execution_id values missing invalid { path message } complete updated_at }"
+    };
+}
+
+/// Read the draft of a draftable human_input execution.
+pub const HUMAN_INPUT_DRAFT: &str = concat!(
+    "query HumanInputDraft($execution_id: Uuid4!) { human_input_draft(execution_id: $execution_id) ",
+    human_input_draft_selection!(),
+    " }"
+);
+
+/// Merge-patch the draft of a waiting human_input execution.
+pub const SET_HUMAN_INPUT_DRAFT: &str = concat!(
+    "mutation SetHumanInputDraft($execution_id: Uuid4!, $values: Json!) { set_human_input_draft(execution_id: $execution_id, values: $values) ",
+    human_input_draft_selection!(),
+    " }"
+);
+
+/// Resolve a waiting gate from its complete draft.
+pub const SUBMIT_HUMAN_INPUT_DRAFT: &str = concat!(
+    "mutation SubmitHumanInputDraft($execution_id: Uuid4!) { submit_human_input_draft(execution_id: $execution_id) ",
+    human_input_draft_selection!(),
+    " }"
+);
 
 /// List all executions for a task.
 /// NOTE: Prepend EXECUTION_FIELDS when sending.
