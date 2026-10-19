@@ -106,6 +106,7 @@ and is audited separately from the embedded CLI command skills.
 | Skill file | Command/topic | Category | Source of truth | Disposition | Notes |
 |---|---|---|---|---|---|
 | `skills/add/SKILL.md` | `vtb add` | Command reference | Live `vtb add --help`; `docs/vtb-guide/tasks.md` | keep-generated | Regenerate syntax from live help and keep hierarchy guidance brief. |
+| `skills/gate/SKILL.md` | `vtb gate show/set/submit` | Command reference | Gate command help; `docs/vtb-guide/execution.md` | keep-generated | Durable field drafts; confirmation before submission; JSON submission snapshot. |
 | `skills/artifact/SKILL.md` | `vtb artifact ...` | Command reference | Live artifact help; `docs/vtb-guide/artifacts.md` | keep-generated | Project-scoped artifact lookup and attachment syntax. |
 | `skills/archive/SKILL.md` | `vtb archive`; `vtb unarchive` | Command reference | Live `vtb archive --help` and `vtb unarchive --help`; `docs/vtb-guide/tasks.md` | keep-generated | `unarchive` is related and can remain in the same skill. |
 | `skills/blockers/SKILL.md` | `vtb blockers` | Command reference | Live `vtb blockers --help`; `docs/vtb-guide/dependencies.md` | keep-generated | Verify examples against live help. |

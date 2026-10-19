@@ -1946,6 +1946,11 @@ pub struct HumanInputConfig {
     /// JSON Schema the response must satisfy; `None` accepts any response
     #[serde(default)]
     pub output_schema: Option<serde_json::Value>,
+    /// Whether Sacrum accepts the response field by field as a draft. Read
+    /// from Sacrum, never authored: it is not serialized, so a read config
+    /// reused as a definition stays writable.
+    #[serde(default, skip_serializing)]
+    pub draftable: bool,
 }
 
 impl Default for HumanInputConfig {
@@ -1956,8 +1961,40 @@ impl Default for HumanInputConfig {
             question: None,
             artifact: None,
             output_schema: None,
+            draftable: false,
         }
     }
+}
+
+/// The response being built field by field on a waiting, draftable
+/// `human_input` execution. Sacrum decides what is `missing` and whether the
+/// draft is `complete`; clients only report it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HumanInputDraft {
+    pub execution_id: String,
+    /// Answered fields by `output_schema` property name.
+    #[serde(default)]
+    pub values: serde_json::Map<String, serde_json::Value>,
+    /// Required properties not yet set.
+    #[serde(default)]
+    pub missing: Vec<String>,
+    /// Values that violate the schema.
+    #[serde(default)]
+    pub invalid: Vec<HumanInputDraftViolation>,
+    /// True when nothing required is missing and the whole draft validates.
+    pub complete: bool,
+    /// When the draft last changed; `None` before its first change.
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+/// A draft value that violates the gate's `output_schema`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HumanInputDraftViolation {
+    /// JSON pointer to the offending value, such as `/approved`; empty for
+    /// the whole draft.
+    pub path: String,
+    pub message: String,
 }
 
 fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
@@ -2590,6 +2627,11 @@ pub struct StepExecution {
     /// emit a handoff.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handoff: Option<String>,
+
+    /// The response being built on a draftable `human_input` execution;
+    /// `None` for every other execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<HumanInputDraft>,
 }
 
 impl Serialize for StepExecution {
@@ -2648,6 +2690,7 @@ impl StepExecution {
             duration_ms: None,
             model_provider: None,
             handoff: None,
+            draft: None,
         }
     }
 
@@ -4465,6 +4508,7 @@ mod tests {
                 question: Some("Approve {{ task.title }}?".to_string()),
                 artifact: Some("approval".to_string()),
                 output_schema: Some(serde_json::json!({"type": "object"})),
+                draftable: false,
             })
         );
         assert_eq!(

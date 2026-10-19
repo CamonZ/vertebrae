@@ -93,6 +93,9 @@ mod tests {
             question: Some("Ship it?".into()),
             output_schema: None,
             revision: None,
+            draftable: None,
+            draft: None,
+            fields: None,
         };
 
         let plain = session_developer_instructions(None);

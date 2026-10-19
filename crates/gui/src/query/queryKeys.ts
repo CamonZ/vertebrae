@@ -81,6 +81,22 @@ export const queryKeys = {
     byRun: (generation: number, runId: string) =>
       [...queryKeys.executions.all(generation), "byRun", runId] as const,
   },
+  humanInputDrafts: {
+    all: (generation: number) =>
+      [...queryKeys.project(generation), "humanInputDrafts"] as const,
+    byExecution: (generation: number, executionId: string) =>
+      [...queryKeys.humanInputDrafts.all(generation), executionId] as const,
+    /** Keyed by the draft's last change, so a change reads it again. */
+    detail: (
+      generation: number,
+      executionId: string,
+      updatedAt: string | null
+    ) =>
+      [
+        ...queryKeys.humanInputDrafts.byExecution(generation, executionId),
+        updatedAt,
+      ] as const,
+  },
   taskRuns: {
     all: (generation: number) =>
       [...queryKeys.project(generation), "taskRuns"] as const,

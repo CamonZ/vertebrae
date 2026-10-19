@@ -749,6 +749,9 @@ fn gate() -> crate::local_chat::LocalChatGateBinding {
         question: None,
         output_schema: None,
         revision: None,
+        draftable: None,
+        draft: None,
+        fields: None,
     }
 }
 

@@ -122,6 +122,7 @@ describe("uiStore", () => {
         thinkingIndicatorStyle: "futuristic",
         density: "auto",
         externalEditor: "",
+        gateSteeringThresholds: { soft: 3, form: 6, escape: 9 },
       });
 
       setItemSpy.mockRestore();

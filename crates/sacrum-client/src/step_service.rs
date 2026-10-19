@@ -661,6 +661,7 @@ mod tests {
                 question: Some("Approve {{ task.title }}?".to_string()),
                 artifact: Some("approval".to_string()),
                 output_schema: Some(json!({"type": "object", "required": ["approved"]})),
+                draftable: false,
             }))
         );
 

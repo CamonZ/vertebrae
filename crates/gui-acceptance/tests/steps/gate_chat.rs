@@ -9,7 +9,15 @@ use serde_json::Value;
 
 use crate::GuiWorld;
 
-const APPROVAL_SCHEMA: &str = r#"{"type":"object","required":["approved","reason"],"properties":{"approved":{"type":"boolean"},"reason":{"type":"string"}}}"#;
+/// Not draftable: the nested `details` object keeps the gate on the
+/// whole-artifact protocol.
+const APPROVAL_SCHEMA: &str = r#"{"type":"object","required":["approved","reason"],"properties":{"approved":{"type":"boolean"},"reason":{"type":"string"},"details":{"type":"object"}}}"#;
+
+/// Draftable: every property is a boolean or a string, so Sacrum accepts the
+/// response field by field.
+const DRAFTABLE_APPROVAL_SCHEMA: &str = r#"{"type":"object","required":["approved","reason"],"properties":{"approved":{"type":"boolean","description":"Should it ship?"},"reason":{"type":"string","description":"Why?"}}}"#;
+
+const UI_STORAGE_KEY: &str = "vertebrae-ui-storage";
 
 /// Heading that opens the hidden gate protocol in the developer instructions.
 const GATE_PROTOCOL_HEADING: &str = "# Human input gate";
@@ -63,6 +71,32 @@ async fn create_resolvable_human_input_step(
             &artifact,
             "--output-schema",
             APPROVAL_SCHEMA,
+        ],
+        &workflow_name,
+    )
+    .await;
+}
+
+#[given(
+    expr = "I create a draftable human_input step {string} with question {string} and artifact {string} in the workflow {string} via the CLI"
+)]
+async fn create_draftable_human_input_step(
+    world: &mut GuiWorld,
+    step_name: String,
+    question: String,
+    artifact: String,
+    workflow_name: String,
+) {
+    add_human_input_step(
+        world,
+        &[
+            &step_name,
+            "--question",
+            &question,
+            "--artifact",
+            &artifact,
+            "--output-schema",
+            DRAFTABLE_APPROVAL_SCHEMA,
         ],
         &workflow_name,
     )
@@ -126,8 +160,48 @@ async fn create_reviewed_human_input_step(
     artifact: String,
     workflow_name: String,
 ) {
+    add_reviewed_gate(
+        world,
+        &step_name,
+        &question,
+        &artifact,
+        &workflow_name,
+        APPROVAL_SCHEMA,
+    )
+    .await;
+}
+
+#[given(
+    expr = "I create a reviewed draftable human_input step {string} with question {string} and artifact {string} in the workflow {string} via the CLI"
+)]
+async fn create_reviewed_draftable_human_input_step(
+    world: &mut GuiWorld,
+    step_name: String,
+    question: String,
+    artifact: String,
+    workflow_name: String,
+) {
+    add_reviewed_gate(
+        world,
+        &step_name,
+        &question,
+        &artifact,
+        &workflow_name,
+        DRAFTABLE_APPROVAL_SCHEMA,
+    )
+    .await;
+}
+
+async fn add_reviewed_gate(
+    world: &mut GuiWorld,
+    step_name: &str,
+    question: &str,
+    artifact: &str,
+    workflow_name: &str,
+    schema: &str,
+) {
     let workflow_id = world
-        .workflow_id_by_name(&workflow_name)
+        .workflow_id_by_name(workflow_name)
         .unwrap_or_else(|| panic!("no workflow ID found for '{workflow_name}' — create it first"))
         .clone();
     let done = add_step(
@@ -144,13 +218,13 @@ async fn create_reviewed_human_input_step(
             "claude",
             "--step-type",
             "human_input",
-            &step_name,
+            step_name,
             "--question",
-            &question,
+            question,
             "--artifact",
-            &artifact,
+            artifact,
             "--output-schema",
-            APPROVAL_SCHEMA,
+            schema,
         ],
     )
     .await;
@@ -471,6 +545,10 @@ async fn harness_started_gate_chats(
                 "{harness} gate instructions lack {expected:?}:\n{instructions}"
             );
         }
+        assert!(
+            !instructions.contains("vtb gate "),
+            "a whole-artifact gate offers draft commands:\n{instructions}"
+        );
     }
 }
 
@@ -536,7 +614,7 @@ async fn gate_chat_receives_evaluation(
         for expected in [
             format!("attempt {attempt}"),
             reasons.clone(),
-            format!("--subject-id {execution_id}"),
+            execution_id.clone(),
         ] {
             assert!(
                 turn.contains(&expected),
@@ -544,4 +622,337 @@ async fn gate_chat_receives_evaluation(
             );
         }
     }
+}
+
+/// Gate chat instructions that ask `question` on the draft protocol.
+fn draft_gate_sessions(harness: &str, question: &str) -> Vec<String> {
+    gate_session_instructions(harness)
+        .into_iter()
+        .filter(|instructions| {
+            instructions.contains(question) && instructions.contains("## Recording answers")
+        })
+        .collect()
+}
+
+#[then(expr = "the {string} harness should have started {int} draft gate chat(s) asking {string}")]
+async fn harness_started_draft_gate_chats(
+    world: &mut GuiWorld,
+    harness: String,
+    expected: usize,
+    question: String,
+) {
+    if expected == 0 {
+        // Nothing waits once the gate resolved without a chat.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let sessions = draft_gate_sessions(&harness, &question);
+        assert!(
+            sessions.is_empty(),
+            "unexpected draft gate chats: {sessions:#?}"
+        );
+        return;
+    }
+    let (_, execution_id) = waiting_gate_ids(world).await;
+    let started = gui_acceptance::wait_until(
+        "draft gate chat session start",
+        Duration::from_secs(10),
+        || async { Ok::<_, String>(draft_gate_sessions(&harness, &question).len() >= expected) },
+    )
+    .await;
+    let sessions = draft_gate_sessions(&harness, &question);
+    assert!(
+        started.is_ok() && sessions.len() == expected,
+        "expected {expected} {harness} draft gate chat(s), found {}: {sessions:#?}",
+        sessions.len()
+    );
+    for instructions in &sessions {
+        for expected in [
+            format!("vtb gate set {execution_id} --values '<JSON object>'"),
+            format!("vtb gate show {execution_id}"),
+            format!("vtb --json gate submit {execution_id}"),
+            "[Vertebrae steering]".to_string(),
+            "- approved (required, boolean): Should it ship?".to_string(),
+        ] {
+            assert!(
+                instructions.contains(&expected),
+                "{harness} draft gate instructions lack {expected:?}:\n{instructions}"
+            );
+        }
+        assert!(
+            !instructions.contains(&format!("--subject-id {execution_id}")),
+            "a draftable gate offers the whole-artifact command:\n{instructions}"
+        );
+    }
+}
+
+#[then(
+    expr = "the latest {string} gate chat asking {string} should start from the answer {string} with {string} still needed"
+)]
+async fn latest_gate_chat_starts_from_draft(
+    _world: &mut GuiWorld,
+    harness: String,
+    question: String,
+    answer: String,
+    missing: String,
+) {
+    let sessions = draft_gate_sessions(&harness, &question);
+    let latest = sessions
+        .last()
+        .unwrap_or_else(|| panic!("no {harness} draft gate chat asking {question:?}"));
+    for expected in [
+        "## Answers so far".to_string(),
+        format!("- {answer}"),
+        format!("Still needed: {missing}"),
+    ] {
+        assert!(
+            latest.contains(&expected),
+            "the latest gate chat does not start from the draft ({expected:?}):\n{latest}"
+        );
+    }
+}
+
+/// Hidden Claude turns that begin with `marker`, such as `[Vertebrae steering]`.
+fn claude_hidden_turns(marker: &str) -> Vec<String> {
+    let prefix = format!("<vertebrae-hidden-turn>\n{marker}");
+    capture_lines("stdin_turns.jsonl")
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|text| text.starts_with(&prefix))
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+/// `expected` hints so far, the latest naming exactly what is still needed.
+#[then(expr = "the gate chat should receive {int} steering turn(s) naming {string}")]
+async fn gate_chat_receives_steering(_world: &mut GuiWorld, expected: usize, needed: String) {
+    let delivered = gui_acceptance::wait_until(
+        "gate chat steering turn",
+        Duration::from_secs(15),
+        || async { Ok::<_, String>(claude_hidden_turns("[Vertebrae steering]").len() >= expected) },
+    )
+    .await;
+    // Later renders must not repeat the hint for the same stall.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let turns = claude_hidden_turns("[Vertebrae steering]");
+    assert!(
+        delivered.is_ok() && turns.len() == expected,
+        "expected {expected} steering turn(s), found {}: {turns:#?}",
+        turns.len()
+    );
+    let latest = turns.last().expect("at least one steering turn");
+    assert!(
+        latest.contains(&format!("Still needed: {needed}")),
+        "the latest steering turn does not name {needed:?}:\n{latest}"
+    );
+}
+
+#[then(expr = "the gate chat should receive a form turn reporting {string}")]
+async fn gate_chat_receives_form_turn(_world: &mut GuiWorld, answer: String) {
+    let delivered =
+        gui_acceptance::wait_until("gate chat form turn", Duration::from_secs(15), || async {
+            Ok::<_, String>(
+                claude_hidden_turns("[Vertebrae form]")
+                    .iter()
+                    .any(|turn| turn.contains(&answer)),
+            )
+        })
+        .await;
+    assert!(
+        delivered.is_ok(),
+        "no form turn reported {answer:?}: {:#?}",
+        claude_hidden_turns("[Vertebrae form]")
+    );
+}
+
+#[then("the gate chat should open with the recovery turn")]
+async fn gate_chat_opens_with_recovery_turn(_world: &mut GuiWorld) {
+    let opened = gui_acceptance::wait_until(
+        "gate chat recovery turn",
+        Duration::from_secs(10),
+        || async {
+            Ok::<_, String>(
+                capture_lines("stdin_turns.jsonl")
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|text| text.contains("after the earlier chat ended")),
+            )
+        },
+    )
+    .await;
+    assert!(
+        opened.is_ok(),
+        "no recovery turn reached Claude: {:#?}",
+        capture_lines("stdin_turns.jsonl")
+    );
+}
+
+#[then(expr = "the evaluation turn should present {string} as a previous answer")]
+async fn evaluation_turn_presents_previous_answer(_world: &mut GuiWorld, answer: String) {
+    let turns = claude_hidden_turns("[Vertebrae evaluation]");
+    let latest = turns
+        .last()
+        .expect("no evaluation turn reached the gate chat");
+    for expected in [
+        "from the previous attempt".to_string(),
+        format!("- {answer}"),
+    ] {
+        assert!(
+            latest.contains(&expected),
+            "the evaluation turn lacks {expected:?}:\n{latest}"
+        );
+    }
+}
+
+/// Record answers in the waiting gate's draft with the command a draftable
+/// gate chat's agent runs.
+#[when(expr = "I set the waiting gate's draft to {string} via the CLI")]
+async fn set_waiting_gate_draft(world: &mut GuiWorld, values: String) {
+    let (_, execution_id) = waiting_gate_ids(world).await;
+    world
+        .run_vtb(&["gate", "set", &execution_id, "--values", &values])
+        .await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb gate set failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+}
+
+#[when("I submit the waiting gate's draft via the CLI")]
+async fn submit_waiting_gate_draft(world: &mut GuiWorld) {
+    let (_, execution_id) = waiting_gate_ids(world).await;
+    world.run_vtb(&["gate", "submit", &execution_id]).await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb gate submit failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+}
+
+#[then(expr = "the gate draft progress should show {string} as {string} within {int} seconds")]
+async fn gate_draft_progress_shows(
+    world: &mut GuiWorld,
+    field: String,
+    state: String,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    gui_acceptance::wait_for_js(
+        &client,
+        &format!("gate draft field {field} {state}"),
+        r#"
+          const row = [...document.querySelectorAll('[data-testid="gate-draft-field"]')]
+            .find((row) => row.dataset.field === arguments[0]);
+          return row?.dataset.state === arguments[1];
+        "#,
+        vec![field.clone().into(), state.clone().into()],
+        Duration::from_secs(timeout),
+    )
+    .await;
+    world
+        .screenshot(&client, &format!("after-assert-draft-{field}-{state}"))
+        .await;
+}
+
+/// Steer gate chats after fewer stalled turns. Stored the way Settings does;
+/// the next navigation restarts the frontend, which reads it on startup.
+#[given(expr = "gate chats are steered after {int}, {int} and {int} stalled turns")]
+async fn gate_steering_thresholds(world: &mut GuiWorld, soft: u32, form: u32, escape: u32) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    client
+        .execute(
+            r#"
+              const stored = JSON.parse(window.localStorage.getItem(arguments[0]) ?? 'null')
+                ?? { state: {}, version: 0 };
+              stored.state = {
+                ...stored.state,
+                gateSteeringThresholds: { soft: arguments[1], form: arguments[2], escape: arguments[3] },
+              };
+              window.localStorage.setItem(arguments[0], JSON.stringify(stored));
+            "#,
+            vec![
+                UI_STORAGE_KEY.into(),
+                soft.into(),
+                form.into(),
+                escape.into(),
+            ],
+        )
+        .await
+        .expect("store gate steering thresholds");
+}
+
+/// Undo [`gate_steering_thresholds`]. Runs after every scenario.
+pub async fn reset_gate_steering_thresholds(world: &GuiWorld) {
+    let Some(wd) = world.webdriver.as_ref() else {
+        return;
+    };
+    let client = wd.lock().await;
+    let _ = client
+        .execute(
+            r#"
+              const stored = JSON.parse(window.localStorage.getItem(arguments[0]) ?? 'null');
+              if (stored?.state?.gateSteeringThresholds) {
+                delete stored.state.gateSteeringThresholds;
+                window.localStorage.setItem(arguments[0], JSON.stringify(stored));
+              }
+            "#,
+            vec![UI_STORAGE_KEY.into()],
+        )
+        .await;
+}
+
+#[then(expr = "the vtb output should contain {string}")]
+async fn vtb_output_contains(world: &mut GuiWorld, expected: String) {
+    assert!(
+        world.last_stdout.contains(&expected),
+        "vtb output lacks {expected:?}:\n{}{}",
+        world.last_stdout,
+        world.last_stderr
+    );
+}
+
+/// Hidden steering and form turns never render as the user's messages.
+#[then(expr = "the local chat should show {int} user messages, none of them from Vertebrae")]
+async fn local_chat_user_messages_exclude_hidden_turns(world: &mut GuiWorld, expected: usize) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let rows = client
+        .execute(
+            r#"
+              return [...document.querySelectorAll(
+                '[data-testid="chat-messages-scroll"] .evrow--user:not(.is-prompt):not(.is-system)'
+              )].map((row) => row.textContent ?? '');
+            "#,
+            vec![],
+        )
+        .await
+        .expect("read local chat user messages");
+    world.screenshot(&client, "assert-user-messages").await;
+    let rows: Vec<String> = rows
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| row.as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(rows.len(), expected, "unexpected user messages: {rows:#?}");
+    assert!(
+        rows.iter()
+            .all(|row| !row.contains("[Vertebrae") && !row.contains("vertebrae-hidden-turn")),
+        "a hidden Vertebrae turn rendered as a user message: {rows:#?}"
+    );
 }

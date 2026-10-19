@@ -153,7 +153,7 @@ never on the adapter crates directly.
 | `harnesses/codex/` | Codex model catalog and session creation |
 | `harnesses/shared.rs` | `LocalChatHarnessEventSink` — translates `HarnessEventV1` into local-chat events; `LocalChatControlSink` for approvals |
 | `permissions.rs` | Permission-mode translation and the `vtb-gate` prompt bridge |
-| `gate.rs` | `LocalChatGateBinding`, the hidden gate protocol instructions, and the bound `vtb artifact add` command check |
+| `gate.rs` | `LocalChatGateBinding`, the hidden gate protocol instructions (draft or whole-artifact), and the bound `vtb gate` / `vtb artifact add` command check |
 | `manager.rs` | Session registry and pane/session bookkeeping |
 
 #### Gate chats
@@ -185,6 +185,29 @@ that execution, which makes duplicate updates inject one turn. A chat with no
 running session is rebound in place and gets the verdict in its developer
 instructions when it resumes; a chat whose gate no longer waits resumes
 unbound.
+
+A draftable gate (Sacrum's `HumanInputStepConfig.draftable`) is resolved
+through its durable draft. The canonical binding carries `draftable`, the
+waiting execution's draft and the schema `fields`; the protocol records answers
+with `vtb gate set|show|submit`, which the bridge approves for the bound
+execution instead of `vtb artifact add`. `useHumanInputDraft()` reads the draft
+keyed by the execution's realtime `draft_updated_at`, so every draft change
+re-reads Sacrum's missing/invalid/complete report rather than deriving it.
+`GateDraftProgress` shows each field under the status bar. `useGateSteering()`
+counts the user's completed turns since the draft last changed, the gate was
+re-entered, or the user chose Keep going; past the Settings thresholds (`uiStore`
+`gateSteeringThresholds`, default 3/6/9) it sends one hidden `[Vertebrae
+steering]` turn per stall, then `GateSteering` renders the remaining fields as
+a `GateAnswerForm` (recorded with `setHumanInputDraft`, then reported in a
+hidden `[Vertebrae form]` turn) and finally a Keep going / Stop this run card.
+`HumanInputGate` offers the same form as Answer directly. Forms retain dirty
+edits across draft refreshes; untouched fields follow the durable values. An
+edited chat form stays open until recorded, Keep going is chosen, or its waiting execution changes.
+Submission cards use the snapshot returned by `vtb --json gate submit`, rather
+than reconstructing answers from chat commands; older results without that
+snapshot remain ordinary tool output. When Resolve finds
+the bound chat's session gone, `resolveGateInChat()` detaches that chat and
+starts a new one whose protocol includes the current draft.
 
 ### Opt-in OpenTelemetry collection
 

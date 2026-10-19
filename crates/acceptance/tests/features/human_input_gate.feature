@@ -53,7 +53,7 @@ Feature: human_input gate config and resolution
     Then the command should fail with "Human input rejected: artifact body is not valid JSON:"
     And the hint should contain "must be a JSON document"
     When I attach '{"approved": "yes"}' as "approval" to the waiting execution
-    Then the command should fail with "Human input rejected: artifact body does not satisfy the gate's output_schema:"
+    Then the command should fail with "Human input rejected: the response does not satisfy the gate's output_schema:"
     And the error should contain "  - #/approved:"
     And the error should contain "  - #:"
     And the hint should contain "Fix each listed path"
@@ -76,3 +76,40 @@ Feature: human_input gate config and resolution
     When I attach '{"approved": true, "reason": "Too late"}' as "approval" to the waiting execution
     Then the command should fail with "Human input rejected: step execution is not waiting for human input"
     And the hint should contain "current waiting execution"
+
+  Scenario: A draftable gate is answered field by field and submitted from its draft
+    Given the human_input step "gate" is configured with role "Review as a release manager" and question "Approve {{ task.title }}?", artifact "approval", and the approval output schema
+    And I create a task with:
+      | title | Draft parser |
+    And I assign the workflow to the task
+    When I transition the task to step "gate" with --skip-validation
+    And I run vtb "start-taskrun <TASK_ID>"
+    And I store the latest TaskRun ID as "task_run_id"
+    And the TaskRun "task_run_id" is waiting at the human_input gate
+    And I run vtb "gate show <step_execution_id>"
+    Then the command should succeed
+    And the output should contain "Answered: none yet"
+    And the output should contain "Still needed: approved, reason"
+    When I set the waiting gate's draft to '{"approved": true}'
+    Then the command should succeed
+    And the output should contain "  approved: true"
+    And the output should contain "Still needed: reason"
+    When I set the waiting gate's draft to '{"nope": 1}'
+    Then the command should fail with "Human input rejected: not a property of the gate's output_schema: nope"
+    And the hint should contain "vtb gate show"
+    When I set the waiting gate's draft to '{"approved": "yes"}'
+    Then the command should fail with "Human input rejected: the response does not satisfy the gate's output_schema:"
+    And the error should contain "/approved"
+    When I run vtb "gate submit <step_execution_id>"
+    Then the command should fail with "Human input rejected: draft is missing required fields: reason"
+    And the hint should contain "vtb gate set"
+    When I set the waiting gate's draft to '{"reason": "Looks good"}'
+    Then the command should succeed
+    And the output should contain "Complete — confirm with the user, then submit."
+    When I run vtb "gate submit <step_execution_id>"
+    Then the command should succeed
+    And the output should contain "the gate is resolved"
+    And the TaskRun "task_run_id" should reach status "completed"
+    When I run vtb "gate show <step_execution_id>"
+    Then the command should succeed
+    And the output should contain '  reason: "Looks good"'

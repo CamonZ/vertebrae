@@ -196,13 +196,31 @@ describe("resolveHumanInputGate", () => {
         artifact: "decision",
         output_schema: schema,
         fields: [
-          { name: "decision", required: true, type: "string", question: null },
+          {
+            name: "decision",
+            required: true,
+            type: "string",
+            question: null,
+            value_type: "string",
+            choices: null,
+            multiple: false,
+            format: null,
+          },
         ],
       },
     });
     const gate = resolveHumanInputGate(run, [exec]);
     expect(gate?.fields).toEqual([
-      { name: "decision", required: true, type: "string", question: null },
+      {
+        name: "decision",
+        required: true,
+        type: "string",
+        question: null,
+        value_type: "string",
+        choices: null,
+        multiple: false,
+        format: null,
+      },
     ]);
     expect(gate?.question).toBe("Ship v2?");
     expect(gate?.role).toBe("Release manager");

@@ -497,6 +497,8 @@ fn graphql_item(
         path: path.map(|path| path.into_iter().map(str::to_string).collect()),
         code: None,
         extensions,
+        fields: None,
+        missing: None,
     }
 }
 

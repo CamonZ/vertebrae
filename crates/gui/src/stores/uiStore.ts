@@ -1,5 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import {
+  DEFAULT_GATE_STEERING_THRESHOLDS,
+  type GateSteeringThresholds,
+} from "../utils/gateDraft";
 
 type Theme = "light" | "dark" | "system";
 
@@ -24,6 +28,8 @@ interface UIState {
   density: DensityPreference;
   /** Application name or path used to open local file references. */
   externalEditor: string;
+  /** Stalled user turns before a gate chat is steered back to its draft. */
+  gateSteeringThresholds: GateSteeringThresholds;
 }
 
 interface UIActions {
@@ -35,6 +41,8 @@ interface UIActions {
   setDensity: (density: DensityPreference) => void;
   /** Set the application used to open local file references. */
   setExternalEditor: (externalEditor: string) => void;
+  /** Set when stalled gate chats are steered. */
+  setGateSteeringThresholds: (thresholds: GateSteeringThresholds) => void;
 }
 
 export type UIStore = UIState & UIActions;
@@ -51,6 +59,9 @@ export const useUIStore = create<UIStore>()(
       setDensity: (density) => set({ density }),
       externalEditor: "",
       setExternalEditor: (externalEditor) => set({ externalEditor }),
+      gateSteeringThresholds: DEFAULT_GATE_STEERING_THRESHOLDS,
+      setGateSteeringThresholds: (gateSteeringThresholds) =>
+        set({ gateSteeringThresholds }),
     }),
     {
       name: "vertebrae-ui-storage",
@@ -60,6 +71,7 @@ export const useUIStore = create<UIStore>()(
         thinkingIndicatorStyle: state.thinkingIndicatorStyle,
         density: state.density,
         externalEditor: state.externalEditor,
+        gateSteeringThresholds: state.gateSteeringThresholds,
       }),
     }
   )

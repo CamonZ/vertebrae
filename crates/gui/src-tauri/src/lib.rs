@@ -128,6 +128,9 @@ fn create_builder() -> Builder {
             commands::get_active_run,
             commands::get_task_runs,
             commands::get_task_run_trace,
+            commands::get_human_input_draft,
+            commands::set_human_input_draft,
+            commands::submit_human_input_draft,
             // Step commands (first-class workflow steps)
             commands::list_steps_for_workflow,
             commands::get_step,

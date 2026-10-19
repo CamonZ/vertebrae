@@ -22,13 +22,19 @@ pub struct GraphqlErrorItem {
     #[serde(default)]
     pub code: Option<String>,
     pub extensions: Option<serde_json::Value>,
+    /// Draft keys `unknown_draft_field` rejected.
+    #[serde(default)]
+    pub fields: Option<Vec<String>>,
+    /// Required draft properties `draft_incomplete` reports unset.
+    #[serde(default)]
+    pub missing: Option<Vec<String>>,
 }
 
 /// Prefix Sacrum puts before each `invalid_human_input` violation.
 const SCHEMA_VIOLATION_PREFIX: &str = "response does not satisfy the output_schema: ";
 
 /// Classify the gate errors Sacrum returns when an artifact attached to a
-/// waiting `human_input` execution is rejected.
+/// waiting `human_input` execution, or a draft operation on it, is rejected.
 fn human_input_rejection(items: &[GraphqlErrorItem]) -> Option<HumanInputRejection> {
     let with_code = |code: &'static str| {
         items
@@ -38,6 +44,31 @@ fn human_input_rejection(items: &[GraphqlErrorItem]) -> Option<HumanInputRejecti
     if let Some(item) = with_code("human_input_execution_not_waiting").next() {
         return Some(HumanInputRejection::NotWaiting {
             message: item.message.clone(),
+        });
+    }
+    if let Some(item) = with_code("not_human_input").next() {
+        return Some(HumanInputRejection::NotHumanInput {
+            message: item.message.clone(),
+        });
+    }
+    if let Some(item) = with_code("human_input_not_draftable").next() {
+        return Some(HumanInputRejection::NotDraftable {
+            message: item.message.clone(),
+        });
+    }
+    if let Some(item) = with_code("human_input_artifact_not_configured").next() {
+        return Some(HumanInputRejection::ArtifactNotConfigured {
+            message: item.message.clone(),
+        });
+    }
+    if let Some(item) = with_code("unknown_draft_field").next() {
+        return Some(HumanInputRejection::UnknownDraftFields {
+            fields: item.fields.clone().unwrap_or_default(),
+        });
+    }
+    if let Some(item) = with_code("draft_incomplete").next() {
+        return Some(HumanInputRejection::DraftIncomplete {
+            missing: item.missing.clone().unwrap_or_default(),
         });
     }
     if let Some(item) = with_code("invalid_human_input_json").next() {
@@ -236,6 +267,8 @@ mod tests {
                 path: Some(vec!["createDaemon".to_string()]),
                 code: None,
                 extensions: Some(serde_json::json!({ "field": "name" })),
+                fields: None,
+                missing: None,
             }],
             messages: vec!["has already been taken".to_string()],
             message: "has already been taken".to_string(),
@@ -300,6 +333,68 @@ mod tests {
             messages,
             message: String::new(),
         }
+    }
+
+    #[test]
+    fn test_draft_codes_convert_to_rejections_carrying_their_lists() {
+        let item = |value: serde_json::Value| -> GraphqlErrorItem {
+            serde_json::from_value(value).unwrap()
+        };
+        let convert = |item: GraphqlErrorItem| -> ServiceError {
+            SacrumClientError::GraphqlError {
+                messages: vec![item.message.clone()],
+                items: vec![item],
+                message: String::new(),
+            }
+            .into()
+        };
+
+        let unknown = convert(item(serde_json::json!({
+            "message": "not a property of the gate's output_schema: nope",
+            "code": "unknown_draft_field",
+            "fields": ["nope"]
+        })));
+        assert!(matches!(
+            unknown,
+            ServiceError::HumanInputRejected(HumanInputRejection::UnknownDraftFields { ref fields })
+                if fields == &["nope".to_string()]
+        ));
+
+        let incomplete = convert(item(serde_json::json!({
+            "message": "draft is missing required fields: reason",
+            "code": "draft_incomplete",
+            "missing": ["reason"]
+        })));
+        assert!(matches!(
+            incomplete,
+            ServiceError::HumanInputRejected(HumanInputRejection::DraftIncomplete { ref missing })
+                if missing == &["reason".to_string()]
+        ));
+
+        for (code, expected) in [
+            ("human_input_not_draftable", "NotDraftable"),
+            (
+                "human_input_artifact_not_configured",
+                "ArtifactNotConfigured",
+            ),
+            ("not_human_input", "NotHumanInput"),
+        ] {
+            let error = convert(item(serde_json::json!({"message": "m", "code": code})));
+            let ServiceError::HumanInputRejected(rejection) = error else {
+                panic!("{code} should be a human input rejection");
+            };
+            assert!(format!("{rejection:?}").starts_with(expected), "{code}");
+        }
+
+        let violation = convert(item(serde_json::json!({
+            "message": "response does not satisfy the output_schema: /approved: Type mismatch.",
+            "code": "invalid_human_input"
+        })));
+        assert!(matches!(
+            violation,
+            ServiceError::HumanInputRejected(HumanInputRejection::SchemaViolations { ref violations })
+                if violations == &["/approved: Type mismatch.".to_string()]
+        ));
     }
 
     #[test]

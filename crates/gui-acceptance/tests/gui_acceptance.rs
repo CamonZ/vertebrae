@@ -602,6 +602,7 @@ async fn main() {
 
                 if let Some(world) = world {
                     steps::gate_chat::reset_default_local_chat_provider(world).await;
+                    steps::gate_chat::reset_gate_steering_thresholds(world).await;
                     // Stop the daemon first so it can't hold DB locks while we
                     // delete the workflows/tasks underneath it.
                     world.stop_daemon().await;

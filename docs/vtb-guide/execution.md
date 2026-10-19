@@ -34,3 +34,32 @@ or `No active run for task <task-id>`. TaskRun commands have no command aliases.
 
 The CLI does not expose execution-history or detailed execution-log commands.
 Sacrum records StepExecutions as steps run inside a TaskRun.
+
+## Answering a waiting gate field by field
+
+A waiting `human_input` gate whose output schema Sacrum accepts field by field
+(every top-level property a string, number, integer, boolean, string enum, or
+array of string enum) keeps a durable draft. `vtb gate` reads and fills it:
+
+```bash
+# Record answers; keys are the schema's properties, null clears one
+vtb gate set <execution-id> --values '{"approved": true}'
+
+# Show the answers recorded so far and what is still needed
+vtb gate show <execution-id>
+
+# Resolve the gate from the complete draft
+vtb gate submit <execution-id>
+```
+
+`<execution-id>` is the full ID of the run's waiting StepExecution
+(`latestStep=` in `vtb show <task>`). `set` and `show` print the recorded
+answers, any invalid values with their JSON path, then either `Still needed:
+<fields>` or `Complete — confirm with the user, then submit`; Sacrum, not the
+caller, decides what is missing. `submit` resolves the gate exactly as
+attaching its artifact does. With the global `--json` flag every command
+prints the draft (`execution_id`, `values`, `missing`, `invalid`, `complete`,
+`updated_at`). Rejections name the problem: an unknown field, a value that
+violates the schema, a draft still missing required fields, a gate that does
+not accept drafts or names no artifact, and an execution that is no longer
+waiting. A gate that is not draftable is resolved with `vtb artifact add`.

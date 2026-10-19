@@ -465,6 +465,8 @@ mod tests {
                 "rule": "reference must exist",
                 "field_path": "$.rules[0].transition.step_id"
             })),
+            fields: None,
+            missing: None,
         };
 
         let formatted = format_graphql_error(&error);

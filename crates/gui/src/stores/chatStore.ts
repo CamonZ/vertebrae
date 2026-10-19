@@ -518,6 +518,16 @@ export interface ChatSession {
   gate?: LocalChatGateBinding | null;
   /** Runtime-only phase of the bound gate, derived from realtime run state. */
   gateStatus?: GateChatStatus | null;
+  /** Runtime-only steering state of a stalled draftable gate chat. */
+  gateSteering?: GateSteeringState | null;
+}
+
+/** How a draftable gate chat has been steered since its draft last moved. */
+export interface GateSteeringState {
+  /** Stall baseline (ms) the hidden soft hint was sent for; once per stall. */
+  softHintBaseline: number | null;
+  /** When the user chose "Keep going", restarting the stall count (ms). */
+  resetAt: number | null;
 }
 
 export interface ChatPane {
@@ -586,6 +596,16 @@ interface ChatStoreActions {
   setGateChatStatus: (sessionId: string, status: GateChatStatus | null) => void;
   /** Rebind a gate chat to the execution now waiting at its gate. */
   setGateChatBinding: (sessionId: string, gate: LocalChatGateBinding) => void;
+  /**
+   * Unbind a gate chat whose session ended, keeping it as a plain chat, so
+   * Resolve starts a new chat for the gate.
+   */
+  detachGateChat: (sessionId: string) => void;
+  /** Record steering of a stalled gate chat. Runtime-only. */
+  setGateSteering: (
+    sessionId: string,
+    patch: Partial<GateSteeringState>
+  ) => void;
   /** List persisted local chat sessions, newest first */
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
   /** Hydrate local chat metadata from the app-managed index file. */
@@ -2127,6 +2147,29 @@ export const useChatStore = create<ChatStore>((set, get) => {
         session.gate?.execution_id === gate.execution_id
           ? session
           : { ...session, gate }
+      );
+    },
+
+    detachGateChat: (sessionId) => {
+      void updateSession(sessionId, (session) =>
+        session.gate
+          ? { ...session, gate: null, gateStatus: null, gateSteering: null }
+          : session
+      );
+    },
+
+    setGateSteering: (sessionId, patch) => {
+      void updateSession(
+        sessionId,
+        (session) => ({
+          ...session,
+          gateSteering: {
+            softHintBaseline: session.gateSteering?.softHintBaseline ?? null,
+            resetAt: session.gateSteering?.resetAt ?? null,
+            ...patch,
+          },
+        }),
+        { persist: false }
       );
     },
 

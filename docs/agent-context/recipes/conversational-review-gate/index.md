@@ -28,4 +28,4 @@ installed binaries may lack the human-input authoring flags.
   Load when: manual end-to-end testing, waiting execution IDs, schema failures.
 
 ## Related
-[human_input](../../workflows/steps/human_input.md) · [Route loops](../../workflows/steps/route/loops.md) · [structured_inference questions](../../workflows/steps/structured_inference/questions.md)
+[human_input](../../workflows/steps/human_input/index.md) · [Route loops](../../workflows/steps/route/loops.md) · [structured_inference questions](../../workflows/steps/structured_inference/questions.md)

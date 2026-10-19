@@ -5525,6 +5525,7 @@ mod human_input_config_tests {
                 question: Some("Approve {{ task.title }}?".to_string()),
                 artifact: Some("approval".to_string()),
                 output_schema: Some(schema.clone()),
+                draftable: false,
             }
         );
 

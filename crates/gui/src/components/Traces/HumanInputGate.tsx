@@ -1,6 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { useResolveGateInChat } from "../../hooks/useGateChat";
+import {
+  setGateDraft,
+  submitGateDraft,
+  useHumanInputDraft,
+} from "../../hooks/useHumanInputDraft";
 import { gateChatBinding } from "../../utils/gateChat";
+import { draftValues, type GateDraftValues } from "../../utils/gateDraft";
+import { GateAnswerForm } from "../shared/GateAnswerForm";
 import { MarkdownContent } from "../shared/MarkdownContent";
 import { Spinner } from "../Spinner";
 import type { HumanInputGateContext } from "../../utils/humanInputGate";
@@ -63,6 +70,23 @@ export function HumanInputGate({
   const fields = context.fields ?? [];
   const resolveGateInChat = useResolveGateInChat();
   const resolvable = gateChatBinding(context) !== null;
+  // Only a draftable gate has a draft; it can be answered without a chat.
+  const { draft } = useHumanInputDraft(
+    execution?.id,
+    execution?.draft_updated_at
+  );
+  const answerable =
+    draft !== null && !!execution?.id && fields.length > 0 && resolvable;
+  const [answering, setAnswering] = useState(false);
+
+  const submitDirectly = async (answers: GateDraftValues) => {
+    if (!execution?.id) return;
+    if (Object.keys(answers).length > 0) {
+      await setGateDraft(execution.id, answers);
+    }
+    await submitGateDraft(execution.id);
+    setAnswering(false);
+  };
 
   const hasRole = !!role && role.trim().length > 0;
   const hasQuestion = !!question && question.trim().length > 0;
@@ -152,6 +176,18 @@ export function HumanInputGate({
             </svg>
             <span>Resolve</span>
           </button>
+          {answerable && (
+            <button
+              type="button"
+              data-testid="human-input-gate-answer-directly"
+              aria-expanded={answering}
+              onClick={() => setAnswering((open) => !open)}
+              className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-info)]/60 px-2.5 py-1.5 text-xs font-medium text-[var(--color-info)] transition-colors hover:bg-[var(--color-info)]/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-info)]"
+              title="Answer this gate in a form, without a chat"
+            >
+              <span>Answer directly</span>
+            </button>
+          )}
           {stoppable && onStop && (
             <button
               type="button"
@@ -179,6 +215,22 @@ export function HumanInputGate({
           )}
         </div>
       </div>
+      {answerable && answering && draft && (
+        <div
+          data-testid="human-input-gate-direct-answer"
+          className="mt-3 rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-3"
+        >
+          <GateAnswerForm
+            key={execution?.id}
+            fields={fields}
+            values={draftValues(draft)}
+            submitLabel="Submit"
+            requireRequired
+            onSubmit={submitDirectly}
+            testId="human-input-gate-answer-form"
+          />
+        </div>
+      )}
       <dl className="mt-3 grid grid-cols-1 gap-2 text-eyebrow sm:grid-cols-2">
         <div>
           <dt className="font-mono uppercase tracking-wider text-[var(--color-fg-mute)]">

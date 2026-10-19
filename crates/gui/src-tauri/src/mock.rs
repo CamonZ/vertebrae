@@ -1177,6 +1177,34 @@ impl ExecutionService for MockExecutionService {
         sync_task_run_controls(&mut s, &stopped.task_id);
         Ok(Some(stopped))
     }
+
+    async fn human_input_draft(
+        &self,
+        _execution_id: &str,
+    ) -> ServiceResult<vertebrae_core::HumanInputDraft> {
+        Err(ServiceError::validation_failed(
+            "human_input drafts are not supported by the mock backend",
+        ))
+    }
+
+    async fn set_human_input_draft(
+        &self,
+        _execution_id: &str,
+        _values: serde_json::Map<String, serde_json::Value>,
+    ) -> ServiceResult<vertebrae_core::HumanInputDraft> {
+        Err(ServiceError::validation_failed(
+            "human_input drafts are not supported by the mock backend",
+        ))
+    }
+
+    async fn submit_human_input_draft(
+        &self,
+        _execution_id: &str,
+    ) -> ServiceResult<vertebrae_core::HumanInputDraft> {
+        Err(ServiceError::validation_failed(
+            "human_input drafts are not supported by the mock backend",
+        ))
+    }
 }
 
 // ============================================================================

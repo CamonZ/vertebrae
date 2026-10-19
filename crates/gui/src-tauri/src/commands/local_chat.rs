@@ -378,6 +378,17 @@ fn canonical_gate_binding(
         question: config.question.clone(),
         output_schema: config.output_schema.clone(),
         revision: gate_revision(gate_attempts.len(), execution.handoff.as_deref()),
+        draftable: Some(config.draftable),
+        // The trace read carries the draft, so a (re)started chat picks up
+        // from the persisted answers instead of re-asking them.
+        draft: config
+            .draftable
+            .then(|| execution.draft.clone().map(Into::into))
+            .flatten(),
+        fields: config
+            .output_schema
+            .as_ref()
+            .map(crate::local_chat::gate::gate_fields),
     })
 }
 
@@ -787,6 +798,7 @@ mod tests {
             duration_ms: None,
             model_provider: None,
             handoff: None,
+            draft: None,
         }];
         if second_execution {
             executions.push(vertebrae_core::StepExecution {
@@ -831,6 +843,9 @@ mod tests {
             question: Some("Forged question?".into()),
             output_schema: Some(serde_json::json!("forged")),
             revision: None,
+            draftable: None,
+            draft: None,
+            fields: None,
         }
     }
 
@@ -849,6 +864,63 @@ mod tests {
             gate.output_schema,
             Some(serde_json::json!({ "type": "object" }))
         );
+    }
+
+    #[test]
+    fn draftable_gate_bindings_carry_sacrums_flag_draft_and_fields() {
+        let mut trace = gate_trace(vertebrae_core::TaskRunStatus::Waiting, false);
+        let execution = &mut trace.step_executions[0];
+        let Some(vertebrae_core::StepConfig::HumanInput(config)) = execution.config.as_mut() else {
+            panic!("human_input config");
+        };
+        config.output_schema = Some(serde_json::json!({
+            "type": "object",
+            "required": ["approved"],
+            "properties": { "approved": { "type": "boolean", "description": "Ship?" } }
+        }));
+        config.draftable = true;
+        let mut values = serde_json::Map::new();
+        values.insert("approved".into(), serde_json::json!(true));
+        execution.draft = Some(vertebrae_core::HumanInputDraft {
+            execution_id: "exec-1".into(),
+            values,
+            missing: Vec::new(),
+            invalid: Vec::new(),
+            complete: true,
+            updated_at: None,
+        });
+
+        let gate = canonical_gate_binding(
+            trace,
+            crate::local_chat::LocalChatGateBinding {
+                draftable: Some(false),
+                ..supplied_gate()
+            },
+        )
+        .expect("valid gate");
+
+        assert_eq!(gate.draftable, Some(true));
+        let draft = gate.draft.expect("the draft seeds the protocol");
+        assert_eq!(draft.values, serde_json::json!({ "approved": true }));
+        assert!(draft.complete);
+        let fields = gate.fields.expect("fields for the progress panel");
+        assert_eq!(fields[0].name, "approved");
+        assert_eq!(fields[0].question.as_deref(), Some("Ship?"));
+    }
+
+    #[test]
+    fn non_draftable_gate_bindings_carry_no_draft() {
+        let gate = canonical_gate_binding(
+            gate_trace(vertebrae_core::TaskRunStatus::Waiting, false),
+            crate::local_chat::LocalChatGateBinding {
+                draftable: Some(true),
+                ..supplied_gate()
+            },
+        )
+        .expect("valid gate");
+
+        assert_eq!(gate.draftable, Some(false));
+        assert_eq!(gate.draft, None);
     }
 
     #[test]

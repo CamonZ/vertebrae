@@ -88,6 +88,20 @@ pub enum HumanInputRejection {
     /// The execution is no longer parked on the gate
     /// (`human_input_execution_not_waiting`).
     NotWaiting { message: String },
+    /// The execution is not a `human_input` gate (`not_human_input`).
+    NotHumanInput { message: String },
+    /// The gate's `output_schema` does not support drafts
+    /// (`human_input_not_draftable`).
+    NotDraftable { message: String },
+    /// The gate names no artifact to resolve it with
+    /// (`human_input_artifact_not_configured`).
+    ArtifactNotConfigured { message: String },
+    /// Draft keys that are not `output_schema` properties
+    /// (`unknown_draft_field`); nothing was stored.
+    UnknownDraftFields { fields: Vec<String> },
+    /// The draft was submitted with required properties unset
+    /// (`draft_incomplete`).
+    DraftIncomplete { missing: Vec<String> },
 }
 
 impl std::fmt::Display for HumanInputRejection {
@@ -97,16 +111,26 @@ impl std::fmt::Display for HumanInputRejection {
                 write!(f, "artifact body is not valid JSON: {message}")
             }
             Self::SchemaViolations { violations } => {
-                write!(
-                    f,
-                    "artifact body does not satisfy the gate's output_schema:"
-                )?;
+                write!(f, "the response does not satisfy the gate's output_schema:")?;
                 for violation in violations {
                     write!(f, "\n  - {violation}")?;
                 }
                 Ok(())
             }
-            Self::NotWaiting { message } => write!(f, "{message}"),
+            Self::NotWaiting { message }
+            | Self::NotHumanInput { message }
+            | Self::NotDraftable { message }
+            | Self::ArtifactNotConfigured { message } => write!(f, "{message}"),
+            Self::UnknownDraftFields { fields } => write!(
+                f,
+                "not a property of the gate's output_schema: {}",
+                fields.join(", ")
+            ),
+            Self::DraftIncomplete { missing } => write!(
+                f,
+                "draft is missing required fields: {}",
+                missing.join(", ")
+            ),
         }
     }
 }
@@ -267,10 +291,25 @@ impl ServiceError {
                     "hint: The gate's artifact body must be a JSON document. Fix the body and attach it again.".to_string()
                 }
                 HumanInputRejection::SchemaViolations { .. } => {
-                    "hint: Fix each listed path and attach the artifact again; 'vtb step show <STEP>' prints the gate's output_schema.".to_string()
+                    "hint: Fix each listed path and send the response again; 'vtb step show <STEP>' prints the gate's output_schema.".to_string()
                 }
                 HumanInputRejection::NotWaiting { .. } => {
                     "hint: The execution already completed, was cancelled, or its run moved on. Run 'vtb show <TASK>' and attach to the run's current waiting execution (latestStep=...) instead.".to_string()
+                }
+                HumanInputRejection::NotHumanInput { .. } => {
+                    "hint: Name the waiting human_input execution of the run (latestStep=... in 'vtb show <TASK>').".to_string()
+                }
+                HumanInputRejection::NotDraftable { .. } => {
+                    "hint: This gate does not accept drafts; resolve it by attaching its whole artifact with 'vtb artifact add'.".to_string()
+                }
+                HumanInputRejection::ArtifactNotConfigured { .. } => {
+                    "hint: The gate's step config names no artifact; set one with 'vtb step update <STEP> --config'.".to_string()
+                }
+                HumanInputRejection::UnknownDraftFields { .. } => {
+                    "hint: Set only the gate's fields; 'vtb gate show <EXECUTION_ID>' lists them.".to_string()
+                }
+                HumanInputRejection::DraftIncomplete { .. } => {
+                    "hint: Set the listed fields with 'vtb gate set', then submit again.".to_string()
                 }
             }),
             _ => None,
@@ -306,7 +345,7 @@ mod tests {
         });
         assert_eq!(
             violations.to_string(),
-            "Human input rejected: artifact body does not satisfy the gate's output_schema:\n  \
+            "Human input rejected: the response does not satisfy the gate's output_schema:\n  \
              - #/approved: Type mismatch. Expected Boolean but got String.\n  \
              - #: Required property reason was not present."
         );
@@ -325,6 +364,32 @@ mod tests {
                 .unwrap()
                 .contains("current waiting execution")
         );
+    }
+
+    #[test]
+    fn test_draft_rejections_list_their_fields_and_hint_the_gate_commands() {
+        let unknown = ServiceError::HumanInputRejected(HumanInputRejection::UnknownDraftFields {
+            fields: vec!["nope".to_string(), "size".to_string()],
+        });
+        assert_eq!(
+            unknown.to_string(),
+            "Human input rejected: not a property of the gate's output_schema: nope, size"
+        );
+        assert!(unknown.hint().unwrap().contains("vtb gate show"));
+
+        let incomplete = ServiceError::HumanInputRejected(HumanInputRejection::DraftIncomplete {
+            missing: vec!["reason".to_string()],
+        });
+        assert_eq!(
+            incomplete.to_string(),
+            "Human input rejected: draft is missing required fields: reason"
+        );
+        assert!(incomplete.hint().unwrap().contains("vtb gate set"));
+
+        let not_draftable = ServiceError::HumanInputRejected(HumanInputRejection::NotDraftable {
+            message: "the gate's output_schema does not support drafts".to_string(),
+        });
+        assert!(not_draftable.hint().unwrap().contains("vtb artifact add"));
     }
 
     #[test]

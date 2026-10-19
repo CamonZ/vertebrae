@@ -672,6 +672,40 @@ async getTaskRunTrace(rootTaskRunId: string) : Promise<Result<TaskRunTrace, Comm
 }
 },
 /**
+ * Read the draft of a waiting human_input gate. `None` when the gate is not
+ * draftable, which Sacrum decides from its `output_schema`.
+ */
+async getHumanInputDraft(executionId: string) : Promise<Result<GateDraft | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_human_input_draft", { executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Merge answers into a waiting gate's draft; a null value clears a field.
+ */
+async setHumanInputDraft(executionId: string, values: JsonValue) : Promise<Result<GateDraft, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_human_input_draft", { executionId, values }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Resolve a waiting gate from its complete draft.
+ */
+async submitHumanInputDraft(executionId: string) : Promise<Result<GateDraft, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("submit_human_input_draft", { executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List all steps for a workflow
  *
  * Returns all first-class Step entities associated with the given workflow ID.
@@ -1466,6 +1500,35 @@ export type ExecuteStepConfig = { version: number; script: string; context: Json
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
 /**
+ * The response being built on a draftable gate, as Sacrum reports it.
+ */
+export type GateDraft = { execution_id: string;
+/**
+ * Answered fields by `output_schema` property name.
+ */
+values: JsonValue;
+/**
+ * Required fields not yet answered.
+ */
+missing: string[];
+/**
+ * Answers that violate the schema.
+ */
+invalid: GateDraftViolation[];
+/**
+ * True when nothing required is missing and the whole draft validates.
+ */
+complete: boolean;
+/**
+ * When the draft last changed (ISO 8601).
+ */
+updated_at?: string | null }
+export type GateDraftViolation = {
+/**
+ * JSON pointer to the offending value, such as `/approved`.
+ */
+path: string; message: string }
+/**
  * A top-level property of a gate's output schema.
  */
 export type GateField = { name: string; required: boolean;
@@ -1476,7 +1539,24 @@ type: string;
 /**
  * The field's description, which is the question to ask for it.
  */
-question: string | null }
+question: string | null;
+/**
+ * JSON type of the answer (`string`, `number`, `integer`, `boolean`,
+ * `array`, `object`); absent when the property declares none.
+ */
+value_type: string | null;
+/**
+ * Allowed values of a string enum, or of each item of an enum array.
+ */
+choices: string[] | null;
+/**
+ * Whether the answer is a list of `choices` (multi-select).
+ */
+multiple: boolean;
+/**
+ * The string `format` hint, such as `date` or `email`.
+ */
+format: string | null }
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
 export type GuiUpdateChannelStatus = { channel: string; endpoint: string; available: boolean; release: GuiUpdateChannelRelease | null; error: string | null }
 /**
@@ -1623,7 +1703,22 @@ output_schema?: JsonValue | null;
  * Present when the run returned to this step after an earlier
  * resolution, so the waiting execution is a revision.
  */
-revision?: LocalChatGateRevision | null }
+revision?: LocalChatGateRevision | null;
+/**
+ * Whether Sacrum accepts the response field by field; a draftable gate
+ * is answered through `vtb gate` and its draft decides completeness.
+ */
+draftable?: boolean | null;
+/**
+ * The waiting execution's draft when the chat was bound: the answers so
+ * far and what is still needed, so the agent never re-asks them.
+ */
+draft?: GateDraft | null;
+/**
+ * Top-level `output_schema` properties in schema order, for the
+ * progress panel and the answer form.
+ */
+fields?: GateField[] | null }
 /**
  * A later visit of a gate: the review rejected the earlier resolution and
  * the route looped back, carrying its reasons as the execution's handoff.
@@ -2095,7 +2190,12 @@ handoff?: string | null;
 /**
  * Provider session identifier (e.g. Claude session ID)
  */
-session_id?: string | null }
+session_id?: string | null;
+/**
+ * When the draft of a draftable human_input execution last changed;
+ * a change means its missing/complete report must be read again.
+ */
+draft_updated_at?: string | null }
 /**
  * The type of change that occurred on a step execution.
  */

@@ -12,6 +12,7 @@ pub mod check_item;
 pub mod criterion_ref;
 pub mod delete;
 pub mod depend;
+pub mod gate;
 pub mod init;
 pub mod list;
 pub mod path;
@@ -40,6 +41,7 @@ pub use check_item::CheckItemCommand;
 pub use criterion_ref::CriterionRefCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
+pub use gate::GateCommand;
 pub use init::InitCommand;
 pub use list::ListCommand;
 pub use path::PathCommand;
@@ -151,6 +153,9 @@ pub enum Command {
     Delete(DeleteCommand),
     /// Create a dependency relationship between tasks
     Depend(DependCommand),
+    /// Answer a waiting human_input gate field by field through its draft
+    #[command(subcommand)]
+    Gate(GateCommand),
     /// Initialize vertebrae in the current project
     Init(InitCommand),
     /// List tasks with optional filters
@@ -497,7 +502,7 @@ impl Command {
                 cmd.id = resolve_id(&cmd.id, services).await?;
                 cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
             }
-            Command::Init(_) | Command::Ready(_) => {}
+            Command::Gate(_) | Command::Init(_) | Command::Ready(_) => {}
             Command::List(cmd) => {
                 resolve_optional_id(&mut cmd.parent, services).await?;
                 resolve_optional_workflow_id(&mut cmd.workflow, services).await?;
@@ -649,6 +654,10 @@ impl Command {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
+            Command::Gate(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(result))
+            }
             Command::Init(cmd) => {
                 // Init doesn't use the database - it registers with Sacrum API
                 let result = cmd
@@ -784,6 +793,7 @@ impl Command {
                 )
             }
             Command::Artifact(cmd) => cmd.execute_json(services).await?,
+            Command::Gate(cmd) => json_value(cmd.execute_result(services).await?)?,
             Command::Show(cmd) => {
                 let detail = cmd.execute(services).await?;
                 json_value(&detail)?

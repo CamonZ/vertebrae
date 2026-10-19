@@ -953,6 +953,134 @@ describe("chatMessagesToThread", () => {
     ).toBe(false);
   });
 
+  it("keeps submission snapshots distinct across attempts and leaves legacy results as tools", () => {
+    const messages: ChatMessage[] = [];
+    for (const [toolId, executionId, result] of [
+      [
+        "first",
+        "exec-1",
+        JSON.stringify({
+          execution_id: "exec-1",
+          complete: true,
+          values: { reason: "First answer" },
+        }),
+      ],
+      [
+        "second",
+        "exec-2",
+        JSON.stringify({
+          execution_id: "exec-2",
+          complete: true,
+          values: { reason: "Revised answer" },
+        }),
+      ],
+      ["legacy", "exec-3", "Submitted successfully"],
+    ]) {
+      messages.push(
+        {
+          kind: "tool_call",
+          toolName: "Bash",
+          toolId,
+          input: JSON.stringify({
+            command: `vtb --json gate submit ${executionId}`,
+          }),
+          timestamp: TS,
+        },
+        { kind: "tool_result", toolId, result, isError: false, timestamp: TS }
+      );
+    }
+    const thread = build(messages, {
+      gate: {
+        task_run_id: "run-1",
+        step_name: "approve",
+        execution_id: "exec-3",
+        artifact: "approval",
+        draft: {
+          execution_id: "exec-3",
+          values: { reason: "Latest draft" },
+          missing: [],
+          invalid: [],
+          complete: true,
+        },
+      },
+    });
+    const rows = thread.turns.flatMap((turn) => turn.messages);
+    expect(
+      rows.filter((message) => message.type === "resolution_submission")
+    ).toMatchObject([
+      { executionId: "exec-1", values: { reason: "First answer" } },
+      { executionId: "exec-2", values: { reason: "Revised answer" } },
+    ]);
+    expect(rows.find((message) => message.type === "tool")).toMatchObject({
+      body: "Submitted successfully",
+    });
+  });
+
+  it("renders the submitted snapshot including answers recorded outside the chat", () => {
+    const gate = {
+      task_run_id: "run-1",
+      step_name: "approve",
+      execution_id: "exec-1",
+      artifact: "approval",
+      draft: {
+        execution_id: "exec-1",
+        values: { channel: "beta" },
+        missing: [],
+        invalid: [],
+        complete: false,
+      },
+    };
+    const call = (toolId: string, command: string, isError = false) => [
+      {
+        kind: "tool_call" as const,
+        toolName: "Bash",
+        toolId,
+        input: JSON.stringify({ command }),
+        timestamp: TS,
+      },
+      {
+        kind: "tool_result" as const,
+        toolId,
+        result: isError
+          ? "unknown_draft_field"
+          : command.includes("submit")
+            ? JSON.stringify({
+                execution_id: "exec-1",
+                complete: true,
+                values: { approved: false, reason: "Answered in the form" },
+              })
+            : "ok",
+        isError,
+        timestamp: TS,
+      },
+    ];
+    const thread = build(
+      [
+        ...call(
+          "set-1",
+          `vtb gate set exec-1 --values '{"approved":true,"reason":"draft"}'`
+        ),
+        ...call("set-bad", `vtb gate set exec-1 --values '{"nope":1}'`, true),
+        ...call(
+          "set-2",
+          `vtb gate set exec-1 --values '{"reason":null,"notes":"ok"}'`
+        ),
+        ...call("show", "vtb gate show exec-1"),
+        ...call("submit", "vtb gate submit exec-1 --json"),
+      ],
+      { gate }
+    );
+
+    const submissions = thread.turns[0].messages.filter(
+      (message) => message.type === "resolution_submission"
+    );
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).toMatchObject({
+      executionId: "exec-1",
+      values: { approved: false, reason: "Answered in the form" },
+    });
+  });
+
   it("keeps a failed submission visible as an errored tool call", () => {
     const gate = {
       task_run_id: "run-1",

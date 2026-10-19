@@ -6,6 +6,8 @@ import {
   gateChatAcceptsSubmission,
   gateChatBinding,
   gateChatLabel,
+  parseGateDraftCommand,
+  parseGateDraftSubmission,
   parseGateResolutionSubmission,
   hiddenTurn,
   isHiddenTurn,
@@ -29,6 +31,41 @@ function context(
   };
 }
 
+describe("parseGateDraftCommand", () => {
+  it("reads set, show and submit for an execution", () => {
+    expect(
+      parseGateDraftCommand(
+        `vtb gate set exec-1 --values '{"approved":true,"note":"it'\\''s fine"}'`
+      )
+    ).toEqual({
+      action: "set",
+      executionId: "exec-1",
+      values: { approved: true, note: "it's fine" },
+    });
+    expect(parseGateDraftCommand("vtb --json gate show exec-1")).toEqual({
+      action: "show",
+      executionId: "exec-1",
+    });
+    expect(parseGateDraftCommand(`bash -lc "vtb gate submit exec-1"`)).toEqual({
+      action: "submit",
+      executionId: "exec-1",
+    });
+  });
+
+  it("ignores other commands and malformed gate commands", () => {
+    for (const command of [
+      "vtb artifact add a.json",
+      "vtb gate set exec-1",
+      "vtb gate set exec-1 --values '[1]'",
+      "vtb gate submit exec-1 --values '{}'",
+      "vtb gate show",
+      "vtb gate delete exec-1",
+    ]) {
+      expect(parseGateDraftCommand(command)).toBeNull();
+    }
+  });
+});
+
 describe("gateChatBinding", () => {
   it("binds the run's step to the waiting execution's rendered config", () => {
     expect(gateChatBinding(context())).toEqual({
@@ -40,6 +77,7 @@ describe("gateChatBinding", () => {
       question: "Ship v2?",
       output_schema: { type: "object" },
       revision: null,
+      fields: null,
     });
   });
 
@@ -200,13 +238,29 @@ describe("deriveGateChatStatus", () => {
       phase: "drafting",
       attempt: 1,
       waitingExecutionId: "gate-1",
+      waitingSince: at(0),
+      draftUpdatedAt: null,
     });
+  });
+
+  it("carries when the waiting attempt's draft last changed", () => {
+    expect(
+      deriveGateChatStatus(gate, run("waiting"), [
+        { ...firstAttempt, draft_updated_at: at(3) },
+      ])
+    ).toMatchObject({ waitingSince: at(0), draftUpdatedAt: at(3) });
   });
 
   it("is under review once the submission completes the attempt", () => {
     expect(
       deriveGateChatStatus(gate, run("executing"), [submitted, evaluated])
-    ).toEqual({ phase: "under_review", attempt: 1, waitingExecutionId: null });
+    ).toEqual({
+      phase: "under_review",
+      attempt: 1,
+      waitingExecutionId: null,
+      waitingSince: null,
+      draftUpdatedAt: null,
+    });
   });
 
   it("is rejected at attempt n when the route loops back to the gate", () => {
@@ -221,6 +275,8 @@ describe("deriveGateChatStatus", () => {
       phase: "rejected",
       attempt: 2,
       waitingExecutionId: "gate-2",
+      waitingSince: at(11),
+      draftUpdatedAt: null,
     });
     expect(gateChatAcceptsSubmission(status)).toBe(true);
   });
@@ -233,7 +289,13 @@ describe("deriveGateChatStatus", () => {
         routed,
         exec("ship-1", "ship", "llm_inference", 11),
       ])
-    ).toEqual({ phase: "accepted", attempt: 1, waitingExecutionId: null });
+    ).toEqual({
+      phase: "accepted",
+      attempt: 1,
+      waitingExecutionId: null,
+      waitingSince: null,
+      draftUpdatedAt: null,
+    });
   });
 
   it("stays under review through chained routes and steps before the route", () => {
@@ -259,6 +321,8 @@ describe("deriveGateChatStatus", () => {
         phase: "closed",
         attempt: 1,
         waitingExecutionId: null,
+        waitingSince: null,
+        draftUpdatedAt: null,
       });
       expect(gateChatAcceptsSubmission(closed)).toBe(false);
     }
@@ -276,5 +340,30 @@ describe("deriveGateChatStatus", () => {
       deriveGateChatStatus(gate, run("executing"), [evaluated])
     ).toBeNull();
     expect(gateChatAcceptsSubmission(null)).toBe(true);
+  });
+});
+
+describe("parseGateDraftSubmission", () => {
+  it("uses only a complete response for the submitted execution", () => {
+    const snapshot = {
+      execution_id: "exec-1",
+      complete: true,
+      values: { approved: false },
+    };
+    expect(
+      parseGateDraftSubmission(JSON.stringify(snapshot), "exec-1", "approval")
+    ).toEqual({
+      executionId: "exec-1",
+      artifact: "approval",
+      values: snapshot.values,
+    });
+    for (const output of [
+      "Submitted successfully",
+      "{}",
+      JSON.stringify({ ...snapshot, complete: false }),
+      JSON.stringify({ ...snapshot, execution_id: "exec-other" }),
+    ]) {
+      expect(parseGateDraftSubmission(output, "exec-1", "approval")).toBeNull();
+    }
   });
 });
