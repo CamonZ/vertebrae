@@ -20,5 +20,5 @@ Each step's type decides who handles it: the daemon (AI work or Rhai transformat
   Load when: run boundaries, "pause here", resuming in a later run.
 - [finish](finish.md): complete the task.
   Load when: terminal steps, task completion, dependents starting after completion.
-- [human_input](human_input.md): a human gate (limited today).
+- [human_input](human_input.md): a waiting gate resolved by a schema-validated artifact.
   Load when: approvals, manual review steps.
