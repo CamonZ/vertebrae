@@ -787,8 +787,9 @@ mod tests {
             "step_type": "human_input",
             "status": "waiting",
             "config": {
-                "version": 1,
-                "instructions": "Approve Ship parser?",
+                "version": 2,
+                "role": "Review as a release manager",
+                "question": "Approve Ship parser?",
                 "artifact": "approval",
                 "output_schema": {"type": "object", "required": ["approved"]}
             }
@@ -799,8 +800,9 @@ mod tests {
         assert_eq!(
             execution.config,
             Some(StepConfig::HumanInput(vertebrae_core::HumanInputConfig {
-                version: 1,
-                instructions: Some("Approve Ship parser?".to_string()),
+                version: 2,
+                role: Some("Review as a release manager".to_string()),
+                question: Some("Approve Ship parser?".to_string()),
                 artifact: Some("approval".to_string()),
                 output_schema: Some(json!({"type": "object", "required": ["approved"]})),
             }))

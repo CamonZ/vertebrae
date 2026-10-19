@@ -2051,7 +2051,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           gateChanged:
             previousGate?.execution_id !== gate.execution_id ||
             previousGate?.artifact !== gate.artifact ||
-            previousGate?.instructions !== gate.instructions ||
+            previousGate?.role !== gate.role ||
+            previousGate?.question !== gate.question ||
             previousGate?.output_schema !== gate.output_schema,
         };
       }

@@ -406,13 +406,13 @@ mod tests {
                 "data": { "createArtifact": null },
                 "errors": [
                     {
-                        "message": "artifact does not satisfy the output_schema: #/approved: Type mismatch. Expected Boolean but got String.",
+                        "message": "response does not satisfy the output_schema: #/approved: Type mismatch. Expected Boolean but got String.",
                         "code": "invalid_human_input",
                         "locations": [{"line": 2, "column": 3}],
                         "path": ["createArtifact"]
                     },
                     {
-                        "message": "artifact does not satisfy the output_schema: #: Required property reason was not present.",
+                        "message": "response does not satisfy the output_schema: #: Required property reason was not present.",
                         "code": "invalid_human_input",
                         "path": ["createArtifact"]
                     }

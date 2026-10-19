@@ -1465,17 +1465,33 @@ export type ExecuteStepConfig = { version: number; script: string; context: Json
  * Execution status - mirrors db::ExecutionStatus
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
+/**
+ * A top-level property of a gate's output schema.
+ */
+export type GateField = { name: string; required: boolean;
+/**
+ * Type or allowed values; nested shapes are summarized by type.
+ */
+type: string;
+/**
+ * The field's description, which is the question to ask for it.
+ */
+question: string | null }
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
 export type GuiUpdateChannelStatus = { channel: string; endpoint: string; available: boolean; release: GuiUpdateChannelRelease | null; error: string | null }
 /**
- * Config of a `human_input` step. On a waiting execution `instructions` is
+ * Config of a `human_input` step. On a waiting execution `question` is
  * already rendered.
  */
 export type HumanInputStepConfig = { version: number;
 /**
- * Instructions shown to the human while the gate waits
+ * How the resolving agent behaves; null means the generic gate role
  */
-instructions: string | null;
+role: string | null;
+/**
+ * What the gate asks while it waits
+ */
+question: string | null;
 /**
  * Logical name of the artifact that resolves the gate
  */
@@ -1483,7 +1499,11 @@ artifact: string | null;
 /**
  * JSON Schema the response must satisfy; null accepts any response
  */
-output_schema: JsonValue | null }
+output_schema: JsonValue | null;
+/**
+ * Top-level properties of `output_schema` in schema order
+ */
+fields: GateField[] }
 export type InferLocalChatSessionTitleInput = { harness: LocalChatHarnessKind; initial_prompts: string[]; working_dir: string | null;
 /**
  * Provider the chat runs on. Custom providers infer titles through
@@ -1574,7 +1594,7 @@ export type LocalChatFileChange = { path: string; kind: string; diff: string | n
 export type LocalChatFileChangeEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; status: string; changes: LocalChatFileChange[]; parent_tool_use_id: string | null }
 /**
  * Binds a local chat to a waiting `human_input` gate. The chat is identified
- * by `task_run_id` + `step_name`; `execution_id`, `artifact`, `instructions`
+ * by `task_run_id` + `step_name`; `execution_id`, `artifact`, `role`, `question`
  * and `output_schema` describe the execution currently waiting there.
  */
 export type LocalChatGateBinding = { task_run_id: string; step_name: string;
@@ -1587,9 +1607,14 @@ execution_id: string;
  */
 artifact: string;
 /**
- * Rendered gate instructions; the question the user must answer.
+ * The author's role for the resolving agent; absent uses the generic
+ * gate role.
  */
-instructions?: string | null;
+role?: string | null;
+/**
+ * Rendered gate question; what the user must answer and why.
+ */
+question?: string | null;
 /**
  * JSON Schema the resolution must satisfy; absent accepts any JSON.
  */
@@ -2016,7 +2041,7 @@ status?: ExecutionStatus;
 /**
  * Step config the execution ran with, templates rendered (rendered
  * prompt for llm_inference, resolved state for structured_inference,
- * rendered instructions for human_input, rendered script and context
+ * rendered question for human_input, rendered script and context
  * snapshot for execute); null for stop and finish. Narrow it with
  * `step_type`.
  */

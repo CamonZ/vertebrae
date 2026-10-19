@@ -153,7 +153,7 @@ step keeps Sacrum's default and provider-backfill behavior.
 | `execute` | Authored `version=1`, `script`, `output_schema`; server-written execution `context` | Runs a Rhai JSON transformation, which may read tasks and named artifacts in its project through the `vtb::tasks` and `vtb::artifacts` host functions, send project notifications through `vtb::notifications`, and run local commands through `vtb::cmd`, with the full canonical context bound as `task`, `execution`, `inputs`, `steps`, `workflow`, and `artifacts`, validates the result, and completes through the existing execution status path. It has no provider harness. |
 | `route` | `route_config` | Sacrum evaluates the deterministic route locally; an empty config is a draft. |
 | `wait_children` | `output_schema` | Waits for child tasks and can validate their combined output. |
-| `human_input` | `instructions`, `artifact`, `output_schema` (all optional) | Parks the run until an artifact named `artifact` is attached to the waiting execution; Sacrum renders `instructions` when the run parks and validates the body against `output_schema`. |
+| `human_input` | `role`, `question`, `artifact`, `output_schema` (all optional) | Parks the run until an artifact named `artifact` is attached to the waiting execution; Sacrum stores `role` verbatim and renders `question` when the run parks and validates the body against `output_schema`. |
 | `stop` | `null` | Ends the current run and requires one continuation target. |
 | `finish` | `null` | Completes the task immediately without daemon dispatch. |
 

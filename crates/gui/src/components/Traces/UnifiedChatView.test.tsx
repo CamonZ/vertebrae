@@ -139,7 +139,7 @@ describe("UnifiedChatView (single-run threads)", () => {
           run: { id: "run-1" } as never,
           execution: null,
           stepName: "wait_children",
-          prompt: null,
+          question: null,
           outputSchema: null,
           artifact: null,
         }}

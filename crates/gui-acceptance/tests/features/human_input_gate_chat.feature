@@ -14,7 +14,7 @@ Feature: Resolve a human_input gate in a local chat
     And I create a workflow with:
       | name | Gate Chat Workflow |
     And I create a step "draft" in the workflow "Gate Chat Workflow" via the CLI
-    And I create a human_input step "approve" with instructions "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Chat Workflow" via the CLI
+    And I create a human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Chat Workflow" via the CLI
     And the GUI is showing the task list
     When I create a task with:
       | title    | Gate Chat Task     |
@@ -35,7 +35,7 @@ Feature: Resolve a human_input gate in a local chat
     And I create a workflow with:
       | name | Gate Reopen Workflow |
     And I create a step "draft" in the workflow "Gate Reopen Workflow" via the CLI
-    And I create a human_input step "approve" with instructions "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Reopen Workflow" via the CLI
+    And I create a human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Reopen Workflow" via the CLI
     And the GUI is showing the task list
     When I create a task with:
       | title    | Gate Reopen Task     |
@@ -78,7 +78,7 @@ Feature: Resolve a human_input gate in a local chat
     And I create a workflow with:
       | name | Gate Codex Workflow |
     And I create a step "draft" in the workflow "Gate Codex Workflow" via the CLI
-    And I create a human_input step "approve" with instructions "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Codex Workflow" via the CLI
+    And I create a human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Codex Workflow" via the CLI
     And the GUI is showing the task list
     When I create a task with:
       | title    | Gate Codex Task     |
@@ -98,7 +98,7 @@ Feature: Resolve a human_input gate in a local chat
     And I create a workflow with:
       | name | Gate Review Workflow |
     And I create a step "draft" in the workflow "Gate Review Workflow" via the CLI
-    And I create a reviewed human_input step "approve" with instructions "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Review Workflow" via the CLI
+    And I create a reviewed human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Review Workflow" via the CLI
     And the GUI is showing the task list
     When I create a task with:
       | title    | Gate Review Task     |
@@ -123,7 +123,7 @@ Feature: Resolve a human_input gate in a local chat
     And I create a workflow with:
       | name | Gate Stop Workflow |
     And I create a step "draft" in the workflow "Gate Stop Workflow" via the CLI
-    And I create a human_input step "approve" with instructions "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Stop Workflow" via the CLI
+    And I create a human_input step "approve" with question "Approve {{ task.title }}?" and artifact "approval" in the workflow "Gate Stop Workflow" via the CLI
     And the GUI is showing the task list
     When I create a task with:
       | title    | Gate Stop Task     |

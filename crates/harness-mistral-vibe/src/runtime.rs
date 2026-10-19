@@ -67,7 +67,7 @@ impl std::fmt::Debug for MistralVibeRuntime {
 enum OutcomeState {
     #[default]
     Pending,
-    Ready(RunOutcome),
+    Ready(Box<RunOutcome>),
     Failed(String),
 }
 
@@ -100,7 +100,7 @@ impl RunHandle for MistralVibeRunHandle {
                         )
                     })?;
                 }
-                OutcomeState::Ready(outcome) => return Ok(outcome),
+                OutcomeState::Ready(outcome) => return Ok(*outcome),
                 OutcomeState::Failed(message) => {
                     return Err(HarnessError::Operation(message));
                 }
@@ -288,7 +288,7 @@ async fn execute_run(
         ));
         return;
     }
-    let _ = outcome_tx.send(OutcomeState::Ready(outcome));
+    let _ = outcome_tx.send(OutcomeState::Ready(Box::new(outcome)));
 }
 
 fn completed_outcome(text: String) -> RunOutcome {

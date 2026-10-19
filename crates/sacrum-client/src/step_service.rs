@@ -645,8 +645,9 @@ mod tests {
         let step = SacrumStepService::response_to_step(&step_response(
             Some("human_input"),
             json!({
-                "version": 1,
-                "instructions": "Approve {{ task.title }}?",
+                "version": 2,
+                "role": "Review as a release manager",
+                "question": "Approve {{ task.title }}?",
                 "artifact": "approval",
                 "output_schema": {"type": "object", "required": ["approved"]}
             }),
@@ -655,8 +656,9 @@ mod tests {
         assert_eq!(
             step.config,
             Some(StepConfig::HumanInput(vertebrae_core::HumanInputConfig {
-                version: 1,
-                instructions: Some("Approve {{ task.title }}?".to_string()),
+                version: 2,
+                role: Some("Review as a release manager".to_string()),
+                question: Some("Approve {{ task.title }}?".to_string()),
                 artifact: Some("approval".to_string()),
                 output_schema: Some(json!({"type": "object", "required": ["approved"]})),
             }))
@@ -664,7 +666,7 @@ mod tests {
 
         let step = SacrumStepService::response_to_step(&step_response(
             Some("human_input"),
-            json!({"version": 1, "instructions": null, "artifact": null, "output_schema": null}),
+            json!({"version": 2, "role": null, "question": null, "artifact": null, "output_schema": null}),
         ))
         .unwrap();
         assert_eq!(

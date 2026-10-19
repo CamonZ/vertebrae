@@ -25,7 +25,7 @@ pub struct GraphqlErrorItem {
 }
 
 /// Prefix Sacrum puts before each `invalid_human_input` violation.
-const SCHEMA_VIOLATION_PREFIX: &str = "artifact does not satisfy the output_schema: ";
+const SCHEMA_VIOLATION_PREFIX: &str = "response does not satisfy the output_schema: ";
 
 /// Classify the gate errors Sacrum returns when an artifact attached to a
 /// waiting `human_input` execution is rejected.
@@ -307,11 +307,11 @@ mod tests {
         let error: ServiceError = gate_error(&[
             (
                 "invalid_human_input",
-                "artifact does not satisfy the output_schema: #/approved: Type mismatch.",
+                "response does not satisfy the output_schema: #/approved: Type mismatch.",
             ),
             (
                 "invalid_human_input",
-                "artifact does not satisfy the output_schema: #: Required property reason was not present.",
+                "response does not satisfy the output_schema: #: Required property reason was not present.",
             ),
         ])
         .into();

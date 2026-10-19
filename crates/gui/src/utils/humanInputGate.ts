@@ -1,4 +1,4 @@
-import type { StepExecution, TaskRun } from "../bindings";
+import type { GateField, StepExecution, TaskRun } from "../bindings";
 import { safeMs } from "../components/Traces/timeUtils";
 import { executionHumanInput } from "./stepConfig";
 
@@ -10,9 +10,13 @@ export interface HumanInputGateContext {
   run: TaskRun;
   execution: StepExecution | null;
   stepName: string | null;
-  /** Rendered gate instructions from the waiting execution's config. */
-  prompt: string | null;
+  /** Author-supplied role for the resolving agent; null uses the generic role. */
+  role?: string | null;
+  /** Rendered gate question from the waiting execution's config. */
+  question: string | null;
   outputSchema: unknown | null;
+  /** Top-level output schema properties, computed by the backend. */
+  fields?: GateField[];
   /** Logical name of the artifact that resolves the gate. */
   artifact: string | null;
   /** 1-based visit of this gate step in the run. */
@@ -68,8 +72,10 @@ export function resolveHumanInputGate(
     run,
     execution,
     stepName: execution?.step_name ?? null,
-    prompt: config?.instructions ?? null,
+    role: config?.role ?? null,
+    question: config?.question ?? null,
     outputSchema: config?.output_schema ?? null,
+    fields: config?.fields ?? [],
     artifact: config?.artifact ?? null,
     attempt,
   };

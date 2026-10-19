@@ -89,7 +89,8 @@ mod tests {
             step_name: "approve".into(),
             execution_id: "exec-1".into(),
             artifact: "approval".into(),
-            instructions: Some("Ship it?".into()),
+            role: None,
+            question: Some("Ship it?".into()),
             output_schema: None,
             revision: None,
         };

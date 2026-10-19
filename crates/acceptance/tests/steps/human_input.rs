@@ -54,16 +54,17 @@ async fn stored_human_input_config(world: &SmokeWorld, name: &str) -> HumanInput
 }
 
 #[when(
-    expr = "I add a human_input step {string} with instructions from a file containing {string}, artifact {string}, and the approval output schema"
+    expr = "I add a human_input step {string} with role {string} and question from a file containing {string}, artifact {string}, and the approval output schema"
 )]
 async fn add_configured_gate(
     world: &mut SmokeWorld,
     name: String,
-    instructions: String,
+    role: String,
+    question: String,
     artifact: String,
 ) {
     let workflow_id = world.workflow_id.clone().expect("no workflow ID stored");
-    let instructions = at_path(world, &instructions);
+    let question = at_path(world, &question);
     world
         .run_vtb(&[
             "step",
@@ -75,8 +76,10 @@ async fn add_configured_gate(
             "claude",
             "--step-type",
             "human_input",
-            "--instructions",
-            &instructions,
+            "--role",
+            &role,
+            "--question",
+            &question,
             "--artifact",
             &artifact,
             "--output-schema",
@@ -96,15 +99,16 @@ async fn add_configured_gate(
 }
 
 #[given(
-    expr = "the human_input step {string} is configured with instructions {string}, artifact {string}, and the approval output schema"
+    expr = "the human_input step {string} is configured with role {string} and question {string}, artifact {string}, and the approval output schema"
 )]
 #[when(
-    expr = "I configure the human_input step {string} with instructions {string}, artifact {string}, and the approval output schema"
+    expr = "I configure the human_input step {string} with role {string} and question {string}, artifact {string}, and the approval output schema"
 )]
 async fn configure_gate(
     world: &mut SmokeWorld,
     name: String,
-    instructions: String,
+    role: String,
+    question: String,
     artifact: String,
 ) {
     let id = step_id(world, &name);
@@ -113,8 +117,10 @@ async fn configure_gate(
             "step",
             "update",
             &id,
-            "--instructions",
-            &instructions,
+            "--role",
+            &role,
+            "--question",
+            &question,
             "--artifact",
             &artifact,
             "--output-schema",
@@ -128,34 +134,37 @@ async fn configure_gate(
     );
 }
 
-#[when(expr = "I clear the human_input instructions and artifact of step {string}")]
-async fn clear_gate_instructions_and_artifact(world: &mut SmokeWorld, name: String) {
+#[when(expr = "I clear the human_input role, question and artifact of step {string}")]
+async fn clear_gate_role_question_and_artifact(world: &mut SmokeWorld, name: String) {
     let id = step_id(world, &name);
     world
         .run_vtb(&[
             "step",
             "update",
             &id,
-            "--clear-instructions",
+            "--clear-role",
+            "--clear-question",
             "--clear-artifact",
         ])
         .await;
 }
 
 #[then(
-    expr = "Sacrum should store the human_input step {string} with instructions {string}, artifact {string}, and the approval output schema"
+    expr = "Sacrum should store the human_input step {string} with role {string} and question {string}, artifact {string}, and the approval output schema"
 )]
 async fn sacrum_stores_gate_config(
     world: &mut SmokeWorld,
     name: String,
-    instructions: String,
+    role: String,
+    question: String,
     artifact: String,
 ) {
     assert_eq!(
         stored_human_input_config(world, &name).await,
         HumanInputConfig {
-            version: 1,
-            instructions: Some(instructions),
+            version: 2,
+            role: Some(role),
+            question: Some(question),
             artifact: Some(artifact),
             output_schema: Some(approval_schema()),
         }
@@ -169,8 +178,9 @@ async fn sacrum_stores_cleared_gate_config(world: &mut SmokeWorld, name: String)
     assert_eq!(
         stored_human_input_config(world, &name).await,
         HumanInputConfig {
-            version: 1,
-            instructions: None,
+            version: 2,
+            role: None,
+            question: None,
             artifact: None,
             output_schema: Some(approval_schema()),
         }
@@ -227,10 +237,13 @@ async fn wait_for_parked_gate(world: &mut SmokeWorld, task_run_ref: String) {
         .insert("step_execution_id".to_string(), execution_id);
 }
 
-#[then(expr = "the waiting execution should carry instructions {string} and artifact {string}")]
+#[then(
+    expr = "the waiting execution should carry role {string}, question {string} and artifact {string}"
+)]
 async fn waiting_execution_carries_rendered_config(
     world: &mut SmokeWorld,
-    instructions: String,
+    role: String,
+    question: String,
     artifact: String,
 ) {
     let execution_id = world.resolve_vars("<step_execution_id>");
@@ -242,8 +255,9 @@ async fn waiting_execution_carries_rendered_config(
     assert_eq!(
         execution.config,
         Some(StepConfig::HumanInput(HumanInputConfig {
-            version: 1,
-            instructions: Some(instructions),
+            version: 2,
+            role: Some(role),
+            question: Some(question),
             artifact: Some(artifact),
             output_schema: Some(approval_schema()),
         }))

@@ -395,7 +395,7 @@ pub struct StepAddCommand {
     /// agent, skill, and agent-config flags; structured_inference takes
     /// --provider, --model, --state, and --questions; route takes
     /// --route-config; wait_children takes --output-schema and
-    /// --children-session; human_input takes --instructions, --artifact, and
+    /// --children-session; human_input takes --role, --question, --artifact, and
     /// --output-schema; execute requires
     /// --script and --output-schema and has no harness; the others take none.
     #[arg(long, value_enum, default_value = "llm_inference")]
@@ -429,10 +429,15 @@ pub struct StepAddCommand {
     #[arg(long, value_name = "fork:STEP", value_parser = parse_session_directive)]
     pub children_session: Option<SessionDirective>,
 
-    /// Instructions a human_input step shows while it waits, inline or
-    /// `@path`; a Liquid template rendered when the run parks
+    /// Role of the agent that resolves a human_input step, inline or
+    /// `@path`; stored verbatim, never rendered
     #[arg(long, value_name = "TEXT|@PATH")]
-    pub instructions: Option<String>,
+    pub role: Option<String>,
+
+    /// Question a human_input step asks while it waits, inline or `@path`; a
+    /// Liquid template rendered when the run parks
+    #[arg(long, value_name = "TEXT|@PATH")]
+    pub question: Option<String>,
 
     /// Logical name of the artifact that resolves a human_input step when
     /// attached to its waiting execution
@@ -598,7 +603,8 @@ impl StepAddCommand {
             ("agent_config", self.agent_config_flags_present(step_type)),
             ("route_config", self.route_config.is_some()),
             ("session", self.children_session.is_some()),
-            ("instructions", self.instructions.is_some()),
+            ("role", self.role.is_some()),
+            ("question", self.question.is_some()),
             ("artifact", self.artifact.is_some()),
             ("provider", structured && self.provider.is_some()),
             ("model", structured && self.model.is_some()),
@@ -665,10 +671,15 @@ impl StepAddCommand {
                 config.session = self.children_session.clone();
             }
             Some(StepConfig::HumanInput(config)) => {
-                config.instructions = self
-                    .instructions
+                config.role = self
+                    .role
                     .as_deref()
-                    .map(|value| read_flag_value(value, "--instructions"))
+                    .map(|value| read_flag_value(value, "--role"))
+                    .transpose()?;
+                config.question = self
+                    .question
+                    .as_deref()
+                    .map(|value| read_flag_value(value, "--question"))
                     .transpose()?;
                 config.artifact = self.artifact.clone();
                 config.output_schema = output_schema;
@@ -971,8 +982,9 @@ Goal:          {}
             }
             Some(StepConfig::HumanInput(config)) => {
                 output.push_str(&format!(
-                    "Instructions:  {}\nArtifact:      {}\nOutput Schema: {}\n",
-                    config.instructions.as_deref().unwrap_or("(none)"),
+                    "Role:          {}\nQuestion:      {}\nArtifact:      {}\nOutput Schema: {}\n",
+                    config.role.as_deref().unwrap_or("(none)"),
+                    config.question.as_deref().unwrap_or("(none)"),
                     config.artifact.as_deref().unwrap_or("(none)"),
                     pretty_json(config.output_schema.as_ref()),
                 ));
@@ -1229,13 +1241,21 @@ pub struct StepUpdateCommand {
     #[arg(long)]
     pub clear_children_session: bool,
 
-    /// New instructions of a human_input step, inline or `@path`
+    /// New role of a human_input step, inline or `@path`
     #[arg(long, value_name = "TEXT|@PATH")]
-    pub instructions: Option<String>,
+    pub role: Option<String>,
 
-    /// Clear the human_input instructions
+    /// Clear the human_input role; the generic role applies
     #[arg(long)]
-    pub clear_instructions: bool,
+    pub clear_role: bool,
+
+    /// New question of a human_input step, inline or `@path`
+    #[arg(long, value_name = "TEXT|@PATH")]
+    pub question: Option<String>,
+
+    /// Clear the human_input question
+    #[arg(long)]
+    pub clear_question: bool,
 
     /// New logical name of the artifact that resolves a human_input step
     #[arg(long, value_name = "NAME")]
@@ -1321,10 +1341,8 @@ impl StepUpdateCommand {
                 "session",
                 self.children_session.is_some() || self.clear_children_session,
             ),
-            (
-                "instructions",
-                self.instructions.is_some() || self.clear_instructions,
-            ),
+            ("role", self.role.is_some() || self.clear_role),
+            ("question", self.question.is_some() || self.clear_question),
             ("artifact", self.artifact.is_some() || self.clear_artifact),
             ("provider", structured && self.provider.is_some()),
             ("model", structured && self.model.is_some()),
@@ -1378,9 +1396,14 @@ impl StepUpdateCommand {
                 "--children-session and --clear-children-session",
             ),
             (
-                self.instructions.is_some(),
-                self.clear_instructions,
-                "--instructions and --clear-instructions",
+                self.role.is_some(),
+                self.clear_role,
+                "--role and --clear-role",
+            ),
+            (
+                self.question.is_some(),
+                self.clear_question,
+                "--question and --clear-question",
             ),
             (
                 self.artifact.is_some(),
@@ -1487,13 +1510,17 @@ impl StepUpdateCommand {
             updates = updates.with_config_field("session", session);
         }
 
-        if self.clear_instructions {
-            updates = updates.with_config_field("instructions", serde_json::Value::Null);
-        } else if let Some(instructions) = &self.instructions {
-            updates = updates.with_config_field(
-                "instructions",
-                read_flag_value(instructions, "--instructions")?.into(),
-            );
+        if self.clear_role {
+            updates = updates.with_config_field("role", serde_json::Value::Null);
+        } else if let Some(role) = &self.role {
+            updates = updates.with_config_field("role", read_flag_value(role, "--role")?.into());
+        }
+
+        if self.clear_question {
+            updates = updates.with_config_field("question", serde_json::Value::Null);
+        } else if let Some(question) = &self.question {
+            updates = updates
+                .with_config_field("question", read_flag_value(question, "--question")?.into());
         }
 
         if self.clear_artifact {

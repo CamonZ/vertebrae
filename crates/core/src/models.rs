@@ -204,6 +204,14 @@ impl StepType {
         }
     }
 
+    /// Version of the config this step type carries.
+    pub fn config_version(&self) -> i32 {
+        match self {
+            StepType::HumanInput => HUMAN_INPUT_CONFIG_VERSION,
+            _ => STEP_CONFIG_VERSION,
+        }
+    }
+
     /// Config fields this step type declares, or `None` when steps of this
     /// type carry no config (`stop`, `finish`).
     pub fn config_fields(&self) -> Option<&'static [&'static str]> {
@@ -219,7 +227,7 @@ impl StepType {
             StepType::Execute => Some(&["version", "script", "output_schema"]),
             StepType::Route => Some(&["route_config"]),
             StepType::WaitChildren => Some(&["output_schema", "session"]),
-            StepType::HumanInput => Some(&["instructions", "artifact", "output_schema"]),
+            StepType::HumanInput => Some(&["role", "question", "artifact", "output_schema"]),
             StepType::Stop | StepType::Finish => None,
             // Sacrum is the authority for types this client does not know.
             StepType::Unsupported(_) => None,
@@ -1642,6 +1650,14 @@ fn step_config_version() -> i32 {
     STEP_CONFIG_VERSION
 }
 
+/// Current version of the `human_input` config, which split `instructions`
+/// into `role` and `question`.
+pub const HUMAN_INPUT_CONFIG_VERSION: i32 = 2;
+
+fn human_input_config_version() -> i32 {
+    HUMAN_INPUT_CONFIG_VERSION
+}
+
 /// Config of an `llm_inference` step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmInferenceConfig {
@@ -1910,16 +1926,20 @@ impl Default for WaitChildrenConfig {
     }
 }
 
-/// Config of a `human_input` step. On a waiting execution `instructions` is
-/// already rendered; attaching an artifact named `artifact` whose body
-/// satisfies `output_schema` resolves the gate.
+/// Config of a `human_input` step. On a waiting execution `question` is
+/// already rendered (`role` is never rendered); attaching an artifact named
+/// `artifact` whose body satisfies `output_schema` resolves the gate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HumanInputConfig {
-    #[serde(default = "step_config_version")]
+    #[serde(default = "human_input_config_version")]
     pub version: i32,
-    /// Liquid template shown to the human
+    /// How the resolving agent behaves and what kind of decision this is;
+    /// stored verbatim, `None` means the client's generic role
     #[serde(default)]
-    pub instructions: Option<String>,
+    pub role: Option<String>,
+    /// Liquid template framing what must be answered and why
+    #[serde(default)]
+    pub question: Option<String>,
     /// Logical name of the artifact that resolves the gate
     #[serde(default)]
     pub artifact: Option<String>,
@@ -1931,8 +1951,9 @@ pub struct HumanInputConfig {
 impl Default for HumanInputConfig {
     fn default() -> Self {
         Self {
-            version: STEP_CONFIG_VERSION,
-            instructions: None,
+            version: HUMAN_INPUT_CONFIG_VERSION,
+            role: None,
+            question: None,
             artifact: None,
             output_schema: None,
         }
@@ -2526,7 +2547,7 @@ pub struct StepExecution {
 
     /// The step config this execution ran with, templates rendered: the
     /// rendered prompt for `llm_inference`, the resolved state for
-    /// `structured_inference`, the rendered instructions for `human_input`, and
+    /// `structured_inference`, the rendered question for `human_input`, and
     /// the rendered script/typed context snapshot for `execute`. `None` for
     /// stop and finish.
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
@@ -4057,7 +4078,7 @@ mod tests {
         );
         assert_eq!(
             StepType::HumanInput.config_fields(),
-            Some(&["instructions", "artifact", "output_schema"][..])
+            Some(&["role", "question", "artifact", "output_schema"][..])
         );
         for step_type in [StepType::Stop, StepType::Finish] {
             assert_eq!(step_type.config_fields(), None);
@@ -4427,8 +4448,9 @@ mod tests {
         let human = StepConfig::from_value(
             &StepType::HumanInput,
             serde_json::json!({
-                "version": 1,
-                "instructions": "Approve {{ task.title }}?",
+                "version": 2,
+                "role": "Review as a release manager",
+                "question": "Approve {{ task.title }}?",
                 "artifact": "approval",
                 "output_schema": {"type": "object"}
             }),
@@ -4438,8 +4460,9 @@ mod tests {
         assert_eq!(
             human,
             StepConfig::HumanInput(HumanInputConfig {
-                version: 1,
-                instructions: Some("Approve {{ task.title }}?".to_string()),
+                version: 2,
+                role: Some("Review as a release manager".to_string()),
+                question: Some("Approve {{ task.title }}?".to_string()),
                 artifact: Some("approval".to_string()),
                 output_schema: Some(serde_json::json!({"type": "object"})),
             })
@@ -4449,7 +4472,7 @@ mod tests {
             Some(&serde_json::json!({"type": "object"}))
         );
         assert_eq!(
-            StepConfig::from_value(&StepType::HumanInput, serde_json::json!({"version": 1}))
+            StepConfig::from_value(&StepType::HumanInput, serde_json::json!({"version": 2}))
                 .unwrap(),
             Some(StepConfig::HumanInput(HumanInputConfig::default()))
         );

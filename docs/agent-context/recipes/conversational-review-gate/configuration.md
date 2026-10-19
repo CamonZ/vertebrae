@@ -1,13 +1,17 @@
 # Configuration
 
 Purpose: define the gate response and the bounded evidence the evaluator sees.
-Use this when: adapting this recipe's schema, questions, state, or instructions.
+Use this when: adapting this recipe's schema, questions, state, role, or gate question.
 
 ## Gate response
 `answer.schema.json`:
 ```json
-{"type":"object","required":["outcome","answer","rationale"],"properties":{"outcome":{"type":"string","enum":["resolved","rejected_premise"]},"answer":{"type":"string","minLength":1},"rationale":{"type":"string","minLength":1}}}
+{"type":"object","required":["outcome","answer","rationale"],"properties":{"outcome":{"type":"string","enum":["resolved","rejected_premise"],"description":"Is the question valid, or does it rest on a false premise?"},"answer":{"type":"string","minLength":1,"description":"What is the answer to the question?"},"rationale":{"type":"string","minLength":1,"description":"Why is that the answer?"}}}
 ```
+
+Property descriptions are the questions: the gate chat asks for each field in
+schema order using its description, so write every description as the question
+the human should be asked.
 
 ## Evaluator questions
 `questions.json`:
@@ -29,8 +33,16 @@ Use this when: adapting this recipe's schema, questions, state, or instructions.
 }
 ```
 
-## Gate instructions
-`gate.liquid` renders the first attempt and later loop-backs:
+## Gate role
+`gate.role.md` is stored verbatim and never rendered. It sets how the resolving
+agent behaves; the chat's fixed protocol rules always win over it:
+```text
+You are a careful assistant helping a person answer a question accurately.
+Challenge a premise that looks false instead of inventing an answer.
+```
+
+## Gate question
+`gate.liquid` is the gate's `--question`; it renders the first attempt and later loop-backs:
 ```liquid
 Question: {{ task.title }}
 {{ task.description }}

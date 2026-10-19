@@ -15,7 +15,7 @@ pub const STEP_FIELDS: &str = r#"
             ... on ExecuteStepConfig { version script context output_schema }
             ... on RouteStepConfig { version route_config }
             ... on WaitChildrenStepConfig { version output_schema session }
-            ... on HumanInputStepConfig { version instructions artifact output_schema }
+            ... on HumanInputStepConfig { version role question artifact output_schema }
         }
         persistence_options
         step_order
@@ -47,7 +47,7 @@ pub const WORKFLOW_EXPORT_STEP_FIELDS: &str = r#"
             ... on ExecuteStepConfig { version script output_schema }
             ... on RouteStepConfig { version route_config }
             ... on WaitChildrenStepConfig { version output_schema session }
-            ... on HumanInputStepConfig { version instructions artifact output_schema }
+            ... on HumanInputStepConfig { version role question artifact output_schema }
         }
         persistence_options
         step_order
@@ -227,7 +227,7 @@ mod tests {
                     .contains("... on WaitChildrenStepConfig { version output_schema session }")
             );
             assert!(fragment.contains(
-                "... on HumanInputStepConfig { version instructions artifact output_schema }"
+                "... on HumanInputStepConfig { version role question artifact output_schema }"
             ));
         }
         assert!(

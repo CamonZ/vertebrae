@@ -20,7 +20,11 @@ interface DisclosureProps {
   children: ReactNode;
 }
 
-function Disclosure({ label, testIdBase, children }: DisclosureProps): ReactNode {
+function Disclosure({
+  label,
+  testIdBase,
+  children,
+}: DisclosureProps): ReactNode {
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -55,11 +59,13 @@ export function HumanInputGate({
   onStop,
   className,
 }: HumanInputGateProps): ReactNode {
-  const { run, execution, stepName, prompt, outputSchema } = context;
+  const { run, execution, stepName, role, question, outputSchema } = context;
+  const fields = context.fields ?? [];
   const resolveGateInChat = useResolveGateInChat();
   const resolvable = gateChatBinding(context) !== null;
 
-  const hasPrompt = !!prompt && prompt.trim().length > 0;
+  const hasRole = !!role && role.trim().length > 0;
+  const hasQuestion = !!question && question.trim().length > 0;
   const schemaJson = formatSchema(outputSchema);
 
   const containerClass = [
@@ -202,16 +208,44 @@ export function HumanInputGate({
           </dd>
         </div>
       </dl>
-      {(hasPrompt || schemaJson !== null) && (
+      {(hasRole || hasQuestion || fields.length > 0 || schemaJson !== null) && (
         <div className="mt-3 space-y-2">
-          {hasPrompt && (
-            <Disclosure label="Prompt" testIdBase="human-input-gate-prompt">
+          {hasRole && (
+            <Disclosure label="Role" testIdBase="human-input-gate-role">
               <div
-                data-testid="human-input-gate-prompt"
+                data-testid="human-input-gate-role"
                 className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)]"
               >
-                <MarkdownContent text={prompt as string} />
+                <MarkdownContent text={role as string} />
               </div>
+            </Disclosure>
+          )}
+          {hasQuestion && (
+            <Disclosure label="Question" testIdBase="human-input-gate-question">
+              <div
+                data-testid="human-input-gate-question"
+                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)]"
+              >
+                <MarkdownContent text={question as string} />
+              </div>
+            </Disclosure>
+          )}
+          {fields.length > 0 && (
+            <Disclosure label="Fields" testIdBase="human-input-gate-fields">
+              <ul
+                data-testid="human-input-gate-fields"
+                className="mt-1 max-h-96 space-y-1 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)]"
+              >
+                {fields.map((field) => (
+                  <li key={field.name} data-testid="human-input-gate-field">
+                    <span className="font-mono">{field.name}</span>{" "}
+                    <span className="text-xs text-[var(--color-fg-mute)]">
+                      ({field.required ? "required" : "optional"}, {field.type})
+                    </span>
+                    {field.question && <>: {field.question}</>}
+                  </li>
+                ))}
+              </ul>
             </Disclosure>
           )}
           {schemaJson !== null && (

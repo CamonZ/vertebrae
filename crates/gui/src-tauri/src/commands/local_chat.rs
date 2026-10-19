@@ -374,7 +374,8 @@ fn canonical_gate_binding(
         step_name: supplied.step_name,
         execution_id: supplied.execution_id,
         artifact: artifact.to_string(),
-        instructions: config.instructions.clone(),
+        role: config.role.clone(),
+        question: config.question.clone(),
         output_schema: config.output_schema.clone(),
         revision: gate_revision(gate_attempts.len(), execution.handoff.as_deref()),
     })
@@ -770,7 +771,8 @@ mod tests {
             context: None,
             config: Some(vertebrae_core::StepConfig::HumanInput(
                 vertebrae_core::HumanInputConfig {
-                    instructions: Some("Authoritative question?".into()),
+                    role: Some("Authoritative role.".into()),
+                    question: Some("Authoritative question?".into()),
                     artifact: Some("approval".into()),
                     output_schema: Some(serde_json::json!({ "type": "object" })),
                     ..Default::default()
@@ -825,7 +827,8 @@ mod tests {
             step_name: "approve".into(),
             execution_id: "exec-1".into(),
             artifact: "forged".into(),
-            instructions: Some("Forged question?".into()),
+            role: Some("Forged role.".into()),
+            question: Some("Forged question?".into()),
             output_schema: Some(serde_json::json!("forged")),
             revision: None,
         }
@@ -840,10 +843,8 @@ mod tests {
         .expect("valid gate");
 
         assert_eq!(gate.artifact, "approval");
-        assert_eq!(
-            gate.instructions.as_deref(),
-            Some("Authoritative question?")
-        );
+        assert_eq!(gate.role.as_deref(), Some("Authoritative role."));
+        assert_eq!(gate.question.as_deref(), Some("Authoritative question?"));
         assert_eq!(
             gate.output_schema,
             Some(serde_json::json!({ "type": "object" }))

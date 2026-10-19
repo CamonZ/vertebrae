@@ -54,7 +54,8 @@ export function gateChatBinding(
     step_name: stepName,
     execution_id: executionId,
     artifact,
-    instructions: context.prompt,
+    role: context.role ?? null,
+    question: context.question,
     output_schema: jsonValue(context.outputSchema ?? null),
     revision,
   };

@@ -103,7 +103,7 @@ mod tests {
         assert!(
             validate_config_fields(
                 &StepType::HumanInput,
-                ["instructions", "artifact", "output_schema"]
+                ["role", "question", "artifact", "output_schema"]
             )
             .is_ok()
         );

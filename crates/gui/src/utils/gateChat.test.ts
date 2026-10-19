@@ -20,7 +20,8 @@ function context(
     run: { id: "run-1" } as TaskRun,
     execution: { id: "exec-1" } as StepExecution,
     stepName: "approve",
-    prompt: "Ship v2?",
+    role: "Release manager",
+    question: "Ship v2?",
     outputSchema: { type: "object" },
     artifact: "approval",
     attempt: 1,
@@ -35,7 +36,8 @@ describe("gateChatBinding", () => {
       step_name: "approve",
       execution_id: "exec-1",
       artifact: "approval",
-      instructions: "Ship v2?",
+      role: "Release manager",
+      question: "Ship v2?",
       output_schema: { type: "object" },
       revision: null,
     });
@@ -43,8 +45,8 @@ describe("gateChatBinding", () => {
 
   it("keeps a gate without a question or schema resolvable", () => {
     expect(
-      gateChatBinding(context({ prompt: null, outputSchema: null }))
-    ).toMatchObject({ instructions: null, output_schema: null });
+      gateChatBinding(context({ question: null, outputSchema: null }))
+    ).toMatchObject({ question: null, output_schema: null });
   });
 
   it("derives a revision from a rejected gate's handoff", () => {

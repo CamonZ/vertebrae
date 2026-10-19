@@ -20,7 +20,7 @@ finish=$(vtb step add "Accepted" -w "$workflow" \
   --harness claude --step-type finish | vtb_id)
 gate=$(vtb step add "answer_question" -w "$workflow" \
   --harness claude --step-type human_input \
-  --instructions @gate.liquid --artifact answer \
+  --role @gate.role.md --question @gate.liquid --artifact answer \
   --output-schema @answer.schema.json | vtb_id)
 evaluate=$(vtb step add "Evaluate answer" -w "$workflow" \
   --harness typesafe --step-type structured_inference \

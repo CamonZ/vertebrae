@@ -44,12 +44,12 @@ async fn add_human_input_step(world: &mut GuiWorld, args: &[&str], workflow_name
 }
 
 #[given(
-    expr = "I create a human_input step {string} with instructions {string} and artifact {string} in the workflow {string} via the CLI"
+    expr = "I create a human_input step {string} with question {string} and artifact {string} in the workflow {string} via the CLI"
 )]
 async fn create_resolvable_human_input_step(
     world: &mut GuiWorld,
     step_name: String,
-    instructions: String,
+    question: String,
     artifact: String,
     workflow_name: String,
 ) {
@@ -57,8 +57,8 @@ async fn create_resolvable_human_input_step(
         world,
         &[
             &step_name,
-            "--instructions",
-            &instructions,
+            "--question",
+            &question,
             "--artifact",
             &artifact,
             "--output-schema",
@@ -117,12 +117,12 @@ async fn update_step(world: &mut GuiWorld, step_id: &str, args: &[&str]) {
 /// `approved: false` back to the gate, carrying its `reason` as the handoff,
 /// and anything else to a `done` finish step.
 #[given(
-    expr = "I create a reviewed human_input step {string} with instructions {string} and artifact {string} in the workflow {string} via the CLI"
+    expr = "I create a reviewed human_input step {string} with question {string} and artifact {string} in the workflow {string} via the CLI"
 )]
 async fn create_reviewed_human_input_step(
     world: &mut GuiWorld,
     step_name: String,
-    instructions: String,
+    question: String,
     artifact: String,
     workflow_name: String,
 ) {
@@ -145,8 +145,8 @@ async fn create_reviewed_human_input_step(
             "--step-type",
             "human_input",
             &step_name,
-            "--instructions",
-            &instructions,
+            "--question",
+            &question,
             "--artifact",
             &artifact,
             "--output-schema",

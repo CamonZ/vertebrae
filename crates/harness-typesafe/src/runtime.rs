@@ -49,7 +49,7 @@ impl TypeSafeRuntime {
 enum OutcomeState {
     #[default]
     Pending,
-    Ready(RunOutcome),
+    Ready(Box<RunOutcome>),
     Failed(OutcomeFailure),
 }
 
@@ -315,7 +315,7 @@ async fn execute_run(
     {
         let _ = outcome_tx.send(OutcomeState::Failed(error.into()));
     } else {
-        let _ = outcome_tx.send(OutcomeState::Ready(outcome));
+        let _ = outcome_tx.send(OutcomeState::Ready(Box::new(outcome)));
     }
 }
 
@@ -386,7 +386,7 @@ async fn await_state(
             OutcomeState::Pending => receiver.changed().await.map_err(|_| {
                 HarnessError::Operation("TypeSafe run ended without an outcome".into())
             })?,
-            OutcomeState::Ready(outcome) => return Ok(outcome),
+            OutcomeState::Ready(outcome) => return Ok(*outcome),
             OutcomeState::Failed(error) => return Err(error.into_harness_error()),
         }
     }

@@ -637,7 +637,8 @@ describe("localChatPersistence", () => {
       step_name: "approve",
       execution_id: "exec-1",
       artifact: "approval",
-      instructions: "Ship v2?",
+      role: null,
+      question: "Ship v2?",
       output_schema: { type: "object" },
     };
 

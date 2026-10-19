@@ -1239,7 +1239,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       );
       // human_input executions carry no rendered config, so no prompt.
       expect(
-        screen.queryByTestId("human-input-gate-prompt-toggle")
+        screen.queryByTestId("human-input-gate-question-toggle")
       ).not.toBeInTheDocument();
     });
 
