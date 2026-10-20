@@ -13,11 +13,16 @@ use std::{
     path::PathBuf,
     process,
     sync::Arc,
+    time::Duration,
 };
 use tracing_subscriber::EnvFilter;
 
 use vertebrae_daemon::helpers::{
     resolve_all_provider_binaries_with_diagnostics, resolve_shell_path,
+};
+use vertebrae_daemon::renewal::{
+    CredentialStatus, RENEWAL_LEAD, ReenrollmentReason, ReenrollmentSignal, credential_status,
+    reenrollment_instructions,
 };
 use vertebrae_daemon::{
     ConfigError, DaemonCapabilities, DaemonConfig, DaemonEnrollmentClient, DaemonEnrollmentStorage,
@@ -142,23 +147,87 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     capabilities.log_startup_diagnostics();
 
-    let identity = daemon_identity.ok_or(
+    let mut identity = daemon_identity.ok_or(
         "vtb-daemon requires standalone enrollment; run `vtb-daemon enroll` before starting it",
     )?;
 
-    let daemon_config = DaemonConfig {
-        base_url: sacrum_url,
-        identity,
-        capabilities,
-    };
+    let shutdown = wait_for_shutdown_signal();
+    tokio::pin!(shutdown);
+    loop {
+        let reason = if credential_status(&identity.expires_at, chrono::Utc::now(), RENEWAL_LEAD)
+            == CredentialStatus::Expired
+        {
+            // An expired credential cannot be renewed: do not attempt a connection.
+            ReenrollmentReason::Expired
+        } else {
+            let daemon_config = DaemonConfig::new(
+                identity.endpoint.clone(),
+                identity.clone(),
+                capabilities.clone(),
+            );
+            let signal = daemon_config.reenrollment.clone();
+            match run_supervisor(daemon_config, &projects, &signal, &mut shutdown).await? {
+                SupervisorExit::Shutdown => return Ok(()),
+                SupervisorExit::Stopped => signal
+                    .get()
+                    .ok_or("DaemonSupervisor stopped unexpectedly; see daemon diagnostics")?,
+            }
+        };
+        if reason == ReenrollmentReason::IdentityRetired {
+            // A retired identity cannot be renewed or rotated. Exit successfully
+            // so the service manager does not relaunch it.
+            tracing::error!(
+                daemon_id = %identity.daemon_id,
+                "Standalone daemon identity is retired; enroll a new daemon from the Vertebrae GUI"
+            );
+            return Ok(());
+        }
+        tracing::error!(
+            daemon_id = %identity.daemon_id,
+            %reason,
+            "Daemon re-enrollment required; not connecting. {}",
+            reenrollment_instructions(&identity.endpoint, &identity.daemon_id)
+        );
+        match wait_for_reenrollment(&identity, &mut shutdown).await {
+            Some(reenrolled) => {
+                tracing::info!(
+                    daemon_id = %reenrolled.daemon_id,
+                    "Daemon re-enrolled; connecting with the new credential"
+                );
+                identity = reenrolled;
+            }
+            None => return Ok(()),
+        }
+    }
+}
 
-    let (actor_ref, actor_handle) = Actor::spawn(
-        Some("daemon-supervisor".to_string()),
-        DaemonSupervisor,
-        daemon_config,
-    )
-    .await
-    .map_err(|e| format!("Failed to start DaemonSupervisor: {e}"))?;
+#[derive(Debug, PartialEq, Eq)]
+enum SupervisorExit {
+    Shutdown,
+    Stopped,
+}
+
+async fn run_supervisor(
+    daemon_config: DaemonConfig,
+    projects: &[ProjectEntry],
+    signal: &ReenrollmentSignal,
+    shutdown: impl std::future::Future<Output = ()> + Unpin,
+) -> Result<SupervisorExit, Box<dyn std::error::Error>> {
+    let mut shutdown = shutdown;
+    // Startup retries an unreachable backend, so a shutdown must interrupt it.
+    let spawned = tokio::select! {
+        spawned = Actor::spawn(
+            Some("daemon-supervisor".to_string()),
+            DaemonSupervisor,
+            daemon_config,
+        ) => spawned,
+        () = &mut shutdown => return Ok(SupervisorExit::Shutdown),
+    };
+    let (actor_ref, actor_handle) = match spawned {
+        Ok(spawned) => spawned,
+        Err(_) if signal.get().is_some() => return Ok(SupervisorExit::Stopped),
+        Err(error) => return Err(format!("Failed to start DaemonSupervisor: {error}").into()),
+    };
 
     for ProjectEntry {
         slug,
@@ -173,25 +242,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "Registering project"
         );
         actor_ref.cast(DaemonMessage::AddProject {
-            project_id,
+            project_id: project_id.clone(),
             project_root: std::path::PathBuf::from(path),
         })?;
     }
 
     tracing::info!("vtb-daemon is running. Press Ctrl+C to stop.");
 
-    supervise_until_shutdown(actor_ref, actor_handle, wait_for_shutdown_signal()).await
+    supervise_until_shutdown(actor_ref, actor_handle, shutdown).await
 }
 
 async fn supervise_until_shutdown(
     actor_ref: ractor::ActorRef<DaemonMessage>,
     mut actor_handle: tokio::task::JoinHandle<()>,
     shutdown: impl std::future::Future<Output = ()>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<SupervisorExit, Box<dyn std::error::Error>> {
     tokio::select! {
         result = &mut actor_handle => {
             result?;
-            return Err("DaemonSupervisor stopped unexpectedly; see daemon diagnostics".into());
+            return Ok(SupervisorExit::Stopped);
         }
         () = shutdown => {}
     }
@@ -199,7 +268,38 @@ async fn supervise_until_shutdown(
     actor_ref.cast(DaemonMessage::Shutdown)?;
     actor_handle.await?;
     tracing::info!("vtb-daemon stopped");
-    Ok(())
+    Ok(SupervisorExit::Shutdown)
+}
+
+const REENROLLMENT_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Stay running without connecting until `daemon.toml` holds a different,
+/// unexpired credential for the same daemon (written by
+/// `vtb-daemon enroll --replace-existing`). Returns `None` on shutdown.
+async fn wait_for_reenrollment(
+    rejected: &DaemonIdentity,
+    shutdown: impl std::future::Future<Output = ()> + Unpin,
+) -> Option<DaemonIdentity> {
+    let mut shutdown = shutdown;
+    let mut interval = tokio::time::interval(REENROLLMENT_POLL_INTERVAL);
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {}
+            () = &mut shutdown => return None,
+        }
+        if let Ok(Some(candidate)) = vertebrae_daemon::load_daemon_identity()
+            && is_reenrolled(rejected, &candidate)
+        {
+            return Some(candidate);
+        }
+    }
+}
+
+fn is_reenrolled(rejected: &DaemonIdentity, candidate: &DaemonIdentity) -> bool {
+    candidate.daemon_id == rejected.daemon_id
+        && candidate.reconnect_token != rejected.reconnect_token
+        && credential_status(&candidate.expires_at, chrono::Utc::now(), RENEWAL_LEAD)
+            != CredentialStatus::Expired
 }
 
 async fn enroll(args: EnrollArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -308,12 +408,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("stopped unexpectedly")
-        );
+        assert_eq!(result.unwrap(), SupervisorExit::Stopped);
     }
 
     #[tokio::test]
@@ -326,6 +421,45 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
+    }
+
+    fn identity(token: &str, expires_at: chrono::DateTime<chrono::Utc>) -> DaemonIdentity {
+        DaemonIdentity {
+            endpoint: "http://127.0.0.1:4000".to_string(),
+            daemon_id: "33333333-3333-3333-3333-333333333333".to_string(),
+            reconnect_token: token.to_string(),
+            expires_at: expires_at.to_rfc3339(),
+        }
+    }
+
+    #[test]
+    fn reenrollment_requires_a_new_unexpired_credential_for_the_same_daemon() {
+        let now = chrono::Utc::now();
+        let rejected = identity("rejected-secret", now - chrono::Duration::hours(1));
+        let fresh = identity("fresh-secret", now + chrono::Duration::days(30));
+        assert!(is_reenrolled(&rejected, &fresh));
+        assert!(!is_reenrolled(&rejected, &rejected));
+        assert!(!is_reenrolled(
+            &rejected,
+            &identity("stale-secret", now - chrono::Duration::minutes(1))
+        ));
+        let other = DaemonIdentity {
+            daemon_id: "44444444-4444-4444-4444-444444444444".to_string(),
+            ..fresh
+        };
+        assert!(!is_reenrolled(&rejected, &other));
+    }
+
+    #[tokio::test]
+    async fn reenrollment_wait_ends_on_shutdown() {
+        let rejected = identity("rejected-secret", chrono::Utc::now());
+        let waited = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            wait_for_reenrollment(&rejected, std::future::ready(())),
+        )
+        .await
+        .unwrap();
+        assert!(waited.is_none());
     }
 
     #[test]

@@ -16,17 +16,19 @@ use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
 use tokio_tungstenite::tungstenite::Message;
-use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
+use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig, SharedBearerToken};
 
 use crate::actors::project_supervisor::{
     ProjectConfig, ProjectMessage, ProjectSupervisor, parse_cancel_step_payload,
     parse_run_step_payload,
 };
 use crate::capabilities::SharedDaemonCapabilities;
-use crate::connection::{
-    INITIAL_RECONNECT_DELAY, MAX_RECONNECT_DELAY, connect_with_identity, next_backoff, reconnect,
-};
+use crate::connection::{INITIAL_RECONNECT_DELAY, MAX_RECONNECT_DELAY, next_backoff, reconnect};
 use crate::phoenix::{PhoenixMessage, PhoenixSocket, is_terminal_daemon_reason};
+use crate::renewal::{
+    CredentialRenewer, CredentialStatus, ReenrollmentReason, ReenrollmentSignal, RenewalOutcome,
+    RenewalPolicy, SacrumCredentialRenewer, credential_status, renew_with_retry,
+};
 use crate::telemetry::{DaemonReport, HEARTBEAT_INTERVAL};
 
 /// Result of classifying an incoming channel message.
@@ -128,17 +130,17 @@ fn classify_channel_message_with_join_ref<V>(
 enum ChannelRecovery {
     Reconnect,
     Stop(String),
-    RetireAndStop(String),
+    Reenroll(ReenrollmentReason),
 }
 
 fn daemon_join_recovery(reason: Option<&str>) -> ChannelRecovery {
     match reason {
-        Some(reason) if is_terminal_daemon_reason(reason) => ChannelRecovery::RetireAndStop(
-            "daemon identity was not found or deregistered; re-enrollment is required".to_string(),
-        ),
-        Some("invalid_credentials") => ChannelRecovery::Stop(
-            "daemon credentials rejected; re-enrollment is required".to_string(),
-        ),
+        Some(reason) if is_terminal_daemon_reason(reason) => {
+            ChannelRecovery::Reenroll(ReenrollmentReason::IdentityRetired)
+        }
+        Some("invalid_credentials") => {
+            ChannelRecovery::Reenroll(ReenrollmentReason::CredentialRejected)
+        }
         Some("identity_mismatch" | "invalid_registration" | "unsupported_operation") => {
             ChannelRecovery::Stop(
                 "daemon registration configuration is incompatible with the backend".to_string(),
@@ -161,6 +163,30 @@ pub struct DaemonConfig {
     /// Immutable provider, path, skill, and Claude compatibility discovery
     /// captured before this actor starts.
     pub capabilities: SharedDaemonCapabilities,
+    /// Automatic credential renewal timing. Renewal is always on.
+    pub renewal: RenewalPolicy,
+    /// Obtains and persists renewed credentials.
+    pub renewer: Arc<dyn CredentialRenewer>,
+    /// Set when the supervisor stops because re-enrollment is required.
+    pub reenrollment: ReenrollmentSignal,
+}
+
+impl DaemonConfig {
+    /// A configuration with automatic renewal through Sacrum and `daemon.toml`.
+    pub fn new(
+        base_url: String,
+        identity: crate::config::DaemonIdentity,
+        capabilities: SharedDaemonCapabilities,
+    ) -> Self {
+        Self {
+            base_url,
+            identity,
+            capabilities,
+            renewal: RenewalPolicy::default(),
+            renewer: Arc::new(SacrumCredentialRenewer::default()),
+            reenrollment: ReenrollmentSignal::default(),
+        }
+    }
 }
 
 impl std::fmt::Debug for DaemonConfig {
@@ -169,7 +195,8 @@ impl std::fmt::Debug for DaemonConfig {
             .field("base_url", &self.base_url)
             .field("identity", &self.identity)
             .field("capabilities", &self.capabilities)
-            .finish()
+            .field("renewal", &self.renewal)
+            .finish_non_exhaustive()
     }
 }
 
@@ -220,6 +247,12 @@ pub enum DaemonMessage {
     /// A reconnection attempt succeeded — carries the new socket.
     Reconnected(Box<PhoenixSocket>),
     ReconnectFailed(String),
+    /// Wall-clock credential check: renew when the lead window is reached.
+    CheckCredential,
+    /// A renewed credential was saved to `daemon.toml`.
+    CredentialRenewed(crate::config::DaemonIdentity),
+    /// The credential is expired, rejected, or the identity is gone.
+    ReenrollmentRequired(ReenrollmentReason),
     /// Publish the application-level liveness heartbeat on a standalone
     /// daemon channel. Phoenix protocol heartbeats are not sufficient for
     /// Sacrum's daemon metrics.
@@ -249,6 +282,13 @@ impl std::fmt::Debug for DaemonMessage {
             Self::ReconnectFailed(reason) => {
                 f.debug_tuple("ReconnectFailed").field(reason).finish()
             }
+            Self::CheckCredential => write!(f, "CheckCredential"),
+            Self::CredentialRenewed(identity) => {
+                f.debug_tuple("CredentialRenewed").field(identity).finish()
+            }
+            Self::ReenrollmentRequired(reason) => {
+                f.debug_tuple("ReenrollmentRequired").field(reason).finish()
+            }
             Self::PublishHeartbeat => write!(f, "PublishHeartbeat"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
@@ -276,6 +316,11 @@ pub struct DaemonState {
     telemetry_handle: Option<tokio::task::JoinHandle<()>>,
     /// Process start time reused in every report, including reconnects.
     started_at: DateTime<Utc>,
+    /// Current reconnect credential shared by every project GraphQL client.
+    credential: SharedBearerToken,
+    /// The single in-flight renewal, if any.
+    renewal_handle: Option<tokio::task::JoinHandle<()>>,
+    credential_check_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// The root supervisor actor.
@@ -299,14 +344,32 @@ impl Actor for DaemonSupervisor {
             args.base_url
         );
 
-        let socket = match connect_with_identity(&args.base_url, &args.identity).await {
+        if credential_status(&args.identity.expires_at, Utc::now(), args.renewal.lead)
+            == CredentialStatus::Expired
+        {
+            args.reenrollment.set(ReenrollmentReason::Expired);
+            return Err(
+                "daemon reconnect credential has expired; re-enrollment is required".into(),
+            );
+        }
+
+        // Startup while Sacrum is unreachable retries like a reconnect rather
+        // than exiting into a service-manager restart loop.
+        let socket = match reconnect(
+            &args.base_url,
+            &args.identity,
+            INITIAL_RECONNECT_DELAY,
+            MAX_RECONNECT_DELAY,
+        )
+        .await
+        {
             Ok(socket) => socket,
             Err(error) => {
-                if matches!(
-                    error,
-                    crate::phoenix::PhoenixError::StandaloneDaemonNotFound
-                ) {
-                    retire_standalone_identity(&args.identity);
+                if let Some(reason) = reenrollment_reason_for(&error) {
+                    if reason == ReenrollmentReason::IdentityRetired {
+                        retire_standalone_identity(&args.identity);
+                    }
+                    args.reenrollment.set(reason);
                 }
                 return Err(format!("Failed to connect to Sacrum WebSocket: {error}").into());
             }
@@ -327,6 +390,11 @@ impl Actor for DaemonSupervisor {
 
         let myself_clone = myself.clone();
         let reader_handle = tokio::spawn(Self::ws_reader_pump(reader, myself_clone));
+        let credential_check_handle = Some(spawn_credential_checks(
+            myself.clone(),
+            args.renewal.check_interval,
+        ));
+        let credential = SharedBearerToken::new(args.identity.reconnect_token.clone());
 
         Ok(DaemonState {
             script_worker: Arc::new(crate::script_worker::ScriptWorker::default()),
@@ -340,6 +408,9 @@ impl Actor for DaemonSupervisor {
             daemon_join_message_ref,
             telemetry_handle: None,
             started_at: Utc::now(),
+            credential,
+            renewal_handle: None,
+            credential_check_handle,
         })
     }
 
@@ -368,10 +439,8 @@ impl Actor for DaemonSupervisor {
                     tracing::error!(%reason, "Daemon registration rejected");
                     myself.stop(Some(reason));
                 }
-                Some(ChannelRecovery::RetireAndStop(reason)) => {
-                    retire_standalone_identity(&state.config.identity);
-                    tracing::error!(%reason, "Daemon registration rejected");
-                    myself.stop(Some(reason));
+                Some(ChannelRecovery::Reenroll(reason)) => {
+                    self.handle_reenrollment_required(&myself, reason, state);
                 }
                 Some(ChannelRecovery::Reconnect) => {
                     self.handle_connection_lost(myself, state).await
@@ -387,6 +456,15 @@ impl Actor for DaemonSupervisor {
             DaemonMessage::ReconnectFailed(reason) => {
                 tracing::error!(%reason, "Daemon cannot reconnect");
                 myself.stop(Some(reason));
+            }
+            DaemonMessage::CheckCredential => self.check_credential(&myself, state),
+            DaemonMessage::CredentialRenewed(identity) => {
+                self.handle_credential_renewed(myself, identity, state)
+                    .await;
+            }
+            DaemonMessage::ReenrollmentRequired(reason) => {
+                state.renewal_handle = None;
+                self.handle_reenrollment_required(&myself, reason, state);
             }
             DaemonMessage::PublishHeartbeat => {
                 if state.telemetry_handle.is_some()
@@ -458,6 +536,7 @@ impl Actor for DaemonSupervisor {
         tracing::info!("DaemonSupervisor stopping, cleaning up");
 
         stop_telemetry(state);
+        stop_credential_tasks(state);
 
         stop_projects(
             std::mem::take(&mut state.projects),
@@ -554,17 +633,18 @@ impl DaemonSupervisor {
         }
 
         let identity = &state.config.identity;
-        let api_token = identity.reconnect_token.clone();
         tracing::info!("Registered daemon project mapping {}", project_id);
 
         let sacrum_config = SacrumConfig::new(
             state.config.base_url.clone(),
-            api_token,
+            state.credential.get(),
             project_id.to_string(),
         );
-        let client = Arc::new(GraphqlClient::new_with_daemon_id(
+        // Renewal replaces the shared credential in place for running projects.
+        let client = Arc::new(GraphqlClient::new_with_daemon_credential(
             sacrum_config,
-            Some(&identity.daemon_id),
+            &identity.daemon_id,
+            state.credential.clone(),
         ));
         let services = Arc::new(vertebrae_sacrum_client::from_sacrum(client));
 
@@ -646,6 +726,8 @@ impl DaemonSupervisor {
             ChannelAction::DaemonJoinConfirmed(daemon_id) => {
                 state.reconnect_delay = INITIAL_RECONNECT_DELAY;
                 tracing::info!(daemon_id = %daemon_id, "Standalone daemon identity registered");
+                // Every (re)connect checks whether renewal is due.
+                self.check_credential(&myself, state);
                 self.start_daemon_telemetry(myself, state).await;
             }
             ChannelAction::DaemonJoinFailed(_, reason) => {
@@ -704,17 +786,13 @@ impl DaemonSupervisor {
                     let _ = actor_ref.cast(DaemonMessage::Reconnected(Box::new(socket)));
                 }
                 Err(error) => {
-                    let reason = match error {
-                        crate::phoenix::PhoenixError::StandaloneDaemonNotFound => {
-                            retire_standalone_identity(&config.identity);
-                            "daemon identity was not found or deregistered; re-enrollment is required"
-                        }
-                        crate::phoenix::PhoenixError::AuthenticationRejected => {
-                            "daemon authentication was rejected; re-enrollment is required"
-                        }
-                        _ => "invalid daemon connection configuration",
+                    let message = match reenrollment_reason_for(&error) {
+                        Some(reason) => DaemonMessage::ReenrollmentRequired(reason),
+                        None => DaemonMessage::ReconnectFailed(
+                            "invalid daemon connection configuration".to_string(),
+                        ),
                     };
-                    let _ = actor_ref.cast(DaemonMessage::ReconnectFailed(reason.to_string()));
+                    let _ = actor_ref.cast(message);
                 }
             }
         });
@@ -769,6 +847,7 @@ impl DaemonSupervisor {
 
         state.shutting_down = true;
         stop_telemetry(state);
+        stop_credential_tasks(state);
 
         // Abort any in-flight reconnection attempt.
         if let Some(handle) = state.reconnect_handle.take() {
@@ -788,6 +867,134 @@ impl DaemonSupervisor {
 fn stop_telemetry(state: &mut DaemonState) {
     if let Some(handle) = state.telemetry_handle.take() {
         handle.abort();
+    }
+}
+
+fn stop_credential_tasks(state: &mut DaemonState) {
+    for handle in [
+        state.renewal_handle.take(),
+        state.credential_check_handle.take(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        handle.abort();
+    }
+}
+
+fn spawn_credential_checks(
+    actor_ref: ActorRef<DaemonMessage>,
+    period: Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+        loop {
+            interval.tick().await;
+            if actor_ref.cast(DaemonMessage::CheckCredential).is_err() {
+                break;
+            }
+        }
+    })
+}
+
+/// Socket errors that no reconnect attempt can fix.
+fn reenrollment_reason_for(error: &crate::phoenix::PhoenixError) -> Option<ReenrollmentReason> {
+    match error {
+        crate::phoenix::PhoenixError::AuthenticationRejected => {
+            Some(ReenrollmentReason::CredentialRejected)
+        }
+        crate::phoenix::PhoenixError::StandaloneDaemonNotFound => {
+            Some(ReenrollmentReason::IdentityRetired)
+        }
+        _ => None,
+    }
+}
+
+impl DaemonSupervisor {
+    /// Start a renewal when due. At most one renewal runs at a time, so
+    /// concurrent triggers (timer, reconnect) produce a single request.
+    fn check_credential(&self, myself: &ActorRef<DaemonMessage>, state: &mut DaemonState) {
+        if state.shutting_down || state.renewal_handle.is_some() {
+            return;
+        }
+        match credential_status(
+            &state.config.identity.expires_at,
+            Utc::now(),
+            state.config.renewal.lead,
+        ) {
+            CredentialStatus::Valid => {}
+            CredentialStatus::Expired => {
+                self.handle_reenrollment_required(myself, ReenrollmentReason::Expired, state);
+            }
+            CredentialStatus::RenewalDue => {
+                tracing::info!(
+                    daemon_id = %state.config.identity.daemon_id,
+                    expires_at = %state.config.identity.expires_at,
+                    "Renewing daemon reconnect credential before expiry"
+                );
+                let renewer = Arc::clone(&state.config.renewer);
+                let identity = state.config.identity.clone();
+                let policy = state.config.renewal;
+                let actor_ref = myself.clone();
+                state.renewal_handle = Some(tokio::spawn(async move {
+                    let message = match renew_with_retry(renewer.as_ref(), &identity, &policy).await
+                    {
+                        RenewalOutcome::Renewed(identity) => {
+                            DaemonMessage::CredentialRenewed(identity)
+                        }
+                        RenewalOutcome::ReenrollmentRequired(reason) => {
+                            DaemonMessage::ReenrollmentRequired(reason)
+                        }
+                    };
+                    let _ = actor_ref.cast(message);
+                }));
+            }
+        }
+    }
+
+    /// Adopt a saved successor and reconnect with it. The first use of the
+    /// successor retires the predecessor in Sacrum.
+    async fn handle_credential_renewed(
+        &self,
+        myself: ActorRef<DaemonMessage>,
+        identity: crate::config::DaemonIdentity,
+        state: &mut DaemonState,
+    ) {
+        state.renewal_handle = None;
+        if identity.daemon_id != state.config.identity.daemon_id {
+            tracing::error!("Ignoring renewed credential for a different daemon identity");
+            return;
+        }
+        tracing::info!(
+            daemon_id = %identity.daemon_id,
+            expires_at = %identity.expires_at,
+            "Daemon reconnect credential renewed; reconnecting with the renewed credential"
+        );
+        state.credential.set(identity.reconnect_token.clone());
+        state.config.identity = identity;
+        if state.shutting_down {
+            return;
+        }
+        // An in-flight reconnect captured the predecessor; restart it.
+        if let Some(handle) = state.reconnect_handle.take() {
+            handle.abort();
+        }
+        state.reconnect_delay = INITIAL_RECONNECT_DELAY;
+        self.handle_connection_lost(myself, state).await;
+    }
+
+    fn handle_reenrollment_required(
+        &self,
+        myself: &ActorRef<DaemonMessage>,
+        reason: ReenrollmentReason,
+        state: &mut DaemonState,
+    ) {
+        if reason == ReenrollmentReason::IdentityRetired {
+            retire_standalone_identity(&state.config.identity);
+        }
+        // The process reports the recovery steps once, when it starts waiting.
+        state.config.reenrollment.set(reason);
+        myself.stop(Some(format!("re-enrollment required: {reason}")));
     }
 }
 

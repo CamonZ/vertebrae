@@ -10,13 +10,17 @@ import { DaemonEnrollmentModal } from "../components/Daemons/DaemonEnrollmentMod
 import {
   countDaemonsByStatus,
   daemonFieldValue,
+  daemonRequiresReenrollment,
   daemonStatusIntent,
   daemonStatusLabel,
   filterDaemons,
   groupDaemonsByStatus,
   type DaemonStatusFilter,
 } from "../daemons/filters";
-import { useDaemonDetail } from "../hooks/useDaemonDetail";
+import {
+  useDaemonDetail,
+  useDaemonEnrollmentMetadata,
+} from "../hooks/useDaemonDetail";
 import { useDaemonFleet } from "../hooks/useDaemonFleet";
 import { useDaemonMutations } from "../hooks/useDaemonMutations";
 import { useShellHeader } from "../hooks/useShellHeader";
@@ -73,6 +77,7 @@ export function DaemonsPage() {
     [fleet.daemons, selectedDaemonId]
   );
   const detail = useDaemonDetail(selectedDaemonId);
+  const enrollment = useDaemonEnrollmentMetadata(selectedDaemonId);
   const {
     renameDaemon,
     setDaemonMaxConcurrency,
@@ -493,6 +498,10 @@ export function DaemonsPage() {
           isUpdatingMaxConcurrency={daemonAction === "max_concurrency"}
           isReissuing={daemonAction === "reissue"}
           isUnregistering={daemonAction === "unregister"}
+          reenrollmentRequired={
+            enrollment.connectionId === connectionId &&
+            daemonRequiresReenrollment(enrollment.data)
+          }
           closing={inspector.closing}
           onClose={closeInspector}
           onRename={handleRename}

@@ -1,6 +1,7 @@
 pub mod assertions;
 pub mod cancel;
 pub mod codex_mocks;
+pub mod credential_renewal;
 pub mod cross_run_sessions;
 pub mod execute;
 pub mod hierarchy;

@@ -5,6 +5,20 @@ use crate::DaemonWorld;
 
 #[given("a configured daemon test environment")]
 pub async fn configured_daemon_environment(world: &mut DaemonWorld) {
+    let (daemon_id, enrollment_token, project_id) = create_project_and_daemon(world).await;
+    world
+        .start_standalone_daemon_with_projects(
+            &daemon_id,
+            &enrollment_token,
+            &[(&project_id, "/app")],
+        )
+        .await;
+    world.wait_for_daemon_online(&daemon_id).await;
+}
+
+/// Create the scenario project and a pending daemon enrollment.
+/// Returns `(daemon_id, bootstrap_token, project_id)`.
+pub async fn create_project_and_daemon(world: &mut DaemonWorld) -> (String, String, String) {
     assert!(
         !world.sacrum_token.is_empty(),
         "VTB_TOKEN must be set for daemon acceptance tests"
@@ -66,12 +80,5 @@ pub async fn configured_daemon_environment(world: &mut DaemonWorld) {
     let daemon_id = bootstrap.daemon.id.clone();
     world.daemon_id = Some(daemon_id.clone());
     world.created_daemon_ids.push(daemon_id.clone());
-    world
-        .start_standalone_daemon_with_projects(
-            &daemon_id,
-            &bootstrap.enrollment_token,
-            &[(&project_id, "/app")],
-        )
-        .await;
-    world.wait_for_daemon_online(&daemon_id).await;
+    (daemon_id, bootstrap.enrollment_token, project_id)
 }

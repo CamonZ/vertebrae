@@ -52,6 +52,41 @@ pub struct GraphqlClient {
     endpoint: String,
     pub(crate) project_id: String,
     connection_identity: String,
+    /// Replaces the constructor's bearer token on every request when set.
+    shared_token: Option<SharedBearerToken>,
+}
+
+/// A bearer credential that can be replaced while clients holding it stay alive.
+///
+/// The daemon renews its reconnect credential in place; every clone observes
+/// the replacement on its next request. `Debug` never shows the value.
+#[derive(Clone)]
+pub struct SharedBearerToken(std::sync::Arc<std::sync::RwLock<String>>);
+
+impl SharedBearerToken {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(std::sync::Arc::new(std::sync::RwLock::new(token.into())))
+    }
+
+    pub fn get(&self) -> String {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn set(&self, token: impl Into<String>) {
+        *self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = token.into();
+    }
+}
+
+impl std::fmt::Debug for SharedBearerToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SharedBearerToken(<redacted>)")
+    }
 }
 
 impl GraphqlClient {
@@ -95,7 +130,22 @@ impl GraphqlClient {
             endpoint,
             project_id: config.project_id,
             connection_identity,
+            shared_token: None,
         }
+    }
+
+    /// Create a daemon client whose reconnect credential can be renewed in place.
+    ///
+    /// `config.api_token` is ignored for authorization; each request reads the
+    /// current value of `token`.
+    pub fn new_with_daemon_credential(
+        config: SacrumConfig,
+        daemon_id: &str,
+        token: SharedBearerToken,
+    ) -> Self {
+        let mut client = Self::new_with_daemon_id(config, Some(daemon_id));
+        client.shared_token = Some(token);
+        client
     }
 
     /// Get the project ID this client is configured for
@@ -119,12 +169,12 @@ impl GraphqlClient {
         let start = std::time::Instant::now();
         log::info!("[GQL] {} {}", op, context);
 
-        let response = self
-            .client
-            .post(&self.endpoint)
-            .json(&request_body)
-            .send()
-            .await?;
+        let mut request = self.client.post(&self.endpoint).json(&request_body);
+        if let Some(token) = &self.shared_token {
+            // Request headers take precedence over the client's default headers.
+            request = request.bearer_auth(token.get());
+        }
+        let response = request.send().await?;
         let status = response.status();
 
         if !status.is_success() {
@@ -664,5 +714,47 @@ mod tests {
         assert_eq!(identity.len(), 16);
         assert!(identity.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(!identity.contains(token));
+    }
+
+    #[tokio::test]
+    async fn shared_daemon_credential_replacement_applies_to_existing_clients() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        for token in ["first-secret", "second-secret"] {
+            Mock::given(method("POST"))
+                .and(path("/graphql"))
+                .and(header("authorization", format!("Bearer {token}").as_str()))
+                .and(header("x-daemon-id", "daemon-1"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"data": {"value": token}})),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        let token = SharedBearerToken::new("first-secret");
+        let client = GraphqlClient::new_with_daemon_credential(
+            SacrumConfig::new(server.uri(), "first-secret".into(), "proj".into()),
+            "daemon-1",
+            token.clone(),
+        );
+        let clone = client.clone();
+        let first: String = client
+            .execute("query Value { value }", Value::Null, "value")
+            .await
+            .unwrap();
+        token.set("second-secret");
+        let second: String = clone
+            .execute("query Value { value }", Value::Null, "value")
+            .await
+            .unwrap();
+        assert_eq!(
+            (first.as_str(), second.as_str()),
+            ("first-secret", "second-secret")
+        );
+        assert!(!format!("{token:?}").contains("secret"));
     }
 }

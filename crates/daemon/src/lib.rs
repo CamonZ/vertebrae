@@ -7,6 +7,7 @@ pub mod helpers;
 pub mod output_validator;
 pub mod phoenix;
 pub mod provider;
+pub mod renewal;
 mod script_host;
 pub mod script_worker;
 pub mod session_log_event_sink;
@@ -23,7 +24,8 @@ pub use actors::{StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessa
 pub use capabilities::{DaemonCapabilities, HarnessCapability, SharedDaemonCapabilities};
 pub use config::{
     ConfigError, DaemonEnrollmentStorage, DaemonIdentity, ProjectEntry, ResolvedConfig,
-    daemon_config_path, load_daemon_identity, retire_daemon_identity, save_daemon_identity,
+    daemon_config_path, load_daemon_identity, persist_renewed_credential, retire_daemon_identity,
+    save_daemon_identity,
 };
 pub use enrollment::{DaemonEnrollmentClient, EnrollmentError, EnrollmentResult};
 pub use provider::{

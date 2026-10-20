@@ -188,7 +188,7 @@ fn classify_standalone_not_found_and_deregistered_as_terminal_retirement() {
         );
         assert!(matches!(
             daemon_join_recovery(Some(reason)),
-            ChannelRecovery::RetireAndStop(_)
+            ChannelRecovery::Reenroll(ReenrollmentReason::IdentityRetired)
         ));
     }
 }
@@ -231,13 +231,13 @@ fn channel_interruptions_and_duplicate_connections_are_recoverable() {
     ] {
         assert_eq!(daemon_join_recovery(reason), ChannelRecovery::Reconnect);
     }
-    assert!(matches!(
+    assert_eq!(
         daemon_join_recovery(Some("invalid_credentials")),
-        ChannelRecovery::Stop(_)
-    ));
+        ChannelRecovery::Reenroll(ReenrollmentReason::CredentialRejected)
+    );
     assert!(matches!(
         daemon_join_recovery(Some("not_found")),
-        ChannelRecovery::RetireAndStop(_)
+        ChannelRecovery::Reenroll(ReenrollmentReason::IdentityRetired)
     ));
     assert!(matches!(
         daemon_join_recovery(Some("identity_mismatch")),
@@ -345,15 +345,15 @@ fn sample_daemon_config() -> DaemonConfig {
         openai: Some(std::path::PathBuf::from("/usr/local/bin/codex")),
         mistral_vibe: None,
     };
-    DaemonConfig {
-        base_url: "http://localhost:4000".to_string(),
-        identity: crate::config::DaemonIdentity {
+    DaemonConfig::new(
+        "http://localhost:4000".to_string(),
+        crate::config::DaemonIdentity {
             endpoint: "http://localhost:4000".to_string(),
             daemon_id: "33333333-3333-3333-3333-333333333333".to_string(),
             reconnect_token: "sac_super_secret_token".to_string(),
             expires_at: "2099-01-01T00:00:00Z".to_string(),
         },
-        capabilities: Arc::new(crate::capabilities::DaemonCapabilities {
+        Arc::new(crate::capabilities::DaemonCapabilities {
             harnesses: HashMap::new(),
             provider_binaries,
             shell_path: "/usr/bin:/bin".to_string(),
@@ -368,7 +368,7 @@ fn sample_daemon_config() -> DaemonConfig {
             typesafe_url: None,
             provider_profiles: Default::default(),
         }),
-    }
+    )
 }
 
 #[test]
@@ -394,4 +394,298 @@ fn daemon_config_carries_both_provider_binaries() {
     let cfg = sample_daemon_config();
     assert!(cfg.capabilities.provider_binaries.anthropic.is_some());
     assert!(cfg.capabilities.provider_binaries.openai.is_some());
+}
+
+// ===== Credential renewal =====
+
+struct ScriptedRenewer {
+    renewals: std::sync::atomic::AtomicUsize,
+    reject: bool,
+    release: tokio::sync::Notify,
+    persisted: std::sync::Mutex<Vec<crate::config::DaemonIdentity>>,
+}
+
+impl ScriptedRenewer {
+    fn new(reject: bool) -> Arc<Self> {
+        Arc::new(Self {
+            renewals: std::sync::atomic::AtomicUsize::new(0),
+            reject,
+            release: tokio::sync::Notify::new(),
+            persisted: std::sync::Mutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl CredentialRenewer for ScriptedRenewer {
+    async fn renew(
+        &self,
+        current: &crate::config::DaemonIdentity,
+    ) -> Result<crate::renewal::RenewedCredential, crate::renewal::RenewalError> {
+        assert_eq!(current.reconnect_token, "expiring-secret");
+        self.renewals
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Hold the request open so overlapping triggers can be observed.
+        self.release.notified().await;
+        if self.reject {
+            return Err(crate::renewal::RenewalError::InvalidCredentials);
+        }
+        Ok(crate::renewal::RenewedCredential {
+            reconnect_token: "renewed-secret".to_string(),
+            expires_at: (Utc::now() + chrono::Duration::days(30)).to_rfc3339(),
+        })
+    }
+
+    fn persist(
+        &self,
+        _previous: &crate::config::DaemonIdentity,
+        renewed: &crate::config::DaemonIdentity,
+    ) -> Result<(), crate::config::ConfigError> {
+        self.persisted.lock().unwrap().push(renewed.clone());
+        Ok(())
+    }
+}
+
+/// A Phoenix peer that confirms every daemon join and reports each
+/// connection's reconnect credential.
+#[expect(
+    clippy::result_large_err,
+    reason = "tungstenite fixes the handshake callback's error type"
+)]
+fn spawn_phoenix_peer(
+    listener: tokio::net::TcpListener,
+) -> tokio::sync::mpsc::UnboundedReceiver<String> {
+    use futures::{SinkExt, StreamExt};
+    let (tokens_tx, tokens_rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let tokens_tx = tokens_tx.clone();
+            tokio::spawn(async move {
+                let mut token = String::new();
+                let callback =
+                    |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                     response| {
+                        token = url::Url::parse(&format!("http://peer{}", request.uri()))
+                            .unwrap()
+                            .query_pairs()
+                            .find(|(key, _)| key == "reconnect_token")
+                            .map(|(_, value)| value.into_owned())
+                            .unwrap_or_default();
+                        Ok(response)
+                    };
+                let Ok(mut socket) = tokio_tungstenite::accept_hdr_async(stream, callback).await
+                else {
+                    return;
+                };
+                let _ = tokens_tx.send(token);
+                while let Some(Ok(frame)) = socket.next().await {
+                    let Ok(text) = frame.to_text() else { continue };
+                    let Ok(message) = serde_json::from_str::<serde_json::Value>(text) else {
+                        continue;
+                    };
+                    if message[2] == "phoenix" {
+                        continue;
+                    }
+                    let reply = serde_json::json!([message[0], message[1], message[2], "phx_reply", {"status": "ok"}]);
+                    if socket
+                        .send(Message::Text(reply.to_string().into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    tokens_rx
+}
+
+async fn renewal_config(
+    renewer: Arc<ScriptedRenewer>,
+) -> (DaemonConfig, tokio::sync::mpsc::UnboundedReceiver<String>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let tokens = spawn_phoenix_peer(listener);
+    let mut config = sample_daemon_config();
+    config.base_url = endpoint.clone();
+    config.identity = crate::config::DaemonIdentity {
+        endpoint,
+        daemon_id: "33333333-3333-3333-3333-333333333333".to_string(),
+        reconnect_token: "expiring-secret".to_string(),
+        // Inside the default 24h lead window.
+        expires_at: (Utc::now() + chrono::Duration::hours(2)).to_rfc3339(),
+    };
+    config.renewer = renewer;
+    (config, tokens)
+}
+
+async fn next_token(tokens: &mut tokio::sync::mpsc::UnboundedReceiver<String>) -> String {
+    tokio::time::timeout(Duration::from_secs(5), tokens.recv())
+        .await
+        .expect("connection within 5s")
+        .expect("peer running")
+}
+
+#[tokio::test]
+async fn due_credential_renews_once_persists_and_reconnects_with_the_successor() {
+    let renewer = ScriptedRenewer::new(false);
+    let (config, mut tokens) = renewal_config(renewer.clone()).await;
+    let (actor, handle) = Actor::spawn(None, DaemonSupervisor, config).await.unwrap();
+    assert_eq!(next_token(&mut tokens).await, "expiring-secret");
+
+    // Join confirmation already started the renewal; extra triggers coalesce.
+    for _ in 0..3 {
+        actor.cast(DaemonMessage::CheckCredential).unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while renewer.renewals.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    renewer.release.notify_one();
+
+    assert_eq!(next_token(&mut tokens).await, "renewed-secret");
+    assert_eq!(
+        renewer.renewals.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    let persisted = renewer.persisted.lock().unwrap().clone();
+    assert_eq!(persisted.len(), 1);
+    assert_eq!(persisted[0].reconnect_token, "renewed-secret");
+
+    // The renewed credential is outside the lead window: no further renewal.
+    actor.cast(DaemonMessage::CheckCredential).unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        renewer.renewals.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+
+    actor.cast(DaemonMessage::Shutdown).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn rejected_renewal_stops_for_reenrollment_without_reconnecting() {
+    let renewer = ScriptedRenewer::new(true);
+    let (config, mut tokens) = renewal_config(renewer.clone()).await;
+    let signal = config.reenrollment.clone();
+    let (_actor, handle) = Actor::spawn(None, DaemonSupervisor, config).await.unwrap();
+    assert_eq!(next_token(&mut tokens).await, "expiring-secret");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while renewer.renewals.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    renewer.release.notify_one();
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(signal.get(), Some(ReenrollmentReason::CredentialRejected));
+    assert!(tokens.try_recv().is_err(), "no reconnect after rejection");
+}
+
+#[tokio::test]
+async fn expired_credential_fails_startup_without_connecting() {
+    let renewer = ScriptedRenewer::new(false);
+    let (mut config, mut tokens) = renewal_config(renewer.clone()).await;
+    config.identity.expires_at = (Utc::now() - chrono::Duration::minutes(1)).to_rfc3339();
+    let signal = config.reenrollment.clone();
+    assert!(Actor::spawn(None, DaemonSupervisor, config).await.is_err());
+    assert_eq!(signal.get(), Some(ReenrollmentReason::Expired));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(tokens.try_recv().is_err(), "no socket connect attempt");
+    assert_eq!(
+        renewer.renewals.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+}
+
+#[tokio::test]
+async fn startup_with_rejected_socket_auth_requires_reenrollment() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0; 4096];
+        let _ = stream.read(&mut request).await.unwrap();
+        stream
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    let mut config = sample_daemon_config();
+    config.base_url = endpoint.clone();
+    config.identity.endpoint = endpoint;
+    let signal = config.reenrollment.clone();
+    assert!(Actor::spawn(None, DaemonSupervisor, config).await.is_err());
+    assert_eq!(signal.get(), Some(ReenrollmentReason::CredentialRejected));
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn startup_while_offline_keeps_retrying_with_a_valid_credential() {
+    // Reserve a port, then close it so connections are refused.
+    let endpoint = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}", listener.local_addr().unwrap())
+    };
+    let mut config = sample_daemon_config();
+    config.base_url = endpoint.clone();
+    config.identity.endpoint = endpoint;
+    let signal = config.reenrollment.clone();
+    let spawn = tokio::time::timeout(
+        Duration::from_millis(500),
+        Actor::spawn(None, DaemonSupervisor, config),
+    )
+    .await;
+    assert!(spawn.is_err(), "startup is still retrying");
+    assert_eq!(signal.get(), None);
+}
+
+#[test]
+fn daemon_config_defaults_always_enable_renewal_with_a_one_day_lead() {
+    let config = sample_daemon_config();
+    assert_eq!(config.renewal, RenewalPolicy::default());
+    assert_eq!(config.renewal.lead, Duration::from_secs(24 * 60 * 60));
+    assert!(config.renewal.check_interval <= Duration::from_secs(5 * 60));
+    assert_eq!(config.reenrollment.get(), None);
+}
+
+#[test]
+fn enrolled_daemon_toml_without_renewal_settings_is_renewed_automatically() {
+    // Exactly the format `vtb-daemon enroll` writes: no renewal keys exist.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("daemon.toml");
+    let expires_at = (Utc::now() + chrono::Duration::hours(3)).to_rfc3339();
+    std::fs::write(
+        &path,
+        format!(
+            "endpoint = \"https://sacrum.example.test\"\ndaemon_id = \"33333333-3333-3333-3333-333333333333\"\nreconnect_token = \"enrolled-secret\"\nexpires_at = \"{expires_at}\"\n"
+        ),
+    )
+    .unwrap();
+    let identity = crate::config::load_daemon_identity_for_test(&path);
+    let config = DaemonConfig::new(
+        identity.endpoint.clone(),
+        identity,
+        Arc::new(crate::capabilities::DaemonCapabilities::clone(
+            &sample_daemon_config().capabilities,
+        )),
+    );
+    assert_eq!(
+        credential_status(&config.identity.expires_at, Utc::now(), config.renewal.lead),
+        CredentialStatus::RenewalDue
+    );
 }

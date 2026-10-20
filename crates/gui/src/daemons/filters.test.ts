@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { Daemon } from "../bindings";
+import type {
+  Daemon,
+  DaemonCredentialMetadata,
+  DaemonEnrollmentMetadata,
+} from "../bindings";
 import {
   countDaemonsByStatus,
+  daemonRequiresReenrollment,
   filterDaemons,
   formatDaemonCapabilityReadiness,
   formatDaemonHeartbeatAge,
@@ -95,5 +100,61 @@ describe("daemon fleet projections", () => {
       })
     ).toBe("2/3 ready (1 unavailable)");
     expect(formatDaemonCapabilityReadiness({})).toBe("Unknown");
+  });
+});
+
+describe("daemonRequiresReenrollment", () => {
+  const now = Date.parse("2026-10-20T12:00:00Z");
+  const credential = (
+    overrides: Partial<DaemonCredentialMetadata>
+  ): DaemonCredentialMetadata => ({
+    id: "credential-1",
+    credential_kind: "reconnect",
+    status: "active",
+    expires_at: "2026-11-19T12:00:00Z",
+    consumed_at: null,
+    revoked_at: null,
+    inserted_at: null,
+    updated_at: null,
+    ...overrides,
+  });
+  const metadata = (
+    credentials: DaemonCredentialMetadata[],
+    overrides: Partial<DaemonEnrollmentMetadata> = {}
+  ): DaemonEnrollmentMetadata => ({
+    daemon_id: "daemon-1",
+    status: "active",
+    enrolled_at: "2026-09-12T09:00:00Z",
+    credentials,
+    ...overrides,
+  });
+
+  it("is false while an unexpired reconnect credential is active", () => {
+    expect(daemonRequiresReenrollment(metadata([credential({})]), now)).toBe(
+      false
+    );
+  });
+
+  it("is true once every reconnect credential is expired or revoked", () => {
+    expect(
+      daemonRequiresReenrollment(
+        metadata([
+          credential({ expires_at: "2026-10-15T19:42:16Z" }),
+          credential({ id: "credential-2", status: "revoked" }),
+          credential({ id: "bootstrap", credential_kind: "bootstrap" }),
+        ]),
+        now
+      )
+    ).toBe(true);
+  });
+
+  it("ignores pending enrollments and missing metadata", () => {
+    expect(daemonRequiresReenrollment(null, now)).toBe(false);
+    expect(
+      daemonRequiresReenrollment(
+        metadata([], { status: "pending", enrolled_at: null }),
+        now
+      )
+    ).toBe(false);
   });
 });

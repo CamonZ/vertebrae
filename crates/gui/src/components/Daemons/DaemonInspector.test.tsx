@@ -231,6 +231,33 @@ describe("DaemonInspector", () => {
     expect(editor.getByText("Enter a whole number greater than zero.")).toBeInTheDocument();
   });
 
+  it("offers rotate-and-re-enroll when the reconnect credential cannot be renewed", async () => {
+    const user = userEvent.setup();
+    const onReissue = vi.fn();
+    const { rerender } = renderInspector();
+    expect(
+      screen.queryByTestId("daemon-inspector-credential-reenrollment")
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <DaemonInspector
+        daemon={daemon}
+        isLoading={false}
+        error={null}
+        reenrollmentRequired
+        onClose={vi.fn()}
+        onReissue={onReissue}
+        onUnregister={vi.fn()}
+        onExitAnimationEnd={vi.fn()}
+      />
+    );
+    expect(
+      screen.getByTestId("daemon-inspector-credential-reenrollment")
+    ).toHaveTextContent("--replace-existing");
+    await user.click(screen.getByTestId("daemon-inspector-rotate-reenroll"));
+    expect(onReissue).toHaveBeenCalledWith("daemon-123");
+  });
+
   it("shows revoked state without offering credential controls", () => {
     renderInspector({ daemon: { ...daemon, status: "revoked" } });
 
