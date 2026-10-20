@@ -286,23 +286,52 @@ smoke test is the only adoption-specific test that creates Docker resources,
 and it is opt-in, requires an isolated Docker environment, and cleans up only
 resources it created.
 
+### GUI-managed Podman acceptance scenarios
+
+The GUI acceptance runner includes a separate `@podman` phase using a real
+Podman 5.6.2 engine and Debian's standalone Docker Compose provider. It starts
+the GUI as a dedicated UID 1000 user with its own HOME, rootless storage and API
+socket. No host container-engine socket is mounted. The disposable outer runner
+is privileged to allow nested user namespaces; the test user retains SYS_ADMIN
+inside that container for kernels that restrict unprivileged namespace creation.
+The nested engine uses VFS storage and disabled cgroups. Without a systemd user
+manager, a runner loop executes `podman healthcheck run` against the containers'
+actual configured checks. This lane does not validate health-check scheduling by
+a desktop service manager, desktop storage drivers, SELinux, macOS VM forwarding
+or host restarts.
+
+```bash
+python3 scripts/acceptance.py gui
+# Run just the Podman phase while iterating:
+GUI_ACCEPTANCE_PODMAN_ONLY=1 python3 scripts/acceptance.py gui
+```
+
+`local_backend_podman.feature` invokes real Tauri commands to provision a stack,
+authenticate with saved GUI settings, restart the application, and reopen the saved
+installation. It checks loopback reachability and refusal of non-loopback TCP
+ingress, saved identity, database/token preservation, cross-runtime refusal,
+changed-storage refusal, and missing-volume refusal without recreation. Poisoned
+inherited engine/provider variables exercise explicit target selection. Engine
+metadata, provider version and API/driver logs are saved under the run's
+`podman/` output directory. These scenarios do not exercise a Sacrum image update;
+the opt-in smoke test below covers that additional operation.
+
 ### GUI-managed Podman smoke test
 
-The adapter targets the configurations below. **Real Podman execution has not
-been verified in the implementation environment** (Podman is not installed).
-Passing mocked tests is not evidence of desktop, VM forwarding, SELinux or
-provider compatibility. Run and record the smoke test on each platform before
-claiming verified support for that platform/provider combination.
+The adapter targets the configurations below. The Docker-hosted acceptance lane
+verifies a real Linux rootless engine/provider pair; desktop and macOS machine
+verification remain pending. Run and record the smoke test on each platform
+before claiming desktop, VM forwarding, SELinux or restart compatibility.
 
 | Configuration | Prerequisites | Current evidence |
 |---|---|---|
-| Linux native rootless | Podman 5.6+, running user API socket, standalone Docker Compose 2.24+ | Mocked target/command/lifecycle tests; real smoke pending |
+| Linux rootless in isolated acceptance container | Podman 5.6.2, standalone Docker Compose 2.26.1-4, Linux arm64 | Four real GUI acceptance scenarios passed; VFS, disabled cgroups, runner-scheduled health checks |
+| Linux native desktop rootless | Podman 5.6+, running user API socket, standalone Docker Compose 2.24+ | Mocked target/command/lifecycle tests; native-host smoke pending |
 | macOS rootless machine | Podman 5.6+, running registered machine, rootless connection and shared app-data directory, standalone Docker Compose 2.24+ | Mocked machine/connection/restart-identity tests; real smoke pending |
 | Windows or rootful Podman | Outside this integration | Rejected by runtime validation |
 
 Version checks cover standalone Compose 2.24+ (including a 5.5.1 fixture).
-The tested **real** engine/provider versions must be added to the table after
-execution; no particular pair has been verified yet. The GUI only discovers
+Record additional tested engine/provider pairs in the table. The GUI only discovers
 installed tools. Setup then validates the engine, saved connection and provider.
 A stopped socket/machine requires the user to start it; a changed saved machine
 identity (including SSH forwarding/connection details) is rejected rather than

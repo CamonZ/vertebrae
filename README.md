@@ -77,7 +77,7 @@ The GUI first-run flow offers two choices:
   Podman 5.6+ engine on Linux or a registered rootless Podman machine on macOS,
   with a standalone `docker-compose` provider (2.24+); Docker Engine is not needed.
   See the [Podman verification matrix](docs/testing.md#gui-managed-podman-smoke-test)
-  for the current verification status and opt-in checks.
+  for real-engine GUI acceptance results, desktop verification gaps and opt-in checks.
 
 A fresh managed stack uses the official digest-pinned Sacrum image selected by the
   backend manifest and `postgres:18-alpine` configured for logical replication. It
