@@ -5,6 +5,8 @@ import {
   events,
   InitializeProjectResult,
   LocalBackendProgressEvent,
+  LocalBackendRuntimes,
+  RuntimeKind,
   SavedProject,
   SacrumConfigStatus as BackendConfigStatus,
 } from "../bindings";
@@ -59,6 +61,11 @@ export function ProjectSetupPage() {
   const [projectName, setProjectName] = useState("");
   const [backendUrl, setBackendUrl] = useState("");
   const [backendToken, setBackendToken] = useState("");
+  const [localRuntime, setLocalRuntime] = useState<RuntimeKind>("docker");
+  const [runtimeOptions, setRuntimeOptions] = useState<LocalBackendRuntimes | null>(null);
+  const [runtimeDiscoveryError, setRuntimeDiscoveryError] = useState<string | null>(null);
+  const [runtimeDiscoveryRetry, setRuntimeDiscoveryRetry] = useState(0);
+  const [isLoadingRuntimes, setIsLoadingRuntimes] = useState(false);
   const [localProgress, setLocalProgress] =
     useState<LocalBackendProgressEvent | null>(null);
   const [localAdoptionRequired, setLocalAdoptionRequired] = useState(false);
@@ -68,6 +75,26 @@ export function ProjectSetupPage() {
   const [isInitializing, setIsInitializing] = useState(false);
   const [initializeResult, setInitializeResult] =
     useState<InitializeProjectResult | null>(null);
+
+  useEffect(() => {
+    if (backendChoice !== "local") return;
+    let cancelled = false;
+    setIsLoadingRuntimes(true);
+    setRuntimeDiscoveryError(null);
+    commands.localBackendRuntimes().then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") {
+        setRuntimeDiscoveryError(result.error.message);
+        return;
+      }
+      setRuntimeOptions(result.data);
+      setLocalRuntime(result.data.saved_runtime ??
+        result.data.options.find((option) => option.installed)?.runtime ?? "docker");
+    }).catch((error: unknown) => {
+      if (!cancelled) setRuntimeDiscoveryError(`Could not discover container runtimes: ${String(error)}`);
+    }).finally(() => { if (!cancelled) setIsLoadingRuntimes(false); });
+    return () => { cancelled = true; };
+  }, [backendChoice, runtimeDiscoveryRetry]);
 
   const loadProjects = useCallback(async () => {
     setIsLoading(true);
@@ -231,11 +258,15 @@ export function ProjectSetupPage() {
     }
 
     if (backendChoice === "local") {
+      if (isLoadingRuntimes || runtimeDiscoveryError || !runtimeOptions?.options.some((option) => option.runtime === localRuntime && option.installed)) {
+        setFormError(runtimeDiscoveryError ?? "Install the selected container runtime and its Compose provider, then retry.");
+        return;
+      }
       setFormError(null);
       setLocalProgress(null);
       setIsProvisioningLocal(true);
       try {
-        const result = await commands.setupLocalBackend(localAdoptionRequired);
+        const result = await commands.setupLocalBackend(localAdoptionRequired, localRuntime);
         if (result.status === "error") {
           setFormError(result.error.message);
           return;
@@ -405,7 +436,7 @@ export function ProjectSetupPage() {
     setupView === "ignition"
       ? "Project setup is complete. Vertebrae registered and selected the project."
       : setupView === "backend"
-        ? "Choose an existing backend or run one locally with Docker."
+        ? "Choose an existing backend or run one locally with Docker or Podman."
         : isProjectForm
           ? "Point Vertebrae at a folder and confirm the name it should use."
           : "Select a saved project or add a new one.";
@@ -629,9 +660,36 @@ export function ProjectSetupPage() {
         <div className="space-y-4" data-testid="project-phase-form">
           <div className="fr-callout" data-testid="selected-backend">
             {backendChoice === "local"
-              ? "Docker-hosted local backend"
+              ? `${localRuntime === "podman" ? "Podman" : "Docker"}-hosted local backend`
               : "Existing backend"}
           </div>
+
+          {backendChoice === "local" && (
+            <div className="fr-field">
+              <label htmlFor="local-container-runtime">Container runtime</label>
+              <select id="local-container-runtime" value={localRuntime}
+                disabled={isProvisioningLocal || isLoadingRuntimes || runtimeOptions?.saved_runtime != null}
+                onChange={(event) => {
+                  setLocalRuntime(event.target.value as RuntimeKind);
+                  setLocalAdoptionRequired(false);
+                  setFormError(null);
+                }}>
+                {(runtimeOptions?.options ?? [{ runtime: "docker" as const, installed: true, diagnostic: null }, { runtime: "podman" as const, installed: false, diagnostic: null }]).map((option) => (
+                  <option key={option.runtime} value={option.runtime} disabled={!option.installed}>
+                    {option.runtime === "podman" ? "Podman" : "Docker"}{option.installed ? "" : " (not installed)"}
+                  </option>
+                ))}
+              </select>
+              {isLoadingRuntimes && <p role="status">Checking container runtimes…</p>}
+              {runtimeOptions?.saved_runtime && <p>This installation uses its saved container runtime.</p>}
+              {runtimeOptions?.options.filter((option) => !option.installed).map((option) => (
+                <p key={option.runtime}>{option.diagnostic}</p>
+              ))}
+              {runtimeDiscoveryError && <p role="alert">{runtimeDiscoveryError}</p>}
+              <button type="button" className={secondaryButtonClass} disabled={isLoadingRuntimes || isProvisioningLocal}
+                onClick={() => setRuntimeDiscoveryRetry((value) => value + 1)}>Refresh runtimes</button>
+            </div>
+          )}
 
           <div className="fr-field">
             <label>Project folder</label>
@@ -768,7 +826,7 @@ export function ProjectSetupPage() {
             data-testid="backend-choice-local"
           >
             <div className="font-medium text-fg">
-              Run a local backend with Docker
+              Run a local backend with Docker or Podman
             </div>
             <div className="mt-1 text-sm text-fg-mute">
               Keep the backend on this computer and let Vertebrae manage its stack.

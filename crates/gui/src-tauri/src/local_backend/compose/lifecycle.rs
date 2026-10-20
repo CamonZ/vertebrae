@@ -231,7 +231,9 @@ struct RawServiceStatus {
     exit_code: Option<i32>,
 }
 
-fn parse_service_statuses(output: &str) -> Result<Vec<ServiceStatus>, LocalBackendError> {
+pub(crate) fn parse_service_statuses(
+    output: &str,
+) -> Result<Vec<ServiceStatus>, LocalBackendError> {
     let trimmed = output.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
@@ -242,7 +244,7 @@ fn parse_service_statuses(output: &str) -> Result<Vec<ServiceStatus>, LocalBacke
         trimmed.lines().map(serde_json::from_str).collect()
     }
     .map_err(|error| {
-        LocalBackendError::InvalidState(format!("could not parse Docker Compose status: {error}"))
+        LocalBackendError::InvalidState(format!("could not parse Compose status: {error}"))
     })?;
     Ok(raw
         .into_iter()

@@ -72,6 +72,7 @@ fn create_builder() -> Builder {
             commands::sacrum_config_status,
             commands::save_sacrum_settings,
             commands::setup_local_backend,
+            commands::local_backend_runtimes,
             commands::adopt_local_backend,
             commands::initialize_project,
             commands::add_project,

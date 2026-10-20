@@ -68,13 +68,16 @@ they do not change the configuration format or add Docker metadata to it.
 
 The GUI first-run flow offers two choices:
 
-- **Remote backend**: enter the backend URL and API token. No Docker resources are
+- **Remote backend**: enter the backend URL and API token. No container resources are
   created, and the token is stored only in the normal Sacrum configuration.
-- **GUI-managed local backend**: the GUI checks Docker, provisions a fresh local
-  stack, and writes the resulting loopback URL/token to the same Sacrum
-  configuration. Docker Desktop or a local Docker Engine with Compose is required;
-  the managed path requires Engine 28 or newer and a local Unix/npipe Docker
-  endpoint.
+- **GUI-managed local backend**: choose Docker or Podman. The GUI provisions a
+  fresh stack and writes its loopback URL/token to the same Sacrum configuration.
+  Docker requires Docker Desktop or a local Engine 28+ with Compose and a local
+  Unix/npipe endpoint. The Podman adapter targets an already running rootless
+  Podman 5.6+ engine on Linux or a registered rootless Podman machine on macOS,
+  with a standalone `docker-compose` provider (2.24+); Docker Engine is not needed.
+  See the [Podman verification matrix](docs/testing.md#gui-managed-podman-smoke-test)
+  for the current verification status and opt-in checks.
 
 A fresh managed stack uses the official digest-pinned Sacrum image selected by the
   backend manifest and `postgres:18-alpine` configured for logical replication. It
@@ -90,6 +93,28 @@ backend. On the next GUI startup, a saved ready state causes the GUI to reconcil
 the same Compose project and volume, wait for health, and reuse the saved token. It
 does not reseed the account. Approved image updates replace only the Sacrum service;
 they do not rotate runtime secrets, recreate the PostgreSQL volume, or delete data.
+
+The selected runtime and its local connection are saved with the installation.
+Existing version-1 Docker state remains Docker-owned; new Podman installations
+use version-2 state with the local socket, rootless storage identity, pinned
+Compose-provider path and (on macOS) machine/connection identity. Changing the
+system default or installing another runtime does not move an existing database.
+Missing or changed resources produce an error and preserve data. Restoring the
+original runtime/provider/connection is required before retrying; switching
+engines or importing a database is a separate operation.
+
+Podman setup never installs tools, starts machines or changes global defaults.
+On Linux, enable the rootless API socket before setup, for example
+`systemctl --user start podman.socket`. On macOS, start the desired rootless
+machine and select its connection before first setup. Its shared directories must
+include the Vertebrae application-data directory for the seeder file. Podman
+mounts the seeder read-only, with private SELinux labeling on Linux. The
+standalone Compose provider is invoked directly against the saved Podman socket;
+this avoids the environment-dependent provider choice in
+[`podman compose`](https://docs.podman.io/en/stable/markdown/podman-compose.1.html).
+Rootful Podman, arbitrary SSH/TCP targets, Windows Podman, automatic machine
+startup and cross-runtime adoption are outside this first integration. Legacy
+Docker stacks continue to use Docker adoption.
 
 ### Existing `scripts/dev-backend.sh` stacks
 

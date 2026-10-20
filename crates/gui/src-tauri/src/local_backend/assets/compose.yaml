@@ -59,7 +59,7 @@ services:
       SEED_PASSWORD: "${SEED_PASSWORD:-}"
       SEED_TOKEN: "${SEED_TOKEN:-}"
     volumes:
-      - "${SEED_SCRIPT_PATH:?}:/seed.exs:ro"
+      - "${SEED_SCRIPT_PATH:?}:/seed.exs:${SEED_MOUNT_OPTIONS:-ro}"
     entrypoint: ["/bin/sh", "-c", "chmod -R a+x /app/bin && /app/bin/sacrum eval \"$$(cat /seed.exs)\""]
 
 volumes:

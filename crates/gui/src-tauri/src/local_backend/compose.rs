@@ -4,9 +4,9 @@ use super::command::{discover_docker_cli, SystemProcessRunner};
 use super::state::{DockerTarget, LocalBackendError};
 
 mod legacy;
-mod lifecycle;
+pub(crate) mod lifecycle;
 mod runtime;
-mod transport;
+pub(crate) mod transport;
 
 #[allow(unused_imports)]
 pub use super::health::HealthProbe;
@@ -25,7 +25,7 @@ pub type DockerCompose<R, H> = super::manager::LocalBackendManager<DockerRuntime
 pub struct DockerRuntime<R> {
     runner: R,
     docker_cli: PathBuf,
-    target: DockerTarget,
+    pub(super) target: DockerTarget,
     quick_timeout: Duration,
     reconcile_timeout: Duration,
 }
@@ -317,7 +317,7 @@ mod tests {
             )
             .await?;
 
-            let second_controller = smoke_controller(Some(state.docker_target.clone())).await;
+            let second_controller = smoke_controller(Some(state.docker_target()?.clone())).await;
             second_controller.up_detached(&paths, &mut state).await?;
             second_controller.wait_until_healthy(&paths, &state).await?;
             let second_status = second_controller.status(&paths, &state).await?;
@@ -389,7 +389,13 @@ mod tests {
 
         let cleanup_state = paths.load_state().ok().flatten().unwrap_or(state.clone());
         cleanup_managed_stack(
-            &smoke_controller(Some(cleanup_state.docker_target.clone())).await,
+            &smoke_controller(Some(
+                cleanup_state
+                    .docker_target()
+                    .expect("Docker target")
+                    .clone(),
+            ))
+            .await,
             &paths,
             &cleanup_state,
         )
