@@ -163,8 +163,8 @@ On restart, `vtb-daemon` authenticates the Phoenix socket with the stored
 disconnects and channel interruptions retry indefinitely with capped exponential
 backoff and jitter. Each WebSocket connection attempt has a 15-second timeout.
 A duplicate registration retries because a previous connection can take time to
-disappear from the backend. Explicitly rejected credentials stop with an actionable
-re-enrollment error. A machine-readable `not_found`, `deregistered`, or equivalent
+disappear from the backend. Startup while Sacrum is unreachable retries the same
+way instead of exiting. A machine-readable `not_found`, `deregistered`, or equivalent
 terminal response means the standalone identity was retired while offline: the
 daemon atomically removes `reconnect_token` from `daemon.toml`, writes a retired
 marker, preserves `daemon.lock`, and stops without entering another retry loop.
@@ -173,10 +173,56 @@ On restart, a retired marker fails before startup, so the daemon cannot silently
 fall back to `[sacrum].token`. Re-enrollment with
 `--replace-existing` clears the marker and writes a fresh reconnect credential.
 Unexpected supervisor termination exits the executable with a failure status so the
-existing service manager can restart it. Initial connection failures also exit
-unsuccessfully. Restart always reuses the saved identity; it does not repeat the
-bootstrap exchange. Reconnect credentials are not automatically refreshed; expiry
-or revocation requires explicit re-enrollment.
+existing service manager can restart it. Restart always reuses the saved identity;
+it does not repeat the bootstrap exchange.
+
+### Automatic credential renewal
+
+Reconnect credentials last 30 days. Every enrolled daemon renews its credential
+automatically; there is no setting to enable or disable this, and existing
+`daemon.toml` files need no changes. At startup, after every reconnect, and every
+five minutes of wall-clock time, the daemon compares the persisted `expires_at`
+with the current time. When less than 24 hours remain it calls the
+`renewDaemonCredential` GraphQL mutation with `Authorization: Bearer
+<reconnect_token>` and `X-Daemon-ID`. Only one renewal runs at a time.
+
+The successor credential and expiry are written to `daemon.toml` with the same
+lock and atomic replacement as enrollment (owner-only temporary file, fsync,
+rename). The daemon then reconnects its socket with the successor and switches
+its GraphQL reporting to it. Sacrum retires the previous credential when the
+successor is first used. If the response is lost or the write fails, the previous
+`daemon.toml` stays intact and usable, and the daemon retries renewal with the
+previous credential. Sacrum then replaces the unused successor. Network errors,
+timeouts, and `unavailable` responses retry with capped, jittered backoff until
+the credential expires. A renewal never overwrites a `daemon.toml` that was
+re-enrolled in the meantime.
+
+### Re-enrollment required
+
+An expired credential cannot be renewed. When the persisted credential has
+already expired at startup, the daemon makes no connection attempt. When renewal
+or socket authentication returns `invalid_credentials` (for example after an owner
+rotation), the daemon stops connecting. In both cases it logs one
+`Daemon re-enrollment required` message with the daemon ID and the recovery
+command, and keeps running without contacting Sacrum. It does not exit into a
+service-manager restart loop. The GUI marks such a daemon in the Daemons
+inspector. To recover:
+
+1. In the GUI, open Daemons, select the daemon, and choose **Rotate and
+   re-enroll** (or **Re-issue token**). This calls `rotateDaemonCredentials`
+   and shows a new one-time bootstrap credential.
+2. On the daemon's machine, run the displayed command, which includes
+   `--replace-existing`:
+
+   ```bash
+   vtb-daemon enroll --endpoint 'https://sacrum.example.com' \
+     --daemon-id '<daemon-uuid>' --token-stdin --replace-existing \
+     < /path/to/protected-bootstrap-token
+   ```
+
+The waiting daemon detects the new credential in `daemon.toml` within a few
+seconds and reconnects without a restart. The daemon never calls
+`rotateDaemonCredentials` itself, and credential values never appear in its logs.
 The daemon uses the enrolled identity for both daemon-channel command delivery
 and project-scoped GraphQL reporting. It does not join project channels or use
 `[sacrum].token` for execution. Existing account-token daemon installations

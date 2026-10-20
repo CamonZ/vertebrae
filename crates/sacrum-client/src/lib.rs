@@ -70,7 +70,7 @@ pub use api_types::{
     WorkflowExportTransition, WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse,
 };
 pub use artifact_service::SacrumArtifactService;
-pub use client::{GraphqlClient, with_fragments};
+pub use client::{GraphqlClient, SharedBearerToken, with_fragments};
 pub use config::{
     DaemonSection, GlobalSacrumSection, ObservabilityConfig, ObservabilityLevel,
     ObservabilityProtocol, ObservabilitySignal, ObservabilitySubsystem, ProjectSection,

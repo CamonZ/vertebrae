@@ -81,6 +81,15 @@ under test is unchanged.
 docker compose run --rm daemon-test-runner
 ```
 
+`crates/daemon-acceptance/tests/features/credential_renewal.feature` (tag
+`@credential_renewal`) covers automatic reconnect-credential renewal with the
+daemon's default configuration. It shortens only the persisted `expires_at`
+in `daemon.toml`, and covers renewal, restart reuse, an expired credential, and
+recovery from owner rotation through `vtb-daemon enroll --replace-existing`. The
+Sacrum image must include the `renewDaemonCredential` mutation (Sacrum PR 253).
+Run only these scenarios with
+`CUCUMBER_FILTER_TAGS=@credential_renewal` set on `daemon-test-runner`.
+
 ### Rhai execute demo
 
 `crates/daemon-acceptance/tests/features/execute.feature` creates disposable

@@ -1217,6 +1217,7 @@ dependencies = [
 name = "daemon-acceptance"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "cucumber",
  "futures",
  "serde",

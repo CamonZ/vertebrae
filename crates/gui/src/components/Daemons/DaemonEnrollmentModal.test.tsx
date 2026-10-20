@@ -138,6 +138,10 @@ describe("DaemonEnrollmentModal", () => {
       screen.queryByTestId("daemon-enrollment-name-step")
     ).not.toBeInTheDocument();
     await waitFor(() => expect(mockSacrumConfigStatus).toHaveBeenCalledOnce());
+    // Re-issue replaces the credential of an already-enrolled machine.
+    expect(screen.getByText(/vtb-daemon enroll/)).toHaveTextContent(
+      "--token-stdin --replace-existing"
+    );
   });
 
   it("rejects a name that violates the shared registration policy before calling the server", async () => {

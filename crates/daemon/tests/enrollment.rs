@@ -151,3 +151,99 @@ async fn retired_identity_blocks_account_token_fallback() {
     );
     assert!(directory.join("daemon.lock").exists());
 }
+
+fn write_identity(directory: &Path, endpoint: &str, token: &str, expires_at: &str) {
+    std::fs::write(
+        directory.join("daemon.toml"),
+        format!(
+            "endpoint = \"{endpoint}\"\ndaemon_id = \"{FIRST_ID}\"\nreconnect_token = \"{token}\"\nexpires_at = \"{expires_at}\"\n"
+        ),
+    )
+    .unwrap();
+}
+
+async fn wait_for_log(log: &Path, needle: &str) -> String {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let text = std::fs::read_to_string(log).unwrap_or_default();
+            if text.contains(needle) {
+                return text;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "daemon did not log {needle:?}: {}",
+            std::fs::read_to_string(log).unwrap_or_default()
+        )
+    })
+}
+
+#[tokio::test]
+async fn expired_credential_waits_for_reenrollment_instead_of_exiting() {
+    let home = tempfile::tempdir().unwrap();
+    let directory = config_dir(home.path());
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join("config.toml"),
+        "[sacrum]\nurl = \"http://127.0.0.1:1\"\n",
+    )
+    .unwrap();
+    // Port 1 refuses connections, so any connection attempt is visible in the log.
+    write_identity(
+        &directory,
+        "http://127.0.0.1:1",
+        "EXPIRED-CREDENTIAL",
+        "2020-01-01T00:00:00Z",
+    );
+    let log_path = home.path().join("daemon.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let mut daemon = Command::new(env!("CARGO_BIN_EXE_vtb-daemon"))
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join("config"))
+        .env("RUST_LOG", "info")
+        .stdout(Stdio::from(log.try_clone().unwrap()))
+        .stderr(Stdio::from(log))
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+
+    let text = wait_for_log(&log_path, "Daemon re-enrollment required").await;
+    assert!(text.contains(FIRST_ID));
+    assert!(text.contains("--replace-existing"));
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(daemon.try_wait().unwrap().is_none(), "daemon keeps running");
+    let text = std::fs::read_to_string(&log_path).unwrap();
+    assert_eq!(text.matches("Daemon re-enrollment required").count(), 1);
+    assert!(!text.contains("Connecting to Phoenix WebSocket"));
+
+    // `vtb-daemon enroll --replace-existing` writes a fresh credential.
+    write_identity(
+        &directory,
+        "http://127.0.0.1:1",
+        "FRESH-CREDENTIAL",
+        "2099-01-01T00:00:00Z",
+    );
+    wait_for_log(&log_path, "Connecting to Phoenix WebSocket").await;
+    let text = std::fs::read_to_string(&log_path).unwrap();
+    assert!(text.contains("Daemon re-enrolled"));
+    assert!(!text.contains("EXPIRED-CREDENTIAL"));
+    assert!(!text.contains("FRESH-CREDENTIAL"));
+
+    let pid = daemon.id().unwrap().to_string();
+    let status = std::process::Command::new("kill")
+        .args(["-TERM", &pid])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let exit = tokio::time::timeout(Duration::from_secs(10), daemon.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        exit.success(),
+        "shutdown during startup retries exits cleanly"
+    );
+}

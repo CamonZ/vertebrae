@@ -1,4 +1,4 @@
-import type { Daemon } from "../bindings";
+import type { Daemon, DaemonEnrollmentMetadata } from "../bindings";
 
 export const DAEMON_STATUSES = [
   "active",
@@ -138,6 +138,23 @@ export function groupDaemonsByStatus(
       (daemon) => normalizedDaemonStatus(daemon.status) === status
     ),
   })).filter((group) => group.daemons.length > 0);
+}
+
+/**
+ * True when an enrolled daemon has no unexpired active reconnect credential.
+ * Such a daemon cannot renew itself; the owner must rotate and re-enroll.
+ */
+export function daemonRequiresReenrollment(
+  metadata: DaemonEnrollmentMetadata | null | undefined,
+  now = Date.now()
+): boolean {
+  if (!metadata?.enrolled_at || metadata.status !== "active") return false;
+  return !metadata.credentials.some(
+    (credential) =>
+      credential.credential_kind === "reconnect" &&
+      credential.status === "active" &&
+      Date.parse(credential.expires_at) > now
+  );
 }
 
 export function formatDaemonTimestamp(

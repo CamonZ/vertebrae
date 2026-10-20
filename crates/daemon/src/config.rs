@@ -30,6 +30,8 @@ pub enum ConfigError {
     IdentityMismatch { existing_id: String },
     #[error("Failed to persist daemon configuration: {0}")]
     PersistFailed(String),
+    #[error("Daemon credential changed on disk; a newer enrollment takes precedence")]
+    CredentialChanged,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -335,6 +337,44 @@ pub fn save_daemon_identity(
 /// so a later explicit re-enrollment uses the same synchronization boundary.
 pub fn retire_daemon_identity(daemon_id: &str) -> Result<(), ConfigError> {
     DaemonEnrollmentStorage::begin(daemon_id, true)?.retire()
+}
+
+/// Replace `previous` with its renewed successor in `daemon.toml`.
+///
+/// Uses the enrollment lock and the same atomic write as enrollment. A file
+/// that no longer holds `previous` (for example after a concurrent
+/// `vtb-daemon enroll --replace-existing`) is left untouched.
+pub fn persist_renewed_credential(
+    previous: &DaemonIdentity,
+    renewed: &DaemonIdentity,
+) -> Result<(), ConfigError> {
+    persist_renewed_credential_at(&daemon_config_path()?, previous, renewed)
+}
+
+pub(crate) fn persist_renewed_credential_at(
+    path: &Path,
+    previous: &DaemonIdentity,
+    renewed: &DaemonIdentity,
+) -> Result<(), ConfigError> {
+    let storage = DaemonEnrollmentStorage::begin_at(path, &previous.daemon_id, true)?;
+    match load_daemon_state_at(path)? {
+        Some(PersistedDaemonState::Active(current)) if current == *previous => {
+            storage.save(renewed)
+        }
+        _ => Err(ConfigError::CredentialChanged),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn save_daemon_identity_for_test(path: &Path, identity: &DaemonIdentity) {
+    save_daemon_identity_at(path, identity, true).expect("save test daemon identity");
+}
+
+#[cfg(test)]
+pub(crate) fn load_daemon_identity_for_test(path: &Path) -> DaemonIdentity {
+    load_daemon_identity_at(path)
+        .expect("load test daemon identity")
+        .expect("test daemon identity exists")
 }
 
 #[cfg(test)]
@@ -713,5 +753,73 @@ mod tests {
             load_daemon_identity_at(&path).unwrap().unwrap().daemon_id,
             winners[0].0
         );
+    }
+
+    #[test]
+    fn renewal_replaces_only_the_credential_it_renewed() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("daemon.toml");
+        let original = identity("daemon-1", "original-secret");
+        save_daemon_identity_at(&path, &original, false).unwrap();
+        let renewed = DaemonIdentity {
+            reconnect_token: "renewed-secret".to_string(),
+            expires_at: "2026-10-07T12:00:00Z".to_string(),
+            ..original.clone()
+        };
+        persist_renewed_credential_at(&path, &original, &renewed).unwrap();
+        assert_eq!(
+            load_daemon_identity_at(&path).unwrap(),
+            Some(renewed.clone())
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        // A stale renewal must not overwrite a newer enrollment.
+        let stale = DaemonIdentity {
+            reconnect_token: "stale-secret".to_string(),
+            ..original.clone()
+        };
+        assert!(matches!(
+            persist_renewed_credential_at(&path, &original, &stale),
+            Err(ConfigError::CredentialChanged)
+        ));
+        assert_eq!(load_daemon_identity_at(&path).unwrap(), Some(renewed));
+    }
+
+    #[test]
+    fn failed_renewal_write_leaves_the_previous_config_intact() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("daemon.toml");
+        let original = identity("daemon-1", "original-secret");
+        save_daemon_identity_at(&path, &original, false).unwrap();
+        let renewed = DaemonIdentity {
+            reconnect_token: "renewed-secret".to_string(),
+            ..original.clone()
+        };
+        // An in-progress enrollment holds the lock: renewal fails before writing.
+        let held = DaemonEnrollmentStorage::begin_at(&path, "daemon-1", true).unwrap();
+        assert!(persist_renewed_credential_at(&path, &original, &renewed).is_err());
+        drop(held);
+        assert_eq!(
+            load_daemon_identity_at(&path).unwrap(),
+            Some(original.clone())
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|name| name != "daemon.toml" && name != "daemon.lock")
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no partial files remain: {leftovers:?}"
+        );
+        persist_renewed_credential_at(&path, &original, &renewed).unwrap();
+        assert_eq!(load_daemon_identity_at(&path).unwrap(), Some(renewed));
     }
 }

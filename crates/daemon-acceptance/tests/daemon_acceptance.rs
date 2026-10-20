@@ -62,7 +62,10 @@ pub struct DaemonWorld {
     pub capture_dir: PathBuf,
     pub managed_plugin_root: Option<PathBuf>,
     pub standalone_home: Option<PathBuf>,
+    pub daemon_log_path: Option<PathBuf>,
     pub typesafe_server: Option<MockServer>,
+    /// Credential state observed by the renewal scenarios.
+    pub renewal: steps::credential_renewal::RenewalObservations,
 }
 
 impl std::fmt::Debug for DaemonWorld {
@@ -131,7 +134,9 @@ impl DaemonWorld {
             )),
             managed_plugin_root: None,
             standalone_home: None,
+            daemon_log_path: None,
             typesafe_server: None,
+            renewal: Default::default(),
         }
     }
 
@@ -160,13 +165,33 @@ impl DaemonWorld {
     }
 
     pub async fn stop_daemon(&mut self) {
+        self.stop_daemon_process().await;
+        if let Some(home) = self.standalone_home.take() {
+            let _ = std::fs::remove_dir_all(home);
+        }
+    }
+
+    /// Stop the running daemon but keep its home and persisted enrollment.
+    pub async fn stop_daemon_process(&mut self) {
         if let Some(mut child) = self.daemon.take() {
             let _ = child.kill().await;
             let _ = child.wait().await;
         }
-        if let Some(home) = self.standalone_home.take() {
-            let _ = std::fs::remove_dir_all(home);
-        }
+    }
+
+    /// Path of `daemon.toml` inside the standalone daemon home (Linux layout).
+    pub fn daemon_toml_path(&self) -> PathBuf {
+        self.standalone_home
+            .as_ref()
+            .expect("standalone daemon home configured")
+            .join(".config/vertebrae/daemon.toml")
+    }
+
+    pub fn daemon_log(&self) -> String {
+        self.daemon_log_path
+            .as_ref()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .unwrap_or_default()
     }
 
     pub async fn start_standalone_daemon(&mut self, daemon_id: &str, enrollment_token: &str) {
@@ -175,6 +200,31 @@ impl DaemonWorld {
     }
 
     pub async fn start_standalone_daemon_with_projects(
+        &mut self,
+        daemon_id: &str,
+        enrollment_token: &str,
+        projects: &[(&str, &str)],
+    ) {
+        self.enroll_standalone_daemon(daemon_id, enrollment_token, projects)
+            .await;
+        self.launch_enrolled_daemon(&Self::registration_logs(projects))
+            .await;
+    }
+
+    /// Log lines that prove the daemon registered and started every project.
+    pub fn registration_logs(projects: &[(&str, &str)]) -> Vec<String> {
+        let mut expected = vec!["Standalone daemon identity registered".to_string()];
+        expected.extend(projects.iter().flat_map(|(project_id, _)| {
+            [
+                format!("Registered daemon project mapping {project_id}"),
+                format!("ProjectSupervisor starting for project {project_id}"),
+            ]
+        }));
+        expected
+    }
+
+    /// Create a standalone home, map `projects`, and run `vtb-daemon enroll`.
+    pub async fn enroll_standalone_daemon(
         &mut self,
         daemon_id: &str,
         enrollment_token: &str,
@@ -237,7 +287,17 @@ impl DaemonWorld {
             String::from_utf8_lossy(&enrollment_output.stdout),
             String::from_utf8_lossy(&enrollment_output.stderr)
         );
+        self.standalone_home = Some(home);
+    }
 
+    /// Start `vtb-daemon` against the enrolled home and wait until every
+    /// `expected` log line appears. An empty list only waits for spawn.
+    pub async fn launch_enrolled_daemon(&mut self, expected: &[String]) {
+        assert!(self.daemon.is_none(), "daemon already running for scenario");
+        let home = self
+            .standalone_home
+            .clone()
+            .expect("standalone daemon is enrolled");
         let log_path = PathBuf::from(format!(
             "/tmp/daemon-acc-standalone-{}.log",
             uuid::Uuid::new_v4().simple()
@@ -263,15 +323,8 @@ impl DaemonWorld {
             .kill_on_drop(true);
         let child = cmd.spawn().expect("spawn standalone daemon");
         self.daemon = Some(child);
-        self.standalone_home = Some(home);
+        self.daemon_log_path = Some(log_path.clone());
 
-        let mut expected = vec!["Standalone daemon identity registered".to_string()];
-        expected.extend(projects.iter().flat_map(|(project_id, _)| {
-            [
-                format!("Registered daemon project mapping {project_id}"),
-                format!("ProjectSupervisor starting for project {project_id}"),
-            ]
-        }));
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if Instant::now() >= deadline {

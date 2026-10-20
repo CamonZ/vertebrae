@@ -26,6 +26,15 @@ vi.mock("../hooks/useDaemonFleet", () => ({
 }));
 vi.mock("../hooks/useDaemonDetail", () => ({
   useDaemonDetail: (...args: unknown[]) => mockUseDaemonDetail(...args),
+  useDaemonEnrollmentMetadata: () => ({
+    data: null,
+    isLoading: false,
+    isRefreshing: false,
+    error: null,
+    errorKind: null,
+    connectionId: null,
+    refetch: vi.fn(),
+  }),
 }));
 vi.mock("../hooks/useWebSocketStatus", () => ({
   useWebSocketStatus: () => mockUseWebSocketStatus(),

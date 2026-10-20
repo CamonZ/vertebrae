@@ -40,6 +40,8 @@ interface DaemonInspectorProps {
   isUpdatingMaxConcurrency?: boolean;
   isReissuing?: boolean;
   isUnregistering?: boolean;
+  /** The daemon's reconnect credential is expired or rejected. */
+  reenrollmentRequired?: boolean;
   closing?: boolean;
   onClose: () => void;
   onRename?: (daemonId: string, name: DaemonNameUpdate) => Promise<boolean>;
@@ -107,6 +109,7 @@ export function DaemonInspector({
   isUpdatingMaxConcurrency = false,
   isReissuing = false,
   isUnregistering = false,
+  reenrollmentRequired = false,
   closing = false,
   onClose,
   onRename = async () => false,
@@ -230,6 +233,33 @@ export function DaemonInspector({
                   This daemon is pending enrollment. Heartbeat and capability
                   telemetry are not available yet.
                 </p>
+              )}
+              {reenrollmentRequired && !revoked && !terminal && (
+                <div
+                  className="rounded-[var(--radius-md)] border border-[var(--color-warn)]/35 bg-[var(--color-warn-wash)] p-3 text-xs leading-relaxed text-[var(--color-warn)]"
+                  role="status"
+                  data-testid="daemon-inspector-credential-reenrollment"
+                >
+                  <p>
+                    This daemon&apos;s reconnect credential has expired or was
+                    rejected, so it cannot reconnect or renew itself. Rotate its
+                    credentials, then run the enrollment command with{" "}
+                    <code className="font-mono">--replace-existing</code> on the
+                    daemon&apos;s machine. The running daemon reconnects once
+                    the new credential is saved.
+                  </p>
+                  <Button
+                    className="mt-2"
+                    variant="secondary"
+                    size="sm"
+                    loading={isReissuing}
+                    disabled={actionBusy}
+                    onClick={() => onReissue(daemon.id)}
+                    data-testid="daemon-inspector-rotate-reenroll"
+                  >
+                    Rotate and re-enroll
+                  </Button>
+                </div>
               )}
               <section aria-labelledby="daemon-identity-heading">
                 <h2

@@ -123,8 +123,10 @@ export function DaemonEnrollmentModal({
   const command = useMemo(() => {
     if (!bootstrap) return "";
     const endpoint = serverEndpoint ?? "<configured-sacrum-endpoint>";
-    return `vtb-daemon enroll --endpoint '${endpoint}' --daemon-id '${bootstrap.daemon.id}' --token-stdin < /path/to/protected-bootstrap-token`;
-  }, [bootstrap, serverEndpoint]);
+    // A re-issued token replaces the credential of an already-enrolled machine.
+    const replace = isReissue ? " --replace-existing" : "";
+    return `vtb-daemon enroll --endpoint '${endpoint}' --daemon-id '${bootstrap.daemon.id}' --token-stdin${replace} < /path/to/protected-bootstrap-token`;
+  }, [bootstrap, isReissue, serverEndpoint]);
 
   const handleCopy = async (target: CopyTarget, value: string) => {
     try {
@@ -154,7 +156,7 @@ export function DaemonEnrollmentModal({
       onClose={onClose}
       hideClose
       variant="dialog"
-      className="w-[520px] max-w-[calc(100vw-2rem)]"
+      className="w-[520px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)]"
     >
       {step === "name" ? (
         <form
@@ -246,7 +248,7 @@ export function DaemonEnrollmentModal({
           </h2>
           <p className="mt-2 text-sm italic leading-relaxed text-[var(--color-fg-mute)]">
             {isReissue
-              ? "Run the new one-time enrollment command on the remote machine."
+              ? "Run the new one-time enrollment command on the daemon's machine. A running daemon reconnects with the new credential automatically."
               : "The daemon is registered but has never checked in. Run this on the machine — the token is accepted once, then burned."}
           </p>
 
