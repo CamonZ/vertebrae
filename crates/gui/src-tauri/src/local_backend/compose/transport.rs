@@ -24,16 +24,7 @@ pub(super) const DOCKER_ENV_REMOVE: [&str; 8] = [
     "DOCKER_AUTH_CONFIG",
 ];
 
-#[derive(Debug)]
-pub(super) struct DockerPrerequisites {
-    pub(super) engine_version: String,
-    pub(super) engine_major: u64,
-}
-
-impl<R, H> DockerCompose<R, H>
-where
-    R: ProcessRunner,
-{
+impl<R: ProcessRunner, H> DockerCompose<R, H> {
     pub async fn connect(
         runner: R,
         health_probe: H,
@@ -47,7 +38,18 @@ where
         let target = resolve_docker_target(&runner, &docker_cli, QUICK_COMMAND_TIMEOUT).await?;
         Ok(Self::new(runner, health_probe, docker_cli, target))
     }
+}
 
+#[derive(Debug)]
+pub(super) struct DockerPrerequisites {
+    pub(super) engine_version: String,
+    pub(super) engine_major: u64,
+}
+
+impl<R> super::DockerRuntime<R>
+where
+    R: ProcessRunner,
+{
     pub(super) async fn check_prerequisites(
         &self,
     ) -> Result<DockerPrerequisites, LocalBackendError> {
@@ -505,6 +507,7 @@ mod tests {
         let controller = controller(runner.clone(), MockHealth::default());
 
         let error = controller
+            .runtime
             .check_prerequisites()
             .await
             .expect_err("changed context must fail");
@@ -543,6 +546,7 @@ mod tests {
             ),
         ] {
             let error = controller(MockRunner::with_outputs(outputs), MockHealth::default())
+                .runtime
                 .check_prerequisites()
                 .await
                 .expect_err("prerequisite must fail");
@@ -593,6 +597,7 @@ mod tests {
         let controller = controller(runner.clone(), MockHealth::default());
 
         controller
+            .runtime
             .run_seeder(&paths, &state, &account, &token)
             .await
             .expect("run one-shot seeder");
@@ -640,6 +645,7 @@ mod tests {
         let controller = controller(runner, MockHealth::default());
 
         let error = controller
+            .runtime
             .run_seeder(&paths, &state, &account, &token)
             .await
             .expect_err("seed should fail");

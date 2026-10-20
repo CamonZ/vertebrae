@@ -1,11 +1,23 @@
+//! The GUI selects a Docker runtime at the composition boundary. Shared startup,
+//! provisioning, HTTP readiness, volume-preservation policy, and image-state
+//! commits run through LocalBackendManager and the semantic ContainerRuntime
+//! contract. Docker discovery, context validation, Compose commands, and metadata
+//! parsing remain in compose. Saved schema-version-1 state is unchanged; this
+//! extraction does not add runtime selection or Podman support.
+
 mod command;
 pub(crate) mod compose;
+mod health;
+mod manager;
 pub(crate) mod manifest;
 pub(crate) mod provisioning;
+mod runtime;
 pub(crate) mod state;
 
-use command::ProcessRunner;
-use compose::{DockerCompose, HealthProbe};
+use compose::DockerCompose;
+use health::HealthProbe;
+use manager::LocalBackendManager;
+use runtime::ContainerRuntime;
 use state::{ApiToken, LocalBackendError, ManagedStackPaths, ManagedStackState, ProvisioningState};
 
 pub(crate) async fn ensure_for_startup() -> Result<bool, LocalBackendError> {
@@ -20,13 +32,13 @@ pub(crate) async fn ensure_for_startup() -> Result<bool, LocalBackendError> {
     .await
 }
 
-async fn ensure_for_startup_with<R, H, F>(
+async fn ensure_for_startup_with<T, H, F>(
     paths: &ManagedStackPaths,
-    compose: &DockerCompose<R, H>,
+    compose: &LocalBackendManager<T, H>,
     persist_client_config: F,
 ) -> Result<bool, LocalBackendError>
 where
-    R: ProcessRunner,
+    T: ContainerRuntime,
     H: HealthProbe,
     F: Fn(&str, &ApiToken) -> Result<(), LocalBackendError>,
 {
@@ -38,14 +50,14 @@ where
     Ok(true)
 }
 
-async fn ensure_ready_stack<R, H, F>(
-    compose: &DockerCompose<R, H>,
+async fn ensure_ready_stack<T, H, F>(
+    compose: &LocalBackendManager<T, H>,
     paths: &ManagedStackPaths,
     mut state: ManagedStackState,
     persist_client_config: F,
 ) -> Result<ManagedStackState, LocalBackendError>
 where
-    R: ProcessRunner,
+    T: ContainerRuntime,
     H: HealthProbe,
     F: Fn(&str, &ApiToken) -> Result<(), LocalBackendError>,
 {

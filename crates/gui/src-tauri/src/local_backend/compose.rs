@@ -3,45 +3,45 @@ use std::{path::PathBuf, time::Duration};
 use super::command::{discover_docker_cli, SystemProcessRunner};
 use super::state::{DockerTarget, LocalBackendError};
 
-mod health;
 mod legacy;
 mod lifecycle;
+mod runtime;
 mod transport;
 
 #[allow(unused_imports)]
-pub use health::HealthProbe;
-pub use health::ReqwestHealthProbe;
+pub use super::health::HealthProbe;
+pub use super::health::ReqwestHealthProbe;
 pub type LegacyStackCandidate = legacy::LegacyStackCandidate;
 pub type LegacyStackDetection = legacy::LegacyStackDetection;
-pub type ServiceStatus = lifecycle::ServiceStatus;
+pub use super::runtime::ServiceStatus;
 
-use health::{HEALTH_POLL_INTERVAL, HEALTH_TIMEOUT};
 use lifecycle::RECONCILE_TIMEOUT;
 use transport::QUICK_COMMAND_TIMEOUT;
 
-pub struct DockerCompose<R, H> {
+/// Compatibility name for the GUI's Docker-backed manager.
+pub type DockerCompose<R, H> = super::manager::LocalBackendManager<DockerRuntime<R>, H>;
+
+/// Docker/Compose transport. Lifecycle policy belongs to LocalBackendManager.
+pub struct DockerRuntime<R> {
     runner: R,
-    health_probe: H,
     docker_cli: PathBuf,
     target: DockerTarget,
     quick_timeout: Duration,
     reconcile_timeout: Duration,
-    health_timeout: Duration,
-    health_poll_interval: Duration,
 }
 
 impl<R, H> DockerCompose<R, H> {
     pub fn new(runner: R, health_probe: H, docker_cli: PathBuf, target: DockerTarget) -> Self {
-        Self {
-            runner,
+        Self::with_runtime(
+            DockerRuntime {
+                runner,
+                docker_cli,
+                target,
+                quick_timeout: QUICK_COMMAND_TIMEOUT,
+                reconcile_timeout: RECONCILE_TIMEOUT,
+            },
             health_probe,
-            docker_cli,
-            target,
-            quick_timeout: QUICK_COMMAND_TIMEOUT,
-            reconcile_timeout: RECONCILE_TIMEOUT,
-            health_timeout: HEALTH_TIMEOUT,
-            health_poll_interval: HEALTH_POLL_INTERVAL,
-        }
+        )
     }
 
     pub fn with_timeouts(
@@ -51,15 +51,15 @@ impl<R, H> DockerCompose<R, H> {
         health_timeout: Duration,
         health_poll_interval: Duration,
     ) -> Self {
-        self.quick_timeout = quick_timeout;
-        self.reconcile_timeout = reconcile_timeout;
+        self.runtime.quick_timeout = quick_timeout;
+        self.runtime.reconcile_timeout = reconcile_timeout;
         self.health_timeout = health_timeout;
         self.health_poll_interval = health_poll_interval;
         self
     }
 
     pub fn target(&self) -> &DockerTarget {
-        &self.target
+        &self.runtime.target
     }
 }
 
@@ -166,7 +166,8 @@ mod tests {
         state: &ManagedStackState,
     ) -> Result<String, LocalBackendError> {
         let output = controller
-            .checked(controller.compose_request(
+            .runtime
+            .checked(controller.runtime.compose_request(
                 paths,
                 state,
                 "capture local backend logs",
@@ -182,14 +183,14 @@ mod tests {
         paths: &ManagedStackPaths,
         state: &ManagedStackState,
     ) {
-        let request = controller.compose_request(
+        let request = controller.runtime.compose_request(
             paths,
             state,
             "remove smoke-test stack",
             ["down", "--volumes", "--remove-orphans"],
             Duration::from_secs(60),
         );
-        let _ = controller.checked(request).await;
+        let _ = controller.runtime.checked(request).await;
     }
 
     fn run_legacy_script(
@@ -255,8 +256,7 @@ mod tests {
                 .start_and_wait_until_healthy(&paths, &mut state)
                 .await?;
             let secrets = paths.load_runtime_secrets(state.kind)?;
-            first_controller
-                .run_seeder(&paths, &state, &account, &api_token)
+            first_controller.runtime.run_seeder(&paths, &state, &account, &api_token)
                 .await?;
             state.provisioning_state = ProvisioningState::Ready;
             paths.save_state(&state)?;
@@ -371,8 +371,7 @@ mod tests {
                 ],
             )
             .await?;
-            let volume = second_controller
-                .checked(second_controller.docker_request(
+            let volume = second_controller.runtime.checked(second_controller.runtime.docker_request(
                     "inspect smoke-test volume",
                     ["volume", "inspect", postgres_volume.as_str()],
                     Duration::from_secs(30),

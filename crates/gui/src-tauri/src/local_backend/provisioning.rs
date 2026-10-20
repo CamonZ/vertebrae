@@ -1,9 +1,10 @@
-use super::command::ProcessRunner;
-use super::compose::{DockerCompose, HealthProbe, ServiceStatus};
+use super::health::HealthProbe;
+use super::runtime::ServiceStatus;
 use super::state::{
     ApiToken, LocalBackendError, ManagedStackPaths, ManagedStackState, ProvisioningStage,
     ProvisioningState, RuntimeSecrets, SeedAccount, StackKind,
 };
+use super::{manager::LocalBackendManager, runtime::ContainerRuntime};
 
 /// Provisioning result without the API token, which is persisted in the canonical config.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,12 +14,12 @@ pub struct ProvisioningResult {
     pub services: Vec<ServiceStatus>,
 }
 
-impl<R, H> DockerCompose<R, H>
+impl<T, H> LocalBackendManager<T, H>
 where
-    R: ProcessRunner,
+    T: ContainerRuntime,
     H: HealthProbe,
 {
-    /// Persist secrets and the API token before starting Docker so retries reuse them.
+    /// Persist secrets and the API token before starting containers so retries reuse them.
     pub async fn provision_fresh(
         &self,
         paths: &ManagedStackPaths,
@@ -72,7 +73,10 @@ where
         };
 
         progress(ProvisioningStage::Seeding);
-        let seed_result = self.run_seeder(paths, state, &account, &api_token).await;
+        let seed_result = self
+            .runtime
+            .run_seeder(paths, state, &account, &api_token)
+            .await;
         drop(account);
         if let Err(error) = seed_result {
             return Err(record_failed_state(paths, state, error));
