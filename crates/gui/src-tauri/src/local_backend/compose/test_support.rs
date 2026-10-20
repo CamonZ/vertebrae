@@ -227,8 +227,11 @@ pub(crate) async fn postgres_exec(
         .collect::<Vec<_>>();
     args.extend(psql_args.iter().map(OsString::from));
     controller
+        .runtime
         .checked_stack(
-            controller.compose_request(paths, state, action, args, Duration::from_secs(30)),
+            controller
+                .runtime
+                .compose_request(paths, state, action, args, Duration::from_secs(30)),
             secrets,
         )
         .await

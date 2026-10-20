@@ -2,14 +2,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use super::DockerCompose;
-use crate::local_backend::command::ProcessRunner;
 use crate::local_backend::state::{
     ApiToken, LocalBackendError, ManagedStackPaths, ManagedStackState,
 };
-
-pub(super) const HEALTH_TIMEOUT: Duration = Duration::from_secs(120);
-pub(super) const HEALTH_POLL_INTERVAL: Duration = Duration::from_secs(2);
+use crate::local_backend::{manager::LocalBackendManager, runtime::ContainerRuntime};
 
 #[async_trait]
 pub trait HealthProbe: Send + Sync {
@@ -98,9 +94,9 @@ fn truncate_authentication_detail(detail: &str) -> String {
     }
 }
 
-impl<R, H> DockerCompose<R, H>
+impl<T, H> LocalBackendManager<T, H>
 where
-    R: ProcessRunner,
+    T: ContainerRuntime,
     H: HealthProbe,
 {
     pub async fn wait_until_healthy(
@@ -108,8 +104,8 @@ where
         paths: &ManagedStackPaths,
         state: &ManagedStackState,
     ) -> Result<(), LocalBackendError> {
-        self.revalidate_context().await?;
-        let secrets = self.validate_stack_files(paths, state)?;
+        self.runtime.revalidate_target().await?;
+        let secrets = self.runtime.validate_stack_files(paths, state)?;
         let url = format!("{}/healthz", state.backend_url());
         let started = tokio::time::Instant::now();
         loop {
@@ -118,18 +114,9 @@ where
             }
             if started.elapsed() >= self.health_timeout {
                 let logs = self
-                    .checked_stack(
-                        self.compose_request(
-                            paths,
-                            state,
-                            "read local backend logs",
-                            ["logs", "--no-color", "--tail", "80", "postgres", "sacrum"],
-                            self.quick_timeout,
-                        ),
-                        &secrets,
-                    )
+                    .runtime
+                    .logs(paths, state, &secrets)
                     .await
-                    .map(|output| output.summary())
                     .unwrap_or_else(|error| format!("Could not read logs: {error}"));
                 return Err(LocalBackendError::HealthTimedOut {
                     url,
@@ -154,7 +141,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::*;
+    use super::super::compose::test_support::*;
     use super::*;
     use crate::local_backend::command::CommandOutput;
     use crate::local_backend::state::StackKind;

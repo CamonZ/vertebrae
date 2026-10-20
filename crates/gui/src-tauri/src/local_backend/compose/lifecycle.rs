@@ -3,94 +3,32 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::legacy::LegacyVolumeStatus;
-use super::DockerCompose;
+use super::ServiceStatus;
 use crate::local_backend::command::ProcessRunner;
+use crate::local_backend::runtime::{DatabaseVolumeStatus, StartMode};
+#[cfg(test)]
+use crate::local_backend::state::ProvisioningStage;
 use crate::local_backend::state::{
-    LocalBackendError, ManagedStackPaths, ManagedStackState, ProvisioningStage, RuntimeSecrets,
-    StackKind, LEGACY_VOLUME,
+    LocalBackendError, ManagedStackPaths, ManagedStackState, RuntimeSecrets, StackKind,
 };
 
 pub(super) const RECONCILE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const MINIMUM_SAFE_ENGINE_MAJOR: u64 = 28;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ServiceStatus {
-    pub name: String,
-    pub service: String,
-    pub state: String,
-    pub health: Option<String>,
-    pub exit_code: Option<i32>,
-}
-
-impl<R, H> DockerCompose<R, H>
+impl<R> super::DockerRuntime<R>
 where
     R: ProcessRunner,
 {
-    pub async fn start_and_wait_until_healthy(
+    pub(super) async fn prepare_start(
         &self,
         paths: &ManagedStackPaths,
-        state: &mut ManagedStackState,
-    ) -> Result<Vec<ServiceStatus>, LocalBackendError>
-    where
-        H: super::health::HealthProbe,
-    {
-        self.start_and_wait_until_healthy_with_progress(paths, state, |_| {})
-            .await
-    }
-
-    pub async fn start_and_wait_until_healthy_with_progress<F>(
-        &self,
-        paths: &ManagedStackPaths,
-        state: &mut ManagedStackState,
-        progress: F,
-    ) -> Result<Vec<ServiceStatus>, LocalBackendError>
-    where
-        H: super::health::HealthProbe,
-        F: Fn(ProvisioningStage) + Send + Sync,
-    {
-        if state.kind != StackKind::Managed {
-            return Err(LocalBackendError::InvalidState(
-                "fresh provisioning cannot start an adopted development stack".to_string(),
-            ));
-        }
-
-        state.provisioning_state = crate::local_backend::state::ProvisioningState::InProgress;
-        paths.save_state(state)?;
-
-        let result = async {
-            progress(ProvisioningStage::Pulling);
-            self.up_detached(paths, state).await?;
-            progress(ProvisioningStage::Migrating);
-            progress(ProvisioningStage::Health);
-            self.wait_until_healthy(paths, state).await?;
-            let secrets = self.validate_stack_files(paths, state)?;
-            self.status_without_prerequisite(paths, state, &secrets)
-                .await
-        }
-        .await;
-
-        match result {
-            Ok(status) => Ok(status),
-            Err(error) => {
-                state.provisioning_state = crate::local_backend::state::ProvisioningState::Failed;
-                if let Err(save_error) = paths.save_state(state) {
-                    return Err(LocalBackendError::InvalidState(format!(
-                        "{error}; additionally could not record failed provisioning state: {save_error}"
-                    )));
-                }
-                Err(error)
-            }
-        }
-    }
-
-    pub async fn up_detached(
-        &self,
-        paths: &ManagedStackPaths,
-        state: &mut ManagedStackState,
-    ) -> Result<Vec<ServiceStatus>, LocalBackendError> {
+        state: &ManagedStackState,
+        mode: StartMode,
+    ) -> Result<RuntimeSecrets, LocalBackendError> {
         let prerequisites = self.check_prerequisites().await?;
         let secrets = self.validate_stack_files(paths, state)?;
-        if state.kind == StackKind::Managed
+        if mode == StartMode::Reconcile
+            && state.kind == StackKind::Managed
             && prerequisites.engine_major < MINIMUM_SAFE_ENGINE_MAJOR
         {
             return Err(LocalBackendError::UnsupportedEngineVersion {
@@ -98,82 +36,26 @@ where
                 minimum: MINIMUM_SAFE_ENGINE_MAJOR,
             });
         }
-        self.validate_persistent_volume(state).await?;
-        self.checked_stack(
-            self.compose_request(
-                paths,
-                state,
-                "validate Compose configuration",
-                ["config", "--quiet"],
-                self.quick_timeout,
-            ),
-            &secrets,
-        )
-        .await?;
-        let result = self
-            .checked_stack(
-                self.compose_request(
-                    paths,
-                    state,
-                    "start local backend",
-                    ["up", "--detach", "--pull", "missing", "postgres", "sacrum"],
-                    self.reconcile_timeout,
-                ),
-                &secrets,
-            )
-            .await;
-        if let Err(error) = result {
-            return Err(classify_port_error(error, state.host_port));
-        }
-        if !state.postgres_volume_initialized {
-            let volume = state.postgres_volume();
-            if !self.named_volume_exists(&volume).await? {
-                return Err(LocalBackendError::PersistentVolumeUnavailable {
-                    volume,
-                    reason: "Docker Compose completed without creating the database volume"
-                        .to_string(),
-                });
-            }
-            state.postgres_volume_initialized = true;
-            paths.save_state(state)?;
-        }
-        self.status_without_prerequisite(paths, state, &secrets)
-            .await
+        Ok(secrets)
     }
 
-    /// Start an adopted legacy stack without changing its existing images or
-    /// recreating containers. Image changes are reserved for the explicit
-    /// backend-update command.
-    pub async fn up_adopted(
+    pub(super) async fn start_services(
         &self,
         paths: &ManagedStackPaths,
-        state: &mut ManagedStackState,
-    ) -> Result<Vec<ServiceStatus>, LocalBackendError> {
-        if state.kind != StackKind::AdoptedLegacy {
-            return Err(LocalBackendError::InvalidState(
-                "legacy adoption startup requires an adopted development stack".to_string(),
-            ));
-        }
-        let _ = self.check_prerequisites().await?;
-        let secrets = self.validate_stack_files(paths, state)?;
-        self.validate_persistent_volume(state).await?;
-        self.checked_stack(
-            self.compose_request(
-                paths,
-                state,
-                "validate adopted Compose configuration",
-                ["config", "--quiet"],
-                self.quick_timeout,
+        state: &ManagedStackState,
+        secrets: &RuntimeSecrets,
+        mode: StartMode,
+    ) -> Result<(), LocalBackendError> {
+        let (validate_action, start_action, operation) = match mode {
+            StartMode::Reconcile => (
+                "validate Compose configuration",
+                "start local backend",
+                vec!["up", "--detach", "--pull", "missing", "postgres", "sacrum"],
             ),
-            &secrets,
-        )
-        .await?;
-        self.checked_stack(
-            self.compose_request(
-                paths,
-                state,
+            StartMode::PreserveExisting => (
+                "validate adopted Compose configuration",
                 "start preserved legacy backend",
-                [
+                vec![
                     "up",
                     "--detach",
                     "--no-recreate",
@@ -182,13 +64,37 @@ where
                     "postgres",
                     "sacrum",
                 ],
-                self.reconcile_timeout,
             ),
-            &secrets,
+        };
+        self.checked_stack(
+            self.compose_request(
+                paths,
+                state,
+                validate_action,
+                ["config", "--quiet"],
+                self.quick_timeout,
+            ),
+            secrets,
         )
         .await?;
-        self.status_without_prerequisite(paths, state, &secrets)
-            .await
+        let result = self
+            .checked_stack(
+                self.compose_request(
+                    paths,
+                    state,
+                    start_action,
+                    operation,
+                    self.reconcile_timeout,
+                ),
+                secrets,
+            )
+            .await;
+        match mode {
+            StartMode::Reconcile => result
+                .map(|_| ())
+                .map_err(|error| classify_port_error(error, state.host_port)),
+            StartMode::PreserveExisting => result.map(|_| ()),
+        }
     }
 
     pub async fn status(
@@ -202,30 +108,17 @@ where
             .await
     }
 
-    pub async fn update_sacrum_image(
+    pub(super) async fn replace_sacrum_image(
         &self,
         paths: &ManagedStackPaths,
         state: &ManagedStackState,
-        image_ref: &str,
-        version: Option<&str>,
-        build: Option<&str>,
-        image_created_at: Option<&str>,
-    ) -> Result<Vec<ServiceStatus>, LocalBackendError>
-    where
-        H: super::health::HealthProbe,
-    {
-        let mut updated_state = state.clone();
-        updated_state.sacrum_image_ref = image_ref.to_string();
-        updated_state.sacrum_version = version.map(str::to_string);
-        updated_state.sacrum_build = build.map(str::to_string);
-        updated_state.sacrum_image_created_at = image_created_at.map(str::to_string);
-        updated_state.validate()?;
+        updated_state: &ManagedStackState,
+    ) -> Result<(), LocalBackendError> {
         let secrets = self.validate_stack_files(paths, state)?;
-
         self.checked_stack(
             self.compose_request(
                 paths,
-                &updated_state,
+                updated_state,
                 "pull local backend image",
                 ["pull", "sacrum"],
                 self.reconcile_timeout,
@@ -236,7 +129,7 @@ where
         self.checked_stack(
             self.compose_request(
                 paths,
-                &updated_state,
+                updated_state,
                 "recreate local backend",
                 ["up", "--detach", "--no-deps", "--pull", "never", "sacrum"],
                 self.reconcile_timeout,
@@ -244,46 +137,33 @@ where
             &secrets,
         )
         .await?;
-        self.wait_until_healthy(paths, &updated_state).await?;
-        let status = self.status(paths, &updated_state).await?;
-        paths.save_state(&updated_state)?;
-        Ok(status)
+        Ok(())
     }
 
-    async fn validate_persistent_volume(
+    pub(super) async fn inspect_database_volume(
         &self,
         state: &ManagedStackState,
-    ) -> Result<(), LocalBackendError> {
+    ) -> Result<DatabaseVolumeStatus, LocalBackendError> {
         match state.kind {
-            StackKind::AdoptedLegacy => match self.legacy_volume_status().await? {
-                LegacyVolumeStatus::Compatible => Ok(()),
-                LegacyVolumeStatus::Absent => Err(LocalBackendError::PersistentVolumeUnavailable {
-                    volume: LEGACY_VOLUME.to_string(),
-                    reason: "the adopted legacy database volume is missing".to_string(),
-                }),
-                LegacyVolumeStatus::Unsafe(reason) => {
-                    Err(LocalBackendError::PersistentVolumeUnavailable {
-                        volume: LEGACY_VOLUME.to_string(),
-                        reason,
-                    })
-                }
-            },
-            StackKind::Managed => {
-                let volume = state.postgres_volume();
-                let exists = self.named_volume_exists(&volume).await?;
-                if !exists && state.postgres_volume_is_external() {
-                    return Err(LocalBackendError::PersistentVolumeUnavailable {
-                        volume,
-                        reason: "a previously created database volume is missing; restore it or explicitly start over"
-                            .to_string(),
-                    });
-                }
-                Ok(())
-            }
+            StackKind::AdoptedLegacy => Ok(match self.legacy_volume_status().await? {
+                LegacyVolumeStatus::Compatible => DatabaseVolumeStatus::Present,
+                LegacyVolumeStatus::Absent => DatabaseVolumeStatus::Absent,
+                LegacyVolumeStatus::Unsafe(reason) => DatabaseVolumeStatus::Unsafe(reason),
+            }),
+            StackKind::Managed => Ok(
+                if self.named_volume_exists(&state.postgres_volume()).await? {
+                    DatabaseVolumeStatus::Present
+                } else {
+                    DatabaseVolumeStatus::Absent
+                },
+            ),
         }
     }
 
-    async fn named_volume_exists(&self, volume: &str) -> Result<bool, LocalBackendError> {
+    pub(super) async fn named_volume_exists(
+        &self,
+        volume: &str,
+    ) -> Result<bool, LocalBackendError> {
         let output = self
             .checked(self.docker_request(
                 "find local backend database volume",
@@ -301,7 +181,7 @@ where
         Ok(output.stdout.lines().any(|name| name.trim() == volume))
     }
 
-    async fn status_without_prerequisite(
+    pub(super) async fn status_without_prerequisite(
         &self,
         paths: &ManagedStackPaths,
         state: &ManagedStackState,

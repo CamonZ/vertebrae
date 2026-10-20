@@ -46,7 +46,24 @@ pub(super) enum LegacyVolumeStatus {
     Unsafe(String),
 }
 
-impl<R, H> DockerCompose<R, H>
+impl<R: ProcessRunner, H> DockerCompose<R, H> {
+    pub async fn detect_legacy_stack(&self) -> Result<LegacyStackDetection, LocalBackendError> {
+        self.runtime.detect_legacy_stack().await
+    }
+    pub async fn adopt_legacy_stack(
+        &self,
+        paths: &ManagedStackPaths,
+        detection: &LegacyStackDetection,
+        image_channel: BackendImageChannel,
+        confirmed: bool,
+    ) -> Result<ManagedStackState, LocalBackendError> {
+        self.runtime
+            .adopt_legacy_stack(paths, detection, image_channel, confirmed)
+            .await
+    }
+}
+
+impl<R> super::DockerRuntime<R>
 where
     R: ProcessRunner,
 {
