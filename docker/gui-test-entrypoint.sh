@@ -133,5 +133,12 @@ for i in $(seq 1 100); do
 done
 
 echo "==> Running GUI acceptance tests..."
-acceptance_time build-tests cargo test --locked -p gui-acceptance --test gui_acceptance --no-run
-acceptance_time scenarios cargo test --locked -p gui-acceptance --test gui_acceptance -- "$@"
+acceptance_time build-tests cargo test --locked -p gui-acceptance --test gui_acceptance --no-run --message-format=json > /tmp/gui-acceptance-build.jsonl
+status=0
+if [ "${GUI_ACCEPTANCE_PODMAN_ONLY:-0}" != 1 ]; then
+    acceptance_time scenarios cargo test --locked -p gui-acceptance --test gui_acceptance -- "$@" || status=$?
+fi
+podman_status=0
+acceptance_time podman-scenarios /app/docker/gui-podman-entrypoint.sh || podman_status=$?
+if [ "$status" -ne 0 ]; then exit "$status"; fi
+exit "$podman_status"

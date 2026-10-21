@@ -48,9 +48,17 @@ async saveSacrumSettings(url: string, token: string) : Promise<Result<SacrumConf
  * Provision or adopt the local Sacrum backend and persist its generated
  * connection settings before project initialization begins.
  */
-async setupLocalBackend(adoptLegacy: boolean) : Promise<Result<LocalBackendSetupResult, CommandError>> {
+async setupLocalBackend(adoptLegacy: boolean, runtime: RuntimeKind | null) : Promise<Result<LocalBackendSetupResult, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("setup_local_backend", { adoptLegacy }) };
+    return { status: "ok", data: await TAURI_INVOKE("setup_local_backend", { adoptLegacy, runtime }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async localBackendRuntimes() : Promise<Result<LocalBackendRuntimes, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("local_backend_runtimes") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1663,6 +1671,8 @@ export type LocalBackendAdoptionResult = { status: LocalBackendAdoptionStatus; b
 export type LocalBackendAdoptionStatus = "ready" | "adoption_required"
 export type LocalBackendProgressEvent = { stage: LocalBackendProgressStage; message: string }
 export type LocalBackendProgressStage = "pulling" | "migrating" | "health" | "seeding"
+export type LocalBackendRuntimeOption = { runtime: RuntimeKind; installed: boolean; diagnostic: string | null }
+export type LocalBackendRuntimes = { saved_runtime: RuntimeKind | null; options: LocalBackendRuntimeOption[] }
 export type LocalBackendSetupResult = { status: LocalBackendSetupStatus; backend_url: string | null; adoption_message: string | null }
 export type LocalBackendSetupStatus = "ready" | "adoption_required"
 export type LocalBackendUpdateDiagnostic = { code: string; retryable: boolean; message: string }
@@ -1873,6 +1883,7 @@ export type RouteStepConfig = { version: number;
  * Opaque deterministic route configuration
  */
 route_config: JsonValue | null }
+export type RuntimeKind = "docker" | "podman"
 /**
  * Current Sacrum settings state for GUI onboarding.
  */
@@ -2136,7 +2147,7 @@ status?: ExecutionStatus;
 /**
  * Step config the execution ran with, templates rendered (rendered
  * prompt for llm_inference, resolved state for structured_inference,
- * rendered question for human_input, rendered script and context
+ * rendered instructions for human_input, rendered script and context
  * snapshot for execute); null for stop and finish. Narrow it with
  * `step_type`.
  */
@@ -2214,7 +2225,7 @@ export type StepExecutionStatus = "Pending" | "Running" | "Completed" | "Failed"
  * Step runtime harness exposed to the GUI. The core enum remains the shared
  * domain contract and this mirror is generated into the TypeScript bindings.
  */
-export type StepHarness = "claude" | "codex" | "typesafe"
+export type StepHarness = "claude" | "codex" | "typesafe" | "mistral_vibe"
 /**
  * The type of change that occurred on a step transition.
  */
@@ -2234,10 +2245,6 @@ export type StepTransitionChangedEvent = { transition_id: string; from_step_id: 
  * Step type - mirrors core::StepType
  */
 export type StepType = "llm_inference" | "structured_inference" | "execute" | "route" | "wait_children" | "human_input" | "stop" | "finish" | { unsupported: string }
-/** Step runtime harness exposed to the GUI. The core enum remains the shared
- * domain contract and this mirror is generated into the TypeScript bindings.
- */
-export type StepHarness = "claude" | "codex" | "typesafe" | "mistral_vibe"
 /**
  * StopRun command input. Provide either `task_run_id` or `task_id`.
  */

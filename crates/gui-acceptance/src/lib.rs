@@ -1,6 +1,6 @@
 use fantoccini::Client;
 use std::sync::Arc;
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::Mutex;
 
 /// Default WebDriver URL where tauri-driver listens.
 pub const WEBDRIVER_URL: &str = "http://localhost:4444";
@@ -28,82 +28,105 @@ pub fn tauri_base_url() -> String {
     std::env::var("TAURI_BASE_URL").unwrap_or_else(|_| "http://tauri.localhost".to_string())
 }
 
-/// Global WebDriver session, initialized once before the first scenario.
+/// Global WebDriver session, shared until explicitly closed.
 ///
 /// Persists across all scenarios so we avoid reopening the browser.
 /// The `Mutex` ensures only one scenario drives the session at a time
 /// (Cucumber concurrency is set to 1 anyway, but the Mutex makes it safe).
-static WEBDRIVER: OnceCell<Arc<Mutex<Client>>> = OnceCell::const_new();
+static WEBDRIVER: Mutex<Option<Arc<Mutex<Client>>>> = Mutex::const_new(None);
 
 /// Get or initialize the global WebDriver session.
 ///
 /// On first call, connects to the WebDriver endpoint and returns the
 /// shared client handle. Subsequent calls return the same handle.
 pub async fn webdriver() -> Arc<Mutex<Client>> {
-    WEBDRIVER
-        .get_or_init(|| async {
-            let webdriver_url =
-                std::env::var("WEBDRIVER_URL").unwrap_or_else(|_| WEBDRIVER_URL.to_string());
+    let mut saved = WEBDRIVER.lock().await;
+    if let Some(client) = saved.as_ref() {
+        return client.clone();
+    }
+    let client = create_webdriver().await;
+    *saved = Some(client.clone());
+    client
+}
 
-            let gui_binary = std::env::var("GUI_BINARY").unwrap_or_else(|_| GUI_BINARY.to_string());
+async fn create_webdriver() -> Arc<Mutex<Client>> {
+    let webdriver_url =
+        std::env::var("WEBDRIVER_URL").unwrap_or_else(|_| WEBDRIVER_URL.to_string());
 
-            let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
-            let claude_code_path = std::env::var("CLAUDE_CODE_PATH")
-                .unwrap_or_else(|_| "/usr/local/bin/mock-claude".to_string());
-            let codex_path = std::env::var("CODEX_PATH")
-                .unwrap_or_else(|_| "/usr/local/bin/mock-codex".to_string());
-            let mock_output_dir =
-                std::env::var("MOCK_OUTPUT_DIR").unwrap_or_else(|_| "/mocks".to_string());
+    let gui_binary = std::env::var("GUI_BINARY").unwrap_or_else(|_| GUI_BINARY.to_string());
 
-            let mut app_env = serde_json::Map::new();
-            app_env.insert("DISPLAY".to_string(), serde_json::Value::String(display));
-            app_env.insert(
-                "CLAUDE_CODE_PATH".to_string(),
-                serde_json::Value::String(claude_code_path),
-            );
-            app_env.insert(
-                "CODEX_PATH".to_string(),
-                serde_json::Value::String(codex_path),
-            );
-            app_env.insert(
-                "MOCK_OUTPUT_DIR".to_string(),
-                serde_json::Value::String(mock_output_dir),
-            );
-            app_env.insert(
-                "MOCK_STDIN_ASSISTANT_MESSAGE_FILE".to_string(),
-                serde_json::Value::String(MOCK_CHAT_RESPONSE_FILE.to_string()),
-            );
-            if let Ok(vtb_gate_path) = std::env::var("VTB_GATE_PATH") {
-                app_env.insert(
-                    "VTB_GATE_PATH".to_string(),
-                    serde_json::Value::String(vtb_gate_path),
-                );
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
+    let claude_code_path = std::env::var("CLAUDE_CODE_PATH")
+        .unwrap_or_else(|_| "/usr/local/bin/mock-claude".to_string());
+    let codex_path =
+        std::env::var("CODEX_PATH").unwrap_or_else(|_| "/usr/local/bin/mock-codex".to_string());
+    let mock_output_dir = std::env::var("MOCK_OUTPUT_DIR").unwrap_or_else(|_| "/mocks".to_string());
+
+    let mut app_env = serde_json::Map::new();
+    app_env.insert("DISPLAY".to_string(), serde_json::Value::String(display));
+    app_env.insert(
+        "CLAUDE_CODE_PATH".to_string(),
+        serde_json::Value::String(claude_code_path),
+    );
+    app_env.insert(
+        "CODEX_PATH".to_string(),
+        serde_json::Value::String(codex_path),
+    );
+    app_env.insert(
+        "MOCK_OUTPUT_DIR".to_string(),
+        serde_json::Value::String(mock_output_dir),
+    );
+    app_env.insert(
+        "MOCK_STDIN_ASSISTANT_MESSAGE_FILE".to_string(),
+        serde_json::Value::String(MOCK_CHAT_RESPONSE_FILE.to_string()),
+    );
+    if let Ok(vtb_gate_path) = std::env::var("VTB_GATE_PATH") {
+        app_env.insert(
+            "VTB_GATE_PATH".to_string(),
+            serde_json::Value::String(vtb_gate_path),
+        );
+    }
+
+    if std::env::var("GUI_ACCEPTANCE_PODMAN").as_deref() == Ok("1") {
+        for name in [
+            "HOME",
+            "PATH",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_RUNTIME_DIR",
+            "DOCKER_HOST",
+            "CONTAINER_HOST",
+            "CONTAINER_CONNECTION",
+            "PODMAN_COMPOSE_PROVIDER",
+            "MOCK_CAPTURE_DIR",
+        ] {
+            if let Ok(value) = std::env::var(name) {
+                app_env.insert(name.into(), value.into());
             }
+        }
+    }
 
-            let capabilities = serde_json::json!({
-                "tauri:options": {
-                    "application": gui_binary,
-                    "env": app_env
-                }
-            });
+    let capabilities = serde_json::json!({
+        "tauri:options": {
+            "application": gui_binary,
+            "env": app_env
+        }
+    });
 
-            let client = fantoccini::ClientBuilder::native()
-                .capabilities(capabilities.as_object().unwrap().clone())
-                .connect(&webdriver_url)
-                .await
-                .expect("failed to connect to tauri-driver — is it running on port 4444?");
-
-            // Log the initial URL so we know what scheme Tauri is actually using.
-            if let Ok(url) = client.current_url().await {
-                eprintln!("DEBUG tauri initial URL: {}", url);
-            }
-
-            screenshot(&client, "startup", 0, "initial-app-state").await;
-
-            Arc::new(Mutex::new(client))
-        })
+    let client = fantoccini::ClientBuilder::native()
+        .capabilities(capabilities.as_object().unwrap().clone())
+        .connect(&webdriver_url)
         .await
-        .clone()
+        .expect("failed to connect to tauri-driver — is it running on port 4444?");
+
+    // Log the initial URL so we know what scheme Tauri is actually using.
+    if let Ok(url) = client.current_url().await {
+        eprintln!("DEBUG tauri initial URL: {}", url);
+    }
+
+    screenshot(&client, "startup", 0, "initial-app-state").await;
+
+    Arc::new(Mutex::new(client))
 }
 
 /// Sanitise a string so it is safe to use as a filesystem path component.
@@ -136,9 +159,10 @@ pub async fn screenshot(client: &Client, dir: &str, seq: u32, label: &str) {
     }
 }
 
-/// Close the global WebDriver session. Call once after all scenarios.
+/// Close and clear the session. Restart scenarios can then create a new app.
 pub async fn close_webdriver() {
-    if let Some(wd) = WEBDRIVER.get() {
+    let saved = WEBDRIVER.lock().await.take();
+    if let Some(wd) = saved {
         let client = wd.lock().await;
         let _ = client.clone().close().await;
     }
@@ -386,7 +410,8 @@ pub async fn select_when_ready(client: &Client, locator: fantoccini::Locator<'_>
 
 /// Reuse the existing browser for a setup failure; never start one during cleanup.
 pub async fn screenshot_existing_session(scenario: &str) {
-    if let Some(wd) = WEBDRIVER.get() {
+    let saved = WEBDRIVER.lock().await.clone();
+    if let Some(wd) = saved {
         let client = wd.lock().await;
         screenshot(&client, scenario, 999, "fail-setup").await;
     }

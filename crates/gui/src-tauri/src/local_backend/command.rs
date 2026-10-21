@@ -243,6 +243,26 @@ pub(crate) fn discover_docker_cli() -> Result<PathBuf, LocalBackendError> {
     resolve_docker_cli(path.as_deref(), home.as_deref(), &candidates)
 }
 
+/// Discover a native executable without invoking a shell or accepting PATH-relative results.
+pub(crate) fn discover_container_tool(name: &str) -> Result<PathBuf, LocalBackendError> {
+    let mut directories = env::var_os("PATH")
+        .map(|v| env::split_paths(&v).collect::<Vec<_>>())
+        .unwrap_or_default();
+    directories.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].map(PathBuf::from));
+    if let Some(home) = dirs::home_dir() {
+        directories.push(home.join(".local/bin"));
+    }
+    for directory in directories.into_iter().filter(|p| p.is_absolute()) {
+        let candidate = directory.join(name);
+        if is_executable_file(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err(LocalBackendError::Podman(format!(
+        "{name} was not found. Install it and retry local setup."
+    )))
+}
+
 pub(crate) fn path_for_docker_process(
     docker_cli: &Path,
     existing_path: Option<&OsStr>,

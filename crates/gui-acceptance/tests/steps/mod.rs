@@ -8,3 +8,5 @@ pub mod navigation;
 pub mod project;
 pub mod setup;
 pub mod streaming;
+
+pub mod local_backend;

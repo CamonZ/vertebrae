@@ -178,7 +178,7 @@ where
                     "a different managed local stack already exists".to_string(),
                 ));
             }
-            if existing.docker_target != self.target {
+            if existing.docker_target()? != &self.target {
                 return Err(LocalBackendError::UnsafeLegacyStack(
                     "saved Docker context does not match the adoption target".to_string(),
                 ));

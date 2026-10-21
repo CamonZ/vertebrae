@@ -158,7 +158,7 @@ impl<T: ContainerRuntime, H> LocalBackendManager<T, H> {
             if !self.runtime.database_volume_exists(&volume).await? {
                 return Err(LocalBackendError::PersistentVolumeUnavailable {
                     volume,
-                    reason: "Docker Compose completed without creating the database volume"
+                    reason: "Container runtime completed without creating the database volume"
                         .to_string(),
                 });
             }

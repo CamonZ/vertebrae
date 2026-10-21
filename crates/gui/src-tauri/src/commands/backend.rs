@@ -4,9 +4,11 @@ use crate::events::{LocalBackendProgressEvent, LocalBackendProgressStage};
 use crate::local_backend::compose::{DockerCompose, LegacyStackDetection};
 use crate::local_backend::manifest::BackendManifestClient;
 use crate::local_backend::provisioning::{self, ProvisioningResult};
+use crate::local_backend::selection::SystemBackend;
+use crate::local_backend::state::RuntimeKind;
 use crate::local_backend::state::{
-    ApiToken, BackendImageChannel, LocalBackendError, ManagedStackPaths, ManagedStackState,
-    ProvisioningStage, ProvisioningState, SeedAccount, StackKind, LOCAL_SACRUM_IMAGE_REF,
+    ApiToken, BackendImageChannel, LocalBackendError, ManagedStackPaths, ProvisioningStage,
+    ProvisioningState, SeedAccount, StackKind, LOCAL_SACRUM_IMAGE_REF,
 };
 use tauri::{AppHandle, Emitter};
 
@@ -189,8 +191,7 @@ pub async fn apply_approved_local_backend_update(
         )));
     }
 
-    let compose =
-        DockerCompose::system_for(state.docker_target.clone()).map_err(local_backend_error)?;
+    let compose = SystemBackend::for_state(&state).map_err(local_backend_error)?;
     compose
         .update_sacrum_image(
             &paths,
@@ -638,9 +639,18 @@ fn adoption_ready_result(backend_url: String) -> LocalBackendAdoptionResult {
 pub async fn setup_local_backend(
     app_handle: AppHandle,
     adopt_legacy: bool,
+    runtime: Option<RuntimeKind>,
 ) -> Result<LocalBackendSetupResult, CommandError> {
     let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
-    let compose = DockerCompose::system().await.map_err(local_backend_error)?;
+    let saved = paths.load_state().map_err(local_backend_error)?;
+    let selected = crate::local_backend::selection::select_runtime(saved.as_ref(), runtime)
+        .map_err(local_backend_error)?;
+    let compose = if let Some(state) = &saved {
+        SystemBackend::for_state(state)
+    } else {
+        SystemBackend::system(selected).await
+    }
+    .map_err(local_backend_error)?;
     let detection = compose
         .detect_legacy_stack()
         .await
@@ -677,18 +687,23 @@ pub async fn setup_local_backend(
                 )));
             }
             Some(existing) => existing,
-            None => ManagedStackState::fresh(
-                LOCAL_SACRUM_IMAGE_REF,
-                crate::local_backend::state::select_host_port(0).map_err(local_backend_error)?,
-                BackendImageChannel::BackendMaster,
-                compose.target().clone(),
-            )
-            .map_err(local_backend_error)?,
+            None => compose
+                .fresh_state(
+                    LOCAL_SACRUM_IMAGE_REF,
+                    crate::local_backend::state::select_host_port(0)
+                        .map_err(local_backend_error)?,
+                    BackendImageChannel::BackendMaster,
+                )
+                .map_err(local_backend_error)?,
         },
     };
 
     let progress = |stage| emit_progress(&app_handle, stage);
     if state.provisioning_state == ProvisioningState::Ready {
+        compose
+            .up_detached(&paths, &mut state)
+            .await
+            .map_err(local_backend_error)?;
         progress(ProvisioningStage::Health);
         compose
             .wait_until_healthy(&paths, &state)
@@ -808,4 +823,51 @@ fn local_backend_error(error: LocalBackendError) -> CommandError {
     CommandError {
         message: diagnostic.message,
     }
+}
+
+#[derive(serde::Serialize, specta::Type)]
+pub struct LocalBackendRuntimeOption {
+    pub runtime: RuntimeKind,
+    pub installed: bool,
+    pub diagnostic: Option<String>,
+}
+
+#[derive(serde::Serialize, specta::Type)]
+pub struct LocalBackendRuntimes {
+    pub saved_runtime: Option<RuntimeKind>,
+    pub options: Vec<LocalBackendRuntimeOption>,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn local_backend_runtimes() -> Result<LocalBackendRuntimes, CommandError> {
+    use crate::local_backend::command::{discover_container_tool, discover_docker_cli};
+    let paths = ManagedStackPaths::new().map_err(local_backend_error)?;
+    let saved = paths.load_state().map_err(local_backend_error)?;
+    let saved_runtime = saved.as_ref().map(|s| s.runtime);
+    let docker = discover_docker_cli().map(|_| ());
+    let podman = if cfg!(any(target_os = "linux", target_os = "macos")) {
+        discover_container_tool("podman").and_then(|_| {
+            if let Some(target) = saved.as_ref().and_then(|s| s.podman_target.as_ref()) {
+                if target.provider.is_file() { Ok(target.provider.clone()) }
+                else { Err(LocalBackendError::Podman("The saved standalone Compose provider is missing; restore it at its original path.".into())) }
+            } else { discover_container_tool("docker-compose") }
+        }).map(|_| ())
+    } else {
+        Err(LocalBackendError::Podman(
+            "GUI-managed Podman supports Linux and macOS only".into(),
+        ))
+    };
+    let options = [(RuntimeKind::Docker, docker), (RuntimeKind::Podman, podman)]
+        .into_iter()
+        .map(|(runtime, result)| LocalBackendRuntimeOption {
+            runtime,
+            installed: result.is_ok(),
+            diagnostic: result.err().map(|e| e.diagnostic().message),
+        })
+        .collect();
+    Ok(LocalBackendRuntimes {
+        saved_runtime,
+        options,
+    })
 }

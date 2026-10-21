@@ -141,59 +141,18 @@ where
         operation: impl IntoIterator<Item = impl Into<OsString>>,
         timeout: Duration,
     ) -> CommandRequest {
-        let project_name = state.project_name();
-        let postgres_volume = state.postgres_volume();
-        let mut args = vec![
-            "compose".into(),
-            "--ansi".into(),
-            "never".into(),
-            "--project-directory".into(),
-            paths.root.as_os_str().to_owned(),
-            "--project-name".into(),
-            project_name.into(),
-            "--file".into(),
-            paths.compose_file.as_os_str().to_owned(),
-            "--env-file".into(),
-            paths.secrets_file.as_os_str().to_owned(),
-        ];
-        args.extend(operation.into_iter().map(Into::into));
-        self.docker_request(action, args, timeout)
-            .with_env([
-                (OsString::from("POSTGRES_VOLUME"), postgres_volume.into()),
-                (
-                    OsString::from("POSTGRES_VOLUME_EXTERNAL"),
-                    state.postgres_volume_is_external().to_string().into(),
-                ),
-                (
-                    OsString::from("POSTGRES_IMAGE_REF"),
-                    state.postgres_image_ref().into(),
-                ),
-                (
-                    OsString::from("POSTGRES_DATA_PATH"),
-                    state.postgres_data_path().into(),
-                ),
-                (
-                    OsString::from("SACRUM_IMAGE_REF"),
-                    state.sacrum_image_ref.clone().into(),
-                ),
-                (
-                    OsString::from("SACRUM_HOST_PORT"),
-                    state.host_port.to_string().into(),
-                ),
-                (
-                    OsString::from("SACRUM_BIND_PREFIX"),
-                    state.sacrum_bind_prefix().into(),
-                ),
-                (
-                    OsString::from("SEED_SCRIPT_PATH"),
-                    paths.seed_file.as_os_str().to_owned(),
-                ),
-            ])
-            .with_env_removed([
-                "POSTGRES_PASSWORD",
-                "SECRET_KEY_BASE",
-                "COMPOSE_PROJECT_NAME",
-            ])
+        stack_request(
+            |args| {
+                self.docker_request(
+                    action,
+                    std::iter::once(OsString::from("compose")).chain(args),
+                    timeout,
+                )
+            },
+            paths,
+            state,
+            operation,
+        )
     }
 
     pub(super) fn validate_stack_files(
@@ -202,10 +161,10 @@ where
         state: &ManagedStackState,
     ) -> Result<RuntimeSecrets, LocalBackendError> {
         state.validate()?;
-        if state.docker_target != self.target {
+        if state.docker_target()? != &self.target {
             return Err(LocalBackendError::DockerContextChanged {
-                expected_name: state.docker_target.name.clone(),
-                expected_endpoint: state.docker_target.endpoint.clone(),
+                expected_name: state.docker_target()?.name.clone(),
+                expected_endpoint: state.docker_target()?.endpoint.clone(),
                 actual_name: self.target.name.clone(),
                 actual_endpoint: self.target.endpoint.clone(),
             });
@@ -297,6 +256,67 @@ where
     }
 }
 
+pub(crate) fn stack_request(
+    request: impl FnOnce(Vec<OsString>) -> CommandRequest,
+    paths: &ManagedStackPaths,
+    state: &ManagedStackState,
+    operation: impl IntoIterator<Item = impl Into<OsString>>,
+) -> CommandRequest {
+    let project_name = state.project_name();
+    let postgres_volume = state.postgres_volume();
+    let mut args = vec![
+        "--ansi".into(),
+        "never".into(),
+        "--project-directory".into(),
+        paths.root.as_os_str().to_owned(),
+        "--project-name".into(),
+        project_name.into(),
+        "--file".into(),
+        paths.compose_file.as_os_str().to_owned(),
+        "--env-file".into(),
+        paths.secrets_file.as_os_str().to_owned(),
+    ];
+    args.extend(operation.into_iter().map(Into::into));
+    request(args)
+        .with_env([
+            (OsString::from("POSTGRES_VOLUME"), postgres_volume.into()),
+            (
+                OsString::from("POSTGRES_VOLUME_EXTERNAL"),
+                state.postgres_volume_is_external().to_string().into(),
+            ),
+            (
+                OsString::from("POSTGRES_IMAGE_REF"),
+                state.postgres_image_ref().into(),
+            ),
+            (
+                OsString::from("POSTGRES_DATA_PATH"),
+                state.postgres_data_path().into(),
+            ),
+            (
+                OsString::from("SACRUM_IMAGE_REF"),
+                state.sacrum_image_ref.clone().into(),
+            ),
+            (
+                OsString::from("SACRUM_HOST_PORT"),
+                state.host_port.to_string().into(),
+            ),
+            (
+                OsString::from("SACRUM_BIND_PREFIX"),
+                state.sacrum_bind_prefix().into(),
+            ),
+            (
+                OsString::from("SEED_SCRIPT_PATH"),
+                paths.seed_file.as_os_str().to_owned(),
+            ),
+        ])
+        .with_env_removed([
+            "POSTGRES_PASSWORD",
+            "SECRET_KEY_BASE",
+            "COMPOSE_PROJECT_NAME",
+            "SEED_MOUNT_OPTIONS",
+        ])
+}
+
 async fn resolve_docker_target<R: ProcessRunner>(
     runner: &R,
     docker_cli: &Path,
@@ -379,7 +399,7 @@ fn sanitized_docker_request_with_path(
         .with_env_removed(DOCKER_ENV_REMOVE)
 }
 
-fn redact_command_error(
+pub(crate) fn redact_command_error(
     mut error: LocalBackendError,
     secrets: &RuntimeSecrets,
 ) -> LocalBackendError {
@@ -391,7 +411,7 @@ fn redact_command_error(
     error
 }
 
-fn redact_seed_error(
+pub(crate) fn redact_seed_error(
     mut error: LocalBackendError,
     account: &SeedAccount,
     api_token: &ApiToken,

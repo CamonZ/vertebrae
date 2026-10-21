@@ -1,20 +1,20 @@
-//! The GUI selects a Docker runtime at the composition boundary. Shared startup,
-//! provisioning, HTTP readiness, volume-preservation policy, and image-state
-//! commits run through LocalBackendManager and the semantic ContainerRuntime
-//! contract. Docker discovery, context validation, Compose commands, and metadata
-//! parsing remain in compose. Saved schema-version-1 state is unchanged; this
-//! extraction does not add runtime selection or Podman support.
+//! Runtime selection and saved installation identity are resolved at the GUI's
+//! composition boundary. Shared provisioning, readiness, volume preservation and
+//! update commits run through LocalBackendManager and ContainerRuntime. Docker
+//! and Podman adapters own their connection validation and container commands.
+//! Version-1 Docker state remains readable; new Podman stacks use version 2.
 
-mod command;
+pub(crate) mod command;
 pub(crate) mod compose;
 mod health;
 mod manager;
 pub(crate) mod manifest;
+pub(crate) mod podman;
 pub(crate) mod provisioning;
 mod runtime;
+pub(crate) mod selection;
 pub(crate) mod state;
 
-use compose::DockerCompose;
 use health::HealthProbe;
 use manager::LocalBackendManager;
 use runtime::ContainerRuntime;
@@ -25,7 +25,7 @@ pub(crate) async fn ensure_for_startup() -> Result<bool, LocalBackendError> {
     let Some(state) = paths.load_state()? else {
         return Ok(false);
     };
-    let compose = DockerCompose::system_for(state.docker_target.clone())?;
+    let compose = selection::SystemBackend::for_state(&state)?;
     ensure_for_startup_with(&paths, &compose, |backend_url, api_token| {
         provisioning::persist_local_client_config(backend_url, api_token)
     })
@@ -129,7 +129,7 @@ mod tests {
             .ensure_api_token(&configured_token)
             .expect("persist saved token");
         let saved_token = paths.load_api_token().expect("load saved token");
-        let endpoint = state.docker_target.endpoint.clone();
+        let endpoint = state.docker_target().unwrap().endpoint.clone();
         let runner = MockRunner::with_outputs([
             CommandOutput::success(endpoint.as_str()),
             CommandOutput::success("28.0.0"),

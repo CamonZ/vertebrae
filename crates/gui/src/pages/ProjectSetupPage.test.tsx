@@ -20,6 +20,7 @@ const {
   mockSacrumConfigStatus,
   mockSaveSacrumSettings,
   mockSetupLocalBackend,
+  mockLocalBackendRuntimes,
   mockLocalBackendProgressListen,
   mockInitializeProject,
   mockRemoveProject,
@@ -31,6 +32,7 @@ const {
   mockSacrumConfigStatus: vi.fn(),
   mockSaveSacrumSettings: vi.fn(),
   mockSetupLocalBackend: vi.fn(),
+  mockLocalBackendRuntimes: vi.fn(),
   mockLocalBackendProgressListen: vi.fn(),
   mockInitializeProject: vi.fn(),
   mockRemoveProject: vi.fn(),
@@ -57,6 +59,7 @@ vi.mock("../bindings", () => ({
     sacrumConfigStatus: (...args: unknown[]) => mockSacrumConfigStatus(...args),
     saveSacrumSettings: (...args: unknown[]) => mockSaveSacrumSettings(...args),
     setupLocalBackend: (...args: unknown[]) => mockSetupLocalBackend(...args),
+    localBackendRuntimes: (...args: unknown[]) => mockLocalBackendRuntimes(...args),
     initializeProject: (...args: unknown[]) => mockInitializeProject(...args),
     removeProject: (...args: unknown[]) => mockRemoveProject(...args),
   },
@@ -124,6 +127,12 @@ describe("ProjectSetupPage", () => {
     mockInitializeProject.mockResolvedValue(initializedProject);
     mockRemoveProject.mockResolvedValue({ status: "ok", data: null });
     mockOpen.mockResolvedValue("/tmp/new-project");
+    mockLocalBackendRuntimes.mockResolvedValue({ status: "ok", data: {
+      saved_runtime: null, options: [
+        { runtime: "docker", installed: true, diagnostic: null },
+        { runtime: "podman", installed: true, diagnostic: null },
+      ],
+    } });
     mockSetupLocalBackend.mockResolvedValue({
       status: "ok",
       data: {
@@ -290,6 +299,65 @@ describe("ProjectSetupPage", () => {
     );
   });
 
+  it("lets the user explicitly select Podman when both runtimes are installed", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    render(<ProjectSetupPage />);
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    await userEvent.selectOptions(await screen.findByLabelText("Container runtime"), "podman");
+    expect(screen.getByTestId("selected-backend")).toHaveTextContent("Podman-hosted local backend");
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
+    expect(mockSetupLocalBackend).toHaveBeenCalledWith(false, "podman");
+  });
+
+  it("keeps a saved Podman installation pinned even when Docker is available", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockLocalBackendRuntimes.mockResolvedValue({ status: "ok", data: {
+      saved_runtime: "podman", options: [
+        { runtime: "docker", installed: true, diagnostic: null },
+        { runtime: "podman", installed: true, diagnostic: null },
+      ],
+    } });
+    render(<ProjectSetupPage />);
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    expect(await screen.findByLabelText("Container runtime")).toHaveValue("podman");
+    expect(screen.getByLabelText("Container runtime")).toBeDisabled();
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
+    expect(mockSetupLocalBackend).toHaveBeenCalledWith(false, "podman");
+  });
+
+  it("defaults to installed Podman without requiring Docker", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockLocalBackendRuntimes.mockResolvedValue({ status: "ok", data: {
+      saved_runtime: null, options: [
+        { runtime: "docker", installed: false, diagnostic: "Docker is not installed" },
+        { runtime: "podman", installed: true, diagnostic: null },
+      ],
+    } });
+    render(<ProjectSetupPage />);
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    expect(await screen.findByLabelText("Container runtime")).toHaveValue("podman");
+    expect(screen.getByText("Docker (not installed)")).toBeDisabled();
+  });
+
+  it("shows runtime discovery transport errors without provisioning", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockLocalBackendRuntimes.mockRejectedValueOnce(new Error("discovery unavailable"));
+    render(<ProjectSetupPage />);
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("discovery unavailable");
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+    expect(mockSetupLocalBackend).not.toHaveBeenCalled();
+  });
+
   it("surfaces the backend no-supported-harness error without presenting the project as created", async () => {
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockInitializeProject.mockResolvedValue({
@@ -342,7 +410,7 @@ describe("ProjectSetupPage", () => {
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
-    expect(mockSetupLocalBackend).toHaveBeenCalledWith(false);
+    expect(mockSetupLocalBackend).toHaveBeenCalledWith(false, "docker");
     expect(mockSaveSacrumSettings).not.toHaveBeenCalled();
     expect(mockInitializeProject).toHaveBeenCalledWith(
       "/tmp/new-project",
@@ -411,7 +479,7 @@ describe("ProjectSetupPage", () => {
 
     await userEvent.click(screen.getByTestId("project-phase-continue"));
     expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
-    expect(mockSetupLocalBackend).toHaveBeenLastCalledWith(true);
+    expect(mockSetupLocalBackend).toHaveBeenLastCalledWith(true, "docker");
   });
 
   it("saves missing backend settings and initializes directly into the ready state", async () => {

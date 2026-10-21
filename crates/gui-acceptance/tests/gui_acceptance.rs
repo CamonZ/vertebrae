@@ -114,6 +114,9 @@ pub struct GuiWorld {
     pub mock_output_dir: PathBuf,
 
     pub standalone_home: Option<PathBuf>,
+    pub backend_snapshot: Option<serde_json::Value>,
+    pub backend_token: Option<Vec<u8>>,
+    pub backend_result: Option<serde_json::Value>,
 
     pub daemon_log_path: Option<PathBuf>,
 }
@@ -168,6 +171,9 @@ impl GuiWorld {
                 std::env::var("MOCK_OUTPUT_DIR").unwrap_or_else(|_| "/mocks".to_string()),
             ),
             standalone_home: None,
+            backend_snapshot: None,
+            backend_token: None,
+            backend_result: None,
             daemon_log_path: None,
         }
     }
@@ -311,7 +317,7 @@ impl GuiWorld {
                 panic!("daemon did not log {expected:?} within 30s. log:\n{tail}");
             }
             if let Ok(text) = std::fs::read_to_string(&log_path)
-                && text.contains(&expected)
+                && text.contains(expected)
             {
                 return;
             }
@@ -543,6 +549,7 @@ async fn main() {
             let feature_name = feature.name.clone();
             // `@first_run` may live on either the scenario or the feature.
             let first_run = is_first_run(feature, scenario);
+            let podman = is_podman(feature, scenario);
             // `@multi_project` provisions a second project for switcher tests.
             let multi_project = is_multi_project(feature, scenario);
             Box::pin(async move {
@@ -552,12 +559,17 @@ async fn main() {
                 let _ = std::fs::remove_dir_all(gui_acceptance::HARNESS_CAPTURE_DIR);
                 world.feature_slug = slugify(&feature_name);
                 world.scenario_slug = slugify(&scenario_name);
-                steps::setup::before_scenario(world, &scenario_name, first_run, multi_project)
-                    .await;
+                if podman {
+                    steps::local_backend::before_scenario(world, &scenario_name).await;
+                } else {
+                    steps::setup::before_scenario(world, &scenario_name, first_run, multi_project)
+                        .await;
+                }
             })
         })
         .after(|feature, _rule, scenario, ev, world| {
             let first_run = is_first_run(feature, scenario);
+            let podman = is_podman(feature, scenario);
             let prefix = match ev {
                 cucumber::event::ScenarioFinished::StepFailed(..)
                 | cucumber::event::ScenarioFinished::BeforeHookFailed(..) => "F",
@@ -601,6 +613,11 @@ async fn main() {
                 }
 
                 if let Some(world) = world {
+                    if podman {
+                        steps::local_backend::after_scenario().await;
+                        world.scenario_timing.take();
+                        return;
+                    }
                     steps::gate_chat::reset_default_local_chat_provider(world).await;
                     steps::gate_chat::reset_gate_steering_thresholds(world).await;
                     // Stop the daemon first so it can't hold DB locks while we
@@ -644,6 +661,8 @@ async fn main() {
         .filter_run("tests/features", |feature, _rule, scenario| {
             // `@skip` features/scenarios are excluded from the run.
             !is_skipped(feature, scenario)
+                && is_podman(feature, scenario)
+                    == (std::env::var("GUI_ACCEPTANCE_PODMAN").as_deref() == Ok("1"))
         })
         .await;
 
@@ -706,4 +725,9 @@ fn slugify(input: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn is_podman(feature: &cucumber::gherkin::Feature, scenario: &cucumber::gherkin::Scenario) -> bool {
+    scenario.tags.iter().any(|tag| tag == "podman")
+        || feature.tags.iter().any(|tag| tag == "podman")
 }

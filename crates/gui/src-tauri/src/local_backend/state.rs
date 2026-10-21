@@ -43,6 +43,8 @@ pub enum LocalBackendError {
     InvalidState(String),
     #[error("Could not generate local backend secrets: {0}")]
     SecretGeneration(String),
+    #[error("Podman local backend: {0}")]
+    Podman(String),
     #[error("Docker CLI was not found; searched {searched}")]
     DockerCliNotFound { searched: String },
     #[error("Docker daemon is unreachable: {0}")]
@@ -66,13 +68,13 @@ pub enum LocalBackendError {
     PersistentVolumeUnavailable { volume: String, reason: String },
     #[error("Local backend port {port} is unavailable: {output}")]
     PortUnavailable { port: u16, output: String },
-    #[error("Docker command '{action}' failed with status {status}: {output}")]
+    #[error("Container command '{action}' failed with status {status}: {output}")]
     CommandFailed {
         action: String,
         status: String,
         output: String,
     },
-    #[error("Docker command '{action}' timed out after {timeout_seconds} seconds: {output}")]
+    #[error("Container command '{action}' timed out after {timeout_seconds} seconds: {output}")]
     CommandTimedOut {
         action: String,
         timeout_seconds: u64,
@@ -109,6 +111,10 @@ impl LocalBackendError {
                 "local_setup_persistence",
                 true,
                 "Vertebrae could not persist local setup data. Check the application-data directory permissions and available disk space, then retry.",
+            ),
+            Self::Podman(_) => (
+                "podman_local_backend", true,
+                "Check the installed Podman runtime, running rootless local machine/socket and standalone Docker Compose provider. Existing data was preserved.",
             ),
             Self::SecretGeneration(_) => (
                 "secure_randomness",
@@ -223,6 +229,10 @@ impl LocalBackendError {
 
 fn classify_command_failure(action: &str, output: &str) -> (&'static str, bool, &'static str) {
     let normalized = format!("{action} {output}").to_ascii_lowercase();
+    if normalized.contains("podman") && !normalized.contains("seed") {
+        return ("podman_operation_failed", true,
+            "Podman could not complete the local backend operation. Check its running rootless local socket/machine, permissions and pinned standalone Compose provider, then retry; existing data was preserved.");
+    }
     if normalized.contains("seed") {
         return (
             "seeder_failed",
@@ -244,7 +254,7 @@ fn classify_command_failure(action: &str, output: &str) -> (&'static str, bool, 
         return (
             "sacrum_image_unavailable",
             true,
-            "Docker could not pull the pinned local backend image. Check network access and registry authentication, then retry without deleting the database volume.",
+            "The container runtime could not pull the pinned local backend image. Check network access and registry authentication, then retry without deleting the database volume.",
         );
     }
     if normalized.contains("migrat") {
@@ -258,7 +268,7 @@ fn classify_command_failure(action: &str, output: &str) -> (&'static str, bool, 
         return (
             "postgres_readiness_failed",
             true,
-            "PostgreSQL did not become ready for the local backend. Check Docker resources and the redacted database output, then retry without recreating the volume.",
+            "PostgreSQL did not become ready for the local backend. Check container runtime resources and the redacted database output, then retry without recreating the volume.",
         );
     }
     if normalized.contains("compose") || action.contains("Docker") {
@@ -567,12 +577,31 @@ fn approved_local_endpoint(_endpoint: &str) -> bool {
     false
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeKind {
+    #[default]
+    Docker,
+    Podman,
+}
+
+impl RuntimeKind {
+    fn is_docker(&self) -> bool {
+        *self == Self::Docker
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManagedStackState {
     pub schema_version: u32,
     pub kind: StackKind,
     pub installation_id: Uuid,
-    pub docker_target: DockerTarget,
+    #[serde(default, skip_serializing_if = "RuntimeKind::is_docker")]
+    pub runtime: RuntimeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker_target: Option<DockerTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub podman_target: Option<super::podman::PodmanTarget>,
     pub sacrum_image_ref: String,
     #[serde(default)]
     pub sacrum_version: Option<String>,
@@ -598,7 +627,9 @@ impl ManagedStackState {
             schema_version: 1,
             kind: StackKind::Managed,
             installation_id: Uuid::new_v4(),
-            docker_target,
+            runtime: RuntimeKind::Docker,
+            docker_target: Some(docker_target),
+            podman_target: None,
             sacrum_image_ref: sacrum_image_ref.into(),
             sacrum_version: None,
             sacrum_build: None,
@@ -622,7 +653,9 @@ impl ManagedStackState {
             schema_version: 1,
             kind: StackKind::AdoptedLegacy,
             installation_id: Uuid::new_v4(),
-            docker_target,
+            runtime: RuntimeKind::Docker,
+            docker_target: Some(docker_target),
+            podman_target: None,
             sacrum_image_ref: sacrum_image_ref.into(),
             sacrum_version: None,
             sacrum_build: None,
@@ -638,6 +671,42 @@ impl ManagedStackState {
     fn validated(state: Self) -> Result<Self, LocalBackendError> {
         state.validate()?;
         Ok(state)
+    }
+
+    pub fn docker_target(&self) -> Result<&DockerTarget, LocalBackendError> {
+        self.docker_target
+            .as_ref()
+            .filter(|_| self.runtime == RuntimeKind::Docker)
+            .ok_or_else(|| {
+                LocalBackendError::InvalidState(
+                    "this installation is not managed by Docker".to_string(),
+                )
+            })
+    }
+
+    pub fn fresh_podman(
+        image: impl Into<String>,
+        port: u16,
+        channel: BackendImageChannel,
+        target: super::podman::PodmanTarget,
+    ) -> Result<Self, LocalBackendError> {
+        Self::validated(Self {
+            schema_version: 2,
+            kind: StackKind::Managed,
+            installation_id: Uuid::new_v4(),
+            runtime: RuntimeKind::Podman,
+            docker_target: None,
+            podman_target: Some(target),
+            sacrum_image_ref: image.into(),
+            sacrum_version: None,
+            sacrum_build: None,
+            sacrum_image_created_at: None,
+            image_channel: channel,
+            provisioning_state: ProvisioningState::Pending,
+            postgres_volume_initialized: false,
+            host_port: port,
+            sacrum_bind_host: "127.0.0.1".into(),
+        })
     }
 
     pub fn backend_url(&self) -> String {
@@ -685,7 +754,7 @@ impl ManagedStackState {
     }
 
     pub fn validate(&self) -> Result<(), LocalBackendError> {
-        if self.schema_version != 1 {
+        if self.schema_version != 1 && self.schema_version != 2 {
             return Err(LocalBackendError::InvalidState(format!(
                 "unsupported schema version {}",
                 self.schema_version
@@ -701,7 +770,19 @@ impl ManagedStackState {
                 "adopted legacy database volume must be initialized".to_string(),
             ));
         }
-        self.docker_target.validate()?;
+        match (self.runtime, &self.docker_target, &self.podman_target) {
+            (RuntimeKind::Docker, Some(target), None) => target.validate()?,
+            (RuntimeKind::Podman, None, Some(target))
+                if self.schema_version == 2 && self.kind == StackKind::Managed =>
+            {
+                target.validate()?
+            }
+            _ => {
+                return Err(LocalBackendError::InvalidState(
+                    "runtime identity does not match the saved schema or stack kind".to_string(),
+                ))
+            }
+        }
         if self.host_port == 0 {
             return Err(LocalBackendError::InvalidState(
                 "host port must be between 1 and 65535".to_string(),
