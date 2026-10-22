@@ -114,7 +114,7 @@ impl LocalBackendError {
             ),
             Self::Podman(_) => (
                 "podman_local_backend", true,
-                "Check the installed Podman runtime, running rootless local machine/socket and standalone Docker Compose provider. Existing data was preserved.",
+                "Check the installed Podman runtime, running rootless local machine/socket and saved Compose provider (podman-compose or docker-compose). Existing data was preserved.",
             ),
             Self::SecretGeneration(_) => (
                 "secure_randomness",

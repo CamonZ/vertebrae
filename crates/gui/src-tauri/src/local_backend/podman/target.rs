@@ -224,6 +224,7 @@ pub(super) async fn resolve_target<R: ProcessRunner>(
         endpoint,
         storage_root,
         provider,
+        provider_kind: super::ComposeProviderKind::DockerCompose,
         machine,
     };
     target.validate()?;

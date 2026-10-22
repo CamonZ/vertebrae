@@ -33,12 +33,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # replaced below with the pinned engine built above.
     podman \
     nftables \
-    docker-compose \
     uidmap \
     slirp4netns \
     passt \
     fuse-overlayfs \
-    python3 \
+    python3-venv \
     # Utilities
     curl \
     ca-certificates \
@@ -57,6 +56,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 
 # Install tauri-driver for WebDriver protocol support
 RUN cargo install tauri-driver
+
+# Keep Docker binaries out of the final runner. Exercise the Docker-free provider.
+RUN python3 -m venv /opt/podman-compose \
+    && /opt/podman-compose/bin/pip install --no-cache-dir podman-compose==1.5.0 \
+    && ln -s /opt/podman-compose/bin/podman-compose /usr/local/bin/podman-compose \
+    && test -z "$(find /usr /opt /bin /sbin -name docker -o -name docker-compose)"
 
 # Podman recommends this DNS helper; nested Compose stacks require it.
 RUN apt-get update && apt-get install -y --no-install-recommends aardvark-dns \

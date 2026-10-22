@@ -289,7 +289,9 @@ resources it created.
 ### GUI-managed Podman acceptance scenarios
 
 The GUI acceptance runner includes a separate `@podman` phase using a real
-Podman 5.6.2 engine and Debian's standalone Docker Compose provider. It starts
+Podman 5.6.2 engine and podman-compose 1.5.0. The final runner image contains
+neither `docker` nor `docker-compose`; image build and entrypoint checks assert
+their absence on disk. It starts
 the GUI as a dedicated UID 1000 user with its own HOME, rootless storage and API
 socket. No host container-engine socket is mounted. The disposable outer runner
 is privileged to allow nested user namespaces; the test user retains SYS_ADMIN
@@ -310,11 +312,14 @@ GUI_ACCEPTANCE_PODMAN_ONLY=1 python3 scripts/acceptance.py gui
 authenticate with saved GUI settings, restart the application, and reopen the saved
 installation. It checks loopback reachability and refusal of non-loopback TCP
 ingress, saved identity, database/token preservation, cross-runtime refusal,
-changed-storage refusal, and missing-volume refusal without recreation. Poisoned
+changed-storage refusal, missing-volume refusal without recreation, and refusal
+to silently replace a missing legacy Docker Compose provider. A separate scenario
+applies a newer official Sacrum digest through the GUI update command, checks
+container recreation, and verifies data, token and provider identity survive. Poisoned
 inherited engine/provider variables exercise explicit target selection. Engine
 metadata, provider version and API/driver logs are saved under the run's
-`podman/` output directory. These scenarios do not exercise a Sacrum image update;
-the opt-in smoke test below covers that additional operation.
+`podman/` output directory. The update scenario requires the current published
+master manifest to advertise a different digest from the bundled initial image.
 
 ### GUI-managed Podman smoke test
 
@@ -325,12 +330,16 @@ before claiming desktop, VM forwarding, SELinux or restart compatibility.
 
 | Configuration | Prerequisites | Current evidence |
 |---|---|---|
-| Linux rootless in isolated acceptance container | Podman 5.6.2, standalone Docker Compose 2.26.1-4, Linux arm64 | Four real GUI acceptance scenarios passed; VFS, disabled cgroups, runner-scheduled health checks |
-| Linux native desktop rootless | Podman 5.6+, running user API socket, standalone Docker Compose 2.24+ | Mocked target/command/lifecycle tests; native-host smoke pending |
-| macOS rootless machine | Podman 5.6+, running registered machine, rootless connection and shared app-data directory, standalone Docker Compose 2.24+ | Mocked machine/connection/restart-identity tests; real smoke pending |
+| Linux rootless in isolated acceptance container | Podman 5.6.2, podman-compose 1.5.0, Linux arm64 | Six real GUI scenarios / 43 steps passed, including image update; VFS, disabled cgroups, runner-scheduled health checks |
+| Linux rootless, previous Docker Compose lane | Podman 5.6.2, standalone Docker Compose 2.26.1-4, Linux arm64 | Four real GUI scenarios passed in PR #501; retained compatibility unit tests |
+| Linux native desktop rootless | Podman 5.6+, running user API socket, podman-compose 1.5+ or standalone Docker Compose 2.24+ | Mocked target/command/lifecycle tests; native-host smoke pending |
+| macOS rootless machine | Podman 5.6+, running registered machine, rootless connection and shared app-data directory, podman-compose 1.5+ or standalone Docker Compose 2.24+ | Mocked machine/connection/restart-identity tests; real smoke pending |
 | Windows or rootful Podman | Outside this integration | Rejected by runtime validation |
 
-Version checks cover standalone Compose 2.24+ (including a 5.5.1 fixture).
+Version checks cover podman-compose 1.5+ and standalone Docker Compose 2.24+.
+Saved installations keep their provider path and kind; omitted kind in older
+schema-2 state means Docker Compose. Missing providers require restoring the
+saved executable rather than automatically switching implementations.
 Record additional tested engine/provider pairs in the table. The GUI only discovers
 installed tools. Setup then validates the engine, saved connection and provider.
 A stopped socket/machine requires the user to start it; a changed saved machine

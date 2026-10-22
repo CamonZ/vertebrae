@@ -75,7 +75,8 @@ The GUI first-run flow offers two choices:
   Docker requires Docker Desktop or a local Engine 28+ with Compose and a local
   Unix/npipe endpoint. The Podman adapter targets an already running rootless
   Podman 5.6+ engine on Linux or a registered rootless Podman machine on macOS,
-  with a standalone `docker-compose` provider (2.24+); Docker Engine is not needed.
+  with `podman-compose` 1.5+ for a Docker-free setup. Standalone `docker-compose`
+  2.24+ is also supported; Docker Engine is not needed.
   See the [Podman verification matrix](docs/testing.md#gui-managed-podman-smoke-test)
   for real-engine GUI acceptance results, desktop verification gaps and opt-in checks.
 
@@ -97,9 +98,12 @@ they do not rotate runtime secrets, recreate the PostgreSQL volume, or delete da
 The selected runtime and its local connection are saved with the installation.
 Existing version-1 Docker state remains Docker-owned; new Podman installations
 use version-2 state with the local socket, rootless storage identity, pinned
-Compose-provider path and (on macOS) machine/connection identity. Changing the
+Compose-provider kind/path and (on macOS) machine/connection identity. Changing the
 system default or installing another runtime does not move an existing database.
-Missing or changed resources produce an error and preserve data. Restoring the
+New installations prefer `podman-compose` when both providers are installed. Older
+Podman state without a provider kind remains pinned to Docker Compose; installing
+`podman-compose` does not migrate it. Missing or changed resources produce an
+error and preserve data. Restoring the
 original runtime/provider/connection is required before retrying; switching
 engines or importing a database is a separate operation.
 
@@ -109,7 +113,7 @@ On Linux, enable the rootless API socket before setup, for example
 machine and select its connection before first setup. Its shared directories must
 include the Vertebrae application-data directory for the seeder file. Podman
 mounts the seeder read-only, with private SELinux labeling on Linux. The
-standalone Compose provider is invoked directly against the saved Podman socket;
+selected Compose provider is invoked directly against the saved Podman socket;
 this avoids the environment-dependent provider choice in
 [`podman compose`](https://docs.podman.io/en/stable/markdown/podman-compose.1.html).
 Rootful Podman, arbitrary SSH/TCP targets, Windows Podman, automatic machine
