@@ -19,6 +19,9 @@ use super::state::{
     SeedAccount, StackKind,
 };
 
+mod provider;
+pub(crate) use provider::discover_provider;
+pub use provider::ComposeProviderKind;
 mod target;
 use target::{inspect_machine, inspect_store, resolve_target};
 
@@ -68,6 +71,9 @@ pub struct PodmanTarget {
     pub endpoint: String,
     pub storage_root: String,
     pub provider: PathBuf,
+    /// Missing in existing schema-2 installations, which used Docker Compose.
+    #[serde(default)]
+    pub provider_kind: ComposeProviderKind,
     pub machine: Option<PodmanMachineTarget>,
 }
 
@@ -124,8 +130,9 @@ impl PodmanRuntime<SystemProcessRunner> {
             ));
         }
         let cli = discover_container_tool("podman")?;
-        let provider = discover_container_tool("docker-compose")?;
-        let target = resolve_target(&SystemProcessRunner, &cli, provider).await?;
+        let (provider_kind, provider) = discover_provider(discover_container_tool)?;
+        let mut target = resolve_target(&SystemProcessRunner, &cli, provider).await?;
+        target.provider_kind = provider_kind;
         let runtime = Self {
             runner: SystemProcessRunner,
             cli,
@@ -146,6 +153,12 @@ impl PodmanRuntime<SystemProcessRunner> {
             return Err(problem(
                 "GUI-managed Podman is supported on Linux and macOS only",
             ));
+        }
+        if !target.provider.is_file() {
+            return Err(problem(format!(
+                "saved {} provider is missing at {}; restore it before retrying; providers are never switched automatically",
+                target.provider_kind.name(), target.provider.display()
+            )));
         }
         Ok(Self {
             runner: SystemProcessRunner,
@@ -187,8 +200,14 @@ impl<R: ProcessRunner> PodmanRuntime<R> {
     ) -> CommandRequest {
         let mut request = stack_request(
             |args| {
-                clean_request(&self.target.provider, action, args, RECONCILE)
-                    .with_env([("DOCKER_HOST", self.target.endpoint.as_str())])
+                let args = self.target.provider_kind.arguments(args, &self.cli);
+                let request = clean_request(&self.target.provider, action, args, RECONCILE)
+                    .with_env([("DOCKER_HOST", self.target.endpoint.as_str())]);
+                if self.target.provider_kind == ComposeProviderKind::PodmanCompose {
+                    request.with_env([("CONTAINER_HOST", self.target.endpoint.as_str())])
+                } else {
+                    request
+                }
             },
             paths,
             state,
@@ -206,11 +225,20 @@ impl<R: ProcessRunner> PodmanRuntime<R> {
                 },
             ),
         ]);
+        if self.target.provider_kind == ComposeProviderKind::PodmanCompose {
+            // podman-compose 1.5 interpolates external booleans as strings;
+            // "false" is truthy. Own initial creation explicitly, then always
+            // attach the checked volume as external through this provider.
+            request = request.with_env([("POSTGRES_VOLUME_EXTERNAL", "true")]);
+        }
         // ProcessRunner removes env_remove after setting env. Keep this pinned
         // value while stripping inherited Docker targeting variables.
-        request
-            .env_remove
-            .retain(|name| name != "DOCKER_HOST" && name != "SEED_MOUNT_OPTIONS");
+        request.env_remove.retain(|name| {
+            name != "DOCKER_HOST"
+                && name != "SEED_MOUNT_OPTIONS"
+                && !(name == "CONTAINER_HOST"
+                    && self.target.provider_kind == ComposeProviderKind::PodmanCompose)
+        });
         request
     }
 
@@ -236,22 +264,92 @@ impl<R: ProcessRunner> PodmanRuntime<R> {
             .checked(clean_request(
                 &self.target.provider,
                 "check Podman Compose provider",
-                ["version", "--short"],
+                self.target
+                    .provider_kind
+                    .arguments(vec!["version".into(), "--short".into()], &self.cli),
                 QUICK,
             ))
             .await?;
         require_complete(&output)?;
-        let version = output.stdout.trim().trim_start_matches('v');
-        let parts = version
-            .split('.')
-            .map(str::parse::<u64>)
-            .take(2)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| problem("standalone Docker Compose returned an invalid version"))?;
-        if parts.len() != 2 || parts[0] < 2 || (parts[0] == 2 && parts[1] < 24) {
-            return Err(problem("install standalone Docker Compose 2.24+ (docker-compose); Docker Engine is not required"));
+        self.target
+            .provider_kind
+            .validate_version(output.stdout.trim())
+    }
+
+    async fn container_ids(
+        &self,
+        state: &ManagedStackState,
+        service: Option<&str>,
+    ) -> Result<Vec<String>, LocalBackendError> {
+        let mut args = vec![
+            "ps".to_string(),
+            "--all".into(),
+            "--filter".into(),
+            format!("label=com.docker.compose.project={}", state.project_name()),
+            "--format".into(),
+            "{{.ID}}".into(),
+        ];
+        if let Some(service) = service {
+            args.extend([
+                "--filter".into(),
+                format!("label=com.docker.compose.service={service}"),
+            ]);
         }
-        Ok(())
+        let output = self
+            .checked(self.native("find managed Podman containers", args))
+            .await?;
+        require_complete(&output)?;
+        let ids: Vec<String> = output
+            .stdout
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        if ids.iter().any(|id| id.starts_with('-')) {
+            return Err(problem("invalid Podman container id"));
+        }
+        Ok(ids)
+    }
+
+    async fn native_status(
+        &self,
+        state: &ManagedStackState,
+    ) -> Result<Vec<ServiceStatus>, LocalBackendError> {
+        let ids = self.container_ids(state, None).await?;
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Inspect only bounded status fields; full inspection can contain credentials.
+        let template = r#"{"name":{{json .Name}},"service":{{json (index .Config.Labels "com.docker.compose.service")}},"state":{{json .State.Status}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}},"exit_code":{{json .State.ExitCode}}}"#;
+        let args = ["inspect", "--format", template]
+            .into_iter()
+            .map(str::to_string)
+            .chain(ids);
+        let output = self
+            .checked(self.native("read native Podman backend status", args))
+            .await?;
+        require_complete(&output)?;
+        #[derive(Deserialize)]
+        struct Status {
+            name: String,
+            service: String,
+            state: String,
+            health: Option<String>,
+            exit_code: Option<i32>,
+        }
+        let mut services = Vec::new();
+        for item in serde_json::Deserializer::from_str(&output.stdout).into_iter::<Status>() {
+            let item = item.map_err(|e| problem(format!("invalid Podman status: {e}")))?;
+            if matches!(item.service.as_str(), "postgres" | "sacrum") {
+                services.push(ServiceStatus {
+                    name: item.name,
+                    service: item.service,
+                    state: item.state,
+                    health: item.health,
+                    exit_code: item.exit_code,
+                });
+            }
+        }
+        Ok(services)
     }
 
     async fn verify_loopback(
@@ -260,32 +358,47 @@ impl<R: ProcessRunner> PodmanRuntime<R> {
         state: &ManagedStackState,
         secrets: &RuntimeSecrets,
     ) -> Result<(), LocalBackendError> {
-        let ids = self
-            .stack(
-                self.compose(
-                    paths,
-                    state,
-                    "find Podman backend container",
-                    ["ps", "--all", "--quiet", "sacrum"],
-                ),
-                secrets,
-            )
-            .await?;
-        require_complete(&ids)?;
-        let ids = ids.stdout.split_whitespace().collect::<Vec<_>>();
+        let ids = if self.target.provider_kind == ComposeProviderKind::PodmanCompose {
+            self.container_ids(state, Some("sacrum")).await?
+        } else {
+            let output = self
+                .stack(
+                    self.compose(
+                        paths,
+                        state,
+                        "find Podman backend container",
+                        ["ps", "--all", "--quiet", "sacrum"],
+                    ),
+                    secrets,
+                )
+                .await?;
+            require_complete(&output)?;
+            output
+                .stdout
+                .split_whitespace()
+                .map(str::to_string)
+                .collect()
+        };
         if ids.len() != 1 || ids[0].starts_with('-') {
             return Err(problem("expected exactly one managed Sacrum container"));
         }
         let output = self
             .stack(
-                self.native("verify Podman loopback publishing", ["inspect", ids[0]]),
+                self.native(
+                    "verify Podman loopback publishing",
+                    [
+                        "inspect",
+                        "--format",
+                        "{{json .NetworkSettings.Ports}}",
+                        ids[0].as_str(),
+                    ],
+                ),
                 secrets,
             )
             .await?;
-        let values: Vec<Value> = parse(&output)?;
-        let bindings = values
-            .first()
-            .and_then(|v| v.pointer("/NetworkSettings/Ports/4000~1tcp"))
+        let ports: Value = parse(&output)?;
+        let bindings = ports
+            .get("4000/tcp")
             .and_then(Value::as_array)
             .ok_or_else(|| problem("Podman did not report the backend's published port"))?;
         if bindings.is_empty()
@@ -423,10 +536,20 @@ impl<R: ProcessRunner> ContainerRuntime for PodmanRuntime<R> {
                 .pointer("/Labels/com.docker.compose.project")
                 .and_then(Value::as_str)
                 == Some(expected_project.as_str())
-            && values[0]
-                .pointer("/Labels/com.docker.compose.volume")
-                .and_then(Value::as_str)
-                == Some("pgdata");
+            && match self.target.provider_kind {
+                ComposeProviderKind::DockerCompose => {
+                    values[0]
+                        .pointer("/Labels/com.docker.compose.volume")
+                        .and_then(Value::as_str)
+                        == Some("pgdata")
+                }
+                ComposeProviderKind::PodmanCompose => {
+                    values[0]
+                        .pointer("/Labels/io.podman.compose.project")
+                        .and_then(Value::as_str)
+                        == Some(expected_project.as_str())
+                }
+            };
         Ok(if valid {
             DatabaseVolumeStatus::Present
         } else {
@@ -453,6 +576,36 @@ impl<R: ProcessRunner> ContainerRuntime for PodmanRuntime<R> {
             secrets,
         )
         .await?;
+        if self.target.provider_kind == ComposeProviderKind::PodmanCompose
+            && !state.postgres_volume_is_external()
+        {
+            match self.inspect_database_volume(state).await? {
+                DatabaseVolumeStatus::Absent => {
+                    self.checked(self.native(
+                        "create initial Podman database volume",
+                        [
+                            "volume",
+                            "create",
+                            "--label",
+                            &format!("com.docker.compose.project={}", state.project_name()),
+                            "--label",
+                            &format!("io.podman.compose.project={}", state.project_name()),
+                            "--label",
+                            "com.docker.compose.volume=pgdata",
+                            &state.postgres_volume(),
+                        ],
+                    ))
+                    .await?;
+                    if self.inspect_database_volume(state).await? != DatabaseVolumeStatus::Present {
+                        return Err(problem(
+                            "new Podman database volume has unexpected ownership metadata",
+                        ));
+                    }
+                }
+                DatabaseVolumeStatus::Present => {}
+                DatabaseVolumeStatus::Unsafe(reason) => return Err(problem(reason)),
+            }
+        }
         self.stack(
             self.compose(
                 paths,
@@ -524,6 +677,9 @@ impl<R: ProcessRunner> ContainerRuntime for PodmanRuntime<R> {
         state: &ManagedStackState,
         secrets: &RuntimeSecrets,
     ) -> Result<Vec<ServiceStatus>, LocalBackendError> {
+        if self.target.provider_kind == ComposeProviderKind::PodmanCompose {
+            return self.native_status(state).await;
+        }
         let output = self
             .stack(
                 self.compose(

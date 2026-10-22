@@ -2,6 +2,8 @@
 # A real rootless Podman lane in the disposable GUI acceptance container.
 set -euo pipefail
 if [ "$(id -u)" -eq 0 ]; then
+    # Assert absence on disk, not just a PATH that hides Docker binaries.
+    test -z "$(find /usr /opt /bin /sbin -name docker -o -name docker-compose)"
     test_binary=$(python3 -c 'import json; records=[json.loads(line) for line in open("/tmp/gui-acceptance-build.jsonl") if line.startswith("{")]; print(next(r["executable"] for r in records if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="gui_acceptance" and r.get("executable")))')
     install -d -o podmantest -g podmantest -m 0700 /run/user/1000
     install -d -o podmantest -g podmantest /home/podmantest/.local/share/vertebrae/bin /home/podmantest/.local/bin /app/test-output/podman
@@ -50,7 +52,7 @@ helper_binaries_dir = ["/usr/lib/podman", "/usr/libexec/podman", "/usr/bin"]
 default_rootless_network_cmd = "slirp4netns"
 CONFIG
 podman --remote=false info --format json > /app/test-output/podman/engine-info.json
-docker-compose version > /app/test-output/podman/compose-version.txt
+podman-compose version --short > /app/test-output/podman/compose-version.txt
 python3 -c 'import json; x=json.load(open("/app/test-output/podman/engine-info.json")); assert x["host"]["security"]["rootless"], "acceptance engine must be rootless"'
 podman system service --time=0 "unix://$XDG_RUNTIME_DIR/podman/podman.sock" > /app/test-output/podman/api.log 2>&1 &
 API_PID=$!

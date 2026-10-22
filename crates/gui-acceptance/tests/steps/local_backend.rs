@@ -65,6 +65,16 @@ async fn containers(state: &Value, service: Option<&str>) -> Vec<String> {
     }
     native(&args).await.lines().map(str::to_string).collect()
 }
+async fn remove_containers(state: &Value) {
+    // podman-compose records native dependency edges. Remove dependants first,
+    // retaining project/service label confinement rather than using --depend.
+    for service in ["seeder", "sacrum", "postgres"] {
+        for id in containers(state, Some(service)).await {
+            native(&["rm", "--force", &id]).await;
+        }
+    }
+}
+
 async fn invoke(world: &mut GuiWorld, command: &str, args: Value) -> Value {
     let wd = world.webdriver.as_ref().expect("Podman WebDriver").clone();
     let client = wd.lock().await;
@@ -119,9 +129,7 @@ pub async fn after_scenario() {
     gui_acceptance::close_webdriver().await;
     if backend_dir().join("state.json").is_file() {
         let state = saved_state();
-        for id in containers(&state, None).await {
-            native(&["rm", "--force", &id]).await;
-        }
+        remove_containers(&state).await;
         let name = volume(&state);
         if native(&["volume", "ls", "--format", "{{.Name}}"])
             .await
@@ -172,6 +180,13 @@ async fn saved_identity(world: &mut GuiWorld) {
     let state = saved_state();
     assert_eq!(state["schema_version"], 2);
     assert_eq!(state["runtime"], "podman");
+    assert_eq!(state["podman_target"]["provider_kind"], "podman_compose");
+    assert!(
+        state["podman_target"]["provider"]
+            .as_str()
+            .unwrap()
+            .ends_with("/podman-compose")
+    );
     assert!(state.get("docker_target").is_none());
     assert!(
         state["podman_target"]["endpoint"]
@@ -333,9 +348,7 @@ async fn change_storage(_world: &mut GuiWorld) {
 #[when("the managed Podman database volume is removed")]
 async fn remove_volume(_world: &mut GuiWorld) {
     let state = saved_state();
-    for id in containers(&state, None).await {
-        native(&["rm", "--force", &id]).await;
-    }
+    remove_containers(&state).await;
     native(&["volume", "rm", &volume(&state)]).await;
 }
 #[then("the lost Podman database volume should remain absent")]
@@ -357,4 +370,68 @@ async fn backend_success(world: &mut GuiWorld) {
         .expect("backend command result");
     assert_eq!(result["ok"], true, "backend command failed: {result}");
     assert_eq!(result["value"]["status"], "ready");
+}
+
+#[given("the runner has Podman Compose and no Docker tooling")]
+async fn docker_free_runner(_world: &mut GuiWorld) {
+    // The image and entrypoint also assert absence on disk, before source/cache mounts.
+    for binary in ["docker", "docker-compose"] {
+        for directory in [
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/opt/podman-compose/bin",
+        ] {
+            assert!(
+                !std::path::Path::new(directory).join(binary).exists(),
+                "Docker tooling must be absent"
+            );
+        }
+    }
+    assert!(std::path::Path::new("/usr/local/bin/podman-compose").is_file());
+}
+
+#[when("the saved provider is a missing legacy Docker Compose installation")]
+async fn missing_legacy_provider(_world: &mut GuiWorld) {
+    let mut state = saved_state();
+    state["podman_target"]
+        .as_object_mut()
+        .unwrap()
+        .remove("provider_kind");
+    state["podman_target"]["provider"] = "/usr/bin/docker-compose".into();
+    std::fs::write(
+        backend_dir().join("state.json"),
+        serde_json::to_vec(&state).unwrap(),
+    )
+    .unwrap();
+}
+
+#[when("I apply a newer official backend image through the GUI command")]
+async fn update_backend(world: &mut GuiWorld) {
+    let before = saved_state();
+    let old_containers = containers(&before, Some("sacrum")).await;
+    let check = invoke(world, "check_local_backend_update", json!({})).await;
+    assert_eq!(check["ok"], true, "update check failed: {check}");
+    assert_eq!(
+        check["value"]["available"], true,
+        "update scenario requires two distinct official Sacrum digests"
+    );
+    let latest = &check["value"]["latest"];
+    let result = invoke(world, "apply_approved_local_backend_update", json!({
+        "approved":true,"channel":latest["channel"],"version":latest["version"],"build":latest["build"],"imageRef":latest["image_ref"]
+    })).await;
+    assert_eq!(
+        result["ok"], true,
+        "real Podman backend update failed: {result}"
+    );
+    let after = saved_state();
+    assert_eq!(after["sacrum_image_ref"], latest["image_ref"]);
+    assert_ne!(before["sacrum_image_ref"], after["sacrum_image_ref"]);
+    assert_eq!(before["installation_id"], after["installation_id"]);
+    assert_eq!(before["podman_target"], after["podman_target"]);
+    assert_ne!(
+        old_containers,
+        containers(&after, Some("sacrum")).await,
+        "update must recreate the backend container"
+    );
 }

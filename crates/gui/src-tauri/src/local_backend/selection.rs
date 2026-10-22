@@ -234,6 +234,7 @@ mod tests {
                 endpoint: "unix:///run/user/1000/podman/podman.sock".into(),
                 storage_root: "/storage".into(),
                 provider: std::env::current_exe().unwrap(),
+                provider_kind: crate::local_backend::podman::ComposeProviderKind::DockerCompose,
                 machine: None,
             },
         )

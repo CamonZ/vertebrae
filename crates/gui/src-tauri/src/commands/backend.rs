@@ -851,7 +851,7 @@ pub async fn local_backend_runtimes() -> Result<LocalBackendRuntimes, CommandErr
             if let Some(target) = saved.as_ref().and_then(|s| s.podman_target.as_ref()) {
                 if target.provider.is_file() { Ok(target.provider.clone()) }
                 else { Err(LocalBackendError::Podman("The saved standalone Compose provider is missing; restore it at its original path.".into())) }
-            } else { discover_container_tool("docker-compose") }
+            } else { crate::local_backend::podman::discover_provider(discover_container_tool).map(|(_, path)| path) }
         }).map(|_| ())
     } else {
         Err(LocalBackendError::Podman(
