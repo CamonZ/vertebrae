@@ -8,7 +8,7 @@ use crate::local_backend::selection::SystemBackend;
 use crate::local_backend::state::RuntimeKind;
 use crate::local_backend::state::{
     ApiToken, BackendImageChannel, LocalBackendError, ManagedStackPaths, ProvisioningStage,
-    ProvisioningState, SeedAccount, StackKind, LOCAL_SACRUM_IMAGE_REF,
+    ProvisioningState, SeedAccount, StackKind,
 };
 use tauri::{AppHandle, Emitter};
 
@@ -687,14 +687,25 @@ pub async fn setup_local_backend(
                 )));
             }
             Some(existing) => existing,
-            None => compose
-                .fresh_state(
-                    LOCAL_SACRUM_IMAGE_REF,
-                    crate::local_backend::state::select_host_port(0)
-                        .map_err(local_backend_error)?,
-                    BackendImageChannel::BackendMaster,
-                )
-                .map_err(local_backend_error)?,
+            None => {
+                let channel = BackendImageChannel::BackendMaster;
+                let manifest = BackendManifestClient::default()
+                    .fetch(channel)
+                    .await
+                    .map_err(local_backend_error)?;
+                let mut state = compose
+                    .fresh_state(
+                        &manifest.image_ref,
+                        crate::local_backend::state::select_host_port(0)
+                            .map_err(local_backend_error)?,
+                        channel,
+                    )
+                    .map_err(local_backend_error)?;
+                state.sacrum_version = Some(manifest.version);
+                state.sacrum_build = Some(manifest.build);
+                state.sacrum_image_created_at = manifest.generated_at;
+                state
+            }
         },
     };
 

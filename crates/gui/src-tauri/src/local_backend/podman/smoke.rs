@@ -11,8 +11,7 @@ async fn podman_smoke_provision_reopen_update_and_volume_preservation() {
         Ok("1"),
         "set VERTEBRAE_TEST_PODMAN=1 only for an isolated test runtime"
     );
-    let image =
-        std::env::var("VERTEBRAE_TEST_SACRUM_IMAGE_REF").expect("first official Sacrum digest");
+    let image = crate::local_backend::compose::test_support::smoke_image_ref().await;
     let update = std::env::var("VERTEBRAE_TEST_SACRUM_UPDATE_IMAGE_REF")
         .expect("second official Sacrum digest");
     assert_ne!(image, update);
@@ -38,7 +37,7 @@ async fn podman_smoke_provision_reopen_update_and_volume_preservation() {
     let mut state = ManagedStackState::fresh_podman(
         image,
         select_host_port(0).unwrap(),
-        BackendImageChannel::BackendRelease,
+        BackendImageChannel::BackendMaster,
         runtime.target().clone(),
     )
     .unwrap();

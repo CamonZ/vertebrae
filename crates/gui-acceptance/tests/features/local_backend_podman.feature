@@ -7,6 +7,15 @@ Feature: GUI-managed Podman backend
   Background:
     Given the runner has Podman Compose and no Docker tooling
 
+  Scenario: Fresh self-hosted setup creates and selects a project
+    Given a fresh GUI-managed Podman backend
+    Then the local backend should accept authenticated requests using the saved GUI settings
+    When I initialize the prepared project directory through the GUI command
+    Then the GUI-created project should be active within 20 seconds
+    And the Podman database sentinel and token should be unchanged
+    When I restart the GUI application
+    Then the GUI-created project should be active within 20 seconds
+
   Scenario: Provisioning and application restart preserve a usable local backend
     Given a fresh GUI-managed Podman backend
     Then the Podman installation should have valid saved runtime identity
@@ -38,9 +47,9 @@ Feature: GUI-managed Podman backend
     Then the backend command should fail with "database volume is missing"
     And the lost Podman database volume should remain absent
 
-  Scenario: Updating the backend preserves data with the Docker-free provider
+  Scenario: Fresh setup installs the latest backend with the Docker-free provider
     Given a fresh GUI-managed Podman backend
-    When I apply a newer official backend image through the GUI command
+    When I check that the installed backend is the latest published release
     Then the Podman database sentinel and token should be unchanged
     And the local backend should accept authenticated requests using the saved GUI settings
     And the Podman backend should publish only the saved loopback port

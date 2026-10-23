@@ -615,6 +615,7 @@ async fn main() {
                 if let Some(world) = world {
                     if podman {
                         steps::local_backend::after_scenario().await;
+                        steps::setup::after_scenario(world, false).await;
                         world.scenario_timing.take();
                         return;
                     }
