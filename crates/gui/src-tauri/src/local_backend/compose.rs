@@ -94,22 +94,12 @@ mod tests {
     use super::super::state::{
         is_valid_backend_image_ref, select_host_port, ApiToken, BackendImageChannel,
         LocalBackendError, ManagedStackPaths, ManagedStackState, ProvisioningState, RuntimeSecrets,
-        SeedAccount, StackKind, LOCAL_SACRUM_IMAGE_REF,
+        SeedAccount, StackKind,
     };
     use super::test_support::*;
     use super::*;
 
     const SMOKE_TIMEOUT: Duration = Duration::from_secs(180);
-
-    fn smoke_image_ref() -> String {
-        let image_ref = std::env::var("VERTEBRAE_TEST_SACRUM_IMAGE_REF")
-            .unwrap_or_else(|_| LOCAL_SACRUM_IMAGE_REF.to_string());
-        assert!(
-            is_valid_backend_image_ref(&image_ref),
-            "VERTEBRAE_TEST_SACRUM_IMAGE_REF must be an official digest-pinned image"
-        );
-        image_ref
-    }
 
     async fn smoke_controller(
         target: Option<DockerTarget>,
@@ -160,6 +150,29 @@ mod tests {
         Ok(body)
     }
 
+    async fn healthy_container_status(
+        controller: &DockerCompose<SystemProcessRunner, ReqwestHealthProbe>,
+        paths: &ManagedStackPaths,
+        state: &ManagedStackState,
+    ) -> Result<Vec<ServiceStatus>, LocalBackendError> {
+        // HTTP readiness can precede Docker's scheduled container health check.
+        tokio::time::timeout(SMOKE_TIMEOUT, async {
+            loop {
+                let status = controller.status(paths, state).await?;
+                if !status.is_empty()
+                    && status.iter().all(|service| {
+                        service.state == "running" && service.health.as_deref() == Some("healthy")
+                    })
+                {
+                    return Ok(status);
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        })
+        .await
+        .map_err(|_| LocalBackendError::InvalidState("containers did not become healthy".into()))?
+    }
+
     async fn raw_stack_logs(
         controller: &DockerCompose<SystemProcessRunner, ReqwestHealthProbe>,
         paths: &ManagedStackPaths,
@@ -183,9 +196,11 @@ mod tests {
         paths: &ManagedStackPaths,
         state: &ManagedStackState,
     ) {
+        let mut cleanup_state = state.clone();
+        cleanup_state.postgres_volume_initialized = false;
         let request = controller.runtime.compose_request(
             paths,
-            state,
+            &cleanup_state,
             "remove smoke-test stack",
             ["down", "--volumes", "--remove-orphans"],
             Duration::from_secs(60),
@@ -217,7 +232,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires Docker and an official GHCR image; set VERTEBRAE_TEST_SACRUM_UPDATE_IMAGE_REF for update coverage"]
     async fn docker_smoke_fresh_stack_covers_provisioning_persistence_and_updates() {
-        let image_ref = smoke_image_ref();
+        let image_ref = smoke_image_ref().await;
         let update_image_ref = std::env::var("VERTEBRAE_TEST_SACRUM_UPDATE_IMAGE_REF").expect(
             "set VERTEBRAE_TEST_SACRUM_UPDATE_IMAGE_REF to a second official digest-pinned image",
         );
@@ -227,7 +242,10 @@ mod tests {
         );
         assert_ne!(image_ref, update_image_ref);
 
-        let temp = tempfile::tempdir().expect("temp dir");
+        let temp = tempfile::Builder::new()
+            .prefix(".vertebrae-docker-smoke-")
+            .tempdir_in(dirs::home_dir().expect("home directory shared with Docker"))
+            .expect("temp dir");
         let paths = ManagedStackPaths::from_data_dir(temp.path());
         let first_controller = smoke_controller(None).await;
         let mut state = ManagedStackState::fresh(
@@ -269,7 +287,7 @@ mod tests {
                 "verify PostgreSQL logical replication",
                 &[
                     "-tAc",
-                    "SELECT current_setting('server_version_num')::int >= 180000 || current_setting('server_version') LIKE '18.%'; SELECT current_setting('wal_level') || ' ' || current_setting('max_replication_slots') || ' ' || current_setting('max_wal_senders');",
+                    "SELECT current_setting('server_version_num')::int >= 180000; SELECT current_setting('wal_level') || ' ' || current_setting('max_replication_slots') || ' ' || current_setting('max_wal_senders');",
                 ],
             )
             .await?;
@@ -320,7 +338,7 @@ mod tests {
             let second_controller = smoke_controller(Some(state.docker_target()?.clone())).await;
             second_controller.up_detached(&paths, &mut state).await?;
             second_controller.wait_until_healthy(&paths, &state).await?;
-            let second_status = second_controller.status(&paths, &state).await?;
+            let second_status = healthy_container_status(&second_controller, &paths, &state).await?;
             let reused_token = paths.load_api_token()?;
             let reused_secrets = paths.load_runtime_secrets(state.kind)?;
             let sentinel = postgres_exec(
@@ -340,7 +358,7 @@ mod tests {
             let authenticated_after_restart = graphql_projects(&state, &reused_token).await?;
             assert!(authenticated_after_restart["data"]["projects"].is_array());
 
-            let updated_status = second_controller
+            second_controller
                 .update_sacrum_image(
                     &paths,
                     &state,
@@ -350,12 +368,8 @@ mod tests {
                     None,
                 )
                 .await?;
-            assert!(updated_status.iter().any(|service| {
-                service.service == "sacrum"
-                    && service.state == "running"
-                    && service.health.as_deref() == Some("healthy")
-            }));
             let updated_state = paths.load_state()?.expect("updated state");
+            healthy_container_status(&second_controller, &paths, &updated_state).await?;
             assert_eq!(updated_state.sacrum_image_ref, update_image_ref);
             assert_eq!(paths.load_api_token()?, api_token);
             assert_eq!(paths.load_runtime_secrets(updated_state.kind)?, secrets);
@@ -436,7 +450,7 @@ mod tests {
             return;
         }
 
-        let image_ref = smoke_image_ref();
+        let image_ref = smoke_image_ref().await;
         let controller = smoke_controller(None).await;
         match controller
             .detect_legacy_stack()
@@ -480,7 +494,10 @@ mod tests {
         assert!(!String::from_utf8_lossy(&seeded.stderr).contains(api_token.as_str()));
         assert!(!String::from_utf8_lossy(&seeded.stderr).contains(account.password()));
 
-        let temp = tempfile::tempdir().expect("temp dir");
+        let temp = tempfile::Builder::new()
+            .prefix(".vertebrae-docker-smoke-")
+            .tempdir_in(dirs::home_dir().expect("home directory shared with Docker"))
+            .expect("temp dir");
         let paths = ManagedStackPaths::from_data_dir(temp.path());
         let outcome = async {
             let detection = match controller.detect_legacy_stack().await? {

@@ -18,6 +18,14 @@ use crate::local_backend::state::{
 pub(crate) const DIGEST_IMAGE: &str =
     "ghcr.io/camonz/sacrum@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
+pub(crate) async fn smoke_image_ref() -> String {
+    crate::local_backend::manifest::BackendManifestClient::default()
+        .fetch(BackendImageChannel::BackendMaster)
+        .await
+        .expect("resolve latest published backend for container smoke tests")
+        .image_ref
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct MockRunner {
     requests: Arc<Mutex<Vec<CommandRequest>>>,

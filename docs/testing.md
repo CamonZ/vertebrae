@@ -255,10 +255,11 @@ npm run test:coverage
 
 The local-backend Docker smoke tests are ignored by default because they pull an
 actual GHCR Sacrum image and create temporary Docker resources. Run them only in
-an isolated Docker environment with official digest-pinned image references:
+an isolated Docker environment. They resolve the latest published backend from
+the `backend-master/latest.json` manifest, just like fresh setup. Supply a distinct
+official digest-pinned image for the update portion:
 
 ```bash
-VERTEBRAE_TEST_SACRUM_IMAGE_REF='<official-sacrum-digest>' \
 VERTEBRAE_TEST_SACRUM_UPDATE_IMAGE_REF='<second-official-sacrum-digest>' \
 cargo test -p gui --lib docker_smoke_fresh_stack_covers_provisioning_persistence_and_updates \
   -- --ignored --nocapture
@@ -273,7 +274,6 @@ volume already exists, and destroys the test-created legacy volume when complete
 
 ```bash
 VERTEBRAE_TEST_ALLOW_LEGACY_STACK=1 \
-VERTEBRAE_TEST_SACRUM_IMAGE_REF='<official-sacrum-digest>' \
 cargo test -p gui --lib docker_smoke_adopts_dev_backend_without_reseeding_or_replacing_v17_volume \
   -- --ignored --nocapture
 ```
@@ -311,15 +311,18 @@ GUI_ACCEPTANCE_PODMAN_ONLY=1 python3 scripts/acceptance.py gui
 `local_backend_podman.feature` invokes real Tauri commands to provision a stack,
 authenticate with saved GUI settings, restart the application, and reopen the saved
 installation. It checks loopback reachability and refusal of non-loopback TCP
-ingress, saved identity, database/token preservation, cross-runtime refusal,
+ingress. A combined setup scenario provisions a fresh self-hosted backend,
+creates and selects a project through the real GUI commands, verifies the project
+exists in that backend, and checks it remains active after restarting the GUI.
+Other scenarios cover saved identity, database/token preservation, cross-runtime refusal,
 changed-storage refusal, missing-volume refusal without recreation, and refusal
 to silently replace a missing legacy Docker Compose provider. A separate scenario
-applies a newer official Sacrum digest through the GUI update command, checks
-container recreation, and verifies data, token and provider identity survive. Poisoned
+checks that fresh setup installed the latest manifest image and release metadata,
+and that an already-current update is refused without changing containers or data. Poisoned
 inherited engine/provider variables exercise explicit target selection. Engine
 metadata, provider version and API/driver logs are saved under the run's
-`podman/` output directory. The update scenario requires the current published
-master manifest to advertise a different digest from the bundled initial image.
+`podman/` output directory. Actual replacement between distinct image digests is
+covered by the opt-in Docker and Podman smoke tests below.
 
 ### GUI-managed Podman smoke test
 
@@ -330,7 +333,7 @@ before claiming desktop, VM forwarding, SELinux or restart compatibility.
 
 | Configuration | Prerequisites | Current evidence |
 |---|---|---|
-| Linux rootless in isolated acceptance container | Podman 5.6.2, podman-compose 1.5.0, Linux arm64 | Six real GUI scenarios / 43 steps passed, including image update; VFS, disabled cgroups, runner-scheduled health checks |
+| Linux rootless in isolated acceptance container | Podman 5.6.2, podman-compose 1.5.0, Linux arm64 | Seven real GUI scenarios / 51 steps passed, including fresh backend/project setup and latest-release verification; VFS, disabled cgroups, runner-scheduled health checks |
 | Linux rootless, previous Docker Compose lane | Podman 5.6.2, standalone Docker Compose 2.26.1-4, Linux arm64 | Four real GUI scenarios passed in PR #501; retained compatibility unit tests |
 | Linux native desktop rootless | Podman 5.6+, running user API socket, podman-compose 1.5+ or standalone Docker Compose 2.24+ | Mocked target/command/lifecycle tests; native-host smoke pending |
 | macOS rootless machine | Podman 5.6+, running registered machine, rootless connection and shared app-data directory, podman-compose 1.5+ or standalone Docker Compose 2.24+ | Mocked machine/connection/restart-identity tests; real smoke pending |
@@ -347,12 +350,13 @@ identity (including SSH forwarding/connection details) is rejected rather than
 silently retargeted. Test machine/host restarts and record whether the identity
 remains stable on the chosen Podman release.
 
-Use an isolated rootless engine/machine and two distinct official Sacrum digests:
+Use an isolated rootless engine/machine. The initial image resolves from the
+latest `backend-master/latest.json` manifest; supply a distinct official Sacrum
+digest for the update portion:
 
 ```bash
 VERTEBRAE_TEST_PODMAN=1 \
 VERTEBRAE_TEST_NON_LOOPBACK_HOST='<this-host-non-loopback-ip>' \
-VERTEBRAE_TEST_SACRUM_IMAGE_REF='<official-sacrum-digest>' \
 VERTEBRAE_TEST_SACRUM_UPDATE_IMAGE_REF='<second-official-sacrum-digest>' \
 cargo test -p gui --lib podman_smoke_provision_reopen_update_and_volume_preservation \
   -- --ignored --nocapture

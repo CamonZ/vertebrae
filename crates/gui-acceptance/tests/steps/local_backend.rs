@@ -224,6 +224,7 @@ async fn authenticated_backend(world: &mut GuiWorld) {
         .await
         .expect("provisioned backend accepts authenticated GraphQL requests");
     assert!(projects.is_array());
+    world.graphql_client = Some(client);
 }
 
 #[then("the Podman backend should publish only the saved loopback port")]
@@ -406,32 +407,39 @@ async fn missing_legacy_provider(_world: &mut GuiWorld) {
     .unwrap();
 }
 
-#[when("I apply a newer official backend image through the GUI command")]
-async fn update_backend(world: &mut GuiWorld) {
+#[when("I check that the installed backend is the latest published release")]
+async fn check_latest_backend(world: &mut GuiWorld) {
     let before = saved_state();
     let old_containers = containers(&before, Some("sacrum")).await;
     let check = invoke(world, "check_local_backend_update", json!({})).await;
     assert_eq!(check["ok"], true, "update check failed: {check}");
     assert_eq!(
-        check["value"]["available"], true,
-        "update scenario requires two distinct official Sacrum digests"
+        check["value"]["available"], false,
+        "fresh setup must install the latest published backend"
     );
     let latest = &check["value"]["latest"];
+    assert_eq!(before["sacrum_image_ref"], latest["image_ref"]);
+    assert_eq!(before["sacrum_version"], latest["version"]);
+    assert_eq!(before["sacrum_build"], latest["build"]);
+    assert_eq!(before["sacrum_image_created_at"], latest["generated_at"]);
     let result = invoke(world, "apply_approved_local_backend_update", json!({
         "approved":true,"channel":latest["channel"],"version":latest["version"],"build":latest["build"],"imageRef":latest["image_ref"]
     })).await;
     assert_eq!(
-        result["ok"], true,
-        "real Podman backend update failed: {result}"
+        result["ok"], false,
+        "updating an already-current backend must be refused: {result}"
+    );
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("already up to date")
     );
     let after = saved_state();
-    assert_eq!(after["sacrum_image_ref"], latest["image_ref"]);
-    assert_ne!(before["sacrum_image_ref"], after["sacrum_image_ref"]);
-    assert_eq!(before["installation_id"], after["installation_id"]);
-    assert_eq!(before["podman_target"], after["podman_target"]);
-    assert_ne!(
+    assert_eq!(before, after);
+    assert_eq!(
         old_containers,
         containers(&after, Some("sacrum")).await,
-        "update must recreate the backend container"
+        "checking an already-current backend must preserve its container"
     );
 }

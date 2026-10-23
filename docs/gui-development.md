@@ -485,6 +485,15 @@ fails, the guard intentionally falls through to its children rather than
 blocking an already-working install. `InstallationGuard` sits above
 `ProjectGuard`, so the welcome screen comes before `/setup`.
 
+### Fresh local backend setup
+
+Fresh Docker and Podman installations resolve the latest published backend
+from the `backend-master/latest.json` release manifest before provisioning.
+The resolved image digest and release metadata are saved with the installation.
+If the manifest cannot be fetched or validated, setup reports the error rather
+than using a bundled older image. Reopening an existing installation uses its
+saved image; backend updates remain available through Settings.
+
 ### GUI update availability
 
 The GUI checks its signed Tauri updater manifest immediately after startup and
