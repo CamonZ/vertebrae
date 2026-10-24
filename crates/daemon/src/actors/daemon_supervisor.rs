@@ -467,11 +467,36 @@ impl Actor for DaemonSupervisor {
                 self.handle_reenrollment_required(&myself, reason, state);
             }
             DaemonMessage::PublishHeartbeat => {
-                if state.telemetry_handle.is_some()
-                    && let Err(error) = state.socket.send_daemon_heartbeat().await
-                {
-                    tracing::warn!(%error, "Daemon telemetry heartbeat send failed");
-                    self.handle_connection_lost(myself, state).await;
+                if state.telemetry_handle.is_some() {
+                    let previous = DaemonReport::from_capabilities(
+                        &state.config.identity.daemon_id,
+                        &state.config.capabilities,
+                        state.started_at,
+                    );
+                    self.refresh_provider_metadata(state).await;
+                    let report = DaemonReport::from_capabilities(
+                        &state.config.identity.daemon_id,
+                        &state.config.capabilities,
+                        state.started_at,
+                    );
+                    if report.capabilities != previous.capabilities {
+                        match report.payload() {
+                            Ok(payload) => {
+                                if let Err(error) = state.socket.send_daemon_report(payload).await {
+                                    tracing::warn!(%error, "Provider capability update failed; reconnecting");
+                                    self.handle_connection_lost(myself, state).await;
+                                    return Ok(());
+                                }
+                            }
+                            Err(error) => {
+                                tracing::warn!(%error, "Could not serialize provider capability update")
+                            }
+                        }
+                    }
+                    if let Err(error) = state.socket.send_daemon_heartbeat().await {
+                        tracing::warn!(%error, "Daemon telemetry heartbeat send failed");
+                        self.handle_connection_lost(myself, state).await;
+                    }
                 }
             }
             DaemonMessage::Shutdown => {
@@ -999,6 +1024,18 @@ impl DaemonSupervisor {
 }
 
 impl DaemonSupervisor {
+    async fn refresh_provider_metadata(&self, state: &mut DaemonState) {
+        match state.config.capabilities.latest_provider_metadata().await {
+            Ok(capabilities) => state.config.capabilities = Arc::new(capabilities),
+            Err(error) => {
+                tracing::warn!(%error, "Provider configuration unavailable; not advertising custom providers");
+                let mut unavailable = (*state.config.capabilities).clone();
+                unavailable.provider_profiles.clear();
+                state.config.capabilities = Arc::new(unavailable);
+            }
+        }
+    }
+
     async fn start_daemon_telemetry(
         &self,
         myself: ActorRef<DaemonMessage>,
@@ -1008,6 +1045,7 @@ impl DaemonSupervisor {
             return;
         }
 
+        self.refresh_provider_metadata(state).await;
         let report = DaemonReport::from_capabilities(
             &state.config.identity.daemon_id,
             &state.config.capabilities,

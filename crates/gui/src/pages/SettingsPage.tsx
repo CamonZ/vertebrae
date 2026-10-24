@@ -1,3 +1,8 @@
+import { useProviderSettingsStore } from "../stores/providerSettingsStore";
+import {
+  SharedConfigSettings,
+  type ConfigSection,
+} from "../components/settings/SharedConfigSettings";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -1761,7 +1766,40 @@ function UpdatesSection({
   );
 }
 
-type SettingsSection = "chat" | "appearance" | "updates";
+type SettingsSection = "chat" | "appearance" | "updates" | ConfigSection;
+
+const SETTINGS_COPY: Record<
+  SettingsSection,
+  { title: string; description: string }
+> = {
+  chat: {
+    title: "Chat",
+    description:
+      "Chat sessions are agent runs. These settings apply to new sessions; open and resumed sessions keep the configuration they started with.",
+  },
+  appearance: {
+    title: "Appearance",
+    description: "Choose how Vertebrae should look across the application.",
+  },
+  updates: {
+    title: "Updates",
+    description:
+      "Review signed release metadata before deciding whether to approve an update.",
+  },
+  providers: {
+    title: "Providers & Models",
+    description:
+      "Configure the providers and models available on this machine.",
+  },
+  connection: {
+    title: "Connection",
+    description: "Manage the backend connection saved on this machine.",
+  },
+  observability: {
+    title: "Observability",
+    description: "Choose which telemetry Vertebrae sends to your collector.",
+  },
+};
 
 export interface SettingsPageProps {
   /** Optional test/integration hook; the default action applies the approved release. */
@@ -1773,6 +1811,9 @@ export function SettingsPage({
   onApproveUpdate,
   onApproveLocalBackendUpdate,
 }: SettingsPageProps = {}) {
+  const providerSettingsRevision = useProviderSettingsStore(
+    (state) => state.revision
+  );
   const [catalog, setCatalog] = useState<LocalChatHarnessCatalog | null>(null);
   const [externalEditors, setExternalEditors] = useState<LocalFileEditor[]>([]);
   const [externalEditorsLoading, setExternalEditorsLoading] = useState(false);
@@ -1783,6 +1824,16 @@ export function SettingsPage({
   const [isLoading, setIsLoading] = useState(true);
   const [savedFeedback, setSavedFeedback] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>("chat");
+  const [configDirty, setConfigDirty] = useState(false);
+  const [configBusy, setConfigBusy] = useState(false);
+  const [pendingSection, setPendingSection] = useState<SettingsSection | null>(
+    null
+  );
+  const selectSection = (section: SettingsSection) => {
+    if (section === activeSection || configBusy) return;
+    if (configDirty) setPendingSection(section);
+    else setActiveSection(section);
+  };
   const [reviewOpen, setReviewOpen] = useState(false);
   const [localBackendReviewOpen, setLocalBackendReviewOpen] = useState(false);
   const [localBackendAdoptionReviewOpen, setLocalBackendAdoptionReviewOpen] =
@@ -1891,7 +1942,7 @@ export function SettingsPage({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [providerSettingsRevision]);
 
   useEffect(() => {
     if (activeSection !== "chat") return;
@@ -2008,7 +2059,7 @@ export function SettingsPage({
         <nav>
           <button
             type="button"
-            onClick={() => setActiveSection("chat")}
+            onClick={() => selectSection("chat")}
             className={`w-full rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${
               activeSection === "chat"
                 ? "border-[var(--color-accent)] bg-[var(--color-bg-1)] text-[var(--color-fg)]"
@@ -2021,7 +2072,7 @@ export function SettingsPage({
           </button>
           <button
             type="button"
-            onClick={() => setActiveSection("appearance")}
+            onClick={() => selectSection("appearance")}
             className={`mt-1 w-full rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${
               activeSection === "appearance"
                 ? "border-[var(--color-accent)] bg-[var(--color-bg-1)] text-[var(--color-fg)]"
@@ -2034,7 +2085,7 @@ export function SettingsPage({
           </button>
           <button
             type="button"
-            onClick={() => setActiveSection("updates")}
+            onClick={() => selectSection("updates")}
             className={`mt-1 flex w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${
               activeSection === "updates"
                 ? "border-[var(--color-accent)] bg-[var(--color-bg-1)] text-[var(--color-fg)]"
@@ -2054,6 +2105,24 @@ export function SettingsPage({
               </span>
             )}
           </button>
+          {(
+            [
+              ["providers", "Providers & Models"],
+              ["connection", "Connection"],
+              ["observability", "Observability"],
+            ] as const
+          ).map(([section, label]) => (
+            <button
+              key={section}
+              type="button"
+              onClick={() => selectSection(section)}
+              className={`mt-1 w-full rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${activeSection === section ? "border-[var(--color-accent)] bg-[var(--color-bg-1)] text-[var(--color-fg)]" : "border-transparent text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-1)]"}`}
+              aria-current={activeSection === section ? "page" : undefined}
+              data-testid={`settings-nav-${section}`}
+            >
+              {label}
+            </button>
+          ))}
         </nav>
       </aside>
 
@@ -2062,24 +2131,50 @@ export function SettingsPage({
           <header className="flex items-start justify-between gap-4 border-b border-[var(--color-line)] pb-7">
             <div className="max-w-2xl">
               <h1 className="font-serif text-4xl text-[var(--color-fg)]">
-                {activeSection === "appearance"
-                  ? "Appearance"
-                  : activeSection === "updates"
-                    ? "Updates"
-                    : "Chat"}
+                {SETTINGS_COPY[activeSection].title}
               </h1>
               <p className="mt-3 text-base leading-7 text-[var(--color-fg-soft)]">
-                {activeSection === "appearance"
-                  ? "Choose how Vertebrae should look across the application."
-                  : activeSection === "updates"
-                    ? "Review signed release metadata before deciding whether to approve an update."
-                    : "Chat sessions are agent runs. These settings apply to new sessions; open and resumed sessions keep the configuration they started with."}
+                {SETTINGS_COPY[activeSection].description}
               </p>
             </div>
             <SaveIndicator visible={savedFeedback} />
           </header>
 
-          {storageWarning && (
+          {(activeSection === "providers" ||
+            activeSection === "connection" ||
+            activeSection === "observability") && (
+            <SharedConfigSettings
+              key={activeSection}
+              section={activeSection}
+              onDirty={setConfigDirty}
+              onBusy={setConfigBusy}
+            />
+          )}
+          <Modal
+            open={pendingSection !== null}
+            onClose={() => setPendingSection(null)}
+            title="Unsaved settings"
+          >
+            <p className="mb-5 text-sm">
+              Discard your unsaved settings changes and switch sections?
+            </p>
+            <div className="flex gap-3">
+              <Button onClick={() => setPendingSection(null)}>
+                Keep editing
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  if (pendingSection) setActiveSection(pendingSection);
+                  setConfigDirty(false);
+                  setPendingSection(null);
+                }}
+              >
+                Discard and switch
+              </Button>
+            </div>
+          </Modal>
+          {activeSection === "chat" && storageWarning && (
             <p
               className="mt-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
               role="status"
@@ -2141,7 +2236,7 @@ export function SettingsPage({
                 }}
               />
             </>
-          ) : (
+          ) : activeSection === "chat" ? (
             <>
               <div className="mt-8 border-t border-[var(--color-line)]">
                 <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
@@ -2248,7 +2343,7 @@ export function SettingsPage({
                 </div>
               )}
             </>
-          )}
+          ) : null}
         </div>
       </section>
       {reviewOpen &&

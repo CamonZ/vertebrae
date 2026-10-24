@@ -86,7 +86,12 @@ pub async fn initialize_project(
     path: String,
     name: Option<String>,
 ) -> Result<InitializeProjectResult, CommandError> {
-    let capabilities = installed_harness_capabilities(&local_chat_manager.catalog().await);
+    let capabilities =
+        installed_harness_capabilities(&local_chat_manager.catalog().await.map_err(|error| {
+            CommandError {
+                message: error.to_string(),
+            }
+        })?);
     initialize_project_inner(path, name, capabilities).await
 }
 
@@ -185,7 +190,12 @@ pub async fn add_project(
     path: String,
 ) -> Result<SavedProject, CommandError> {
     log::info!("add_project called with path: {}", path);
-    let capabilities = installed_harness_capabilities(&local_chat_manager.catalog().await);
+    let capabilities =
+        installed_harness_capabilities(&local_chat_manager.catalog().await.map_err(|error| {
+            CommandError {
+                message: error.to_string(),
+            }
+        })?);
     let result = initialize_project_inner(path, None, capabilities).await?;
 
     Ok(SavedProject {
@@ -796,6 +806,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         };
 
         ensure_project_slug_available_for_path(&config, "duplicate", &registered).unwrap();
@@ -845,6 +856,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         })
         .unwrap();
         let custom_status = sacrum_config_status().await.unwrap();
@@ -921,6 +933,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         })
         .unwrap();
 
@@ -964,6 +977,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         })
         .unwrap();
 
@@ -1043,6 +1057,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         })
         .unwrap();
 
@@ -1094,6 +1109,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         })
         .unwrap();
 

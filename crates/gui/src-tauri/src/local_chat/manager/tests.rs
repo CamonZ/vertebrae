@@ -171,7 +171,7 @@ async fn catalog_defaults_to_the_first_available_harness_and_retains_diagnostics
         ),
         Arc::new(MockHarness::new(LocalChatHarnessKind::Codex)),
     ]);
-    let catalog = manager.catalog().await;
+    let catalog = manager.catalog().await.unwrap();
 
     assert_eq!(catalog.default_harness, LocalChatHarnessKind::Codex);
     assert_eq!(
@@ -200,7 +200,7 @@ async fn catalog_uses_claude_when_it_is_the_only_available_harness() {
     ]);
 
     assert_eq!(
-        manager.catalog().await.default_harness,
+        manager.catalog().await.unwrap().default_harness,
         LocalChatHarnessKind::Claude
     );
 }
@@ -215,7 +215,7 @@ async fn catalog_falls_back_to_claude_kind_when_neither_harness_is_available() {
     ]);
 
     assert_eq!(
-        manager.catalog().await.default_harness,
+        manager.catalog().await.unwrap().default_harness,
         LocalChatHarnessKind::Claude
     );
 }
@@ -252,7 +252,7 @@ async fn catalog_lists_builtin_and_custom_providers_but_not_typesafe_profiles() 
     ])
     .with_provider_profiles_for_tests(custom_profiles());
 
-    let catalog = manager.catalog().await;
+    let catalog = manager.catalog().await.unwrap();
 
     let ids = catalog
         .providers
@@ -899,4 +899,85 @@ async fn failed_gate_session_start_drops_the_binding() {
 
     assert!(result.is_err());
     assert!(!bridge.has_gate_binding("backend-gate"));
+}
+
+#[tokio::test]
+async fn new_sessions_and_catalogs_reload_without_mutating_existing_sessions() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.toml");
+    let profile = |model: &str, endpoint: &str, key: &str| {
+        format!("[providers.dynamic]\nharness = 'codex'\nmodels = ['{model}']\nbase_url = '{endpoint}'\napi_key = '{key}'\n")
+    };
+    std::fs::write(
+        &path,
+        profile("old-model", "http://localhost:8001", "old-key"),
+    )
+    .unwrap();
+    let harness = Arc::new(MockHarness::new(LocalChatHarnessKind::Codex));
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![harness.clone()])
+        .with_provider_config_path_for_tests(path.clone());
+    let mut first = create_input(LocalChatHarnessKind::Codex, "first");
+    first.provider_id = Some("dynamic".into());
+    manager
+        .create_session_with_runtime(first, LocalChatRuntime::inert_for_tests())
+        .await
+        .unwrap();
+    std::fs::write(
+        &path,
+        profile("new-model", "http://localhost:8002", "new-key"),
+    )
+    .unwrap();
+    let catalog = manager.catalog().await.unwrap();
+    let dynamic = catalog
+        .providers
+        .iter()
+        .find(|provider| provider.id == "dynamic")
+        .unwrap();
+    assert_eq!(dynamic.models.as_ref().unwrap()[0].id, "new-model");
+    let mut second = create_input(LocalChatHarnessKind::Codex, "second");
+    second.provider_id = Some("dynamic".into());
+    manager
+        .create_session_with_runtime(second, LocalChatRuntime::inert_for_tests())
+        .await
+        .unwrap();
+    let calls = harness.calls();
+    let MockCall::Create(first) = &calls[0] else {
+        panic!("expected first create")
+    };
+    let MockCall::Create(second) = &calls[1] else {
+        panic!("expected second create")
+    };
+    let first = &first.provider.as_ref().unwrap().profile;
+    let second = &second.provider.as_ref().unwrap().profile;
+    assert_eq!(first.models, vec!["old-model"]);
+    assert_eq!(first.api_key.as_deref(), Some("old-key"));
+    assert_eq!(first.base_url.as_deref(), Some("http://localhost:8001"));
+    assert_eq!(second.models, vec!["new-model"]);
+    assert_eq!(second.api_key.as_deref(), Some("new-key"));
+    assert_eq!(second.base_url.as_deref(), Some("http://localhost:8002"));
+    std::fs::write(&path, "api_key = 'secret-that-must-not-leak\n").unwrap();
+    assert!(manager.catalog().await.is_err());
+    let mut invalid = create_input(LocalChatHarnessKind::Codex, "invalid");
+    invalid.provider_id = Some("dynamic".into());
+    let error = manager
+        .create_session_with_runtime(invalid, LocalChatRuntime::inert_for_tests())
+        .await
+        .unwrap_err();
+    assert!(!error.to_string().contains("secret-that-must-not-leak"));
+    manager.send_message("first", "still active").await.unwrap();
+    assert!(
+        matches!(harness.calls().last(), Some(MockCall::Send { backend_session_id, .. }) if backend_session_id == "first")
+    );
+    std::fs::write(
+        &path,
+        profile("recovered", "http://localhost:8003", "recovered-key"),
+    )
+    .unwrap();
+    assert!(manager
+        .catalog()
+        .await
+        .unwrap()
+        .providers
+        .iter()
+        .any(|provider| provider.id == "dynamic"));
 }

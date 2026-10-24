@@ -222,7 +222,12 @@ fn local_chat_session_index_path() -> Result<PathBuf, CommandError> {
 pub async fn get_supported_local_chat_harnesses(
     local_chat_manager: State<'_, LocalChatSessionManager>,
 ) -> Result<LocalChatHarnessCatalog, CommandError> {
-    Ok(local_chat_manager.catalog().await)
+    local_chat_manager
+        .catalog()
+        .await
+        .map_err(|error| CommandError {
+            message: error.to_string(),
+        })
 }
 
 /// Create a provider-neutral local chat session.
@@ -476,16 +481,16 @@ pub async fn infer_local_chat_session_title(
         working_dir
     );
 
-    let custom_provider = match custom_title_provider(
-        local_chat_manager.provider_profiles(),
-        input.provider_id.as_deref(),
-    ) {
-        Ok(custom_provider) => custom_provider,
-        Err(message) => {
-            log::warn!("infer_local_chat_session_title failed: {message}");
-            return Err(CommandError { message });
-        }
-    };
+    let provider_id = input.provider_id.clone();
+    let custom_provider = local_chat_manager
+        .with_provider_profiles(move |profiles| {
+            custom_title_provider(profiles, provider_id.as_deref())
+                .map_err(LocalChatSessionError::StartFailed)
+        })
+        .await
+        .map_err(|error| CommandError {
+            message: error.to_string(),
+        })?;
 
     match infer_session_title(input, custom_provider).await {
         Ok(output) => {

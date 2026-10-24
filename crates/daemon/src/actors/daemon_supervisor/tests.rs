@@ -364,8 +364,10 @@ fn sample_daemon_config() -> DaemonConfig {
                 warning: None,
             },
             typesafe_api_key: None,
+            typesafe_api_key_secret: None,
             typesafe_base_url: None,
             typesafe_url: None,
+            provider_config_path: None,
             provider_profiles: Default::default(),
         }),
     )

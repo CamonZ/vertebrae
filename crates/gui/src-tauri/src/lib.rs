@@ -70,6 +70,8 @@ fn create_builder() -> Builder {
             // Project management commands
             commands::get_projects,
             commands::sacrum_config_status,
+            commands::get_shared_settings,
+            commands::save_shared_settings,
             commands::save_sacrum_settings,
             commands::setup_local_backend,
             commands::local_backend_runtimes,

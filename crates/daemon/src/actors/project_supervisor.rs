@@ -90,6 +90,12 @@ pub enum ProjectMessage {
         task_id: String,
         result: StepResult,
     },
+    /// The executor captured its live provider snapshot. No credentials cross
+    /// the actor boundary; this corrects metadata if settings changed at launch.
+    ProviderResolved {
+        execution_id: String,
+        metadata: ExecutionMetadata,
+    },
     /// A session step started a new provider conversation. Sent before the
     /// id reaches Sacrum, so a resume of it is dispatched only afterwards.
     SessionBound {
@@ -140,6 +146,14 @@ impl std::fmt::Debug for ProjectMessage {
                 .field("execution_id", execution_id)
                 .field("task_id", task_id)
                 .field("result", result)
+                .finish(),
+            Self::ProviderResolved {
+                execution_id,
+                metadata,
+            } => f
+                .debug_struct("ProviderResolved")
+                .field("execution_id", execution_id)
+                .field("metadata", metadata)
                 .finish(),
             Self::SessionBound {
                 execution_id,
@@ -520,7 +534,7 @@ pub struct ExecutionMetadata {
 
 /// Resolve the metadata the daemon reports for an execution. The provider is
 /// the real provider ID (built-in or custom) and the harness is the one that
-/// runs it, resolved against the daemon's startup provider profiles; the
+/// runs it, resolved against the supplied provider snapshot; the
 /// model is never inferred from the model string.
 pub fn resolved_execution_metadata(
     agent_config: &AgentConfig,
@@ -684,6 +698,14 @@ impl Actor for ProjectSupervisor {
             } => {
                 self.handle_step_finished(&execution_id, &task_id, &result, state)
                     .await;
+            }
+            ProjectMessage::ProviderResolved {
+                execution_id,
+                metadata,
+            } => {
+                if state.running_executors.contains_key(&execution_id) {
+                    state.pending_metadata.insert(execution_id, metadata);
+                }
             }
             ProjectMessage::SessionBound {
                 execution_id,
@@ -1069,13 +1091,34 @@ impl ProjectSupervisor {
             }
             return Ok(());
         }
+        let request_capabilities =
+            if matches!(step_config.execution_kind, ExecutionKind::Execute(_)) {
+                state.capabilities.clone()
+            } else {
+                match state.capabilities.latest_provider_metadata().await {
+                    Ok(capabilities) => Arc::new(capabilities),
+                    Err(error) => {
+                        let params = UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
+                            .with_output(format!("Provider settings reload failed: {error}"));
+                        if let Err(error) = state
+                            .services
+                            .executions()
+                            .update_execution_status(execution_id, params)
+                            .await
+                        {
+                            tracing::error!(%error, "Could not report provider settings failure");
+                        }
+                        return Ok(());
+                    }
+                }
+            };
         let metadata = if matches!(step_config.execution_kind, ExecutionKind::Execute(_)) {
             None
         } else {
             Some(resolved_execution_metadata(
                 &step_config.agent_config,
                 step_config.harness,
-                &state.capabilities,
+                &request_capabilities,
             ))
         };
         let mut running_params = UpdateExecutionStatusParams::new(ExecutionStatus::InProgress);
@@ -1120,7 +1163,7 @@ impl ProjectSupervisor {
             step_config,
             project_root: state.project_root.clone(),
             worktree,
-            capabilities: state.capabilities.clone(),
+            capabilities: request_capabilities,
             execution_service: state.services.executions_arc(),
             script_worker: Arc::clone(&state.script_worker),
             script_scope: ScriptScope {
@@ -1460,8 +1503,10 @@ mod tests {
                 warning: None,
             },
             typesafe_api_key: None,
+            typesafe_api_key_secret: None,
             typesafe_base_url: None,
             typesafe_url: None,
+            provider_config_path: None,
             provider_profiles: Default::default(),
         });
         ProjectConfig {
@@ -2428,8 +2473,10 @@ done
                     warning: None,
                 },
                 typesafe_api_key: None,
+                typesafe_api_key_secret: None,
                 typesafe_base_url: None,
                 typesafe_url: None,
+                provider_config_path: None,
                 provider_profiles: Default::default(),
             }),
         };
@@ -3500,8 +3547,10 @@ done
                 warning: None,
             },
             typesafe_api_key: None,
+            typesafe_api_key_secret: None,
             typesafe_base_url: None,
             typesafe_url: None,
+            provider_config_path: None,
             provider_profiles: std::collections::BTreeMap::from([(
                 ProviderId::new("openrouter").unwrap(),
                 vertebrae_core::ProviderProfile {

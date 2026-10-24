@@ -141,6 +141,9 @@ pub struct ProviderProfile {
     /// Literal API credential, used when `api_key_env` is unset or blank.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// UUID reference in this OS user's Vertebrae credential store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_secret: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -165,6 +168,7 @@ impl fmt::Debug for ProviderProfile {
             .field("base_url", &self.base_url.as_deref().map(redacted_base_url))
             .field("url", &self.url.as_ref().map(|_| "<redacted>"))
             .field("api_key_env", &self.api_key_env)
+            .field("api_key_secret", &self.api_key_secret)
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field("env", &env)
             .field("models", &self.models)
@@ -190,6 +194,7 @@ impl ProviderProfile {
             url: None,
             api_key_env: None,
             api_key: None,
+            api_key_secret: None,
             env: BTreeMap::new(),
             models: Vec::new(),
             default_model: None,
@@ -277,15 +282,22 @@ impl ProviderProfile {
         }
     }
 
-    /// Resolve the API credential. A nonblank value of the `api_key_env`
-    /// variable takes precedence over the literal `api_key`.
+    /// Resolve legacy inline/environment credentials. A nonblank `api_key_env`
+    /// wins. OS references are resolved by the harness; when one is configured,
+    /// this helper never falls back to a legacy inline credential.
     pub fn resolve_api_key(&self, lookup: impl Fn(&str) -> Option<String>) -> Option<String> {
         let nonblank = |value: String| (!value.trim().is_empty()).then_some(value);
         self.api_key_env
             .as_deref()
             .and_then(|name| lookup(name.trim()))
             .and_then(nonblank)
-            .or_else(|| self.api_key.clone().and_then(nonblank))
+            .or_else(|| {
+                if self.api_key_secret.is_some() {
+                    None
+                } else {
+                    self.api_key.clone().and_then(nonblank)
+                }
+            })
     }
 }
 

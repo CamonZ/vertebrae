@@ -24,6 +24,7 @@ path = "src/bin/generate-types.rs"
 tauri-build = { version = "2.5.3", features = [] }
 
 [dependencies]
+vertebrae-credentials = { path = "../../credentials" }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 semver = "1"

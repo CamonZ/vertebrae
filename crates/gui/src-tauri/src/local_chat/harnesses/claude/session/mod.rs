@@ -830,13 +830,20 @@ impl ClaudeSessionRuntime {
                 ..RequestConfig::default()
             },
         };
-        let instance = match (self.runtime_factory)(
-            factory_config,
-            HarnessRuntimeOptions {
-                agent_config,
-                request_config: request.config.clone(),
-            },
-        ) {
+        let runtime_factory = self.runtime_factory.clone();
+        let options = HarnessRuntimeOptions {
+            agent_config,
+            request_config: request.config.clone(),
+        };
+        let construction =
+            tokio::task::spawn_blocking(move || runtime_factory(factory_config, options))
+                .await
+                .unwrap_or_else(|_| {
+                    Err(HarnessError::Operation(
+                        "Provider construction failed".into(),
+                    ))
+                });
+        let instance = match construction {
             Ok(harness) => harness,
             Err(error) => {
                 #[cfg(unix)]
