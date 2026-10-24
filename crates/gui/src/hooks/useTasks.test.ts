@@ -28,6 +28,83 @@ describe("useTasks", () => {
     vi.clearAllMocks();
   });
 
+  it("keeps only matching rows mounted while a filter request is pending and preserves live changes", async () => {
+    queryClient.clear();
+    resetProjectScopedStores();
+    const keep = createMockTask({ id: "keep-placeholder", title: "Keep this" });
+    const other = createMockTask({ id: "other-placeholder", title: "Other" });
+    let finish!: (value: { status: "ok"; data: Task[] }) => void;
+    mockListTasks
+      .mockResolvedValueOnce({ status: "ok", data: [keep, other] })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+    const filter = {
+      step_names: null,
+      levels: null,
+      tags: null,
+      root_only: null,
+      children_of: null,
+      search: null,
+      workflow_id: null,
+      step_id: null,
+    };
+    const { result, rerender } = renderHook(
+      ({ search }) => useTasks({ ...filter, search }),
+      { wrapper, initialProps: { search: null as string | null } }
+    );
+    await waitFor(() => expect(result.current.tasks).toHaveLength(2));
+    rerender({ search: "Keep" });
+    expect(result.current.tasks).toEqual([keep]);
+    expect(result.current.tasks[0]).toBe(keep);
+    expect(result.current.isLoading).toBe(false);
+    const live = {
+      ...keep,
+      title: "Keep live update",
+      updated_at: "2099-01-01T00:00:00Z",
+    };
+    act(() => upsertTaskInQueryCache(live));
+    expect(
+      queryClient.getQueryData(
+        queryKeys.tasks.list(getProjectScopeGeneration(), {
+          ...filter,
+          search: "Keep",
+        })
+      )
+    ).toBeUndefined();
+    expect(result.current.tasks).toHaveLength(1);
+    await act(async () => finish({ status: "ok", data: [keep] }));
+    await waitFor(() =>
+      expect(result.current.tasks[0].title).toBe("Keep live update")
+    );
+  });
+
+  it("does not retain placeholder rows when the project scope changes", async () => {
+    queryClient.clear();
+    resetProjectScopedStores();
+    let finish!: (value: { status: "ok"; data: Task[] }) => void;
+    mockListTasks
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: [createMockTask({ id: "old-scope-placeholder" })],
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+    const { result } = renderHook(() => useTasks(), { wrapper });
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1));
+    act(() => resetProjectScopedStores());
+    expect(result.current.tasks).toEqual([]);
+    expect(result.current.isLoading).toBe(true);
+    await act(async () => finish({ status: "ok", data: [] }));
+  });
+
   it("shares one request for null and all-null unfiltered filters", async () => {
     queryClient.clear();
     resetProjectScopedStores();

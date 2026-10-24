@@ -251,9 +251,14 @@ export function TasksPage() {
     [activeRunsByTaskId, tasks]
   );
 
+  // Weak keys retain reusable nodes only while their task snapshots are live.
+  const treeCache = useMemo(
+    () => new WeakMap<Task, import("../types/ui").TaskTreeNode>(),
+    []
+  );
   const hierarchy = useMemo(
-    () => buildTreeFromTasks(scopedTasks),
-    [scopedTasks]
+    () => buildTreeFromTasks(scopedTasks, treeCache),
+    [scopedTasks, treeCache]
   );
 
   // "Filtering" mirrors the prototype: a scope chip (other than "all") or a

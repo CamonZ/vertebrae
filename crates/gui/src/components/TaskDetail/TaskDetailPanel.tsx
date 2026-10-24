@@ -222,7 +222,8 @@ export function TaskDetailPanel({
   }, [taskId]);
   const { stepExecutions: activeRunExecutions } = useRunTrace(
     taskId,
-    activeRun?.id
+    activeRun?.status === "waiting" ? activeRun.id : null,
+    { includeExecutionLogs: false }
   );
 
   const {
@@ -358,9 +359,19 @@ export function TaskDetailPanel({
     (event: { payload: TaskChangedEvent }) => {
       const { task_id, change_type } = event.payload;
 
-      if (task_id !== taskId) {
-        return;
+      if (task_id !== taskId) return;
+      if (pendingRefetch.current) {
+        clearTimeout(pendingRefetch.current);
+        pendingRefetch.current = null;
       }
+      // Complete projections are already applied by the global listener.
+      // Deletion/archive and legacy events still need their recovery read.
+      if (
+        change_type !== "Deleted" &&
+        !event.payload.archived &&
+        event.payload.task
+      )
+        return;
 
       console.debug(
         `[TaskDetailPanel] Received ${change_type} event for task ${task_id.slice(0, 6)}`
@@ -371,9 +382,6 @@ export function TaskDetailPanel({
         return;
       }
 
-      if (pendingRefetch.current) {
-        clearTimeout(pendingRefetch.current);
-      }
       pendingRefetch.current = setTimeout(() => {
         refetchRef.current();
         pendingRefetch.current = null;
@@ -1320,7 +1328,7 @@ export function TaskDetailPanel({
         onClose={onClose}
         isOpen={taskId != null && !closing}
         shouldHandleEscape={() => editingField === null && onClose != null}
-        className="tasks-v2"
+        className="tasks-v2 detail-opaque"
         testId="task-detail-panel"
       >
         {content}

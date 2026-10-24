@@ -1,3 +1,4 @@
+import { preloadTaskDetailFontAfterStyles } from "./utils/preloadTaskDetailFont";
 import { StrictMode, useState, useEffect } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
@@ -13,6 +14,8 @@ import {
   createGuiUpdateScheduler,
 } from "./update";
 import { installActionableReferenceClickRecovery } from "./utils/actionableReferenceClickRecovery";
+
+void preloadTaskDetailFontAfterStyles();
 
 function App() {
   const [booting, setBooting] = useState(true);

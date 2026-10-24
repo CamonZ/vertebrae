@@ -44,7 +44,7 @@ function taskListFilterFromKey(
 }
 
 function reconcileTaskList(
-  tasks: readonly Task[] | undefined,
+  tasks: Task[] | undefined,
   task: Task,
   filter: TaskFilterOptions | null,
   generation: number
@@ -56,7 +56,9 @@ function reconcileTaskList(
   const location = cachedTaskLocation(mergedTask, generation);
 
   if (!taskMatchesFilter(mergedTask, filter, location)) {
-    return current.filter((item) => item.id !== task.id);
+    return index === -1
+      ? current
+      : current.filter((item) => item.id !== task.id);
   }
 
   if (index === -1) return [...current, mergedTask];
@@ -457,13 +459,15 @@ export function upsertTaskInQueryCache(
   const lists = queryClient.getQueriesData<Task[]>({
     queryKey: queryKeys.tasks.lists(generation),
   });
-  for (const [key] of lists) {
-    const filter = taskListFilterFromKey(key);
-    queryClient.setQueryData<Task[] | undefined>(key, (currentTasks) =>
-      currentTasks === undefined
-        ? undefined
-        : reconcileTaskList(currentTasks, task, filter, generation)
+  for (const [key, currentTasks] of lists) {
+    if (!currentTasks) continue;
+    const next = reconcileTaskList(
+      currentTasks,
+      task,
+      taskListFilterFromKey(key),
+      generation
     );
+    if (next !== currentTasks) queryClient.setQueryData(key, next);
   }
 }
 

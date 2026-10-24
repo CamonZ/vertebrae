@@ -817,3 +817,37 @@ describe("server cache helpers", () => {
     ).toEqual([]);
   });
 });
+
+describe("unaffected filtered task queries", () => {
+  it("does not publish an update when a task is absent and does not match", () => {
+    queryClient.clear();
+    const key = queryKeys.tasks.list(0, {
+      step_names: null,
+      levels: ["epic"],
+      tags: null,
+      root_only: null,
+      children_of: null,
+      search: null,
+      workflow_id: null,
+      step_id: null,
+    });
+    queryClient.setQueryData(key, []);
+    let updates = 0;
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        event.type === "updated" &&
+        event.query.queryKey ===
+          queryClient.getQueryCache().find({ queryKey: key, exact: true })
+            ?.queryKey
+      )
+        updates++;
+    });
+    upsertTaskInQueryCache(
+      createMockTask({ id: "unrelated", level: "task" }),
+      0
+    );
+    expect(updates).toBe(0);
+    expect(queryClient.getQueryData(key)).toEqual([]);
+    unsubscribe();
+  });
+});

@@ -9,6 +9,7 @@ import {
   queryKeys,
   unwrapCommand,
 } from "../query";
+import { shareTaskList } from "../query/taskListSharing";
 import { mergeTask, taskMatchesFilter } from "../utils/taskMerge";
 
 // Stable fallback for renders where the query has no data yet (loading or
@@ -44,6 +45,17 @@ export function useTasks(filter?: TaskFilterOptions) {
 
   const query = useQuery({
     queryKey,
+    structuralSharing: shareTaskList,
+    // Keep matching rows mounted across filter requests in the same project.
+    // Never carry a previous project's data into a new scope.
+    placeholderData: (previous, previousQuery) => {
+      if (!previous || previousQuery?.queryKey[1] !== projectScopeGeneration)
+        return undefined;
+      const matching = previous.filter((task) =>
+        taskMatchesFilter(task, activeFilter)
+      );
+      return matching.length === previous.length ? previous : matching;
+    },
     queryFn: async () => {
       const tasksAtFetchStart = new Map(
         (queryClient.getQueryData<Task[]>(queryKey) ?? []).map((task) => [
