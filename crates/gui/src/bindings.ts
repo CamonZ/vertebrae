@@ -36,6 +36,22 @@ async sacrumConfigStatus() : Promise<Result<SacrumConfigStatus, CommandError>> {
     else return { status: "error", error: e  as any };
 }
 },
+async getSharedSettings() : Promise<Result<SharedSettings, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_shared_settings") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveSharedSettings(revision: string, edit: SettingsEdit) : Promise<Result<SharedSettings, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_shared_settings", { revision, edit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async saveSacrumSettings(url: string, token: string) : Promise<Result<SacrumConfigStatus, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("save_sacrum_settings", { url, token }) };
@@ -1498,6 +1514,7 @@ export type DaemonMetrics = { daemon_version?: string | null; os?: string | null
 export type DaemonMetricsEvent = { connection_id: string; daemon_id: string; schema_version: number; metrics: DaemonMetrics }
 export type DaemonMutationResult = { connection_id: string; daemon: Daemon }
 export type DaemonNameUpdate = { kind: "unchanged" } | { kind: "clear" } | { kind: "set"; value: string }
+export type EnvironmentEdit = { name: string; secret: SecretEdit }
 /**
  * Execute config shared by workflow definitions and execution records.
  * Context is server-written only on runtime execution snapshots; null on definitions.
@@ -1813,6 +1830,7 @@ export type NotificationPage = { notifications: Notification[]; has_more: boolea
  * How a durable notification is styled.
  */
 export type NotificationSeverity = "info" | "success" | "warning" | "error"
+export type ObservabilitySettings = { enabled: boolean; endpoint: string; protocol: string; signals: string[]; subsystems: string[]; level: string; capture_message_content: boolean }
 export type PermissionDecisionBehavior = "allow" | "deny"
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode
@@ -1872,6 +1890,7 @@ export type PipelineWorkflow = { id: string; name: string; description: string |
  * Inter-workflow transition entry returned by `pipeline_summary`.
  */
 export type PipelineWorkflowTransition = { id: string; from_workflow_id: string; to_workflow_id: string; target_step_id: string | null; label: string }
+export type ProviderSettings = { id: string; harness: string; endpoint: string; endpoint_hidden: boolean; models: string[]; default_model: string; api_key_env: string; has_api_key: boolean; key_storage: string; credential_override: boolean; environment_names: string[]; wire_api: string }
 export type ResolvePermissionRequestError = { kind: ResolvePermissionRequestErrorKind; message: string }
 export type ResolvePermissionRequestErrorKind = "unavailable" | "not_found" | "invalid" | "internal"
 export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
@@ -1921,6 +1940,7 @@ project_id: string;
  * Git root path for the project
  */
 path: string }
+export type SecretEdit = { action: "keep" } | { action: "replace"; value: string } | { action: "clear" } | { action: "migrate" }
 /**
  * Section content within a task
  */
@@ -2030,6 +2050,8 @@ export type SessionLogUpdatedEvent = { log_id: string; step_execution_id: string
  * How an llm_inference destination enters its provider conversation.
  */
 export type SessionMode = "new" | "resume" | "fork"
+export type SettingsEdit = { section: "connection"; url: string; token: SecretEdit } | { section: "typesafe"; url: string; key: SecretEdit } | { section: "provider"; id: string; create: boolean; harness: string; endpoint: string; models: string[]; default_model: string; api_key_env: string; key: SecretEdit; environment: EnvironmentEdit[]; wire_api: string } | { section: "observability"; settings: ObservabilitySettings }
+export type SharedSettings = { revision: string; path: string; connection_url: string; has_connection_token: boolean; effective_connection_url: string; connection_url_override: boolean; connection_token_override: boolean; typesafe_url: string; typesafe_endpoint_hidden: boolean; has_typesafe_key: boolean; typesafe_key_storage: string; credential_warning: string | null; typesafe_key_override: boolean; typesafe_url_override: boolean; providers: ProviderSettings[]; observability: ObservabilitySettings }
 /**
  * Workflow step entity - mirrors core::Step
  */

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useProviderSettingsStore } from "../stores/providerSettingsStore";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocalChat } from "./useLocalChat";
 import { commands } from "../bindings";
 import type {
@@ -41,6 +42,10 @@ import {
 // ---------------------------------------------------------------------------
 
 export function useChatSession(sessionId: string) {
+  const providerSettingsRevision = useProviderSettingsStore(
+    (state) => state.revision
+  );
+  const hasLoadedCatalog = useRef(false);
   const [inputValue, setInputValue] = useState("");
   const [harnessCatalog, setHarnessCatalog] =
     useState<LocalChatHarnessCatalog | null>(null);
@@ -77,13 +82,16 @@ export function useChatSession(sessionId: string) {
   );
   const localChatDefaults = useLocalChatDefaultsStore((s) => s.defaults);
 
-  // --- Harness catalog fetch ---
+  // Existing live sessions retain the catalog they started with. Closed or
+  // not-yet-started sessions refresh before their next request.
   useEffect(() => {
+    if (isActive && hasLoadedCatalog.current) return;
     let cancelled = false;
     void commands
       .getSupportedLocalChatHarnesses()
       .then((result) => {
         if (!cancelled && result.status === "ok") {
+          hasLoadedCatalog.current = true;
           setHarnessCatalog(result.data);
         }
       })
@@ -93,7 +101,7 @@ export function useChatSession(sessionId: string) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [providerSettingsRevision, isActive]);
 
   // --- Derived provider/harness state ---
   // The picker selects a provider; its harness is derived from it. Built-in

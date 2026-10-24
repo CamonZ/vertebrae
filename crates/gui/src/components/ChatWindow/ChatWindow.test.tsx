@@ -1,3 +1,4 @@
+import { useProviderSettingsStore } from "../../stores/providerSettingsStore";
 import { withBuiltinProviders } from "../../test/localChatCatalog";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
@@ -689,6 +690,70 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.getByTitle("Clear messages")).toBeInTheDocument();
+  });
+
+  it("refreshes model choices after provider settings are saved before a session starts", async () => {
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+    const picker = await screen.findByTestId("local-chat-model-picker");
+    expect(picker).toHaveTextContent("Sonnet");
+    const latest = withBuiltinProviders({
+      default_harness: "claude",
+      harnesses: [
+        {
+          harness: "claude",
+          label: "Claude",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "new-model",
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [{ id: "new-model", label: "New model" }],
+        },
+      ],
+    });
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+      status: "ok",
+      data: latest,
+    });
+    act(() => useProviderSettingsStore.getState().changed());
+    await waitFor(() =>
+      expect(screen.getByTestId("local-chat-model-picker")).toHaveTextContent(
+        "New model"
+      )
+    );
+  });
+
+  it("keeps an active session's model catalog when provider settings change", async () => {
+    const session = createSession({
+      backendSessionId: "active-backend",
+      selectedModelId: "sonnet",
+      lifecycle: "idle",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+    const picker = await screen.findByTestId("local-chat-model-picker");
+    expect(picker).toHaveTextContent("Sonnet");
+    const calls =
+      mockedCommands.getSupportedLocalChatHarnesses.mock.calls.length;
+    act(() => useProviderSettingsStore.getState().changed());
+    expect(mockedCommands.getSupportedLocalChatHarnesses).toHaveBeenCalledTimes(
+      calls
+    );
+    expect(picker).toHaveTextContent("Sonnet");
+    expect(
+      useChatStore.getState().sessions["test-session"].selectedModelId
+    ).toBe("sonnet");
   });
 
   it("renders the Claude model picker without forcing a model for a new session", async () => {

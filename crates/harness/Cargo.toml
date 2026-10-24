@@ -6,6 +6,8 @@ description = "Provider-selecting composition layer for the V1 harness contract"
 license = "Apache-2.0"
 
 [dependencies]
+tokio = { version = "1", features = ["rt"] }
+vertebrae-credentials = { path = "../credentials" }
 serde_json = "1"
 vertebrae-core = { path = "../core" }
 vertebrae-harness-claude = { path = "../harness-claude" }

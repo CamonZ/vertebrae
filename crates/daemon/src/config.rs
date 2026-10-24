@@ -140,6 +140,7 @@ pub struct ResolvedConfig {
     pub sacrum_url: String,
     pub api_token: Option<String>,
     pub typesafe_api_key: Option<String>,
+    pub typesafe_api_key_secret: Option<String>,
     pub typesafe_url: Option<String>,
     /// Custom `[providers.<id>]` profiles; Debug output redacts secrets.
     pub provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
@@ -500,6 +501,7 @@ impl ResolvedConfig {
             sacrum_url,
             api_token: config.sacrum.token.clone(),
             typesafe_api_key: config.typesafe.api_key.clone(),
+            typesafe_api_key_secret: config.typesafe.api_key_secret.clone(),
             typesafe_url: config.typesafe.url.clone(),
             provider_profiles: config.providers.clone(),
             daemon_identity,
@@ -533,6 +535,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         }
     }
 
@@ -575,6 +578,7 @@ mod tests {
     fn resolved_config_keeps_typesafe_key_daemon_side_and_redacts_debug() {
         let mut config = config(Some("account-token"));
         config.typesafe.api_key = Some("typesafe-config-secret".into());
+        config.typesafe.api_key_secret = Some("11111111-1111-4111-8111-111111111111".into());
         config.typesafe.url =
             Some("https://config-user:typesafe-url-secret@example.test/v1/systemone".into());
 
@@ -589,6 +593,10 @@ mod tests {
 
         let resolved = ResolvedConfig::from_config_file(&config).unwrap();
         assert_eq!(resolved.provider_profiles, config.providers);
+        assert_eq!(
+            resolved.typesafe_api_key_secret,
+            config.typesafe.api_key_secret
+        );
         assert_eq!(
             resolved.typesafe_api_key.as_deref(),
             Some("typesafe-config-secret")

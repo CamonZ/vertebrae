@@ -410,7 +410,12 @@ process-local capability snapshot shared by all project and step actors. The
 snapshot is observational: a missing provider remains present with its
 diagnostic, and the requested step retains the existing provider error path.
 Installing or updating Claude Code, providers, or skills while the daemon is
-running takes effect after restart.
+running takes effect after restart. File-backed provider profiles, TypeSafe
+settings and credential references are captured separately for each new request;
+active executions retain their owned configuration. Credential resolution holds
+a shared config-file lock until the selected key is captured, coordinating with
+atomic settings writes and retirement of old OS-store entries. Custom-provider
+readiness metadata is refreshed on the existing application heartbeat.
 
 ## GUI (`crates/gui`)
 

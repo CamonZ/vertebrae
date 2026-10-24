@@ -12,6 +12,8 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros"] }
 thiserror = "2"
 toml = "0.9"
+toml_edit = "0.23"
+fs2 = "0.4"
 log = "0.4"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }

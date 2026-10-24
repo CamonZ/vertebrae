@@ -2,7 +2,7 @@
 //!
 //! Provider-specific launch arguments and protocols live in the reusable
 //! harness crates. The daemon only selects the requested provider (built-in or
-//! a custom `[providers.<id>]` profile from its startup config) and reports
+//! a custom `[providers.<id>]` profile from its request config) and reports
 //! configuration or startup-resolution errors to the workflow.
 
 use vertebrae_core::models::AgentConfig;
@@ -37,7 +37,7 @@ impl std::fmt::Display for ProviderResolutionError {
 impl std::error::Error for ProviderResolutionError {}
 
 /// Resolve which provider and harness should run this step, using the custom
-/// provider profiles captured at daemon startup.
+/// provider profiles captured for this request.
 pub fn resolve_provider(config: &StepExecutorConfig) -> Result<ResolvedProvider, HarnessError> {
     resolve_provider_from_agent_config(
         config.step_config.harness,

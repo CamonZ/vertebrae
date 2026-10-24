@@ -26,6 +26,7 @@ pub struct LocalChatSessionManager {
     permission_bridge: PermissionBridge,
     shutdown_started: AtomicBool,
     provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
+    provider_config_path: Option<std::path::PathBuf>,
 }
 
 const LOCAL_CHAT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
@@ -61,6 +62,7 @@ impl LocalChatSessionManager {
             PermissionBridge::new(),
         );
         manager.provider_profiles = provider_profiles;
+        manager.provider_config_path = vertebrae_sacrum_client::config_path();
         manager
     }
 
@@ -73,8 +75,39 @@ impl LocalChatSessionManager {
         self
     }
 
-    pub(crate) fn provider_profiles(&self) -> &BTreeMap<ProviderId, ProviderProfile> {
-        &self.provider_profiles
+    /// Run a per-request operation against one locked file snapshot. Active
+    /// harness sessions retain their existing owned provider configuration.
+    pub(crate) async fn with_provider_profiles<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&BTreeMap<ProviderId, ProviderProfile>) -> Result<T, LocalChatSessionError>
+            + Send
+            + 'static,
+    ) -> Result<T, LocalChatSessionError> {
+        let path = self.provider_config_path.clone();
+        let fixed = self.provider_profiles.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some(path) = path {
+                let snapshot = vertebrae_sacrum_client::config::lock_config_snapshot_at(&path)
+                    .map_err(|_| {
+                        LocalChatSessionError::StartFailed(
+                            "Could not read provider settings. Check config.toml and retry.".into(),
+                        )
+                    })?;
+                operation(&snapshot.config().providers)
+            } else {
+                operation(&fixed)
+            }
+        })
+        .await
+        .map_err(|_| {
+            LocalChatSessionError::StartFailed("Could not load provider settings.".into())
+        })?
+    }
+
+    #[cfg(test)]
+    fn with_provider_config_path_for_tests(mut self, path: std::path::PathBuf) -> Self {
+        self.provider_config_path = Some(path);
+        self
     }
 
     #[cfg(test)]
@@ -102,10 +135,14 @@ impl LocalChatSessionManager {
             permission_bridge,
             shutdown_started: AtomicBool::new(false),
             provider_profiles: BTreeMap::new(),
+            provider_config_path: None,
         }
     }
 
-    pub async fn catalog(&self) -> LocalChatHarnessCatalog {
+    pub async fn catalog(&self) -> Result<LocalChatHarnessCatalog, LocalChatSessionError> {
+        let profiles = self
+            .with_provider_profiles(|profiles| Ok(profiles.clone()))
+            .await?;
         let mut harnesses = Vec::with_capacity(self.harnesses.len());
         for harness in self.harnesses.values() {
             harnesses.push(harness.info().await);
@@ -118,26 +155,38 @@ impl LocalChatSessionManager {
             .or_else(|| harnesses.first().map(|info| info.harness))
             .unwrap_or(LocalChatHarnessKind::Claude);
 
-        let providers = provider_catalog(&harnesses, &self.provider_profiles);
+        let providers = provider_catalog(&harnesses, &profiles);
         let default_provider = providers
             .iter()
             .find(|provider| !provider.custom && provider.harness == default_harness)
             .map(|provider| provider.id.clone())
             .unwrap_or_else(|| BuiltinProvider::Anthropic.as_str().to_string());
 
-        LocalChatHarnessCatalog {
+        Ok(LocalChatHarnessCatalog {
             default_harness,
             harnesses,
             default_provider,
             providers,
-        }
+        })
     }
 
     /// Resolve the picker's provider for a session on `harness`. Built-in IDs
     /// (or none) use the harness's own provider; custom IDs must be valid
     /// profiles bound to the same harness.
-    fn provider_selection(
+    async fn provider_selection(
         &self,
+        harness: LocalChatHarnessKind,
+        provider_id: Option<&str>,
+    ) -> Result<Option<LocalChatProviderSelection>, LocalChatSessionError> {
+        let provider_id = provider_id.map(str::to_owned);
+        self.with_provider_profiles(move |profiles| {
+            Self::provider_selection_from_profiles(profiles, harness, provider_id.as_deref())
+        })
+        .await
+    }
+
+    fn provider_selection_from_profiles(
+        profiles: &BTreeMap<ProviderId, ProviderProfile>,
         harness: LocalChatHarnessKind,
         provider_id: Option<&str>,
     ) -> Result<Option<LocalChatProviderSelection>, LocalChatSessionError> {
@@ -154,7 +203,7 @@ impl LocalChatSessionManager {
             }
             return Ok(None);
         }
-        let profile = self.provider_profiles.get(&id).ok_or_else(|| {
+        let profile = profiles.get(&id).ok_or_else(|| {
             LocalChatSessionError::StartFailed(format!(
                 "provider '{id}' is not configured; add [providers.{id}] to config.toml"
             ))
@@ -168,10 +217,24 @@ impl LocalChatSessionManager {
                 profile.harness
             )));
         }
-        Ok(Some(LocalChatProviderSelection {
-            id,
-            profile: profile.clone(),
-        }))
+        let mut profile = profile.clone();
+        if profile.api_key_secret.is_some() {
+            let agent = vertebrae_core::AgentConfig::new().with_provider(id.clone());
+            let mut factory = vertebrae_harness::HarnessFactoryConfig {
+                environment: crate::shell_environment::user_shell_environment().variables,
+                provider_profiles: BTreeMap::from([(id.clone(), profile)]),
+                ..Default::default()
+            };
+            factory
+                .resolve_request_credentials(Some(expected), &agent)
+                .map_err(|error| LocalChatSessionError::StartFailed(error.to_string()))?;
+            profile = factory.provider_profiles.remove(&id).ok_or_else(|| {
+                LocalChatSessionError::StartFailed(
+                    "Provider settings changed during selection.".into(),
+                )
+            })?;
+        }
+        Ok(Some(LocalChatProviderSelection { id, profile }))
     }
 
     pub async fn create_session(
@@ -196,7 +259,9 @@ impl LocalChatSessionManager {
         }
         let harness_kind = input.harness;
         let backend_session_id = input.backend_session_id.clone();
-        let provider = self.provider_selection(harness_kind, input.provider_id.as_deref())?;
+        let provider = self
+            .provider_selection(harness_kind, input.provider_id.as_deref())
+            .await?;
         let harness = self.harness(harness_kind)?;
         let info = harness.info().await;
         if !info.available {

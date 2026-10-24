@@ -89,6 +89,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         daemon_identity,
         projects,
         typesafe_api_key,
+        typesafe_api_key_secret,
         typesafe_url,
         provider_profiles,
         ..
@@ -143,7 +144,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             typesafe_factory_config.typesafe_base_url,
             typesafe_factory_config.typesafe_url,
         )
-        .with_provider_profiles(provider_profiles),
+        .with_provider_profiles(provider_profiles)
+        .with_typesafe_api_key_secret(typesafe_api_key_secret)
+        .with_provider_config_path(vertebrae_sacrum_client::config_path()),
     );
     capabilities.log_startup_diagnostics();
 

@@ -71,6 +71,48 @@ The Rust backend in `src-tauri/src/` provides:
   adapters and normalized live event delivery
 - **Project config** (`project_config.rs`) — multi-project management
 
+### Shared configuration forms
+
+Settings includes Providers & Models, Connection and Observability forms for
+this machine's `config.toml`, alongside existing Chat, Appearance and Updates.
+Project creation remains in its dedicated UI. `daemon.toml` and daemon lifecycle
+management are outside these forms.
+
+File-backed forms keep drafts until Save or Discard, validate inputs, and protect
+unsaved navigation. Reads return credential-presence flags and environment
+variable names, never stored keys or environment values. Credential changes use
+explicit keep/replace/clear operations. Provider API-key fields additionally
+support moving an existing inline key to the OS credential store. New provider
+API keys default to OS storage; `api_key_secret` references are persisted instead
+of plaintext. Keychain/Secret Service reads and writes run on blocking workers,
+and settings reads return the configured storage source without reading keys.
+Locked/missing stores fail explicitly. Environment override indicators describe
+the GUI process, not a remote daemon's environment. Endpoint URLs containing
+credentials, query parameters or fragments are hidden rather than exposed.
+
+Saved provider profiles, endpoints, models and API keys apply to new local
+chat/title requests and daemon executions without restart. A confirmed GUI save
+refreshes provider pickers for not-yet-started sessions; active sessions retain
+their catalog and owned runtime configuration. Each new request reads a coherent
+file snapshot and resolves its selected credential while holding a shared config
+lock, so replacement cannot delete an old entry midway through request capture.
+Malformed/unreadable config fails new requests and catalogs explicitly, while
+existing sessions continue; fixing the file permits recovery on the next request.
+
+Backend connection and telemetry settings still require a GUI restart. Binary,
+skill and shell-environment discovery also stay startup-scoped. Saving never
+restarts a process or replaces an active chat runtime. The daemon refreshes
+custom-provider readiness advertisements on its existing 30-second heartbeat.
+
+The shared configuration writer preserves unknown keys and existing comments
+when patching known settings, atomically replaces the file with private Unix
+permissions, and coordinates application writers through an advisory lock and
+loaded-file revisions. Stale writes require reload and reconciliation. This
+assumes the user configuration directory is trusted. External editors do not
+participate in the lock: edits are checked before activation, but an editor can
+still race the final filesystem replacement. Atomic visibility is provided;
+power-loss durability of the directory entry is not guaranteed.
+
 ### Workflow step harness selection
 
 The Workflow Atlas authoring form (`WorkflowInspector.tsx`) sets a step's
@@ -136,8 +178,7 @@ contract changes.
 Local chat owns session lifecycle and UI options; it owns no provider wire
 protocol. The composer picker is provider → model: the built-in Anthropic and
 OpenAI choices run on the `claude` and `codex` harnesses, and each
-`[providers.<id>]` entry on those harnesses (loaded from config.toml at
-startup) is an extra choice whose model list is exactly its configured
+`[providers.<id>]` entry on those harnesses (read from config.toml for new sessions) is an extra choice whose model list is exactly its configured
 `models`. `LocalChatHarnessCatalog.providers` carries these choices, the
 session stores `providerId`, `create_local_chat_session` and title inference
 receive `provider_id`, and saved chat defaults are keyed by provider. Both providers are built through the shared `HarnessRuntimeFactory`

@@ -43,8 +43,11 @@ default_model = "moonshotai/kimi-k2"
 
 `[typesafe]`
 
-- **api_key** (optional): Server-side API key for TypeSafe System One requests.
-  The daemon reads it from the shared `config.toml` at startup. Protect this file
+- **api_key_secret** (optional): UUID reference to an API key in this OS user's
+  Vertebrae credential store. The GUI creates this reference when setting or
+  migrating an API key; the secret itself is not stored in TOML.
+- **api_key** (optional, legacy): Server-side API key for TypeSafe System One requests.
+  The daemon reads it from the shared `config.toml` for each new request. Protect this file
   as a credential store; Vertebrae writes it with owner-only permissions on
   Unix. The daemon redacts it from Debug output and diagnostics. Do not print or
   commit the key.
@@ -86,10 +89,14 @@ lowercase letters, digits, `-`, and `_`; built-in names and their aliases
   `model_providers.<id>.base_url`.
 - **url** (`typesafe`): Full System One endpoint URL, with the same semantics
   as `[typesafe].url`.
-- **api_key_env** (preferred) / **api_key**: The credential. A nonblank value
+- **api_key_secret** (optional): UUID reference to an API key in the local OS
+  credential store. GUI-entered API keys use this field instead of plaintext.
+- **api_key_env** / **api_key** (legacy inline key): The credential. A nonblank value
   of the named environment variable (read from the daemon's or GUI's process
-  environment) wins over the literal `api_key`; a configured but missing
-  `api_key_env` without an `api_key` fails the run. Claude receives it as
+  environment) wins over `api_key_secret`, which wins over the legacy literal
+  `api_key`. A missing or inaccessible explicit OS reference fails the run;
+  it never falls back to plaintext. A configured but missing `api_key_env`
+  without any usable credential fails the run. Claude receives it as
   `ANTHROPIC_AUTH_TOKEN` (with `ANTHROPIC_API_KEY` cleared); Codex App Server
   threads receive it as a per-thread `experimental_bearer_token` (one-off
   `codex exec` processes read it through a generated `env_key`); TypeSafe
@@ -107,22 +114,63 @@ overrides), so `~/.codex/config.toml` needs no edits. `claude`/`codex` providers
 `typesafe` providers are step-only. A step whose provider is not configured on
 the executing daemon, or whose explicit harness disagrees with the provider's,
 fails with a descriptive error. Like `[typesafe]`, provider profiles are
-snapshotted at daemon and GUI startup.
+read for each new GUI session/title request and daemon execution. Existing
+sessions keep the configuration and credential they started with. GUI saves
+refresh provider/model pickers for sessions that have not started. New custom
+provider IDs are advertised on the daemon's next application heartbeat (within
+30 seconds); binary and skill discovery remain startup-scoped.
+
+### OS credential storage for provider API keys
+
+Settings → Providers & Models stores newly entered or replaced API keys in
+macOS Keychain (generic password entries), Linux Secret Service, or Windows
+Credential Manager under service `dev.vertebrae.api-keys`. macOS Passwords.app's
+Password AutoFill database is a separate interface; these are application-owned
+Keychain entries. TOML contains only `api_key_secret = "<uuid>"`.
+
+Existing inline API keys continue to work. Choose **Move saved key to OS
+credential store** to migrate without displaying or retyping the key. No key is
+migrated automatically. Saving first writes and verifies a fresh OS entry, then
+publishes its reference. A stale or failed config write retains the old key.
+Clearing/replacing removes an old OS entry only after a successful config save
+and only when no remaining configured provider references it. Cleanup failures
+are reported, and uncertain file activation retains staged entries for recovery.
+
+The GUI and daemon must run as the same OS user with access to the same unlocked
+store. macOS may require permission for both executables. Linux requires a
+running Secret Service implementation (for example GNOME Keyring or a compatible
+KWallet service) and the user's D-Bus session; headless daemons can instead use
+explicit environment credentials. There is no automatic plaintext fallback.
+References are machine/user-local; copying a config file does not transfer keys.
+
+Provider settings apply to new sessions and requests without restarting the
+GUI or daemon. Each request captures its selected key under a shared config
+read lock before a save can retire the previous reference. Existing sessions
+already holding a key keep it; subsequent requests use the updated reference. Stored key values are never returned to the Settings frontend. Backend
+connection tokens, provider environment values and protected daemon enrollment
+credentials are outside this provider-API-key feature and retain their existing
+storage contracts.
 
 ## Environment Variables
 
 - **VTB_URL**: Overrides `[sacrum].url`
 - **VTB_TOKEN**: Overrides `[sacrum].token`
 - **VTB_PROJECT_ID**: Overrides path-based project resolution and uses the given Sacrum project ID directly
-- **TYPESAFE_API_KEY**: A nonblank value overrides `[typesafe].api_key` for the daemon. If unset or blank, the daemon uses the TOML value. If neither source has a usable key, TypeSafe requests report that configuration is missing.
+- **TYPESAFE_API_KEY**: A nonblank value overrides `[typesafe].api_key_secret`
+  and the legacy `[typesafe].api_key`. When no environment override is present,
+  an explicit OS reference takes precedence over the inline key. Missing or
+  inaccessible referenced credentials fail explicitly; no plaintext fallback is used.
 - **TYPESAFE_BASE_URL**: Overrides `[typesafe].url` and preserves the legacy
   base URL behavior: Vertebrae appends `/v1/systemone` to this value. If it is
   unset, the daemon uses `[typesafe].url`, then the default endpoint above.
 
-The daemon snapshots the resolved TypeSafe settings at startup; changes to the
-TOML file or environment take effect after restarting it. The credential stays in
-daemon configuration and is not copied into task or workflow data, `AgentConfig`,
-or provider-neutral request configuration.
+The daemon captures current file-backed TypeSafe settings for every new
+inference request. Environment overrides retain precedence and are supplied by
+the daemon process environment; changing that environment still requires a new
+process. Credentials remain local to runtime construction and are not copied
+into task/workflow data, `AgentConfig`, or provider-neutral request configuration.
+Malformed or unreadable config fails new requests explicitly rather than using a
+stale cached provider; correcting the file allows the next request to recover.
 
 ## Backend ownership
 

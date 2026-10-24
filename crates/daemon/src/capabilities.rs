@@ -1,4 +1,4 @@
-//! Immutable capabilities discovered once while the daemon is booting.
+//! Startup executable/skill discovery and per-request provider settings.
 //!
 //! Discovery is descriptive only. A missing provider is retained as a
 //! diagnostic and does not remove that provider from the map or prevent the
@@ -36,9 +36,11 @@ pub struct DaemonCapabilities {
     pub installed_skills_diagnostic: Option<String>,
     pub claude_plugin_dir: ClaudePluginDirResolution,
     pub typesafe_api_key: Option<String>,
+    pub typesafe_api_key_secret: Option<String>,
     pub typesafe_base_url: Option<String>,
     pub typesafe_url: Option<String>,
     pub provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
+    pub provider_config_path: Option<PathBuf>,
 }
 
 impl fmt::Debug for DaemonCapabilities {
@@ -159,10 +161,22 @@ impl DaemonCapabilities {
             installed_skills_diagnostic,
             claude_plugin_dir,
             typesafe_api_key,
+            typesafe_api_key_secret: None,
             typesafe_base_url,
             typesafe_url,
             provider_profiles: BTreeMap::new(),
+            provider_config_path: None,
         }
+    }
+
+    pub fn with_typesafe_api_key_secret(mut self, reference: Option<String>) -> Self {
+        if reference.is_some()
+            && let Some(capability) = self.harnesses.get_mut(&StepHarness::Typesafe)
+        {
+            capability.discovery_diagnostic = None;
+        }
+        self.typesafe_api_key_secret = reference;
+        self
     }
 
     pub fn with_provider_profiles(
@@ -173,10 +187,97 @@ impl DaemonCapabilities {
         self
     }
 
+    pub fn with_provider_config_path(mut self, path: Option<PathBuf>) -> Self {
+        self.provider_config_path = path;
+        self
+    }
+
+    fn with_live_provider_config<T>(
+        &self,
+        operation: impl FnOnce(Self) -> Result<T, String>,
+    ) -> Result<T, String> {
+        if let Some(path) = &self.provider_config_path {
+            let snapshot =
+                vertebrae_sacrum_client::config::lock_config_snapshot_at(path).map_err(|_| {
+                    "Could not read provider settings. Check config.toml and retry.".to_string()
+                })?;
+            operation(self.with_provider_settings(snapshot.config()))
+        } else {
+            operation(self.clone())
+        }
+    }
+
+    fn with_provider_settings(
+        &self,
+        config: &vertebrae_sacrum_client::VertebraeConfigFile,
+    ) -> Self {
+        let factory = HarnessFactoryConfig::from_environment_with_typesafe_configured_settings(
+            config.typesafe.api_key.clone(),
+            config.typesafe.url.clone(),
+        );
+        let mut current = self.clone();
+        current.typesafe_api_key = factory.typesafe_api_key;
+        current.typesafe_api_key_secret = config.typesafe.api_key_secret.clone();
+        current.typesafe_base_url = factory.typesafe_base_url;
+        current.typesafe_url = factory.typesafe_url;
+        current.provider_profiles = config.providers.clone();
+        if let Some(capability) = current.harnesses.get_mut(&StepHarness::Typesafe) {
+            capability.discovery_diagnostic = (!current.typesafe_api_key.as_deref().is_some_and(|value| !value.trim().is_empty()) && current.typesafe_api_key_secret.is_none())
+                .then(|| "TypeSafe provider API key is not configured; set it in Settings or TYPESAFE_API_KEY".into());
+        }
+        current
+    }
+
+    /// Metadata only; never opens the OS credential store. Executable discovery
+    /// stays startup-scoped, while file-backed provider settings are refreshed.
+    pub async fn latest_provider_metadata(&self) -> Result<Self, String> {
+        let current = self.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some(path) = &current.provider_config_path {
+                let config =
+                    vertebrae_sacrum_client::config::load_config_file_at(path).map_err(|_| {
+                        "Could not reload provider settings. Check config.toml.".to_string()
+                    })?;
+                Ok(current.with_provider_settings(&config))
+            } else {
+                Ok(current)
+            }
+        })
+        .await
+        .map_err(|_| "Could not reload provider settings.".to_string())?
+    }
+
+    /// Freeze one new request's provider configuration and credential while
+    /// holding the shared config read lock. Active executions keep their copy.
+    pub async fn for_request(
+        &self,
+        harness: Option<StepHarness>,
+        agent: vertebrae_core::AgentConfig,
+    ) -> Result<Self, String> {
+        let current = self.clone();
+        tokio::task::spawn_blocking(move || {
+            current.with_live_provider_config(|mut current| {
+                let mut factory = HarnessFactoryConfig::default();
+                current.configure_provider_harnesses(&mut factory);
+                factory
+                    .resolve_request_credentials(harness, &agent)
+                    .map_err(|error| error.to_string())?;
+                current.provider_profiles = factory.provider_profiles;
+                current.typesafe_api_key = factory.typesafe_api_key;
+                current.typesafe_api_key_secret = factory.typesafe_api_key_secret;
+                current.provider_config_path = None;
+                Ok(current)
+            })
+        })
+        .await
+        .map_err(|_| "Could not load provider settings for this request.".to_string())?
+    }
+
     /// Copy server-owned provider settings (the `[typesafe]` section and
     /// custom provider profiles) into a harness factory configuration.
     pub(crate) fn configure_provider_harnesses(&self, config: &mut HarnessFactoryConfig) {
         config.typesafe_api_key = self.typesafe_api_key.clone();
+        config.typesafe_api_key_secret = self.typesafe_api_key_secret.clone();
         config.typesafe_base_url = self.typesafe_base_url.clone();
         config.typesafe_url = self.typesafe_url.clone();
         config.provider_profiles = self.provider_profiles.clone();
@@ -272,6 +373,130 @@ mod tests {
         async fn emit(&self, _event: HarnessEventV1) -> Result<(), HarnessError> {
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn request_snapshots_reload_profiles_and_keep_previous_execution_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        let profile = |model: &str, key: &str| {
+            format!(
+                "[providers.dynamic]\nharness = 'codex'\nmodels = ['{model}']\nbase_url = 'http://localhost:8000'\napi_key = '{key}'\n"
+            )
+        };
+        std::fs::write(&path, profile("old-model", "old-key")).unwrap();
+        let caps = DaemonCapabilities::new(
+            "/usr/bin:/bin".into(),
+            ProviderBinaries::default(),
+            ProviderDiscoveryDiagnostics::default(),
+            temp.path(),
+            None,
+            None,
+            None,
+        )
+        .with_provider_config_path(Some(path.clone()));
+        let id = ProviderId::new("dynamic").unwrap();
+        let agent = vertebrae_core::AgentConfig::new().with_provider(id.clone());
+        let first = caps.for_request(None, agent.clone()).await.unwrap();
+        assert!(
+            first.provider_config_path.is_none(),
+            "a captured request must not reload a second time"
+        );
+        std::fs::write(&path, profile("new-model", "new-key")).unwrap();
+        let next = caps.for_request(None, agent.clone()).await.unwrap();
+        assert_eq!(
+            first.provider_profiles[&id].api_key.as_deref(),
+            Some("old-key")
+        );
+        assert_eq!(
+            next.provider_profiles[&id].api_key.as_deref(),
+            Some("new-key")
+        );
+        assert_eq!(next.provider_profiles[&id].models, vec!["new-model"]);
+        assert!(
+            caps.provider_profiles.is_empty(),
+            "startup discovery stays immutable"
+        );
+        std::fs::write(&path, "api_key = 'must-not-leak\n").unwrap();
+        let error = caps.for_request(None, agent.clone()).await.unwrap_err();
+        assert!(!error.contains("must-not-leak"));
+        assert!(caps.latest_provider_metadata().await.is_err());
+        std::fs::write(&path, profile("recovered", "recovered-key")).unwrap();
+        let metadata = caps.latest_provider_metadata().await.unwrap();
+        let report = crate::telemetry::DaemonReport::from_capabilities(
+            "daemon",
+            &metadata,
+            chrono::Utc::now(),
+        )
+        .payload()
+        .unwrap();
+        assert!(report["capabilities"]["providers"].get("dynamic").is_some());
+        assert!(!report.to_string().contains("recovered-key"));
+        assert_eq!(
+            caps.for_request(None, agent)
+                .await
+                .unwrap()
+                .provider_profiles[&id]
+                .models,
+            vec!["recovered"]
+        );
+    }
+
+    #[tokio::test]
+    async fn typesafe_metadata_reloads_without_accessing_the_credential_store() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(&path, "[typesafe]\napi_key_secret = 'invalid-reference-not-read-by-metadata'\nurl = 'https://example.test/systemone'\n").unwrap();
+        let caps = DaemonCapabilities::new(
+            "/usr/bin:/bin".into(),
+            ProviderBinaries::default(),
+            ProviderDiscoveryDiagnostics::default(),
+            temp.path(),
+            None,
+            None,
+            None,
+        )
+        .with_provider_config_path(Some(path));
+        let current = caps.latest_provider_metadata().await.unwrap();
+        assert_eq!(
+            current.typesafe_api_key_secret.as_deref(),
+            Some("invalid-reference-not-read-by-metadata")
+        );
+        assert_eq!(
+            current.typesafe_url.as_deref(),
+            Some("https://example.test/systemone")
+        );
+        assert!(
+            current.harnesses[&StepHarness::Typesafe]
+                .discovery_diagnostic
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn secure_typesafe_reference_is_carried_into_runtime_configuration() {
+        let capabilities = DaemonCapabilities::new(
+            "/usr/bin:/bin".into(),
+            ProviderBinaries::default(),
+            ProviderDiscoveryDiagnostics::default(),
+            Path::new("."),
+            None,
+            None,
+            None,
+        )
+        .with_typesafe_api_key_secret(Some("11111111-1111-4111-8111-111111111111".into()));
+        assert!(
+            capabilities.harnesses[&StepHarness::Typesafe]
+                .discovery_diagnostic
+                .is_none()
+        );
+        let mut factory_config = HarnessFactoryConfig::default();
+        capabilities.configure_provider_harnesses(&mut factory_config);
+        assert_eq!(
+            factory_config.typesafe_api_key_secret,
+            capabilities.typesafe_api_key_secret
+        );
+        assert!(factory_config.typesafe_api_key.is_none());
     }
 
     #[test]

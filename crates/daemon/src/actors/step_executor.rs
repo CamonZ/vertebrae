@@ -716,6 +716,29 @@ impl StepExecutor {
         );
 
         let harness = state.config.step_config.harness;
+        let live_provider_settings = state.config.capabilities.provider_config_path.is_some();
+        if live_provider_settings {
+            match state
+                .config
+                .capabilities
+                .for_request(harness, state.config.step_config.agent_config.clone())
+                .await
+            {
+                Ok(capabilities) => state.config.capabilities = Arc::new(capabilities),
+                Err(error) => {
+                    let _ = state.parent.cast(ProjectMessage::StepFinished {
+                        execution_id: state.execution_id.clone(),
+                        task_id: state.task_id.clone(),
+                        result: StepResult::failed(
+                            None,
+                            format!("Provider settings reload failed: {error}"),
+                        ),
+                    });
+                    myself.stop(Some("provider settings reload failed".into()));
+                    return Ok(());
+                }
+            }
+        }
         let resolved = match crate::provider::resolve_provider(&state.config) {
             Ok(resolved) => resolved,
             Err(error) => {
@@ -731,6 +754,16 @@ impl StepExecutor {
                 return Ok(());
             }
         };
+        if live_provider_settings {
+            let _ = state.parent.cast(ProjectMessage::ProviderResolved {
+                execution_id: state.execution_id.clone(),
+                metadata: crate::actors::project_supervisor::resolved_execution_metadata(
+                    &state.config.step_config.agent_config,
+                    harness,
+                    &state.config.capabilities,
+                ),
+            });
+        }
         let resolved_harness = resolved.harness;
         let settings_guard = if resolved_harness == StepHarness::Claude {
             match SyntheticSettings::create(&state.execution_id) {
@@ -869,13 +902,16 @@ impl StepExecutor {
                     .collect()
             },
         };
-        let instance = match HarnessRuntimeFactory::new(factory_config).create_for_harness(
-            harness,
-            HarnessRuntimeOptions {
-                agent_config: agent_config.clone(),
-                request_config,
-            },
-        ) {
+        let instance = match HarnessRuntimeFactory::new(factory_config)
+            .create_for_harness_async(
+                harness,
+                HarnessRuntimeOptions {
+                    agent_config: agent_config.clone(),
+                    request_config,
+                },
+            )
+            .await
+        {
             Ok(instance) => instance,
             Err(error) => {
                 let _ = state.parent.cast(ProjectMessage::StepFinished {

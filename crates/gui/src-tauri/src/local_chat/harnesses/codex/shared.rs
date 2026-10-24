@@ -73,10 +73,13 @@ impl CodexLocalChatHarness {
             Vec::new(),
             &self.shell_environment,
         ));
-        let instance = match factory.create(HarnessRuntimeOptions {
-            agent_config: AgentConfig::new().with_provider(ProviderId::openai()),
-            request_config: Default::default(),
-        }) {
+        let instance = match factory
+            .create_async(HarnessRuntimeOptions {
+                agent_config: AgentConfig::new().with_provider(ProviderId::openai()),
+                request_config: Default::default(),
+            })
+            .await
+        {
             Ok(instance) => instance,
             Err(error) => return unavailable_codex_info(error.to_string()),
         };
@@ -183,10 +186,11 @@ impl LocalChatHarness for CodexLocalChatHarness {
             provider.apply(&mut factory_config, &mut agent_config);
         }
         let instance = HarnessRuntimeFactory::new(factory_config)
-            .create(HarnessRuntimeOptions {
+            .create_async(HarnessRuntimeOptions {
                 agent_config,
                 request_config: request.config.clone(),
             })
+            .await
             .map_err(|error| {
                 let error = error.to_string();
                 emit_error(&runtime, &backend_session_id, error.clone());

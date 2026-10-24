@@ -31,6 +31,9 @@ pub struct SacrumConfig {
 /// Top-level config file structure for ~/.config/vertebrae/config.toml
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct VertebraeConfigFile {
+    /// Revision of the loaded file, used to reject stale configuration writes.
+    #[serde(skip)]
+    pub source_revision: Option<String>,
     /// Global sacrum defaults
     #[serde(default)]
     pub sacrum: GlobalSacrumSection,
@@ -70,6 +73,9 @@ pub struct TypeSafeSection {
     /// Server-side API credential. Its Debug representation is always redacted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// UUID reference to an API key in the local OS credential store.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_secret: Option<String>,
     /// Full System One endpoint URL. Its Debug representation is always redacted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
@@ -77,7 +83,7 @@ pub struct TypeSafeSection {
 
 impl TypeSafeSection {
     fn is_default(&self) -> bool {
-        self.api_key.is_none() && self.url.is_none()
+        self.api_key.is_none() && self.api_key_secret.is_none() && self.url.is_none()
     }
 }
 
@@ -429,7 +435,7 @@ pub fn load_config_file() -> SacrumClientResult<VertebraeConfigFile> {
     })?;
 
     if !path.exists() {
-        return Ok(VertebraeConfigFile::default());
+        return parse_config("");
     }
 
     let content = std::fs::read_to_string(&path).map_err(|e| {
@@ -440,36 +446,202 @@ pub fn load_config_file() -> SacrumClientResult<VertebraeConfigFile> {
         ))
     })?;
 
-    let config: VertebraeConfigFile = toml::from_str(&content).map_err(|e| {
-        SacrumClientError::ConfigError(format!("Failed to parse config file: {}", e))
-    })?;
+    parse_config(&content)
+}
 
+/// Read an application-selected config path without credential access. Atomic
+/// file replacement makes this sufficient for catalog/telemetry metadata.
+pub fn load_config_file_at(path: &Path) -> SacrumClientResult<VertebraeConfigFile> {
+    parse_config(&read_config_text(path)?)
+}
+
+/// A coherent config read. Keep this guard alive while resolving referenced
+/// credentials, so a cooperating save cannot retire a key mid-read. Never
+/// attempt a config write while holding this guard.
+pub struct ConfigReadGuard {
+    config: VertebraeConfigFile,
+    _lock: std::fs::File,
+}
+
+impl ConfigReadGuard {
+    pub fn config(&self) -> &VertebraeConfigFile {
+        &self.config
+    }
+}
+
+impl Drop for ConfigReadGuard {
+    fn drop(&mut self) {
+        // The guard owns the lock lifetime. A descriptor inherited by a
+        // concurrently spawned child must not extend credential capture.
+        let _ = fs2::FileExt::unlock(&self._lock);
+    }
+}
+
+/// Internal application paths only; no frontend-supplied filesystem authority.
+pub fn lock_config_snapshot_at(path: &Path) -> SacrumClientResult<ConfigReadGuard> {
+    use fs2::FileExt;
+    let lock = open_config_lock(path)?;
+    FileExt::lock_shared(&lock).map_err(|_| config_error("Could not lock configuration"))?;
+    let config = parse_config(&read_config_text(path)?)?;
+    Ok(ConfigReadGuard {
+        config,
+        _lock: lock,
+    })
+}
+
+fn open_config_lock(path: &Path) -> SacrumClientResult<std::fs::File> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| config_error("Invalid config path"))?;
+    std::fs::create_dir_all(parent)
+        .map_err(|_| config_error("Could not create config directory"))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
+        .open(parent.join("config.lock"))
+        .map_err(|_| config_error("Could not open configuration lock"))
+}
+
+fn parse_config(content: &str) -> SacrumClientResult<VertebraeConfigFile> {
+    let mut config: VertebraeConfigFile = toml::from_str(content).map_err(|_| {
+        SacrumClientError::ConfigError("Configuration is not valid TOML or contains invalid settings. Fix the file before saving.".into())
+    })?;
+    config.source_revision = Some(config_revision(content));
     Ok(config)
 }
 
-/// Serialize and write the global config file. Creates parent directories if needed.
+/// Opaque revision; never exposes configuration contents.
+pub fn config_revision(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(content.as_bytes()))
+}
+
+/// Serialize known changes while retaining comments and unknown settings.
+/// All application writers share an advisory lock in the trusted user config
+/// directory. Revisions reject stale read/modify/write cycles. Non-cooperating
+/// external editors are detected before activation, but cannot honor our lock.
 pub fn save_config_file(config: &VertebraeConfigFile) -> SacrumClientResult<()> {
     let path = config_path().ok_or_else(|| {
-        SacrumClientError::ConfigError("Could not determine config directory".to_string())
+        SacrumClientError::ConfigError("Could not determine config directory".into())
     })?;
+    save_config_at(&path, config)
+}
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            SacrumClientError::ConfigError(format!(
-                "Failed to create config directory {}: {}",
-                parent.display(),
-                e
-            ))
-        })?;
+fn save_config_at(path: &Path, config: &VertebraeConfigFile) -> SacrumClientResult<()> {
+    use fs2::FileExt;
+    let lock = open_config_lock(path)?;
+    lock.lock_exclusive()
+        .map_err(|_| config_error("Could not lock configuration"))?;
+    let content = read_config_text(path)?;
+    if config
+        .source_revision
+        .as_ref()
+        .is_some_and(|rev| *rev != config_revision(&content))
+    {
+        return Err(config_error(
+            "Configuration changed on disk. Reload and reapply your edits.",
+        ));
     }
+    let previous = parse_config(&content)?;
+    let old =
+        toml::to_string(&previous).map_err(|_| config_error("Could not encode configuration"))?;
+    let new =
+        toml::to_string(config).map_err(|_| config_error("Could not encode configuration"))?;
+    let old = old
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| config_error("Could not encode configuration"))?;
+    let new = new
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| config_error("Could not encode configuration"))?;
+    let mut document = content
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| config_error("Configuration is not valid TOML"))?;
+    merge_config_table(document.as_table_mut(), old.as_table(), new.as_table());
+    if read_config_text(path)? != content {
+        return Err(config_error(
+            "Configuration changed on disk. Reload and reapply your edits.",
+        ));
+    }
+    write_config_atomically(path, document.to_string().as_bytes())
+}
 
-    let content = toml::to_string_pretty(config).map_err(|e| {
-        SacrumClientError::ConfigError(format!("Failed to serialize config: {}", e))
-    })?;
+fn config_error(message: &str) -> SacrumClientError {
+    SacrumClientError::ConfigError(message.into())
+}
 
-    write_config_atomically(&path, content.as_bytes())?;
+fn read_config_text(path: &Path) -> SacrumClientResult<String> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(content),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(_) => Err(config_error("Could not read configuration file")),
+    }
+}
 
-    Ok(())
+fn config_items_equal(left: &toml_edit::Item, right: &toml_edit::Item) -> bool {
+    match (left.as_table_like(), right.as_table_like()) {
+        (Some(left), Some(right)) => {
+            left.len() == right.len()
+                && left.iter().all(|(key, value)| {
+                    right
+                        .get(key)
+                        .is_some_and(|other| config_items_equal(value, other))
+                })
+        }
+        _ => left.to_string() == right.to_string(),
+    }
+}
+
+fn merge_config_table(
+    target: &mut dyn toml_edit::TableLike,
+    old: &dyn toml_edit::TableLike,
+    new: &dyn toml_edit::TableLike,
+) {
+    for (key, old_item) in old.iter() {
+        if !new.contains_key(key) {
+            if let (Some(target_table), Some(old_table)) = (
+                target
+                    .get_mut(key)
+                    .and_then(toml_edit::Item::as_table_like_mut),
+                old_item.as_table_like(),
+            ) {
+                merge_config_table(target_table, old_table, &toml_edit::Table::new());
+                if !target_table.is_empty() {
+                    continue;
+                }
+            }
+            target.remove(key);
+        }
+    }
+    for (key, item) in new.iter() {
+        if let Some(old_item) = old.get(key) {
+            if config_items_equal(old_item, item) {
+                continue;
+            }
+            if let (Some(target_table), Some(old_table), Some(new_table)) = (
+                target
+                    .get_mut(key)
+                    .and_then(toml_edit::Item::as_table_like_mut),
+                old_item.as_table_like(),
+                item.as_table_like(),
+            ) {
+                merge_config_table(target_table, old_table, new_table);
+                continue;
+            }
+        }
+        let mut replacement = item.clone();
+        if let (Some(existing), Some(value)) = (
+            target.get(key).and_then(toml_edit::Item::as_value),
+            replacement.as_value_mut(),
+        ) {
+            *value.decor_mut() = existing.decor().clone();
+        }
+        target.insert(key, replacement);
+    }
 }
 
 fn write_config_atomically(path: &Path, content: &[u8]) -> SacrumClientResult<()> {
@@ -661,6 +833,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         };
 
         // CWD inside child-project should match the child (longer prefix)
@@ -692,6 +865,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         };
 
         let cwd = std::path::Path::new("/tmp/unrelated");
@@ -721,6 +895,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         };
 
         let cwd = std::path::Path::new("/home/user/code/myproject");
@@ -871,6 +1046,7 @@ models = ["kimi-k2"]
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         };
 
         let serialized = toml::to_string_pretty(&config).unwrap();
@@ -972,6 +1148,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         }
     }
 
@@ -1063,6 +1240,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
 
@@ -1091,6 +1269,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
 
@@ -1383,6 +1562,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         };
 
         let _cwd = CurrentDirGuard::push(&subdir);
@@ -1415,6 +1595,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         }
     }
 
@@ -1480,6 +1661,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config);
         assert!(result.is_err());
@@ -1490,5 +1672,181 @@ path = "/Users/test/other"
             err_msg
         );
         clear_vtb_env_vars();
+    }
+}
+
+#[cfg(test)]
+mod settings_persistence_tests {
+    use super::*;
+
+    #[test]
+    fn patches_known_values_preserving_comments_unknown_keys_and_projects() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let original = "# personal configuration\nfuture = 'keep'\n[sacrum]\nurl = 'https://old.example' # endpoint\ntoken = 'stored-secret'\ncustom = 42\n[projects.existing]\nid = 'project-id'\npath = '/code/project'\n";
+        std::fs::write(&path, original).unwrap();
+        let mut config = parse_config(original).unwrap();
+        config.sacrum.url = "https://new.example".into();
+        save_config_at(&path, &config).unwrap();
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.contains("# personal configuration"));
+        assert!(text.contains("# endpoint"));
+        assert!(text.contains("future = 'keep'"));
+        assert!(text.contains("custom = 42"));
+        assert!(text.contains("[projects.existing]"));
+        let stored = parse_config(&text).unwrap();
+        assert_eq!(stored.sacrum.url, "https://new.example");
+        assert_eq!(stored.sacrum.token.as_deref(), Some("stored-secret"));
+        assert_eq!(stored.projects["existing"].path, "/code/project");
+    }
+
+    #[test]
+    fn credential_snapshot_holds_a_shared_lock_until_values_are_captured() {
+        use fs2::FileExt;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "[typesafe]\napi_key_secret = 'old-reference'\n").unwrap();
+        let snapshot = lock_config_snapshot_at(&path).unwrap();
+        let inherited_descriptor = snapshot._lock.try_clone().unwrap();
+        let writer = open_config_lock(&path).unwrap();
+        assert!(
+            writer.try_lock_exclusive().is_err(),
+            "a save must wait for credential capture"
+        );
+        let captured = snapshot.config().typesafe.api_key_secret.clone();
+        drop(snapshot);
+        writer.try_lock_exclusive().unwrap();
+        drop(inherited_descriptor);
+        assert_eq!(captured.as_deref(), Some("old-reference"));
+    }
+
+    #[test]
+    fn secure_references_round_trip_and_replacing_inline_key_removes_plaintext() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let original = "[typesafe]\napi_key = 'legacy-secret'\n";
+        std::fs::write(&path, original).unwrap();
+        let mut config = parse_config(original).unwrap();
+        config.typesafe.api_key = None;
+        config.typesafe.api_key_secret = Some("11111111-1111-4111-8111-111111111111".into());
+        save_config_at(&path, &config).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("legacy-secret"));
+        let stored = parse_config(&text).unwrap();
+        assert_eq!(
+            stored.typesafe.api_key_secret,
+            config.typesafe.api_key_secret
+        );
+        assert!(stored.typesafe.api_key.is_none());
+    }
+
+    #[test]
+    fn registers_nested_projects_and_provider_tables() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let mut config = parse_config("").unwrap();
+        config.projects.insert(
+            "first".into(),
+            ProjectSection {
+                id: "id-1".into(),
+                path: "/first".into(),
+            },
+        );
+        let mut provider = ProviderProfile::new(vertebrae_core::StepHarness::Codex);
+        provider.models = vec!["model-a".into()];
+        config
+            .providers
+            .insert(ProviderId::new("custom").unwrap(), provider);
+        save_config_at(&path, &config).unwrap();
+        let mut saved = parse_config(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved.projects["first"].id, "id-1");
+        assert_eq!(
+            saved.providers[&ProviderId::new("custom").unwrap()].models,
+            vec!["model-a"]
+        );
+        saved.projects.insert(
+            "second".into(),
+            ProjectSection {
+                id: "id-2".into(),
+                path: "/second".into(),
+            },
+        );
+        save_config_at(&path, &saved).unwrap();
+        let saved = parse_config(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(saved.projects.len(), 2);
+    }
+
+    #[test]
+    fn creates_changed_default_sections_in_a_missing_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let mut config = parse_config("").unwrap();
+        config.observability.enabled = true;
+        config.sacrum.url = "https://custom.example".into();
+        save_config_at(&path, &config).unwrap();
+        let saved = parse_config(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert!(saved.observability.enabled);
+        assert_eq!(saved.sacrum.url, "https://custom.example");
+    }
+
+    #[test]
+    fn clearing_optional_settings_keeps_unknown_sibling_keys() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let original = "[typesafe]\napi_key = 'secret'\nfuture = 'keep'\n";
+        std::fs::write(&path, original).unwrap();
+        let mut config = parse_config(original).unwrap();
+        config.typesafe.api_key = None;
+        save_config_at(&path, &config).unwrap();
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(!text.contains("secret"));
+        assert!(text.contains("future = 'keep'"));
+    }
+
+    #[test]
+    fn rejects_stale_writers_and_keeps_the_external_edit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let stale = parse_config("").unwrap();
+        std::fs::write(&path, "# external edit\n").unwrap();
+        let error = save_config_at(&path, &stale).unwrap_err();
+        assert!(error.to_string().contains("changed on disk"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "# external edit\n");
+    }
+
+    #[test]
+    fn malformed_config_is_not_overwritten_and_errors_are_redacted() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let malformed = "token = 'do-not-print\n";
+        std::fs::write(&path, malformed).unwrap();
+        let error = save_config_at(&path, &VertebraeConfigFile::default()).unwrap_err();
+        assert!(!error.to_string().contains("do-not-print"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), malformed);
+    }
+
+    #[test]
+    fn patches_inline_tables_and_uses_private_permissions() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let original = "sacrum = { url = 'https://old.example', custom = 1 }\n";
+        std::fs::write(&path, original).unwrap();
+        let mut config = parse_config(original).unwrap();
+        config.sacrum.url = "https://new.example".into();
+        save_config_at(&path, &config).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("custom = 1"));
+        assert_eq!(
+            parse_config(&text).unwrap().sacrum.url,
+            "https://new.example"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
     }
 }

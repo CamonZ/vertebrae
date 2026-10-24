@@ -69,6 +69,8 @@ pub struct HarnessFactoryConfig {
     /// Server-owned TypeSafe API credential. It is never copied into an
     /// `AgentConfig` or provider-neutral `RequestConfig`.
     pub typesafe_api_key: Option<String>,
+    /// OS credential reference from the shared local configuration.
+    pub typesafe_api_key_secret: Option<String>,
     /// Optional server-owned TypeSafe endpoint override.
     pub typesafe_base_url: Option<String>,
     /// Optional server-owned full TypeSafe System One endpoint URL.
@@ -141,6 +143,31 @@ impl HarnessFactoryConfig {
     /// factory constructs a TypeSafe client.
     pub fn from_environment() -> Self {
         Self::from_environment_with_typesafe_configured_settings(None, None)
+    }
+
+    /// Freeze the selected request's credential into this owned factory
+    /// config. Call while holding the shared config read guard when using live
+    /// file settings. No session is started, and unused providers are untouched.
+    pub fn resolve_request_credentials(
+        &mut self,
+        harness: Option<StepHarness>,
+        agent: &AgentConfig,
+    ) -> Result<(), HarnessError> {
+        let factory = HarnessRuntimeFactory::new(self.clone());
+        let resolved = factory.resolve_provider(harness, agent)?;
+        if let Some(profile) = &resolved.profile {
+            let key = factory.custom_provider_api_key(&resolved, profile)?;
+            let profile = self
+                .provider_profiles
+                .get_mut(&resolved.id)
+                .expect("resolved profile exists");
+            profile.api_key = key;
+            profile.api_key_secret = None;
+        } else if resolved.harness == StepHarness::Typesafe {
+            self.typesafe_api_key = factory.typesafe_api_key()?;
+            self.typesafe_api_key_secret = None;
+        }
+        Ok(())
     }
 
     /// Capture environment configuration while using the shared app config as
@@ -298,6 +325,25 @@ impl HarnessRuntimeFactory {
         resolve_provider(harness, agent_config, &self.config.provider_profiles)
     }
 
+    /// Construct a runtime without blocking an async worker on OS credential
+    /// access (which can wait for a locked store or an OS approval prompt).
+    pub async fn create_async(
+        self,
+        options: HarnessRuntimeOptions,
+    ) -> Result<HarnessRuntimeInstance, HarnessError> {
+        self.create_for_harness_async(None, options).await
+    }
+
+    pub async fn create_for_harness_async(
+        self,
+        harness: Option<StepHarness>,
+        options: HarnessRuntimeOptions,
+    ) -> Result<HarnessRuntimeInstance, HarnessError> {
+        tokio::task::spawn_blocking(move || self.create_for_harness(harness, options))
+            .await
+            .map_err(|_| HarnessError::Operation("Provider construction failed".into()))?
+    }
+
     pub fn create(
         &self,
         options: HarnessRuntimeOptions,
@@ -429,7 +475,20 @@ impl HarnessRuntimeFactory {
         resolved: &ResolvedProvider,
         profile: &ProviderProfile,
     ) -> Result<Option<String>, HarnessError> {
-        let api_key = profile.resolve_api_key(|name| self.lookup_environment(name));
+        let environment_key = profile
+            .api_key_env
+            .as_deref()
+            .and_then(|name| self.lookup_environment(name.trim()))
+            .filter(|value| !value.trim().is_empty());
+        let api_key = match environment_key {
+            Some(value) => Some(value),
+            None => vertebrae_credentials::resolve(
+                &vertebrae_credentials::OsSecretStore,
+                profile.api_key_secret.as_deref(),
+                profile.api_key.as_deref(),
+            )
+            .map_err(|error| HarnessError::Unavailable(error.to_string()))?,
+        };
         if api_key.is_none()
             && let Some(name) = &profile.api_key_env
         {
@@ -653,6 +712,26 @@ impl HarnessRuntimeFactory {
         Ok(MistralVibeRuntime::new(provider))
     }
 
+    fn typesafe_api_key(&self) -> Result<Option<String>, HarnessError> {
+        let api_key = if self.config.typesafe_api_key_secret.is_some() {
+            match self
+                .lookup_environment("TYPESAFE_API_KEY")
+                .filter(|value| !value.trim().is_empty())
+            {
+                Some(value) => Some(value),
+                None => vertebrae_credentials::resolve(
+                    &vertebrae_credentials::OsSecretStore,
+                    self.config.typesafe_api_key_secret.as_deref(),
+                    None,
+                )
+                .map_err(|error| HarnessError::Unavailable(error.to_string()))?,
+            }
+        } else {
+            self.config.typesafe_api_key.clone()
+        };
+        Ok(api_key)
+    }
+
     fn build_typesafe(
         &self,
         resolved: &ResolvedProvider,
@@ -682,8 +761,8 @@ impl HarnessRuntimeFactory {
             request_config.model.as_deref(),
         )
         .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
-        let mut config =
-            TypeSafeClientConfig::new(self.config.typesafe_api_key.clone().unwrap_or_default());
+        let api_key = self.typesafe_api_key()?;
+        let mut config = TypeSafeClientConfig::new(api_key.unwrap_or_default());
         if let Some(base_url) = &self.config.typesafe_base_url {
             config = config.with_base_url(base_url.clone());
         } else if let Some(url) = &self.config.typesafe_url {
@@ -1525,6 +1604,53 @@ mod tests {
         assert!(
             instance.is_ok(),
             "the legacy base URL override should be used instead of the configured full URL"
+        );
+    }
+
+    #[test]
+    fn environment_overrides_secure_provider_reference_and_broken_reference_fails_closed() {
+        let id = ProviderId::new("secure-provider").unwrap();
+        let mut profile = custom_profile(StepHarness::Codex, &["model"]);
+        profile.api_key_secret = Some("invalid-reference".into());
+        profile.api_key = Some("legacy-key".into());
+        profile.api_key_env = Some(" CUSTOM_SECURE_KEY ".into());
+        let resolved = ResolvedProvider {
+            id,
+            harness: StepHarness::Codex,
+            profile: Some(profile.clone()),
+        };
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            environment: BTreeMap::from([("CUSTOM_SECURE_KEY".into(), "environment-key".into())]),
+            ..Default::default()
+        });
+        assert_eq!(
+            factory
+                .custom_provider_api_key(&resolved, &profile)
+                .unwrap()
+                .as_deref(),
+            Some("environment-key")
+        );
+        profile.api_key_env = None;
+        let error = factory
+            .custom_provider_api_key(&resolved, &profile)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("credential reference"));
+        assert!(!error.contains("legacy-key"));
+    }
+
+    #[test]
+    fn typesafe_environment_overrides_secure_reference_without_opening_the_store() {
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            typesafe_api_key_secret: Some("invalid-reference".into()),
+            environment: BTreeMap::from([("TYPESAFE_API_KEY".into(), "environment-key".into())]),
+            ..Default::default()
+        });
+        let resolved = ResolvedProvider::builtin(BuiltinProvider::Typesafe);
+        assert!(
+            factory
+                .build_typesafe(&resolved, &RequestConfig::default())
+                .is_ok()
         );
     }
 
