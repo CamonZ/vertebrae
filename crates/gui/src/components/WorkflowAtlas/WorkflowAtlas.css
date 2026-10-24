@@ -1400,7 +1400,7 @@
    Inspector content (.wfd) — WorkflowInspector / StepInspector.
 
    This is the CONTENT inside a right-docked FloatingDetailPanel; the panel
-   shell already owns the float positioning, frosted glass, resize handle, and
+   shell already owns the float positioning, opaque surface, resize handle, and
    focus model, so `.wfd` here is just a fill-the-shell flex column (NOT the
    prototype's self-positioned glass card). The `.kindspine` + `.k-<kind>`
    carrier only sets --kc for the panel's accents (eyebrow dot, chips); the

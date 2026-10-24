@@ -10,7 +10,10 @@ import type { TaskTreeNode } from "../types/ui";
  * Root nodes are tasks whose parent_id is null or whose parent
  * is not present in the provided task set.
  */
-export function buildTreeFromTasks(tasks: Task[]): TaskTreeNode[] {
+export function buildTreeFromTasks(
+  tasks: Task[],
+  cache?: WeakMap<Task, TaskTreeNode>
+): TaskTreeNode[] {
   const taskMap = new Map<string, Task>();
   const childrenMap = new Map<string, Task[]>();
 
@@ -33,7 +36,15 @@ export function buildTreeFromTasks(tasks: Task[]): TaskTreeNode[] {
   function buildNode(task: Task): TaskTreeNode {
     const hasBlockers = task.run_controls?.disabled_reason_code === "blocked";
     const children = (childrenMap.get(task.id) ?? []).map(buildNode);
-    return {
+    const previous = cache?.get(task);
+    if (
+      previous &&
+      previous.children.length === children.length &&
+      previous.children.every((child, index) => child === children[index])
+    ) {
+      return previous;
+    }
+    const node: TaskTreeNode = {
       task,
       has_blockers: hasBlockers,
       // The list contract exposes server-derived blocked state, not the
@@ -42,6 +53,8 @@ export function buildTreeFromTasks(tasks: Task[]): TaskTreeNode[] {
       blocker_count: hasBlockers ? 1 : 0,
       children,
     };
+    cache?.set(task, node);
+    return node;
   }
 
   // Root nodes: parent_id is null or parent not in task set

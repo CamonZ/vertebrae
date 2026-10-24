@@ -90,6 +90,41 @@ describe("useRunTrace", () => {
     mockGetExecutionLogs.mockResolvedValue({ status: "ok", data: [] });
   });
 
+  it("keeps execution status live without fetching log history for status-only consumers", async () => {
+    const exec = execution();
+    mockGetTaskRunTrace.mockResolvedValue({
+      status: "ok",
+      data: {
+        root_task_run_id: "run-1",
+        task_runs: [],
+        step_executions: [exec],
+        session_logs: [],
+      } satisfies TaskRunTrace,
+    });
+    const { result, rerender } = renderHook(
+      ({ includeExecutionLogs }) =>
+        useRunTrace("task-1", "run-1", { includeExecutionLogs }),
+      { wrapper, initialProps: { includeExecutionLogs: false } }
+    );
+    await waitFor(() => expect(result.current.stepExecutions).toEqual([exec]));
+    expect(mockGetExecutionLogs).not.toHaveBeenCalled();
+    act(() =>
+      upsertStepExecutionInQueryCache(execution({ status: "completed" }), {
+        taskId: "task-1",
+        taskRunId: "run-1",
+        generation: getProjectScopeGeneration(),
+      })
+    );
+    await waitFor(() =>
+      expect(result.current.stepExecutions[0].status).toBe("completed")
+    );
+    expect(mockGetExecutionLogs).not.toHaveBeenCalled();
+    rerender({ includeExecutionLogs: true });
+    await waitFor(() =>
+      expect(mockGetExecutionLogs).toHaveBeenCalledWith("exec-1")
+    );
+  });
+
   it("fetches a single-run trace and seeds session logs into the session log store", async () => {
     const exec = execution();
     const log = sessionLog();

@@ -31,6 +31,7 @@ import {
 const mockTaskOverrides = vi.hoisted(() => ({
   current: {} as Partial<Task>,
   listTaskArtifacts: vi.fn(),
+  refetch: vi.fn(),
 }));
 
 // Mock the useTask hook to return task data directly
@@ -123,7 +124,7 @@ vi.mock("../../hooks/useTask", () => ({
       }),
       isLoading: false,
       error: null,
-      refetch: vi.fn(),
+      refetch: mockTaskOverrides.refetch,
     };
   },
 }));
@@ -290,6 +291,86 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   afterEach(() => {
     queryClient.clear();
+  });
+
+  it("uses realtime projections without refetching and retains legacy/deletion/archive recovery", async () => {
+    render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+    const calls = vi.mocked(eventsModule.events.taskChangedEvent.listen).mock
+      .calls;
+    const listener = calls[calls.length - 1][0];
+    const payload = {
+      task_id: mockTaskData.id,
+      change_type: "Updated" as const,
+      task: mockTaskData,
+      current_step_id: null,
+      workflow_id: null,
+      level: null,
+      archived: false,
+    };
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        listener({ event: "task-changed-event", id: 0, payload });
+        vi.advanceTimersByTime(120);
+      });
+      expect(mockTaskOverrides.refetch).not.toHaveBeenCalled();
+      await act(async () => {
+        listener({
+          event: "task-changed-event",
+          id: 0,
+          payload: { ...payload, task: null },
+        });
+        vi.advanceTimersByTime(120);
+      });
+      expect(mockTaskOverrides.refetch).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        listener({
+          event: "task-changed-event",
+          id: 0,
+          payload: { ...payload, change_type: "Deleted", task: null },
+        });
+      });
+      expect(mockTaskOverrides.refetch).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        listener({
+          event: "task-changed-event",
+          id: 0,
+          payload: { ...payload, task: null },
+        });
+        listener({ event: "task-changed-event", id: 0, payload });
+        vi.advanceTimersByTime(120);
+      });
+      expect(mockTaskOverrides.refetch).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        listener({
+          event: "task-changed-event",
+          id: 0,
+          payload: { ...payload, archived: true },
+        });
+        vi.advanceTimersByTime(120);
+      });
+      expect(mockTaskOverrides.refetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not fetch traces or execution logs for a running task without a waiting gate", async () => {
+    const run = activeRun(mockTaskData.id, { status: "executing" });
+    seedTaskRuns(mockTaskData.id, [run]);
+    renderWithTaskOverrides({
+      run_controls: {
+        runnable: false,
+        stoppable: true,
+        disabled_reason_code: "active_run",
+        disabled_reason: null,
+        active_run: run,
+      },
+    });
+    expect(screen.getByTestId("task-detail-stop-button")).toBeInTheDocument();
+    await act(async () => {});
+    expect(eventsModule.commands.getTaskRunTrace).not.toHaveBeenCalled();
+    expect(eventsModule.commands.getExecutionLogs).not.toHaveBeenCalled();
   });
 
   describe("Header", () => {

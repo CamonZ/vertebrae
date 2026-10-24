@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import type { Task, TaskRun, TaskRunStatus } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
@@ -21,6 +21,8 @@ import {
 } from "../shared/HearthPrimitives";
 import type { PipelineSegment } from "../shared/HearthPrimitives";
 
+import { activeRunsFromTasks } from "../../hooks/useTaskRuns";
+
 interface TaskTreeNodeProps {
   node: TaskTreeNodeType;
   depth: number;
@@ -31,7 +33,7 @@ interface TaskTreeNodeProps {
   hideCompleted?: boolean;
   filtering?: boolean;
   summaryExpanded?: ReturnType<typeof useSummaryExpanded>;
-  activeRunsByTaskId: ReadonlyMap<string, TaskRun>;
+  activeRunsByTaskId?: ReadonlyMap<string, TaskRun>;
 }
 
 /**
@@ -172,7 +174,37 @@ function levelClass(level: Task["level"]): "l0" | "l1" | "l2" {
   return "l2";
 }
 
-export function TaskTreeNode({
+function containsTask(
+  node: TaskTreeNodeType,
+  id: string | null | undefined
+): boolean {
+  return Boolean(
+    id &&
+    (node.task.id === id ||
+      node.children.some((child) => containsTask(child, id)))
+  );
+}
+
+function sameNodeProps(
+  previous: TaskTreeNodeProps,
+  next: TaskTreeNodeProps
+): boolean {
+  return (
+    previous.node === next.node &&
+    previous.depth === next.depth &&
+    previous.onTaskSelect === next.onTaskSelect &&
+    previous.expandedNodes === next.expandedNodes &&
+    previous.hideCompleted === next.hideCompleted &&
+    previous.filtering === next.filtering &&
+    previous.summaryExpanded === next.summaryExpanded &&
+    previous.activeRunsByTaskId === next.activeRunsByTaskId &&
+    (previous.selectedTaskId === next.selectedTaskId ||
+      (!containsTask(next.node, previous.selectedTaskId) &&
+        !containsTask(next.node, next.selectedTaskId)))
+  );
+}
+
+export const TaskTreeNode = memo(function TaskTreeNodeRow({
   node,
   depth,
   selectedTaskId,
@@ -209,7 +241,18 @@ export function TaskTreeNode({
   }, [expandedNodes, task.id]);
 
   const priority = getPriorityIndicator(task.priority);
-  const activeRun = activeRunsByTaskId.get(task.id) ?? null;
+  // List tasks already carry run state. An unrelated task's run must not
+  // invalidate this row through a newly allocated, list-wide map.
+  const localRuns = useMemo(
+    () =>
+      activeRunsByTaskId ??
+      activeRunsFromTasks([
+        node.task,
+        ...node.children.map((child) => child.task),
+      ]),
+    [activeRunsByTaskId, node]
+  );
+  const activeRun = localRuns.get(task.id) ?? null;
   const runChip = deriveRunStateChip(activeRun);
   const activeRunStatus = activeRun?.status ?? null;
   const tags = task.tags ?? [];
@@ -218,9 +261,9 @@ export function TaskTreeNode({
     () =>
       deriveHearthStateBreakdown(
         node.children.map((child) => child.task),
-        activeRunsByTaskId
+        localRuns
       ),
-    [activeRunsByTaskId, node.children]
+    [localRuns, node.children]
   );
   const hasBreakdown = hasHearthStateBreakdown(breakdown);
 
@@ -418,4 +461,4 @@ export function TaskTreeNode({
       )}
     </div>
   );
-}
+}, sameNodeProps);

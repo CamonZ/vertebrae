@@ -61,16 +61,20 @@ export interface UseRunTraceResult {
   refetch: () => void;
 }
 
+const NO_EXECUTIONS: readonly StepExecution[] = [];
+
 /**
  * SINGLE-RUN trace data path.
  *
  * `getTaskRunTrace(runId)` is single-run scoped. The `root_task_run_id`
  * command argument and response field names are legacy Sacrum names; callers
  * pass the concrete run id they want to display.
+ * Status-only consumers can opt out of per-execution log history and subscriptions.
  */
 export function useRunTrace(
   _taskId: string | null | undefined,
-  activeRunId: string | null | undefined
+  activeRunId: string | null | undefined,
+  options: { includeExecutionLogs?: boolean } = {}
 ): UseRunTraceResult {
   const projectScopeGeneration = useProjectScopeGeneration();
   const queryKey = queryKeys.executions.byRun(
@@ -115,8 +119,9 @@ export function useRunTrace(
   });
 
   const stepExecutions = query.data?.step_executions ?? [];
-  const { logsByExecutionId, logBucketsByExecutionId } =
-    useSubtreeSessionLogs(stepExecutions);
+  const { logsByExecutionId, logBucketsByExecutionId } = useSubtreeSessionLogs(
+    options.includeExecutionLogs === false ? NO_EXECUTIONS : stepExecutions
+  );
 
   return {
     stepExecutions,
