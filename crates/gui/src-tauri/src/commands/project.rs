@@ -806,6 +806,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         };
 
@@ -856,6 +857,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         })
         .unwrap();
@@ -933,6 +935,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         })
         .unwrap();
@@ -977,6 +980,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         })
         .unwrap();
@@ -1057,6 +1061,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         })
         .unwrap();
@@ -1109,6 +1114,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         })
         .unwrap();

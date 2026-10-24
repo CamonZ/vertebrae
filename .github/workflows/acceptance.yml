@@ -11,6 +11,11 @@ jobs:
   acceptance:
     name: Acceptance Tests
     runs-on: ubuntu-24.04
+    env:
+      # Pin the source; bumping it also invalidates the image archive cache.
+      POSTGRES_IMAGE_SOURCE: public.ecr.aws/docker/library/postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+      # docker save/load preserves tags, but not registry digest references.
+      VTB_ACCEPTANCE_POSTGRES_IMAGE: vtb-acceptance-postgres:ci
     permissions:
       contents: read
       packages: read
@@ -21,6 +26,34 @@ jobs:
 
       - name: Verify Docker Compose
         run: docker compose version
+
+      - name: Restore Postgres image cache
+        id: postgres-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/acceptance-postgres.tar
+          key: postgres-image-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.POSTGRES_IMAGE_SOURCE }}
+
+      - name: Load or pull Postgres image
+        env:
+          POSTGRES_IMAGE_ARCHIVE: ${{ runner.temp }}/acceptance-postgres.tar
+        shell: bash
+        run: |
+          if [[ -f "$POSTGRES_IMAGE_ARCHIVE" ]] && docker load --input "$POSTGRES_IMAGE_ARCHIVE"; then
+            docker image inspect "$VTB_ACCEPTANCE_POSTGRES_IMAGE" > /dev/null
+          else
+            docker pull "$POSTGRES_IMAGE_SOURCE"
+            docker tag "$POSTGRES_IMAGE_SOURCE" "$VTB_ACCEPTANCE_POSTGRES_IMAGE"
+            docker save --output "$POSTGRES_IMAGE_ARCHIVE" "$VTB_ACCEPTANCE_POSTGRES_IMAGE"
+          fi
+
+      # Save before the suites, so a later test failure does not discard a miss.
+      - name: Save Postgres image cache
+        if: steps.postgres-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/acceptance-postgres.tar
+          key: ${{ steps.postgres-cache.outputs.cache-primary-key }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3

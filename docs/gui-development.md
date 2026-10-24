@@ -684,3 +684,13 @@ Enrolled daemon -> `daemon:<id>` report/heartbeat -> Sacrum live registry
                 -> `accounts:me` `daemon_metrics` -> `DaemonMetricsEvent`
                 -> live fields merged into initialized daemon projections
 ```
+
+### Decision model settings
+
+Settings → Decision Model saves one optional machine-wide provider/model role
+through the shared settings editor, including revision checks and discard/reload
+behavior. It reuses provider profiles and discovered model catalogs; provider
+selection determines the harness and credentials. The role is disabled by
+default and independent of chat defaults. Stale enabled selections are reported
+without preventing settings from loading; disabling retains the selection. See
+`SACRUM_CONFIG.md` for resolution semantics and follow-up integration boundaries.

@@ -1795,6 +1795,11 @@ const SETTINGS_COPY: Record<
     title: "Connection",
     description: "Manage the backend connection saved on this machine.",
   },
+  decision_model: {
+    title: "Decision Model",
+    description:
+      "Choose a model for background decisions about tool edits, worktrees and session context.",
+  },
   observability: {
     title: "Observability",
     description: "Choose which telemetry Vertebrae sends to your collector.",
@@ -2108,6 +2113,7 @@ export function SettingsPage({
           {(
             [
               ["providers", "Providers & Models"],
+              ["decision_model", "Decision Model"],
               ["connection", "Connection"],
               ["observability", "Observability"],
             ] as const
@@ -2140,7 +2146,8 @@ export function SettingsPage({
             <SaveIndicator visible={savedFeedback} />
           </header>
 
-          {(activeSection === "providers" ||
+          {(activeSection === "decision_model" ||
+            activeSection === "providers" ||
             activeSection === "connection" ||
             activeSection === "observability") && (
             <SharedConfigSettings

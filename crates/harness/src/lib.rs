@@ -312,6 +312,9 @@ pub struct HarnessRuntimeFactory {
     config: HarnessFactoryConfig,
 }
 
+mod decision_model;
+pub use decision_model::ResolvedDecisionModel;
+
 impl HarnessRuntimeFactory {
     pub fn new(config: HarnessFactoryConfig) -> Self {
         Self { config }

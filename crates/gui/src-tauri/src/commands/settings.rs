@@ -51,7 +51,17 @@ pub struct ObservabilitySettings {
 }
 
 #[derive(Clone, Serialize, Deserialize, specta::Type)]
+pub struct DecisionModelSettings {
+    pub enabled: bool,
+    pub provider: String,
+    pub model: String,
+    pub harness: Option<String>,
+    pub validation_error: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, specta::Type)]
 pub struct SharedSettings {
+    pub decision_model: DecisionModelSettings,
     pub revision: String,
     pub path: String,
     pub connection_url: String,
@@ -73,6 +83,11 @@ pub struct SharedSettings {
 #[derive(Clone, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "section", rename_all = "snake_case")]
 pub enum SettingsEdit {
+    DecisionModel {
+        enabled: bool,
+        provider: String,
+        model: String,
+    },
     Connection {
         url: String,
         token: SecretEdit,
@@ -163,10 +178,34 @@ fn key_storage(literal: Option<&str>, reference: Option<&str>) -> &'static str {
     }
 }
 
+fn decision_factory(config: &VertebraeConfigFile) -> vertebrae_harness::HarnessRuntimeFactory {
+    vertebrae_harness::HarnessRuntimeFactory::new(vertebrae_harness::HarnessFactoryConfig {
+        provider_profiles: config.providers.clone(),
+        ..Default::default()
+    })
+}
+
 fn snapshot(config: &VertebraeConfigFile) -> Result<SharedSettings, CommandError> {
     let obs = serde_json::to_value(&config.observability)
         .map_err(|_| invalid("Could not read observability settings."))?;
+    let decision = decision_factory(config).resolve_decision_model(&config.decision_model);
     Ok(SharedSettings {
+        decision_model: DecisionModelSettings {
+            enabled: config.decision_model.enabled,
+            provider: config
+                .decision_model
+                .provider
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+            model: config.decision_model.model.clone().unwrap_or_default(),
+            harness: decision
+                .as_ref()
+                .ok()
+                .and_then(|r| r.as_ref())
+                .map(|r| r.harness.to_string()),
+            validation_error: decision.err().map(|error| error.to_string()),
+        },
         revision: config.source_revision.clone().unwrap_or_default(),
         path: vertebrae_sacrum_client::config_path()
             .map(|p| p.display().to_string())
@@ -248,6 +287,24 @@ fn snapshot(config: &VertebraeConfigFile) -> Result<SharedSettings, CommandError
 
 fn apply(config: &mut VertebraeConfigFile, edit: SettingsEdit) -> Result<(), CommandError> {
     match edit {
+        SettingsEdit::DecisionModel {
+            enabled,
+            provider,
+            model,
+        } => {
+            let selection = vertebrae_core::DecisionModelConfig {
+                enabled,
+                provider: nonblank(provider)
+                    .map(ProviderId::new)
+                    .transpose()
+                    .map_err(|_| invalid("Select a valid decision model provider."))?,
+                model: nonblank(model),
+            };
+            decision_factory(config)
+                .resolve_decision_model(&selection)
+                .map_err(|error| invalid(&error.to_string()))?;
+            config.decision_model = selection;
+        }
         SettingsEdit::Connection { url, token } => {
             endpoint(url.trim())?;
             edit_secret(&mut config.sacrum.token, token)?;
@@ -426,6 +483,59 @@ pub async fn save_shared_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decision_role_validates_and_reports_stale_provider_without_breaking_settings() {
+        let mut config = VertebraeConfigFile::default();
+        let mut profile = ProviderProfile::new(StepHarness::Codex);
+        profile.models = vec!["model-a".into()];
+        config
+            .providers
+            .insert(ProviderId::new("custom").unwrap(), profile);
+        apply(
+            &mut config,
+            SettingsEdit::DecisionModel {
+                enabled: true,
+                provider: "custom".into(),
+                model: "model-a".into(),
+            },
+        )
+        .unwrap();
+        let settings = snapshot(&config).unwrap();
+        assert_eq!(settings.decision_model.harness.as_deref(), Some("codex"));
+        assert!(settings.decision_model.validation_error.is_none());
+        let before = config.decision_model.clone();
+        assert!(apply(
+            &mut config,
+            SettingsEdit::DecisionModel {
+                enabled: true,
+                provider: "custom".into(),
+                model: "removed".into(),
+            }
+        )
+        .is_err());
+        assert_eq!(config.decision_model, before);
+        config.providers.clear();
+        assert!(snapshot(&config)
+            .unwrap()
+            .decision_model
+            .validation_error
+            .is_some());
+        apply(
+            &mut config,
+            SettingsEdit::DecisionModel {
+                enabled: false,
+                provider: "custom".into(),
+                model: "model-a".into(),
+            },
+        )
+        .unwrap();
+        assert!(snapshot(&config)
+            .unwrap()
+            .decision_model
+            .validation_error
+            .is_none());
+    }
 
     #[test]
     fn snapshots_never_expose_credentials_or_environment_values() {

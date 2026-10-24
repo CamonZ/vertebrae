@@ -1514,6 +1514,7 @@ export type DaemonMetrics = { daemon_version?: string | null; os?: string | null
 export type DaemonMetricsEvent = { connection_id: string; daemon_id: string; schema_version: number; metrics: DaemonMetrics }
 export type DaemonMutationResult = { connection_id: string; daemon: Daemon }
 export type DaemonNameUpdate = { kind: "unchanged" } | { kind: "clear" } | { kind: "set"; value: string }
+export type DecisionModelSettings = { enabled: boolean; provider: string; model: string; harness: string | null; validation_error: string | null }
 export type EnvironmentEdit = { name: string; secret: SecretEdit }
 /**
  * Execute config shared by workflow definitions and execution records.
@@ -2050,8 +2051,8 @@ export type SessionLogUpdatedEvent = { log_id: string; step_execution_id: string
  * How an llm_inference destination enters its provider conversation.
  */
 export type SessionMode = "new" | "resume" | "fork"
-export type SettingsEdit = { section: "connection"; url: string; token: SecretEdit } | { section: "typesafe"; url: string; key: SecretEdit } | { section: "provider"; id: string; create: boolean; harness: string; endpoint: string; models: string[]; default_model: string; api_key_env: string; key: SecretEdit; environment: EnvironmentEdit[]; wire_api: string } | { section: "observability"; settings: ObservabilitySettings }
-export type SharedSettings = { revision: string; path: string; connection_url: string; has_connection_token: boolean; effective_connection_url: string; connection_url_override: boolean; connection_token_override: boolean; typesafe_url: string; typesafe_endpoint_hidden: boolean; has_typesafe_key: boolean; typesafe_key_storage: string; credential_warning: string | null; typesafe_key_override: boolean; typesafe_url_override: boolean; providers: ProviderSettings[]; observability: ObservabilitySettings }
+export type SettingsEdit = { section: "decision_model"; enabled: boolean; provider: string; model: string } | { section: "connection"; url: string; token: SecretEdit } | { section: "typesafe"; url: string; key: SecretEdit } | { section: "provider"; id: string; create: boolean; harness: string; endpoint: string; models: string[]; default_model: string; api_key_env: string; key: SecretEdit; environment: EnvironmentEdit[]; wire_api: string } | { section: "observability"; settings: ObservabilitySettings }
+export type SharedSettings = { decision_model: DecisionModelSettings; revision: string; path: string; connection_url: string; has_connection_token: boolean; effective_connection_url: string; connection_url_override: boolean; connection_token_override: boolean; typesafe_url: string; typesafe_endpoint_hidden: boolean; has_typesafe_key: boolean; typesafe_key_storage: string; credential_warning: string | null; typesafe_key_override: boolean; typesafe_url_override: boolean; providers: ProviderSettings[]; observability: ObservabilitySettings }
 /**
  * Workflow step entity - mirrors core::Step
  */

@@ -18,6 +18,7 @@ import {
   type ConfigSection,
 } from "./settingsDraft";
 import { SettingsValidationContext } from "./settingsValidation";
+import { DecisionModelForm } from "./DecisionModelForm";
 import { ProviderForm } from "./ProviderForm";
 export type { ConfigSection } from "./settingsDraft";
 
@@ -234,6 +235,13 @@ export function SharedConfigSettings({
                     Existing sessions keep their configuration.
                   </Notice>
                 </>
+              )}
+              {draft.section === "decision_model" && (
+                <DecisionModelForm
+                  draft={draft}
+                  settings={settings}
+                  change={change}
+                />
               )}
               {draft.section === "connection" && (
                 <div className={`${card} space-y-5`}>
@@ -460,7 +468,9 @@ export function SharedConfigSettings({
             </Button>
             <span role="status" className="text-sm text-[var(--color-fg-mute)]">
               {saved
-                ? draft.section === "provider" || draft.section === "typesafe"
+                ? draft.section === "provider" ||
+                  draft.section === "typesafe" ||
+                  draft.section === "decision_model"
                   ? "Settings saved. Applies to new sessions and requests."
                   : "Settings saved. Restart the GUI to apply these settings."
                 : dirty

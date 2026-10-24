@@ -6,11 +6,22 @@ import type {
 import type { SecretEdit } from "../../bindings";
 import type { SettingsValidation } from "./settingsValidation";
 export const keep: SecretEdit = { action: "keep" };
-export type ConfigSection = "providers" | "connection" | "observability";
+export type ConfigSection =
+  | "providers"
+  | "connection"
+  | "observability"
+  | "decision_model";
 export function draftFor(
   section: ConfigSection,
   settings: SharedSettings
 ): SettingsEdit {
+  if (section === "decision_model")
+    return {
+      section,
+      enabled: settings.decision_model.enabled,
+      provider: settings.decision_model.provider,
+      model: settings.decision_model.model,
+    };
   if (section === "connection")
     return { section, url: settings.connection_url, token: keep };
   if (section === "observability")
@@ -53,6 +64,15 @@ function validEndpoint(value: string, optional = false) {
 export function validateSettingsDraft(
   edit: SettingsEdit
 ): SettingsValidation | null {
+  if (edit.section === "decision_model" && edit.enabled) {
+    if (!edit.provider)
+      return {
+        field: "Decision provider",
+        message: "Select a decision model provider.",
+      };
+    if (!edit.model.trim())
+      return { field: "Decision model", message: "Select a decision model." };
+  }
   const error = (field: string, message: string) => ({ field, message });
   const secret =
     edit.section === "connection"

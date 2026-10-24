@@ -1,3 +1,4 @@
+import { withBuiltinProviders } from "../../test/localChatCatalog";
 import { useProviderSettingsStore } from "../../stores/providerSettingsStore";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -23,6 +24,13 @@ vi.mock("../../bindings", () => ({
   events: { localBackendProgressEvent: { listen: async () => () => {} } },
 }));
 const settings: SharedSettings = {
+  decision_model: {
+    enabled: false,
+    provider: "",
+    model: "",
+    harness: null,
+    validation_error: null,
+  },
   revision: "revision-1",
   path: "/test/config.toml",
   connection_url: "https://backend.example",
@@ -98,7 +106,12 @@ beforeEach(() => {
   });
 });
 describe("shared configuration forms", () => {
-  it.each(["providers", "connection", "observability"] as const)(
+  it.each([
+    "providers",
+    "connection",
+    "observability",
+    "decision_model",
+  ] as const)(
     "renders only the %s pane and restores preferences when returning to Chat",
     async (section) => {
       const user = userEvent.setup();
@@ -438,5 +451,135 @@ describe("shared configuration forms", () => {
     expect(
       screen.queryByText(/Saved provider changes take effect after restarting/)
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("decision model configuration", () => {
+  it("uses the existing harness catalog for built-in model choices", async () => {
+    vi.mocked(commands.getSupportedLocalChatHarnesses).mockResolvedValueOnce({
+      status: "ok",
+      data: withBuiltinProviders({
+        default_harness: "codex",
+        harnesses: [
+          {
+            harness: "codex",
+            available: false,
+            unavailable_reason: "Codex is not installed",
+            default_model_id: "gpt-5",
+            models: [
+              { id: "default", label: "Default" },
+              { id: "gpt-5", label: "GPT-5" },
+            ],
+          },
+        ],
+      }),
+    });
+    const user = userEvent.setup();
+    mount("decision_model");
+    await user.selectOptions(
+      await screen.findByLabelText("Decision provider"),
+      "openai"
+    );
+    expect(await screen.findByRole("option", { name: "GPT-5" })).toBeVisible();
+    expect(
+      screen.queryByRole("option", { name: "Default" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Codex is not installed")).toBeVisible();
+    await user.selectOptions(screen.getByLabelText("Decision model"), "gpt-5");
+    expect(screen.getByLabelText("Decision model")).toHaveValue("gpt-5");
+  });
+
+  it("saves a configured provider/model independently of chat defaults", async () => {
+    const user = userEvent.setup();
+    const defaults = localStorage.getItem(
+      "vertebrae.local-chat-provider-defaults.v2"
+    );
+    const saved = structuredClone(settings);
+    saved.decision_model = {
+      enabled: true,
+      provider: "custom",
+      model: "model-a",
+      harness: "codex",
+      validation_error: null,
+    };
+    vi.mocked(commands.saveSharedSettings).mockResolvedValue({
+      status: "ok",
+      data: saved,
+    });
+    mount("decision_model");
+    await screen.findByLabelText("Decision model status");
+    await user.selectOptions(
+      screen.getByLabelText("Decision model status"),
+      "enabled"
+    );
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    await user.selectOptions(
+      screen.getByLabelText("Decision provider"),
+      "custom"
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Decision model"),
+      "model-a"
+    );
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(commands.saveSharedSettings).toHaveBeenCalledWith("revision-1", {
+        section: "decision_model",
+        enabled: true,
+        provider: "custom",
+        model: "model-a",
+      })
+    );
+    expect(
+      await screen.findByText(
+        "Settings saved. Applies to new sessions and requests."
+      )
+    ).toBeVisible();
+    expect(
+      localStorage.getItem("vertebrae.local-chat-provider-defaults.v2")
+    ).toBe(defaults);
+    expect(
+      screen.queryByLabelText("New provider api key")
+    ).not.toBeInTheDocument();
+    await user.selectOptions(
+      screen.getByLabelText("Decision provider"),
+      "openai"
+    );
+    expect(screen.getByLabelText("Decision model")).toHaveValue("");
+  });
+
+  it("retains stale selections and allows disabling the optional role", async () => {
+    const stale = structuredClone(settings);
+    stale.decision_model = {
+      enabled: true,
+      provider: "removed",
+      model: "old-model",
+      harness: null,
+      validation_error: "Provider is no longer configured.",
+    };
+    vi.mocked(commands.getSharedSettings).mockResolvedValue({
+      status: "ok",
+      data: stale,
+    });
+    const user = userEvent.setup();
+    mount("decision_model");
+    expect(await screen.findByLabelText("Decision provider")).toHaveValue(
+      "removed"
+    );
+    expect(screen.getByLabelText("Decision model")).toHaveValue("old-model");
+    expect(screen.getByText("Provider is no longer configured.")).toBeVisible();
+    await user.selectOptions(
+      screen.getByLabelText("Decision model status"),
+      "disabled"
+    );
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(commands.saveSharedSettings).toHaveBeenCalledWith("revision-1", {
+        section: "decision_model",
+        enabled: false,
+        provider: "removed",
+        model: "old-model",
+      })
+    );
   });
 });

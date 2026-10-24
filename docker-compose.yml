@@ -19,7 +19,7 @@ services:
   postgres:
     # Docker's official image via ECR Public: Docker Hub rate-limits
     # anonymous pulls from shared CI runners.
-    image: public.ecr.aws/docker/library/postgres:17-alpine
+    image: ${VTB_ACCEPTANCE_POSTGRES_IMAGE:-public.ecr.aws/docker/library/postgres:17-alpine}
     command:
       - "postgres"
       - "-c"
