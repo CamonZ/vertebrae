@@ -167,7 +167,7 @@ function AtlasEntityPanel({
     <FloatingDetailPanel
       panelId="global-entity-panel"
       widthStorageKey="global-entity-panel-width"
-      className="workflow-atlas"
+      className="workflow-atlas detail-opaque"
       closing={closing}
       onExitAnimationEnd={onExitAnimationEnd}
       onClose={close}

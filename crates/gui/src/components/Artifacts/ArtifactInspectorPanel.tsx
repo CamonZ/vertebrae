@@ -34,7 +34,7 @@ export function ArtifactInspectorPanel({
       onExitAnimationEnd={onExitAnimationEnd}
       onClose={onClose}
       isOpen={artifact != null && !closing}
-      className="tasks-v2"
+      className="tasks-v2 detail-opaque"
       testId="artifact-inspector-panel"
       position={position}
     >

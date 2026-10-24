@@ -9,13 +9,6 @@ import {
 } from "../../utils/computeVisibleChildren";
 import { EmptyState } from "../molecules/EmptyState";
 import { useCallback, useMemo } from "react";
-import { activeRunsFromTasks } from "../../hooks/useTaskRuns";
-
-const EMPTY_ACTIVE_RUNS: ReadonlyMap<string, TaskRun> = new Map();
-
-function flattenTasks(nodes: TaskTreeNodeType[]): Task[] {
-  return nodes.flatMap((node) => [node.task, ...flattenTasks(node.children)]);
-}
 
 interface TaskTreeViewProps {
   hierarchy: TaskTreeNodeType[];
@@ -151,14 +144,6 @@ export function TaskTreeView({
   summaryExpanded,
   activeRunsByTaskId,
 }: TaskTreeViewProps) {
-  const resolvedActiveRuns = useMemo(
-    () =>
-      activeRunsByTaskId ??
-      (hierarchy.length > 0
-        ? activeRunsFromTasks(flattenTasks(hierarchy))
-        : EMPTY_ACTIVE_RUNS),
-    [activeRunsByTaskId, hierarchy]
-  );
   const summaryExpandedIds = summaryExpanded?.summaryExpandedIds;
   const visibleNodes = useMemo(
     () =>
@@ -243,7 +228,7 @@ export function TaskTreeView({
               selectedTaskId={selectedTaskId}
               onTaskSelect={onTaskSelect}
               expandedNodes={expandedNodes}
-              activeRunsByTaskId={resolvedActiveRuns}
+              activeRunsByTaskId={activeRunsByTaskId}
               hideCompleted={hideCompleted}
               filtering={filtering}
               summaryExpanded={summaryExpanded}

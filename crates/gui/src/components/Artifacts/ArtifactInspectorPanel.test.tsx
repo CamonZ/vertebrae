@@ -22,7 +22,7 @@ const artifact: Artifact = {
 };
 
 describe("ArtifactInspectorPanel", () => {
-  it("keeps its content shell transparent so the shared glass panel is visible", () => {
+  it("lets the shared opaque detail panel own the content background", () => {
     render(
       <ArtifactInspectorPanel
         artifact={artifact}
@@ -32,7 +32,8 @@ describe("ArtifactInspectorPanel", () => {
     );
 
     expect(screen.getByTestId("artifact-inspector-panel")).toHaveClass(
-      "detail-float"
+      "detail-float",
+      "detail-opaque"
     );
     expect(screen.getByTestId("artifact-inspector-content")).not.toHaveClass(
       "bg-bg"
