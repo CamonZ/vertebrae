@@ -294,6 +294,8 @@ export interface ErrorMessage extends BaseMessage {
   title?: string;
   /** Mono sub-line with detail. */
   sub?: string;
+  /** "warning" renders the row in warn colors; absent means a true error. */
+  severity?: "warning";
 }
 
 export interface GateEvaluationMessage extends BaseMessage {
