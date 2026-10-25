@@ -694,3 +694,8 @@ selection determines the harness and credentials. The role is disabled by
 default and independent of chat defaults. Stale enabled selections are reported
 without preventing settings from loading; disabling retains the selection. See
 `SACRUM_CONFIG.md` for resolution semantics and follow-up integration boundaries.
+
+## Local chat associations
+
+See [Local chat associations](chat-associations.md) for the inference flow,
+header disclosure, persistence and prototype limits.

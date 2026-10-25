@@ -1,0 +1,75 @@
+.chat-association-panel {
+  container: chat-context / inline-size;
+}
+.chat-association {
+  min-width: 0;
+  flex: 0 0 auto;
+  font: 11px var(--mono, monospace);
+}
+.chat-association > summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 42cqi;
+  padding: 4px 6px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  color: var(--color-fg-soft);
+}
+.chat-association > summary::-webkit-details-marker {
+  display: none;
+}
+.chat-association > summary:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--color-bg),
+    0 0 0 4px var(--color-accent);
+}
+.association-short-id {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.association-title,
+.association-worktree {
+  display: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+@container chat-context (min-width: 420px) {
+  .association-title {
+    display: inline;
+    max-width: 120px;
+  }
+}
+@container chat-context (min-width: 640px) {
+  .association-worktree {
+    display: inline;
+    max-width: 140px;
+    color: var(--color-accent);
+  }
+}
+/* The positioned header owns the popover, so it stays inside its chat panel. */
+.association-popover {
+  position: absolute;
+  inset-inline: 8px;
+  top: 100%;
+  z-index: 60;
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md, 6px);
+  background: var(--color-bg-1);
+  box-shadow: 0 8px 24px #0004;
+  font: 12px/1.5 var(--sans, sans-serif);
+  color: var(--color-fg);
+}
+.association-path {
+  overflow-wrap: anywhere;
+  font: 11px/1.5 var(--mono, monospace);
+}

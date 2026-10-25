@@ -25,6 +25,7 @@ interface ChatHeaderProps {
   isTitleRegenerating?: boolean;
   titleError?: string | null;
   projectLabel?: string;
+  association?: React.ReactNode;
 }
 
 interface HeaderAction {
@@ -82,6 +83,7 @@ export function ChatHeader({
   isTitleRegenerating = false,
   titleError,
   projectLabel = FALLBACK_CHAT_PROJECT_LABEL,
+  association,
 }: ChatHeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(label);
@@ -325,7 +327,7 @@ export function ChatHeader({
   return (
     <div className="hc-head">
       <div className="hc-head-top">
-        <span className="hc-title">
+        <div className="hc-title">
           {isEditingTitle ? (
             <span className="hc-title-editor">
               <input
@@ -419,6 +421,7 @@ export function ChatHeader({
           >
             {projectLabel}
           </span>
+          {association}
           {lifecycle === "error" ? (
             <span
               data-testid="chat-error-dot"
@@ -436,7 +439,7 @@ export function ChatHeader({
           ) : (
             <span className="em" />
           )}
-        </span>
+        </div>
         {(titleEditError || titleError) && (
           <span className="hc-title-error" role="alert">
             {titleEditError || titleError}

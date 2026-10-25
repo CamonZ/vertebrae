@@ -135,6 +135,10 @@ fn local_file_roots(project_root: &Path) -> Vec<PathBuf> {
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalChatSessionIndexEntry {
+    /// Optional association metadata; no raw tool payloads.
+    #[serde(default)]
+    #[specta(optional)]
+    pub association: Option<serde_json::Value>,
     pub id: String,
     pub label: String,
     pub title: Option<String>,

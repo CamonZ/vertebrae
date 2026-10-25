@@ -252,3 +252,34 @@ fn usage_fixture_has_only_documented_token_fields() {
     .unwrap();
     assert_eq!(usage.input_tokens + usage.output_tokens, 30);
 }
+
+#[tokio::test]
+async fn accepts_resolved_model_versions_for_alias_requests() {
+    let server = MockServer::start().await;
+    let mut body = success_body();
+    body["model"] = json!("jev-1.14.0");
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/systemone"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let response = client(&server).system_one(request()).await.unwrap();
+    assert_eq!(response.model, "jev-1.14.0");
+}
+
+#[tokio::test]
+async fn rejects_empty_response_model_metadata() {
+    let server = MockServer::start().await;
+    let mut body = success_body();
+    body["model"] = json!(" ");
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/v1/systemone"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let error = client(&server).system_one(request()).await.unwrap_err();
+    assert!(matches!(error, TypeSafeError::MalformedResponse(_)));
+}

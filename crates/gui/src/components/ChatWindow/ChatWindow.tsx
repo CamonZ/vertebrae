@@ -1,6 +1,8 @@
 import { Profiler, useCallback, useEffect, useRef, useState } from "react";
 import { useChatSession } from "../../hooks/useChatSession";
 import { useChatStore } from "../../stores/chatStore";
+import { useChatAssociation } from "../../hooks/useChatAssociation";
+import { ChatAssociation } from "./ChatAssociation";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
@@ -67,6 +69,7 @@ export function ChatWindow({
   }>(() => ({ sessionId, comments: [] }));
 
   const chat = useChatSession(sessionId);
+  const association = useChatAssociation(sessionId);
   const loadOlderReplayMessages = useChatStore(
     (state) => state.loadOlderReplayMessages
   );
@@ -159,11 +162,18 @@ export function ChatWindow({
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col"
+      className="chat-association-panel flex h-full min-h-0 flex-col"
       data-testid="local-chat-window"
       data-project-path={chat.session.projectPath ?? ""}
     >
       <ChatHeader
+        association={
+          <ChatAssociation
+            record={association.record}
+            diagnostic={association.diagnostic}
+            onCorrect={association.correct}
+          />
+        }
         label={chat.session.title?.trim() || chat.session.label}
         lifecycle={chat.lifecycle}
         isActive={chat.isActive}
