@@ -33,6 +33,7 @@
 //! ```
 
 pub mod artifact_service;
+pub mod decision_model;
 pub mod error;
 pub mod execution_service;
 pub mod execution_settings;
@@ -42,6 +43,7 @@ pub mod models;
 pub mod notification_service;
 pub mod orchestrator;
 pub mod provider;
+pub use decision_model::DecisionModelConfig;
 pub mod service;
 pub mod services;
 pub mod step_constraints;

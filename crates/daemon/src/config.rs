@@ -535,6 +535,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         }
     }

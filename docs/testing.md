@@ -236,6 +236,21 @@ filenames: `<feature>__<scenario_slug>__<step>.{stdout,stderr}.jsonl`.
 those sequences so the scripted prompt arrives at the daemon intact. Bare `{`
 or `}` from normal JSON nesting are safe.
 
+### CI Postgres image cache
+
+The acceptance workflow caches a `docker save` archive of Postgres between
+GitHub-hosted jobs. Its key includes the pinned source image digest, runner OS
+and architecture. A hit loads the archive; a miss pulls the pinned image and
+saves it before tests start. An unreadable archive falls back to pulling.
+
+CI tags the image as `vtb-acceptance-postgres:ci` and passes it through
+`VTB_ACCEPTANCE_POSTGRES_IMAGE` to Compose because image archives retain tags,
+not registry digest references. Local runs keep the existing ECR image default.
+Update `POSTGRES_IMAGE_SOURCE` in `.github/workflows/acceptance.yml` to refresh
+Postgres and invalidate the cache. This caches the image only: test containers
+and database volumes are still disposed after each run. Compare the cache
+restore/load timings with pulls in CI to verify the benefit.
+
 ## GUI Tests (React)
 
 ```bash

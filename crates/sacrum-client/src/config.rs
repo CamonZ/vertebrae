@@ -31,6 +31,12 @@ pub struct SacrumConfig {
 /// Top-level config file structure for ~/.config/vertebrae/config.toml
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct VertebraeConfigFile {
+    /// Optional decision role; does not affect ordinary chat or workflow models.
+    #[serde(
+        default,
+        skip_serializing_if = "vertebrae_core::DecisionModelConfig::is_default"
+    )]
+    pub decision_model: vertebrae_core::DecisionModelConfig,
     /// Revision of the loaded file, used to reject stale configuration writes.
     #[serde(skip)]
     pub source_revision: Option<String>,
@@ -833,6 +839,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         };
 
@@ -865,6 +872,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         };
 
@@ -895,6 +903,7 @@ mod tests {
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         };
 
@@ -1046,6 +1055,7 @@ models = ["kimi-k2"]
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         };
 
@@ -1148,6 +1158,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         }
     }
@@ -1240,6 +1251,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
@@ -1269,6 +1281,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
@@ -1562,6 +1575,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         };
 
@@ -1595,6 +1609,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         }
     }
@@ -1661,6 +1676,7 @@ path = "/Users/test/other"
             providers: Default::default(),
             observability: Default::default(),
             daemon: Default::default(),
+            decision_model: Default::default(),
             source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config);
@@ -1848,5 +1864,29 @@ mod settings_persistence_tests {
                 0o600
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod decision_model_tests {
+    use super::*;
+
+    #[test]
+    fn decision_settings_are_optional_and_round_trip_without_losing_other_fields() {
+        let mut config: VertebraeConfigFile = toml::from_str("").unwrap();
+        assert!(!config.decision_model.enabled);
+        assert!(!toml::to_string(&config).unwrap().contains("decision_model"));
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(&path, "# keep this comment\nfuture_setting = 'preserved'\n[decision_model]\nenabled = true\nprovider = 'custom'\nmodel = 'model-a'\n[providers.custom]\nharness = 'codex'\nmodels = ['model-a']\n").unwrap();
+        config = load_config_file_at(&path).unwrap();
+        config.decision_model.model = Some("model-b".into());
+        save_config_at(&path, &config).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("# keep this comment"));
+        assert!(saved.contains("future_setting = 'preserved'"));
+        let reloaded = load_config_file_at(&path).unwrap();
+        assert_eq!(reloaded.decision_model, config.decision_model);
+        assert_eq!(reloaded.providers, config.providers);
     }
 }

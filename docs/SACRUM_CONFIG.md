@@ -57,6 +57,47 @@ default_model = "moonshotai/kimi-k2"
   Default: `https://api.typesafe.ai/v1/systemone`. URLs with credentials,
   query strings, or fragments are rejected.
 
+`[decision_model]`
+
+Optional machine-wide selection for future background decisions about file edits,
+worktrees and session-ticket context. Configure it under **Settings → Decision
+Model**. It is independent of conversational defaults and workflow step models.
+
+```toml
+[decision_model]
+enabled = true
+provider = "openai" # built-in ID, or an existing [providers.<id>] profile
+model = "gpt-5"
+```
+
+- **enabled** defaults to `false`. Disabled selections are retained but not
+  resolved, so a stale optional selection does not break ordinary work.
+- **provider** and **model** are required when enabled. The provider selects its
+  existing harness; there is no separate harness, endpoint or credential setting.
+  Custom models must be in that profile's `models` list. Built-ins use the
+  existing provider/model validation rules. Unrecognized/removed selections fail
+  resolution explicitly; there is no fallback to the chat model.
+- GUI model choices reuse configured profiles and discovered chat catalogs.
+  When a built-in provider has no discovered catalog, enter its exact model ID.
+- `HarnessRuntimeFactory::resolve_decision_model` resolves this role against the
+  factory's provider snapshot without processes or credential access.
+  `create_decision_runtime` uses the existing adapter construction and credential
+  precedence above, returning ordinary unavailable/credential errors. It sends
+  no inference request. Callers must check capabilities required by their
+  eventual decision protocol, rather than assuming every harness supports the
+  TypeSafe structured-inference API.
+- Future callers should load one shared config snapshot per new decision request
+  and build their usual factory from that same snapshot. Changes then affect new
+  requests; in-flight requests retain their selected model/provider settings.
+  There are no decision-role environment overrides. Provider credential and
+  endpoint overrides retain their existing precedence.
+
+This delivers configuration and runtime selection only. Tool classification,
+filesystem change capture, inferred session associations and diff rendering are
+not activated. Explicit task/worktree assignments remain authoritative; future
+inferred associations must retain their provenance and use filesystem evidence
+for displayed patches.
+
 `[daemon]`
 
 No daemon-side Rhai concurrency settings are currently supported. The backend
