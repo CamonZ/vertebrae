@@ -72,7 +72,12 @@ function dayGroupOf(iso: string | null): DayGroup {
     now.getMonth(),
     now.getDate()
   ).getTime();
-  const startOfYesterday = startOfToday - 24 * 3600 * 1000;
+  // Calendar arithmetic, not -24h: DST days are 23 or 25 hours long.
+  const startOfYesterday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - 1
+  ).getTime();
   if (ms >= startOfToday) return "Today";
   if (ms >= startOfYesterday) return "Yesterday";
   return "Earlier";

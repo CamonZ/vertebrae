@@ -54,7 +54,13 @@ beforeEach(() => {
 describe("RunHistoryRail (flat run history)", () => {
   it("groups the task's runs by day", () => {
     const now = new Date();
-    const yesterday = new Date(now.getTime() - 24 * 3600 * 1000);
+    // Noon yesterday by calendar date, so DST days (23h/25h) don't shift it.
+    const yesterday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 1,
+      12
+    );
     const runs = [
       createMockTaskRun({
         id: "run-today",
