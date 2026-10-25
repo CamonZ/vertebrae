@@ -8,9 +8,12 @@ const { useProjectArtifacts } = vi.hoisted(() => ({
 }));
 
 vi.mock("../hooks/useProjectArtifacts", () => ({ useProjectArtifacts }));
+const { useTaskArtifacts } = vi.hoisted(() => ({ useTaskArtifacts: vi.fn() }));
+vi.mock("../hooks/useTaskArtifacts", () => ({ useTaskArtifacts }));
 vi.mock("../hooks/useShellHeader", () => ({ useShellHeader: vi.fn() }));
 
 import { ArtifactsPage } from "./ArtifactsPage";
+import { useEntityPanelStore } from "../stores/entityPanelStore";
 
 const artifact = (id: string, name: string): Artifact => ({
   id,
@@ -33,6 +36,14 @@ const artifact = (id: string, name: string): Artifact => ({
 describe("ArtifactsPage", () => {
   beforeEach(() => {
     useProjectArtifacts.mockReset();
+    useTaskArtifacts.mockReset();
+    useTaskArtifacts.mockReturnValue({
+      artifacts: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    useEntityPanelStore.getState().reset();
     useProjectArtifacts.mockReturnValue({
       artifacts: [artifact("a-1", "First"), artifact("a-2", "Second")],
       isLoading: false,
@@ -240,5 +251,50 @@ describe("ArtifactsPage", () => {
       "aria-selected",
       "true"
     );
+  });
+
+  describe("with a ticket open", () => {
+    const taskLookup = (state: object) =>
+      useTaskArtifacts.mockReturnValue({
+        artifacts: [artifact("a-1", "First")],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        ...state,
+      });
+
+    it("keeps the ticket and places an attached artifact to its left", () => {
+      taskLookup({});
+      useEntityPanelStore.getState().openTask("t-1");
+      render(<ArtifactsPage />, { wrapper: MemoryRouter });
+      fireEvent.click(screen.getByRole("treeitem", { name: /First/i }));
+      expect(useEntityPanelStore.getState().selection).toEqual({
+        type: "task",
+        taskId: "t-1",
+      });
+      expect(screen.getByTestId("artifact-inspector-panel")).toBeInTheDocument();
+    });
+
+    it("replaces the ticket when the artifact is unrelated", () => {
+      taskLookup({});
+      useEntityPanelStore.getState().openTask("t-1");
+      render(<ArtifactsPage />, { wrapper: MemoryRouter });
+      fireEvent.click(screen.getByRole("treeitem", { name: /Second/i }));
+      expect(useEntityPanelStore.getState().selection).toBeNull();
+      expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
+        "Second"
+      );
+    });
+
+    it("does not close the ticket while the lookup is loading or failed", () => {
+      for (const state of [{ isLoading: true }, { error: "boom" }]) {
+        taskLookup(state);
+        useEntityPanelStore.getState().openTask("t-1");
+        const view = render(<ArtifactsPage />, { wrapper: MemoryRouter });
+        fireEvent.click(screen.getByRole("treeitem", { name: /First/i }));
+        expect(useEntityPanelStore.getState().selection).not.toBeNull();
+        view.unmount();
+      }
+    });
   });
 });

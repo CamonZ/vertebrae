@@ -15,6 +15,8 @@ import { Spinner } from "../components/Spinner";
 import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
 import { useProjectArtifacts } from "../hooks/useProjectArtifacts";
+import { useTaskArtifacts } from "../hooks/useTaskArtifacts";
+import { useEntityPanelStore } from "../stores/entityPanelStore";
 import { useShellHeader } from "../hooks/useShellHeader";
 import {
   buildArtifactTree,
@@ -196,6 +198,52 @@ export function ArtifactsPage() {
     setSelectedArtifactId(linkedArtifactId);
   }, [artifacts, linkedArtifactId]);
 
+  // Placement follows the ticket open in the shared entity panel. Only a
+  // confirmed task-artifact relationship counts as attached: while the lookup
+  // is loading or failed the relationship is unknown, so nothing is replaced.
+  const openTaskId = useEntityPanelStore((state) =>
+    state.selection?.type === "task" ? state.selection.taskId : null
+  );
+  const closeEntityPanel = useEntityPanelStore((state) => state.close);
+  const taskArtifacts = useTaskArtifacts(openTaskId);
+  const relationshipKnown =
+    openTaskId != null && !taskArtifacts.isLoading && !taskArtifacts.error;
+  const attachedToOpenTask =
+    relationshipKnown &&
+    selectedArtifactId != null &&
+    taskArtifacts.artifacts.some((item) => item.id === selectedArtifactId);
+  const handledArtifactRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedArtifactId) {
+      handledArtifactRef.current = null;
+      return;
+    }
+    if (!openTaskId) {
+      handledArtifactRef.current = selectedArtifactId;
+      return;
+    }
+    if (!relationshipKnown) return;
+    if (attachedToOpenTask) {
+      handledArtifactRef.current = selectedArtifactId;
+      return;
+    }
+    // Whichever unrelated panel was opened last replaces the other. Closing
+    // the artifact inspector later never restores a replaced ticket.
+    if (handledArtifactRef.current === selectedArtifactId) {
+      setSelectedArtifactId(null);
+    } else {
+      handledArtifactRef.current = selectedArtifactId;
+      closeEntityPanel();
+    }
+  }, [
+    attachedToOpenTask,
+    closeEntityPanel,
+    openTaskId,
+    relationshipKnown,
+    selectedArtifactId,
+  ]);
+
   const {
     mounted: inspectorMounted,
     closing: inspectorClosing,
@@ -290,6 +338,7 @@ export function ArtifactsPage() {
           closing={inspectorClosing}
           onClose={closeInspector}
           onExitAnimationEnd={inspectorOnAnimationEnd}
+          position={attachedToOpenTask ? "left-of-task" : "right"}
         />
       )}
     </div>
