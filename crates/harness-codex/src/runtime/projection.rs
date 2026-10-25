@@ -220,21 +220,9 @@ impl SessionState {
                 }
             }
             CodexNotification::Error(params) => {
-                let message = optional_string(
-                    &params,
-                    &["/message", "/error/message", "/turn/error/message"],
-                )
-                .unwrap_or_else(|| params.to_string());
-                self.emit(
-                    stream,
-                    correlation,
-                    HarnessEventPayloadV1::Error(DiagnosticEvent {
-                        message,
-                        code: Some("codex_error".into()),
-                    }),
-                    UpdateSemantics::Snapshot,
-                )
-                .await?;
+                let payload = error_payload(&params);
+                self.emit(stream, correlation, payload, UpdateSemantics::Snapshot)
+                    .await?;
             }
             CodexNotification::ThreadStarted(_)
             | CodexNotification::ThreadStatusChanged(_)
@@ -375,13 +363,89 @@ pub(crate) fn summary(content: &str) -> Option<String> {
     }
 }
 
+/// Projects a Codex `error` notification. Retryable provider errors are
+/// nonterminal diagnostics; only an error the provider will not retry is a
+/// terminal `Error`.
+fn error_payload(params: &Value) -> HarnessEventPayloadV1 {
+    let message = optional_string(
+        params,
+        &["/message", "/error/message", "/turn/error/message"],
+    )
+    .unwrap_or_else(|| params.to_string());
+    let details = optional_string(
+        params,
+        &[
+            "/additionalDetails",
+            "/error/additionalDetails",
+            "/turn/error/additionalDetails",
+        ],
+    )
+    .filter(|details| !details.trim().is_empty() && *details != message);
+    let message = match details {
+        Some(details) => format!("{message}: {details}"),
+        None => message,
+    };
+    let will_retry = ["/willRetry", "/will_retry"]
+        .iter()
+        .find_map(|pointer| params.pointer(pointer).and_then(Value::as_bool))
+        .unwrap_or(false);
+    if will_retry {
+        HarnessEventPayloadV1::Warning(DiagnosticEvent {
+            message,
+            code: Some("codex_retrying".into()),
+        })
+    } else {
+        HarnessEventPayloadV1::Error(DiagnosticEvent {
+            message,
+            code: Some("codex_error".into()),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SessionState, file_change_event, tool_call, tool_output};
+    use super::{SessionState, error_payload, file_change_event, tool_call, tool_output};
     use serde_json::json;
     use vertebrae_harness_core::{
-        FileChangeKind, SessionId, ThreadId, ToolCallId, ToolStatus, TurnId,
+        FileChangeKind, HarnessEventPayloadV1, SessionId, ThreadId, ToolCallId, ToolStatus, TurnId,
     };
+
+    #[test]
+    fn retryable_errors_are_warnings_and_final_error_is_terminal() {
+        for attempt in 1..=5 {
+            let payload = error_payload(&json!({
+                "message": format!("Reconnecting... {attempt}/5"),
+                "willRetry": true,
+                "additionalDetails": "stream disconnected",
+            }));
+            assert!(matches!(
+                payload,
+                HarnessEventPayloadV1::Warning(ref w)
+                    if w.message == format!("Reconnecting... {attempt}/5: stream disconnected")
+                        && w.code.as_deref() == Some("codex_retrying")
+            ));
+        }
+        let terminal = error_payload(&json!({
+            "error": {
+                "message": "stream closed before response.completed",
+                "additionalDetails": "provider zai_glm53"
+            },
+            "willRetry": false,
+        }));
+        assert!(matches!(
+            terminal,
+            HarnessEventPayloadV1::Error(ref e)
+                if e.message == "stream closed before response.completed: provider zai_glm53"
+        ));
+    }
+
+    #[test]
+    fn error_without_retry_flag_is_terminal() {
+        assert!(matches!(
+            error_payload(&json!({"message": "boom"})),
+            HarnessEventPayloadV1::Error(ref e) if e.message == "boom"
+        ));
+    }
 
     #[test]
     fn child_correlation_preserves_parent_tool_call() {

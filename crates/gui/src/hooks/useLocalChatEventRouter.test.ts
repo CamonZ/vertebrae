@@ -16,6 +16,7 @@ import {
   routeLocalChatSessionEndEvent,
   routeLocalChatSessionTitleEvent,
   routeLocalChatSessionErrorEvent,
+  routeLocalChatSessionWarningEvent,
   routeLocalChatCompactionEvent,
   routeLocalChatTextEvent,
   routeLocalChatToolCallEvent,
@@ -164,7 +165,9 @@ describe("useLocalChatEventRouter route functions", () => {
         title: "Provider Title",
       })
     ).toBe(true);
-    expect(useChatStore.getState().sessions.session.title).toBe("Keep My Title");
+    expect(useChatStore.getState().sessions.session.title).toBe(
+      "Keep My Title"
+    );
   });
 
   it("subscribes only once when the router is mounted multiple times in a webview", async () => {
@@ -605,7 +608,9 @@ describe("useLocalChatEventRouter route functions", () => {
       "backend-local",
       "follow-up"
     );
-    expect(useChatStore.getState().sessions.local.queuedMessages).toBeUndefined();
+    expect(
+      useChatStore.getState().sessions.local.queuedMessages
+    ).toBeUndefined();
   });
 
   it("does not hand off queued work when End races a stopping turn", async () => {
@@ -1259,6 +1264,118 @@ describe("useLocalChatEventRouter route functions", () => {
     expect(local.backendSessionId).toBeNull();
     expect(local.lifecycle).toBe("error");
     expect(local.lifecycleError).toBe("turn failed");
+  });
+
+  it("keeps the session and turn attached through retry warnings, then settles once on the terminal error", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "turn-retry", "codex");
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      expect(
+        routeLocalChatSessionWarningEvent({
+          backend_session_id: "backend-local",
+          harness: "codex",
+          turn_id: "turn-retry",
+          thread_id: "backend-local-thread",
+          is_root: true,
+          warning: `Reconnecting... ${attempt}/5`,
+        })
+      ).toBe(true);
+      const mid = useChatStore.getState().sessions.local;
+      expect(mid.backendSessionId).toBe("backend-local");
+      expect(mid.activeTurn?.turnId).toBe("turn-retry");
+    }
+
+    const terminal = {
+      backend_session_id: "backend-local",
+      harness: "codex" as const,
+      turn_id: "turn-retry",
+      thread_id: "backend-local-thread",
+      is_root: true,
+      error: "stream closed before response.completed",
+    };
+    expect(routeLocalChatSessionErrorEvent(terminal)).toBe(true);
+    // The session is released by the first terminal error; a duplicate is
+    // dropped rather than settling or appending a second diagnostic.
+    expect(routeLocalChatSessionErrorEvent(terminal)).toBe(false);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.activeTurn).toBeNull();
+    expect(local.lifecycle).toBe("error");
+    expect(
+      local.messages.filter((m) => m.kind === "warning").map((m) => m.message)
+    ).toEqual([1, 2, 3, 4, 5].map((n) => `Reconnecting... ${n}/5`));
+    expect(local.messages.filter((m) => m.kind === "error")).toHaveLength(1);
+  });
+
+  it("continues normal streaming after a retry warning", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "turn-ok", "codex");
+
+    expect(
+      routeLocalChatSessionWarningEvent({
+        backend_session_id: "backend-local",
+        harness: "codex",
+        turn_id: "turn-ok",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        warning: "Reconnecting... 1/5",
+      })
+    ).toBe(true);
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-local",
+        harness: "codex",
+        turn_id: "turn-ok",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        text: "hello",
+        item_id: "item-1",
+      } as LocalChatTextEvent)
+    ).toBe(true);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.backendSessionId).toBe("backend-local");
+    expect(local.activeTurn?.turnId).toBe("turn-ok");
+    expect(local.lifecycle).not.toBe("error");
+  });
+
+  it("ignores retry warnings from a stale turn", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "turn-1", "codex");
+    useChatStore.getState().settleActiveTurn("local", "turn-1");
+    useChatStore.getState().beginActiveTurn("local");
+    startTurn("backend-local", "turn-2", "codex");
+
+    expect(
+      routeLocalChatSessionWarningEvent({
+        backend_session_id: "backend-local",
+        harness: "codex",
+        turn_id: "turn-1",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        warning: "Reconnecting... 2/5",
+      })
+    ).toBe(false);
+    expect(useChatStore.getState().sessions.local.messages).toEqual([]);
   });
 
   it("drops events from a closed or replaced backend session", () => {

@@ -828,6 +828,16 @@ describe("chatMessagesToThread", () => {
     const err = thread.turns[0].messages[0] as ErrorMessage;
     expect(err.type).toBe("error");
     expect(err.title).toBe("Connection failed");
+    expect(err.severity).toBeUndefined();
+  });
+
+  it("marks a warning event with warning severity", () => {
+    const thread = build([
+      { kind: "warning", message: "Reconnecting... 1/5", timestamp: TS },
+    ]);
+    const warn = thread.turns[0].messages[0] as ErrorMessage;
+    expect(warn.title).toBe("Reconnecting... 1/5");
+    expect(warn.severity).toBe("warning");
   });
 
   it("skips permission_request (handled as a sibling by ChatWindow)", () => {

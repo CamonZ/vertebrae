@@ -615,7 +615,11 @@ function ErrorRow(
   const clickable = props.onClick ? { "data-clickable": "" } : {};
   return (
     <div
-      className={"evrow evrow--error" + sel}
+      className={
+        "evrow evrow--error" +
+        (props.severity === "warning" ? " evrow--warning" : "") +
+        sel
+      }
       onClick={props.onClick}
       {...clickable}
     >

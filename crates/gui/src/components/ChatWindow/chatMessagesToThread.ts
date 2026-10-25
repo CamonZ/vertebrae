@@ -146,6 +146,7 @@ interface TurnDraft {
   endsWithPartialAssistant: boolean;
   /** Set for a standalone error/warning turn (no events). */
   errorTitle?: string;
+  errorSeverity?: "warning";
 }
 
 export function chatMessagesToThread(
@@ -321,6 +322,7 @@ export function chatMessagesToThread(
           events: [],
           endsWithPartialAssistant: false,
           errorTitle: m.message,
+          errorSeverity: m.kind === "warning" ? "warning" : undefined,
         });
         current = null;
         continue;
@@ -337,6 +339,7 @@ export function chatMessagesToThread(
         evt: `${turnId}-error`,
         type: "error",
         title: draft.errorTitle,
+        ...(draft.errorSeverity ? { severity: draft.errorSeverity } : {}),
       };
       turns.push({ id: turnId, messages: [err] });
       return;
