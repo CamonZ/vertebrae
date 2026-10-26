@@ -881,6 +881,14 @@ async getLocalFileRoots(projectRoot: string) : Promise<Result<string[], CommandE
     else return { status: "error", error: e  as any };
 }
 },
+async resolveChatAssociation(input: AssociationInput) : Promise<Result<AssociationResult, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resolve_chat_association", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Open a validated local-chat file reference with the operating system's
  * external file handler. The frontend supplies the captured project root and
@@ -1395,6 +1403,33 @@ export type ArtifactChangedEvent = { artifact_id: string; task_id: string | null
  * Versioned provenance carried by an artifact attachment projection.
  */
 export type ArtifactLinkMetadata = { version: number; content_kind: string; format: string; origin: string; presentation: string; extensions: JsonValue }
+export type AssociationEventKind = "user" | "tool"
+export type AssociationInput = { project_root: string; event_kind: AssociationEventKind; text: string;
+/**
+ * Eligible tickets read from the React Query cache (user events only).
+ */
+candidates: AssociationTicket[]; candidate_project_root: string | null;
+/**
+ * Current association; only its missing parts are asked about.
+ */
+ticket_id: string | null; worktree_path: string | null }
+export type AssociationResult = { selection: AssociationSelection;
+/**
+ * User events: the inventory now, before any requested worktree exists.
+ * Tool events: the worktrees the event touched.
+ */
+worktrees: AssociationWorktree[];
+/**
+ * The user asked to create a worktree; a later tool event will reveal it.
+ */
+create_worktree: boolean;
+/**
+ * Set when the decision could not run; the caller keeps its association.
+ */
+diagnostic: string | null }
+export type AssociationSelection = { kind: "keep" } | { kind: "unknown" } | { kind: "ticket"; id: string }
+export type AssociationTicket = { id: string; title: string }
+export type AssociationWorktree = { path: string; branch: string | null }
 /**
  * Code reference - file location reference
  */
@@ -1780,7 +1815,11 @@ export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id: string; thread_id?: string | null; is_root: boolean; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number; item_id?: string | null; completion_status?: string | null }
 export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { CompactionFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }
 export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; error: string; item_id?: string | null }
-export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind;
+export type LocalChatSessionIndexEntry = {
+/**
+ * Optional association metadata; no raw tool payloads.
+ */
+association?: JsonValue | null; id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind;
 /**
  * Provider the session was started with; absent means the harness's
  * built-in provider.

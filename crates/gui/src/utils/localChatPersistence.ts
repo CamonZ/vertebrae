@@ -68,6 +68,7 @@ let sessionIndexHydrated = false;
 let sessionIndexHydratePromise: Promise<boolean> | null = null;
 
 export interface LocalChatSessionSummary {
+  association?: JsonValue | null;
   id: string;
   label: string;
   title?: string | null;
@@ -269,6 +270,7 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     createdAt,
     updatedAt,
     messageCount,
+    association: candidate.association ?? null,
     gate: normalizeGateBinding(candidate.gate),
   };
 }
@@ -431,6 +433,7 @@ function serializeSession(
     createdAt,
     updatedAt,
     messageCount,
+    association: session.association ?? null,
     gate: session.gate ?? null,
   };
 }
@@ -441,6 +444,7 @@ function readSessions(): Record<string, ChatSession> {
 
 function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
   return {
+    association: session.association ?? null,
     id: session.id,
     label: session.label,
     title: session.title ?? null,

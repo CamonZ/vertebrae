@@ -36,11 +36,8 @@ pub fn validate_response(
     if response.model.trim().is_empty() {
         return Err(malformed_response("model must not be blank"));
     }
-    if response.model != request.model {
-        return Err(malformed_response(
-            "response model does not match request model",
-        ));
-    }
+    // The service reports the resolved version, e.g. jev-latest -> jev-1.14.0.
+    // Model identity is response metadata, not an echo of the requested alias.
     if response.answers.len() != request.questions.len() {
         return Err(malformed_response(
             "response answers do not match request questions",

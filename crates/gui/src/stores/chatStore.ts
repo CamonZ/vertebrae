@@ -454,6 +454,8 @@ export interface ChatSession {
   titleConfidence?: number | null;
   /** Number of early user messages used by the latest title inference attempt */
   titleUserMessageCount?: number;
+  /** Local association projection; original events remain in replay. */
+  association?: JsonValue | null;
   /** Chat messages in this session */
   messages: ChatMessage[];
   /** Whether the user has sent at least one message in this session. */
@@ -712,6 +714,8 @@ interface ChatStoreActions {
     sessionId: string,
     providerResumeId: string | null
   ) => void;
+  /** Persist the derived conversation association without changing activity time. */
+  setSessionAssociation: (sessionId: string, association: JsonValue) => void;
   /** Set the inferred display title for a local chat session */
   setSessionTitle: (sessionId: string, title: string | null) => void;
   /** Set a user-authored display title and protect it from inference. */
@@ -3145,6 +3149,15 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return false;
     },
 
+    setSessionAssociation: (sessionId, association) => {
+      updateSession(sessionId, (session) => ({
+        ...session,
+        association,
+      })).catch((error) => {
+        console.warn("Failed to persist chat association", error);
+      });
+    },
+
     setSessionTitleCandidate: (sessionId, candidate, options) => {
       const normalized = candidate.title?.replace(/\s+/g, " ").trim() || null;
       const confidence = Number.isFinite(candidate.confidence)
@@ -3348,6 +3361,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         (session) => ({
           ...session,
           messages: [],
+          association: null,
           hasUserMessage: false,
           title: null,
           titleStatus: "pending",

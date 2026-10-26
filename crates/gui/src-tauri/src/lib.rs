@@ -149,6 +149,7 @@ fn create_builder() -> Builder {
             commands::get_supported_local_chat_harnesses,
             commands::get_local_file_editors,
             commands::get_local_file_roots,
+            commands::resolve_chat_association,
             commands::open_local_file,
             commands::create_local_chat_session,
             commands::refresh_local_chat_session_gate,
