@@ -331,6 +331,40 @@ describe("ProjectSetupPage", () => {
     expect(mockSetupLocalBackend).toHaveBeenCalledWith(false, "podman");
   });
 
+  it("does not instruct Docker users to install optional Podman after refreshing runtimes", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockLocalBackendRuntimes.mockResolvedValue({ status: "ok", data: {
+      saved_runtime: null, options: [
+        { runtime: "docker", installed: true, diagnostic: null },
+        { runtime: "podman", installed: false, diagnostic: "Podman was not found. Install it and retry local setup." },
+      ],
+    } });
+    render(<ProjectSetupPage />);
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    expect(await screen.findByLabelText("Container runtime")).toHaveValue("docker");
+    expect(screen.queryByText(/Podman was not found/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh runtimes" }));
+    await waitFor(() => expect(mockLocalBackendRuntimes).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByLabelText("Container runtime")).toBeEnabled());
+    expect(screen.queryByText(/Podman was not found/)).not.toBeInTheDocument();
+  });
+
+  it("still explains a missing saved runtime when another runtime is installed", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockLocalBackendRuntimes.mockResolvedValue({ status: "ok", data: {
+      saved_runtime: "podman", options: [
+        { runtime: "docker", installed: true, diagnostic: null },
+        { runtime: "podman", installed: false, diagnostic: "Restore the saved Podman installation." },
+      ],
+    } });
+    render(<ProjectSetupPage />);
+    await userEvent.click(await screen.findByTestId("backend-choice-local"));
+    await userEvent.click(screen.getByTestId("backend-choice-continue"));
+    expect(await screen.findByText("Restore the saved Podman installation.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Container runtime")).toBeDisabled();
+  });
+
   it("defaults to installed Podman without requiring Docker", async () => {
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockLocalBackendRuntimes.mockResolvedValue({ status: "ok", data: {

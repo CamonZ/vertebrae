@@ -550,6 +550,7 @@ async fn main() {
             // `@first_run` may live on either the scenario or the feature.
             let first_run = is_first_run(feature, scenario);
             let podman = is_podman(feature, scenario);
+            let colima = is_colima(feature, scenario);
             // `@multi_project` provisions a second project for switcher tests.
             let multi_project = is_multi_project(feature, scenario);
             Box::pin(async move {
@@ -559,7 +560,9 @@ async fn main() {
                 let _ = std::fs::remove_dir_all(gui_acceptance::HARNESS_CAPTURE_DIR);
                 world.feature_slug = slugify(&feature_name);
                 world.scenario_slug = slugify(&scenario_name);
-                if podman {
+                if colima {
+                    steps::colima::before_scenario(world, &scenario_name).await;
+                } else if podman {
                     steps::local_backend::before_scenario(world, &scenario_name).await;
                 } else {
                     steps::setup::before_scenario(world, &scenario_name, first_run, multi_project)
@@ -570,6 +573,7 @@ async fn main() {
         .after(|feature, _rule, scenario, ev, world| {
             let first_run = is_first_run(feature, scenario);
             let podman = is_podman(feature, scenario);
+            let colima = is_colima(feature, scenario);
             let prefix = match ev {
                 cucumber::event::ScenarioFinished::StepFailed(..)
                 | cucumber::event::ScenarioFinished::BeforeHookFailed(..) => "F",
@@ -613,6 +617,11 @@ async fn main() {
                 }
 
                 if let Some(world) = world {
+                    if colima {
+                        gui_acceptance::close_webdriver().await;
+                        world.scenario_timing.take();
+                        return;
+                    }
                     if podman {
                         steps::local_backend::after_scenario().await;
                         steps::setup::after_scenario(world, false).await;
@@ -662,6 +671,8 @@ async fn main() {
         .filter_run("tests/features", |feature, _rule, scenario| {
             // `@skip` features/scenarios are excluded from the run.
             !is_skipped(feature, scenario)
+                && is_colima(feature, scenario)
+                    == (std::env::var("GUI_ACCEPTANCE_COLIMA").as_deref() == Ok("1"))
                 && is_podman(feature, scenario)
                     == (std::env::var("GUI_ACCEPTANCE_PODMAN").as_deref() == Ok("1"))
         })
@@ -731,4 +742,12 @@ fn slugify(input: &str) -> String {
 fn is_podman(feature: &cucumber::gherkin::Feature, scenario: &cucumber::gherkin::Scenario) -> bool {
     scenario.tags.iter().any(|tag| tag == "podman")
         || feature.tags.iter().any(|tag| tag == "podman")
+}
+
+fn is_colima(feature: &cucumber::gherkin::Feature, scenario: &cucumber::gherkin::Scenario) -> bool {
+    scenario
+        .tags
+        .iter()
+        .chain(feature.tags.iter())
+        .any(|tag| tag == "colima")
 }

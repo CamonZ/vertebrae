@@ -268,6 +268,32 @@ npm run test:coverage
 
 ### GUI-managed Docker smoke tests
 
+For GUI-driven project setup against the local Colima engine, run:
+
+```bash
+python3 scripts/acceptance-colima.py
+```
+
+The opt-in lane runs the actual Linux Tauri UI with WebDriver and the native
+GTK folder chooser against the host Colima Docker socket. It uses a disposable
+app home and a unique managed database. It clicks backend selection, runtime
+selection, Refresh, folder selection, project creation and entry into the app.
+It never invokes setup/project commands directly. Component binaries and mock
+AI executables are fixture prerequisites; backend configuration and projects
+start absent. This does not verify the macOS WebView or component installer.
+Screenshots/logs are retained under `test-output/colima-*`. Only test-owned
+containers and the database volume are removed; build caches are retained.
+
+The `Colima GUI project setup` job in `.github/workflows/acceptance.yml` runs
+this same scenario on PRs targeting master, master pushes and manual runs.
+On an Ubuntu 24.04 runner it starts a real Colima QEMU VM accelerated by KVM
+with pinned Colima and Lima versions, then invokes the same runner; it does
+not substitute the host's Docker engine. CI supplies
+`VTB_ACCEPTANCE_OUTPUT=test-output/colima` for artifact collection. The runner
+cleans up its stack, and an always-run job step deletes the disposable Colima
+VM and its data even after a test failure. This validates the Linux webview
+against Colima, not the native macOS webview or first-install component flow.
+
 The local-backend Docker smoke tests are ignored by default because they pull an
 actual GHCR Sacrum image and create temporary Docker resources. Run them only in
 an isolated Docker environment. They resolve the latest published backend from

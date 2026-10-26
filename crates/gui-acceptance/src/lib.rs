@@ -87,13 +87,17 @@ async fn create_webdriver() -> Arc<Mutex<Client>> {
         );
     }
 
-    if std::env::var("GUI_ACCEPTANCE_PODMAN").as_deref() == Ok("1") {
+    if std::env::var("GUI_ACCEPTANCE_PODMAN").as_deref() == Ok("1")
+        || std::env::var("GUI_ACCEPTANCE_COLIMA").as_deref() == Ok("1")
+    {
         for name in [
             "HOME",
             "PATH",
             "XDG_CONFIG_HOME",
             "XDG_DATA_HOME",
             "XDG_RUNTIME_DIR",
+            "XDG_CACHE_HOME",
+            "GSETTINGS_BACKEND",
             "DOCKER_HOST",
             "CONTAINER_HOST",
             "CONTAINER_CONNECTION",
