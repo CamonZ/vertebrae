@@ -40,3 +40,11 @@ Per session the record keeps the ticket, worktree, pending-creation snapshot,
 recent worktrees and the last processed event. One request runs at a time; its
 result is dropped if the session changes or a newer user message arrives. Once
 both are known nothing more is asked; switching tickets needs the correction.
+
+## Investigation and diagnostic logs
+
+See [Detection investigation](vtb://artifact/381dfb40-155d-4501-b0ae-6efed5c30142) for request and
+response boundaries, reproducible context failures, diagnostic configuration,
+privacy limits and remaining hypotheses. Execution-directory keys include `cwd`,
+`workdir`, `working_directory` and `working_dir`; late responses are also retired
+when the conversation root or project generation changes.

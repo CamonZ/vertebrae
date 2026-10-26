@@ -54,17 +54,46 @@ impl TypeSafeClient {
         &self,
         request: SystemOneRequest,
     ) -> Result<SystemOneResponse, TypeSafeError> {
+        self.system_one_correlated(request, None).await
+    }
+
+    pub(crate) async fn system_one_correlated(
+        &self,
+        request: SystemOneRequest,
+        run_id: Option<&vertebrae_harness_core::RunId>,
+    ) -> Result<SystemOneResponse, TypeSafeError> {
+        let started = std::time::Instant::now();
+        let result = self.system_one_inner(request, run_id).await;
+        if let (Some(run_id), Err(error)) = (run_id, &result) {
+            let category = match error {
+                TypeSafeError::Transport(_) => "transport",
+                TypeSafeError::Timeout { .. } => "timeout",
+                TypeSafeError::MalformedResponse(_) => "parse_or_validation",
+                TypeSafeError::ResponseTooLarge => "response_too_large",
+                TypeSafeError::ApiError { .. } => "http_status",
+                _ => "request_validation",
+            };
+            log::info!(target: "chat_association", "request_id={:?} phase=http_failure category={} elapsed_ms={}", run_id, category, started.elapsed().as_millis());
+        }
+        result
+    }
+
+    async fn system_one_inner(
+        &self,
+        request: SystemOneRequest,
+        run_id: Option<&vertebrae_harness_core::RunId>,
+    ) -> Result<SystemOneResponse, TypeSafeError> {
         request.validate()?;
         let body = serde_json::to_vec(&request).map_err(TypeSafeError::RequestSerialization)?;
-        let response = match tokio::time::timeout(self.config.timeout, self.send_once(&body)).await
-        {
-            Ok(result) => result?,
-            Err(_) => {
-                return Err(TypeSafeError::Timeout {
-                    timeout: self.config.timeout,
-                });
-            }
-        };
+        let response =
+            match tokio::time::timeout(self.config.timeout, self.send_once(&body, run_id)).await {
+                Ok(result) => result?,
+                Err(_) => {
+                    return Err(TypeSafeError::Timeout {
+                        timeout: self.config.timeout,
+                    });
+                }
+            };
         validate_response(&request, &response)?;
         Ok(response)
     }
@@ -79,7 +108,19 @@ impl TypeSafeClient {
             .await
     }
 
-    async fn send_once(&self, body: &[u8]) -> Result<SystemOneResponse, TypeSafeError> {
+    async fn send_once(
+        &self,
+        body: &[u8],
+        run_id: Option<&vertebrae_harness_core::RunId>,
+    ) -> Result<SystemOneResponse, TypeSafeError> {
+        let started = std::time::Instant::now();
+        let destination = reqwest::Url::parse(&self.endpoint)
+            .ok()
+            .map(|url| url.origin().ascii_serialization())
+            .unwrap_or_default();
+        if let Some(run_id) = run_id {
+            log::info!(target: "chat_association", "request_id={:?} phase=http_request destination={:?} method=POST payload_bytes={}", run_id, destination, body.len());
+        }
         let mut request = self
             .client
             .post(&self.endpoint)
@@ -105,6 +146,9 @@ impl TypeSafeClient {
             .unwrap_or_default()
             .to_owned();
         let status = response.status();
+        if let Some(run_id) = run_id {
+            log::info!(target: "chat_association", "request_id={:?} phase=http_response status={} elapsed_ms={}", run_id, status.as_u16(), started.elapsed().as_millis());
+        }
         let bytes = read_bounded_body(response, self.config.max_response_bytes).await?;
 
         if !status.is_success() {
