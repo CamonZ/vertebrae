@@ -620,7 +620,7 @@ provider ID and harness on the execution.
 |-----------|---------|------------------|--------------------------------|
 | `claude` | Claude Code streaming harness | `claude`, persistent stream-json session | `CLAUDE_CODE_PATH` |
 | `codex` | Codex App Server streaming harness | `codex`, App Server WebSocket | `CODEX_PATH` |
-| `typesafe` | TypeSafe structured-inference runtime | System One API | `TYPESAFE_API_KEY` or `[typesafe].api_key` |
+| `typesafe` | TypeSafe structured-inference runtime | System One API | Optional `TYPESAFE_API_KEY` or `[typesafe].api_key`; without a key no `Authorization` header is sent |
 
 The harnesses emit normalized events through the shared runtime contract. The
 daemon persists those events as `format=harness` session logs and the GUI

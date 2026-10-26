@@ -234,13 +234,25 @@ async fn oversized_response_is_rejected_before_decoding() {
 }
 
 #[tokio::test]
-async fn missing_api_key_fails_before_any_outbound_request() {
-    let server = MockServer::start().await;
-    let error =
-        TypeSafeClient::from_config(TypeSafeClientConfig::new("   ").with_base_url(server.uri()))
-            .unwrap_err();
-    assert!(matches!(error, TypeSafeError::MissingApiKey));
-    assert!(server.received_requests().await.unwrap().is_empty());
+async fn blank_api_keys_send_no_authorization_header() {
+    for api_key in ["", "   "] {
+        let server = MockServer::start().await;
+        Mock::given(matchers::method("POST"))
+            .and(matchers::path("/v1/systemone"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+            .mount(&server)
+            .await;
+
+        let client = TypeSafeClient::from_config(
+            TypeSafeClientConfig::new(api_key).with_base_url(server.uri()),
+        )
+        .unwrap();
+        client.system_one(request()).await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(!requests[0].headers.contains_key("authorization"));
+    }
 }
 
 #[test]

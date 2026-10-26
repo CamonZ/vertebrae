@@ -73,9 +73,6 @@ impl TypeSafeClientConfig {
     }
 
     pub(crate) fn endpoint(&self) -> Result<String, TypeSafeError> {
-        if self.api_key.trim().is_empty() {
-            return Err(TypeSafeError::MissingApiKey);
-        }
         if self.timeout.is_zero() {
             return Err(invalid_configuration("timeout must be greater than zero"));
         }
@@ -98,8 +95,9 @@ impl TypeSafeClientConfig {
         ))
     }
 
-    pub(crate) fn api_key(&self) -> &str {
-        &self.api_key
+    /// The configured key, or `None` when it is empty or whitespace-only.
+    pub(crate) fn api_key(&self) -> Option<&str> {
+        (!self.api_key.trim().is_empty()).then_some(self.api_key.as_str())
     }
 }
 
