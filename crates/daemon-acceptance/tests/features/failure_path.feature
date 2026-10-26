@@ -40,12 +40,3 @@ Feature: Failure path step execution
     And I start a TaskRun
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"
-
-  Scenario: Selected TypeSafe harness reports missing server credentials
-    Given a configured daemon test environment
-    And a workflow with one inference step using harness "typesafe" and model "jev"
-    And a task assigned to the workflow
-    When I start a TaskRun
-    And I wait for the execution to reach status "failed"
-    Then the execution status is "failed"
-    And the execution output contains "TypeSafe provider API key is not configured"

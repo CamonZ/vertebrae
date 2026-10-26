@@ -750,13 +750,7 @@ impl HarnessRuntimeFactory {
             if let Some(url) = &profile.url {
                 config = config.with_url(url.clone());
             }
-            return TypeSafeRuntime::from_config(config).map_err(|error| match error {
-                TypeSafeError::MissingApiKey => HarnessError::Unavailable(format!(
-                    "provider '{}' API key is not configured; set api_key_env or api_key in [providers.{}]",
-                    resolved.id, resolved.id
-                )),
-                error => map_typesafe_configuration_error(error),
-            });
+            return TypeSafeRuntime::from_config(config).map_err(map_typesafe_configuration_error);
         }
 
         vertebrae_core::validate_provider_model(
@@ -896,9 +890,6 @@ fn resolve_typesafe_api_key(
 
 fn map_typesafe_configuration_error(error: TypeSafeError) -> HarnessError {
     match error {
-        TypeSafeError::MissingApiKey => HarnessError::Unavailable(
-            "TypeSafe provider API key is not configured; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY on the server".into(),
-        ),
         TypeSafeError::InvalidConfiguration(message) => HarnessError::InvalidRequest(message),
         error => HarnessError::Unavailable(format!("TypeSafe provider is unavailable: {error}")),
     }
@@ -1289,15 +1280,15 @@ mod tests {
             Some("jev-staging")
         );
 
-        let builtin = create_error(
-            &factory,
-            None,
-            AgentConfig::new().with_provider(ProviderId::typesafe()),
-        );
-        assert!(
-            builtin.to_string().contains("[typesafe].api_key"),
-            "the built-in provider keeps using the [typesafe] section: {builtin}"
-        );
+        // The built-in provider keeps using the [typesafe] section, which has
+        // no key; credentials are optional, so construction still succeeds.
+        let builtin = factory
+            .create(HarnessRuntimeOptions {
+                agent_config: AgentConfig::new().with_provider(ProviderId::typesafe()),
+                request_config: RequestConfig::default(),
+            })
+            .expect("a missing TypeSafe API key does not make the provider unavailable");
+        assert_eq!(builtin.harness, StepHarness::Typesafe);
         let debug = format!("{:?}", factory.config);
         assert!(!debug.contains("profile-secret"), "{debug}");
         assert!(!debug.contains("staging.typesafe.test"), "{debug}");
@@ -1658,7 +1649,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_typesafe_api_key_is_unavailable_without_cli_lookup() {
+    fn missing_typesafe_api_key_does_not_make_the_provider_unavailable() {
         let result = HarnessRuntimeFactory::new(HarnessFactoryConfig::default()).create(
             HarnessRuntimeOptions {
                 agent_config: AgentConfig::new().with_provider(ProviderId::typesafe()),
@@ -1666,11 +1657,7 @@ mod tests {
             },
         );
 
-        assert!(matches!(
-            result,
-            Err(HarnessError::Unavailable(message))
-                if message.contains("TYPESAFE_API_KEY") && !message.contains("executable")
-        ));
+        assert!(result.is_ok());
     }
 
     #[test]

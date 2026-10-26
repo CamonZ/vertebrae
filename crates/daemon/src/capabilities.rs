@@ -120,12 +120,7 @@ impl DaemonCapabilities {
                 StepHarness::Typesafe,
                 HarnessCapability {
                     executable: None,
-                    discovery_diagnostic: (!typesafe_api_key
-                        .as_deref()
-                        .is_some_and(|key| !key.trim().is_empty()))
-                    .then(|| {
-                        "TypeSafe provider API key is not configured; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY".to_string()
-                    }),
+                    discovery_diagnostic: None,
                 },
             ),
             (
@@ -222,8 +217,7 @@ impl DaemonCapabilities {
         current.typesafe_url = factory.typesafe_url;
         current.provider_profiles = config.providers.clone();
         if let Some(capability) = current.harnesses.get_mut(&StepHarness::Typesafe) {
-            capability.discovery_diagnostic = (!current.typesafe_api_key.as_deref().is_some_and(|value| !value.trim().is_empty()) && current.typesafe_api_key_secret.is_none())
-                .then(|| "TypeSafe provider API key is not configured; set it in Settings or TYPESAFE_API_KEY".into());
+            capability.discovery_diagnostic = None;
         }
         current
     }
@@ -541,9 +535,7 @@ mod tests {
                 .harnesses
                 .get(&StepHarness::Typesafe)
                 .and_then(|capability| capability.discovery_diagnostic.as_deref()),
-            Some(
-                "TypeSafe provider API key is not configured; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY"
-            )
+            None
         );
     }
 

@@ -80,26 +80,23 @@ impl TypeSafeClient {
     }
 
     async fn send_once(&self, body: &[u8]) -> Result<SystemOneResponse, TypeSafeError> {
-        let response = self
+        let mut request = self
             .client
             .post(&self.endpoint)
-            .header(
-                header::AUTHORIZATION,
-                format!("Bearer {}", self.config.api_key()),
-            )
             .header(header::CONTENT_TYPE, "application/json")
-            .body(body.to_owned())
-            .send()
-            .await
-            .map_err(|error| {
-                if error.is_timeout() {
-                    TypeSafeError::Timeout {
-                        timeout: self.config.timeout,
-                    }
-                } else {
-                    TypeSafeError::Transport(error)
+            .body(body.to_owned());
+        if let Some(api_key) = self.config.api_key() {
+            request = request.header(header::AUTHORIZATION, format!("Bearer {api_key}"));
+        }
+        let response = request.send().await.map_err(|error| {
+            if error.is_timeout() {
+                TypeSafeError::Timeout {
+                    timeout: self.config.timeout,
                 }
-            })?;
+            } else {
+                TypeSafeError::Transport(error)
+            }
+        })?;
 
         let request_id = response
             .headers()

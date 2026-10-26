@@ -5,8 +5,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum TypeSafeError {
-    #[error("TypeSafe API key is missing")]
-    MissingApiKey,
     #[error("invalid TypeSafe client configuration: {0}")]
     InvalidConfiguration(String),
     #[error("invalid TypeSafe request: {0}")]
