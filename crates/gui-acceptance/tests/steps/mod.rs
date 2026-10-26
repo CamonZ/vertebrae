@@ -9,4 +9,5 @@ pub mod project;
 pub mod setup;
 pub mod streaming;
 
+pub mod colima;
 pub mod local_backend;

@@ -8,6 +8,78 @@ on:
   workflow_dispatch:
 
 jobs:
+  colima:
+    name: Colima GUI project setup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    env:
+      COLIMA_VERSION: v0.10.3
+      VTB_ACCEPTANCE_CACHE_KEY: colima-${{ github.run_id }}-${{ github.run_attempt }}
+      VTB_ACCEPTANCE_OUTPUT: ${{ github.workspace }}/test-output/colima
+    steps:
+      - name: Checkout vertebrae
+        uses: actions/checkout@v4
+
+      - name: Check acceptance runner contracts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_acceptance*.py'
+
+      - name: Set up Lima, QEMU and KVM
+        uses: lima-vm/lima-actions/setup@1be8c646a08d3a8c1186531108508cde33394b52 # v1
+        with:
+          version: v2.2.0
+          ssh: false
+
+      - name: Install Colima
+        shell: bash
+        run: |
+          download_dir="$RUNNER_TEMP/colima-download"
+          mkdir -p "$download_dir"
+          cd "$download_dir"
+          release_url="https://github.com/abiosoft/colima/releases/download/$COLIMA_VERSION"
+          curl --fail --location --retry 3 --output colima-Linux-x86_64 "$release_url/colima-Linux-x86_64"
+          curl --fail --location --retry 3 --output colima-Linux-x86_64.sha256sum "$release_url/colima-Linux-x86_64.sha256sum"
+          sha256sum --check colima-Linux-x86_64.sha256sum
+          sudo install -m 0755 colima-Linux-x86_64 /usr/local/bin/colima
+
+      - name: Start real Colima Docker engine
+        shell: bash
+        run: |
+          mkdir -p "$VTB_ACCEPTANCE_OUTPUT"
+          colima start --runtime docker --mount-type 9p --cpus 2 --memory 5 --disk 60 --mount "$HOME:w" 2>&1 | tee "$VTB_ACCEPTANCE_OUTPUT/colima-start.log"
+          colima status
+          docker version
+          docker compose version
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Run GUI project setup through Colima
+        run: python3 scripts/acceptance-colima.py
+
+      - name: Remove Colima VM and its test data
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$VTB_ACCEPTANCE_OUTPUT"
+          if command -v colima >/dev/null 2>&1; then
+            colima delete --force --data 2>&1 | tee "$VTB_ACCEPTANCE_OUTPUT/colima-cleanup.log"
+          fi
+
+      - name: Upload Colima GUI diagnostics and timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: colima-gui-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-output/colima
+          if-no-files-found: warn
+
   acceptance:
     name: Acceptance Tests
     runs-on: ubuntu-24.04

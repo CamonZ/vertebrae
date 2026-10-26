@@ -930,6 +930,7 @@ html.light ::selection {
 
 .fr-head {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: var(--s-3);
   padding: var(--s-4) var(--s-5) var(--s-3);
@@ -1003,7 +1004,9 @@ html.light ::selection {
 .fr-body {
   display: grid;
   grid-template-columns: 196px minmax(0, 1fr);
+  flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .fr-spine {
@@ -1101,12 +1104,15 @@ html.light ::selection {
 
 .fr-content {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   padding: var(--s-5) var(--s-5) var(--s-4);
 }
 
 .fr-c-head {
+  flex-shrink: 0;
   margin-bottom: var(--s-4);
 }
 
@@ -1503,7 +1509,7 @@ html.light ::selection {
   }
 
   .fr-card {
-    max-height: none;
+    max-height: calc(100vh - var(--s-4) * 2);
   }
 
   .fr-head {
@@ -1520,8 +1526,7 @@ html.light ::selection {
   }
 
   .fr-spine {
-    border-right: 0;
-    border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
+    display: none;
   }
 
   .fr-scroll {

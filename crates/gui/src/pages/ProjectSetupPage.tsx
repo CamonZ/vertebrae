@@ -682,7 +682,7 @@ export function ProjectSetupPage() {
               </select>
               {isLoadingRuntimes && <p role="status">Checking container runtimes…</p>}
               {runtimeOptions?.saved_runtime && <p>This installation uses its saved container runtime.</p>}
-              {runtimeOptions?.options.filter((option) => !option.installed).map((option) => (
+              {runtimeOptions?.options.filter((option) => option.runtime === localRuntime && !option.installed).map((option) => (
                 <p key={option.runtime}>{option.diagnostic}</p>
               ))}
               {runtimeDiscoveryError && <p role="alert">{runtimeDiscoveryError}</p>}
