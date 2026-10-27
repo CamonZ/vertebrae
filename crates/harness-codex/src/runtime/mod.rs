@@ -3,7 +3,7 @@ mod connection;
 mod control;
 mod handles;
 mod outcome;
-mod projection;
+pub(crate) mod projection;
 mod session;
 mod setup;
 mod subscription;
