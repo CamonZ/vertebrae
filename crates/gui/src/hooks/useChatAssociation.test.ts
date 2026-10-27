@@ -2,10 +2,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands, type JsonValue } from "../bindings";
 import { useChatStore, type ChatMessage } from "../stores/chatStore";
+import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { useChatAssociation } from "./useChatAssociation";
 
 vi.mock("../bindings", () => ({
   commands: { resolveChatAssociation: vi.fn(), getCurrentProjectPath: vi.fn() },
+}));
+vi.mock("../stores/projectScopedStores", () => ({
+  getProjectScopeGeneration: vi.fn(() => 0),
 }));
 const TICKET = { id: "f6f6bf5e-2ca1-4e50-bcfa-9e08944eaa78", title: "Retry" };
 vi.mock("../utils/chatAssociation/candidates", () => ({
@@ -79,6 +83,7 @@ const push = (message: ChatMessage) =>
 describe("useChatAssociation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getProjectScopeGeneration).mockReturnValue(0);
     vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
       status: "ok",
       data: "/p",
@@ -186,6 +191,59 @@ describe("useChatAssociation", () => {
     await waitFor(() => expect(resolve).toHaveBeenCalledTimes(3));
     expect(result.current.record.ticketId).toBeNull();
   });
+
+  it("keeps an ambiguous pair of newly touched worktrees unbound", async () => {
+    reply({ ...SELECT, create_worktree: true, worktrees: [main] });
+    seed([user("implement f6f6bf5e in a new worktree", 1)]);
+    const { result } = renderHook(() => useChatAssociation("s1"));
+    await waitFor(() => expect(result.current.record.ticketId).toBe(TICKET.id));
+    reply({
+      worktrees: [created, { path: "/other/f6f6bf5e", branch: "f6f6bf5e" }],
+    });
+    push(tool("git worktree list", 2));
+    await waitFor(() =>
+      expect(result.current.record.lastProcessedAt).toBe(at(2))
+    );
+    expect(result.current.record.worktreePath).toBeNull();
+    expect(result.current.record.awaitingWorktree).toEqual(["/p"]);
+  });
+
+  it.each(["root", "generation"])(
+    "drops a late response after %s changes",
+    async (change) => {
+      let release!: (value: never) => void;
+      resolve.mockReturnValueOnce(new Promise((r) => (release = r)) as never);
+      seed([user("implement f6f6bf5e", 1)]);
+      const { result } = renderHook(() => useChatAssociation("s1"));
+      await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1));
+      reply({});
+      if (change === "generation") {
+        vi.mocked(getProjectScopeGeneration).mockReturnValue(1);
+      } else {
+        act(() =>
+          useChatStore.setState((s) => ({
+            sessions: {
+              ...s.sessions,
+              s1: { ...s.sessions.s1, projectPath: "/other" },
+            },
+          }))
+        );
+      }
+      await act(async () =>
+        release({
+          status: "ok",
+          data: {
+            ...SELECT,
+            worktrees: [],
+            create_worktree: false,
+            diagnostic: null,
+          },
+        } as never)
+      );
+      await waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
+      expect(result.current.record.ticketId).toBeNull();
+    }
+  );
 
   it("processes events sharing a timestamp once each, and not again after reload", async () => {
     reply({});

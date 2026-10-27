@@ -115,7 +115,14 @@ fn collect(
         serde_json::Value::Object(o) => {
             for (key, v) in o.iter().take(32) {
                 match v.as_str() {
-                    Some(dir) if matches!(key.as_str(), "cwd" | "workdir") => dirs.push(dir.into()),
+                    Some(dir)
+                        if matches!(
+                            key.as_str(),
+                            "cwd" | "workdir" | "working_directory" | "working_dir"
+                        ) =>
+                    {
+                        dirs.push(dir.into())
+                    }
                     _ => collect(v, strings, dirs, depth + 1),
                 }
             }
@@ -231,9 +238,39 @@ mod tests {
         );
         assert_eq!(observe(&created), inventory);
         assert_eq!(
+            observe(r#"{"working_directory":"../feature-97a3edab","cmd":"cat new.rs"}"#),
+            inventory
+        );
+        assert_eq!(
             observe(r#"{"workdir":"../feature-97a3edab","cmd":"ls"}"#),
             inventory
         );
+    }
+
+    #[test]
+    fn execution_directory_aliases_resolve_relative_paths_into_nested_worktrees() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let main = root.join("main");
+        let work = root.join("work with spaces");
+        let nested = work.join("nested");
+        std::fs::create_dir(&main).unwrap();
+        std::fs::create_dir_all(&nested).unwrap();
+        let inventory = vec![
+            AssociationWorktree {
+                path: work.to_string_lossy().into(),
+                branch: None,
+            },
+            AssociationWorktree {
+                path: nested.to_string_lossy().into(),
+                branch: None,
+            },
+        ];
+        for key in ["cwd", "workdir", "working_directory", "working_dir"] {
+            let text = serde_json::json!({ key: work, "cmd": "cat nested/new.rs" }).to_string();
+            let observed = observed_worktrees(&text, &main, &inventory);
+            assert!(observed.contains(&inventory[1]), "{key}: {observed:?}");
+        }
     }
 
     #[test]

@@ -1404,7 +1404,7 @@ export type ArtifactChangedEvent = { artifact_id: string; task_id: string | null
  */
 export type ArtifactLinkMetadata = { version: number; content_kind: string; format: string; origin: string; presentation: string; extensions: JsonValue }
 export type AssociationEventKind = "user" | "tool"
-export type AssociationInput = { project_root: string; event_kind: AssociationEventKind; text: string;
+export type AssociationInput = { attempt_id: string | null; project_root: string; event_kind: AssociationEventKind; text: string;
 /**
  * Eligible tickets read from the React Query cache (user events only).
  */

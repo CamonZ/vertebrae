@@ -250,10 +250,10 @@ async fn execute_run(
                 if changed.is_ok() && *cancel_rx.borrow() {
                     None
                 } else {
-                    Some(client.system_one(request_for_cancel).await)
+                    Some(client.system_one_correlated(request_for_cancel, Some(&request.run_id)).await)
                 }
             }
-            response = client.system_one(judgment.clone()) => Some(response),
+            response = client.system_one_correlated(judgment.clone(), Some(&request.run_id)) => Some(response),
         }
     };
 

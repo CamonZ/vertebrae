@@ -45,7 +45,27 @@ pub(super) async fn decide(
     message: &str,
     candidates: &[AssociationTicket],
     state: State<'_>,
+    attempt: &str,
 ) -> Result<Decision, HarnessError> {
+    let started = std::time::Instant::now();
+    let result = decide_inner(config, message, candidates, state, attempt).await;
+    log::info!(target: "chat_association", "attempt={} phase=decision_finish elapsed_ms={} outcome={} reason={}",
+        attempt, started.elapsed().as_millis(), match &result {
+            Ok(Decision { selection: AssociationSelection::Ticket { .. }, .. }) => "ticket",
+            Ok(Decision { selection: AssociationSelection::Unknown, .. }) => "unknown",
+            Ok(_) => "keep", Err(_) => "error",
+        }, result.as_ref().err().map(diagnostic).unwrap_or_default());
+    result
+}
+
+async fn decide_inner(
+    config: &VertebraeConfigFile,
+    message: &str,
+    candidates: &[AssociationTicket],
+    state: State<'_>,
+    attempt: &str,
+) -> Result<Decision, HarnessError> {
+    log::info!(target: "chat_association", "attempt={} phase=decision enabled={}", attempt, config.decision_model.enabled);
     let keep = Decision {
         selection: AssociationSelection::Keep,
         create_worktree: false,
@@ -86,7 +106,7 @@ pub(super) async fn decide(
             )
         })
         .collect();
-    let answers = ask(&instance, request, message, state).await?;
+    let answers = ask(&instance, request, message, state, attempt).await?;
     let intents = questions
         .keys()
         .map(|name| {
@@ -108,6 +128,7 @@ pub(super) async fn decide(
         });
     }
 
+    log::info!(target: "chat_association", "attempt={} phase=intent implement={} create_worktree={} candidates={}", attempt, intents.get("implement") == Some(&true), create_worktree, candidates.len());
     let selection = if let Some(ticket) = named_ticket(message, candidates) {
         AssociationSelection::Ticket {
             id: ticket.id.clone(),
@@ -130,6 +151,7 @@ pub(super) async fn decide(
             BTreeMap::from([("ticket".into(), question)]),
             message,
             state,
+            attempt,
         )
         .await?;
         match answers["ticket"]["choice"]
@@ -172,6 +194,7 @@ async fn ask(
     questions: BTreeMap<String, Value>,
     message: &str,
     state: State<'_>,
+    attempt: &str,
 ) -> Result<Value, HarnessError> {
     let names: Vec<String> = questions.keys().cloned().collect();
     let request = StructuredInferenceRequest {
@@ -185,30 +208,52 @@ async fn ask(
         model: instance.request_config.model.clone(),
         questions,
     };
-    let run = instance
-        .runtime
-        .run_structured_inference(request, Arc::new(DiscardEvents))
-        .await?;
-    let outcome = match tokio::time::timeout(Duration::from_secs(20), run.await_outcome()).await {
-        Ok(result) => result?,
-        Err(_) => {
-            let _ = tokio::time::timeout(Duration::from_secs(2), run.cancel()).await;
-            return Err(HarnessError::Operation("Decision timed out.".into()));
+    let started = std::time::Instant::now();
+    let request_id = request.run_id.clone();
+    log::info!(target: "chat_association", "attempt={} phase=request request_id={:?} destination=decision_runtime harness={:?} questions={:?} message_bytes={}", attempt, request_id, instance.harness, names, message.len());
+    let response = async {
+        let run = instance
+            .runtime
+            .run_structured_inference(request, Arc::new(DiscardEvents))
+            .await?;
+        let outcome = match tokio::time::timeout(Duration::from_secs(20), run.await_outcome()).await
+        {
+            Ok(result) => result?,
+            Err(_) => {
+                let _ = tokio::time::timeout(Duration::from_secs(2), run.cancel()).await;
+                return Err(HarnessError::Operation("Decision timed out.".into()));
+            }
+        };
+        let answers = outcome.structured_output.ok_or_else(|| {
+            HarnessError::Operation(
+                outcome
+                    .error
+                    .unwrap_or_else(|| "No decision returned.".into()),
+            )
+        })?;
+        if names.iter().any(|name| answers.get(name).is_none()) {
+            return Err(HarnessError::Operation(
+                "The requested answer is missing.".into(),
+            ));
         }
-    };
-    let answers = outcome.structured_output.ok_or_else(|| {
-        HarnessError::Operation(
-            outcome
-                .error
-                .unwrap_or_else(|| "No decision returned.".into()),
-        )
-    })?;
-    if names.iter().any(|name| answers.get(name).is_none()) {
-        return Err(HarnessError::Operation(
-            "The requested answer is missing.".into(),
-        ));
+        Ok(answers)
     }
-    Ok(answers)
+    .await;
+    log::info!(target: "chat_association", "attempt={} phase=response request_id={:?} elapsed_ms={} status={} reason={}", attempt, request_id, started.elapsed().as_millis(), if response.is_ok() { "ok" } else { "error" }, response.as_ref().err().map(diagnostic).unwrap_or_default());
+    if std::env::var("VTB_ASSOCIATION_DIAGNOSTIC_PAYLOADS").as_deref() == Ok("1") {
+        // Strict allowlist: never serialize arbitrary provider keys, strings or errors.
+        if let Ok(answers) = &response {
+            let summary: BTreeMap<_, _> = names.iter().map(|name| {
+                let answer = &answers[name];
+                (name.as_str(), json!({
+                    "probability": answer["noul"].as_f64().filter(|p| (0.0..=1.0).contains(p)),
+                    "has_choice": answer["choice"].is_string(),
+                }))
+            }).collect();
+            log::info!(target: "chat_association", "attempt={} phase=response_summary request_id={:?} content={}", attempt, request_id, json!(summary));
+        }
+    }
+    response
 }
 
 /// Fixed text only: never forward provider payloads, URLs or credentials into chat.
@@ -297,7 +342,9 @@ mod tests {
             .mount(&server)
             .await;
         }
-        let decision = decide(&config, message, &tickets(), state).await.unwrap();
+        let decision = decide(&config, message, &tickets(), state, "fixture")
+            .await
+            .unwrap();
         let bodies = server
             .received_requests()
             .await
@@ -306,6 +353,81 @@ mod tests {
             .map(|r| serde_json::from_slice(&r.body).unwrap())
             .collect();
         (decision, bodies)
+    }
+
+    struct CapturedLogs(std::sync::Mutex<Vec<String>>);
+    static LOGS: CapturedLogs = CapturedLogs(std::sync::Mutex::new(Vec::new()));
+    static LOGGER: std::sync::Once = std::sync::Once::new();
+    impl log::Log for CapturedLogs {
+        fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+            metadata.target() == "chat_association"
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            if self.enabled(record.metadata()) {
+                self.0.lock().unwrap().push(record.args().to_string());
+            }
+        }
+        fn flush(&self) {}
+    }
+
+    #[tokio::test]
+    async fn diagnostic_logs_cover_resolutions_and_response_failures_without_payloads() {
+        LOGGER.call_once(|| {
+            log::set_logger(&LOGS).unwrap();
+            log::set_max_level(log::LevelFilter::Info);
+        });
+        let noul = |p| json!({ "type": "noul", "noul": p });
+        for (template, candidates, expected) in [
+            (ResponseTemplate::new(200).set_body_json(json!({ "model": "jev-1.14.0", "answers": {"implement": noul(0.9), "create_worktree": noul(0.1)}, "usage": {"input_tokens": 1, "output_tokens": 1} })), tickets(), "ticket"),
+            (ResponseTemplate::new(200).set_body_json(json!({ "model": "jev-1.14.0", "answers": {"implement": noul(0.9), "create_worktree": noul(0.1)}, "usage": {"input_tokens": 1, "output_tokens": 1} })), vec![], "unknown"),
+            (ResponseTemplate::new(503).set_body_string("secret-response"), tickets(), "error"),
+            (ResponseTemplate::new(200).set_body_string("secret-malformed-json"), tickets(), "error"),
+            (ResponseTemplate::new(200).set_body_json(json!({"model": "jev-1.14.0", "answers": {}, "usage": {"input_tokens": 1, "output_tokens": 1}})), tickets(), "error"),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(matchers::method("POST")).respond_with(template).mount(&server).await;
+            let mut config = VertebraeConfigFile::default();
+            config.decision_model.enabled = true;
+            config.decision_model.provider = Some(vertebrae_core::ProviderId::typesafe());
+            config.decision_model.model = Some("jev-latest".into());
+            config.typesafe.api_key = Some("secret-credential".into());
+            config.typesafe.url = Some(format!("{}/v1/systemone", server.uri()));
+            let attempt = uuid::Uuid::new_v4().to_string();
+            let _ = decide(&config, &format!("implement {ID} secret-prompt"), &candidates, State::default(), &attempt).await;
+            let lines = LOGS.0.lock().unwrap().iter().filter(|line| line.contains(&attempt)).cloned().collect::<Vec<_>>().join("\n");
+            let all = LOGS.0.lock().unwrap().join("\n");
+            assert!(!all.contains("secret-"), "{all}");
+            assert!(all.contains("phase=http_response status="), "{all}");
+            assert!(lines.contains("phase=request"), "{lines}");
+            assert!(lines.contains("phase=response"), "{lines}");
+            assert!(lines.contains(&format!("outcome={expected}")), "{lines}");
+            assert!(!lines.contains("secret-"), "{lines}");
+            assert!(!lines.contains(ID), "{lines}");
+        }
+    }
+
+    #[tokio::test]
+    async fn connection_failure_returns_a_safe_diagnostic() {
+        let mut config = VertebraeConfigFile::default();
+        config.decision_model.enabled = true;
+        config.decision_model.provider = Some(vertebrae_core::ProviderId::typesafe());
+        config.decision_model.model = Some("jev-latest".into());
+        config.typesafe.api_key = Some("secret-credential".into());
+        // A deliberately invalid port deterministically refuses a connection without a long timeout.
+        config.typesafe.url = Some("http://127.0.0.1:0/v1/systemone".into());
+        let error = decide(
+            &config,
+            "secret-prompt",
+            &tickets(),
+            State::default(),
+            "transport-fixture",
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            diagnostic(&error),
+            "The decision provider failed or returned an invalid response."
+        );
     }
 
     #[tokio::test]

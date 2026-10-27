@@ -194,10 +194,22 @@ export function useChatAssociation(sessionId: string) {
       let result: AssociationResult | null = null;
       let failure: string | null = null;
       const generation = getProjectScopeGeneration();
+      const attempt = crypto.randomUUID();
+      const started = performance.now();
+      const trace = (outcome: string) =>
+        console.info("[chat_association]", {
+          attempt,
+          event: event.kind,
+          generation,
+          outcome,
+          elapsed_ms: Math.round(performance.now() - started),
+        });
+      trace("request");
       const candidates: AssociationTicket[] =
         event.kind === "user" ? cachedAssociationCandidates(generation) : [];
       try {
         const response = await commands.resolveChatAssociation({
+          attempt_id: attempt,
           project_root: root,
           event_kind: event.kind,
           text: event.text,
@@ -221,8 +233,11 @@ export function useChatAssociation(sessionId: string) {
       const live = useChatStore.getState().sessions[sessionId];
       if (
         inflight.current !== mine ||
+        generation !== getProjectScopeGeneration() ||
+        live?.projectPath !== root ||
         lastUser(live?.messages) !== userAtStart
       ) {
+        trace("stale_response");
         if (inflight.current === mine) inflight.current = null;
         setTick((t) => t + 1);
         return;
@@ -266,6 +281,21 @@ export function useChatAssociation(sessionId: string) {
             : worktreeFor(next.ticketId, awaiting ? created : touched)
         );
       }
+      trace(
+        failure
+          ? "failure"
+          : next.worktreePath
+            ? "worktree_bound"
+            : event.kind === "tool"
+              ? (result?.worktrees.length ?? 0) > 1
+                ? "ambiguous_worktree"
+                : "no_worktree_match"
+              : result?.selection.kind === "unknown"
+                ? "no_ticket_match"
+                : result?.selection.kind === "ticket"
+                  ? "ticket_bound"
+                  : "keep"
+      );
       processed(next, event);
     })();
   }, [messages, root, replayLoading, record, tick, sessionId]);
