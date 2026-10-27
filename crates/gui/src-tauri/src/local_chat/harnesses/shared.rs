@@ -245,9 +245,6 @@ impl EventSink for LocalChatHarnessEventSink {
                 }))?;
             }
             HarnessEventPayloadV1::TurnStarted(_) => {
-                if !is_root_stream {
-                    return Ok(());
-                }
                 let Some(turn_id) = turn_id else {
                     return Ok(());
                 };
@@ -256,7 +253,7 @@ impl EventSink for LocalChatHarnessEventSink {
                     harness,
                     turn_id,
                     thread_id,
-                    is_root: true,
+                    is_root: is_root_stream,
                 }))?;
             }
             HarnessEventPayloadV1::Text(value) => {
@@ -374,7 +371,32 @@ impl EventSink for LocalChatHarnessEventSink {
             }
             HarnessEventPayloadV1::TurnFinished(outcome) => {
                 if !is_root_stream {
-                    return Ok(());
+                    return self.emit_local(LocalChatEvent::End(LocalChatSessionEndEvent {
+                        backend_session_id,
+                        harness,
+                        turn_id: turn_id.unwrap_or_default(),
+                        thread_id,
+                        is_root: false,
+                        duration_ms: outcome
+                            .metrics
+                            .duration_ms
+                            .unwrap_or_default()
+                            .min(u64::from(u32::MAX)) as u32,
+                        cost_usd: outcome.metrics.total_cost_usd.unwrap_or_default(),
+                        num_turns: outcome
+                            .metrics
+                            .turn_count
+                            .unwrap_or_default()
+                            .min(u64::from(u32::MAX)) as u32,
+                        result: outcome.result_text.unwrap_or_default(),
+                        is_error: outcome.status != CompletionStatus::Completed,
+                        context_tokens: 0,
+                        context_window: 0,
+                        item_id,
+                        completion_status: Some(
+                            completion_status_name(&outcome.status).to_string(),
+                        ),
+                    }));
                 }
                 let Some(turn_id) = turn_id else {
                     return Ok(());
@@ -673,7 +695,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ignores_child_turn_finished_for_local_chat_lifecycle() {
+    async fn forwards_child_terminal_with_its_own_identity_without_changing_root_stats() {
         let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
         let sink = LocalChatHarnessEventSink::new(
             "backend-1".into(),
@@ -709,7 +731,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(captured.lock().unwrap().is_empty());
+        assert!(
+            matches!(captured.lock().unwrap().as_slice(), [LocalChatEvent::End(event)] if !event.is_root && event.thread_id.as_deref() == Some("child-1") && event.turn_id == "child-turn")
+        );
+        assert_eq!(sink.stats.lock().unwrap().turns, 0);
     }
 
     #[tokio::test]

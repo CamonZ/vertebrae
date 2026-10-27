@@ -10,6 +10,8 @@ export type SpawnOutlineItem = {
   threadId?: string;
   label: string;
   detail: string;
+  isWorking?: boolean;
+  depth?: number;
 };
 
 export function formatSessionTime(value: string): string {
@@ -380,4 +382,57 @@ export function scrollToSpawn(sessionId: string, spawnId: string): void {
       detail: { sessionId, spawnId },
     })
   );
+}
+
+/** Build history lineage without loading any conversation messages. Missing
+ * parents stay top-level; cycles are ignored so no session disappears. */
+export function buildHistoryChildOutlines(
+  sessions: LocalChatSessionSummary[]
+): Map<string, SpawnOutlineItem[]> {
+  const byThread = new Map(
+    sessions
+      .filter((s) => s.providerResumeId)
+      .map((s) => [`${s.harness}:${s.providerResumeId}`, s])
+  );
+  const children = new Map<string, LocalChatSessionSummary[]>();
+  for (const session of sessions) {
+    if (!session.providerParentResumeId || !session.providerResumeId) continue;
+    const parent = byThread.get(
+      `${session.harness}:${session.providerParentResumeId}`
+    );
+    if (!parent || parent.id === session.id) continue;
+    const seen = new Set([session.id]);
+    let ancestor: LocalChatSessionSummary | undefined = parent;
+    while (ancestor && !seen.has(ancestor.id)) {
+      seen.add(ancestor.id);
+      ancestor = byThread.get(
+        `${ancestor.harness}:${ancestor.providerParentResumeId}`
+      );
+    }
+    if (ancestor) continue;
+    const siblings = children.get(parent.id) ?? [];
+    siblings.push(session);
+    children.set(parent.id, siblings);
+  }
+  const result = new Map<string, SpawnOutlineItem[]>();
+  const visit = (id: string): SpawnOutlineItem[] => {
+    const rows: SpawnOutlineItem[] = [];
+    for (const child of (children.get(id) ?? []).sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt)
+    )) {
+      rows.push({
+        id: `${child.harness}:${child.providerResumeId}`,
+        spawnId: child.providerResumeId!,
+        threadId: child.providerResumeId!,
+        label: child.title || child.label,
+        detail: "",
+        depth: 0,
+      });
+      for (const row of visit(child.id))
+        rows.push({ ...row, depth: (row.depth ?? 0) + 1 });
+    }
+    return rows;
+  };
+  for (const session of sessions) result.set(session.id, visit(session.id));
+  return result;
 }

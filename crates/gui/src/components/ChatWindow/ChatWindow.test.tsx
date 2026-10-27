@@ -2099,7 +2099,7 @@ describe("ChatWindow", () => {
             context_tokens: 10,
             context_window: 200000,
           })
-        ).toBe(false);
+        ).toBe(true);
       });
       expectTurnActive();
 

@@ -7,7 +7,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     path::Path,
 };
 
@@ -25,6 +25,8 @@ use vertebrae_harness_core::{
 #[derive(Debug)]
 pub(crate) struct ReplayState {
     thread_id: ThreadId,
+    agent_path: Option<String>,
+    selected_child: bool,
     provider_resume_id: ProviderResumeId,
     stream_id: StreamId,
     emitted_session_start_ids: HashSet<String>,
@@ -39,6 +41,8 @@ impl ReplayState {
     pub(crate) fn new(request: &TranscriptReplayRequest) -> Self {
         Self {
             thread_id: ThreadId::new(request.provider_resume_id.as_str()),
+            agent_path: None,
+            selected_child: false,
             provider_resume_id: request.provider_resume_id.clone(),
             stream_id: request.stream_id.clone(),
             emitted_session_start_ids: HashSet::new(),
@@ -156,6 +160,8 @@ pub(crate) fn read_rollout(
     let mut state = ReplayState::new(request);
     let mut drafts = Vec::new();
     let mut first_timestamp = None;
+    let mut ordinal = 0_u64;
+    let mut history_start = 0_u64;
 
     let mut reader = BufReader::new(file);
     let mut offset = 0_u64;
@@ -173,6 +179,14 @@ pub(crate) fn read_rollout(
         }
         let provider_sequence = offset.saturating_add(1);
         offset = offset.saturating_add(read as u64);
+        if !bytes.ends_with(b"\n") && std::str::from_utf8(&bytes).is_err() {
+            log::warn!(
+                "ignoring truncated UTF-8 Codex transcript record path={} byte={}",
+                path.display(),
+                provider_sequence - 1
+            );
+            break;
+        }
         let line = std::str::from_utf8(&bytes).map_err(|error| {
             HarnessError::Operation(format!(
                 "malformed UTF-8 in Codex transcript {} at byte {}: {error}",
@@ -183,6 +197,14 @@ pub(crate) fn read_rollout(
         if line.trim().is_empty() {
             continue;
         }
+        if !bytes.ends_with(b"\n") && serde_json::from_str::<Value>(line).is_err() {
+            log::warn!(
+                "ignoring truncated Codex child transcript record {} at byte {}",
+                path.display(),
+                provider_sequence - 1
+            );
+            break;
+        }
         let raw: Value = serde_json::from_str(line).map_err(|error| {
             HarnessError::Operation(format!(
                 "malformed Codex transcript {} at byte {}: {error}",
@@ -190,6 +212,33 @@ pub(crate) fn read_rollout(
                 provider_sequence - 1
             ))
         })?;
+        if ordinal == 0 {
+            state.agent_path = raw
+                .pointer("/payload/agent_path")
+                .or_else(|| raw.pointer("/payload/source/subagent/thread_spawn/agent_path"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            state.selected_child = raw
+                .pointer("/payload/parent_thread_id")
+                .and_then(Value::as_str)
+                .is_some()
+                || state
+                    .agent_path
+                    .as_deref()
+                    .is_some_and(|path| path != "/root");
+            history_start = raw
+                .pointer("/payload/subagent_history_start_ordinal")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+        }
+        let current_ordinal = raw
+            .get("ordinal")
+            .and_then(Value::as_u64)
+            .unwrap_or(ordinal);
+        ordinal += 1;
+        if current_ordinal > 0 && current_ordinal < history_start {
+            continue;
+        }
         let timestamp = record_timestamp(&raw);
         first_timestamp.get_or_insert(timestamp);
         drafts.extend(parse_rollout_line(
@@ -216,12 +265,61 @@ pub(crate) fn read_rollout_tail(
     request: &TranscriptReplayRequest,
     budget: usize,
 ) -> Result<TailReadOutcome, HarnessError> {
-    let tail = TranscriptTailLines::read(path, budget, "Codex")?;
+    // A bounded tail does not know the physical ordinal of copied parent
+    // history. Defer a child file to full normalization rather than leak it.
+    let mut header_bytes = Vec::new();
+    let header_budget = (budget / 4).min(64 * 1024);
+    BufReader::new(File::open(path).map_err(|error| HarnessError::Operation(error.to_string()))?)
+        .take(header_budget as u64)
+        .read_until(b'\n', &mut header_bytes)
+        .map_err(|error| HarnessError::Operation(error.to_string()))?;
+    let first_line = String::from_utf8_lossy(&header_bytes);
+    let mut tail =
+        TranscriptTailLines::read(path, budget.saturating_sub(header_bytes.len()), "Codex")?;
+    tail.bytes_read += header_bytes.len();
+    let incomplete_header = std::str::from_utf8(&header_bytes).is_err()
+        || (header_bytes.len() == header_budget && !header_bytes.ends_with(b"\n"));
+    let child_boundary = serde_json::from_str::<Value>(&first_line)
+        .ok()
+        .and_then(|raw| {
+            raw.pointer("/payload/subagent_history_start_ordinal")
+                .and_then(Value::as_u64)
+        });
+    if child_boundary.is_some() || incomplete_header {
+        return Ok(TailReadOutcome {
+            drafts: Vec::new(),
+            older_records_exist: true,
+            bytes_read: tail.bytes_read,
+        });
+    }
     let mut state = ReplayState::new(request);
+    if let Ok(header) = serde_json::from_str::<Value>(&first_line) {
+        state.agent_path = header
+            .pointer("/payload/agent_path")
+            .or_else(|| header.pointer("/payload/source/subagent/thread_spawn/agent_path"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        state.selected_child = header
+            .pointer("/payload/parent_thread_id")
+            .and_then(Value::as_str)
+            .is_some()
+            || state
+                .agent_path
+                .as_deref()
+                .is_some_and(|path| path != "/root");
+    }
+
     let mut drafts = Vec::new();
     for (provider_sequence, line) in &tail.lines {
         if line.trim().is_empty() {
             continue;
+        }
+        if serde_json::from_str::<Value>(line).is_err() {
+            return Ok(TailReadOutcome {
+                drafts: Vec::new(),
+                older_records_exist: true,
+                bytes_read: tail.bytes_read,
+            });
         }
         let raw: Value = serde_json::from_str(line).map_err(|error| {
             HarnessError::Operation(format!(
@@ -337,6 +435,42 @@ fn parse_response_item(
         return Vec::new();
     };
     match kind.as_str() {
+        "agent_message" => {
+            if !state.selected_child {
+                return Vec::new();
+            }
+            let recipient = payload.get("recipient").and_then(Value::as_str);
+            let selected = state.agent_path.as_deref().unwrap_or("/root");
+            if recipient.is_some_and(|recipient| recipient != selected) {
+                return Vec::new();
+            }
+            let mut text = content_text(payload.get("content"));
+            let encrypted = payload
+                .get("content")
+                .and_then(Value::as_array)
+                .is_some_and(|blocks| {
+                    blocks.iter().any(|block| {
+                        block.get("type").and_then(Value::as_str) == Some("encrypted_content")
+                    })
+                });
+            if encrypted {
+                text.push_str("\n[The prompt body is encrypted in this Codex transcript and is unavailable for replay.]");
+            }
+            if text.trim().is_empty() {
+                return Vec::new();
+            }
+            vec![state.item_draft(
+                timestamp,
+                provider_sequence,
+                string(payload, "id").map(ItemId::new),
+                HarnessEventPayloadV1::TurnInput(TurnInput {
+                    thread_id: state.thread_id.clone(),
+                    run_id: None,
+                    content: text,
+                    provenance: TurnInputProvenance::Agent,
+                }),
+            )]
+        }
         "message" => {
             let text = content_text(payload.get("content"));
             if text.is_empty() {

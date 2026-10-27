@@ -473,6 +473,7 @@ export interface ChatSession {
   backendSessionId: string | null;
   /** Provider-specific durable resume ID for this conversation. */
   providerResumeId: string | null;
+  providerParentResumeId?: string | null;
   /** Project root captured when the local chat session was opened. */
   projectPath?: string | null;
   /** User-selected provider model alias for session startup overrides. */
@@ -501,6 +502,14 @@ export interface ChatSession {
   compactionActive?: boolean;
   /** Runtime-only metadata from the most recent completed compaction. */
   compactionSummary?: ChatCompactionSummary | null;
+  /** Runtime ownership and provider-reported work state for a separate child view. */
+  providerChildrenStopped?: boolean;
+  providerChild?: {
+    ownerSessionId: string;
+    active: boolean | null;
+    turnId: string | null;
+    settledTurnId?: string | null;
+  };
   /** Ephemeral assistant text currently streaming; not durable transcript state */
   streamingAssistant?: StreamingAssistantMessage | null;
   /** Runtime-only progressive provider transcript replay state. */
@@ -618,6 +627,23 @@ interface ChatStoreActions {
     preferredPaneId?: string
   ) => Promise<boolean>;
   loadOlderReplayMessages: (sessionId: string) => Promise<boolean>;
+  refreshProviderThreadSession: (sessionId: string) => void;
+  ensureProviderThreadSession: (input: {
+    harness: LocalChatHarnessKind;
+    providerResumeId: string;
+    providerId?: string | null;
+    projectPath?: string | null;
+    label?: string | null;
+    title?: string | null;
+    model?: string | null;
+    ownerSessionId?: string;
+  }) => string;
+  setProviderChildActivity: (
+    sessionId: string,
+    active: boolean,
+    turnId?: string | null
+  ) => void;
+  settleProviderChildren: (ownerSessionId: string) => void;
   /** Hydrate and focus a provider child thread as its own local chat session */
   selectProviderThreadSession: (input: {
     harness: LocalChatHarnessKind;
@@ -628,6 +654,7 @@ interface ChatStoreActions {
     title?: string | null;
     model?: string | null;
     preferredPaneId?: string;
+    ownerSessionId?: string;
   }) => Promise<string | null>;
   /** Start a new local chat without reusing an existing session */
   startFreshSession: (label: string, projectPath?: string | null) => string;
@@ -1571,23 +1598,50 @@ export const useChatStore = create<ChatStore>((set, get) => {
   };
 
   const requestInitialProviderReplayPage = async (
-    session: ChatSession
+    session: ChatSession,
+    retainFromEventId?: string,
+    existingCacheKey?: string | null
   ): Promise<
     | { status: "ok"; page: LoadLocalChatSessionReplayOutput }
     | { status: "error"; error: string }
   > => {
+    const collected: string[][] = [];
+    let cacheKey: string | null | undefined;
     let cursor: string | null = null;
     const seenCursors = new Set<string>();
 
     while (true) {
       const result = await requestProviderReplayPage(session, cursor);
       if (result.status === "error") return result;
+      if (existingCacheKey && result.page.cache_key === existingCacheKey)
+        return result;
+      if (cacheKey !== undefined && result.page.cache_key !== cacheKey) {
+        return {
+          status: "error",
+          error:
+            "Provider transcript changed while refreshing; retry the replay.",
+        };
+      }
+      cacheKey = result.page.cache_key;
+      collected.push(result.page.events);
+      const retainedBoundary =
+        !retainFromEventId ||
+        result.page.events.some((line) => {
+          try {
+            return JSON.parse(line).event_id === retainFromEventId;
+          } catch {
+            return false;
+          }
+        });
       if (
-        result.page.events.length > 0 ||
+        (result.page.events.length > 0 && retainedBoundary) ||
         !result.page.has_more ||
         !result.page.next_cursor
       ) {
-        return result;
+        return {
+          status: "ok",
+          page: { ...result.page, events: collected.reverse().flat() },
+        };
       }
 
       if (seenCursors.has(result.page.next_cursor)) {
@@ -1621,82 +1675,156 @@ export const useChatStore = create<ChatStore>((set, get) => {
     };
   };
 
+  const refreshingProviderThreads = new Set<string>();
+
   const hydrateProviderMessagesInPlace = (
     sessionId: string,
-    session: ChatSession
+    session: ChatSession,
+    refresh = false
   ) => {
     if (!session.providerResumeId) return;
     const currentReplay = get().sessions[sessionId]?.providerReplay;
-    if (currentReplay?.loaded || currentReplay?.loading) return;
-    const generation = providerReplayGeneration();
-    set((state) => {
-      const current = state.sessions[sessionId];
-      if (!current || current.providerResumeId !== session.providerResumeId) {
-        return state;
+    if (currentReplay?.loading || (currentReplay?.loaded && !refresh)) return;
+    let retainFromEventId: string | undefined;
+    if (refresh && currentReplay?.lines[0]) {
+      try {
+        retainFromEventId = JSON.parse(currentReplay.lines[0]).event_id;
+      } catch {
+        /* Legacy unkeyed replay. */
       }
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: {
-            ...current,
-            providerReplay: initialProviderReplayState(generation),
-          },
-        },
-      };
-    });
-
-    void requestInitialProviderReplayPage(session).then((result) => {
+    }
+    const backgroundRefresh = refresh && !!currentReplay?.loaded;
+    if (backgroundRefresh && refreshingProviderThreads.has(sessionId)) return;
+    if (backgroundRefresh) refreshingProviderThreads.add(sessionId);
+    const generation = backgroundRefresh
+      ? currentReplay.generation
+      : providerReplayGeneration();
+    if (!backgroundRefresh)
       set((state) => {
         const current = state.sessions[sessionId];
-        const replay = current?.providerReplay;
-        if (
-          !current ||
-          current.providerResumeId !== session.providerResumeId ||
-          replay?.loading !== "initial" ||
-          replay.generation !== generation
-        ) {
+        if (!current || current.providerResumeId !== session.providerResumeId) {
           return state;
         }
-        if (result.status === "error") {
-          return updateProviderReplay(sessionId, state, (r) =>
-            failReplay(r, result.error)
-          );
-        }
-        const lines = result.page.events.filter(
-          (line): line is string => typeof line === "string"
-        );
-        const projected = replayLinesToChatMessages(lines, current);
-        const merged = mergeReplayMessages(projected, current.messages);
-        const nextSession = {
-          ...current,
-          messages: merged.messages,
-          messageCount: Math.max(
-            merged.messages.length,
-            current.messageCount ?? 0
-          ),
-          hasUserMessage:
-            current.hasUserMessage ??
-            merged.messages.some((message) => message.kind === "user"),
-          providerReplay: applyInitialPage(
-            replay,
-            {
-              cacheKey: result.page.cache_key,
-              events: lines,
-              nextCursor: result.page.next_cursor,
-              hasMore: result.page.has_more,
-            },
-            merged
-          ),
-        };
         return {
           sessions: {
             ...state.sessions,
-            [sessionId]: nextSession,
+            [sessionId]: {
+              ...current,
+              providerReplay:
+                refresh && currentReplay
+                  ? {
+                      ...currentReplay,
+                      generation,
+                      loading: "initial",
+                      error: null,
+                    }
+                  : initialProviderReplayState(generation),
+            },
           },
-          ...spawnOutlineMetadataPatch(state, sessionId, current, nextSession),
         };
       });
-    });
+
+    void requestInitialProviderReplayPage(
+      session,
+      retainFromEventId,
+      refresh ? currentReplay?.cacheKey : undefined
+    )
+      .then((result) => {
+        set((state) => {
+          const current = state.sessions[sessionId];
+          const replay = current?.providerReplay;
+          if (
+            !current ||
+            current.providerResumeId !== session.providerResumeId ||
+            replay?.loading !== (backgroundRefresh ? null : "initial") ||
+            replay.generation !== generation
+          ) {
+            return state;
+          }
+          if (result.status === "error") {
+            return updateProviderReplay(sessionId, state, (r) =>
+              failReplay(r, result.error)
+            );
+          }
+          if (
+            refresh &&
+            currentReplay?.cacheKey &&
+            result.page.cache_key === currentReplay.cacheKey
+          ) {
+            return backgroundRefresh
+              ? state
+              : updateProviderReplay(sessionId, state, (r) => ({
+                  ...r,
+                  loading: null,
+                  error: null,
+                }));
+          }
+          const lines = result.page.events.filter(
+            (line): line is string => typeof line === "string"
+          );
+          const projected = replayLinesToChatMessages(lines, current);
+          // Previously installed replay is a baseline, not a live override.
+          // Reconcile changes made since that baseline before installing a new
+          // snapshot of the same durable item.
+          const previousInstalled = refresh
+            ? (currentReplay?.installedMessages ?? [])
+            : [];
+          const currentPrefix = current.messages.slice(
+            0,
+            previousInstalled.length
+          );
+          const reconciled = refresh
+            ? reconcileReplayMessages(
+                projected,
+                previousInstalled,
+                currentPrefix
+              )
+            : projected;
+          const liveMessages = refresh
+            ? [
+                ...unmatchedMessages(previousInstalled, currentPrefix),
+                ...current.messages.slice(previousInstalled.length),
+              ]
+            : current.messages;
+          const merged = mergeReplayMessages(reconciled, liveMessages);
+          const nextSession = {
+            ...current,
+            messages: merged.messages,
+            messageCount: Math.max(
+              merged.messages.length,
+              current.messageCount ?? 0
+            ),
+            hasUserMessage:
+              current.hasUserMessage ??
+              merged.messages.some((message) => message.kind === "user"),
+            providerReplay: applyInitialPage(
+              replay,
+              {
+                cacheKey: result.page.cache_key,
+                events: lines,
+                nextCursor: result.page.next_cursor,
+                hasMore: result.page.has_more,
+              },
+              merged
+            ),
+          };
+          return {
+            sessions: {
+              ...state.sessions,
+              [sessionId]: nextSession,
+            },
+            ...spawnOutlineMetadataPatch(
+              state,
+              sessionId,
+              current,
+              nextSession
+            ),
+          };
+        });
+      })
+      .finally(() => {
+        refreshingProviderThreads.delete(sessionId);
+      });
   };
 
   const updateSession = (
@@ -2293,46 +2421,149 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return applied;
     },
 
+    ensureProviderThreadSession: (input) => {
+      const id = providerThreadSessionId(input.harness, input.providerResumeId);
+      const existing = get().sessions[id];
+      if (!existing) {
+        const session = hydrateLocalSession(createProviderThreadSession(input));
+        if (input.ownerSessionId)
+          session.providerChild = {
+            ownerSessionId: input.ownerSessionId,
+            active: get().sessions[input.ownerSessionId]
+              ?.providerChildrenStopped
+              ? false
+              : null,
+            turnId: null,
+          };
+        set((state) => ({ sessions: { ...state.sessions, [id]: session } }));
+      } else if (
+        input.label &&
+        existing.label === "Agent" &&
+        existing.title === "Agent"
+      ) {
+        set((state) => ({
+          sessions: {
+            ...state.sessions,
+            [id]: {
+              ...existing,
+              label: input.label!,
+              title: input.title || input.label!,
+              providerChild:
+                existing.providerChild ??
+                (input.ownerSessionId
+                  ? {
+                      ownerSessionId: input.ownerSessionId,
+                      active: null,
+                      turnId: null,
+                    }
+                  : undefined),
+            },
+          },
+        }));
+      } else if (input.ownerSessionId && !existing.providerChild) {
+        set((state) => ({
+          sessions: {
+            ...state.sessions,
+            [id]: {
+              ...existing,
+              providerChild: {
+                ownerSessionId: input.ownerSessionId!,
+                active: null,
+                turnId: null,
+              },
+            },
+          },
+        }));
+      }
+      return id;
+    },
+    setProviderChildActivity: (sessionId, active, turnId) => {
+      const current = get().sessions[sessionId];
+      if (!current?.providerChild) return;
+      const previous = current.providerChild;
+      if (
+        active &&
+        get().sessions[previous.ownerSessionId]?.providerChildrenStopped
+      )
+        return;
+      // Only a correlated live terminal closes a specific turn. A disk status
+      // with no turn ID cannot permanently suppress a later live update.
+      if (active && turnId && turnId === previous.settledTurnId) return;
+      if (
+        !active &&
+        previous.active &&
+        turnId &&
+        previous.turnId &&
+        turnId !== previous.turnId
+      )
+        return;
+      if (
+        previous.active === active &&
+        (!turnId ||
+          (previous.turnId === turnId &&
+            (active || previous.settledTurnId === turnId)))
+      )
+        return;
+      set((state) => ({
+        sessions: {
+          ...state.sessions,
+          [sessionId]: {
+            ...state.sessions[sessionId],
+            providerChild: {
+              ...previous,
+              active,
+              turnId: turnId ?? previous.turnId,
+              ...(!active && turnId ? { settledTurnId: turnId } : {}),
+            },
+          },
+        },
+      }));
+    },
+    settleProviderChildren: (ownerSessionId) => {
+      const owner = get().sessions[ownerSessionId];
+      if (owner)
+        set((state) => ({
+          sessions: {
+            ...state.sessions,
+            [ownerSessionId]: { ...owner, providerChildrenStopped: true },
+          },
+        }));
+      for (const session of Object.values(get().sessions)) {
+        if (session.providerChild?.ownerSessionId === ownerSessionId)
+          get().setProviderChildActivity(
+            session.id,
+            false,
+            session.providerChild.turnId
+          );
+        get().markPendingUserQuestionsUnavailable(session.id);
+      }
+    },
+
+    refreshProviderThreadSession: (sessionId) => {
+      const session = get().sessions[sessionId];
+      if (session) hydrateProviderMessagesInPlace(sessionId, session, true);
+    },
+
     selectProviderThreadSession: async (input) => {
       const providerResumeId = input.providerResumeId.trim();
       if (!providerResumeId) return null;
       const projectPath = input.projectPath ?? null;
-      const runtimeSessionId = providerThreadSessionId(
-        input.harness,
-        providerResumeId
-      );
-      const matchingRuntime = get().sessions[runtimeSessionId];
-      if (matchingRuntime) {
-        set((state) => ({
-          ...focusSessionInPaneLayout(
-            state,
-            matchingRuntime.id,
-            input.preferredPaneId
-          ),
-          panelOpen: true,
-        }));
-        return matchingRuntime.id;
-      }
-
-      const session = createProviderThreadSession({
+      const runtimeSessionId = get().ensureProviderThreadSession({
         ...input,
         providerResumeId,
         projectPath,
       });
-      const hydrated = hydrateLocalSession(session);
-      set((state) => {
-        const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
-        return {
-          sessions: nextSessions,
-          ...focusSessionInPaneLayout(
-            { ...state, sessions: nextSessions },
-            hydrated.id,
-            input.preferredPaneId
-          ),
-          panelOpen: true,
-        };
-      });
-      return hydrated.id;
+      const selected = get().sessions[runtimeSessionId];
+      hydrateProviderMessagesInPlace(runtimeSessionId, selected);
+      set((state) => ({
+        ...focusSessionInPaneLayout(
+          state,
+          runtimeSessionId,
+          input.preferredPaneId
+        ),
+        panelOpen: true,
+      }));
+      return runtimeSessionId;
     },
 
     startFreshSession: (label, projectPath) => {
@@ -2754,6 +2985,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     setSessionLifecycle: (sessionId, lifecycle, errorMessage = null) => {
+      if (
+        get().sessions[sessionId]?.harness === "claude" &&
+        ["closing", "closed", "error"].includes(lifecycle)
+      )
+        get().settleProviderChildren(sessionId);
       updateSession(
         sessionId,
         (session) => {
@@ -2801,6 +3037,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           localId = generateActiveTurnId();
           return {
             ...session,
+            providerChildrenStopped: false,
             activeTurn: {
               localId,
               turnId: null,

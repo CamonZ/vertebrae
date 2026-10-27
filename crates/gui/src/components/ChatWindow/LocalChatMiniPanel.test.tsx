@@ -644,6 +644,54 @@ describe("LocalChatMiniPanel search", () => {
     );
   });
 
+  it("shows working child sessions with the existing indicator and opens the selected child", () => {
+    const parent = makeSession("root", { title: "Parent", harness: "codex" });
+    const worker: SpawnOutlineItem = {
+      id: "child",
+      threadId: "child-thread",
+      spawnId: "spawn",
+      label: "Worker",
+      detail: "",
+      isWorking: true,
+    };
+    const onSelectAgent = vi.fn();
+    const props = {
+      sessionGroups: [makeGroup("current", "Current project", [parent])],
+      onSelectAgent,
+    };
+    const { rerender } = render(
+      <ControlledPanel
+        {...props}
+        spawnOutlineBySessionId={new Map([[parent.id, [worker]]])}
+        thinkingIndicatorStyle="futuristic"
+      />
+    );
+    const row = screen.getByRole("button", {
+      name: "Open spawned agent Worker from Parent",
+    });
+    expect(within(row).getByTestId("thinking-indicator")).toHaveAttribute(
+      "data-style",
+      "futuristic"
+    );
+    fireEvent.click(row);
+    expect(onSelectAgent).toHaveBeenCalledWith(parent.id, worker);
+    rerender(
+      <ControlledPanel
+        {...props}
+        spawnOutlineBySessionId={
+          new Map([[parent.id, [{ ...worker, isWorking: false }]]])
+        }
+      />
+    );
+    expect(
+      within(
+        screen.getByRole("button", {
+          name: "Open spawned agent Worker from Parent",
+        })
+      ).queryByTestId("thinking-indicator")
+    ).not.toBeInTheDocument();
+  });
+
   it("shows independent configured activity indicators and restores harness badges", () => {
     const thinking = makeSession("thinking", {
       title: "Thinking session",

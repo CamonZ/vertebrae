@@ -43,6 +43,52 @@ pub struct TranscriptTailLines {
 }
 
 impl TranscriptTailLines {
+    /// Revision-keyed bounded discovery tails; at most eight 128-KiB windows.
+    /// Replay itself retains its separate cursor/revision cache.
+    pub fn read_cached(
+        path: &Path,
+        budget: usize,
+        provider: &str,
+    ) -> Result<std::sync::Arc<Self>, HarnessError> {
+        use super::TranscriptRevision;
+        use std::{
+            collections::VecDeque,
+            path::PathBuf,
+            sync::{Arc, Mutex, OnceLock},
+        };
+        type Entry = (PathBuf, usize, TranscriptRevision, Arc<TranscriptTailLines>);
+        static CACHE: OnceLock<Mutex<VecDeque<Entry>>> = OnceLock::new();
+        let budget = budget.min(128 * 1024);
+        let revision = TranscriptRevision::capture(path)?;
+        let cache = CACHE.get_or_init(Mutex::default);
+        {
+            let mut entries = cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(index) = entries.iter().position(|(key, size, version, _)| {
+                key == path && *size == budget && version == &revision
+            }) {
+                let entry = entries
+                    .remove(index)
+                    .expect("position came from this deque");
+                let result = entry.3.clone();
+                entries.push_back(entry);
+                return Ok(result);
+            }
+        }
+        let tail = Arc::new(Self::read(path, budget, provider)?);
+        revision.verify(path)?;
+        let mut entries = cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entries.retain(|(key, _, _, _)| key != path);
+        entries.push_back((path.to_owned(), budget, revision, tail.clone()));
+        while entries.len() > 8 {
+            entries.pop_front();
+        }
+        Ok(tail)
+    }
+
     /// Read the last `budget` bytes of a JSONL transcript and split it into
     /// complete lines. The first partial line (cut by the window start) is
     /// discarded so only whole records are decoded.
@@ -71,12 +117,22 @@ impl TranscriptTailLines {
             0
         };
         let first_offset = start.saturating_add(discard as u64);
-        let text = std::str::from_utf8(&bytes[discard..]).map_err(|error| {
-            HarnessError::Operation(format!(
-                "malformed UTF-8 in {provider} transcript {} tail: {error}",
-                path.display()
-            ))
-        })?;
+        let slice = &bytes[discard..];
+        let text = match std::str::from_utf8(slice) {
+            Ok(text) => text,
+            // The writer can stop between the bytes of a final codepoint.
+            // Keep its valid prefix so the adapter can defer incomplete JSON.
+            Err(error) if error.error_len().is_none() => {
+                std::str::from_utf8(&slice[..error.valid_up_to()])
+                    .expect("UTF-8 decoder identified this valid prefix")
+            }
+            Err(error) => {
+                return Err(HarnessError::Operation(format!(
+                    "malformed UTF-8 in {provider} transcript {} tail: {error}",
+                    path.display()
+                )));
+            }
+        };
         let mut offset = first_offset;
         let lines = text
             .split_inclusive('\n')
@@ -100,6 +156,20 @@ mod tests {
 
     use super::*;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn cached_discovery_tail_reuses_unchanged_bytes_and_invalidates_on_append() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "one").unwrap();
+        let first = TranscriptTailLines::read_cached(file.path(), 1024, "test").unwrap();
+        let same = TranscriptTailLines::read_cached(file.path(), 1024, "test").unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first, &same));
+        writeln!(file, "two").unwrap();
+        let changed = TranscriptTailLines::read_cached(file.path(), 1024, "test").unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&first, &changed));
+        assert_eq!(changed.lines.len(), 2);
+        assert_eq!(first.lines.len(), 1);
+    }
 
     #[test]
     fn captured_tail_reader_does_not_follow_appended_bytes() {

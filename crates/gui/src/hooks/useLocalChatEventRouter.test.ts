@@ -21,6 +21,7 @@ import {
   routeLocalChatTextEvent,
   routeLocalChatToolCallEvent,
   routeLocalChatToolResultEvent,
+  routeLocalChatFileChangeEvent,
   routeLocalChatTurnStartedEvent,
   routePermissionRequestEvent,
   resetLocalChatTurnRoutingForTests,
@@ -871,7 +872,7 @@ describe("useLocalChatEventRouter route functions", () => {
     expect(local.messages).toEqual([]);
   });
 
-  it("keeps child content without allowing child terminal settlement", () => {
+  it("keeps child content out of the parent without allowing child terminal settlement", () => {
     resetChatStore({
       local: makeSession({
         id: "local",
@@ -908,20 +909,86 @@ describe("useLocalChatEventRouter route functions", () => {
         context_tokens: 0,
         context_window: 200000,
       })
-    ).toBe(false);
+    ).toBe(true);
 
     const local = useChatStore.getState().sessions.local;
     expect(local.lifecycle).toBe("streaming");
-    expect(local.messages).toEqual([
-      expect.objectContaining({
-        kind: "assistant",
-        text: "child update",
-        parentToolUseId: "spawn-tool",
-      }),
-    ]);
+    expect(local.messages).toEqual([]);
   });
 
-  it("keeps an uncorrelated child error visible without settling the root", () => {
+  it.each(["claude", "codex"] as const)(
+    "routes unlinked %s child text, tools and edits into the child session",
+    (harness) => {
+      resetChatStore({
+        local: makeSession({
+          id: "local",
+          harness,
+          backendSessionId: "backend-local",
+          lifecycle: "streaming",
+        }),
+      });
+      startTurn("backend-local", "root-turn", harness);
+      const child = {
+        backend_session_id: "backend-local",
+        harness,
+        turn_id: "child-turn",
+        thread_id: "child-thread",
+        is_root: false,
+        parent_tool_use_id: null,
+      };
+      expect(
+        routeLocalChatTextEvent({
+          ...child,
+          text: "child-only",
+          is_partial: false,
+        })
+      ).toBe(true);
+      expect(
+        routeLocalChatToolCallEvent({
+          ...child,
+          tool_id: "child-call",
+          tool_name: "Bash",
+          input: "{}",
+        })
+      ).toBe(true);
+      expect(
+        routeLocalChatToolResultEvent({
+          ...child,
+          tool_id: "child-call",
+          result: "child-only",
+          is_error: false,
+        })
+      ).toBe(true);
+      expect(
+        routeLocalChatFileChangeEvent({
+          ...child,
+          tool_id: "child-file",
+          status: "completed",
+          changes: [{ path: "child.rs", kind: "add", diff: "+child" }],
+        })
+      ).toBe(true);
+      expect(useChatStore.getState().sessions.local.messages).toEqual([]);
+      const selectedChild =
+        useChatStore.getState().sessions[`local-chat-${harness}-child-thread`];
+      expect(selectedChild.messages).toMatchObject([
+        { kind: "assistant", text: "child-only" },
+        { kind: "tool_call" },
+        { kind: "tool_result" },
+        { kind: "file_edit" },
+      ]);
+      expect(
+        selectedChild.messages.every(
+          (message) =>
+            !("parentToolUseId" in message) || !message.parentToolUseId
+        )
+      ).toBe(true);
+      expect(useChatStore.getState().sessions.local.lifecycle).toBe(
+        "streaming"
+      );
+    }
+  );
+
+  it("keeps child errors out of the parent without settling the root", () => {
     resetChatStore({
       local: makeSession({
         id: "local",
@@ -945,9 +1012,154 @@ describe("useLocalChatEventRouter route functions", () => {
     const local = useChatStore.getState().sessions.local;
     expect(local.backendSessionId).toBe("backend-local");
     expect(local.lifecycle).toBe("streaming");
-    expect(local.messages).toEqual([
-      expect.objectContaining({ kind: "error", message: "child failed" }),
-    ]);
+    expect(local.messages).toEqual([]);
+    expect(
+      useChatStore.getState().sessions["local-chat-codex-child-thread"].messages
+    ).toContainEqual(
+      expect.objectContaining({ kind: "error", message: "child failed" })
+    );
+  });
+
+  it("keeps scoped child approvals in the child and unscoped Sacrum approvals with their owner", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        harness: "codex",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    const request = {
+      request_id: "child-approval",
+      session_id: "backend-local",
+      tool_name: "Bash",
+      tool_use_id: "child-tool",
+      input: { command: "pwd" },
+      message: "Allow?",
+      is_root: false,
+    };
+    expect(
+      routePermissionRequestEvent({ ...request, thread_id: "child-thread" })
+    ).toBe(true);
+    expect(useChatStore.getState().sessions.local.messages).toEqual([]);
+    expect(
+      useChatStore.getState().sessions["local-chat-codex-child-thread"].messages
+    ).toContainEqual(
+      expect.objectContaining({
+        kind: "permission_request",
+        requestId: "child-approval",
+      })
+    );
+    expect(
+      routePermissionRequestEvent({
+        ...request,
+        request_id: "sacrum-approval",
+        thread_id: null,
+      })
+    ).toBe(true);
+    expect(useChatStore.getState().sessions.local.messages).toContainEqual(
+      expect.objectContaining({ requestId: "sacrum-approval" })
+    );
+    const questions = [
+      {
+        question: "Proceed?",
+        header: "Confirm",
+        options: [{ label: "Yes", description: "Continue" }],
+        multi_select: false,
+      },
+    ];
+    routePermissionRequestEvent({
+      ...request,
+      request_id: "child-question",
+      turn_id: "child-turn",
+      thread_id: "child-thread",
+      tool_name: "AskUserQuestion",
+      input: { questions },
+      questions,
+      input_error: null,
+    });
+    routeLocalChatSessionEndEvent({
+      backend_session_id: "backend-local",
+      harness: "codex",
+      turn_id: "child-turn",
+      thread_id: "child-thread",
+      is_root: false,
+      duration_ms: 0,
+      cost_usd: 0,
+      num_turns: 1,
+      result: "",
+      is_error: false,
+      context_tokens: 0,
+      context_window: 0,
+    });
+    expect(
+      useChatStore.getState().sessions["local-chat-codex-child-thread"].messages
+    ).toContainEqual(
+      expect.objectContaining({
+        kind: "user_question",
+        requestId: "child-question",
+        status: "unavailable",
+      })
+    );
+  });
+
+  it("clears owned Claude child activity on an interrupted root and on process closure", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        harness: "claude",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "root-turn", "claude");
+    const child = {
+      backend_session_id: "backend-local",
+      harness: "claude" as const,
+      turn_id: "child-turn",
+      thread_id: "child-thread",
+      is_root: false,
+      parent_tool_use_id: null,
+    };
+    routeLocalChatToolCallEvent({
+      ...child,
+      tool_id: "child-call",
+      tool_name: "Bash",
+      input: "{}",
+    });
+    const id = "local-chat-claude-child-thread";
+    expect(useChatStore.getState().sessions[id].providerChild?.active).toBe(
+      true
+    );
+    routeLocalChatSessionEndEvent({
+      backend_session_id: "backend-local",
+      harness: "claude",
+      turn_id: "root-turn",
+      thread_id: "root-thread",
+      is_root: true,
+      completion_status: "interrupted",
+      duration_ms: 0,
+      cost_usd: 0,
+      num_turns: 1,
+      result: "",
+      is_error: true,
+      context_tokens: 0,
+      context_window: 0,
+    });
+    expect(useChatStore.getState().sessions[id].providerChild?.active).toBe(
+      false
+    );
+    useChatStore.getState().beginActiveTurn("local");
+    useChatStore
+      .getState()
+      .setProviderChildActivity(id, true, "next-child-turn");
+    expect(useChatStore.getState().sessions[id].providerChild?.active).toBe(
+      true
+    );
+    useChatStore.getState().setSessionLifecycle("local", "closed");
+    expect(useChatStore.getState().sessions[id].providerChild?.active).toBe(
+      false
+    );
   });
 
   it("routes the shared HarnessEventV1 translation fixture through root completion", () => {
@@ -982,7 +1194,7 @@ describe("useLocalChatEventRouter route functions", () => {
       }
     });
 
-    expect(routed).toEqual([true, true, true, true, true]);
+    expect(routed).toEqual([true, true, true, true, true, true]);
     const bridge = useChatStore.getState().sessions.bridge;
     expect(bridge.lifecycle).toBe("idle");
     expect(bridge.messages).toEqual([
@@ -994,11 +1206,6 @@ describe("useLocalChatEventRouter route functions", () => {
         kind: "tool_call",
         toolId: "spawn-1",
         toolName: "Agent",
-      }),
-      expect.objectContaining({
-        kind: "assistant",
-        text: "child update",
-        parentToolUseId: "spawn-1",
       }),
     ]);
   });

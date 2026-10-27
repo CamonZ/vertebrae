@@ -41,7 +41,19 @@ vi.mock("../../bindings", async () => {
   const { withBuiltinProviders } = await import("../../test/localChatCatalog");
   return {
   commands: {
-    getCurrentProject: vi.fn().mockResolvedValue({
+      discoverLocalChatChildSessions: vi
+        .fn()
+        .mockResolvedValue({ status: "ok", data: [] }),
+      loadLocalChatSessionReplay: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: {
+          events: [],
+          cache_key: null,
+          next_cursor: null,
+          has_more: false,
+        },
+      }),
+      getCurrentProject: vi.fn().mockResolvedValue({
       status: "ok",
       data: "/test/project",
     }),
@@ -116,7 +128,8 @@ vi.mock("../../bindings", async () => {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
     localChatTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    localChatToolCallEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
+    localChatToolCallEvent: { listen: vi.fn(() => Promise.resolve(() => {})),
+      },
     localChatToolResultEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
@@ -180,6 +193,14 @@ describe("ChatWindowManager", () => {
     clearPersistedLocalChatSessions();
     useNotificationStore.getState().clearNotifications();
     vi.clearAllMocks();
+    vi.mocked(commands.discoverLocalChatChildSessions).mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+    vi.mocked(commands.loadLocalChatSessionReplay).mockResolvedValue({
+      status: "ok",
+      data: { events: [], cache_key: null, next_cursor: null, has_more: false },
+    });
     vi.mocked(commands.getCurrentProject).mockResolvedValue({
       status: "ok",
       data: "/test/project",
@@ -536,6 +557,133 @@ describe("ChatWindowManager", () => {
     expect(idleRow?.querySelector('[data-harness="claude"]')).not.toBeNull();
     expect(thinkingRow?.querySelector("[data-harness]")).toBeNull();
     expect(compactingRow?.querySelector("[data-harness]")).toBeNull();
+  });
+
+  it("groups persisted Codex children before opening any transcript", async () => {
+    const user = userEvent.setup();
+    const parent = createSession({
+      id: "history-parent",
+      label: "History parent",
+      harness: "codex",
+      providerResumeId: "history-root",
+      status: "open",
+      lifecycle: "idle",
+    });
+    const child = createSession({
+      id: "history-child",
+      label: "History worker",
+      harness: "codex",
+      providerResumeId: "history-worker",
+      providerParentResumeId: "history-root",
+      status: "open",
+      lifecycle: "idle",
+    });
+    persistLocalChatSession(parent);
+    persistLocalChatSession(child);
+    const active = createSession({
+      id: "unrelated-active",
+      label: "Unrelated",
+    });
+    useChatStore.setState({
+      sessions: { [active.id]: active },
+      activeSessionId: active.id,
+      panelOpen: true,
+    });
+    vi.mocked(commands.loadLocalChatSessionReplay).mockClear();
+    render(<ChatWindowManager />);
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    expect(
+      await screen.findByRole("button", {
+        name: "Open spawned agent History worker from History parent",
+      })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Load local chat History worker into active pane",
+      })
+    ).not.toBeInTheDocument();
+    expect(commands.loadLocalChatSessionReplay).not.toHaveBeenCalled();
+    await user.type(screen.getByRole("searchbox"), "History worker");
+    expect(
+      screen.getByRole("button", {
+        name: "Open spawned agent History worker from History parent",
+      })
+    ).toBeInTheDocument();
+  });
+
+  it("discovers Codex child sessions outside the parent replay page and renders the selected conversation", async () => {
+    const user = userEvent.setup();
+    const parent = createSession({
+      id: "parent",
+      label: "Root conversation",
+      harness: "codex",
+      providerResumeId: "root-thread",
+      projectPath: "/test/project",
+    });
+    persistLocalChatSession(parent);
+    useChatStore.setState({
+      sessions: { parent },
+      activeSessionId: parent.id,
+      panelOpen: true,
+    });
+    vi.mocked(commands.discoverLocalChatChildSessions).mockImplementation(
+      async (input) => ({
+        status: "ok",
+        data:
+          input.provider_resume_id === "root-thread"
+            ? [
+                {
+                  provider_resume_id: "worker-thread",
+                  spawn_tool_call_id: "spawn-outside-page",
+                  label: "Codex worker",
+                  is_active: true,
+                },
+              ]
+            : [],
+      })
+    );
+    vi.mocked(commands.loadLocalChatSessionReplay).mockResolvedValue({
+      status: "ok",
+      data: {
+        cache_key: "child-revision",
+        next_cursor: null,
+        has_more: false,
+        events: [
+          JSON.stringify({
+            version: 1,
+            event_id: "child-answer",
+            stream_id: "child",
+            sequence: 1,
+            correlation: {
+              session_id: "worker-thread",
+              thread_id: "worker-thread",
+              item_id: "answer",
+            },
+            timestamp: "2026-01-01T00:00:00Z",
+            semantics: "snapshot",
+            type: "text",
+            data: { text: "This is the child conversation" },
+          }),
+        ],
+      },
+    });
+    render(<ChatWindowManager />);
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    const row = await screen.findByRole("button", {
+      name: "Open spawned agent Codex worker from Root conversation",
+    });
+    expect(within(row).getByTestId("thinking-indicator")).toBeInTheDocument();
+    await user.click(row);
+    expect(
+      await screen.findByText("This is the child conversation")
+    ).toBeInTheDocument();
+    expect(useChatStore.getState().sessions[parent.id].messages).toEqual(
+      parent.messages
+    );
+    expect(
+      useChatStore.getState().sessions[useChatStore.getState().activeSessionId!]
+        .providerResumeId
+    ).toBe("worker-thread");
   });
 
   it("opens spawned agent rows as provider thread sessions", async () => {

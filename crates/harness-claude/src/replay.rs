@@ -85,6 +85,19 @@ impl ClaudeTranscriptReplay {
         &self,
         request: &TranscriptReplayRequest,
     ) -> Result<Option<PathBuf>, HarnessError> {
+        static PATHS: OnceLock<vertebrae_harness_core::TranscriptDiscoveryPaths> = OnceLock::new();
+        let root = self.provider_root()?;
+        PATHS
+            .get_or_init(Default::default)
+            .find(&root, request.provider_resume_id.as_str(), || {
+                self.discover_uncached(request)
+            })
+    }
+
+    fn discover_uncached(
+        &self,
+        request: &TranscriptReplayRequest,
+    ) -> Result<Option<PathBuf>, HarnessError> {
         let root = self.provider_root()?;
         let projects = root.join("projects");
         if !projects.is_dir() || !safe_filename(request.provider_resume_id.as_str()) {
@@ -108,7 +121,7 @@ impl ClaudeTranscriptReplay {
         Ok(found.and_then(|path| validated_file(&projects, &path)))
     }
 
-    fn provider_root(&self) -> Result<PathBuf, HarnessError> {
+    pub(crate) fn provider_root(&self) -> Result<PathBuf, HarnessError> {
         let home = self
             .home_dir
             .clone()
@@ -160,6 +173,17 @@ impl ClaudeTranscriptReplay {
             if line.trim().is_empty() {
                 continue;
             }
+            if request.provider_resume_id.as_str().starts_with("agent-")
+                && !bytes.ends_with(b"\n")
+                && serde_json::from_str::<Value>(&line).is_err()
+            {
+                log::warn!(
+                    "ignoring truncated Claude child transcript record {} at byte {}",
+                    path.display(),
+                    source - 1
+                );
+                break;
+            }
             let value: Value = serde_json::from_str(&line).map_err(|error| {
                 HarnessError::Operation(format!(
                     "malformed Claude transcript {} at byte {}: {error}",
@@ -167,7 +191,12 @@ impl ClaudeTranscriptReplay {
                     source - 1
                 ))
             })?;
-            decode_claude_line(&mut decoder, value, source, &mut drafts);
+            decode_claude_line(
+                &mut decoder,
+                selected_session_record(value, request),
+                source,
+                &mut drafts,
+            );
         }
         drafts.extend(decoder.unresolved_diagnostics());
         Ok(drafts)
@@ -212,6 +241,11 @@ impl ClaudeTranscriptReplay {
             if line.trim().is_empty() {
                 continue;
             }
+            if request.provider_resume_id.as_str().starts_with("agent-")
+                && serde_json::from_str::<Value>(line).is_err()
+            {
+                return Ok(deferred());
+            }
             let value: Value = serde_json::from_str(line).map_err(|error| {
                 HarnessError::Operation(format!(
                     "malformed Claude transcript {} at byte {}: {error}",
@@ -219,6 +253,7 @@ impl ClaudeTranscriptReplay {
                     source - 1
                 ))
             })?;
+            let value = selected_session_record(value, request);
             if tail.older_records_exist && !claude_tail_record_is_context_free(&value) {
                 return Ok(deferred());
             }
@@ -274,6 +309,29 @@ fn decode_claude_line(
     drafts.extend(line_drafts);
 }
 
+// A standalone child transcript carries its parent's sessionId and its own
+// agentId. Within this selected conversation it is the root, not an unresolved
+// child of a spawn that lives in another file. Provider tool IDs stay intact.
+fn selected_session_record(mut value: Value, request: &TranscriptReplayRequest) -> Value {
+    if let Some(agent_id) = request.provider_resume_id.as_str().strip_prefix("agent-")
+        && let Some(object) = value.as_object_mut()
+        && object
+            .get("agentId")
+            .or_else(|| object.get("agent_id"))
+            .and_then(Value::as_str)
+            == Some(agent_id)
+    {
+        object.remove("agentId");
+        object.remove("agent_id");
+        object.remove("parent_tool_use_id");
+        object.insert(
+            "session_id".into(),
+            Value::String(request.provider_resume_id.to_string()),
+        );
+    }
+    value
+}
+
 const NORMALIZED_REPLAY_CACHE_CAPACITY: usize = 8;
 
 fn claude_replay_cache() -> &'static TranscriptReplayCache {
@@ -283,7 +341,7 @@ fn claude_replay_cache() -> &'static TranscriptReplayCache {
 
 fn claude_projection_key(request: &TranscriptReplayRequest) -> String {
     format!(
-        "claude-v2:resume={:?}:stream={:?}:project={:?}:created={:?}",
+        "claude-v3:resume={:?}:stream={:?}:project={:?}:created={:?}",
         request.provider_resume_id.as_str(),
         request.stream_id.as_str(),
         request.project_path,
@@ -363,7 +421,7 @@ fn find_jsonl_by_stem(root: &Path, stem: &str) -> std::io::Result<Option<PathBuf
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() {
+        if entry.file_type()?.is_dir() {
             if let Some(found) = find_jsonl_by_stem(&path, stem)? {
                 return Ok(Some(found));
             }

@@ -160,6 +160,10 @@ pub struct LocalChatSessionIndexEntry {
     pub updated_at: String,
     pub project_path: Option<String>,
     pub provider_resume_id: Option<String>,
+    /// Provider lineage used to group history without opening conversations.
+    #[serde(default)]
+    #[specta(optional)]
+    pub provider_parent_resume_id: Option<String>,
     pub thread_total_tokens: Option<u32>,
     pub message_count: u32,
     pub lifecycle: String,
@@ -536,19 +540,43 @@ pub async fn load_local_chat_session_index() -> Result<Vec<LocalChatSessionIndex
     let value = serde_json::from_str::<serde_json::Value>(&raw).map_err(|error| CommandError {
         message: format!("Failed to parse local chat session index: {}", error),
     })?;
-    if value.is_array() {
-        return serde_json::from_value::<Vec<LocalChatSessionIndexEntry>>(value).map_err(|error| {
-            CommandError {
-                message: format!("Failed to decode local chat session index: {}", error),
-            }
-        });
+    let mut sessions = if value.is_array() {
+        serde_json::from_value::<Vec<LocalChatSessionIndexEntry>>(value)
+    } else {
+        serde_json::from_value::<LocalChatSessionIndexFile>(value).map(|index| index.sessions)
     }
-    let index = serde_json::from_value::<LocalChatSessionIndexFile>(value).map_err(|error| {
-        CommandError {
-            message: format!("Failed to decode local chat session index: {}", error),
-        }
+    .map_err(|error| CommandError {
+        message: format!("Failed to decode local chat session index: {error}"),
     })?;
-    Ok(index.sessions)
+    tauri::async_runtime::spawn_blocking(move || {
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig::default());
+        for session in &mut sessions {
+            if session.harness != LocalChatHarnessKind::Codex {
+                continue;
+            }
+            let Some(id) = session.provider_resume_id.as_ref() else {
+                continue;
+            };
+            let request = TranscriptReplayRequest {
+                provider_resume_id: ProviderResumeId::new(id.clone()),
+                stream_id: StreamId::new(format!("local-history/{}", session.id)),
+                project_path: session.project_path.as_ref().map(PathBuf::from),
+                created_at: Some(session.created_at.clone()),
+            };
+            match factory.transcript_parent_session(StepHarness::Codex, &request) {
+                Ok(Some(parent)) => session.provider_parent_resume_id = Some(parent.to_string()),
+                Ok(None) => {}
+                Err(error) => {
+                    log::warn!("Could not read lineage for session {}: {error}", session.id)
+                }
+            }
+        }
+        sessions
+    })
+    .await
+    .map_err(|error| CommandError {
+        message: format!("Failed to load session lineage: {error}"),
+    })
 }
 
 /// Save the app-managed local chat metadata index atomically.
@@ -599,6 +627,57 @@ fn custom_title_provider(
     .custom_provider_process_launch(&id)
     .map(Some)
     .map_err(|error| error.to_string())
+}
+
+/// A provider-owned child conversation available in the Chat Sessions panel.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LocalChatChildSession {
+    pub provider_resume_id: String,
+    pub spawn_tool_call_id: Option<String>,
+    pub label: String,
+    pub is_active: Option<bool>,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn discover_local_chat_child_sessions(
+    input: LoadLocalChatSessionReplayInput,
+) -> Result<Vec<LocalChatChildSession>, CommandError> {
+    let Some(resume_id) = input.provider_resume_id.filter(|id| !id.trim().is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let harness = match input.harness {
+        LocalChatHarnessKind::Claude => StepHarness::Claude,
+        LocalChatHarnessKind::Codex => StepHarness::Codex,
+    };
+    let request = TranscriptReplayRequest {
+        provider_resume_id: ProviderResumeId::new(resume_id),
+        stream_id: StreamId::new(format!("local-replay/{}", input.session_id)),
+        project_path: input.project_path.map(PathBuf::from),
+        created_at: input.created_at,
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        HarnessRuntimeFactory::new(HarnessFactoryConfig::default())
+            .discover_child_sessions(harness, &request)
+            .map(|children| {
+                children
+                    .into_iter()
+                    .map(|child| LocalChatChildSession {
+                        provider_resume_id: child.provider_resume_id.to_string(),
+                        spawn_tool_call_id: child.spawn_tool_call_id.map(|id| id.to_string()),
+                        label: child.label,
+                        is_active: child.is_active,
+                    })
+                    .collect()
+            })
+    })
+    .await
+    .map_err(|error| CommandError {
+        message: format!("Failed to join child-session discovery: {error}"),
+    })?
+    .map_err(|error| CommandError {
+        message: format!("Failed to discover child sessions: {error}"),
+    })
 }
 
 /// Discover and replay a persisted provider transcript through the

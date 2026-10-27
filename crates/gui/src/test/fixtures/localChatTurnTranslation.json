@@ -54,6 +54,24 @@
     "payload": {
       "backend_session_id": "backend-bridge",
       "harness": "codex",
+      "turn_id": "child-turn",
+      "thread_id": "child-thread",
+      "is_root": false,
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result": "child done",
+      "is_error": false,
+      "context_tokens": 0,
+      "context_window": 0,
+      "completion_status": "completed"
+    }
+  },
+  {
+    "type": "end",
+    "payload": {
+      "backend_session_id": "backend-bridge",
+      "harness": "codex",
       "turn_id": "root-turn",
       "thread_id": "root-thread",
       "is_root": true,

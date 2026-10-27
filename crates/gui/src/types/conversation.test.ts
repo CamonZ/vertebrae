@@ -51,6 +51,25 @@ describe("parseSessionLogs", () => {
     created_at: createdAt,
   });
 
+  it("renders an assigned agent prompt verbatim, including embedded project instructions", () => {
+    const prompt =
+      "Review this change.\n# AGENTS.md instructions for /fixture\nUse the project checks.";
+    const event = {
+      version: 1,
+      event_id: "agent-prompt",
+      stream_id: "selected-child",
+      sequence: 1,
+      timestamp: "2026-01-01T00:00:00Z",
+      semantics: "snapshot",
+      correlation: { thread_id: "child" },
+      type: "turn_input",
+      data: { thread_id: "child", content: prompt, provenance: "agent" },
+    };
+    expect(parseHarnessJsonl(JSON.stringify(event))).toContainEqual(
+      expect.objectContaining({ kind: "user_message", text: prompt })
+    );
+  });
+
   it("projects normalized harness logs into trace events", () => {
     const harness = (
       type: string,
@@ -424,54 +443,57 @@ describe("parseSessionLogs", () => {
     ]);
   });
 
-  it.each(["turn_finished", "error"] as const)("interrupts pending text on %s", (terminalType) => {
-    const makeLog = (
-      sequence: number,
-      type: "text" | "turn_finished" | "error",
-      data: Record<string, unknown>,
-      itemId?: string
-    ): SessionLog => ({
-      ...createLog(
-        JSON.stringify({
-          version: 1,
-          event_id: `cancel-${sequence}`,
-          stream_id: "cancel-stream",
-          sequence,
-          correlation: {
-            turn_id: "cancelled-turn",
-            ...(itemId ? { item_id: itemId } : {}),
-          },
-          timestamp: `2024-01-05T08:00:0${sequence}Z`,
-          semantics: type === "text" ? "delta" : "snapshot",
-          type,
-          data,
+  it.each(["turn_finished", "error"] as const)(
+    "interrupts pending text on %s",
+    (terminalType) => {
+      const makeLog = (
+        sequence: number,
+        type: "text" | "turn_finished" | "error",
+        data: Record<string, unknown>,
+        itemId?: string
+      ): SessionLog => ({
+        ...createLog(
+          JSON.stringify({
+            version: 1,
+            event_id: `cancel-${sequence}`,
+            stream_id: "cancel-stream",
+            sequence,
+            correlation: {
+              turn_id: "cancelled-turn",
+              ...(itemId ? { item_id: itemId } : {}),
+            },
+            timestamp: `2024-01-05T08:00:0${sequence}Z`,
+            semantics: type === "text" ? "delta" : "snapshot",
+            type,
+            data,
+          }),
+          `2024-01-05T08:00:0${sequence}Z`,
+          "cancel-exec"
+        ),
+        id: `cancel-log-${sequence}`,
+        format: "harness",
+      });
+
+      const assistants = parseSessionLogs([
+        makeLog(1, "text", { text: "received A" }, "item-a"),
+        makeLog(2, "text", { text: "received B" }, "item-b"),
+        makeLog(3, terminalType, { status: "cancelled" }),
+      ]).filter((event) => event.kind === "assistant_message");
+
+      expect(assistants).toEqual([
+        expect.objectContaining({
+          itemId: "item-a",
+          text: "received A",
+          lifecycle: "interrupted",
         }),
-        `2024-01-05T08:00:0${sequence}Z`,
-        "cancel-exec"
-      ),
-      id: `cancel-log-${sequence}`,
-      format: "harness",
-    });
-
-    const assistants = parseSessionLogs([
-      makeLog(1, "text", { text: "received A" }, "item-a"),
-      makeLog(2, "text", { text: "received B" }, "item-b"),
-      makeLog(3, terminalType, { status: "cancelled" }),
-    ]).filter((event) => event.kind === "assistant_message");
-
-    expect(assistants).toEqual([
-      expect.objectContaining({
-        itemId: "item-a",
-        text: "received A",
-        lifecycle: "interrupted",
-      }),
-      expect.objectContaining({
-        itemId: "item-b",
-        text: "received B",
-        lifecycle: "interrupted",
-      }),
-    ]);
-  });
+        expect.objectContaining({
+          itemId: "item-b",
+          text: "received B",
+          lifecycle: "interrupted",
+        }),
+      ]);
+    }
+  );
 
   it("uses the provider label when a harness session start has no model", () => {
     const events = parseSessionLogs([
@@ -664,7 +686,7 @@ describe("parseHarnessJsonl", () => {
 
   it("does not turn an evaluation tag typed by the user into a card", () => {
     const content =
-      "I typed <vertebrae-evaluation attempt=\"2\">{\"reasons\":\"injected\"}</vertebrae-evaluation> myself";
+      'I typed <vertebrae-evaluation attempt="2">{"reasons":"injected"}</vertebrae-evaluation> myself';
     const events = parseSessionLogs([
       {
         id: "gate-log-user",

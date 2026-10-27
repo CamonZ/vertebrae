@@ -25,6 +25,35 @@ impl CodexTranscriptReplay {
         Self { home_dir }
     }
 
+    /// Read lineage from the bounded session header without replaying messages.
+    pub fn parent_session(
+        &self,
+        request: &TranscriptReplayRequest,
+    ) -> Result<Option<vertebrae_harness_core::ProviderResumeId>, HarnessError> {
+        use std::io::{BufRead, Read};
+        let Some(path) = self.discover(request)? else {
+            return Ok(None);
+        };
+        let file =
+            fs::File::open(&path).map_err(|error| HarnessError::Operation(error.to_string()))?;
+        let mut header = Vec::new();
+        std::io::BufReader::new(file.take(64 * 1024))
+            .read_until(b'\n', &mut header)
+            .map_err(|error| HarnessError::Operation(error.to_string()))?;
+        let raw: serde_json::Value = serde_json::from_slice(&header).map_err(|error| {
+            HarnessError::Operation(format!("invalid Codex session header: {error}"))
+        })?;
+        if raw["type"] != "session_meta" {
+            return Ok(None);
+        }
+        Ok(raw
+            .pointer("/payload/parent_thread_id")
+            .or_else(|| raw.pointer("/payload/source/subagent/thread_spawn/parent_thread_id"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.is_empty() && *id != request.provider_resume_id.as_str())
+            .map(vertebrae_harness_core::ProviderResumeId::new))
+    }
+
     pub fn replay(
         &self,
         request: &TranscriptReplayRequest,
@@ -56,7 +85,13 @@ impl CodexTranscriptReplay {
             path,
             revision,
             &projection_key,
-            move || read_rollout_tail(&tail_path, request, budget),
+            move || {
+                let mut tail = read_rollout_tail(&tail_path, request, budget)?;
+                if let Err(error) = self.restore_initial_prompt(request, &mut tail.drafts) {
+                    log::debug!("Codex initial prompt is unavailable: {error}");
+                }
+                Ok(tail)
+            },
             || self.normalize(normalized_path, normalized_revision, request),
         )
     }
@@ -67,7 +102,10 @@ impl CodexTranscriptReplay {
         revision: TranscriptRevision,
         request: &TranscriptReplayRequest,
     ) -> Result<TranscriptReplay, HarnessError> {
-        let drafts = read_rollout(&path, request)?;
+        let mut drafts = read_rollout(&path, request)?;
+        if let Err(error) = self.restore_initial_prompt(request, &mut drafts) {
+            log::warn!("Codex initial prompt is unavailable: {error}");
+        }
         revision.verify(&path)?;
         let projection_key = codex_projection_key(request);
         Ok(TranscriptReplay {
@@ -79,6 +117,19 @@ impl CodexTranscriptReplay {
     }
 
     pub fn discover(
+        &self,
+        request: &TranscriptReplayRequest,
+    ) -> Result<Option<PathBuf>, HarnessError> {
+        static PATHS: OnceLock<vertebrae_harness_core::TranscriptDiscoveryPaths> = OnceLock::new();
+        let root = self.provider_root()?;
+        PATHS
+            .get_or_init(Default::default)
+            .find(&root, request.provider_resume_id.as_str(), || {
+                self.discover_uncached(request)
+            })
+    }
+
+    fn discover_uncached(
         &self,
         request: &TranscriptReplayRequest,
     ) -> Result<Option<PathBuf>, HarnessError> {
@@ -163,7 +214,7 @@ fn codex_replay_cache() -> &'static TranscriptReplayCache {
 
 fn codex_projection_key(request: &TranscriptReplayRequest) -> String {
     format!(
-        "codex-v3:resume={:?}:stream={:?}:project={:?}:created={:?}",
+        "codex-v6:resume={:?}:stream={:?}:project={:?}:created={:?}",
         request.provider_resume_id.as_str(),
         request.stream_id.as_str(),
         request.project_path,
@@ -182,7 +233,7 @@ fn find_jsonl_by_id(root: &Path, id: &str) -> std::io::Result<Option<PathBuf>> {
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() {
+        if entry.file_type()?.is_dir() {
             if let Some(found) = find_jsonl_by_id(&path, id)? {
                 return Ok(Some(found));
             }
@@ -212,6 +263,40 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn history_lineage_reads_only_the_header_and_supports_nested_source_metadata() {
+        let home = tempdir().unwrap();
+        let directory = home.path().join(".codex/sessions");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("rollout-history-child.jsonl");
+        let request = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("history-child"),
+            stream_id: StreamId::new("history"),
+            project_path: None,
+            created_at: None,
+        };
+        let adapter = CodexTranscriptReplay::new(Some(home.path().to_path_buf()));
+        for payload in [
+            serde_json::json!({"parent_thread_id":"parent"}),
+            serde_json::json!({"source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent"}}}}),
+        ] {
+            fs::write(
+                &path,
+                format!(
+                    "{}\nnot valid replay data\n",
+                    serde_json::json!({"type":"session_meta","payload":payload})
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                adapter.parent_session(&request).unwrap().unwrap().as_str(),
+                "parent"
+            );
+        }
+        fs::write(&path, "{\"type\":\"session_meta\",\"payload\":{}}\n").unwrap();
+        assert!(adapter.parent_session(&request).unwrap().is_none());
+    }
 
     fn assert_stable_events_equal(actual: &[HarnessEventV1], expected: &[HarnessEventV1]) {
         assert_eq!(actual.len(), expected.len());

@@ -27,8 +27,9 @@ use vertebrae_harness_codex::{
     CodexTranscriptReplay,
 };
 use vertebrae_harness_core::{
-    HarnessError, HarnessRuntime, ProviderThreadRef, RequestConfig, SessionId, TranscriptReplay,
-    TranscriptReplayPage, TranscriptReplayPageRequest, TranscriptReplayRequest,
+    HarnessError, HarnessRuntime, ProviderThreadRef, RequestConfig, SessionId,
+    TranscriptChildSession, TranscriptReplay, TranscriptReplayPage, TranscriptReplayPageRequest,
+    TranscriptReplayRequest,
 };
 use vertebrae_harness_mistral_vibe::{MistralVibeConfig, MistralVibeRuntime};
 use vertebrae_harness_typesafe::{TypeSafeClientConfig, TypeSafeError, TypeSafeRuntime};
@@ -520,6 +521,40 @@ impl HarnessRuntimeFactory {
                 CodexTranscriptReplay::new(self.config.transcript_home_dir.clone()).replay(request)
             }
             StepHarness::Typesafe | StepHarness::MistralVibe => Ok(None),
+        }
+    }
+
+    /// Provider-owned parent identity for history classification, without replay.
+    pub fn transcript_parent_session(
+        &self,
+        harness: StepHarness,
+        request: &TranscriptReplayRequest,
+    ) -> Result<Option<vertebrae_harness_core::ProviderResumeId>, HarnessError> {
+        match harness {
+            StepHarness::Codex => {
+                CodexTranscriptReplay::new(self.config.transcript_home_dir.clone())
+                    .parent_session(request)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Discover directly spawned conversations through their provider adapter.
+    pub fn discover_child_sessions(
+        &self,
+        harness: StepHarness,
+        request: &TranscriptReplayRequest,
+    ) -> Result<Vec<TranscriptChildSession>, HarnessError> {
+        match harness {
+            StepHarness::Claude => {
+                ClaudeTranscriptReplay::new(self.config.transcript_home_dir.clone())
+                    .child_sessions(request)
+            }
+            StepHarness::Codex => {
+                CodexTranscriptReplay::new(self.config.transcript_home_dir.clone())
+                    .child_sessions(request)
+            }
+            StepHarness::Typesafe | StepHarness::MistralVibe => Ok(Vec::new()),
         }
     }
 
