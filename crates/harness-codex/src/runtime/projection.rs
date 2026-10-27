@@ -264,7 +264,7 @@ pub(crate) fn tool_call(item: &Value) -> Option<(String, String, Value, bool)> {
     if kind == "fileChange" {
         return None;
     }
-    let is_tool = kind.contains("tool") || kind == "commandExecution";
+    let is_tool = kind.contains("tool") || kind.contains("Tool") || kind == "commandExecution";
     if !is_tool {
         return None;
     }
@@ -298,7 +298,7 @@ pub(crate) fn file_change_event(item: &Value) -> Option<FileChangeEvent> {
         .flatten()
         .filter_map(|change| {
             let path = optional_string(change, &["/path"])?;
-            let kind = match optional_string(change, &["/kind", "/type"])?.as_str() {
+            let kind = match optional_string(change, &["/kind/type", "/kind", "/type"])?.as_str() {
                 "add" | "added" => FileChangeKind::Added,
                 "delete" | "deleted" => FileChangeKind::Deleted,
                 "rename" | "renamed" => FileChangeKind::Renamed,

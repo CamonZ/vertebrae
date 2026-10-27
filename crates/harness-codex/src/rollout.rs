@@ -5,7 +5,7 @@
 //! type into harness event drafts. Discovery and paging live in `replay.rs`.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs::File,
     io::{BufRead, BufReader},
     path::Path,
@@ -29,7 +29,10 @@ pub(crate) struct ReplayState {
     stream_id: StreamId,
     emitted_session_start_ids: HashSet<String>,
     emitted_thread: bool,
-    custom_tool_names: std::collections::HashMap<String, String>,
+    suppressed_tool_ids: HashSet<String>,
+    // Completed provider items are authoritative over legacy records with the
+    // same ID, regardless of record order. Last snapshot wins deterministically.
+    completed_item_sequences: HashMap<String, u64>,
 }
 
 impl ReplayState {
@@ -40,8 +43,22 @@ impl ReplayState {
             stream_id: request.stream_id.clone(),
             emitted_session_start_ids: HashSet::new(),
             emitted_thread: false,
-            custom_tool_names: std::collections::HashMap::new(),
+            suppressed_tool_ids: HashSet::new(),
+            completed_item_sequences: HashMap::new(),
         }
+    }
+
+    fn finish(&self, drafts: &mut Vec<HarnessEventDraftV1>) {
+        drafts.retain(|draft| {
+            let id = match &draft.payload {
+                HarnessEventPayloadV1::ToolCall(call) => Some(&call.tool_call_id),
+                HarnessEventPayloadV1::ToolOutput(output) => Some(&output.tool_call_id),
+                HarnessEventPayloadV1::FileChange(change) => change.tool_call_id.as_ref(),
+                _ => None,
+            };
+            id.and_then(|id| self.completed_item_sequences.get(id.as_str()))
+                .is_none_or(|sequence| draft.provider_sequence == Some(*sequence))
+        });
     }
 
     fn correlation(&self) -> EventCorrelation {
@@ -184,6 +201,7 @@ pub(crate) fn read_rollout(
         ));
     }
 
+    state.finish(&mut drafts);
     if !state.emitted_session_start_ids.is_empty() {
         return Ok(drafts);
     }
@@ -212,6 +230,16 @@ pub(crate) fn read_rollout_tail(
                 provider_sequence - 1
             ))
         })?;
+        // Legacy calls/outputs can refer to IDs or suppression state outside
+        // this window. Defer those tails to full normalization rather than
+        // inventing a duplicate or orphan output at the page boundary.
+        if tail.older_records_exist && is_legacy_tool_record(&raw, &state) {
+            return Ok(TailReadOutcome {
+                drafts: Vec::new(),
+                older_records_exist: true,
+                bytes_read: tail.bytes_read,
+            });
+        }
         let timestamp = record_timestamp(&raw);
         drafts.extend(parse_rollout_line(
             &raw,
@@ -221,6 +249,7 @@ pub(crate) fn read_rollout_tail(
             path,
         ));
     }
+    state.finish(&mut drafts);
     if !tail.older_records_exist && state.emitted_session_start_ids.is_empty() {
         let timestamp = drafts
             .first()
@@ -370,6 +399,9 @@ fn parse_event_msg(
         return Vec::new();
     };
     match string(payload, "type").as_deref() {
+        Some("item_completed") => {
+            completed_item_drafts(payload, timestamp, provider_sequence, state)
+        }
         Some("turn_aborted") => vec![state.draft(
             timestamp,
             provider_sequence,
@@ -389,6 +421,143 @@ fn parse_event_msg(
         }
         _ => Vec::new(),
     }
+}
+
+/// Recognize only legacy tool records that need context beyond a bounded tail.
+fn is_legacy_tool_record(raw: &Value, state: &ReplayState) -> bool {
+    let payload = &raw["payload"];
+    match raw.get("type").and_then(Value::as_str) {
+        Some("response_item") => match payload.get("type").and_then(Value::as_str) {
+            Some("function_call") => !matches!(
+                payload.get("name").and_then(Value::as_str),
+                Some("exec" | "wait" | "sleep" | "js")
+            ),
+            Some("function_call_output") => !payload
+                .get("call_id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| state.suppressed_tool_ids.contains(id)),
+            Some("custom_tool_call") => {
+                payload.get("name").and_then(Value::as_str) == Some("apply_patch")
+            }
+            _ => false,
+        },
+        Some("event_msg") => {
+            payload.get("type").and_then(Value::as_str) == Some("patch_apply_end")
+                || (payload.get("type").and_then(Value::as_str) == Some("custom_tool_call")
+                    && payload.get("name").and_then(Value::as_str) == Some("apply_patch"))
+        }
+        Some("item.completed" | "item.started" | "item.updated") => matches!(
+            raw.pointer("/item/type").and_then(Value::as_str),
+            Some("command_execution" | "file_change" | "fileChange")
+        ),
+        _ => false,
+    }
+}
+
+/// The rollout uses core item shapes; App Server uses client-facing shapes.
+/// Translate here, then share the live projection to keep event semantics equal.
+fn completed_item_drafts(
+    payload: &Map<String, Value>,
+    timestamp: DateTime<Utc>,
+    provider_sequence: u64,
+    state: &mut ReplayState,
+) -> Vec<HarnessEventDraftV1> {
+    use crate::runtime::projection::{file_change_event, tool_call, tool_output};
+
+    let Some(mut item) = payload.get("item").cloned() else {
+        return Vec::new();
+    };
+    let Some(id) = item.get("id").and_then(Value::as_str).map(str::to_owned) else {
+        return Vec::new();
+    };
+    match item.get("type").and_then(Value::as_str) {
+        Some("CommandExecution") => {
+            item["type"] = json!("commandExecution");
+            if let Some(command) = item.get("command").and_then(Value::as_array) {
+                let Some(arguments) = command
+                    .iter()
+                    .map(Value::as_str)
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    return Vec::new();
+                };
+                let command = shlex::try_join(arguments)
+                    .unwrap_or_else(|_| "<command included NUL byte>".into());
+                item["command"] = json!(command);
+            }
+            if let Some(cwd) = item.get("cwd").and_then(Value::as_str)
+                && let Ok(url) = url::Url::parse(cwd)
+                && let Ok(path) = url.to_file_path()
+            {
+                item["cwd"] = json!(path.to_string_lossy());
+            }
+        }
+        Some("FileChange") => {
+            item["type"] = json!("fileChange");
+            if let Some(changes) = item.get("changes").and_then(Value::as_object) {
+                let changes = changes
+                    .iter()
+                    .map(|(path, change)| {
+                        let mut diff = change
+                            .get("unified_diff")
+                            .or_else(|| change.get("content"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned();
+                        if let Some(moved) = change.get("move_path").and_then(Value::as_str) {
+                            diff.push_str(&format!("\n\nMoved to: {moved}"));
+                        }
+                        json!({"path": path, "kind": change.get("type"), "diff": diff})
+                    })
+                    .collect::<Vec<_>>();
+                item["changes"] = json!(changes);
+            }
+        }
+        Some("McpToolCall") => item["type"] = json!("mcpToolCall"),
+        _ => return Vec::new(),
+    }
+    let mut events = Vec::new();
+    if let Some(change) = file_change_event(&item) {
+        events.push(HarnessEventPayloadV1::FileChange(change));
+    } else if let Some((tool_id, name, input, _)) = tool_call(&item) {
+        events.push(HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+            tool_call_id: ToolCallId::new(tool_id),
+            name,
+            input,
+            status: ToolStatus::Started,
+        }));
+        if let Some((tool_id, output, failed)) = tool_output(&item) {
+            events.push(HarnessEventPayloadV1::ToolOutput(ToolOutputEvent {
+                tool_call_id: ToolCallId::new(tool_id),
+                output,
+                status: if failed {
+                    ToolStatus::Failed
+                } else {
+                    ToolStatus::Completed
+                },
+                content_semantics: UpdateSemantics::Snapshot,
+            }));
+        }
+    }
+    if events.is_empty() {
+        return Vec::new();
+    }
+    state
+        .completed_item_sequences
+        .insert(id.clone(), provider_sequence);
+    events
+        .into_iter()
+        .map(|payload| {
+            let mut draft = state.item_draft(
+                timestamp,
+                provider_sequence,
+                Some(ItemId::new(&id)),
+                payload,
+            );
+            draft.correlation.tool_call_id = Some(ToolCallId::new(&id));
+            draft
+        })
+        .collect()
 }
 
 fn parse_exec_item(
@@ -482,6 +651,10 @@ fn tool_call_draft(
         return Vec::new();
     };
     let name = string(payload, "name").unwrap_or_else(|| "tool".into());
+    if matches!(name.as_str(), "exec" | "wait" | "sleep" | "js") {
+        state.suppressed_tool_ids.insert(tool_id);
+        return Vec::new();
+    }
     let input = parse_json_value(payload.get("arguments")).unwrap_or_else(|| json!({}));
     let input = if name == "exec_command" {
         let mut input = input;
@@ -519,6 +692,9 @@ fn tool_output_draft(
     let Some(tool_id) = string(payload, "call_id").or_else(|| string(payload, "id")) else {
         return Vec::new();
     };
+    if state.suppressed_tool_ids.contains(&tool_id) {
+        return Vec::new();
+    }
     let output = payload.get("output").cloned().unwrap_or(Value::Null);
     let failed = payload
         .get("exit_code")
@@ -550,9 +726,7 @@ fn custom_tool_call_draft(
         return Vec::new();
     };
     let name = string(payload, "name").unwrap_or_default();
-    state
-        .custom_tool_names
-        .insert(tool_id.clone(), name.clone());
+    state.suppressed_tool_ids.insert(tool_id.clone());
     if name != "apply_patch" {
         return Vec::new();
     }
@@ -805,3 +979,6 @@ fn status(value: Option<&str>) -> ToolStatus {
         _ => ToolStatus::Completed,
     }
 }
+
+#[cfg(test)]
+mod tests;

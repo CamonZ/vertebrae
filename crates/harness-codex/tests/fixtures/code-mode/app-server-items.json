@@ -1,0 +1,60 @@
+[
+  {
+    "type": "commandExecution",
+    "id": "exec-cd89a257-7d37-491d-814b-a2c512c3a92a",
+    "pluginId": null,
+    "scriptPath": null,
+    "command": "/bin/zsh -lc 'echo from-root'",
+    "cwd": "/fixture",
+    "processId": "50004",
+    "source": "unifiedExecStartup",
+    "status": "completed",
+    "commandActions": [
+      {
+        "type": "unknown",
+        "command": "echo from-root"
+      }
+    ],
+    "aggregatedOutput": "from-root\n",
+    "exitCode": 0,
+    "durationMs": 0
+  },
+  {
+    "type": "fileChange",
+    "id": "exec-471f1897-6426-4caa-a2dc-d414000ea535",
+    "changes": [
+      {
+        "path": "/fixture/note.txt",
+        "kind": {
+          "type": "add"
+        },
+        "diff": "hi\n"
+      }
+    ],
+    "status": "completed"
+  },
+  {
+    "type": "mcpToolCall",
+    "id": "exec-a94227f1-77e7-4e86-859d-c058742ec47c",
+    "server": "openaiDeveloperDocs",
+    "tool": "search_openai_docs",
+    "status": "completed",
+    "arguments": {
+      "query": "Codex app server fileChange notifications"
+    },
+    "appContext": null,
+    "mcpAppUi": null,
+    "pluginId": null,
+    "readOnlyHint": true,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "redacted search result"
+        }
+      ]
+    },
+    "error": null,
+    "durationMs": 857
+  }
+]

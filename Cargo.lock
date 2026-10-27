@@ -7949,10 +7949,12 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "shlex",
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.24.0",
  "tungstenite 0.24.0",
+ "url",
  "vertebrae-harness-core",
 ]
 

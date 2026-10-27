@@ -163,7 +163,7 @@ fn codex_replay_cache() -> &'static TranscriptReplayCache {
 
 fn codex_projection_key(request: &TranscriptReplayRequest) -> String {
     format!(
-        "codex-v2:resume={:?}:stream={:?}:project={:?}:created={:?}",
+        "codex-v3:resume={:?}:stream={:?}:project={:?}:created={:?}",
         request.provider_resume_id.as_str(),
         request.stream_id.as_str(),
         request.project_path,
