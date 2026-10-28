@@ -1,3 +1,4 @@
+import { ChatSessionContext } from "../thread/toolChange/ChatSessionContext";
 import {
   memo,
   useCallback,
@@ -205,17 +206,19 @@ const HistoricalChatItems = memo(function HistoricalChatItems({
 }: HistoricalChatItemsProps) {
   return items.map((item) =>
     item.kind === "thread" ? (
-      <EventLog key={item.key} mode="bare">
-        <Thread
-          thread={item.thread}
-          depth={0}
-          mode="bare"
-          reveal="shallow"
-          showHead={false}
-          interactive
-          registerRef={registerRef}
-        />
-      </EventLog>
+      <ChatSessionContext.Provider key={item.key} value={sessionId}>
+        <EventLog mode="bare">
+          <Thread
+            thread={item.thread}
+            depth={0}
+            mode="bare"
+            reveal="shallow"
+            showHead={false}
+            interactive
+            registerRef={registerRef}
+          />
+        </EventLog>
+      </ChatSessionContext.Provider>
     ) : item.kind === "permission" ? (
       <PermissionRequestTurn key={item.key} message={item.message} />
     ) : (
@@ -607,16 +610,18 @@ export function ChatMessages({
           />
           {streamingTail && (
             <div data-testid="chat-streaming-tail">
-              <EventLog mode="bare">
-                <Thread
-                  thread={streamingTail}
-                  depth={0}
-                  mode="bare"
-                  reveal="shallow"
-                  showHead={false}
-                  interactive
-                />
-              </EventLog>
+              <ChatSessionContext.Provider value={sessionId}>
+                <EventLog mode="bare">
+                  <Thread
+                    thread={streamingTail}
+                    depth={0}
+                    mode="bare"
+                    reveal="shallow"
+                    showHead={false}
+                    interactive
+                  />
+                </EventLog>
+              </ChatSessionContext.Provider>
             </div>
           )}
           {isWaiting && (

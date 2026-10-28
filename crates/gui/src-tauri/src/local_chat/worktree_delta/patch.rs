@@ -346,42 +346,55 @@ fn write_hunks(text: &mut String, old: &str, new: &str) {
         .timeout(DIFF_TIMEOUT)
         .diff_lines(old, new);
     for group in diff.grouped_ops(CONTEXT_LINES) {
-        let (Some(first), Some(last)) = (group.first(), group.last()) else {
+        let Some(first) = group.first() else {
             continue;
         };
-        let old_range = first.old_range().start..last.old_range().end;
-        let new_range = first.new_range().start..last.new_range().end;
-        let _ = writeln!(
-            text,
-            "@@ -{} +{} @@",
-            hunk_range(old_range),
-            hunk_range(new_range)
-        );
+        // Hunk lengths are counted from the emitted lines rather than read
+        // from the ops' ranges, so the header can never disagree with the body.
+        let (mut old_len, mut new_len) = (0, 0);
+        let mut body = String::new();
         for op in &group {
             for change in diff.iter_changes(op) {
                 let sign = match change.tag() {
-                    ChangeTag::Equal => ' ',
-                    ChangeTag::Delete => '-',
-                    ChangeTag::Insert => '+',
+                    ChangeTag::Equal => {
+                        old_len += 1;
+                        new_len += 1;
+                        ' '
+                    }
+                    ChangeTag::Delete => {
+                        old_len += 1;
+                        '-'
+                    }
+                    ChangeTag::Insert => {
+                        new_len += 1;
+                        '+'
+                    }
                 };
                 let value = change.value();
-                text.push(sign);
-                text.push_str(value);
+                body.push(sign);
+                body.push_str(value);
                 if !value.ends_with('\n') {
-                    text.push_str("\n\\ No newline at end of file\n");
+                    body.push_str("\n\\ No newline at end of file\n");
                 }
             }
         }
+        let _ = writeln!(
+            text,
+            "@@ -{} +{} @@",
+            hunk_range(first.old_range().start, old_len),
+            hunk_range(first.new_range().start, new_len)
+        );
+        text.push_str(&body);
     }
 }
 
 /// Unified range: 1-based start, with the length omitted when it is one and
 /// the start naming the preceding line when it is zero.
-fn hunk_range(range: std::ops::Range<usize>) -> String {
-    match range.len() {
-        0 => format!("{},0", range.start),
-        1 => format!("{}", range.start + 1),
-        length => format!("{},{length}", range.start + 1),
+fn hunk_range(start: usize, length: usize) -> String {
+    match length {
+        0 => format!("{start},0"),
+        1 => format!("{}", start + 1),
+        length => format!("{},{length}", start + 1),
     }
 }
 
@@ -409,4 +422,22 @@ fn quote_path(prefix: &str, path: &str) -> String {
     }
     quoted.push('"');
     quoted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_hunks;
+
+    /// Found by the patch round-trip property: the old side lacks a final
+    /// newline and the diff's last op is a deletion, which made the new-side
+    /// range of the hunk header too short, so `git apply` rejected the patch.
+    #[test]
+    fn hunk_header_lengths_match_the_body_after_an_unterminated_last_line() {
+        let mut text = String::new();
+        write_hunks(&mut text, "d\na", "b\n\nd\nc\nd\n");
+        assert_eq!(
+            text,
+            "@@ -1,2 +1,5 @@\n+b\n+\n+d\n+c\n d\n-a\n\\ No newline at end of file\n"
+        );
+    }
 }

@@ -40,6 +40,7 @@ pub(crate) enum RecorderEvent {
     Child {
         parent_tool_id: Option<String>,
     },
+    TurnStarted,
     TurnEnded,
 }
 
@@ -48,6 +49,8 @@ pub(crate) struct RecorderConfig {
     pub(crate) settle_delay: Duration,
     pub(crate) settle_interval: Duration,
     pub(crate) settle_timeout: Duration,
+    /// How often the idle checkpoint is refreshed during a turn.
+    pub(crate) idle_interval: Duration,
     pub(crate) channel_capacity: usize,
     pub(crate) limits: Limits,
 }
@@ -58,6 +61,7 @@ impl Default for RecorderConfig {
             settle_delay: Duration::from_millis(300),
             settle_interval: Duration::from_millis(100),
             settle_timeout: Duration::from_secs(3),
+            idle_interval: Duration::from_millis(200),
             channel_capacity: 512,
             limits: Limits::default(),
         }
@@ -241,10 +245,35 @@ impl Recorder {
     pub(crate) async fn run(self, mut events: mpsc::Receiver<RecorderEvent>) {
         let mut windows = Windows::default();
         let mut checkpoint: Option<Arc<Snapshot>> = None;
-        // End state of a settle cut short by a queued start: that start's
-        // baseline, so nothing between the two tools is lost or doubled.
-        let mut handoff: Option<Arc<Snapshot>> = None;
-        while let Some(event) = events.recv().await {
+        // Last observed state while no window is open. A provider can run a
+        // tool within milliseconds of announcing it, before a snapshot taken
+        // at the announcement completes, so the next window starts from this
+        // one. It is refreshed every `idle_interval` during a turn, so edits
+        // made between tools are absorbed rather than attributed, and it
+        // carries a cut-short settle's end state, so nothing between two
+        // tools is lost or doubled.
+        let mut idle: Option<Arc<Snapshot>> = self.snapshot().await.map(Arc::new).ok();
+        let mut in_turn = true;
+        loop {
+            let event = if in_turn && windows.is_empty() {
+                tokio::select! {
+                    event = events.recv() => event,
+                    () = tokio::time::sleep(self.config.idle_interval) => {
+                        let fresh = self.snapshot().await.map(Arc::new).ok();
+                        // A start queued meanwhile may already have changed
+                        // the worktree: keep the earlier checkpoint.
+                        if fresh.is_some() && !self.gate.start_pending() {
+                            idle = fresh;
+                        }
+                        continue;
+                    }
+                }
+            } else {
+                events.recv().await
+            };
+            let Some(event) = event else {
+                break;
+            };
             if !self.gate.is_active() {
                 break;
             }
@@ -253,7 +282,7 @@ impl Recorder {
                 // window rather than attribute a segment to the wrong tool.
                 let dropped = windows.drop_all();
                 checkpoint = None;
-                handoff = None;
+                idle = None;
                 while let Ok(event) = events.try_recv() {
                     if matches!(event, RecorderEvent::Started { .. }) {
                         self.gate.start_dequeued();
@@ -267,8 +296,13 @@ impl Recorder {
             match event {
                 RecorderEvent::Started { tool_id, boundary } => {
                     self.gate.start_dequeued();
-                    let handed_off = handoff.take();
-                    if windows.start(&tool_id, boundary) == Some(true) {
+                    let handed_off = idle.take();
+                    let opened = windows.start(&tool_id, boundary);
+                    log::info!(
+                        "[WORKTREE_DELTA] start tool={tool_id} boundary={boundary:?} opened={opened:?} worktree={}",
+                        self.worktree.display()
+                    );
+                    if opened == Some(true) {
                         checkpoint = match handed_off {
                             Some(snapshot) => Some(snapshot),
                             None => self.snapshot().await.map(Arc::new).ok(),
@@ -277,22 +311,23 @@ impl Recorder {
                 }
                 RecorderEvent::Finished { tool_id, boundary } => {
                     let Some(window) = windows.finish(&tool_id, boundary) else {
+                        log::info!(
+                            "[WORKTREE_DELTA] finish tool={tool_id} boundary={boundary:?}: no matching open window"
+                        );
                         continue;
                     };
                     // A tool that left the worktree as it found it needs no
                     // settle: one snapshot equal to the checkpoint ends it.
-                    let unchanged = match &checkpoint {
-                        Some(start) => self
-                            .snapshot()
-                            .await
-                            .ok()
-                            .filter(|now| now.agrees_with(start)),
+                    let mut observed = match &checkpoint {
+                        Some(_) => self.snapshot().await.ok(),
                         None => None,
                     };
-                    let (end, cut_short, unchanged) = match unchanged {
-                        Some(now) => (Ok(Arc::new(now)), false, true),
-                        None => {
-                            let settled = self.settle().await;
+                    let (end, cut_short, unchanged) = match (&checkpoint, observed.take()) {
+                        (Some(start), Some(now)) if now.agrees_with(start) => {
+                            (Ok(Arc::new(now)), false, true)
+                        }
+                        (_, observed) => {
+                            let settled = self.settle(observed).await;
                             let cut_short = matches!(settled, Ok((_, true)));
                             (
                                 settled.map(|(snapshot, _)| Arc::new(snapshot)),
@@ -301,6 +336,10 @@ impl Recorder {
                             )
                         }
                     };
+                    log::info!(
+                        "[WORKTREE_DELTA] finish tool={tool_id} boundary={boundary:?} baseline={} unchanged={unchanged} cut_short={cut_short}",
+                        checkpoint.is_some()
+                    );
                     if let Err(error) = &end {
                         log::warn!(
                             "[WORKTREE_DELTA] skipping tool {tool_id}: could not snapshot {}: {error}",
@@ -318,16 +357,24 @@ impl Recorder {
                     }
                     if windows.is_empty() {
                         checkpoint = None;
-                        handoff = end.ok().filter(|_| cut_short);
+                        idle = end.ok();
                     } else {
                         checkpoint = end.ok();
                     }
                 }
                 RecorderEvent::Child { parent_tool_id } => windows.child(parent_tool_id.as_deref()),
+                RecorderEvent::TurnStarted => {
+                    in_turn = true;
+                    if windows.is_empty() {
+                        idle = self.snapshot().await.map(Arc::new).ok();
+                    }
+                }
                 RecorderEvent::TurnEnded => {
                     let dropped = windows.end_turn();
+                    log::info!("[WORKTREE_DELTA] turn ended; dropped open windows {dropped:?}");
                     checkpoint = None;
-                    handoff = None;
+                    in_turn = false;
+                    idle = self.snapshot().await.map(Arc::new).ok();
                     if !dropped.is_empty() {
                         log::debug!(
                             "[WORKTREE_DELTA] dropped windows {dropped:?} still open at turn end"
@@ -358,20 +405,28 @@ impl Recorder {
     }
 
     /// Wait, then re-snapshot until two consecutive snapshots agree or the
-    /// settle timeout passes; the last snapshot wins. A queued root tool
-    /// start ends the settle at once: its tool has begun, so the snapshot
-    /// taken now closes this segment. Returns whether it was cut short.
-    async fn settle(&self) -> Result<(Snapshot, bool), GitError> {
+    /// settle timeout passes; the last snapshot wins. `observed` is a snapshot
+    /// taken as the tool finished. A queued root tool start ends the settle at
+    /// once, and the segment then closes at the newest snapshot taken before
+    /// that start: the starting tool may already be writing, and its first
+    /// writes belong to it. Returns whether it was cut short.
+    async fn settle(&self, observed: Option<Snapshot>) -> Result<(Snapshot, bool), GitError> {
         let deadline = tokio::time::Instant::now() + self.config.settle_timeout;
+        let mut last = match observed {
+            Some(snapshot) => snapshot,
+            None => self.snapshot().await?,
+        };
         if !self.wait_unless_started(self.config.settle_delay).await {
-            return Ok((self.snapshot().await?, true));
+            return Ok((last, true));
         }
-        let mut last = self.snapshot().await?;
         while tokio::time::Instant::now() < deadline && self.gate.is_active() {
             if !self.wait_unless_started(self.config.settle_interval).await {
-                return Ok((self.snapshot().await?, true));
+                return Ok((last, true));
             }
             let next = self.snapshot().await?;
+            if self.gate.start_pending() {
+                return Ok((last, true));
+            }
             if next.agrees_with(&last) {
                 return Ok((next, false));
             }
@@ -430,12 +485,14 @@ impl Recorder {
         .await
         .unwrap_or_else(|error| Err(GitError::Task(error.to_string())));
         match outcome {
-            Ok(Some(Ok(()))) => {}
+            Ok(Some(Ok(()))) => {
+                log::info!("[WORKTREE_DELTA] recorded annotation for tool {tool_id}")
+            }
             Ok(Some(Err(error))) => {
                 log::warn!("[WORKTREE_DELTA] could not record tool {tool_id}: {error}")
             }
             Ok(None) => {
-                log::debug!("[WORKTREE_DELTA] tool {tool_id}: no change or recorder stopped")
+                log::info!("[WORKTREE_DELTA] tool {tool_id}: no change or recorder stopped")
             }
             Err(error) => log::warn!(
                 "[WORKTREE_DELTA] skipping tool {tool_id} in {}: {error}",
@@ -444,3 +501,6 @@ impl Recorder {
         }
     }
 }
+
+#[cfg(test)]
+mod properties;

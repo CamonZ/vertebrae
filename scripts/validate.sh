@@ -19,6 +19,8 @@ run_rust() {
   cargo clippy --locked --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance -- -D warnings
   python3 scripts/check-rust-guidelines.py
   cargo llvm-cov --workspace --exclude gui --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance --fail-under-lines 75
+  # The GUI crate is outside coverage; its Hegel property tests run here.
+  cargo test --locked -p gui --lib local_chat::worktree_delta
 }
 
 run_gui() {

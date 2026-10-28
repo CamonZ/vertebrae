@@ -422,6 +422,8 @@ describe("chatMessagesToThread", () => {
     expect(tools).toHaveLength(1);
     expect((tools[0] as ToolMessage).evt).toBe("file-1");
     expect((tools[0] as ToolMessage).cmd).toBe("apply_patch");
+    // A bare `@@` replacement is not an actual diff: plain body, no payload diff.
+    expect((tools[0] as ToolMessage).payloadDiffs).toBeUndefined();
     expect((tools[0] as ToolMessage).body).toContain("+new");
     expect((tools[0] as ToolMessage).status).toBe("done");
   });

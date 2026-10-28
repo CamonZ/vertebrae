@@ -50,10 +50,14 @@ impl RecordingTap {
         parent_tool_id: Option<&str>,
     ) {
         let active = self.lock();
+        let event = recorder_event(payload, semantics, is_root_stream, parent_tool_id);
         let Some(recorder) = active.as_ref() else {
+            if matches!(event, Some(RecorderEvent::Started { .. })) {
+                log::info!("[WORKTREE_DELTA] tool start seen but no recorder is active");
+            }
             return;
         };
-        let Some(event) = recorder_event(payload, semantics, is_root_stream, parent_tool_id) else {
+        let Some(event) = event else {
             return;
         };
         let start = matches!(event, RecorderEvent::Started { .. });
@@ -161,6 +165,7 @@ fn recorder_event(
                 | ToolStatus::Cancelled => RecorderEvent::Finished { tool_id, boundary },
             })
         }
+        HarnessEventPayloadV1::TurnStarted(_) => Some(RecorderEvent::TurnStarted),
         HarnessEventPayloadV1::TurnFinished(_) | HarnessEventPayloadV1::RunFinished(_) => {
             Some(RecorderEvent::TurnEnded)
         }

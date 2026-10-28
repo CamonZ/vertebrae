@@ -37,3 +37,6 @@ Thumbs.db
 
 # Python runner/test bytecode
 __pycache__/
+
+# Hegel property-test state
+.hegel/

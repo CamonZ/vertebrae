@@ -5,7 +5,7 @@ description = "Vertebrae GUI - A Tauri-based graphical interface for Vertebrae"
 authors = ["Vertebrae Team"]
 license = "Apache-2.0"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.86"
 default-run = "gui"
 
 [lib]
@@ -101,6 +101,7 @@ tempfile = "3"
 serial_test = "3"
 wiremock = "0.6"
 toml = "0.9"
+hegeltest = "0.50.3"
 
 [lints]
 workspace = true
