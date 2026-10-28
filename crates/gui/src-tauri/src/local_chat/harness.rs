@@ -146,6 +146,25 @@ pub struct CreateLocalChatSessionInput {
     pub gate: Option<LocalChatGateBinding>,
 }
 
+/// The composer's settings for one turn of a live session. Each harness
+/// applies the ones that changed inside the same conversation; unset fields
+/// keep the session's current value.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct LocalChatTurnSettings {
+    #[serde(default)]
+    #[specta(optional)]
+    pub speed_tier: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub model_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub permission_mode: Option<PermissionMode>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LocalChatProviderSelection {
     pub(crate) id: ProviderId,
@@ -346,6 +365,7 @@ pub(crate) trait LocalChatHarness: Send + Sync {
         &self,
         backend_session_id: &str,
         content: &str,
+        settings: LocalChatTurnSettings,
     ) -> Result<(), LocalChatSessionError>;
 
     async fn compact_session(

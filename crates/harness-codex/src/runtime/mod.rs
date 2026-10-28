@@ -131,9 +131,12 @@ impl HarnessRuntime for CodexRuntime {
             } else {
                 task_state
                     .execute_turn(
-                        TurnId::new(turn_key.clone()),
-                        request.prompt,
-                        task_state.default_output_schema.clone(),
+                        vertebrae_harness_core::SendTurnRequest {
+                            turn_id: TurnId::new(turn_key.clone()),
+                            content: request.prompt,
+                            output_schema: task_state.default_output_schema.clone(),
+                            settings: Default::default(),
+                        },
                         Some(task_run_id.clone()),
                         TurnInputProvenance::Human,
                         cancel_rx,

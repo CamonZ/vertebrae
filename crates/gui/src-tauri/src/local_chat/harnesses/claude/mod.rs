@@ -5,8 +5,8 @@ pub(crate) mod session;
 
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatHarness, LocalChatHarnessInfo, LocalChatHarnessKind,
-    LocalChatModelOption, LocalChatPermissionModeOption, LocalChatRuntime, LocalChatSessionError,
-    LocalChatSpeedTierOption,
+    LocalChatModelOption, LocalChatPermissionModeOption, LocalChatReasoningEffortOption,
+    LocalChatRuntime, LocalChatSessionError, LocalChatSpeedTierOption, LocalChatTurnSettings,
 };
 use crate::types::PermissionMode;
 
@@ -20,6 +20,16 @@ use self::args::builtin_claude_output_styles;
 // Re-export public catalog types for tests.
 #[cfg(test)]
 pub(crate) use self::args::{ClaudeModelCatalog, ClaudeModelOption};
+
+/// Claude Code's `--effort` levels, also accepted in-session as the
+/// `effortLevel` flag setting.
+const CLAUDE_EFFORT_LEVELS: &[(&str, &str)] = &[
+    ("low", "Low"),
+    ("medium", "Medium"),
+    ("high", "High"),
+    ("xhigh", "Extra high"),
+    ("max", "Max"),
+];
 
 #[derive(Clone)]
 pub(crate) struct ClaudeLocalChatHarness {
@@ -96,7 +106,13 @@ fn claude_local_chat_harness_info_from_resolution(
             })
             .collect(),
         default_reasoning_effort: None,
-        reasoning_efforts: Vec::new(),
+        reasoning_efforts: CLAUDE_EFFORT_LEVELS
+            .iter()
+            .map(|(id, label)| LocalChatReasoningEffortOption {
+                id: (*id).into(),
+                label: (*label).into(),
+            })
+            .collect(),
         speed_tiers,
         permission_modes: Some(vec![
             LocalChatPermissionModeOption {
@@ -160,8 +176,11 @@ impl LocalChatHarness for ClaudeLocalChatHarness {
         &self,
         backend_session_id: &str,
         content: &str,
+        settings: LocalChatTurnSettings,
     ) -> Result<(), LocalChatSessionError> {
-        self.runtime.send_message(backend_session_id, content).await
+        self.runtime
+            .send_message(backend_session_id, content, settings)
+            .await
     }
 
     async fn close_session(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError> {

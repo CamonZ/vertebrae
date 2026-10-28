@@ -33,6 +33,13 @@ import { commands } from "../../bindings";
 import { useNotificationStore } from "../../stores/notificationStore";
 import { useShellStore } from "../../stores/shellStore";
 
+const DEFAULT_TURN_SETTINGS = {
+  speed_tier: null,
+  model_id: null,
+  reasoning_effort: null,
+  permission_mode: "default",
+};
+
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
 
@@ -40,7 +47,7 @@ Element.prototype.scrollIntoView = vi.fn();
 vi.mock("../../bindings", async () => {
   const { withBuiltinProviders } = await import("../../test/localChatCatalog");
   return {
-  commands: {
+    commands: {
       discoverLocalChatChildSessions: vi
         .fn()
         .mockResolvedValue({ status: "ok", data: [] }),
@@ -54,102 +61,103 @@ vi.mock("../../bindings", async () => {
         },
       }),
       getCurrentProject: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: "/test/project",
-    }),
-    getCurrentProjectPath: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: "/test/project",
-    }),
-    getLocalFileRoots: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: ["/test/project"],
-    }),
-    getProjects: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: savedProjects,
-    }),
-    getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: withBuiltinProviders({
-        default_harness: "claude",
-        harnesses: [
-          {
-            harness: "claude",
-            label: "Claude",
-            available: true,
-            unavailable_reason: null,
-            default_model_id: "sonnet",
-            supports_resume: true,
-            models: [
-              { id: "sonnet", label: "Sonnet" },
-              { id: "opus", label: "Opus" },
-              { id: "haiku", label: "Haiku" },
-              { id: "fable", label: "Fable" },
-            ],
-          },
-          {
-            harness: "codex",
-            label: "Codex",
-            available: true,
-            unavailable_reason: null,
-            default_model_id: "gpt-5.5",
-            default_reasoning_effort: "medium",
-            reasoning_efforts: [{ id: "medium", label: "Medium" }],
-            supports_resume: true,
-            models: [
-              {
-                id: "gpt-5.5",
-                label: "GPT-5.5",
-                supported_reasoning_effort_ids: null,
-              },
-            ],
-          },
-        ],
+        status: "ok",
+        data: "/test/project",
       }),
-    }),
-    createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
-    inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: {
-        title: "Inferred Title",
-        confidence: 0.91,
-        sufficient_signal: true,
+      getCurrentProjectPath: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: "/test/project",
+      }),
+      getLocalFileRoots: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: ["/test/project"],
+      }),
+      getProjects: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: savedProjects,
+      }),
+      getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: withBuiltinProviders({
+          default_harness: "claude",
+          harnesses: [
+            {
+              harness: "claude",
+              label: "Claude",
+              available: true,
+              unavailable_reason: null,
+              default_model_id: "sonnet",
+              supports_resume: true,
+              models: [
+                { id: "sonnet", label: "Sonnet" },
+                { id: "opus", label: "Opus" },
+                { id: "haiku", label: "Haiku" },
+                { id: "fable", label: "Fable" },
+              ],
+            },
+            {
+              harness: "codex",
+              label: "Codex",
+              available: true,
+              unavailable_reason: null,
+              default_model_id: "gpt-5.5",
+              default_reasoning_effort: "medium",
+              reasoning_efforts: [{ id: "medium", label: "Medium" }],
+              supports_resume: true,
+              models: [
+                {
+                  id: "gpt-5.5",
+                  label: "GPT-5.5",
+                  supported_reasoning_effort_ids: null,
+                },
+              ],
+            },
+          ],
+        }),
+      }),
+      createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+      inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: {
+          title: "Inferred Title",
+          confidence: 0.91,
+          sufficient_signal: true,
+        },
+      }),
+      sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
+      closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    },
+    events: {
+      localChatSessionInitEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
       },
-    }),
-    sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
-    closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
-  },
-  events: {
-    localChatSessionInitEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatSessionUsageEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    localChatAnnotationEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatToolCallEvent: { listen: vi.fn(() => Promise.resolve(() => {})),
+      localChatSessionUsageEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
       },
-    localChatToolResultEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
+      localChatTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
+      localChatAnnotationEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatToolCallEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatToolResultEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      permissionRequestEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatSessionEndEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatSessionErrorEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatSessionWarningEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
     },
-    permissionRequestEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatSessionEndEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatSessionErrorEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatSessionWarningEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-  },
-};
+  };
 });
 
 function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
@@ -1288,7 +1296,11 @@ describe("ChatWindowManager", () => {
     expect(
       miniPanel
         .getAllByRole("heading", { level: 3 })
-        .map((heading) => heading.querySelector("[data-mini-history-toggle], span")?.textContent)
+        .map(
+          (heading) =>
+            heading.querySelector("[data-mini-history-toggle], span")
+              ?.textContent
+        )
     ).toEqual(["new-project", "old-project", "Unknown project"]);
 
     const currentGroup = within(
@@ -1394,7 +1406,11 @@ describe("ChatWindowManager", () => {
       expect(
         miniPanel
           .getAllByRole("heading", { level: 3 })
-          .map((heading) => heading.querySelector("[data-mini-history-toggle], span")?.textContent)
+          .map(
+            (heading) =>
+              heading.querySelector("[data-mini-history-toggle], span")
+                ?.textContent
+          )
       ).toEqual(["test-project", "old-project"]);
     });
 
@@ -1643,7 +1659,11 @@ describe("ChatWindowManager", () => {
       expect(
         miniPanel
           .getAllByRole("heading", { level: 3 })
-          .map((heading) => heading.querySelector("[data-mini-history-toggle], span")?.textContent)
+          .map(
+            (heading) =>
+              heading.querySelector("[data-mini-history-toggle], span")
+                ?.textContent
+          )
       ).toEqual(["test-project", "old-project", "Unknown project"]);
     });
     const currentGroup = within(
@@ -1994,11 +2014,13 @@ describe("ChatWindowManager", () => {
     await waitFor(() => {
       expect(commands.sendLocalChatMessage).toHaveBeenCalledWith(
         "backend-left",
-        "left message"
+        "left message",
+        DEFAULT_TURN_SETTINGS
       );
       expect(commands.sendLocalChatMessage).toHaveBeenCalledWith(
         "backend-right",
-        "right message"
+        "right message",
+        DEFAULT_TURN_SETTINGS
       );
     });
     expect(useChatStore.getState().sessions.left.messages).toEqual([
@@ -3082,7 +3104,11 @@ describe("ChatWindowManager", () => {
     expect(
       miniPanel
         .getAllByRole("heading", { level: 3 })
-        .map((heading) => heading.querySelector("[data-mini-history-toggle], span")?.textContent)
+        .map(
+          (heading) =>
+            heading.querySelector("[data-mini-history-toggle], span")
+              ?.textContent
+        )
     ).toEqual(["new-project", "old-project", "Unknown project"]);
 
     const currentGroup = within(

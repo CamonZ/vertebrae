@@ -833,7 +833,12 @@ impl LocalChatHarness for IdleHarness {
         Ok(())
     }
 
-    async fn send_message(&self, _: &str, _: &str) -> Result<(), LocalChatSessionError> {
+    async fn send_message(
+        &self,
+        _: &str,
+        _: &str,
+        _: crate::local_chat::LocalChatTurnSettings,
+    ) -> Result<(), LocalChatSessionError> {
         Ok(())
     }
 

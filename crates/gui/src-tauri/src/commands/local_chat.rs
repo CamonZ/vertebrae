@@ -1,5 +1,7 @@
 use super::*;
-use crate::local_chat::{LocalChatAnnotation, LocalChatAnnotationStore, LocalChatHarnessKind};
+use crate::local_chat::{
+    LocalChatAnnotation, LocalChatAnnotationStore, LocalChatHarnessKind, LocalChatTurnSettings,
+};
 use crate::types::PermissionMode;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -405,6 +407,7 @@ pub async fn send_local_chat_message(
     local_chat_manager: State<'_, LocalChatSessionManager>,
     backend_session_id: String,
     content: String,
+    settings: Option<LocalChatTurnSettings>,
 ) -> Result<(), LocalChatSessionError> {
     log::info!(
         "send_local_chat_message called: backend_session_id={}, content_len={}",
@@ -413,7 +416,7 @@ pub async fn send_local_chat_message(
     );
 
     local_chat_manager
-        .send_message(&backend_session_id, &content)
+        .send_message(&backend_session_id, &content, settings.unwrap_or_default())
         .await
 }
 

@@ -64,7 +64,7 @@ pub(crate) use harness::{
     LocalChatHarnessCatalog, LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
     LocalChatPermissionModeOption, LocalChatPersonalityOption, LocalChatProviderInfo,
     LocalChatProviderSelection, LocalChatReasoningEffortOption, LocalChatRuntime,
-    LocalChatSessionError, LocalChatSpeedTierOption,
+    LocalChatSessionError, LocalChatSpeedTierOption, LocalChatTurnSettings,
 };
 pub(crate) use harnesses::claude::ClaudeStartupCapabilities;
 pub(crate) use manager::LocalChatSessionManager;

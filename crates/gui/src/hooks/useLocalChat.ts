@@ -13,6 +13,7 @@ import type {
   LocalChatSessionWarningEvent,
   LocalChatCompactionEvent,
   LocalChatSessionError,
+  LocalChatTurnSettings,
   Result,
 } from "../bindings";
 import {
@@ -414,8 +415,11 @@ export function handleTextEvent(
       text: payload.text,
       timestamp: new Date().toISOString(),
       isPartial: payload.is_partial,
-      lifecycle: payload.is_partial ? "streaming" :
-        payload.completion_status && payload.completion_status !== "completed" ? "interrupted" : "completed",
+      lifecycle: payload.is_partial
+        ? "streaming"
+        : payload.completion_status && payload.completion_status !== "completed"
+          ? "interrupted"
+          : "completed",
       itemId,
       ...(turnId ? { turnId } : {}),
       ...(parentToolUseId ? { parentToolUseId } : {}),
@@ -776,11 +780,11 @@ export async function doStartSession(
       }
     }
 
-    const modelId = resumeId ? null : (session.selectedModelId ?? null);
-    const reasoningEffort = resumeId
-      ? null
-      : (session.selectedReasoningEffort ?? null);
-    const speedTier = resumeId ? null : (session.selectedSpeedTier ?? null);
+    // A resumed conversation switches to the selected model and effort in
+    // place; no selection keeps the conversation's own.
+    const modelId = session.selectedModelId ?? null;
+    const reasoningEffort = session.selectedReasoningEffort ?? null;
+    const speedTier = session.selectedSpeedTier ?? null;
     const permissionMode = session.permissionMode ?? "default";
     const personality = session.selectedPersonality ?? null;
 
@@ -844,6 +848,28 @@ export async function doStartSession(
   }
 }
 
+/**
+ * The composer's model, effort and permission selection for the next turn of
+ * a live session. The harness applies whatever changed in place, keeping the
+ * conversation; an unset model or effort keeps the session's current one.
+ */
+export function localChatTurnSettings(
+  session: Pick<
+    ChatSession,
+    | "selectedModelId"
+    | "selectedReasoningEffort"
+    | "selectedSpeedTier"
+    | "permissionMode"
+  >
+): LocalChatTurnSettings {
+  return {
+    speed_tier: session.selectedSpeedTier ?? null,
+    model_id: session.selectedModelId ?? null,
+    reasoning_effort: session.selectedReasoningEffort ?? null,
+    permission_mode: session.permissionMode ?? "default",
+  };
+}
+
 export async function doSendMessage(
   backendSessionId: string,
   sessionId: string,
@@ -889,7 +915,7 @@ export async function doSendMessage(
   try {
     const result = options.deliver
       ? await options.deliver()
-      : await commands.sendLocalChatMessage(backendSessionId, content);
+      : await sendWithCurrentSettings(backendSessionId, sessionId, content);
     // Gate before any write: settling or erroring unconditionally here would
     // clear whichever turn is current, including a replacement started after
     // this send was abandoned by a Stop.
@@ -918,6 +944,21 @@ export async function doSendMessage(
     deps.settleActiveTurn?.(sessionId);
     deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
   }
+}
+
+/** Sends with the settings selected when the turn is actually sent, so a
+ * queued message uses the composer's latest choice. */
+function sendWithCurrentSettings(
+  backendSessionId: string,
+  sessionId: string,
+  content: string
+) {
+  const session = useChatStore.getState().sessions[sessionId];
+  return commands.sendLocalChatMessage(
+    backendSessionId,
+    content,
+    session ? localChatTurnSettings(session) : null
+  );
 }
 
 export async function doCloseSession(
@@ -1090,12 +1131,7 @@ export function useLocalChat(sessionId: string | null) {
     );
     if (error) setTitleError(error);
     setIsTitleRegenerating(false);
-  }, [
-    isTitleRegenerating,
-    session,
-    sessionId,
-    setSessionTitleCandidate,
-  ]);
+  }, [isTitleRegenerating, session, sessionId, setSessionTitleCandidate]);
 
   /**
    * Start the local chat session.
@@ -1302,12 +1338,13 @@ export function useLocalChat(sessionId: string | null) {
     settleActiveTurn,
   ]);
 
+  // A rejected send leaves its live backend available for retry. Fatal
+  // provider failures clear backendSessionId through the error event path.
   const isActive =
     session?.status === "open" &&
     !!session?.backendSessionId &&
     session.lifecycle !== "closing" &&
-    session.lifecycle !== "closed" &&
-    session.lifecycle !== "error";
+    session.lifecycle !== "closed";
 
   return {
     session,

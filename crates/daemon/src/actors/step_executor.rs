@@ -1034,6 +1034,7 @@ impl StepExecutor {
                     turn_id: TurnId::new(format!("{}:turn", state.execution_id)),
                     content: prompt,
                     output_schema: request_config.output_schema.clone(),
+                    settings: Default::default(),
                 })
                 .await
             {

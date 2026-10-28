@@ -9,7 +9,7 @@ use vertebrae_harness_core::{
     CompletionStatus, ControlSink, EventCorrelation, EventSequencer, EventSink, HarnessError,
     HarnessEventPayloadV1, ResolutionSource, SequencedEventSink, SessionCloseOutcome,
     SessionCloseStatus, StreamId, ThreadKind, TurnInput, TurnInputProvenance, TurnOutcome,
-    TurnStarted,
+    TurnSettings, TurnStarted,
 };
 
 use crate::{ClaudeDecodeContext, ClaudeRootLocatorResolver, ClaudeStreamDecoder};
@@ -25,6 +25,7 @@ use super::{
         encode_user_message, trace, write_line,
     },
     process::{ProcessOutput, reap, spawn_output_readers, wait_then_reap},
+    settings::{PendingSettings, TurnSubmission},
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -42,6 +43,7 @@ pub(super) async fn run_persistent_process_v2(
     cleanup_timeout: std::time::Duration,
     initialization_timeout: std::time::Duration,
     root_locator_resolver: Option<Arc<dyn ClaudeRootLocatorResolver>>,
+    mut confirmed_settings: TurnSettings,
 ) {
     let stream_id = context.root_stream_id.clone();
     let sequenced = SequencedEventSink::new(Arc::new(EventSequencer::default()), event_sink);
@@ -49,6 +51,9 @@ pub(super) async fn run_persistent_process_v2(
         ClaudeStreamDecoder::with_root_locator_resolver(context, root_locator_resolver);
     let mut output = spawn_output_readers(stdout, stderr);
     let mut pending_turn: Option<PendingTurn> = None;
+    let mut pending_settings: Option<PendingSettings> = None;
+    let mut ready_turn: Option<TurnSubmission> = None;
+    let mut settings_timer = Box::pin(tokio::time::sleep(initialization_timeout));
     let mut initialization_timer = Box::pin(tokio::time::sleep(initialization_timeout));
     let mut initialization_timer_armed = false;
     let mut initialized = false;
@@ -90,11 +95,81 @@ pub(super) async fn run_persistent_process_v2(
                 ));
                 break 'process;
             }
+            _ = &mut settings_timer, if pending_settings.is_some() => {
+                close_status = SessionCloseStatus::Failed;
+                close_error = Some("Claude settings acknowledgement timed out; message was not sent. Session closed because applied settings are unknown.".into());
+                break 'process;
+            }
+            _ = std::future::ready(()), if ready_turn.is_some() => {
+                let TurnSubmission { mut request, outcome_tx, response } = ready_turn.take().expect("ready turn branch is guarded");
+                let request_turn_id = request.turn_id.to_string();
+                let request_content = request.content.clone();
+                request.settings = TurnSettings::default();
+                match begin_persistent_turn(
+                    &mut stdin,
+                    request,
+                    outcome_tx,
+                    response,
+                    &mut decoder,
+                    &sequenced,
+                )
+                .await
+                {
+                    Ok(turn) => {
+                        if !initialized {
+                            initialization_timer.as_mut().reset(tokio::time::Instant::now() + initialization_timeout);
+                            initialization_timer_armed = true;
+                        }
+                        let initialized_before_send = turn.input_emitted;
+                        pending_turn = Some(turn);
+                        trace(
+                            decoder.context().root_thread_id.as_str(),
+                            "message.accepted",
+                            "internal",
+                            Some(&request_turn_id),
+                            "awaiting_provider",
+                            None,
+                            Some(&request_content),
+                        );
+                        if initialized_before_send
+                            && let Some(turn) = pending_turn.as_mut()
+                            && let Some(response) = turn.response.take()
+                        {
+                            let _ = response.send(Ok(()));
+                        }
+                    }
+                    Err(BeginTurnError::StdinClosed(turn, error)) if !initialized => {
+                        // The process stopped reading before it started a
+                        // conversation, so it is exiting. Keep reading its
+                        // output: its startup failure (for example an
+                        // unknown resume id) is the reason this turn fails.
+                        close_status = SessionCloseStatus::Failed;
+                        close_error = Some(error);
+                        pending_turn = Some(turn);
+                        initialization_timer.as_mut().reset(tokio::time::Instant::now() + initialization_timeout);
+                        initialization_timer_armed = true;
+                    }
+                    Err(BeginTurnError::StdinClosed(turn, error)) => {
+                        let _ = turn.outcome_tx.send(OutcomeState::Failed(error.clone()));
+                        if let Some(response) = turn.response {
+                            let _ = response.send(Err(error.clone()));
+                        }
+                        close_status = SessionCloseStatus::Failed;
+                        close_error = Some(error);
+                        break 'process;
+                    }
+                    Err(BeginTurnError::Failed(error)) => {
+                        close_status = SessionCloseStatus::Failed;
+                        close_error = Some(error);
+                        break 'process;
+                    }
+                }
+            }
             command = commands.recv() => match command {
                 Some(SessionCommand::Send { request, outcome_tx, response }) => {
                     let request_turn_id = request.turn_id.to_string();
                     let request_content = request.content.clone();
-                    if pending_turn.is_some() {
+                    if pending_turn.is_some() || pending_settings.is_some() || ready_turn.is_some() {
                         trace(
                             decoder.context().root_thread_id.as_str(),
                             "message.rejected",
@@ -107,65 +182,29 @@ pub(super) async fn run_persistent_process_v2(
                         let _ = response.send(Err("Claude accepts only one active turn per session".into()));
                         continue;
                     }
-                    match begin_persistent_turn(
-                        &mut stdin,
-                        request,
-                        outcome_tx,
-                        response,
-                        &mut decoder,
-                        &sequenced,
-                    )
-                    .await
-                    {
-                        Ok(turn) => {
-                            if !initialized {
-                                initialization_timer.as_mut().reset(tokio::time::Instant::now() + initialization_timeout);
-                                initialization_timer_armed = true;
-                            }
-                            let initialized_before_send = turn.input_emitted;
-                            pending_turn = Some(turn);
-                            trace(
-                                decoder.context().root_thread_id.as_str(),
-                                "message.accepted",
-                                "internal",
-                                Some(&request_turn_id),
-                                "awaiting_provider",
-                                None,
-                                Some(&request_content),
-                            );
-                            if initialized_before_send
-                                && let Some(turn) = pending_turn.as_mut()
-                                && let Some(response) = turn.response.take()
-                            {
-                                let _ = response.send(Ok(()));
-                            }
-                        }
-                        Err(BeginTurnError::StdinClosed(turn, error)) if !initialized => {
-                            // The process stopped reading before it started a
-                            // conversation, so it is exiting. Keep reading its
-                            // output: its startup failure (for example an
-                            // unknown resume id) is the reason this turn fails.
-                            close_status = SessionCloseStatus::Failed;
-                            close_error = Some(error);
-                            pending_turn = Some(turn);
-                            initialization_timer.as_mut().reset(tokio::time::Instant::now() + initialization_timeout);
-                            initialization_timer_armed = true;
-                        }
-                        Err(BeginTurnError::StdinClosed(turn, error)) => {
-                            let _ = turn.outcome_tx.send(OutcomeState::Failed(error.clone()));
-                            if let Some(response) = turn.response {
-                                let _ = response.send(Err(error.clone()));
-                            }
-                            close_status = SessionCloseStatus::Failed;
-                            close_error = Some(error);
-                            break 'process;
-                        }
-                        Err(BeginTurnError::Failed(error)) => {
+                    if request.output_schema.is_some() {
+                        let _ = response.send(Err("per-turn output schemas require a new Claude process".into()));
+                        continue;
+                    }
+                    let pending = PendingSettings::new(TurnSubmission { request, outcome_tx, response }, &confirmed_settings);
+                    if pending.is_complete() {
+                        ready_turn = Some(pending.submission);
+                        continue;
+                    }
+                    for request in &pending.requests {
+                        let line = request.to_string();
+                        trace(decoder.context().root_thread_id.as_str(), "settings.request", "harness_to_provider",
+                            Some(&request_turn_id), "writing", None, Some(&line));
+                        if let Err(error) = write_line(&mut stdin, &line).await {
+                            let error = format!("failed to write Claude settings: {error}");
+                            pending.submission.reject(error.clone());
                             close_status = SessionCloseStatus::Failed;
                             close_error = Some(error);
                             break 'process;
                         }
                     }
+                    settings_timer.as_mut().reset(tokio::time::Instant::now() + initialization_timeout);
+                    pending_settings = Some(pending);
                 }
                 Some(SessionCommand::Interrupt { turn_id, response }) => {
                     if pending_turn.as_ref().map(|turn| &turn.id) != Some(&turn_id) {
@@ -298,6 +337,16 @@ pub(super) async fn run_persistent_process_v2(
                         None,
                         Some(&line),
                     );
+                    if let Ok(record) = serde_json::from_str(&line)
+                        && let Some(pending) = pending_settings.as_mut()
+                        && pending.resolve(&record, &mut confirmed_settings)
+                    {
+                        decoder.context_mut().requested_speed_tier = confirmed_settings.speed_tier;
+                        if pending.is_complete() {
+                            ready_turn = pending_settings.take().expect("settings response has an owner").finish();
+                        }
+                        continue;
+                    }
                     match decoder.decode_line(&line) {
                             Ok(drafts) => {
                         let mut saw_root_declaration = false;
@@ -534,6 +583,16 @@ pub(super) async fn run_persistent_process_v2(
         }
     }
 
+    let unsent_error = close_error
+        .clone()
+        .unwrap_or_else(|| "Claude session closed; message was not sent".into());
+    if let Some(pending) = pending_settings.take() {
+        pending.submission.reject(unsent_error.clone());
+    }
+    if let Some(submission) = ready_turn.take() {
+        submission.reject(unsent_error);
+    }
+
     // Record a missing resumed conversation before answering any pending
     // command, so callers see the provider reason rather than a broken pipe.
     if resuming && let Some(error) = &startup_error {
@@ -703,8 +762,8 @@ pub(super) async fn begin_persistent_turn(
     }
     decoder.clear_pending_background_turn();
     let context = decoder.context().clone();
-    let encoded = encode_user_message(context.session_id.as_ref(), &request.content);
     let request_turn_id = request.turn_id.to_string();
+    let line = encode_user_message(context.session_id.as_ref(), &request.content);
     trace(
         context.root_thread_id.as_str(),
         "stdin",
@@ -712,9 +771,10 @@ pub(super) async fn begin_persistent_turn(
         Some(&request_turn_id),
         "writing",
         None,
-        Some(&encoded),
+        Some(&line),
     );
-    if let Err(error) = write_line(stdin, &encoded).await {
+    let written = write_line(stdin, &line).await;
+    if let Err(error) = written {
         trace(
             context.root_thread_id.as_str(),
             "stdin.write_failed",

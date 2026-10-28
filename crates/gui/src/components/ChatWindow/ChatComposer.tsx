@@ -57,7 +57,6 @@ function permissionModeOptions(
 function useHarnessPickerState(
   visibleHarness: LocalChatHarnessInfo | null,
   session: ChatSession,
-  isBusy: boolean,
   isActive: boolean,
   lockedHarness: boolean,
   hasResume: boolean,
@@ -79,47 +78,31 @@ function useHarnessPickerState(
     !!session.selectedSpeedTier &&
     !supportedSpeedTierIds.has(session.selectedSpeedTier);
 
+  // Model and effort apply per turn: a live or resumed conversation switches
+  // in place on its next turn, so neither picker locks once it has started.
+  // Without a selection a started conversation keeps its current setting.
+  const hasConversation =
+    isActive || lockedHarness || hasResume || !!session.providerResumeId;
   const modelPickerDisabled =
-    isBusy ||
-    isActive ||
-    lockedHarness ||
-    !visibleHarness.available ||
-    (visibleHarness.models ?? []).length === 0;
-  const modelDefaultLabel = session.providerResumeId
-    ? "Original model"
+    !visibleHarness.available || (visibleHarness.models ?? []).length === 0;
+  const modelDefaultLabel = hasConversation
+    ? "Current model"
     : visibleHarness.default_model_id
       ? "Default model"
       : "CLI default";
 
   const effortPickerDisabled =
-    isBusy ||
-    isActive ||
-    lockedHarness ||
-    hasResume ||
-    !visibleHarness.available ||
-    reasoningEfforts.length === 0;
-  const effortDefaultLabel = hasResume
-    ? "Original effort"
+    !visibleHarness.available || reasoningEfforts.length === 0;
+  const effortDefaultLabel = hasConversation
+    ? "Current effort"
     : visibleHarness.default_reasoning_effort
       ? "Default effort"
       : "Provider default";
   const speedPickerDisabled =
-    isBusy ||
-    isActive ||
-    lockedHarness ||
-    hasResume ||
-    !visibleHarness.available;
-  const speedPickerDisabledReason = isBusy
-    ? "Speed tier cannot change while a request is running"
-    : isActive
-      ? "Speed tier cannot change during an active session"
-      : lockedHarness
-        ? "Speed tier cannot change for a resumed session"
-        : hasResume
-          ? "Speed tier cannot change while resuming"
-          : !visibleHarness.available
-            ? LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE
-            : undefined;
+    !visibleHarness.available || supportedSpeedTierIds.size === 0;
+  const speedPickerDisabledReason = !visibleHarness.available
+    ? LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE
+    : undefined;
 
   const unavailableMessage = !visibleHarness.available
     ? lockedHarness
@@ -130,6 +113,7 @@ function useHarnessPickerState(
     : null;
 
   return {
+    hasConversation,
     selectedModelUnsupported,
     selectedReasoningEffortUnsupported,
     modelPickerDisabled,
@@ -274,7 +258,6 @@ export function ChatComposer({
   const picker = useHarnessPickerState(
     visibleHarness,
     session,
-    isBusy,
     isActive,
     lockedHarness,
     hasResume,
@@ -619,7 +602,6 @@ export function ChatComposer({
                   data-testid="local-chat-permission-mode-picker"
                   value={session.permissionMode ?? "default"}
                   onChange={onPermissionModeChange}
-                  disabled={isBusy || isActive}
                 >
                   {availablePermissionModes.map((mode) => (
                     <option key={mode.value} value={mode.value}>
@@ -692,10 +674,16 @@ export function ChatComposer({
                     <select
                       aria-label={`${visibleHarness.label} speed tier`}
                       data-testid="local-chat-speed-tier-picker"
-                      value={session.selectedSpeedTier ?? defaultSpeedTierId}
+                      value={
+                        session.selectedSpeedTier ??
+                        (picker.hasConversation ? "" : defaultSpeedTierId)
+                      }
                       onChange={onSpeedTierChange}
                       disabled={picker.speedPickerDisabled}
                     >
+                      {picker.hasConversation && (
+                        <option value="">Current tier</option>
+                      )}
                       {picker.selectedSpeedTierUnsupported && (
                         <option value={session.selectedSpeedTier ?? ""}>
                           Unsupported: {session.selectedSpeedTier}

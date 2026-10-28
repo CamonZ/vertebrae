@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::ApprovalCategory;
-pub use vertebrae_core::{OutputVerbosity, SpeedTier};
+pub use vertebrae_core::{OutputVerbosity, PermissionMode, SpeedTier};
 
 /// Provider-reported speed state for a started session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

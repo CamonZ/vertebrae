@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::sync::{mpsc, watch};
 use vertebrae_harness_core::{
     CompletionStatus, HarnessError, HarnessEventPayloadV1, RunId, TurnId, TurnInput,
@@ -17,13 +17,17 @@ use crate::{decode_notification, required_string};
 impl SessionState {
     pub(super) async fn execute_turn(
         &self,
-        turn_id: TurnId,
-        content: String,
-        output_schema: Option<Value>,
+        request: vertebrae_harness_core::SendTurnRequest,
         run_id: Option<RunId>,
         provenance: TurnInputProvenance,
         mut cancel_rx: watch::Receiver<bool>,
     ) -> Result<TurnOutcome, HarnessError> {
+        let vertebrae_harness_core::SendTurnRequest {
+            turn_id,
+            content,
+            output_schema,
+            settings,
+        } = request;
         let content_len = content.len();
         trace(
             Some(self.root_session_id.as_str()),
@@ -67,10 +71,13 @@ impl SessionState {
             if let Some(schema) = output_schema {
                 params["outputSchema"] = schema;
             }
-            if let Some(effort) = &self.reasoning_effort {
-                params["effort"] = json!(effort);
-            }
-            self.config.permission.apply_to_params(&mut params);
+            let mut candidate = self.turn_overrides
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let previous_model = candidate.model.clone();
+            candidate.record(settings);
+            candidate.write_params(&mut params);
             let mut connection = self.connection_for_turn().await?;
             let mut retried_drain = false;
             let (response, mut notifications, mut connection_closed) = loop {
@@ -122,6 +129,27 @@ impl SessionState {
                 "turn/start response turn id",
             )
             .map_err(HarnessError::Operation)?;
+            let confirmed_model = candidate.model.clone();
+            *self.turn_overrides
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = candidate;
+            // Refresh session metadata only after provider acceptance, using
+            // the same snapshot event used by Claude's repeated system/init.
+            if confirmed_model != previous_model {
+                self.emit(
+                    self.root_stream_id.clone(),
+                    self.root_correlation(None, None),
+                    HarnessEventPayloadV1::SessionStarted(vertebrae_harness_core::SessionStarted {
+                        provider: "openai".into(),
+                        model: confirmed_model,
+                        provider_resume_id: Some(vertebrae_harness_core::ProviderResumeId::new(self.root_thread_id.as_str())),
+                        speed_tier_status: None,
+                        tools: Vec::new(),
+                    }),
+                    UpdateSemantics::Snapshot,
+                )
+                .await?;
+            }
             log::info!(
                 "[Codex] turn/start accepted requested_turn_id={} provider_turn_id={provider_turn}",
                 turn_id

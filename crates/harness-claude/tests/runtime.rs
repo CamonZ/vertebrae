@@ -533,6 +533,7 @@ done
                 turn_id: TurnId::from(id),
                 content: content.into(),
                 output_schema: None,
+                settings: Default::default(),
             })
             .await
             .unwrap();
@@ -637,6 +638,7 @@ done
                 turn_id: TurnId::from(turn_id),
                 content: content.into(),
                 output_schema: None,
+                settings: Default::default(),
             })
             .await
             .unwrap();
@@ -750,6 +752,7 @@ done
                 turn_id: TurnId::from(turn_id),
                 content: content.into(),
                 output_schema: None,
+                settings: Default::default(),
             })
             .await
             .unwrap();
@@ -1014,6 +1017,7 @@ printf '%s\n' '{{"type":"result","subtype":"success","result":"done"}}'
             turn_id: TurnId::from("timeout-session-turn"),
             content: "go".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1187,6 +1191,7 @@ exit 9
             turn_id: TurnId::from("lost-turn"),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1232,6 +1237,7 @@ sleep 30
             turn_id: TurnId::from("close-turn"),
             content: "wait".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1279,6 +1285,7 @@ sleep 30
             turn_id: TurnId::from("interrupt-turn"),
             content: "start".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1326,6 +1333,7 @@ sleep 30
             turn_id: TurnId::from("ordered-turn"),
             content: "finish".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1390,6 +1398,7 @@ sleep 30
             turn_id: TurnId::from("interrupt-ordered-turn"),
             content: "wait".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1448,6 +1457,7 @@ sleep 30
             turn_id: TurnId::from("sink-failure-turn"),
             content: "finish".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1765,6 +1775,7 @@ async fn assert_unknown_source_fails_with_provider_reason(
             turn_id: TurnId::from("turn-1"),
             content: "continue".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await;
     let error = match send {
@@ -1834,6 +1845,7 @@ done
             turn_id: TurnId::from("turn-1"),
             content: "answer".into(),
             output_schema: Some(schema),
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1852,6 +1864,7 @@ done
             turn_id: TurnId::from("turn-2"),
             content: "answer".into(),
             output_schema: Some(serde_json::json!({"type": "array"})),
+            settings: Default::default(),
         })
         .await
     {
@@ -1895,6 +1908,7 @@ async fn initialization_timeout_fails_and_reaps_instead_of_hanging() {
             turn_id: TurnId::from("timeout-turn"),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await;
     let error = match result {
@@ -2018,6 +2032,7 @@ async fn never_resolving_controls_do_not_block_cancel_or_interrupt() {
             turn_id: TurnId::from("never-turn"),
             content: "go".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();

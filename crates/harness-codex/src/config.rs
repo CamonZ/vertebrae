@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use vertebrae_harness_core::{HarnessCapabilities, HarnessError, RequestConfig};
+use vertebrae_harness_core::{HarnessCapabilities, HarnessError, PermissionMode, RequestConfig};
 
 use crate::CodexAppServerLauncher;
 
@@ -46,6 +46,29 @@ impl CodexPermissionConfig {
         }
         if let Some(value) = &self.prefix_rules {
             params["prefixRules"] = value.clone();
+        }
+    }
+
+    /// The `turn/start` policy that switches a live thread to `mode`.
+    /// `turn/start` has no permission profile, so every mode states its
+    /// approval policy, reviewer and sandbox explicitly; `Default` restores
+    /// approval prompts in a workspace-write sandbox. Prefix rules derive
+    /// from the session's disallowed tools and are kept.
+    pub fn turn_override(&self, mode: &PermissionMode) -> Self {
+        let (approval_policy, approvals_reviewer, sandbox) = match mode {
+            PermissionMode::Default | PermissionMode::AcceptEdits => {
+                ("on-request", "user", "workspaceWrite")
+            }
+            PermissionMode::Auto => ("on-request", "auto_review", "workspaceWrite"),
+            PermissionMode::DontAsk | PermissionMode::Plan => ("never", "user", "workspaceWrite"),
+            PermissionMode::BypassPermissions => ("never", "user", "dangerFullAccess"),
+        };
+        Self {
+            approval_policy: Some(approval_policy.into()),
+            approvals_reviewer: Some(approvals_reviewer.into()),
+            permissions: None,
+            sandbox_policy: Some(json!({ "type": sandbox })),
+            prefix_rules: self.prefix_rules.clone(),
         }
     }
 }

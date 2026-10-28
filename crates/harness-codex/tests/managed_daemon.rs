@@ -180,6 +180,7 @@ async fn send(session: &Arc<dyn SessionHandle>) -> vertebrae_harness_core::TurnO
             turn_id: TurnId::from("turn"),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();

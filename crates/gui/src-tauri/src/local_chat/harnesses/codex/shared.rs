@@ -2,22 +2,25 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use tokio::sync::{Mutex, OnceCell, RwLock};
-use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, ProviderId};
+use vertebrae_core::{AgentConfig, ProviderId};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
     interrupt_close_and_await, EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId,
-    SessionMode, SpeedTier, StartSessionRequest, StreamId, TurnHandle, TurnId,
+    SessionMode, SpeedTier, StartSessionRequest, StreamId, TurnHandle, TurnId, TurnSettings,
 };
 
 use crate::helpers::{build_augmented_path_from, find_codex_binary_with_shell_environment};
 use crate::local_chat::{
     session_developer_instructions, HarnessCreateSessionInput, LocalChatEvent,
     LocalChatGateBinding, LocalChatHarness, LocalChatHarnessInfo, LocalChatHarnessKind,
-    LocalChatRuntime, LocalChatSessionError, LocalChatSessionErrorEvent,
+    LocalChatProviderSelection, LocalChatRuntime, LocalChatSessionError,
+    LocalChatSessionErrorEvent, LocalChatTurnSettings,
 };
 use crate::shell_environment::{user_shell_environment, ShellEnvironment};
 
-use crate::local_chat::harnesses::shared::{LocalChatControlSink, LocalChatHarnessEventSink};
+use crate::local_chat::harnesses::shared::{
+    core_permission_mode, LocalChatControlSink, LocalChatHarnessEventSink,
+};
 use crate::local_chat::permissions::PermissionBridge;
 
 use super::models::{
@@ -146,11 +149,12 @@ impl LocalChatHarness for CodexLocalChatHarness {
         if let Some(warning) = personality_warning {
             emit_warning(&runtime, &backend_session_id, warning);
         }
+        let permission_mode = input.permission_mode.as_ref().map(core_permission_mode);
         let mut agent_config = AgentConfig {
             provider: Some(ProviderId::openai()),
             model: model.clone(),
             reasoning_effort: reasoning_effort.clone(),
-            permission_mode: input.permission_mode.as_ref().map(core_permission_mode),
+            permission_mode,
             ..AgentConfig::default()
         };
         let mut request = codex_start_request(
@@ -214,6 +218,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
             session,
             permission_bridge: runtime.permission_bridge(),
             active_turn: Arc::new(Mutex::new(None)),
+            provider: input.provider,
         });
         let mut sessions = self.sessions.write().await;
         if sessions.contains_key(&backend_session_id) {
@@ -223,7 +228,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
         drop(sessions);
         if let Some(prompt) = initial_prompt {
             tokio::spawn(async move {
-                if let Err(error) = session.send(&prompt).await {
+                if let Err(error) = session.send(&prompt, TurnSettings::default()).await {
                     let _ = session.adapter.emit_error(error.to_string());
                 }
             });
@@ -235,6 +240,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
         &self,
         backend_session_id: &str,
         content: &str,
+        settings: LocalChatTurnSettings,
     ) -> Result<(), LocalChatSessionError> {
         let session = self
             .sessions
@@ -244,8 +250,9 @@ impl LocalChatHarness for CodexLocalChatHarness {
             .cloned()
             .ok_or_else(|| LocalChatSessionError::SessionNotFound(backend_session_id.into()))?;
         let content = content.to_owned();
+        let settings = codex_turn_settings(session.provider.as_ref(), settings);
         tokio::spawn(async move {
-            if let Err(error) = session.send(&content).await {
+            if let Err(error) = session.send(&content, settings).await {
                 let _ = session.adapter.emit_error(error.to_string());
             }
         });
@@ -339,10 +346,41 @@ struct CodexLocalChatSession {
     session: Arc<dyn SessionHandle>,
     permission_bridge: PermissionBridge,
     active_turn: Arc<Mutex<Option<Arc<dyn TurnHandle>>>>,
+    provider: Option<LocalChatProviderSelection>,
+}
+
+/// Resolves the composer's selection for a Codex turn. A model a custom
+/// provider does not list, or Codex's `default` sentinel, leaves the model
+/// unchanged.
+fn codex_turn_settings(
+    provider: Option<&LocalChatProviderSelection>,
+    settings: LocalChatTurnSettings,
+) -> TurnSettings {
+    let requested_model = settings
+        .model_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
+    let model = match provider {
+        Some(provider) => requested_model.and_then(|model| {
+            provider
+                .profile
+                .resolve_model(&provider.id, Some(model))
+                .ok()
+        }),
+        None => requested_model_override(requested_model).map(str::to_owned),
+    };
+    TurnSettings {
+        speed_tier: settings.speed_tier.as_deref().and_then(SpeedTier::parse),
+        model,
+        reasoning_effort: requested_reasoning_effort(settings.reasoning_effort.as_deref())
+            .map(str::to_owned),
+        permission_mode: settings.permission_mode.as_ref().map(core_permission_mode),
+    }
 }
 
 impl CodexLocalChatSession {
-    async fn send(&self, content: &str) -> Result<(), HarnessError> {
+    async fn send(&self, content: &str, settings: TurnSettings) -> Result<(), HarnessError> {
         let turn_number = self.adapter.record_turn();
         let turn = self
             .session
@@ -350,6 +388,7 @@ impl CodexLocalChatSession {
                 turn_id: TurnId::new(format!("{}:{turn_number}", self.adapter.backend_session_id)),
                 content: content.into(),
                 output_schema: None,
+                settings,
             })
             .await?;
         let turn_id = turn.turn_id().clone();
@@ -395,17 +434,6 @@ impl CodexLocalChatSession {
             Some(Ok(_)) | None => Ok(()),
             Some(Err(error)) => Err(LocalChatSessionError::StartFailed(error.to_string())),
         }
-    }
-}
-
-fn core_permission_mode(mode: &crate::types::PermissionMode) -> CorePermissionMode {
-    match mode {
-        crate::types::PermissionMode::AcceptEdits => CorePermissionMode::AcceptEdits,
-        crate::types::PermissionMode::Auto => CorePermissionMode::Auto,
-        crate::types::PermissionMode::BypassPermissions => CorePermissionMode::BypassPermissions,
-        crate::types::PermissionMode::Default => CorePermissionMode::Default,
-        crate::types::PermissionMode::DontAsk => CorePermissionMode::DontAsk,
-        crate::types::PermissionMode::Plan => CorePermissionMode::Plan,
     }
 }
 
@@ -542,6 +570,51 @@ mod tests {
             "(<{}>)",
             docs_root.join("permissions.md").display()
         )));
+    }
+
+    #[test]
+    fn turn_settings_drop_sentinels_and_models_a_custom_provider_does_not_list() {
+        let builtin = codex_turn_settings(
+            None,
+            LocalChatTurnSettings {
+                speed_tier: None,
+                model_id: Some("default".into()),
+                reasoning_effort: Some("default".into()),
+                permission_mode: Some(crate::types::PermissionMode::BypassPermissions),
+            },
+        );
+        assert_eq!(
+            builtin,
+            TurnSettings {
+                permission_mode: Some(vertebrae_core::PermissionMode::BypassPermissions),
+                ..TurnSettings::default()
+            }
+        );
+
+        let profile = vertebrae_core::ProviderProfile {
+            models: vec!["glm-5".into()],
+            ..vertebrae_core::ProviderProfile::new(vertebrae_core::StepHarness::Codex)
+        };
+        let provider = LocalChatProviderSelection {
+            id: ProviderId::new("zai").expect("provider id"),
+            profile,
+        };
+        let listed = codex_turn_settings(
+            Some(&provider),
+            LocalChatTurnSettings {
+                model_id: Some("glm-5".into()),
+                ..LocalChatTurnSettings::default()
+            },
+        );
+        let unlisted = codex_turn_settings(
+            Some(&provider),
+            LocalChatTurnSettings {
+                model_id: Some("gpt-test".into()),
+                ..LocalChatTurnSettings::default()
+            },
+        );
+        assert_eq!(listed.model.as_deref(), Some("glm-5"));
+        assert_eq!(unlisted.model, None);
     }
 
     #[test]

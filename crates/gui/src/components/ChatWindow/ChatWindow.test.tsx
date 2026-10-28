@@ -33,103 +33,115 @@ const mockedCommands = vi.mocked(commands);
 vi.mock("../../bindings", async () => {
   const { withBuiltinProviders } = await import("../../test/localChatCatalog");
   return {
-  commands: {
-    loadWorktreeChanges: vi.fn().mockResolvedValue({ status: "ok", data: { base_branch: null, base_unavailable: "No base", files: [] } }),
-    listWorktreeDirectory: vi.fn().mockResolvedValue({ status: "ok", data: { path: "", entries: [], truncated: false } }),
-    getCurrentProjectPath: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: "/test/project",
-    }),
-    getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: withBuiltinProviders({
-        default_harness: "claude",
-        harnesses: [
-          {
-            harness: "claude",
-            label: "Claude",
-            available: true,
-            unavailable_reason: null,
-            default_model_id: "sonnet",
-            default_reasoning_effort: null,
-            reasoning_efforts: [],
-            supports_resume: true,
-            models: [
-              { id: "sonnet", label: "Sonnet" },
-              { id: "opus", label: "Opus" },
-              { id: "haiku", label: "Haiku" },
-              { id: "fable", label: "Fable" },
-            ],
-          },
-          {
-            harness: "codex",
-            label: "Codex",
-            available: false,
-            unavailable_reason: "Codex app-server is not installed",
-            default_model_id: null,
-            default_reasoning_effort: null,
-            reasoning_efforts: [],
-            supports_resume: true,
-            models: [],
-          },
-        ],
+    commands: {
+      loadWorktreeChanges: vi
+        .fn()
+        .mockResolvedValue({
+          status: "ok",
+          data: { base_branch: null, base_unavailable: "No base", files: [] },
+        }),
+      listWorktreeDirectory: vi
+        .fn()
+        .mockResolvedValue({
+          status: "ok",
+          data: { path: "", entries: [], truncated: false },
+        }),
+      getCurrentProjectPath: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: "/test/project",
       }),
-    }),
-    createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
-    getLocalFileRoots: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: ["/test/project"],
-    }),
-    inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: {
-        title: "Inferred Title",
-        confidence: 0.91,
-        sufficient_signal: true,
+      getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: withBuiltinProviders({
+          default_harness: "claude",
+          harnesses: [
+            {
+              harness: "claude",
+              label: "Claude",
+              available: true,
+              unavailable_reason: null,
+              default_model_id: "sonnet",
+              default_reasoning_effort: null,
+              reasoning_efforts: [],
+              supports_resume: true,
+              models: [
+                { id: "sonnet", label: "Sonnet" },
+                { id: "opus", label: "Opus" },
+                { id: "haiku", label: "Haiku" },
+                { id: "fable", label: "Fable" },
+              ],
+            },
+            {
+              harness: "codex",
+              label: "Codex",
+              available: false,
+              unavailable_reason: "Codex app-server is not installed",
+              default_model_id: null,
+              default_reasoning_effort: null,
+              reasoning_efforts: [],
+              supports_resume: true,
+              models: [],
+            },
+          ],
+        }),
+      }),
+      createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+      getLocalFileRoots: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: ["/test/project"],
+      }),
+      inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: {
+          title: "Inferred Title",
+          confidence: 0.91,
+          sufficient_signal: true,
+        },
+      }),
+      sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
+      closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+      resolvePermissionRequest: vi.fn().mockResolvedValue({ status: "ok" }),
+      getTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+      getStep: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+      getWorkflowWithTasks: vi
+        .fn()
+        .mockResolvedValue({ status: "ok", data: null }),
+      getCurrentProject: vi
+        .fn()
+        .mockResolvedValue({ status: "ok", data: "test-project" }),
+      getTaskExecutions: vi.fn().mockResolvedValue({ status: "ok", data: [] }),
+    },
+    events: {
+      localChatSessionInitEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
       },
-    }),
-    sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
-    closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
-    resolvePermissionRequest: vi.fn().mockResolvedValue({ status: "ok" }),
-    getTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    getStep: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    getWorkflowWithTasks: vi
-      .fn()
-      .mockResolvedValue({ status: "ok", data: null }),
-    getCurrentProject: vi
-      .fn()
-      .mockResolvedValue({ status: "ok", data: "test-project" }),
-    getTaskExecutions: vi.fn().mockResolvedValue({ status: "ok", data: [] }),
-  },
-  events: {
-    localChatSessionInitEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
+      localChatSessionUsageEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
+      localChatAnnotationEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatToolCallEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatToolResultEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      permissionRequestEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatSessionEndEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatSessionErrorEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
+      localChatSessionWarningEvent: {
+        listen: vi.fn(() => Promise.resolve(() => {})),
+      },
     },
-    localChatSessionUsageEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    localChatAnnotationEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatToolCallEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    localChatToolResultEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    permissionRequestEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatSessionEndEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatSessionErrorEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-    localChatSessionWarningEvent: {
-      listen: vi.fn(() => Promise.resolve(() => {})),
-    },
-  },
-};
+  };
 });
 
 function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
@@ -199,29 +211,21 @@ describe("ChatWindow", () => {
     fireEvent.change(composer, { target: { value: "keep this draft" } });
     const conversation = screen.getByTestId("chat-messages-scroll");
     conversation.scrollTop = 123;
-    fireEvent.click(
-      screen.getByRole("button", { name: "Changes" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await screen.findByText("No changes against this baseline.");
     expect(composer).not.toBeVisible();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Conversation" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
     expect(screen.getByTestId("local-chat-composer")).toBe(composer);
     expect(composer).toHaveValue("keep this draft");
     expect(conversation.scrollTop).toBe(123);
     expect(container.contains(conversation)).toBe(true);
     act(() =>
-      useChatStore
-        .getState()
-        .setSessionAssociation("test-session", {
-          ...association,
-          worktreePath: "/new-worktree",
-        })
+      useChatStore.getState().setSessionAssociation("test-session", {
+        ...association,
+        worktreePath: "/new-worktree",
+      })
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Changes" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await waitFor(() =>
       expect(mockedCommands.loadWorktreeChanges).toHaveBeenLastCalledWith(
         "/new-worktree",
@@ -284,10 +288,9 @@ describe("ChatWindow", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
-    expect(screen.getByRole("button", { name: "Conversation" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
+    expect(
+      screen.getByRole("button", { name: "Conversation" })
+    ).toHaveAttribute("aria-pressed", "true");
     expect(
       useDocumentStore.getState().workspaces["/dirty-worktree"]?.documents[
         "a.txt"
@@ -1361,7 +1364,7 @@ describe("ChatWindow", () => {
     expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
   });
 
-  it("locks persisted Codex sessions and resumes with providerResumeId", async () => {
+  it("locks the provider of persisted Codex sessions and resumes with the selected model", async () => {
     const user = userEvent.setup();
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
       status: "ok",
@@ -1422,7 +1425,7 @@ describe("ChatWindow", () => {
     expect(
       await screen.findByTestId("local-chat-provider-picker")
     ).toBeDisabled();
-    expect(screen.getByTestId("local-chat-model-picker")).toBeDisabled();
+    expect(screen.getByTestId("local-chat-model-picker")).toBeEnabled();
 
     await user.type(screen.getByTestId("local-chat-composer"), "Resume Codex");
     await user.click(screen.getByTitle("Resume session"));
@@ -1436,8 +1439,8 @@ describe("ChatWindow", () => {
         working_dir: "/test/project",
         initial_prompt: "Resume Codex",
         provider_resume_id: "codex-resume-1",
-        model_id: null,
-        reasoning_effort: null,
+        model_id: "catalog-codex-default",
+        reasoning_effort: "medium",
         personality: null,
         permission_mode: "default",
       });
@@ -1520,7 +1523,7 @@ describe("ChatWindow", () => {
     ).toBe("plan");
   });
 
-  it("disables model and permission pickers while active or busy", async () => {
+  it("keeps model and permission pickers enabled while active or busy", async () => {
     const activeSession = createSession({
       backendSessionId: "claude-active",
     });
@@ -1532,10 +1535,10 @@ describe("ChatWindow", () => {
 
     const { rerender } = render(<ChatWindow sessionId="test-session" />);
 
-    expect(await screen.findByTestId("local-chat-model-picker")).toBeDisabled();
+    expect(await screen.findByTestId("local-chat-model-picker")).toBeEnabled();
     expect(
       screen.getByTestId("local-chat-permission-mode-picker")
-    ).toBeDisabled();
+    ).toBeEnabled();
 
     act(() => {
       useChatStore.setState({
@@ -1548,10 +1551,10 @@ describe("ChatWindow", () => {
     });
     rerender(<ChatWindow sessionId="test-session" />);
 
-    expect(await screen.findByTestId("local-chat-model-picker")).toBeDisabled();
+    expect(await screen.findByTestId("local-chat-model-picker")).toBeEnabled();
     expect(
       screen.getByTestId("local-chat-permission-mode-picker")
-    ).toBeDisabled();
+    ).toBeEnabled();
   });
 
   it("can clear a selected model back to CLI default before starting", async () => {
@@ -3206,38 +3209,55 @@ describe("ChatWindow", () => {
     ).toBeDisabled();
   });
 
-  it("keeps chat errors in the transcript and allows retry text after an error", async () => {
-    const user = userEvent.setup();
-    const session = createSession({
-      lifecycle: "error",
-      lifecycleError: "Claude failed",
-      backendSessionId: "stale-claude-id",
-      providerResumeId: "conv-retry",
-    });
-    useChatStore.setState({
-      sessions: { "test-session": session },
-      activeSessionId: "test-session",
-      panelOpen: true,
-    });
+  it.each([false, true])(
+    "allows retry after an error with live backend=%s",
+    async (liveBackend) => {
+      const user = userEvent.setup();
+      const session = createSession({
+        lifecycle: "error",
+        lifecycleError: "Claude failed",
+        backendSessionId: liveBackend ? "live-claude-id" : null,
+        providerResumeId: "conv-retry",
+      });
+      useChatStore.setState({
+        sessions: { "test-session": session },
+        activeSessionId: "test-session",
+        panelOpen: true,
+      });
 
-    render(<ChatWindow sessionId="test-session" />);
+      render(<ChatWindow sessionId="test-session" />);
 
-    expect(
-      screen.queryByTestId("chat-lifecycle-label")
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId("chat-lifecycle-error")
-    ).not.toBeInTheDocument();
-    const textarea = screen.getByPlaceholderText("Type a message to resume...");
-    await user.type(textarea, "Retry");
-    expect(screen.getByTitle("Resume session")).not.toBeDisabled();
-    await user.click(screen.getByTitle("Resume session"));
+      expect(
+        screen.queryByTestId("chat-lifecycle-label")
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("chat-lifecycle-error")
+      ).not.toBeInTheDocument();
+      const textarea = screen.getByPlaceholderText(
+        liveBackend ? "Type a message..." : "Type a message to resume..."
+      );
+      await user.type(textarea, "Retry");
+      const submit = screen.getByTitle(
+        liveBackend ? "Send message" : "Resume session"
+      );
+      expect(submit).not.toBeDisabled();
+      await user.click(submit);
 
-    await waitFor(() => {
-      expect(mockedCommands.createLocalChatSession).toHaveBeenCalled();
-      expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
-    });
-  });
+      await waitFor(() => {
+        if (liveBackend) {
+          expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledWith(
+            "live-claude-id",
+            "Retry",
+            expect.any(Object)
+          );
+          expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
+        } else {
+          expect(mockedCommands.createLocalChatSession).toHaveBeenCalled();
+          expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
+        }
+      });
+    }
+  );
 
   it("shows closed resumable state", async () => {
     const user = userEvent.setup();

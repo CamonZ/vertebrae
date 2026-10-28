@@ -24,6 +24,7 @@ use vertebrae_harness_core::{
 };
 
 use super::*;
+use crate::types::PermissionMode;
 
 #[derive(Clone, Default, Debug)]
 struct MemorySpanExporter(Arc<Mutex<Vec<SpanData>>>);
@@ -342,11 +343,11 @@ fn captured_events(events: &Arc<Mutex<Vec<LocalChatEvent>>>) -> Vec<LocalChatEve
 fn permission_modes_map_to_harness_values() {
     assert_eq!(
         core_permission_mode(&PermissionMode::Default),
-        CorePermissionMode::Default
+        vertebrae_core::PermissionMode::Default
     );
     assert_eq!(
         core_permission_mode(&PermissionMode::Plan),
-        CorePermissionMode::Plan
+        vertebrae_core::PermissionMode::Plan
     );
 }
 
@@ -745,7 +746,11 @@ async fn initial_prompt_and_subsequent_messages_use_the_same_session_handle() {
         .await
         .unwrap();
     test.adapter
-        .send_message("backend-turns", "follow-up")
+        .send_message(
+            "backend-turns",
+            "follow-up",
+            LocalChatTurnSettings::default(),
+        )
         .await
         .unwrap();
 
@@ -755,6 +760,74 @@ async fn initial_prompt_and_subsequent_messages_use_the_same_session_handle() {
     assert_eq!(sent[1].content, "follow-up");
     assert_ne!(sent[0].turn_id, sent[1].turn_id);
     assert!(sent.iter().all(|request| request.output_schema.is_none()));
+}
+
+#[tokio::test]
+async fn follow_up_turns_delegate_requested_settings_to_the_same_session() {
+    let test = test_adapter("backend-settings");
+    test.adapter
+        .create_prepared_session(
+            input("backend-settings", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(Some("opus")),
+        )
+        .await
+        .unwrap();
+    let selection = |model: &str, effort: &str, mode| LocalChatTurnSettings {
+        speed_tier: None,
+        model_id: Some(model.into()),
+        reasoning_effort: Some(effort.into()),
+        permission_mode: Some(mode),
+    };
+
+    for settings in [
+        selection("opus", "high", PermissionMode::Plan),
+        selection("haiku", "high", PermissionMode::Default),
+        selection("haiku", "low", PermissionMode::Default),
+        LocalChatTurnSettings::default(),
+        selection("not-a-claude-model", "low", PermissionMode::Default),
+    ] {
+        test.adapter
+            .send_message("backend-settings", "turn", settings)
+            .await
+            .unwrap();
+    }
+
+    let sent = test.handle.sent.lock().unwrap();
+    let settings: Vec<_> = sent
+        .iter()
+        .map(|request| request.settings.clone())
+        .collect();
+    assert_eq!(
+        settings,
+        vec![
+            TurnSettings {
+                model: Some("opus".into()),
+                reasoning_effort: Some("high".into()),
+                permission_mode: Some(vertebrae_core::PermissionMode::Plan),
+                ..Default::default()
+            },
+            TurnSettings {
+                model: Some("haiku".into()),
+                reasoning_effort: Some("high".into()),
+                permission_mode: Some(vertebrae_core::PermissionMode::Default),
+                ..Default::default()
+            },
+            TurnSettings {
+                model: Some("haiku".into()),
+                reasoning_effort: Some("low".into()),
+                permission_mode: Some(vertebrae_core::PermissionMode::Default),
+                ..Default::default()
+            },
+            TurnSettings::default(),
+            TurnSettings {
+                reasoning_effort: Some("low".into()),
+                permission_mode: Some(vertebrae_core::PermissionMode::Default),
+                ..Default::default()
+            },
+        ]
+    );
+    assert_eq!(test.runtime_state.start_requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1042,7 +1115,7 @@ async fn explicit_close_removes_registry_entry_and_closes_handle_once() {
     assert!(!test.adapter.has_session("backend-close").await);
     assert_eq!(test.handle.close_count.load(Ordering::SeqCst), 1);
     assert!(matches!(
-        test.adapter.send_message("backend-close", "late").await,
+        test.adapter.send_message("backend-close", "late", LocalChatTurnSettings::default()).await,
         Err(LocalChatSessionError::SessionNotFound(id)) if id == "backend-close"
     ));
 }

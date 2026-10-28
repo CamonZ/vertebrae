@@ -167,6 +167,11 @@ fn one_shot_spec_uses_print_stream_json_and_verbatim_prompt() {
     assert!(spec.args.contains(&"--verbose".into()));
     assert!(spec.args.contains(&"--include-partial-messages".into()));
     assert!(!spec.args.contains(&"--input-format".into()));
+    assert!(
+        !spec
+            .args
+            .contains(&"--allow-dangerously-skip-permissions".into())
+    );
 }
 
 #[test]
