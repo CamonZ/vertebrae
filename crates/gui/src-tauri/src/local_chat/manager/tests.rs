@@ -981,3 +981,39 @@ async fn new_sessions_and_catalogs_reload_without_mutating_existing_sessions() {
         .iter()
         .any(|provider| provider.id == "dynamic"));
 }
+
+#[tokio::test]
+async fn live_chat_session_ids_map_registered_runtimes_to_chat_sessions() {
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![Arc::new(
+        MockHarness::new(LocalChatHarnessKind::Claude),
+    )]);
+    manager
+        .create_session_with_runtime(
+            create_input(
+                LocalChatHarnessKind::Claude,
+                "local-chat-1700000000000-abc1234-1700000000123",
+            ),
+            LocalChatRuntime::inert_for_tests(),
+        )
+        .await
+        .unwrap();
+
+    let live = manager.live_chat_session_ids().await;
+
+    assert_eq!(
+        live,
+        std::collections::HashSet::from(["chat-1700000000000-abc1234".to_string()])
+    );
+}
+
+#[test]
+fn runtime_ids_without_the_local_chat_shape_map_to_no_chat_session() {
+    assert_eq!(
+        chat_session_id_of_runtime("local-local-chat-codex-thread_1-42"),
+        Some("local-chat-codex-thread_1")
+    );
+    assert_eq!(chat_session_id_of_runtime("local--42"), None);
+    assert_eq!(chat_session_id_of_runtime("local-chat-1-abc"), None);
+    assert_eq!(chat_session_id_of_runtime("remote-chat-1-42"), None);
+    assert_eq!(chat_session_id_of_runtime("local-chat-"), None);
+}

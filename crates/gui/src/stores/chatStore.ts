@@ -30,6 +30,7 @@ import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
 import type {
   JsonValue,
   LoadLocalChatSessionReplayOutput,
+  LocalChatAnnotation,
   LocalChatGateBinding,
   LocalChatHarnessKind,
   PermissionMode,
@@ -53,6 +54,12 @@ import {
   providerReplayGeneration,
   type ProviderReplayState,
 } from "./providerReplay";
+import {
+  mergeToolAnnotations,
+  toolAnnotationEntries,
+  toolAnnotationLoadToken,
+  type ToolAnnotations,
+} from "./toolAnnotations";
 import {
   mergeReplayMessages,
   reconcileReplayMessages,
@@ -514,6 +521,10 @@ export interface ChatSession {
   streamingAssistant?: StreamingAssistantMessage | null;
   /** Runtime-only progressive provider transcript replay state. */
   providerReplay?: ProviderReplayState;
+  /** Runtime-only Vertebrae annotations keyed by provider tool id, then kind. */
+  toolAnnotations?: ToolAnnotations;
+  /** Runtime-only token of the annotation load allowed to write this session. */
+  toolAnnotationsLoad?: number;
   /** Runtime-only user messages queued while a local turn is still active */
   queuedMessages?: string[];
   /** Durable local metadata for session-history ordering */
@@ -662,6 +673,11 @@ interface ChatStoreActions {
   clearConversation: (sessionId: string) => string | null;
   /** Delete one local persisted session and any in-memory copy */
   deleteLocalSession: (sessionId: string) => void;
+  /** Merge a live annotation into its open session; others load it on open. */
+  applyToolAnnotation: (
+    sessionId: string,
+    annotation: LocalChatAnnotation
+  ) => void;
   /** Add a message to a session */
   addMessage: (sessionId: string, message: ChatMessage) => void;
   /** Mark a structured user question as answered. */
@@ -1684,11 +1700,70 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
   const refreshingProviderThreads = new Set<string>();
 
+  /**
+   * Load a session's annotations once per open session, independently of
+   * provider replay. A load result is applied only while its token still
+   * owns the session, so deleted, replaced or reset sessions drop it.
+   */
+  const loadToolAnnotations = (sessionId: string) => {
+    const session = get().sessions[sessionId];
+    if (!session || session.toolAnnotationsLoad !== undefined) return;
+    if (typeof commands.loadLocalChatAnnotations !== "function") return;
+    const token = toolAnnotationLoadToken();
+    set((state) => {
+      const current = state.sessions[sessionId];
+      if (!current) return state;
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: { ...current, toolAnnotationsLoad: token },
+        },
+      };
+    });
+
+    void commands
+      .loadLocalChatAnnotations(sessionId)
+      .then(
+        (result): LocalChatAnnotation[] => {
+          if (result.status === "ok") {
+            return Array.isArray(result.data) ? result.data : [];
+          }
+          console.warn("Failed to load local chat annotations", result.error);
+          return [];
+        },
+        (error: unknown): LocalChatAnnotation[] => {
+          console.warn("Failed to load local chat annotations", error);
+          return [];
+        }
+      )
+      .then((entries) => {
+        if (entries.length === 0) return;
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (current?.toolAnnotationsLoad !== token) return state;
+          // Live entries that arrived during the load are newer than the file.
+          const loaded = mergeToolAnnotations(sessionId, undefined, entries);
+          const toolAnnotations = mergeToolAnnotations(
+            sessionId,
+            loaded,
+            toolAnnotationEntries(current.toolAnnotations)
+          );
+          return {
+            sessions: {
+              ...state.sessions,
+              [sessionId]: { ...current, toolAnnotations },
+            },
+          };
+        });
+      });
+  };
+
   const hydrateProviderMessagesInPlace = (
     sessionId: string,
     session: ChatSession,
     refresh = false
   ) => {
+    if (!refresh) loadToolAnnotations(sessionId);
     if (!session.providerResumeId) return;
 
     const currentReplay = get().sessions[sessionId]?.providerReplay;
@@ -2691,6 +2766,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     deleteLocalSession: (sessionId) => {
       markLocalChatSessionCleared(sessionId);
+      if (typeof commands.deleteLocalChatAnnotations === "function") {
+        void commands.deleteLocalChatAnnotations(sessionId).then(
+          (result) => {
+            if (result.status === "error") {
+              console.warn(
+                "Failed to delete local chat annotations",
+                result.error
+              );
+            }
+          },
+          (error: unknown) =>
+            console.warn("Failed to delete local chat annotations", error)
+        );
+      }
       set((state) => {
         const localSessionSummaries = omitLocalSessionSummary(
           state.localSessionSummaries,
@@ -2700,6 +2789,27 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return {
           ...removeSessionFromRuntimeState(state, sessionId),
           localSessionSummaries,
+        };
+      });
+    },
+
+    applyToolAnnotation: (sessionId, annotation) => {
+      if (annotation.session_id !== sessionId) return;
+      set((state) => {
+        const current = state.sessions[sessionId];
+        if (!current) return state;
+        return {
+          sessions: {
+            ...state.sessions,
+            [sessionId]: {
+              ...current,
+              toolAnnotations: mergeToolAnnotations(
+                sessionId,
+                current.toolAnnotations,
+                [annotation]
+              ),
+            },
+          },
         };
       });
     },

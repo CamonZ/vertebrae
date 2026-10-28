@@ -128,6 +128,9 @@ vi.mock("../../bindings", async () => {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
     localChatTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
+    localChatAnnotationEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
     localChatToolCallEvent: { listen: vi.fn(() => Promise.resolve(() => {})),
       },
     localChatToolResultEvent: {

@@ -1015,6 +1015,28 @@ async loadLocalChatSessionReplay(input: LoadLocalChatSessionReplayInput) : Promi
 }
 },
 /**
+ * Load the Vertebrae-owned tool-call annotations of one chat session.
+ */
+async loadLocalChatAnnotations(sessionId: string) : Promise<Result<LocalChatAnnotation[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_local_chat_annotations", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a chat session's annotations; deleting absent annotations succeeds.
+ */
+async deleteLocalChatAnnotations(sessionId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_local_chat_annotations", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Resolve a local chat permission request shown in the GUI.
  */
 async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, ResolvePermissionRequestError>> {
@@ -1253,6 +1275,7 @@ daemonChangedEvent: DaemonChangedEvent,
 daemonMetricsEvent: DaemonMetricsEvent,
 localBackendProgressEvent: LocalBackendProgressEvent,
 localChatCompactionEvent: LocalChatCompactionEvent,
+localChatAnnotationEvent: LocalChatAnnotationEvent,
 localChatFileChangeEvent: LocalChatFileChangeEvent,
 localChatSessionEndEvent: LocalChatSessionEndEvent,
 localChatSessionErrorEvent: LocalChatSessionErrorEvent,
@@ -1284,6 +1307,7 @@ daemonChangedEvent: "daemon-changed-event",
 daemonMetricsEvent: "daemon-metrics-event",
 localBackendProgressEvent: "local-backend-progress-event",
 localChatCompactionEvent: "local-chat-compaction-event",
+localChatAnnotationEvent: "local-chat-annotation-event",
 localChatFileChangeEvent: "local-chat-file-change-event",
 localChatSessionEndEvent: "local-chat-session-end-event",
 localChatSessionErrorEvent: "local-chat-session-error-event",
@@ -1740,6 +1764,12 @@ export type LocalBackendUpdateDiagnostic = { code: string; retryable: boolean; m
 export type LocalBackendUpdateRelease = { channel: string; version: string; build: string; image_ref: string; generated_at: string | null }
 export type LocalBackendUpdateResult = { channel: string; version: string; build: string; image_ref: string; generated_at: string | null }
 export type LocalBackendUpdateStatus = { management: string; configured: boolean; channel: string | null; current_version: string | null; current_build: string | null; current_image_ref: string | null; current_generated_at: string | null; latest: LocalBackendUpdateRelease | null; available: boolean; adoption_message: string | null; diagnostic: LocalBackendUpdateDiagnostic | null }
+export type LocalChatAnnotation = { session_id: string; tool_id: string; kind: string; payload: JsonValue;
+/**
+ * RFC 3339 timestamp of when Vertebrae recorded the entry.
+ */
+recorded_at: string }
+export type LocalChatAnnotationEvent = { session_id: string; annotation: LocalChatAnnotation }
 export type LocalChatCompactionEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; state: string; trigger?: string | null; pre_tokens?: number | null }
 export type LocalChatFileChange = { path: string; kind: string; diff: string | null }
 export type LocalChatFileChangeEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; status: string; changes: LocalChatFileChange[]; parent_tool_use_id: string | null }

@@ -71,6 +71,7 @@ vi.mock("../bindings", () => {
       localChatSessionErrorEvent: { listen },
       localChatSessionWarningEvent: { listen },
       localChatCompactionEvent: { listen },
+      localChatAnnotationEvent: { listen },
     },
   };
 });
@@ -176,9 +177,9 @@ describe("useLocalChatEventRouter route functions", () => {
     const second = renderHook(() => useLocalChatEventRouter());
 
     await waitFor(() => {
-      expect(listen).toHaveBeenCalledTimes(12);
+      expect(listen).toHaveBeenCalledTimes(13);
     });
-    expect(unlisteners).toHaveLength(12);
+    expect(unlisteners).toHaveLength(13);
 
     first.unmount();
     for (const unlisten of unlisteners) {

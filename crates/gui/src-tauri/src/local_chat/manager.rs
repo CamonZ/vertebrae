@@ -31,6 +31,16 @@ pub struct LocalChatSessionManager {
 
 const LOCAL_CHAT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
+fn chat_session_id_of_runtime(backend_session_id: &str) -> Option<&str> {
+    let (chat_session_id, started_at) = backend_session_id
+        .strip_prefix("local-")?
+        .rsplit_once('-')?;
+    (!chat_session_id.is_empty()
+        && !started_at.is_empty()
+        && started_at.bytes().all(|byte| byte.is_ascii_digit()))
+    .then_some(chat_session_id)
+}
+
 pub(crate) struct ProjectSwitchGuard<'a> {
     _lifecycle: tokio::sync::RwLockWriteGuard<'a, ()>,
 }
@@ -377,6 +387,18 @@ impl LocalChatSessionManager {
             return false;
         };
         harness.has_session(backend_session_id).await
+    }
+
+    /// Persistent chat session ids that currently own a registered runtime.
+    /// Runtime ids are `local-<chat session id>-<start millis>`.
+    pub(crate) async fn live_chat_session_ids(&self) -> std::collections::HashSet<String> {
+        self.session_registry
+            .read()
+            .await
+            .keys()
+            .filter_map(|backend_session_id| chat_session_id_of_runtime(backend_session_id))
+            .map(str::to_owned)
+            .collect()
     }
 
     pub async fn close_all_sessions(&self) {

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { events } from "../bindings";
 import type {
+  LocalChatAnnotationEvent,
   LocalChatSessionEndEvent,
   LocalChatSessionErrorEvent,
   LocalChatSessionInitEvent,
@@ -587,6 +588,25 @@ export function routeLocalChatCompactionEvent(
   return true;
 }
 
+/**
+ * Annotations are keyed by the persistent chat session id, so no backend
+ * session lookup is needed. Sessions not open in this webview load the entry
+ * from disk when they are opened.
+ */
+export function routeLocalChatAnnotationEvent(
+  payload: LocalChatAnnotationEvent
+): boolean {
+  const store = useChatStore.getState();
+  if (
+    !store.sessions[payload.session_id] ||
+    payload.annotation.session_id !== payload.session_id
+  ) {
+    return false;
+  }
+  store.applyToolAnnotation(payload.session_id, payload.annotation);
+  return true;
+}
+
 export async function flushNextQueuedMessage(
   sessionId: string
 ): Promise<boolean> {
@@ -746,6 +766,11 @@ function subscribeLocalChatEvents(): Unlisten {
   void register(
     events.localChatCompactionEvent.listen((event) => {
       routeLocalChatCompactionEvent(event.payload);
+    })
+  );
+  void register(
+    events.localChatAnnotationEvent.listen((event) => {
+      routeLocalChatAnnotationEvent(event.payload);
     })
   );
 

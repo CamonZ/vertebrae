@@ -4,6 +4,7 @@ use specta::Type;
 use std::sync::{Arc, Mutex};
 use tauri_specta::Event;
 
+use crate::local_chat::annotations::LocalChatAnnotationEvent;
 use crate::local_chat::harness::LocalChatHarnessKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
@@ -249,6 +250,7 @@ pub(crate) enum LocalChatEvent {
     Error(LocalChatSessionErrorEvent),
     Warning(LocalChatSessionWarningEvent),
     Compaction(LocalChatCompactionEvent),
+    Annotation(LocalChatAnnotationEvent),
 }
 
 impl LocalChatEvent {
@@ -267,6 +269,7 @@ impl LocalChatEvent {
             LocalChatEvent::Error(_) => "local-chat-session-error-event",
             LocalChatEvent::Warning(_) => "local-chat-session-warning-event",
             LocalChatEvent::Compaction(_) => "local-chat-compaction-event",
+            LocalChatEvent::Annotation(_) => "local-chat-annotation-event",
         }
     }
 }
@@ -357,6 +360,7 @@ impl LocalChatEventSink {
             LocalChatEvent::Error(payload) => payload.emit(app_handle),
             LocalChatEvent::Warning(payload) => payload.emit(app_handle),
             LocalChatEvent::Compaction(payload) => payload.emit(app_handle),
+            LocalChatEvent::Annotation(payload) => payload.emit(app_handle),
         };
         result.map_err(|error| error.to_string())
     }
