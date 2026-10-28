@@ -33,10 +33,6 @@ pub struct LocalChatAnnotation {
 }
 
 impl LocalChatAnnotation {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend producers arrive with b3d8a9c9")
-    )]
     pub(crate) fn new(
         session_id: impl Into<String>,
         tool_id: impl Into<String>,
@@ -89,7 +85,7 @@ impl std::error::Error for AnnotationStoreError {}
 
 /// Session ids become file names, so only a conservative character set is
 /// accepted; separators, dots and anything else are rejected outright.
-fn validate_session_id(session_id: &str) -> Result<(), AnnotationStoreError> {
+pub(crate) fn validate_session_id(session_id: &str) -> Result<(), AnnotationStoreError> {
     let valid = !session_id.is_empty()
         && session_id.len() <= MAX_SESSION_ID_LEN
         && session_id
@@ -157,10 +153,6 @@ impl LocalChatAnnotationStore {
 
     /// Append one entry for a backend producer and notify open chat windows.
     /// The entry's `session_id` must be the persistent chat session id.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend producers arrive with b3d8a9c9")
-    )]
     pub(crate) fn append(
         &self,
         annotation: LocalChatAnnotation,

@@ -163,14 +163,17 @@ impl LocalChatHarness for CodexLocalChatHarness {
             personality,
             input.gate.as_ref(),
         );
-        let adapter = Arc::new(LocalChatHarnessEventSink::new(
-            backend_session_id.clone(),
-            LocalChatHarnessKind::Codex,
-            runtime.event_sink(),
-            sink_model,
-            0,
-            true,
-        ));
+        let adapter = Arc::new(
+            LocalChatHarnessEventSink::new(
+                backend_session_id.clone(),
+                LocalChatHarnessKind::Codex,
+                runtime.event_sink(),
+                sink_model,
+                0,
+                true,
+            )
+            .with_recording(runtime.recording()),
+        );
         let event_sink: Arc<dyn EventSink> = adapter.clone();
         let control_sink: Arc<dyn vertebrae_harness_core::ControlSink> = Arc::new(
             LocalChatControlSink::new(backend_session_id.clone(), runtime.clone()),

@@ -463,6 +463,8 @@ export interface ChatSession {
   titleUserMessageCount?: number;
   /** Local association projection; original events remain in replay. */
   association?: JsonValue | null;
+  /** Runtime-only diagnostic of the latest failed association decision. */
+  associationDiagnostic?: string | null;
   /** Chat messages in this session */
   messages: ChatMessage[];
   /** Whether the user has sent at least one message in this session. */
@@ -759,6 +761,11 @@ interface ChatStoreActions {
   ) => void;
   /** Persist the derived conversation association without changing activity time. */
   setSessionAssociation: (sessionId: string, association: JsonValue) => void;
+  /** Record the association driver's latest diagnostic; never persisted. */
+  setSessionAssociationDiagnostic: (
+    sessionId: string,
+    diagnostic: string | null
+  ) => void;
   /** Set the inferred display title for a local chat session */
   setSessionTitle: (sessionId: string, title: string | null) => void;
   /** Set a user-authored display title and protect it from inference. */
@@ -3529,6 +3536,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
       })).catch((error) => {
         console.warn("Failed to persist chat association", error);
       });
+    },
+
+    setSessionAssociationDiagnostic: (sessionId, diagnostic) => {
+      updateSession(
+        sessionId,
+        (session) =>
+          (session.associationDiagnostic ?? null) === diagnostic
+            ? session
+            : { ...session, associationDiagnostic: diagnostic },
+        { persist: false }
+      );
     },
 
     setSessionTitleCandidate: (sessionId, candidate, options) => {

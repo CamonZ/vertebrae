@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   commands,
   type AssociationResult,
@@ -133,38 +133,78 @@ function attach(record: AssociationRecord, worktree: Worktree | undefined) {
   record.awaitingWorktree = null;
 }
 
+/** In-flight decision per session; replaced or cleared to drop its result. */
+const inflight = new Map<string, object>();
+
+/**
+ * Recording target last sent to each backend runtime: the value passed on
+ * create, then every pushed change. Missing means never sent.
+ */
+const recordingTargets = new Map<string, string | null>();
+
+/** Remember the target a runtime was created with, so it is not re-sent. */
+export function noteRecordingTarget(
+  backendSessionId: string,
+  worktreePath: string | null
+) {
+  recordingTargets.set(backendSessionId, worktreePath);
+}
+
+/** Forget a runtime's target once the runtime is gone or never started. */
+export function forgetRecordingTarget(backendSessionId: string) {
+  recordingTargets.delete(backendSessionId);
+}
+
+/** Worktree a persisted association binds, for starting a runtime. */
+export const associationWorktreePath = (association: unknown) =>
+  readRecord(association).worktreePath;
+
+const setDiagnostic = (sessionId: string, diagnostic: string | null) =>
+  useChatStore
+    .getState()
+    .setSessionAssociationDiagnostic(sessionId, diagnostic);
+
 /**
  * Processes new user/tool events of one session in order, one request at a time,
  * until both a ticket and a worktree are known. User messages are asked whether
  * they request implementing a ticket or creating a worktree; a requested worktree
  * does not exist yet, so later tool events reveal it as a new Git worktree.
  * A failed decision is skipped with a diagnostic so later events still progress;
- * the next user message is the retry.
+ * the next user message is the retry. Mounted once per live or open session by
+ * the global driver, so association keeps progressing without a chat window;
+ * whenever the bound worktree changes, the live runtime records into it.
  */
-export function useChatAssociation(sessionId: string) {
+export function useChatAssociationDriver(sessionId: string) {
   const messages = useChatStore((s) => s.sessions[sessionId]?.messages);
   const root = useChatStore((s) => s.sessions[sessionId]?.projectPath) ?? "";
   const stored = useChatStore((s) => s.sessions[sessionId]?.association);
   const replayLoading = useChatStore(
     (s) => s.sessions[sessionId]?.providerReplay?.loading
   );
+  const backendSessionId = useChatStore(
+    (s) => s.sessions[sessionId]?.backendSessionId ?? null
+  );
+  const lifecycle = useChatStore((s) => s.sessions[sessionId]?.lifecycle);
   const record = readRecord(stored);
-  const [diagnostic, setDiagnostic] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
-  const inflight = useRef<object | null>(null);
 
   const save = (next: AssociationRecord) =>
     useChatStore.getState().setSessionAssociation(sessionId, next);
 
-  useEffect(() => {
-    setDiagnostic(null);
-    return () => {
-      inflight.current = null;
-    };
-  }, [sessionId]);
+  useEffect(
+    () => () => {
+      inflight.delete(sessionId);
+    },
+    [sessionId]
+  );
 
   useEffect(() => {
-    if (!root || !messages || inflight.current || replayLoading === "initial")
+    if (
+      !root ||
+      !messages ||
+      inflight.has(sessionId) ||
+      replayLoading === "initial"
+    )
       return;
     const pending = associationEvents(messages).filter((e) => isNew(e, record));
     const processed = (next: AssociationRecord, last: Event) => {
@@ -185,7 +225,7 @@ export function useChatAssociation(sessionId: string) {
     const event = pending[0];
 
     const mine = {};
-    inflight.current = mine;
+    inflight.set(sessionId, mine);
     const lastUser = (list: readonly ChatMessage[] | undefined) =>
       list?.filter((m) => m.kind === "user").pop()?.timestamp;
     const userAtStart = lastUser(messages);
@@ -232,18 +272,18 @@ export function useChatAssociation(sessionId: string) {
       // or a newer user message arrived; the event is then retried in order.
       const live = useChatStore.getState().sessions[sessionId];
       if (
-        inflight.current !== mine ||
+        inflight.get(sessionId) !== mine ||
         generation !== getProjectScopeGeneration() ||
         live?.projectPath !== root ||
         lastUser(live?.messages) !== userAtStart
       ) {
         trace("stale_response");
-        if (inflight.current === mine) inflight.current = null;
+        if (inflight.get(sessionId) === mine) inflight.delete(sessionId);
         setTick((t) => t + 1);
         return;
       }
-      inflight.current = null;
-      setDiagnostic(failure);
+      inflight.delete(sessionId);
+      setDiagnostic(sessionId, failure);
       const next = { ...readRecord(live?.association) };
       if (failure || !result) {
         // Skipped: a recurring failure must not stall later events.
@@ -300,31 +340,85 @@ export function useChatAssociation(sessionId: string) {
     })();
   }, [messages, root, replayLoading, record, tick, sessionId]);
 
-  /** User intent: blank clears; otherwise one cached ticket matching a full or short ID. */
-  const correct = (input: string) => {
-    const id = input.trim().toLowerCase();
-    const match = id
-      ? cachedAssociationCandidates(getProjectScopeGeneration()).filter((t) =>
-          t.id.startsWith(id)
-        )
-      : [];
-    if (id && (id.length < 8 || match.length !== 1))
-      throw new Error(
-        "Enter one ticket ID from this project's cached tickets."
-      );
-    inflight.current = null; // an in-flight inference must not overwrite this
-    setDiagnostic(null);
-    const next = {
-      ...record,
-      ticketId: match[0]?.id ?? null,
-      ticketTitle: match[0]?.title ?? null,
-      worktreePath: null,
-      branch: null,
-    };
-    attach(next, worktreeFor(next.ticketId, next.recentWorktrees));
-    save(next);
-    setTick((t) => t + 1);
-  };
+  const worktreePath = record.worktreePath;
+  // Targets are per runtime: drop the entry when the runtime or driver goes.
+  useEffect(
+    () => () => {
+      if (backendSessionId) forgetRecordingTarget(backendSessionId);
+    },
+    [backendSessionId]
+  );
+  useEffect(() => {
+    // A starting runtime receives its target with the create request.
+    if (
+      !backendSessionId ||
+      lifecycle === "starting" ||
+      lifecycle === "resuming"
+    )
+      return;
+    if (recordingTargets.get(backendSessionId) === worktreePath) return;
+    recordingTargets.set(backendSessionId, worktreePath);
+    const generation = getProjectScopeGeneration();
+    const isStale = () =>
+      generation !== getProjectScopeGeneration() ||
+      useChatStore.getState().sessions[sessionId]?.backendSessionId !==
+        backendSessionId;
+    void commands
+      .setLocalChatRecordingWorktree(backendSessionId, worktreePath)
+      .then((result) => {
+        if (isStale() || result.status === "ok") return;
+        // Rejected by backend validation: retrying the same path cannot help.
+        console.warn("[chat_association] recording target rejected", {
+          sessionId,
+          error: result.error,
+        });
+      })
+      .catch((error: unknown) => {
+        if (isStale()) return;
+        // The request never completed; the next change re-sends it. No
+        // immediate retry, so a persistent failure cannot loop.
+        recordingTargets.delete(backendSessionId);
+        console.warn("[chat_association] recording target failed", {
+          sessionId,
+          error,
+        });
+      });
+  }, [backendSessionId, lifecycle, worktreePath, sessionId]);
+}
 
+/** User intent: blank clears; otherwise one cached ticket matching a full or short ID. */
+export function correctChatAssociation(sessionId: string, input: string) {
+  const id = input.trim().toLowerCase();
+  const match = id
+    ? cachedAssociationCandidates(getProjectScopeGeneration()).filter((t) =>
+        t.id.startsWith(id)
+      )
+    : [];
+  if (id && (id.length < 8 || match.length !== 1))
+    throw new Error("Enter one ticket ID from this project's cached tickets.");
+  inflight.delete(sessionId); // an in-flight inference must not overwrite this
+  setDiagnostic(sessionId, null);
+  const record = readRecord(
+    useChatStore.getState().sessions[sessionId]?.association
+  );
+  const next = {
+    ...record,
+    ticketId: match[0]?.id ?? null,
+    ticketTitle: match[0]?.title ?? null,
+    worktreePath: null,
+    branch: null,
+  };
+  attach(next, worktreeFor(next.ticketId, next.recentWorktrees));
+  useChatStore.getState().setSessionAssociation(sessionId, next);
+}
+
+/** The session's association record and diagnostic, as the driver keeps them. */
+export function useChatAssociation(sessionId: string) {
+  const stored = useChatStore((s) => s.sessions[sessionId]?.association);
+  const diagnostic = useChatStore(
+    (s) => s.sessions[sessionId]?.associationDiagnostic ?? null
+  );
+  const record = readRecord(stored);
+  const correct = (input: string) => correctChatAssociation(sessionId, input);
   return { record, diagnostic, correct };
 }

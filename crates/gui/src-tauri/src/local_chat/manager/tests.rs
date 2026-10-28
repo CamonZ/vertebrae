@@ -150,6 +150,8 @@ fn create_input(
     CreateLocalChatSessionInput {
         harness,
         backend_session_id: backend_session_id.to_string(),
+        chat_session_id: "chat-1".to_string(),
+        recording_worktree: None,
         working_dir: Some("/tmp/project".to_string()),
         initial_prompt: Some("hello".to_string()),
         provider_resume_id: Some("provider-resume-1".to_string()),
@@ -983,18 +985,17 @@ async fn new_sessions_and_catalogs_reload_without_mutating_existing_sessions() {
 }
 
 #[tokio::test]
-async fn live_chat_session_ids_map_registered_runtimes_to_chat_sessions() {
+async fn live_chat_session_ids_come_from_the_create_contract() {
     let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![Arc::new(
         MockHarness::new(LocalChatHarnessKind::Claude),
     )]);
+    let mut input = create_input(
+        LocalChatHarnessKind::Claude,
+        "runtime-without-chat-id-shape",
+    );
+    input.chat_session_id = "chat-1700000000000-abc1234".to_string();
     manager
-        .create_session_with_runtime(
-            create_input(
-                LocalChatHarnessKind::Claude,
-                "local-chat-1700000000000-abc1234-1700000000123",
-            ),
-            LocalChatRuntime::inert_for_tests(),
-        )
+        .create_session_with_runtime(input, LocalChatRuntime::inert_for_tests())
         .await
         .unwrap();
 
@@ -1004,16 +1005,32 @@ async fn live_chat_session_ids_map_registered_runtimes_to_chat_sessions() {
         live,
         std::collections::HashSet::from(["chat-1700000000000-abc1234".to_string()])
     );
+    manager
+        .close_session("runtime-without-chat-id-shape")
+        .await
+        .unwrap();
+    assert!(manager.live_chat_session_ids().await.is_empty());
 }
 
-#[test]
-fn runtime_ids_without_the_local_chat_shape_map_to_no_chat_session() {
-    assert_eq!(
-        chat_session_id_of_runtime("local-local-chat-codex-thread_1-42"),
-        Some("local-chat-codex-thread_1")
-    );
-    assert_eq!(chat_session_id_of_runtime("local--42"), None);
-    assert_eq!(chat_session_id_of_runtime("local-chat-1-abc"), None);
-    assert_eq!(chat_session_id_of_runtime("remote-chat-1-42"), None);
-    assert_eq!(chat_session_id_of_runtime("local-chat-"), None);
+#[tokio::test]
+async fn create_rejects_an_invalid_chat_session_id() {
+    let harness = MockHarness::new(LocalChatHarnessKind::Claude);
+    let calls = harness.calls.clone();
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![Arc::new(harness)]);
+    for invalid in ["", "claude:resume-1", "../escape", "chat 1"] {
+        let mut input = create_input(LocalChatHarnessKind::Claude, "backend-invalid");
+        input.chat_session_id = invalid.to_string();
+
+        let error = manager
+            .create_session_with_runtime(input, LocalChatRuntime::inert_for_tests())
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            LocalChatSessionError::InvalidChatSessionId(invalid.to_string())
+        );
+    }
+    assert!(calls.lock().unwrap().is_empty());
+    assert!(!manager.has_session("backend-invalid").await);
 }

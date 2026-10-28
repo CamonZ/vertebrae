@@ -1009,6 +1009,8 @@ describe("ChatWindow", () => {
     await waitFor(() => {
       expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
         backend_session_id: expect.any(String),
+        chat_session_id: expect.any(String),
+        recording_worktree: null,
         harness: "codex",
         working_dir: "/test/project",
         initial_prompt: "Start",
@@ -1303,6 +1305,8 @@ describe("ChatWindow", () => {
     await waitFor(() => {
       expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
         backend_session_id: expect.any(String),
+        chat_session_id: expect.any(String),
+        recording_worktree: null,
         harness: "codex",
         working_dir: "/test/project",
         initial_prompt: "Resume Codex",
@@ -1336,6 +1340,8 @@ describe("ChatWindow", () => {
     await waitFor(() => {
       expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
         backend_session_id: expect.any(String),
+        chat_session_id: expect.any(String),
+        recording_worktree: null,
         harness: "claude",
         working_dir: "/test/project",
         initial_prompt: "Start",
@@ -1372,6 +1378,8 @@ describe("ChatWindow", () => {
     await waitFor(() => {
       expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
         backend_session_id: expect.any(String),
+        chat_session_id: expect.any(String),
+        recording_worktree: null,
         harness: "claude",
         working_dir: "/test/project",
         initial_prompt: "Start",
@@ -1448,6 +1456,8 @@ describe("ChatWindow", () => {
     await waitFor(() => {
       expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
         backend_session_id: expect.any(String),
+        chat_session_id: expect.any(String),
+        recording_worktree: null,
         harness: "claude",
         working_dir: "/test/project",
         initial_prompt: "Start",

@@ -157,6 +157,7 @@ fn create_builder() -> Builder {
             commands::send_local_chat_message,
             commands::compact_local_chat_session,
             commands::close_local_chat_session,
+            commands::set_local_chat_recording_worktree,
             commands::infer_local_chat_session_title,
             commands::load_local_chat_session_index,
             commands::save_local_chat_session_index,
@@ -376,15 +377,17 @@ pub fn run() {
             });
 
             // Initialize local chat session manager (owns Claude + Codex harnesses)
+            let annotation_store = LocalChatAnnotationStore::in_app_data_dir(
+                local_chat::LocalChatEventSink::tauri(app.handle().clone()),
+            );
             let local_chat_manager =
                 LocalChatSessionManager::with_claude_startup_capabilities(
                     claude_startup_capabilities,
                     provider_profiles,
-                );
+                )
+                .with_annotation_store(annotation_store.clone());
             app.manage(local_chat_manager);
-            app.manage(LocalChatAnnotationStore::in_app_data_dir(
-                local_chat::LocalChatEventSink::tauri(app.handle().clone()),
-            ));
+            app.manage(annotation_store);
             log::info!("[STARTUP] Local chat session manager initialized");
 
             // Start WebSocket connection to Sacrum for real-time updates

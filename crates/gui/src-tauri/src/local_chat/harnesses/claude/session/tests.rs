@@ -452,6 +452,7 @@ async fn tauri_delivery_failure_is_returned_to_the_harness_event_source() {
             turn_traces: Arc::new(std::sync::Mutex::new(HashMap::new())),
             permission_bridge: crate::local_chat::permissions::PermissionBridge::new(),
             lifecycle_gate: Arc::new(tokio::sync::Mutex::new(())),
+            recording: Default::default(),
         },
     );
 
@@ -520,6 +521,7 @@ async fn inference_delta_is_attached_to_the_send_span_for_its_turn_id() {
             turn_traces: turn_traces.clone(),
             permission_bridge: crate::local_chat::permissions::PermissionBridge::new(),
             lifecycle_gate: Arc::new(tokio::sync::Mutex::new(())),
+            recording: Default::default(),
         },
     );
     let mut delta = event(
