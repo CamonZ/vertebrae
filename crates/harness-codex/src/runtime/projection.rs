@@ -43,6 +43,17 @@ impl SessionState {
                 self.root_correlation(normalized_root_turn.cloned(), None),
             )
         };
+        if let Some(item) = params.get("item")
+            && item.get("type").and_then(Value::as_str) == Some("subAgentActivity")
+            && item.get("kind").and_then(Value::as_str) == Some("started")
+            && let Some(id) = item.get("id").and_then(Value::as_str)
+        {
+            let parent_thread = thread_id
+                .as_deref()
+                .map(ThreadId::new)
+                .unwrap_or_else(|| self.root_thread_id.clone());
+            self.remember_spawn(item, id, parent_thread).await;
+        }
         match notification {
             CodexNotification::AgentMessageDelta(params) => {
                 correlation.item_id =
@@ -338,7 +349,16 @@ pub(crate) fn tool_output(item: &Value) -> Option<(String, Value, bool)> {
         .or_else(|| item.get("result").cloned())
         .or_else(|| item.get("aggregatedOutput").cloned())
         .or_else(|| item.get("aggregated_output").cloned())
-        .or_else(|| item.get("text").cloned())?;
+        .or_else(|| item.get("text").cloned())
+        .or_else(|| {
+            // Collaboration actions (including wait) finish with a status and
+            // agent states, rather than an output field. Their action is done
+            // even when a returned agent is still running or a wait timed out.
+            let status = item.get("status").and_then(Value::as_str)?;
+            (item.get("type").and_then(Value::as_str) == Some("collabAgentToolCall")
+                && matches!(status, "completed" | "failed" | "cancelled" | "interrupted"))
+                .then(|| json!({ "status": status, "agentsStates": item.get("agentsStates").cloned().unwrap_or_else(|| json!({})) }))
+        })?;
     let failed = item
         .get("status")
         .and_then(Value::as_str)
@@ -409,6 +429,20 @@ mod tests {
     use vertebrae_harness_core::{
         FileChangeKind, HarnessEventPayloadV1, SessionId, ThreadId, ToolCallId, ToolStatus, TurnId,
     };
+
+    #[test]
+    fn completed_collaboration_wait_without_output_settles_the_original_call() {
+        // Shape from the real 0.164 App Server thread/read capture.
+        let item = json!({ "type":"collabAgentToolCall", "id":"call_ef3527d38c554ffca8bae501718af76d", "tool":"wait", "status":"completed", "receiverThreadIds":[], "agentsStates":{} });
+        let (id, output, failed) = tool_output(&item).expect("completed wait output");
+        assert_eq!(id, "call_ef3527d38c554ffca8bae501718af76d");
+        assert_eq!(output["status"], "completed");
+        assert_eq!(output["agentsStates"], json!({}));
+        assert!(!failed);
+        let mut running = item;
+        running["status"] = json!("inProgress");
+        assert!(tool_output(&running).is_none());
+    }
 
     #[test]
     fn retryable_errors_are_warnings_and_final_error_is_terminal() {

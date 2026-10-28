@@ -4,6 +4,7 @@
 //! decoding, and process lifetime. It deliberately has no GUI, daemon, actor,
 //! persistence, or provider-settings dependencies.
 
+mod child_sessions;
 mod config;
 mod decoder;
 mod replay;

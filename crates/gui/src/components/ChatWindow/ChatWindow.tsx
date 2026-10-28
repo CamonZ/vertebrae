@@ -68,6 +68,14 @@ export function ChatWindow({
     comments: PendingTextComment[];
   }>(() => ({ sessionId, comments: [] }));
 
+  const childControlAvailable = useChatStore((state) => {
+    const ownerId = state.sessions[sessionId]?.providerChild?.ownerSessionId;
+    const owner = ownerId ? state.sessions[ownerId] : null;
+    return (
+      !!owner?.backendSessionId &&
+      !["closing", "closed", "error"].includes(owner.lifecycle ?? "idle")
+    );
+  });
   const chat = useChatSession(sessionId);
   const association = useChatAssociation(sessionId);
   const loadOlderReplayMessages = useChatStore(
@@ -220,7 +228,7 @@ export function ChatWindow({
           assistantLabel={chat.assistantLabel}
           gate={chat.session.gate}
           isEmpty={isEmpty}
-          isActive={chat.isActive}
+          isActive={chat.isActive || childControlAvailable}
           isWaiting={chat.isWaiting}
           activityLabel={chat.activityLabel}
           compactionSummary={chat.compactionSummary}

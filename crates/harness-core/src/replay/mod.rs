@@ -8,11 +8,13 @@
 mod adapter;
 mod cache;
 mod cursor;
+mod index;
 mod revision;
 mod tail;
 
 pub use adapter::{record_timestamp, safe_filename, validated_file};
 pub use cache::TranscriptReplayCache;
+pub use index::{TranscriptDiscoveryIndex, TranscriptDiscoveryPaths};
 pub use revision::TranscriptRevision;
 pub use tail::{TranscriptTailLines, tail_read_budget};
 
@@ -43,6 +45,16 @@ pub struct TranscriptReplayRequest {
     pub stream_id: StreamId,
     pub project_path: Option<PathBuf>,
     pub created_at: Option<String>,
+}
+
+/// One directly spawned conversation, discovered by its provider adapter.
+/// Activity is provider-reported; `None` means no lifecycle evidence is available.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TranscriptChildSession {
+    pub provider_resume_id: ProviderResumeId,
+    pub spawn_tool_call_id: Option<crate::ToolCallId>,
+    pub label: String,
+    pub is_active: Option<bool>,
 }
 
 /// A discovered transcript projected into the durable V1 event contract.

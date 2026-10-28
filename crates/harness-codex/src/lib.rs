@@ -1,5 +1,6 @@
 //! Reusable Codex App Server runtime.
 
+mod child_sessions;
 mod config;
 mod launcher;
 mod models;

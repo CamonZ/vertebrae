@@ -265,6 +265,47 @@ async fn lifecycle_server(
                                 }
                             }
                             LifecycleScenario::ChildThenRootTerminal => {
+                                // Real App Server code-mode shapes: spawn lineage
+                                // comes from subAgentActivity; waits have no output.
+                                for (method, thread, item) in [
+                                    (
+                                        "item/completed",
+                                        "root-thread",
+                                        json!({"type":"subAgentActivity", "id":"spawn-real", "kind":"started", "agentThreadId":"child-thread"}),
+                                    ),
+                                    (
+                                        "item/started",
+                                        "root-thread",
+                                        json!({"type":"collabAgentToolCall", "id":"wait-call", "tool":"wait", "status":"inProgress", "agentsStates":{}}),
+                                    ),
+                                    (
+                                        "item/completed",
+                                        "root-thread",
+                                        json!({"type":"collabAgentToolCall", "id":"wait-call", "tool":"wait", "status":"completed", "agentsStates":{}}),
+                                    ),
+                                    (
+                                        "item/completed",
+                                        "root-thread",
+                                        json!({"type":"subAgentActivity", "id":"synthetic-completed", "kind":"completed", "agentThreadId":"child-thread"}),
+                                    ),
+                                    (
+                                        "item/started",
+                                        "child-thread",
+                                        json!({"type":"commandExecution", "id":"child-call", "command":"echo child", "status":"inProgress"}),
+                                    ),
+                                    (
+                                        "item/completed",
+                                        "child-thread",
+                                        json!({"type":"commandExecution", "id":"child-call", "command":"echo child", "status":"completed", "aggregatedOutput":"child", "exitCode":0}),
+                                    ),
+                                ] {
+                                    let turn = if thread == "root-thread" {
+                                        "provider-turn"
+                                    } else {
+                                        "child-turn"
+                                    };
+                                    socket.send(Message::Text(json!({"method":method,"params":{"threadId":thread,"turnId":turn,"item":item}}).to_string())).await.unwrap();
+                                }
                                 socket
                                     .send(Message::Text(
                                         json!({"method": "turn/completed", "params": {"threadId": "child-thread", "turn": {"id": "child-turn", "status": "completed"}}})
@@ -1160,6 +1201,14 @@ async fn child_terminal_does_not_settle_the_root_turn_handle() {
                     if child.status == CompletionStatus::Completed
             )
     }));
+
+    assert!(captured.iter().any(|event| {
+        matches!(&event.payload, HarnessEventPayloadV1::ToolCall(call) if call.tool_call_id.as_str() == "child-call")
+            && event.correlation.parent_tool_call_id.as_ref().is_some_and(|id| id.as_str() == "spawn-real")
+    }), "code-mode child calls must retain the actual spawn ID");
+    assert!(captured.iter().any(|event| {
+        matches!(&event.payload, HarnessEventPayloadV1::ToolOutput(output) if output.tool_call_id.as_str() == "wait-call" && output.status == vertebrae_harness_core::ToolStatus::Completed)
+    }), "completed waits without output must settle their tool call");
 
     session.close().await.unwrap();
     let _ = server.await;

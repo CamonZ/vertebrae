@@ -16,6 +16,7 @@ import {
   useChatHistoryPanelLayout,
 } from "../../hooks/useChatHistoryPanelLayout";
 import { useChatKeyboardShortcuts } from "../../hooks/useChatKeyboardShortcuts";
+import { useChildChatSessions } from "../../hooks/useChildChatSessions";
 import { useLocalChatHistory } from "../../hooks/useLocalChatHistory";
 import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
@@ -30,7 +31,11 @@ import { ChatHistoryResizeHandle } from "./ChatHistoryResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import type { LocalChatSessionActivity } from "./LocalChatMiniPanel";
 import { ChatShortcutHints } from "./ChatShortcutHints";
-import { buildSpawnOutline, scrollToSpawn } from "./sessionListUtils";
+import {
+  buildHistoryChildOutlines,
+  buildSpawnOutline,
+  scrollToSpawn,
+} from "./sessionListUtils";
 import type { SpawnOutlineItem } from "./sessionListUtils";
 import { useUIStore } from "../../stores/uiStore";
 import { useNotificationStore } from "../../stores/notificationStore";
@@ -124,26 +129,93 @@ export function ChatWindowManager({
   const spawnOutlineToken = sessionList
     .map((sessionId) => `${sessionId}:${spawnOutlineRevisions[sessionId] ?? 0}`)
     .join("\0");
+  const discoveredChildOutlines = useChildChatSessions(
+    `${sessionIdsToken}\0${sessionActivityToken}\0${sessionList
+      .map((id) => {
+        const session = useChatStore.getState().sessions[id];
+        return `${session?.harness}:${session?.providerResumeId}:${session?.projectPath}`;
+      })
+      .join("\0")}`,
+    panelOpen
+  );
+
+  const historyChildOutlines = useMemo(
+    () => buildHistoryChildOutlines(Object.values(localSessionSummaries)),
+    [localSessionSummaries]
+  );
+
   const spawnOutlineBySessionId = useMemo(() => {
     const outlines = new Map<string, ReturnType<typeof buildSpawnOutline>>();
+
     for (const sessionId of sessionList) {
       const session = useChatStore.getState().sessions[sessionId];
       if (!session) continue;
+
       const outline = buildSpawnOutline(session.messages).filter(
         (spawn) => spawn.threadId !== session.providerResumeId
       );
-      outlines.set(session.id, outline);
+      const discovered = discoveredChildOutlines.get(session.id) ?? [];
+      const history = historyChildOutlines.get(session.id) ?? [];
+      const childRows = discovered.length ? discovered : history;
+
+      // Discovery works even when the spawn is outside the loaded parent page.
+      const groups: SpawnOutlineItem[][] = [];
+      for (const row of childRows) {
+        if ((row.depth ?? 0) > 0 && groups.length)
+          groups[groups.length - 1].push(row);
+        else groups.push([row]);
+      }
+
+      for (const row of outline) {
+        if (
+          !childRows.some(
+            (child) =>
+              (row.threadId && row.threadId === child.threadId) ||
+              row.spawnId === child.spawnId
+          )
+        )
+          groups.push([row]);
+      }
+
+      const positions = new Map(
+        session.messages.flatMap((message, index) =>
+          message.kind === "tool_call" ? [[message.toolId, index] as const] : []
+        )
+      );
+
+      groups.sort(
+        (left, right) =>
+          (positions.get(left[0].spawnId) ??
+            (left[0].id.startsWith("local-chat-")
+              ? Number.MAX_SAFE_INTEGER
+              : -1)) -
+          (positions.get(right[0].spawnId) ??
+            (right[0].id.startsWith("local-chat-")
+              ? Number.MAX_SAFE_INTEGER
+              : -1))
+      );
+
+      outlines.set(session.id, groups.flat());
     }
+
     return outlines;
     // Intentionally keyed by top-level agent tool-call inputs only; assistant
     // streaming text should not re-render the mini-panel outline.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionList, spawnOutlineToken]);
+  }, [
+    sessionList,
+    spawnOutlineToken,
+    discoveredChildOutlines,
+    historyChildOutlines,
+  ]);
+
   const childProviderThreadIds = useMemo(() => {
     const threadIds = new Set<string>();
+
     for (const sessionId of sessionList) {
       const session = useChatStore.getState().sessions[sessionId];
       if (!session) continue;
+
       const outline = spawnOutlineBySessionId.get(sessionId) ?? [];
       for (const spawn of outline) {
         if (spawn.threadId && spawn.threadId !== session.providerResumeId) {
@@ -151,6 +223,7 @@ export function ChatWindowManager({
         }
       }
     }
+
     return threadIds;
   }, [sessionList, spawnOutlineBySessionId]);
 
@@ -406,6 +479,7 @@ export function ChatWindowManager({
         harness: parent.harness,
         providerId: parent.providerId ?? null,
         providerResumeId: agent.threadId,
+        ownerSessionId: parentSessionId,
         projectPath: parent.projectPath ?? null,
         label: agent.label,
         title: agent.label,
@@ -438,21 +512,14 @@ export function ChatWindowManager({
           }
         };
 
-        void doCloseSession(
-          target.backendSessionId,
-          sessionId,
-          {
-            markSessionClosed,
-            setSessionLifecycle,
-            setBackendSessionId,
-            clearQueuedMessages,
-          }
-        ).then(
-          (closed) => {
-            if (!closed) reportCloseFailure();
-          },
-          reportCloseFailure
-        );
+        void doCloseSession(target.backendSessionId, sessionId, {
+          markSessionClosed,
+          setSessionLifecycle,
+          setBackendSessionId,
+          clearQueuedMessages,
+        }).then((closed) => {
+          if (!closed) reportCloseFailure();
+        }, reportCloseFailure);
       }
     },
     [

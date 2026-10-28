@@ -1,0 +1,1 @@
+{"type": "assistant", "timestamp": "2026-10-27T20:21:19.976Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_019bLng9wNyc1LBNCPUbL2nh", "name": "Agent", "input": {"description": "Run echo from-subagent", "prompt": "Run echo from-subagent"}}]}}

@@ -3193,7 +3193,7 @@ html.light ::selection {
   width: calc(100% - var(--s-3));
   min-height: 24px;
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--s-2);
   margin-left: var(--s-3);
@@ -3204,6 +3204,9 @@ html.light ::selection {
   color: var(--fg-mute);
   text-align: left;
   cursor: pointer;
+}
+.hc-panel .hc-mini-history-agent[data-working] {
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 .hc-panel .hc-mini-history-agent:hover,
 .hc-panel .hc-mini-history-agent:focus-visible {
@@ -3217,13 +3220,6 @@ html.light ::selection {
 .hc-panel .hc-mini-history-agent:focus-visible {
   outline: 1px solid color-mix(in oklch, var(--accent) 62%, transparent);
   outline-offset: 1px;
-}
-.hc-panel .hc-mini-history-agent .rail {
-  justify-self: center;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: color-mix(in oklch, var(--fg-mute) 62%, transparent);
 }
 .hc-panel .hc-mini-history-agent .label,
 .hc-panel .hc-mini-history-agent .meta {

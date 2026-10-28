@@ -75,6 +75,41 @@ function resolveSessionId(backendSessionId: string | null | undefined) {
   return sessionId;
 }
 
+type ChildScopedEvent = CorrelatedEvent & {
+  backend_session_id: string;
+  harness: "claude" | "codex";
+  thread_id?: string | null;
+};
+
+function contentSessionId(payload: ChildScopedEvent): string | null {
+  const ownerId = resolveSessionId(payload.backend_session_id);
+  if (!ownerId || payload.is_root !== false) return ownerId;
+  if (!payload.thread_id) return null;
+
+  const owner = useChatStore.getState().sessions[ownerId];
+
+  return useChatStore.getState().ensureProviderThreadSession({
+    harness: payload.harness,
+    providerResumeId: payload.thread_id,
+    projectPath: owner.projectPath,
+    providerId: owner.providerId,
+    ownerSessionId: ownerId,
+  });
+}
+
+function isChildTarget(sessionId: string) {
+  return !!useChatStore.getState().sessions[sessionId]?.providerChild;
+}
+
+function ownChildContent<T extends { parent_tool_use_id?: string | null }>(
+  payload: T,
+  sessionId: string
+): T {
+  return isChildTarget(sessionId)
+    ? { ...payload, parent_tool_use_id: null }
+    : payload;
+}
+
 function matchesActiveRootTurn(
   sessionId: string,
   backendSessionId: string,
@@ -97,6 +132,9 @@ function shouldRouteContentEvent(
   payload: CorrelatedEvent,
   allowSettled = false
 ): boolean {
+  // Child conversation content belongs to its selected child session. A
+  // missing spawn link must not turn a known child event into parent content.
+  if (payload.is_root === false) return false;
   if (!payload.turn_id) {
     if (payload.is_root !== true) return true;
     const routed = rootTurnByBackendSessionId.get(backendSessionId);
@@ -110,7 +148,6 @@ function shouldRouteContentEvent(
       isLocalChatLifecycleBusy(getLocalChatLifecycle(session))
     );
   }
-  if (payload.is_root === false) return true;
   const turn = rootTurnByBackendSessionId.get(backendSessionId);
   if (payload.is_root !== true || turn?.turnId !== payload.turn_id) {
     return false;
@@ -123,7 +160,16 @@ function shouldRouteContentEvent(
 export function routeLocalChatTurnStartedEvent(
   payload: LocalChatTurnStartedEvent
 ): boolean {
-  const sessionId = resolveSessionId(payload.backend_session_id);
+  const sessionId = contentSessionId(payload);
+
+  if (sessionId && isChildTarget(sessionId)) {
+    useChatStore
+      .getState()
+      .setProviderChildActivity(sessionId, true, payload.turn_id);
+
+    return true;
+  }
+
   if (!sessionId || !payload.is_root || !payload.turn_id) {
     return false;
   }
@@ -141,7 +187,10 @@ export function routeLocalChatTurnStartedEvent(
     turnId: payload.turn_id,
     phase: "active",
   });
-  const bound = useChatStore.getState().bindActiveTurn(sessionId, payload.turn_id);
+
+  const bound = useChatStore
+    .getState()
+    .bindActiveTurn(sessionId, payload.turn_id);
   return bound;
 }
 
@@ -149,7 +198,9 @@ export function routeLocalChatSessionInitEvent(
   payload: LocalChatSessionInitEvent
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
+
   if (!sessionId) return false;
+
   const store = useChatStore.getState();
   handleInitEvent(
     payload,
@@ -158,6 +209,7 @@ export function routeLocalChatSessionInitEvent(
     store.setProviderResumeId,
     store.setSessionModel
   );
+
   return true;
 }
 
@@ -165,7 +217,9 @@ export function routeLocalChatSessionTitleEvent(
   payload: LocalChatSessionTitleEvent
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
+
   if (!sessionId || !payload.title.trim()) return false;
+
   const store = useChatStore.getState();
   store.setSessionTitleCandidate(sessionId, {
     title: payload.title,
@@ -173,6 +227,7 @@ export function routeLocalChatSessionTitleEvent(
     sufficientSignal: true,
     userMessageCount: store.sessions[sessionId]?.titleUserMessageCount ?? 0,
   });
+
   return true;
 }
 
@@ -180,6 +235,7 @@ export function routeLocalChatSessionUsageEvent(
   payload: LocalChatSessionUsageEvent
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
+
   if (!sessionId) return false;
   const session = useChatStore.getState().sessions[sessionId];
   // Manual compaction emits session usage without creating a user chat turn.
@@ -201,13 +257,16 @@ export function routeLocalChatSessionUsageEvent(
     sessionId,
     useChatStore.getState().setSessionUsage
   );
+
   return true;
 }
 
 export function routeLocalChatTextEvent(payload: LocalChatTextEvent): boolean {
-  const sessionId = resolveSessionId(payload.backend_session_id);
+  const sessionId = contentSessionId(payload);
+
   if (!sessionId) return false;
   if (
+    !isChildTarget(sessionId) &&
     !shouldRouteContentEvent(
       payload.backend_session_id,
       sessionId,
@@ -217,105 +276,171 @@ export function routeLocalChatTextEvent(payload: LocalChatTextEvent): boolean {
   ) {
     return false;
   }
+
+  if (isChildTarget(sessionId))
+    useChatStore
+      .getState()
+      .setProviderChildActivity(sessionId, true, payload.turn_id);
+
   const store = useChatStore.getState();
+
   handleTextEvent(
-    payload,
+    ownChildContent(payload, sessionId),
     payload.backend_session_id,
     sessionId,
     store.updateLastAssistantMessage,
     store.finalizeLastAssistantMessage,
     store.addMessage
   );
+
   return true;
 }
 
 export function routeLocalChatToolCallEvent(
   payload: LocalChatToolCallEvent
 ): boolean {
-  const sessionId = resolveSessionId(payload.backend_session_id);
+  const sessionId = contentSessionId(payload);
+
   if (!sessionId) return false;
   if (
+    !isChildTarget(sessionId) &&
     !shouldRouteContentEvent(payload.backend_session_id, sessionId, payload)
   ) {
     return false;
   }
+
+  if (isChildTarget(sessionId))
+    useChatStore
+      .getState()
+      .setProviderChildActivity(sessionId, true, payload.turn_id);
+
   handleToolCallEvent(
-    payload,
+    ownChildContent(payload, sessionId),
     payload.backend_session_id,
     sessionId,
     useChatStore.getState().addMessage
   );
+
   return true;
 }
 
 export function routeLocalChatToolResultEvent(
   payload: LocalChatToolResultEvent
 ): boolean {
-  const sessionId = resolveSessionId(payload.backend_session_id);
+  const sessionId = contentSessionId(payload);
+
   if (!sessionId) return false;
   if (
+    !isChildTarget(sessionId) &&
     !shouldRouteContentEvent(payload.backend_session_id, sessionId, payload)
   ) {
     return false;
   }
+
   handleToolResultEvent(
-    payload,
+    ownChildContent(payload, sessionId),
     payload.backend_session_id,
     sessionId,
     useChatStore.getState().addMessage
   );
+
   return true;
 }
 
 export function routeLocalChatFileChangeEvent(
   payload: LocalChatFileChangeEvent
 ): boolean {
-  const sessionId = resolveSessionId(payload.backend_session_id);
+  const sessionId = contentSessionId(payload);
+
   if (!sessionId) return false;
   if (
+    !isChildTarget(sessionId) &&
     !shouldRouteContentEvent(payload.backend_session_id, sessionId, payload)
   ) {
     return false;
   }
+
   handleFileChangeEvent(
-    payload,
+    ownChildContent(payload, sessionId),
     payload.backend_session_id,
     sessionId,
     useChatStore.getState().addMessage
   );
+
   return true;
 }
 
 export function routePermissionRequestEvent(
   payload: PermissionRequestEvent
 ): boolean {
-  const sessionId = resolveSessionId(payload.session_id);
+  const ownerId = resolveSessionId(payload.session_id);
+  const childScoped = payload.is_root === false && !!payload.thread_id;
+  const sessionId =
+    childScoped && ownerId
+      ? contentSessionId({
+          ...payload,
+          backend_session_id: payload.session_id!,
+          harness: useChatStore.getState().sessions[ownerId].harness,
+        })
+      : ownerId;
+
   if (!sessionId) return false;
   if (
     payload.session_id &&
+    payload.is_root !== false &&
     !shouldRouteContentEvent(payload.session_id, sessionId, payload)
   ) {
     return false;
   }
+
+  if (isChildTarget(sessionId))
+    useChatStore
+      .getState()
+      .setProviderChildActivity(sessionId, true, payload.turn_id);
+
   handleSacrumPermissionRequestEvent(
     payload,
     payload.session_id,
     sessionId,
     useChatStore.getState().addMessage
   );
+
   return true;
 }
 
 export function routeLocalChatSessionEndEvent(
   payload: LocalChatSessionEndEvent
 ): boolean {
-  const sessionId = resolveSessionId(payload.backend_session_id);
+  const sessionId = contentSessionId(payload);
+
+  if (sessionId && isChildTarget(sessionId)) {
+    const store = useChatStore.getState();
+    store.setProviderChildActivity(sessionId, false, payload.turn_id);
+    store.markPendingUserQuestionsUnavailable(sessionId);
+    store.completeAssistantMessage(
+      sessionId,
+      payload.turn_id,
+      payload.item_id,
+      payload.result
+    );
+    if (payload.is_error)
+      store.interruptStreamingAssistant(sessionId, payload.turn_id);
+
+    return true;
+  }
+
   if (!sessionId) {
     return false;
   }
   if (!matchesActiveRootTurn(sessionId, payload.backend_session_id, payload)) {
     return false;
   }
+  if (
+    payload.harness === "claude" &&
+    ["interrupted", "cancelled"].includes(payload.completion_status ?? "")
+  )
+    useChatStore.getState().settleProviderChildren(sessionId);
+
   const wasStopping =
     useChatStore.getState().sessions[sessionId]?.activeTurn?.phase ===
     "stopping";
@@ -323,6 +448,7 @@ export function routeLocalChatSessionEndEvent(
     turnId: payload.turn_id,
     phase: "settled",
   });
+
   const store = useChatStore.getState();
   store.settleActiveTurn(sessionId, payload.turn_id);
   store.setSessionCompaction(sessionId, false);
@@ -337,26 +463,41 @@ export function routeLocalChatSessionEndEvent(
     store.completeAssistantMessage
   );
   if (!wasStopping) void flushNextQueuedMessage(sessionId);
+
   return true;
 }
 
 export function routeLocalChatSessionErrorEvent(
   payload: LocalChatSessionErrorEvent
 ): boolean {
-  const sessionId = resolveSessionId(payload.backend_session_id);
-  if (!sessionId) return false;
+  const sessionId = contentSessionId(payload);
+
+  if (!sessionId) {
+    if (payload.is_root === false)
+      console.warn("Unroutable child-session error", {
+        backendSessionId: payload.backend_session_id,
+        threadId: payload.thread_id,
+      });
+    return false;
+  }
+
   const store = useChatStore.getState();
-  if (payload.is_root === false) {
+
+  if (isChildTarget(sessionId)) {
+    store.setProviderChildActivity(sessionId, false, payload.turn_id);
+    store.markPendingUserQuestionsUnavailable(sessionId);
     store.interruptStreamingAssistant(
       sessionId,
       payload.turn_id,
       payload.item_id
     );
+
     store.addMessage(sessionId, {
       kind: "error",
       message: payload.error,
       timestamp: new Date().toISOString(),
     });
+
     return true;
   }
   if (
@@ -373,6 +514,7 @@ export function routeLocalChatSessionErrorEvent(
   } else {
     rootTurnByBackendSessionId.delete(payload.backend_session_id);
   }
+
   // A root error with no turn id is session-fatal: clear whatever turn is
   // tracked. A correlated one only clears the turn it matched above.
   store.settleActiveTurn(sessionId, payload.turn_id ?? null);
@@ -391,15 +533,18 @@ export function routeLocalChatSessionErrorEvent(
     store.interruptStreamingAssistant
   );
   store.clearQueuedMessages(sessionId);
+
   return true;
 }
 
 export function routeLocalChatSessionWarningEvent(
   payload: LocalChatSessionWarningEvent
 ): boolean {
-  const sessionId = resolveSessionId(payload.backend_session_id);
+  const sessionId = contentSessionId(payload);
+
   if (!sessionId) return false;
   if (
+    !isChildTarget(sessionId) &&
     !shouldRouteContentEvent(payload.backend_session_id, sessionId, payload)
   ) {
     return false;
@@ -410,6 +555,7 @@ export function routeLocalChatSessionWarningEvent(
     sessionId,
     useChatStore.getState().addMessage
   );
+
   return true;
 }
 
@@ -417,6 +563,7 @@ export function routeLocalChatCompactionEvent(
   payload: LocalChatCompactionEvent
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
+
   if (!sessionId) return false;
   if (
     payload.turn_id &&
@@ -436,6 +583,7 @@ export function routeLocalChatCompactionEvent(
     useChatStore.getState().setSessionCompaction,
     useChatStore.getState().setCompactionSummary
   );
+
   return true;
 }
 
@@ -470,6 +618,7 @@ export async function flushNextQueuedMessage(
       },
       { addUserMessage: false }
     );
+
     return true;
   }
 
@@ -489,6 +638,7 @@ export async function flushNextQueuedMessage(
     content,
     { addUserMessage: false }
   );
+
   return true;
 }
 

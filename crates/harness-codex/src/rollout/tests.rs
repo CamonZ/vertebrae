@@ -373,3 +373,48 @@ fn pages_resolve_legacy_duplicates_and_helper_outputs_across_tail_boundary() {
         assert_eq!(tools(&read_rollout(&path, &request()).unwrap()).len(), 2);
     }
 }
+
+#[test]
+fn selected_child_renders_readable_agent_prompts_without_exposing_ciphertext() {
+    let header =
+        json!({"type":"session_meta","payload":{"id":"code-mode","agent_path":"/root/worker"}})
+            .to_string();
+    let plain = json!({"type":"response_item","payload":{"type":"agent_message","author":"/root","recipient":"/root/worker","content":[{"type":"input_text","text":"Inspect the parser and report failures."}]}}).to_string();
+    let encrypted = json!({"type":"response_item","payload":{"type":"agent_message","author":"/root","recipient":"/root/worker","content":[{"type":"input_text","text":"Message Type: NEW_TASK\nPayload:\n"},{"type":"encrypted_content","encrypted_content":"gAAAA_private_ciphertext"}]}}).to_string();
+    let drafts = parse(&format!("{header}\n{plain}\n{encrypted}\n"));
+    let prompts = drafts
+        .iter()
+        .filter_map(|draft| match &draft.payload {
+            HarnessEventPayloadV1::TurnInput(input) => Some(input),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(prompts.len(), 2);
+    assert_eq!(
+        prompts[0].content,
+        "Inspect the parser and report failures."
+    );
+    assert_eq!(prompts[0].provenance, TurnInputProvenance::Agent);
+    assert!(prompts[1].content.contains("encrypted"));
+    assert!(!prompts[1].content.contains("gAAAA_private_ciphertext"));
+}
+
+#[test]
+fn incomplete_final_records_are_tolerated_without_a_copied_history_marker() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("child.jsonl");
+    let body = "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"retained\"}]}}\n{\"partial\":\"";
+    let mut bytes = body.as_bytes().to_vec();
+    bytes.push(0xc3);
+    std::fs::write(&path, bytes).unwrap();
+    let full = read_rollout(&path, &request()).unwrap();
+    assert!(full.iter().any(|draft| matches!(&draft.payload, HarnessEventPayloadV1::Text(text) if text.text == "retained")));
+    let tail = read_rollout_tail(
+        &path,
+        &request(),
+        vertebrae_harness_core::tail_read_budget(10),
+    )
+    .unwrap();
+    assert!(tail.drafts.is_empty());
+    assert!(tail.older_records_exist);
+}

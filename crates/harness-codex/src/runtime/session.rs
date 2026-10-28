@@ -59,6 +59,28 @@ pub(crate) enum RecoveredTurn {
     Running(Arc<CodexConnection>),
 }
 
+// App Server code-mode spawns use a single thread ID on subAgentActivity.
+// Terminal activity IDs are synthetic and must never replace the spawn call ID.
+fn spawned_thread_ids(item: &Value) -> Vec<&str> {
+    if item.get("type").and_then(Value::as_str) == Some("subAgentActivity") {
+        if item.get("kind").and_then(Value::as_str) != Some("started") {
+            return Vec::new();
+        }
+        return item
+            .get("agentThreadId")
+            .and_then(Value::as_str)
+            .into_iter()
+            .collect();
+    }
+    item.get("receiverThreadIds")
+        .or_else(|| item.get("receiver_thread_ids"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect()
+}
+
 impl SessionState {
     pub(super) fn connection(&self) -> Arc<CodexConnection> {
         Arc::clone(
@@ -312,13 +334,10 @@ impl SessionState {
         tool_id: &str,
         parent_thread_id: ThreadId,
     ) {
-        let Some(ids) = item
-            .get("receiverThreadIds")
-            .or_else(|| item.get("receiver_thread_ids"))
-            .and_then(Value::as_array)
-        else {
+        let ids = spawned_thread_ids(item);
+        if ids.is_empty() {
             return;
-        };
+        }
         let prompt = optional_string(
             item,
             &["/prompt", "/input/prompt", "/input/text", "/description"],
@@ -333,7 +352,7 @@ impl SessionState {
             .children
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for id in ids.iter().filter_map(Value::as_str) {
+        for id in ids {
             self.owned_threads.insert(id);
             children.entry(id.to_string()).or_insert(ChildInfo {
                 parent_thread_id: parent.clone(),
@@ -449,5 +468,19 @@ async fn wait_cleanup(
         rx.changed().await.map_err(|_| {
             HarnessError::Operation("Codex App Server cleanup ended without an outcome".into())
         })?;
+    }
+}
+
+#[cfg(test)]
+mod spawn_tests {
+    use super::spawned_thread_ids;
+    use serde_json::json;
+    #[test]
+    fn code_mode_spawn_links_only_the_started_activity() {
+        let mut item = json!({ "type": "subAgentActivity", "id": "spawn", "kind": "started", "agentThreadId": "child" });
+        assert_eq!(spawned_thread_ids(&item), ["child"]);
+        item["kind"] = json!("completed");
+        item["id"] = json!("synthetic-completed-id");
+        assert!(spawned_thread_ids(&item).is_empty());
     }
 }

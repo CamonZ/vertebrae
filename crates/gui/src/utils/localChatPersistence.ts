@@ -86,6 +86,7 @@ export interface LocalChatSessionSummary {
   updatedAt: string;
   projectPath: string | null;
   providerResumeId: string | null;
+  providerParentResumeId?: string | null;
   threadTotalTokens?: number;
   messageCount: number;
   /** Whether the user has sent at least one message in this session. */
@@ -212,6 +213,10 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     harness: normalizeHarness(candidate.harness),
     backendSessionId: null,
     providerResumeId,
+    providerParentResumeId:
+      typeof candidate.providerParentResumeId === "string"
+        ? candidate.providerParentResumeId
+        : null,
     projectPath:
       typeof candidate.projectPath === "string" ? candidate.projectPath : null,
     providerId:
@@ -417,6 +422,7 @@ function serializeSession(
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
     providerId: session.providerId ?? null,
     backendSessionId: null,
+    providerParentResumeId: session.providerParentResumeId ?? null,
     providerResumeId: session.providerResumeId ?? null,
     threadTotalTokens: session.threadTotalTokens,
     projectPath: session.projectPath ?? null,
@@ -464,6 +470,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
     projectPath: session.projectPath ?? null,
+    providerParentResumeId: session.providerParentResumeId ?? null,
     providerResumeId: session.providerResumeId ?? null,
     threadTotalTokens: session.threadTotalTokens,
     messageCount:
@@ -680,6 +687,7 @@ export function summarizeLocalChatSession(
     createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
     projectPath: session.projectPath ?? null,
+    providerParentResumeId: session.providerParentResumeId ?? null,
     providerResumeId: session.providerResumeId,
     threadTotalTokens: session.threadTotalTokens,
     messageCount:

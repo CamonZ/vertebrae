@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   buildSpawnOutline,
+  buildHistoryChildOutlines,
   isAgentSpawnTool,
   parseToolInput,
   stringValue,
@@ -485,5 +486,59 @@ describe("scrollToSpawn", () => {
     });
 
     window.removeEventListener(LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT, handler);
+  });
+});
+
+describe("history child lineage", () => {
+  it("groups unopened nested children and keeps orphan/cyclic sessions accessible", () => {
+    const rows = [
+      makeSummary({ id: "root", harness: "codex", providerResumeId: "r" }),
+      makeSummary({
+        id: "child",
+        harness: "codex",
+        providerResumeId: "c",
+        providerParentResumeId: "r",
+      }),
+      makeSummary({
+        id: "nested",
+        harness: "codex",
+        providerResumeId: "n",
+        providerParentResumeId: "c",
+      }),
+      makeSummary({
+        id: "orphan",
+        harness: "codex",
+        providerResumeId: "o",
+        providerParentResumeId: "missing",
+      }),
+      makeSummary({
+        id: "cycle1",
+        harness: "codex",
+        providerResumeId: "a",
+        providerParentResumeId: "b",
+      }),
+      makeSummary({
+        id: "cycle2",
+        harness: "codex",
+        providerResumeId: "b",
+        providerParentResumeId: "a",
+      }),
+      makeSummary({
+        id: "other-provider",
+        harness: "claude",
+        providerResumeId: "x",
+        providerParentResumeId: "r",
+      }),
+    ];
+    const outlines = buildHistoryChildOutlines(rows);
+    expect(
+      outlines.get("root")?.map((row) => [row.threadId, row.depth])
+    ).toEqual([
+      ["c", 0],
+      ["n", 1],
+    ]);
+    expect(outlines.get("child")?.map((row) => row.threadId)).toEqual(["n"]);
+    for (const id of ["orphan", "cycle1", "cycle2", "other-provider"])
+      expect(outlines.get(id)).toEqual([]);
   });
 });

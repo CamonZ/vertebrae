@@ -87,7 +87,10 @@ export interface ThinkingEvent extends BaseEvent {
 }
 
 /** Final assistant text intended for the user. */
-export type AssistantMessageLifecycle = "streaming" | "completed" | "interrupted";
+export type AssistantMessageLifecycle =
+  | "streaming"
+  | "completed"
+  | "interrupted";
 
 export interface AssistantMessageEvent extends BaseEvent {
   kind: "assistant_message";
@@ -381,7 +384,7 @@ function parseGateEvaluation(text: string): GateEvaluationEvent | null {
     return null;
   }
   const markerIndex = trimmed.indexOf(marker);
-  const openingTag = "<vertebrae-evaluation attempt=\"";
+  const openingTag = '<vertebrae-evaluation attempt="';
   const evaluationIndex = trimmed.indexOf(openingTag, markerIndex);
   if (evaluationIndex === -1) return null;
   const attemptStart = evaluationIndex + openingTag.length;
@@ -553,7 +556,9 @@ function parseHarnessEvent(
             events.push({ ...evaluation, timestamp });
           } else if (
             text &&
-            (options.preserveRawInputs || shouldKeepUserMessage(text))
+            (provenance === "agent" ||
+              options.preserveRawInputs ||
+              shouldKeepUserMessage(text))
           ) {
             events.push({ kind: "user_message", timestamp, text });
           }
@@ -566,7 +571,9 @@ function parseHarnessEvent(
       if (text) {
         if (turnKey) state.turnsWithText.add(turnKey);
         const itemId = harnessItemId(raw);
-        const completionStatus = readString(data.completion_status)?.toLowerCase();
+        const completionStatus = readString(
+          data.completion_status
+        )?.toLowerCase();
         const lifecycle =
           raw.semantics === "delta"
             ? "streaming"
@@ -578,7 +585,9 @@ function parseHarnessEvent(
           timestamp,
           text,
           ...(itemId ? { itemId } : {}),
-          ...(raw.correlation?.turn_id ? { turnId: raw.correlation.turn_id } : {}),
+          ...(raw.correlation?.turn_id
+            ? { turnId: raw.correlation.turn_id }
+            : {}),
           ...(itemId && lifecycle ? { lifecycle } : {}),
         });
       }
@@ -694,7 +703,9 @@ function parseHarnessEvent(
           timestamp,
           text: resultText,
           ...(itemId ? { itemId } : {}),
-          ...(raw.correlation?.turn_id ? { turnId: raw.correlation.turn_id } : {}),
+          ...(raw.correlation?.turn_id
+            ? { turnId: raw.correlation.turn_id }
+            : {}),
           ...(itemId || lifecycle === "interrupted" ? { lifecycle } : {}),
         });
       }
@@ -878,18 +889,26 @@ export function parseSessionLogs(
     const turnKey = harnessTurnKey(raw);
     if (
       turnKey &&
-      (raw.type === "turn_finished" || raw.type === "run_finished" || raw.type === "error")
+      (raw.type === "turn_finished" ||
+        raw.type === "run_finished" ||
+        raw.type === "error")
     ) {
       for (const payloadKey of state.activeDeltaByPayloadKey.keys()) {
-        if (payloadKey.startsWith(turnKey + ":") &&
-            (!harnessItemId(raw) || payloadKey === harnessDeltaPayloadKey({...raw, type: "text"}))) {
+        if (
+          payloadKey.startsWith(turnKey + ":") &&
+          (!harnessItemId(raw) ||
+            payloadKey === harnessDeltaPayloadKey({ ...raw, type: "text" }))
+        ) {
           const activeIndex = state.activeDeltaByPayloadKey.get(payloadKey);
           const active =
             activeIndex === undefined ? undefined : events[activeIndex];
           if (active?.kind === "assistant_message") {
-            active.lifecycle = raw.type === "error" ? "interrupted" : terminalAssistantLifecycle(
-              readString(readRecord(raw.data)?.status)?.toLowerCase()
-            );
+            active.lifecycle =
+              raw.type === "error"
+                ? "interrupted"
+                : terminalAssistantLifecycle(
+                    readString(readRecord(raw.data)?.status)?.toLowerCase()
+                  );
           }
           state.activeDeltaByPayloadKey.delete(payloadKey);
         }

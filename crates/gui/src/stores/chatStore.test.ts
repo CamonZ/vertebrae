@@ -1226,6 +1226,164 @@ describe("chatStore", () => {
       });
     });
 
+    it("hydrates the selected child and refreshes across page boundaries without mixing parent content", async () => {
+      const parent = useChatStore.getState().openSession("Parent");
+      useChatStore.getState().addMessage(parent, {
+        kind: "assistant",
+        text: "parent content",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+      const line = (id: string, text: string) =>
+        JSON.stringify({
+          version: 1,
+          event_id: id,
+          stream_id: "child-replay",
+          sequence: Number(id.slice(1)),
+          correlation: {
+            session_id: "child-thread",
+            thread_id: "child-thread",
+            item_id: id,
+          },
+          timestamp: "2026-01-01T00:00:00Z",
+          semantics: "snapshot",
+          type: "text",
+          data: { text },
+        });
+      const page = (
+        events: string[],
+        key: string,
+        cursor: string | null = null
+      ) => ({
+        status: "ok" as const,
+        data: {
+          events,
+          cache_key: key,
+          next_cursor: cursor,
+          has_more: !!cursor,
+        },
+      });
+      const replay = vi
+        .spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValueOnce(page([line("e1", "child first")], "r1"));
+      const id = await useChatStore.getState().selectProviderThreadSession({
+        harness: "codex",
+        providerResumeId: "child-thread",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(useChatStore.getState().sessions[id!].messages).toMatchObject([
+        { kind: "assistant", text: "child first" },
+      ]);
+      replay
+        .mockResolvedValueOnce(
+          page([line("e3", "child latest")], "r2", "older")
+        )
+        .mockResolvedValueOnce(
+          page([line("e1", "child first"), line("e2", "child middle")], "r2")
+        );
+      useChatStore.getState().refreshProviderThreadSession(id!);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(replay).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          provider_resume_id: "child-thread",
+          cursor: "older",
+        })
+      );
+      expect(useChatStore.getState().sessions[id!].messages).toMatchObject([
+        { text: "child first" },
+        { text: "child middle" },
+        { text: "child latest" },
+      ]);
+      replay.mockResolvedValueOnce(
+        page([line("e3", "child latest")], "r2", "older")
+      );
+      useChatStore.getState().refreshProviderThreadSession(id!);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(useChatStore.getState().sessions[id!].messages).toHaveLength(3);
+      expect(useChatStore.getState().sessions[parent].messages).toMatchObject([
+        { text: "parent content" },
+      ]);
+    });
+
+    it("refreshes a changed durable child snapshot instead of treating its old replay as live", async () => {
+      const line = (text: string) =>
+        JSON.stringify({
+          version: 1,
+          event_id: "event-1",
+          stream_id: "child-replay",
+          sequence: 1,
+          correlation: {
+            session_id: "child-thread",
+            thread_id: "child-thread",
+            item_id: "answer-item",
+          },
+          timestamp: "2026-01-01T00:00:00Z",
+          semantics: "snapshot",
+          type: "text",
+          data: { text, completion_status: "completed" },
+        });
+      const page = (text: string, key: string) => ({
+        status: "ok" as const,
+        data: {
+          events: [line(text)],
+          cache_key: key,
+          next_cursor: null,
+          has_more: false,
+        },
+      });
+      vi.spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValueOnce(page("partial answer", "r1"))
+        .mockResolvedValueOnce(page("complete answer", "r2"));
+      const id = await useChatStore
+        .getState()
+        .selectProviderThreadSession({
+          harness: "codex",
+          providerResumeId: "child-thread",
+        });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      useChatStore.getState().refreshProviderThreadSession(id!);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(useChatStore.getState().sessions[id!].messages).toMatchObject([
+        { text: "complete answer" },
+      ]);
+    });
+
+    it("keeps loaded history available during a background child refresh", async () => {
+      const page = {
+        status: "ok" as const,
+        data: {
+          events: [],
+          cache_key: "revision",
+          next_cursor: null,
+          has_more: false,
+        },
+      };
+      let resolve!: (value: typeof page) => void;
+      vi.spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValueOnce(page)
+        .mockImplementationOnce(
+          () =>
+            new Promise((done) => {
+              resolve = done;
+            })
+        );
+      const id = await useChatStore
+        .getState()
+        .selectProviderThreadSession({
+          harness: "codex",
+          providerResumeId: "background-child",
+        });
+      await new Promise((done) => setTimeout(done, 0));
+      useChatStore.getState().refreshProviderThreadSession(id!);
+      expect(
+        useChatStore.getState().sessions[id!].providerReplay
+      ).toMatchObject({ loaded: true, loading: null });
+      resolve(page);
+      await new Promise((done) => setTimeout(done, 0));
+      expect(
+        useChatStore.getState().sessions[id!].providerReplay?.loading
+      ).toBeNull();
+    });
+
     it("locks harness changes after a backend or provider resume id exists", () => {
       const backendId = useChatStore.getState().openSession("Task Backend");
       useChatStore.getState().setBackendSessionId(backendId, "backend-1");

@@ -421,6 +421,10 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                           key={spawn.id}
                           type="button"
                           className="hc-mini-history-agent"
+                          style={{
+                            paddingLeft: `${12 + (spawn.depth ?? 0) * 12}px`,
+                          }}
+                          data-working={spawn.isWorking || undefined}
                           data-active={isAgentActive || undefined}
                           aria-current={isAgentActive ? "true" : undefined}
                           onClick={() => {
@@ -444,7 +448,13 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                               : `Jump to spawned agent ${spawn.label} in ${title}`
                           }
                         >
-                          <span className="rail" aria-hidden="true" />
+                          {spawn.isWorking && (
+                            <ThinkingIndicator
+                              compact
+                              label="Subagent working"
+                              style={thinkingIndicatorStyle}
+                            />
+                          )}
                           <span className="label">{spawn.label}</span>
                           {spawn.detail && (
                             <span className="meta">{spawn.detail}</span>
