@@ -56,8 +56,10 @@ impl TranscriptTailLines {
             path::PathBuf,
             sync::{Arc, Mutex, OnceLock},
         };
+
         type Entry = (PathBuf, usize, TranscriptRevision, Arc<TranscriptTailLines>);
         static CACHE: OnceLock<Mutex<VecDeque<Entry>>> = OnceLock::new();
+
         let budget = budget.min(128 * 1024);
         let revision = TranscriptRevision::capture(path)?;
         let cache = CACHE.get_or_init(Mutex::default);
@@ -76,16 +78,20 @@ impl TranscriptTailLines {
                 return Ok(result);
             }
         }
+
         let tail = Arc::new(Self::read(path, budget, provider)?);
         revision.verify(path)?;
+
         let mut entries = cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+
         entries.retain(|(key, _, _, _)| key != path);
         entries.push_back((path.to_owned(), budget, revision, tail.clone()));
         while entries.len() > 8 {
             entries.pop_front();
         }
+
         Ok(tail)
     }
 
@@ -103,11 +109,13 @@ impl TranscriptTailLines {
             .metadata()
             .map_err(|error| HarnessError::Operation(error.to_string()))?
             .len();
+
         let start = len.saturating_sub(budget as u64);
         file.seek(SeekFrom::Start(start))
             .map_err(|error| HarnessError::Operation(error.to_string()))?;
         let bytes = read_captured_tail(file, (len - start) as usize)
             .map_err(|error| HarnessError::Operation(error.to_string()))?;
+
         let discard = if start > 0 {
             bytes
                 .iter()
@@ -116,6 +124,7 @@ impl TranscriptTailLines {
         } else {
             0
         };
+
         let first_offset = start.saturating_add(discard as u64);
         let slice = &bytes[discard..];
         let text = match std::str::from_utf8(slice) {
@@ -133,6 +142,7 @@ impl TranscriptTailLines {
                 )));
             }
         };
+
         let mut offset = first_offset;
         let lines = text
             .split_inclusive('\n')
@@ -142,6 +152,7 @@ impl TranscriptTailLines {
                 (source, line.to_owned())
             })
             .collect();
+
         Ok(Self {
             lines,
             older_records_exist: first_offset > 0,

@@ -531,15 +531,18 @@ pub async fn load_local_chat_session_index() -> Result<Vec<LocalChatSessionIndex
     if !path.exists() {
         return Ok(Vec::new());
     }
+
     let raw = fs::read_to_string(&path).map_err(|error| CommandError {
         message: format!("Failed to read local chat session index: {}", error),
     })?;
     if raw.trim().is_empty() {
         return Ok(Vec::new());
     }
+
     let value = serde_json::from_str::<serde_json::Value>(&raw).map_err(|error| CommandError {
         message: format!("Failed to parse local chat session index: {}", error),
     })?;
+
     let mut sessions = if value.is_array() {
         serde_json::from_value::<Vec<LocalChatSessionIndexEntry>>(value)
     } else {
@@ -548,21 +551,26 @@ pub async fn load_local_chat_session_index() -> Result<Vec<LocalChatSessionIndex
     .map_err(|error| CommandError {
         message: format!("Failed to decode local chat session index: {error}"),
     })?;
+
     tauri::async_runtime::spawn_blocking(move || {
         let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig::default());
+
         for session in &mut sessions {
             if session.harness != LocalChatHarnessKind::Codex {
                 continue;
             }
+
             let Some(id) = session.provider_resume_id.as_ref() else {
                 continue;
             };
+
             let request = TranscriptReplayRequest {
                 provider_resume_id: ProviderResumeId::new(id.clone()),
                 stream_id: StreamId::new(format!("local-history/{}", session.id)),
                 project_path: session.project_path.as_ref().map(PathBuf::from),
                 created_at: Some(session.created_at.clone()),
             };
+
             match factory.transcript_parent_session(StepHarness::Codex, &request) {
                 Ok(Some(parent)) => session.provider_parent_resume_id = Some(parent.to_string()),
                 Ok(None) => {}
@@ -571,6 +579,7 @@ pub async fn load_local_chat_session_index() -> Result<Vec<LocalChatSessionIndex
                 }
             }
         }
+
         sessions
     })
     .await

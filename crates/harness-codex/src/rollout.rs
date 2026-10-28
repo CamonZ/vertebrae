@@ -273,18 +273,22 @@ pub(crate) fn read_rollout_tail(
         .take(header_budget as u64)
         .read_until(b'\n', &mut header_bytes)
         .map_err(|error| HarnessError::Operation(error.to_string()))?;
+
     let first_line = String::from_utf8_lossy(&header_bytes);
     let mut tail =
         TranscriptTailLines::read(path, budget.saturating_sub(header_bytes.len()), "Codex")?;
     tail.bytes_read += header_bytes.len();
+
     let incomplete_header = std::str::from_utf8(&header_bytes).is_err()
         || (header_bytes.len() == header_budget && !header_bytes.ends_with(b"\n"));
+
     let child_boundary = serde_json::from_str::<Value>(&first_line)
         .ok()
         .and_then(|raw| {
             raw.pointer("/payload/subagent_history_start_ordinal")
                 .and_then(Value::as_u64)
         });
+
     if child_boundary.is_some() || incomplete_header {
         return Ok(TailReadOutcome {
             drafts: Vec::new(),
@@ -292,6 +296,7 @@ pub(crate) fn read_rollout_tail(
             bytes_read: tail.bytes_read,
         });
     }
+
     let mut state = ReplayState::new(request);
     if let Ok(header) = serde_json::from_str::<Value>(&first_line) {
         state.agent_path = header
@@ -321,6 +326,7 @@ pub(crate) fn read_rollout_tail(
                 bytes_read: tail.bytes_read,
             });
         }
+
         let raw: Value = serde_json::from_str(line).map_err(|error| {
             HarnessError::Operation(format!(
                 "malformed Codex transcript {} at byte {}: {error}",
@@ -328,6 +334,7 @@ pub(crate) fn read_rollout_tail(
                 provider_sequence - 1
             ))
         })?;
+
         // Legacy calls/outputs can refer to IDs or suppression state outside
         // this window. Defer those tails to full normalization rather than
         // inventing a duplicate or orphan output at the page boundary.
@@ -338,6 +345,7 @@ pub(crate) fn read_rollout_tail(
                 bytes_read: tail.bytes_read,
             });
         }
+
         let timestamp = record_timestamp(&raw);
         drafts.extend(parse_rollout_line(
             &raw,
@@ -439,11 +447,13 @@ fn parse_response_item(
             if !state.selected_child {
                 return Vec::new();
             }
+
             let recipient = payload.get("recipient").and_then(Value::as_str);
             let selected = state.agent_path.as_deref().unwrap_or("/root");
             if recipient.is_some_and(|recipient| recipient != selected) {
                 return Vec::new();
             }
+
             let mut text = content_text(payload.get("content"));
             let encrypted = payload
                 .get("content")
@@ -456,9 +466,11 @@ fn parse_response_item(
             if encrypted {
                 text.push_str("\n[The prompt body is encrypted in this Codex transcript and is unavailable for replay.]");
             }
+
             if text.trim().is_empty() {
                 return Vec::new();
             }
+
             vec![state.item_draft(
                 timestamp,
                 provider_sequence,

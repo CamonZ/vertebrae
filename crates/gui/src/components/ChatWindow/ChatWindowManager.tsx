@@ -138,21 +138,26 @@ export function ChatWindowManager({
       .join("\0")}`,
     panelOpen
   );
+
   const historyChildOutlines = useMemo(
     () => buildHistoryChildOutlines(Object.values(localSessionSummaries)),
     [localSessionSummaries]
   );
+
   const spawnOutlineBySessionId = useMemo(() => {
     const outlines = new Map<string, ReturnType<typeof buildSpawnOutline>>();
+
     for (const sessionId of sessionList) {
       const session = useChatStore.getState().sessions[sessionId];
       if (!session) continue;
+
       const outline = buildSpawnOutline(session.messages).filter(
         (spawn) => spawn.threadId !== session.providerResumeId
       );
       const discovered = discoveredChildOutlines.get(session.id) ?? [];
       const history = historyChildOutlines.get(session.id) ?? [];
       const childRows = discovered.length ? discovered : history;
+
       // Discovery works even when the spawn is outside the loaded parent page.
       const groups: SpawnOutlineItem[][] = [];
       for (const row of childRows) {
@@ -160,6 +165,7 @@ export function ChatWindowManager({
           groups[groups.length - 1].push(row);
         else groups.push([row]);
       }
+
       for (const row of outline) {
         if (
           !childRows.some(
@@ -170,11 +176,13 @@ export function ChatWindowManager({
         )
           groups.push([row]);
       }
+
       const positions = new Map(
         session.messages.flatMap((message, index) =>
           message.kind === "tool_call" ? [[message.toolId, index] as const] : []
         )
       );
+
       groups.sort(
         (left, right) =>
           (positions.get(left[0].spawnId) ??
@@ -186,8 +194,10 @@ export function ChatWindowManager({
               ? Number.MAX_SAFE_INTEGER
               : -1))
       );
+
       outlines.set(session.id, groups.flat());
     }
+
     return outlines;
     // Intentionally keyed by top-level agent tool-call inputs only; assistant
     // streaming text should not re-render the mini-panel outline.
@@ -198,11 +208,14 @@ export function ChatWindowManager({
     discoveredChildOutlines,
     historyChildOutlines,
   ]);
+
   const childProviderThreadIds = useMemo(() => {
     const threadIds = new Set<string>();
+
     for (const sessionId of sessionList) {
       const session = useChatStore.getState().sessions[sessionId];
       if (!session) continue;
+
       const outline = spawnOutlineBySessionId.get(sessionId) ?? [];
       for (const spawn of outline) {
         if (spawn.threadId && spawn.threadId !== session.providerResumeId) {
@@ -210,6 +223,7 @@ export function ChatWindowManager({
         }
       }
     }
+
     return threadIds;
   }, [sessionList, spawnOutlineBySessionId]);
 

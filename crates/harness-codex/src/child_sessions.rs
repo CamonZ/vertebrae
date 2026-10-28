@@ -19,6 +19,7 @@ struct CodexChildren {
     agent_path: Option<String>,
     initial_message: Option<String>,
 }
+
 fn index_record(state: &mut CodexChildren, raw: &Value, ordinal: u64, own_id: &str) -> bool {
     if ordinal == 0 {
         state.parent = raw
@@ -35,6 +36,7 @@ fn index_record(state: &mut CodexChildren, raw: &Value, ordinal: u64, own_id: &s
             .and_then(Value::as_u64)
             .unwrap_or(0) as usize;
     }
+
     let record_ordinal = raw
         .get("ordinal")
         .and_then(Value::as_u64)
@@ -42,6 +44,7 @@ fn index_record(state: &mut CodexChildren, raw: &Value, ordinal: u64, own_id: &s
     if record_ordinal < state.history_start as u64 {
         return false;
     }
+
     if raw.get("type").and_then(Value::as_str) == Some("response_item") {
         let payload = &raw["payload"];
         if payload["type"] == "agent_message"
@@ -52,6 +55,7 @@ fn index_record(state: &mut CodexChildren, raw: &Value, ordinal: u64, own_id: &s
             return state.initial_message.is_some();
         }
     }
+
     if raw.get("type").and_then(Value::as_str) != Some("event_msg") {
         return false;
     }
@@ -68,7 +72,9 @@ fn index_record(state: &mut CodexChildren, raw: &Value, ordinal: u64, own_id: &s
     else {
         return false;
     };
+
     let kind = item.get("kind").and_then(Value::as_str).unwrap_or_default();
+
     // Interactions can target a parent or peer; only a spawn establishes a descendant.
     if kind != "started" && !state.children.contains_key(id) {
         return false;
@@ -79,6 +85,7 @@ fn index_record(state: &mut CodexChildren, raw: &Value, ordinal: u64, own_id: &s
     ) {
         return false;
     }
+
     let child = state
         .children
         .entry(id.to_owned())
@@ -94,16 +101,19 @@ fn index_record(state: &mut CodexChildren, raw: &Value, ordinal: u64, own_id: &s
                 .to_owned(),
             is_active: None,
         });
+
     state.order.entry(id.to_owned()).or_insert(ordinal);
     state
         .activity_times
         .insert(id.to_owned(), record_timestamp(raw));
+
     if kind == "started" {
         child.spawn_tool_call_id = item.get("id").and_then(Value::as_str).map(ToolCallId::new);
         child.is_active = Some(true);
     } else if matches!(kind, "completed" | "failed" | "cancelled" | "closed") {
         child.is_active = Some(false);
     }
+
     true
 }
 
@@ -114,6 +124,7 @@ fn looks_encrypted(text: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'='))
 }
+
 // Assignment arguments are immutable for a provider call ID. Cache only that
 // lookup (including a known encrypted value), not every prompt in discovery.
 fn parent_assignment(
@@ -127,6 +138,7 @@ fn parent_assignment(
     };
     type Entry = (std::path::PathBuf, String, String, Option<String>);
     static CACHE: OnceLock<Mutex<std::collections::VecDeque<Entry>>> = OnceLock::new();
+
     let metadata =
         std::fs::metadata(path).map_err(|error| HarnessError::Operation(error.to_string()))?;
     #[cfg(unix)]
@@ -136,6 +148,7 @@ fn parent_assignment(
     };
     #[cfg(not(unix))]
     let identity = format!("{:?}", metadata.created().ok());
+
     let cache = CACHE.get_or_init(Mutex::default);
     {
         let entries = cache
@@ -148,9 +161,11 @@ fn parent_assignment(
             return Ok(entry.3.clone());
         }
     }
+
     let file = File::open(path).map_err(|error| HarnessError::Operation(error.to_string()))?;
     let mut reader = BufReader::new(file.take(metadata.len()));
     let mut bytes = Vec::new();
+
     loop {
         bytes.clear();
         if reader
@@ -162,6 +177,7 @@ fn parent_assignment(
         {
             return Ok(None);
         }
+
         if bytes.len() > 8 * 1024 * 1024 {
             if !bytes.ends_with(b"\n") {
                 reader
@@ -174,6 +190,7 @@ fn parent_assignment(
             );
             continue;
         }
+
         let Some(raw) = std::str::from_utf8(&bytes)
             .ok()
             .and_then(|line| serde_json::from_str::<Value>(line).ok())
@@ -187,6 +204,7 @@ fn parent_assignment(
         {
             continue;
         }
+
         let args = payload.get("arguments").and_then(|value| {
             value
                 .as_str()
@@ -199,6 +217,7 @@ fn parent_assignment(
             .and_then(Value::as_str)
             .filter(|text| !looks_encrypted(text))
             .map(str::to_owned);
+
         if prompt
             .as_ref()
             .is_none_or(|text| text.len() <= 2 * 1024 * 1024)
@@ -222,6 +241,7 @@ fn parent_assignment(
                 entries.pop_front();
             }
         }
+
         return Ok(prompt);
     }
 }
@@ -239,16 +259,22 @@ impl CodexTranscriptReplay {
         drafts: &mut [vertebrae_harness_core::HarnessEventDraftV1],
     ) -> Result<(), HarnessError> {
         use vertebrae_harness_core::HarnessEventPayloadV1;
-        if !drafts.iter().any(|draft| matches!(&draft.payload, HarnessEventPayloadV1::TurnInput(input) if input.content.contains("[The prompt body is encrypted"))) { return Ok(()); }
+
+        if !drafts.iter().any(|draft| matches!(&draft.payload, HarnessEventPayloadV1::TurnInput(input) if input.content.contains("[The prompt body is encrypted"))) {
+            return Ok(());
+        }
+
         let Some(path) = self.discover(request)? else {
             return Ok(());
         };
+
         let child = child_index().read(&path, |state, raw, ordinal| {
             index_record(state, raw, ordinal, request.provider_resume_id.as_str())
         })?;
         let (Some(parent_id), Some(message_id)) = (child.parent, child.initial_message) else {
             return Ok(());
         };
+
         let Some(draft) = drafts.iter_mut().find(|draft| {
             draft
                 .correlation
@@ -261,10 +287,12 @@ impl CodexTranscriptReplay {
         let HarnessEventPayloadV1::TurnInput(input) = &mut draft.payload else {
             return Ok(());
         };
+
         let marker = "[The prompt body is encrypted in this Codex transcript and is unavailable for replay.]";
         if !input.content.contains(marker) {
             return Ok(());
         }
+
         let parent_request = TranscriptReplayRequest {
             provider_resume_id: ProviderResumeId::new(parent_id),
             created_at: None,
@@ -273,6 +301,7 @@ impl CodexTranscriptReplay {
         let Some(parent_path) = self.discover(&parent_request)? else {
             return Ok(());
         };
+
         let parent = child_index().read(&parent_path, |state, raw, ordinal| {
             index_record(
                 state,
@@ -281,15 +310,18 @@ impl CodexTranscriptReplay {
                 parent_request.provider_resume_id.as_str(),
             )
         })?;
+
         let spawn_id = parent
             .children
             .get(request.provider_resume_id.as_str())
             .and_then(|child| child.spawn_tool_call_id.as_ref());
+
         if let Some(id) = spawn_id
             && let Some(prompt) = parent_assignment(&parent_path, id.as_str())?
         {
             input.content = input.content.replace(marker, &prompt);
         }
+
         Ok(())
     }
 
@@ -300,17 +332,20 @@ impl CodexTranscriptReplay {
         let Some(path) = self.discover(request)? else {
             return Ok(Vec::new());
         };
+
         let state = child_index().read(&path, |state, raw, ordinal| {
             index_record(state, raw, ordinal, request.provider_resume_id.as_str())
         })?;
         let mut children = state.children;
         let activity_times = state.activity_times;
+
         for child in children.values_mut() {
             let child_request = TranscriptReplayRequest {
                 provider_resume_id: child.provider_resume_id.clone(),
                 created_at: None,
                 ..request.clone()
             };
+
             match self.discover(&child_request) {
                 Ok(Some(child_path)) => {
                     // A bounded read is sufficient for the latest work status.
@@ -321,16 +356,19 @@ impl CodexTranscriptReplay {
                             .get(child.provider_resume_id.as_str())
                             .copied()
                             .unwrap_or(chrono::DateTime::UNIX_EPOCH);
+
                         match TranscriptTailLines::read_cached(&child_path, 128 * 1024, "Codex") {
                             Ok(tail) => {
                                 for (_, line) in &tail.lines {
                                     let Ok(raw) = serde_json::from_str::<Value>(line) else {
                                         continue;
                                     };
+
                                     let timestamp = record_timestamp(&raw);
                                     if timestamp < status_time {
                                         continue;
                                     }
+
                                     match raw.pointer("/payload/type").and_then(Value::as_str) {
                                         Some("task_started") => {
                                             child.is_active = Some(true);
@@ -378,6 +416,7 @@ mod tests {
     use tempfile::tempdir;
     use vertebrae_harness_core::{HarnessEventPayloadV1, StreamId, TranscriptReplayPageRequest};
     const CHILD: &str = "01a17f07-7376-7ff3-92af-4aa71378c140";
+
     fn request(id: &str) -> TranscriptReplayRequest {
         TranscriptReplayRequest {
             provider_resume_id: ProviderResumeId::new(id),
@@ -410,9 +449,12 @@ mod tests {
             )
             .unwrap();
         }
+
         let adapter = CodexTranscriptReplay::new(Some(home.path().to_owned()));
+
         let replay = adapter.replay(&request("selected")).unwrap().unwrap();
         assert!(replay.events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::TurnInput(input) if input.content.contains("Actual assigned prompt") && !input.content.contains("encrypted"))));
+
         let page = adapter
             .replay_page(
                 &request("selected"),
@@ -443,16 +485,19 @@ mod tests {
             include_str!("../tests/fixtures/child-sessions/child.jsonl"),
         )
         .unwrap();
+
         let adapter = CodexTranscriptReplay::new(Some(home.path().to_owned()));
         let children = adapter.child_sessions(&request("parent")).unwrap();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].provider_resume_id.as_str(), CHILD);
         assert_eq!(children[0].is_active, Some(false));
+
         let replay = adapter.replay(&request(CHILD)).unwrap().unwrap();
         assert!(replay.events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::ToolCall(call) if call.tool_call_id.as_str() == "exec-da5af6af-b2f4-4d0a-a158-eb7efab7d140")));
         assert!(!replay.events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::Text(text) if text.text.contains("parent-only"))));
         let mut cursor = None;
         let mut paged = Vec::new();
+
         loop {
             let page = adapter
                 .replay_page(
@@ -502,7 +547,9 @@ mod tests {
                 .collect::<String>(),
         )
         .unwrap();
+
         let adapter = CodexTranscriptReplay::new(Some(home.path().to_owned()));
+
         let replay = adapter.replay(&request("selected")).unwrap().unwrap();
         let text = replay
             .events
@@ -541,6 +588,7 @@ mod tests {
             "{\"timestamp\":\"2026-12-01T00:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}\n",
         )
         .unwrap();
+
         let adapter = CodexTranscriptReplay::new(Some(home.path().to_owned()));
         assert_eq!(
             adapter.child_sessions(&request("parent")).unwrap()[0].is_active,

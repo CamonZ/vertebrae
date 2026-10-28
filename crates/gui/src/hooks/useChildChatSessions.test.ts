@@ -50,20 +50,24 @@ describe("child chat sessions", () => {
               : [],
       }));
     const replay = vi.spyOn(commands, "loadLocalChatSessionReplay");
+
     const { result, unmount } = renderHook(() =>
       useChildChatSessions("root", true)
     );
     await act(async () => {});
+
     expect(result.current.get("root")).toMatchObject([
       { threadId: "worker", isWorking: true, depth: 0 },
       { threadId: "nested", isWorking: false, depth: 1 },
     ]);
     expect(replay).not.toHaveBeenCalled();
+
     active = false;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
     expect(result.current.get("root")?.[0].isWorking).toBe(false);
+
     unmount();
     const calls = discover.mock.calls.length;
     await vi.advanceTimersByTimeAsync(6000);
@@ -90,9 +94,12 @@ describe("child chat sessions", () => {
               : [],
         };
       });
+
     const { result } = renderHook(() => useChildChatSessions("root", true));
     await act(async () => {});
+
     expect(result.current.get("root")?.[0].isWorking).toBe(true);
+
     fail = true;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
@@ -120,6 +127,7 @@ describe("child chat sessions", () => {
             })
           : Promise.resolve({ status: "ok", data: [] })
       );
+
     const { result, rerender } = renderHook(
       ({ token }) => useChildChatSessions(token, true),
       { initialProps: { token: "first" } }
@@ -144,6 +152,7 @@ describe("child chat sessions", () => {
       .mockRejectedValue(new Error("unreadable transcript"));
     renderHook(() => useChildChatSessions("root", true));
     await act(async () => {});
+
     expect(discover).toHaveBeenCalledTimes(1);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
@@ -187,8 +196,10 @@ describe("child chat sessions", () => {
             : [],
       })
     );
+
     const { result } = renderHook(() => useChildChatSessions("root", true));
     await act(async () => {});
+
     expect(result.current.get("root")?.[0].isWorking).toBe(true);
     finished = true;
     await act(async () => {
@@ -264,6 +275,7 @@ describe("child chat sessions", () => {
       });
     renderHook(() => useChildChatSessions("root", true));
     await act(async () => {});
+
     expect(replay).toHaveBeenCalledTimes(1);
     expect(useChatStore.getState().sessions[id].providerReplay).toMatchObject({ cacheKey: "assignment-ready", loaded: true });
     expect(useChatStore.getState().sessions[id].messages).toContainEqual(
@@ -284,6 +296,7 @@ describe("child chat sessions", () => {
         resolve = done;
       })
     );
+
     const { result, rerender } = renderHook(
       ({ enabled }) => useChildChatSessions("root", enabled),
       { initialProps: { enabled: true } }
@@ -311,8 +324,10 @@ describe("child chat sessions", () => {
               : [child("root-thread", false)],
         };
       });
+
     const { result } = renderHook(() => useChildChatSessions("root", true));
     await act(async () => {});
+
     expect(result.current.get("root")?.map((row) => row.threadId)).toContain(
       "good"
     );

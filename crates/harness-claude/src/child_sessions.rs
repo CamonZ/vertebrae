@@ -19,12 +19,14 @@ struct ClaudeChildren {
     completed: HashSet<String>,
     linked_agents: BTreeMap<String, String>,
 }
+
 fn tag<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     text.split_once(&format!("<{name}>"))?
         .1
         .split_once(&format!("</{name}>"))
         .map(|(value, _)| value)
 }
+
 fn index_record(state: &mut ClaudeChildren, raw: &Value, ordinal: u64) -> bool {
     let mut changed = false;
     let content = raw.pointer("/message/content");
@@ -40,6 +42,7 @@ fn index_record(state: &mut ClaudeChildren, raw: &Value, ordinal: u64) -> bool {
                 .collect::<Vec<_>>()
                 .join("\n")
         });
+
     if text.contains("<task-notification>")
         && tag(&text, "status").is_some_and(|status| {
             matches!(
@@ -51,6 +54,7 @@ fn index_record(state: &mut ClaudeChildren, raw: &Value, ordinal: u64) -> bool {
     {
         changed |= state.completed.insert(id.to_owned());
     }
+
     for block in content.and_then(Value::as_array).into_iter().flatten() {
         if block.get("type").and_then(Value::as_str) == Some("tool_use")
             && matches!(
@@ -71,6 +75,7 @@ fn index_record(state: &mut ClaudeChildren, raw: &Value, ordinal: u64) -> bool {
                 )
             });
         }
+
         if let Some(id) = block.get("tool_use_id").and_then(Value::as_str) {
             let result = raw.get("toolUseResult");
             if state.spawns.contains_key(id)
@@ -81,6 +86,7 @@ fn index_record(state: &mut ClaudeChildren, raw: &Value, ordinal: u64) -> bool {
             {
                 changed |= state.completed.insert(id.to_owned());
             }
+
             if let Some(agent) = result
                 .and_then(|result| result.get("agentId"))
                 .and_then(Value::as_str)
@@ -90,20 +96,25 @@ fn index_record(state: &mut ClaudeChildren, raw: &Value, ordinal: u64) -> bool {
             }
         }
     }
+
     changed
 }
+
 fn read_metadata(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
     use std::io::Read;
+
     let mut bytes = Vec::new();
     std::fs::File::open(path)?
         .take(64 * 1024 + 1)
         .read_to_end(&mut bytes)?;
+
     if bytes.len() > 64 * 1024 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "child metadata exceeds 64 KiB",
         ));
     }
+
     Ok(bytes)
 }
 
@@ -111,11 +122,13 @@ fn read_metadata(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
 fn metadata_diagnostic(path: &std::path::Path, cause: &str) {
     type Seen = BTreeMap<(std::path::PathBuf, String), Option<TranscriptRevision>>;
     static SEEN: OnceLock<Mutex<Seen>> = OnceLock::new();
+
     let revision = TranscriptRevision::capture(path).ok();
     let mut seen = SEEN
         .get_or_init(Mutex::default)
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+
     let key = (path.to_owned(), cause.to_owned());
     if seen.get(&key) == Some(&revision) {
         return;
@@ -123,12 +136,14 @@ fn metadata_diagnostic(path: &std::path::Path, cause: &str) {
     if seen.len() >= 128 {
         seen.clear();
     }
+
     log::warn!(
         "Claude child discovery path={} cause={cause}",
         path.display()
     );
     seen.insert(key, revision);
 }
+
 fn child_has_finished(path: &std::path::Path) -> bool {
     match TranscriptTailLines::read_cached(path, 16 * 1024, "Claude") {
         Ok(tail) => tail
@@ -160,6 +175,7 @@ impl ClaudeTranscriptReplay {
         let Some(path) = self.discover(request)? else {
             return Ok(Vec::new());
         };
+
         static INDEX: std::sync::OnceLock<TranscriptDiscoveryIndex<ClaudeChildren>> =
             std::sync::OnceLock::new();
         let state = INDEX
@@ -168,6 +184,7 @@ impl ClaudeTranscriptReplay {
         let spawns = state.spawns;
         let completed = state.completed;
         let linked_agents = state.linked_agents;
+
         let Some(parent_dir) = path.parent() else {
             return Ok(Vec::new());
         };
@@ -180,11 +197,14 @@ impl ClaudeTranscriptReplay {
         if !directory.is_dir() {
             return Ok(Vec::new());
         }
+
         let authority = self.provider_root()?.join("projects");
         let entries = fs::read_dir(&directory).map_err(|error| {
             HarnessError::Operation(format!("failed to list Claude child sessions: {error}"))
         })?;
+
         let mut children = Vec::new();
+
         for entry in entries {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -193,6 +213,7 @@ impl ClaudeTranscriptReplay {
                     continue;
                 }
             };
+
             let candidate = entry.path();
             if candidate.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
                 continue;
@@ -206,6 +227,7 @@ impl ClaudeTranscriptReplay {
             if stem == request.provider_resume_id.as_str() {
                 continue;
             }
+
             if validated_file(&authority, &candidate).is_none() {
                 metadata_diagnostic(
                     &candidate,
@@ -213,6 +235,7 @@ impl ClaudeTranscriptReplay {
                 );
                 continue;
             }
+
             let metadata_path = candidate.with_extension("meta.json");
             let metadata = match validated_file(&authority, &metadata_path) {
                 Some(path) => match read_metadata(&path) {
@@ -242,6 +265,7 @@ impl ClaudeTranscriptReplay {
                     None
                 }
             };
+
             let tool_id = metadata
                 .as_ref()
                 .and_then(|meta| meta.get("toolUseId"))
@@ -254,14 +278,17 @@ impl ClaudeTranscriptReplay {
                 );
                 continue;
             };
+
             // A directory can also contain descendants owned by other agents.
             if !spawns.contains_key(tool_id) {
                 continue;
             }
+
             let finished = metadata
                 .as_ref()
                 .and_then(|meta| meta.get("finished"))
                 .and_then(Value::as_bool);
+
             children.push(TranscriptChildSession {
                 provider_resume_id: ProviderResumeId::new(stem),
                 spawn_tool_call_id: Some(ToolCallId::new(tool_id)),
@@ -278,6 +305,7 @@ impl ClaudeTranscriptReplay {
                 },
             });
         }
+
         children.sort_by_key(|child| {
             child
                 .spawn_tool_call_id
@@ -285,6 +313,7 @@ impl ClaudeTranscriptReplay {
                 .and_then(|id| spawns.get(id.as_str()))
                 .map(|(_, ordinal)| *ordinal)
         });
+
         Ok(children)
     }
 }
@@ -295,6 +324,7 @@ mod tests {
     use tempfile::tempdir;
     use vertebrae_harness_core::{HarnessEventPayloadV1, StreamId, TranscriptReplayPageRequest};
     const CHILD: &str = "agent-aaeb35c276750cf44";
+
     fn request(id: &str) -> TranscriptReplayRequest {
         TranscriptReplayRequest {
             provider_resume_id: ProviderResumeId::new(id),
@@ -303,6 +333,7 @@ mod tests {
             created_at: None,
         }
     }
+
     #[test]
     fn discovers_real_child_and_replays_text_and_tools_as_a_standalone_conversation() {
         let home = tempdir().unwrap();
@@ -324,11 +355,13 @@ mod tests {
             include_str!("../tests/fixtures/child-sessions/child.meta.json"),
         )
         .unwrap();
+
         let adapter = ClaudeTranscriptReplay::new(Some(home.path().to_owned()));
         let children = adapter.child_sessions(&request("parent")).unwrap();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].provider_resume_id.as_str(), CHILD);
         assert_eq!(children[0].is_active, Some(false));
+
         let replay = adapter.replay(&request(CHILD)).unwrap().unwrap();
         assert!(replay.events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::Text(text) if text.text == "child reply")));
         assert!(replay.events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::ToolCall(call) if call.tool_call_id.as_str() == "toolu_01QSjPiMXuxW7iHTpqQtjxKM")));
@@ -397,6 +430,7 @@ mod tests {
             Some(false)
         );
     }
+
     #[test]
     fn invalid_utf8_and_stale_metadata_do_not_hide_children_or_leave_activity_running() {
         let home = tempdir().unwrap();
@@ -412,6 +446,7 @@ mod tests {
         fs::write(agents.join(format!("{CHILD}.jsonl")), "").unwrap();
         let meta = agents.join(format!("{CHILD}.meta.json"));
         fs::write(&meta, "{\"toolUseId\":\"toolu_019bLng9wNyc1LBNCPUbL2nh\"}").unwrap();
+
         let adapter = ClaudeTranscriptReplay::new(Some(home.path().to_owned()));
         assert_eq!(
             adapter.child_sessions(&request("parent")).unwrap()[0].is_active,

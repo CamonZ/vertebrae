@@ -1612,9 +1612,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     while (true) {
       const result = await requestProviderReplayPage(session, cursor);
+
       if (result.status === "error") return result;
+
       if (existingCacheKey && result.page.cache_key === existingCacheKey)
         return result;
+
       if (cacheKey !== undefined && result.page.cache_key !== cacheKey) {
         return {
           status: "error",
@@ -1622,8 +1625,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
             "Provider transcript changed while refreshing; retry the replay.",
         };
       }
+
       cacheKey = result.page.cache_key;
       collected.push(result.page.events);
+
       const retainedBoundary =
         !retainFromEventId ||
         result.page.events.some((line) => {
@@ -1633,6 +1638,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             return false;
           }
         });
+
       if (
         (result.page.events.length > 0 && retainedBoundary) ||
         !result.page.has_more ||
@@ -1650,6 +1656,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           error: "Provider transcript returned a repeated page cursor.",
         };
       }
+
       seenCursors.add(result.page.next_cursor);
       cursor = result.page.next_cursor;
     }
@@ -1683,8 +1690,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
     refresh = false
   ) => {
     if (!session.providerResumeId) return;
+
     const currentReplay = get().sessions[sessionId]?.providerReplay;
     if (currentReplay?.loading || (currentReplay?.loaded && !refresh)) return;
+
     let retainFromEventId: string | undefined;
     if (refresh && currentReplay?.lines[0]) {
       try {
@@ -1693,9 +1702,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
         /* Legacy unkeyed replay. */
       }
     }
+
     const backgroundRefresh = refresh && !!currentReplay?.loaded;
     if (backgroundRefresh && refreshingProviderThreads.has(sessionId)) return;
     if (backgroundRefresh) refreshingProviderThreads.add(sessionId);
+
     const generation = backgroundRefresh
       ? currentReplay.generation
       : providerReplayGeneration();
@@ -1871,6 +1882,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     const updatedSession = updated as ChatSession | null;
     if (updatedSession && options.persist !== false) {
       const persistence = persistLocalChatSession(updatedSession);
+
       set((state) => ({
         localSessionSummaries: upsertLocalSessionSummary(
           state.localSessionSummaries,
@@ -2193,6 +2205,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (runtime) {
         const previousGate = runtime.gate;
         void updateSession(runtime.id, (session) => ({ ...session, gate }));
+
         set((state) => ({
           ...focusSessionInPaneLayout(state, runtime.id),
           panelOpen: true,
@@ -2424,6 +2437,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     ensureProviderThreadSession: (input) => {
       const id = providerThreadSessionId(input.harness, input.providerResumeId);
       const existing = get().sessions[id];
+
       if (!existing) {
         const session = hydrateLocalSession(createProviderThreadSession(input));
         if (input.ownerSessionId)
@@ -2435,6 +2449,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               : null,
             turnId: null,
           };
+
         set((state) => ({ sessions: { ...state.sessions, [id]: session } }));
       } else if (
         input.label &&
@@ -2475,17 +2490,21 @@ export const useChatStore = create<ChatStore>((set, get) => {
           },
         }));
       }
+
       return id;
     },
+
     setProviderChildActivity: (sessionId, active, turnId) => {
       const current = get().sessions[sessionId];
       if (!current?.providerChild) return;
+
       const previous = current.providerChild;
       if (
         active &&
         get().sessions[previous.ownerSessionId]?.providerChildrenStopped
       )
         return;
+
       // Only a correlated live terminal closes a specific turn. A disk status
       // with no turn ID cannot permanently suppress a later live update.
       if (active && turnId && turnId === previous.settledTurnId) return;
@@ -2504,6 +2523,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             (active || previous.settledTurnId === turnId)))
       )
         return;
+
       set((state) => ({
         sessions: {
           ...state.sessions,
@@ -2519,6 +2539,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         },
       }));
     },
+
     settleProviderChildren: (ownerSessionId) => {
       const owner = get().sessions[ownerSessionId];
       if (owner)
@@ -2528,6 +2549,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             [ownerSessionId]: { ...owner, providerChildrenStopped: true },
           },
         }));
+
       for (const session of Object.values(get().sessions)) {
         if (session.providerChild?.ownerSessionId === ownerSessionId)
           get().setProviderChildActivity(
@@ -2547,14 +2569,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
     selectProviderThreadSession: async (input) => {
       const providerResumeId = input.providerResumeId.trim();
       if (!providerResumeId) return null;
+
       const projectPath = input.projectPath ?? null;
       const runtimeSessionId = get().ensureProviderThreadSession({
         ...input,
         providerResumeId,
         projectPath,
       });
+
       const selected = get().sessions[runtimeSessionId];
       hydrateProviderMessagesInPlace(runtimeSessionId, selected);
+
       set((state) => ({
         ...focusSessionInPaneLayout(
           state,
@@ -2563,6 +2588,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         ),
         panelOpen: true,
       }));
+
       return runtimeSessionId;
     },
 

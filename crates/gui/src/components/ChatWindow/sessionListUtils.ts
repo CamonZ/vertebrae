@@ -394,13 +394,17 @@ export function buildHistoryChildOutlines(
       .filter((s) => s.providerResumeId)
       .map((s) => [`${s.harness}:${s.providerResumeId}`, s])
   );
+
   const children = new Map<string, LocalChatSessionSummary[]>();
+
   for (const session of sessions) {
     if (!session.providerParentResumeId || !session.providerResumeId) continue;
+
     const parent = byThread.get(
       `${session.harness}:${session.providerParentResumeId}`
     );
     if (!parent || parent.id === session.id) continue;
+
     const seen = new Set([session.id]);
     let ancestor: LocalChatSessionSummary | undefined = parent;
     while (ancestor && !seen.has(ancestor.id)) {
@@ -410,13 +414,17 @@ export function buildHistoryChildOutlines(
       );
     }
     if (ancestor) continue;
+
     const siblings = children.get(parent.id) ?? [];
     siblings.push(session);
     children.set(parent.id, siblings);
   }
+
   const result = new Map<string, SpawnOutlineItem[]>();
+
   const visit = (id: string): SpawnOutlineItem[] => {
     const rows: SpawnOutlineItem[] = [];
+
     for (const child of (children.get(id) ?? []).sort((a, b) =>
       a.createdAt.localeCompare(b.createdAt)
     )) {
@@ -428,11 +436,14 @@ export function buildHistoryChildOutlines(
         detail: "",
         depth: 0,
       });
+
       for (const row of visit(child.id))
         rows.push({ ...row, depth: (row.depth ?? 0) + 1 });
     }
     return rows;
   };
+
   for (const session of sessions) result.set(session.id, visit(session.id));
+
   return result;
 }

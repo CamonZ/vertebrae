@@ -18,6 +18,7 @@ export function useChildChatSessions(
   const [outlines, setOutlines] = useState<Map<string, SpawnOutlineItem[]>>(
     () => new Map()
   );
+
   const wake = useRef<() => void>(() => {});
   const liveToken = useChatStore((state) =>
     Object.values(state.sessions)
@@ -28,36 +29,45 @@ export function useChildChatSessions(
       )
       .join("\0")
   );
+
   useEffect(() => {
     wake.current();
   }, [sessionToken, liveToken]);
+
   useEffect(() => {
     if (!enabled) return;
+
     let retired = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let running = false;
     let failures = 0;
     const reportedFailures = new Set<string>();
+
     const diagnostic = (error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
+
       if (!reportedFailures.has(message) && reportedFailures.size < 64) {
         console.warn("Could not discover child chat sessions", error);
         reportedFailures.add(message);
       }
     };
+
     const refresh = async () => {
       if (running || retired) return;
       running = true;
+
       try {
         const sessions = Object.values(useChatStore.getState().sessions).filter(
           (session) => session.status === "open" && !!session.providerResumeId
         );
+
         let discoveryFailed = false;
         const liveAtStart = new Map(
           sessions.map((session) => [session.id, session.updatedAt])
         );
         const next = new Map<string, SpawnOutlineItem[]>();
         const discovered = new Map<string, Promise<SpawnOutlineItem[]>>();
+
         const visit = (
           harness: LocalChatHarnessKind,
           resumeId: string,
@@ -65,9 +75,12 @@ export function useChildChatSessions(
           ancestors: ReadonlySet<string>
         ): Promise<SpawnOutlineItem[]> => {
           const key = `${harness}:${resumeId}`;
+
           if (ancestors.has(key) || retired) return Promise.resolve([]);
+
           const cached = discovered.get(key);
           if (cached) return cached;
+
           const pending = (async () => {
             const result = await commands.discoverLocalChatChildSessions({
               session_id: key,
@@ -78,14 +91,18 @@ export function useChildChatSessions(
               cursor: null,
               limit: null,
             });
+
             if (retired) return [];
             if (result.status === "error")
               throw new Error(providerReplayErrorMessage(result.error));
+
             const rows: SpawnOutlineItem[] = [];
             const lineage = new Set([...ancestors, key]);
+
             for (const child of result.data) {
               if (lineage.has(`${harness}:${child.provider_resume_id}`))
                 continue;
+
               rows.push({
                 id: `${harness}:${child.provider_resume_id}`,
                 spawnId: child.spawn_tool_call_id ?? child.provider_resume_id,
@@ -97,6 +114,7 @@ export function useChildChatSessions(
                   : { isWorking: child.is_active }),
                 depth: 0,
               });
+
               try {
                 const nested = await visit(
                   harness,
@@ -117,11 +135,14 @@ export function useChildChatSessions(
             }
             return rows;
           })();
+
           discovered.set(key, pending);
           return pending;
         };
+
         for (const session of sessions) {
           if (retired) return;
+
           try {
             const rows = await visit(
               session.harness,
@@ -129,6 +150,7 @@ export function useChildChatSessions(
               session.projectPath,
               new Set()
             );
+
             const current = useChatStore.getState().sessions[session.id];
             if (
               !current ||
@@ -137,6 +159,7 @@ export function useChildChatSessions(
               current.projectPath !== session.projectPath
             )
               continue;
+
             next.set(session.id, rows);
             for (const row of rows) {
               if (!row.threadId) continue;
@@ -151,6 +174,7 @@ export function useChildChatSessions(
                   ownerSessionId: session.id,
                 });
               const child = useChatStore.getState().sessions[childId];
+
               // Claude terminal evidence may arrive only in persisted task
               // notifications/metadata. Do not overwrite live work that arrived
               // while this older discovery request was in flight.
@@ -170,7 +194,9 @@ export function useChildChatSessions(
             diagnostic(error);
           }
         }
+
         if (retired) return;
+
         setOutlines((previous) => {
           const merged = new Map(previous);
           for (const [id, rows] of next) merged.set(id, rows);
@@ -182,10 +208,13 @@ export function useChildChatSessions(
             ? previous
             : merged;
         });
+
         const state = useChatStore.getState();
+
         for (const pane of state.paneLayout.panes) {
           const selected = state.sessions[pane.sessionId];
           if (!selected?.providerResumeId) continue;
+
           // Refresh terminal transitions too: final output may have landed since
           // the preceding poll. Store paging owns revision invalidation.
           const child = [...next.values()]
@@ -196,6 +225,7 @@ export function useChildChatSessions(
           const needsAssignment = !selected.messages.some(
             (message) => message.kind === "user"
           );
+
           if (
             child &&
             !selected.backendSessionId &&
@@ -205,8 +235,11 @@ export function useChildChatSessions(
           )
             state.refreshProviderThreadSession(selected.id);
         }
+
         failures = discoveryFailed ? Math.min(failures + 1, 5) : 0;
+
         if (!discoveryFailed) reportedFailures.clear();
+
         const busy =
           Object.values(useChatStore.getState().sessions).some(
             (session) => session.providerChild?.active === true
@@ -215,16 +248,19 @@ export function useChildChatSessions(
             isLocalChatLifecycleBusy(getLocalChatLifecycle(session))
           ) ||
           [...next.values()].some((rows) => rows.some((row) => row.isWorking));
+
         const delay = discoveryFailed
           ? Math.min(3000 * 2 ** (failures - 1), 30000)
           : busy
             ? 3000
             : 15000;
+
         timer = setTimeout(() => void refresh(), delay);
       } finally {
         running = false;
       }
     };
+
     // Metadata/activity changes wake the existing owner; they never retire an
     // in-flight request merely because another streamed message arrived.
     wake.current = () => {
@@ -232,23 +268,29 @@ export function useChildChatSessions(
       clearTimeout(timer);
       timer = setTimeout(() => void refresh(), 0);
     };
+
     void refresh();
+
     return () => {
       retired = true;
       wake.current = () => {};
       clearTimeout(timer);
     };
   }, [enabled]);
+
   return useMemo(() => {
     void liveToken;
     const merged = new Map([...outlines].map(([id, rows]) => [id, [...rows]]));
+
     for (const session of Object.values(useChatStore.getState().sessions)) {
       const child = session.providerChild;
+
       if (!child || !session.providerResumeId) continue;
       const rows = merged.get(child.ownerSessionId) ?? [];
       const index = rows.findIndex(
         (row) => row.threadId === session.providerResumeId
       );
+
       if (index >= 0)
         rows[index] = {
           ...rows[index],
@@ -263,8 +305,10 @@ export function useChildChatSessions(
           detail: "",
           isWorking: child.active === true,
         });
+
       merged.set(child.ownerSessionId, rows);
     }
+
     return merged;
   }, [outlines, liveToken]);
 }

@@ -31,21 +31,25 @@ impl CodexTranscriptReplay {
         request: &TranscriptReplayRequest,
     ) -> Result<Option<vertebrae_harness_core::ProviderResumeId>, HarnessError> {
         use std::io::{BufRead, Read};
+
         let Some(path) = self.discover(request)? else {
             return Ok(None);
         };
+
         let file =
             fs::File::open(&path).map_err(|error| HarnessError::Operation(error.to_string()))?;
         let mut header = Vec::new();
         std::io::BufReader::new(file.take(64 * 1024))
             .read_until(b'\n', &mut header)
             .map_err(|error| HarnessError::Operation(error.to_string()))?;
+
         let raw: serde_json::Value = serde_json::from_slice(&header).map_err(|error| {
             HarnessError::Operation(format!("invalid Codex session header: {error}"))
         })?;
         if raw["type"] != "session_meta" {
             return Ok(None);
         }
+
         Ok(raw
             .pointer("/payload/parent_thread_id")
             .or_else(|| raw.pointer("/payload/source/subagent/thread_spawn/parent_thread_id"))
@@ -61,6 +65,7 @@ impl CodexTranscriptReplay {
         let Some(path) = self.discover(request)? else {
             return Ok(None);
         };
+
         let revision = TranscriptRevision::capture(&path)?;
         Ok(Some(self.normalize(path, revision, request)?))
     }
@@ -73,12 +78,14 @@ impl CodexTranscriptReplay {
         let Some(path) = self.discover(request)? else {
             return Ok(None);
         };
+
         let revision = TranscriptRevision::capture(&path)?;
         let projection_key = codex_projection_key(request);
         let tail_path = path.clone();
         let budget = tail_read_budget(page.limit.unwrap_or_default());
         let normalized_path = path.clone();
         let normalized_revision = revision.clone();
+
         load_transcript_page(
             page,
             codex_replay_cache(),

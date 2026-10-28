@@ -85,7 +85,9 @@ export function filterLocalChatSessionGroups(
             session,
           ])
       );
+
       const matches = new Set<string>();
+
       for (const session of sourceSessions) {
         if (
           !localChatSessionDisplayTitle(session)
@@ -93,12 +95,14 @@ export function filterLocalChatSessionGroups(
             .includes(normalizedQuery)
         )
           continue;
+
         let row: LocalChatSessionSummary | undefined = session;
         while (row && !matches.has(row.id)) {
           matches.add(row.id);
           row = byThread.get(`${row.harness}:${row.providerParentResumeId}`);
         }
       }
+
       const sessions = sourceSessions.filter((session) =>
         matches.has(session.id)
       );
