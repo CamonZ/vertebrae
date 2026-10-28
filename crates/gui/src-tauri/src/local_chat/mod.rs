@@ -1,3 +1,4 @@
+pub(crate) mod annotations;
 pub(crate) mod events;
 pub(crate) mod gate;
 pub(crate) mod harness;
@@ -45,6 +46,8 @@ fn chat_developer_instructions_for(docs_root: &std::path::Path) -> String {
     )
 }
 
+pub use annotations::LocalChatAnnotationStore;
+pub(crate) use annotations::{LocalChatAnnotation, LocalChatAnnotationEvent};
 pub(crate) use events::{
     LocalChatCompactionEvent, LocalChatEvent, LocalChatEventSink, LocalChatFileChange,
     LocalChatFileChangeEvent, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,

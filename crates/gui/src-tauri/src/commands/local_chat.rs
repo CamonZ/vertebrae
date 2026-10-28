@@ -1,5 +1,5 @@
 use super::*;
-use crate::local_chat::LocalChatHarnessKind;
+use crate::local_chat::{LocalChatAnnotation, LocalChatAnnotationStore, LocalChatHarnessKind};
 use crate::types::PermissionMode;
 use std::fs;
 use std::{
@@ -522,17 +522,18 @@ pub async fn infer_local_chat_session_title(
     }
 }
 
-/// Load the app-managed local chat metadata index.
-#[tauri::command]
-#[specta::specta]
-pub async fn load_local_chat_session_index() -> Result<Vec<LocalChatSessionIndexEntry>, CommandError>
-{
-    let path = local_chat_session_index_path()?;
+/// Read the session index at `path`. Annotation files are swept only after
+/// the index was read and decoded successfully.
+async fn read_session_index_and_sweep(
+    path: &Path,
+    annotation_store: &LocalChatAnnotationStore,
+    local_chat_manager: &LocalChatSessionManager,
+) -> Result<Vec<LocalChatSessionIndexEntry>, CommandError> {
     if !path.exists() {
         return Ok(Vec::new());
     }
 
-    let raw = fs::read_to_string(&path).map_err(|error| CommandError {
+    let raw = fs::read_to_string(path).map_err(|error| CommandError {
         message: format!("Failed to read local chat session index: {}", error),
     })?;
     if raw.trim().is_empty() {
@@ -543,7 +544,7 @@ pub async fn load_local_chat_session_index() -> Result<Vec<LocalChatSessionIndex
         message: format!("Failed to parse local chat session index: {}", error),
     })?;
 
-    let mut sessions = if value.is_array() {
+    let sessions = if value.is_array() {
         serde_json::from_value::<Vec<LocalChatSessionIndexEntry>>(value)
     } else {
         serde_json::from_value::<LocalChatSessionIndexFile>(value).map(|index| index.sessions)
@@ -551,6 +552,20 @@ pub async fn load_local_chat_session_index() -> Result<Vec<LocalChatSessionIndex
     .map_err(|error| CommandError {
         message: format!("Failed to decode local chat session index: {error}"),
     })?;
+    sweep_orphaned_annotations(annotation_store, local_chat_manager, &sessions).await;
+    Ok(sessions)
+}
+
+/// Load the app-managed local chat metadata index.
+#[tauri::command]
+#[specta::specta]
+pub async fn load_local_chat_session_index(
+    local_chat_manager: State<'_, LocalChatSessionManager>,
+    annotation_store: State<'_, LocalChatAnnotationStore>,
+) -> Result<Vec<LocalChatSessionIndexEntry>, CommandError> {
+    let path = local_chat_session_index_path()?;
+    let mut sessions =
+        read_session_index_and_sweep(&path, &annotation_store, &local_chat_manager).await?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig::default());
@@ -592,12 +607,31 @@ pub async fn load_local_chat_session_index() -> Result<Vec<LocalChatSessionIndex
 #[tauri::command]
 #[specta::specta]
 pub async fn save_local_chat_session_index(
+    local_chat_manager: State<'_, LocalChatSessionManager>,
+    annotation_store: State<'_, LocalChatAnnotationStore>,
     input: SaveLocalChatSessionIndexInput,
 ) -> Result<(), CommandError> {
     let path = local_chat_session_index_path()?;
+    write_session_index_and_sweep(
+        &path,
+        input.sessions,
+        &annotation_store,
+        &local_chat_manager,
+    )
+    .await
+}
+
+/// Atomically replace the session index at `path`, then sweep annotation
+/// files of sessions it no longer lists.
+async fn write_session_index_and_sweep(
+    path: &Path,
+    sessions: Vec<LocalChatSessionIndexEntry>,
+    annotation_store: &LocalChatAnnotationStore,
+    local_chat_manager: &LocalChatSessionManager,
+) -> Result<(), CommandError> {
     let index = LocalChatSessionIndexFile {
         version: 1,
-        sessions: input.sessions,
+        sessions,
     };
     let serialized = serde_json::to_string_pretty(&index).map_err(|error| CommandError {
         message: format!("Failed to serialize local chat session index: {}", error),
@@ -606,10 +640,78 @@ pub async fn save_local_chat_session_index(
     fs::write(&tmp_path, serialized).map_err(|error| CommandError {
         message: format!("Failed to write local chat session index: {}", error),
     })?;
-    fs::rename(&tmp_path, &path).map_err(|error| CommandError {
+    fs::rename(&tmp_path, path).map_err(|error| CommandError {
         message: format!("Failed to replace local chat session index: {}", error),
     })?;
+    sweep_orphaned_annotations(annotation_store, local_chat_manager, &index.sessions).await;
     Ok(())
+}
+
+/// Remove annotation files of sessions absent from a session index that was
+/// just read or written successfully. The index lists every project's
+/// sessions, and chats with a live runtime are always kept.
+async fn sweep_orphaned_annotations(
+    annotation_store: &LocalChatAnnotationStore,
+    local_chat_manager: &LocalChatSessionManager,
+    sessions: &[LocalChatSessionIndexEntry],
+) {
+    let known_session_ids = sessions
+        .iter()
+        .map(|session| session.id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let live_session_ids = local_chat_manager.live_chat_session_ids().await;
+    let store = annotation_store.clone();
+    let swept = tauri::async_runtime::spawn_blocking(move || {
+        store.sweep_orphans(&known_session_ids, &live_session_ids)
+    })
+    .await;
+    match swept {
+        Ok(Ok(removed)) if !removed.is_empty() => {
+            log::info!(
+                "[LOCAL_CHAT] removed annotations of {} unknown sessions",
+                removed.len()
+            )
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => log::warn!("[LOCAL_CHAT] annotation sweep failed: {error}"),
+        Err(error) => log::warn!("[LOCAL_CHAT] annotation sweep task failed: {error}"),
+    }
+}
+
+/// Load the Vertebrae-owned tool-call annotations of one chat session.
+#[tauri::command]
+#[specta::specta]
+pub async fn load_local_chat_annotations(
+    annotation_store: State<'_, LocalChatAnnotationStore>,
+    session_id: String,
+) -> Result<Vec<LocalChatAnnotation>, CommandError> {
+    let store = annotation_store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || store.load(&session_id))
+        .await
+        .map_err(|error| CommandError {
+            message: format!("Failed to load local chat annotations: {error}"),
+        })?
+        .map_err(|error| CommandError {
+            message: format!("Failed to load local chat annotations: {error}"),
+        })
+}
+
+/// Delete a chat session's annotations; deleting absent annotations succeeds.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_local_chat_annotations(
+    annotation_store: State<'_, LocalChatAnnotationStore>,
+    session_id: String,
+) -> Result<(), CommandError> {
+    let store = annotation_store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || store.delete(&session_id))
+        .await
+        .map_err(|error| CommandError {
+            message: format!("Failed to delete local chat annotations: {error}"),
+        })?
+        .map_err(|error| CommandError {
+            message: format!("Failed to delete local chat annotations: {error}"),
+        })
 }
 
 /// Launch settings for title inference on a custom provider; `None` for
@@ -1134,5 +1236,90 @@ mod tests {
             .expect_err("outside file must be rejected");
         assert!(error.message.contains("outside the captured project"));
         let _ = fs::remove_file(outside);
+    }
+
+    fn index_entry(id: &str) -> LocalChatSessionIndexEntry {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "label": id,
+            "titleUserMessageCount": 0,
+            "harness": "claude",
+            "createdAt": "2026-10-28T00:00:00Z",
+            "updatedAt": "2026-10-28T00:00:00Z",
+            "messageCount": 1,
+            "lifecycle": "idle",
+            "status": "open",
+        }))
+        .expect("valid index entry")
+    }
+
+    fn annotation_fixture(
+        dir: &std::path::Path,
+        session_ids: &[&str],
+    ) -> (LocalChatAnnotationStore, PathBuf) {
+        let annotations = dir.join("local-chat-annotations");
+        let store = LocalChatAnnotationStore::new(
+            Ok(annotations.clone()),
+            crate::local_chat::LocalChatEventSink::inert_for_tests(),
+        );
+        fs::create_dir_all(&annotations).unwrap();
+        for session_id in session_ids {
+            fs::write(annotations.join(format!("{session_id}.jsonl")), "").unwrap();
+        }
+        (store, annotations)
+    }
+
+    #[tokio::test]
+    async fn a_failed_index_read_sweeps_no_annotations() {
+        let dir = tempdir().unwrap();
+        let (store, annotations) = annotation_fixture(dir.path(), &["chat-1"]);
+        let manager = LocalChatSessionManager::with_harnesses_for_tests(Vec::new());
+        let index = dir.path().join("local-chat-session-index.json");
+        fs::write(&index, "{ not json").unwrap();
+
+        read_session_index_and_sweep(&index, &store, &manager)
+            .await
+            .expect_err("corrupt index must fail");
+        fs::write(&index, r#"{"version":1,"sessions":[{"id":7}]}"#).unwrap();
+        read_session_index_and_sweep(&index, &store, &manager)
+            .await
+            .expect_err("undecodable index must fail");
+
+        assert!(annotations.join("chat-1.jsonl").exists());
+    }
+
+    #[tokio::test]
+    async fn reading_and_saving_the_index_sweep_annotations_of_unknown_sessions() {
+        let dir = tempdir().unwrap();
+        let (store, annotations) = annotation_fixture(dir.path(), &["kept", "dropped", "later"]);
+        let manager = LocalChatSessionManager::with_harnesses_for_tests(Vec::new());
+        let index = dir.path().join("local-chat-session-index.json");
+
+        write_session_index_and_sweep(
+            &index,
+            vec![index_entry("kept"), index_entry("later")],
+            &store,
+            &manager,
+        )
+        .await
+        .unwrap();
+        assert!(!annotations.join("dropped.jsonl").exists());
+
+        fs::write(
+            &index,
+            serde_json::json!({
+                "version": 1,
+                "sessions": [serde_json::to_value(index_entry("kept")).unwrap()],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let sessions = read_session_index_and_sweep(&index, &store, &manager)
+            .await
+            .unwrap();
+
+        assert_eq!(sessions.len(), 1);
+        assert!(annotations.join("kept.jsonl").exists());
+        assert!(!annotations.join("later.jsonl").exists());
     }
 }

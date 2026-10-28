@@ -34,11 +34,12 @@ use events::{
     TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
 };
 use local_chat::{
-    ClaudeStartupCapabilities, LocalChatCompactionEvent, LocalChatFileChangeEvent,
-    LocalChatSessionEndEvent, LocalChatSessionErrorEvent, LocalChatSessionInitEvent,
-    LocalChatSessionManager, LocalChatSessionTitleEvent, LocalChatSessionUsageEvent,
-    LocalChatSessionWarningEvent, LocalChatTextEvent, LocalChatToolCallEvent,
-    LocalChatToolResultEvent, LocalChatTurnStartedEvent,
+    ClaudeStartupCapabilities, LocalChatAnnotationEvent, LocalChatAnnotationStore,
+    LocalChatCompactionEvent, LocalChatFileChangeEvent, LocalChatSessionEndEvent,
+    LocalChatSessionErrorEvent, LocalChatSessionInitEvent, LocalChatSessionManager,
+    LocalChatSessionTitleEvent, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
+    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
+    LocalChatTurnStartedEvent,
 };
 use project_config::ProjectConfig;
 
@@ -161,6 +162,8 @@ fn create_builder() -> Builder {
             commands::save_local_chat_session_index,
             commands::load_local_chat_session_replay,
             commands::discover_local_chat_child_sessions,
+            commands::load_local_chat_annotations,
+            commands::delete_local_chat_annotations,
             commands::resolve_permission_request,
             // WebSocket status command
             commands::get_websocket_status,
@@ -220,6 +223,7 @@ fn create_builder() -> Builder {
             LocalChatSessionErrorEvent,
             LocalChatSessionWarningEvent,
             LocalChatCompactionEvent,
+            LocalChatAnnotationEvent,
         ])
 }
 
@@ -378,6 +382,9 @@ pub fn run() {
                     provider_profiles,
                 );
             app.manage(local_chat_manager);
+            app.manage(LocalChatAnnotationStore::in_app_data_dir(
+                local_chat::LocalChatEventSink::tauri(app.handle().clone()),
+            ));
             log::info!("[STARTUP] Local chat session manager initialized");
 
             // Start WebSocket connection to Sacrum for real-time updates
