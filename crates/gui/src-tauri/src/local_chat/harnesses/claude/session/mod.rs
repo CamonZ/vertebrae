@@ -410,6 +410,7 @@ struct ClaudeGuiEventSinkContext {
     turn_traces: TurnTraceRegistry,
     permission_bridge: crate::local_chat::permissions::PermissionBridge,
     lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
+    recording: crate::local_chat::worktree_delta::RecordingTap,
 }
 
 impl ClaudeGuiEventSink {
@@ -432,7 +433,8 @@ impl ClaudeGuiEventSink {
                     initial_model,
                     DEFAULT_CLAUDE_CONTEXT_WINDOW,
                     false,
-                ),
+                )
+                .with_recording(context.recording),
             ),
             sessions: context.sessions,
             turn_traces: context.turn_traces,
@@ -791,6 +793,7 @@ impl ClaudeSessionRuntime {
                 turn_traces: turn_traces.clone(),
                 permission_bridge: runtime.permission_bridge(),
                 lifecycle_gate: lifecycle_gate.clone(),
+                recording: runtime.recording(),
             },
         ));
         let control_sink = Arc::new(

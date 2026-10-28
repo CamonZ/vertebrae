@@ -32,6 +32,11 @@ import {
   DEFAULT_LOCAL_CHAT_HARNESS,
   isAutomaticLocalChatLabel,
 } from "../utils/localChatPersistence";
+import {
+  associationWorktreePath,
+  forgetRecordingTarget,
+  noteRecordingTarget,
+} from "./useChatAssociation";
 import { gateChatAcceptsSubmission } from "../utils/gateChat";
 import { resolveContextWindow } from "../utils/modelContextWindow";
 
@@ -793,9 +798,13 @@ export async function doStartSession(
       );
     }
 
+    const recordingWorktree = associationWorktreePath(session.association);
+    noteRecordingTarget(backendSessionId, recordingWorktree);
     const result = await commands.createLocalChatSession({
       harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
       backend_session_id: backendSessionId,
+      chat_session_id: session.id,
+      recording_worktree: recordingWorktree,
       working_dir: workingDir,
       initial_prompt: initialPrompt ?? null,
       provider_resume_id: resumeId,
@@ -820,6 +829,7 @@ export async function doStartSession(
     if (completionIsStale()) return;
     deps.setSessionLifecycle(sessionId, userMessage ? "streaming" : "idle");
   } catch (error) {
+    forgetRecordingTarget(backendSessionId);
     if (completionIsStale()) return;
     const message = commandErrorMessage(error);
     deps.setBackendSessionId(sessionId, null);

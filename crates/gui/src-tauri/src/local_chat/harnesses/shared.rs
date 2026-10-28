@@ -11,6 +11,7 @@ use vertebrae_harness_core::{
     EventCorrelation, EventId, FileChange, FileChangeEvent, StreamId, ToolCallId,
 };
 
+use crate::local_chat::worktree_delta::RecordingTap;
 use crate::local_chat::{
     LocalChatCompactionEvent, LocalChatEvent, LocalChatEventSink, LocalChatFileChange,
     LocalChatFileChangeEvent, LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionEndEvent,
@@ -48,6 +49,7 @@ pub(crate) struct LocalChatHarnessEventSink {
     pub(crate) stats: Arc<Mutex<LocalChatSessionStats>>,
     default_context_window: u32,
     inherit_terminal_usage: bool,
+    recording: RecordingTap,
 }
 
 impl LocalChatHarnessEventSink {
@@ -69,7 +71,14 @@ impl LocalChatHarnessEventSink {
             })),
             default_context_window,
             inherit_terminal_usage,
+            recording: RecordingTap::default(),
         }
+    }
+
+    /// Forward tool boundaries to the runtime's worktree recorder.
+    pub(crate) fn with_recording(mut self, recording: RecordingTap) -> Self {
+        self.recording = recording;
+        self
     }
 
     pub(crate) fn record_turn(&self) -> u32 {
@@ -196,6 +205,12 @@ impl EventSink for LocalChatHarnessEventSink {
             .as_ref()
             .map(ToString::to_string);
         let item_id = event.correlation.item_id.as_ref().map(ToString::to_string);
+        self.recording.forward(
+            &event.payload,
+            event.semantics,
+            is_root_stream,
+            parent_tool_use_id.as_deref(),
+        );
 
         match event.payload {
             HarnessEventPayloadV1::SessionStarted(started) => {

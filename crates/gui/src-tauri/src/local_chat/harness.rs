@@ -7,6 +7,7 @@ use vertebrae_harness::HarnessFactoryConfig;
 use crate::local_chat::events::LocalChatEventSink;
 use crate::local_chat::gate::LocalChatGateBinding;
 use crate::local_chat::permissions::PermissionBridge;
+use crate::local_chat::worktree_delta::RecordingTap;
 use crate::types::PermissionMode;
 
 #[derive(
@@ -113,6 +114,14 @@ pub struct LocalChatHarnessCatalog {
 pub struct CreateLocalChatSessionInput {
     pub harness: LocalChatHarnessKind,
     pub backend_session_id: String,
+    /// Persistent chat session this runtime serves; Vertebrae-owned
+    /// records such as tool-call annotations are keyed by it.
+    pub chat_session_id: String,
+    /// Git worktree whose per-tool-call changes are recorded: the project
+    /// root or one of its worktrees. Absent leaves recording off.
+    #[serde(default)]
+    #[specta(optional)]
+    pub recording_worktree: Option<String>,
     pub working_dir: Option<String>,
     pub initial_prompt: Option<String>,
     pub provider_resume_id: Option<String>,
@@ -239,6 +248,10 @@ pub enum LocalChatSessionError {
     },
     #[error("Unsupported local chat harness: {0:?}")]
     UnsupportedHarness(LocalChatHarnessKind),
+    #[error("Invalid chat session id: {0}")]
+    InvalidChatSessionId(String),
+    #[error("Invalid recording worktree: {0}")]
+    InvalidRecordingWorktree(String),
 }
 
 #[derive(Clone)]
@@ -246,6 +259,7 @@ pub(crate) struct LocalChatRuntime {
     app_handle: Option<tauri::AppHandle>,
     event_sink: LocalChatEventSink,
     permission_bridge: PermissionBridge,
+    recording: RecordingTap,
 }
 
 impl LocalChatRuntime {
@@ -254,6 +268,7 @@ impl LocalChatRuntime {
             app_handle: Some(app_handle.clone()),
             event_sink: LocalChatEventSink::tauri(app_handle),
             permission_bridge,
+            recording: RecordingTap::default(),
         }
     }
 
@@ -263,6 +278,7 @@ impl LocalChatRuntime {
             app_handle: None,
             event_sink: LocalChatEventSink::inert_for_tests(),
             permission_bridge: PermissionBridge::new(),
+            recording: RecordingTap::default(),
         }
     }
 
@@ -274,6 +290,7 @@ impl LocalChatRuntime {
             app_handle: None,
             event_sink: LocalChatEventSink::inert_for_tests(),
             permission_bridge,
+            recording: RecordingTap::default(),
         }
     }
 
@@ -296,6 +313,7 @@ impl LocalChatRuntime {
                 app_handle: None,
                 event_sink,
                 permission_bridge: PermissionBridge::new(),
+                recording: RecordingTap::default(),
             },
             events,
         )
@@ -303,6 +321,12 @@ impl LocalChatRuntime {
 
     pub(crate) fn permission_bridge(&self) -> PermissionBridge {
         self.permission_bridge.clone()
+    }
+
+    /// Tap the shared projection forwards tool boundaries to; the manager
+    /// starts and stops the recorder behind it.
+    pub(crate) fn recording(&self) -> RecordingTap {
+        self.recording.clone()
     }
 }
 

@@ -542,14 +542,29 @@ describe("handleFileChangeEvent", () => {
     useChatStore.getState().reset();
     const store = useChatStore.getState();
     const id = store.openSession("Interrupted item");
-    handleTextEvent({
-      backend_session_id: CLAUDE_SESSION_ID, harness: "claude",
-      turn_id: "turn-1", item_id: "item-1", parent_tool_use_id: null,
-      text: "**received**", is_partial: false, completion_status: "interrupted",
-    }, CLAUDE_SESSION_ID, id, store.updateLastAssistantMessage,
-    store.finalizeLastAssistantMessage, store.addMessage);
+    handleTextEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        turn_id: "turn-1",
+        item_id: "item-1",
+        parent_tool_use_id: null,
+        text: "**received**",
+        is_partial: false,
+        completion_status: "interrupted",
+      },
+      CLAUDE_SESSION_ID,
+      id,
+      store.updateLastAssistantMessage,
+      store.finalizeLastAssistantMessage,
+      store.addMessage
+    );
     expect(useChatStore.getState().sessions[id].messages).toEqual([
-      expect.objectContaining({text: "**received**", lifecycle: "interrupted", isPartial: false}),
+      expect.objectContaining({
+        text: "**received**",
+        lifecycle: "interrupted",
+        isPartial: false,
+      }),
     ]);
   });
 
@@ -1226,6 +1241,8 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.stringMatching(/^local-/),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1235,6 +1252,40 @@ describe("doStartSession", () => {
       personality: null,
       permission_mode: "default",
     });
+  });
+
+  it("passes the persistent chat session id and the associated worktree as the recording target", async () => {
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({
+        association: {
+          ticketId: "b3d8a9c9-11cf-4d00-9a4b-c426be34bd29",
+          ticketTitle: "Record worktree patches",
+          worktreePath: "/test/project-b3d8a9c9",
+          branch: "b3d8a9c9-record",
+          lastProcessedAt: null,
+          processedAtCount: 0,
+          awaitingWorktree: null,
+          recentWorktrees: [],
+        },
+      }),
+      SESSION_ID,
+      deps
+    );
+
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chat_session_id: SESSION_ID,
+        recording_worktree: "/test/project-b3d8a9c9",
+      })
+    );
   });
 
   it("uses the project path captured on the chat session", async () => {
@@ -1255,6 +1306,8 @@ describe("doStartSession", () => {
     expect(mockedCommands.getCurrentProjectPath).not.toHaveBeenCalled();
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.stringMatching(/^local-/),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: "/captured/project",
       initial_prompt: null,
@@ -1349,6 +1402,8 @@ describe("doStartSession", () => {
     expect(mockedCommands.getCurrentProjectPath).toHaveBeenCalled();
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.stringMatching(/^local-/),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1377,6 +1432,8 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.stringMatching(/^local-/),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1408,6 +1465,8 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.stringMatching(/^local-/),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "codex",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1440,6 +1499,8 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.stringMatching(/^local-/),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "codex",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1496,6 +1557,8 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.stringMatching(/^local-/),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1744,6 +1807,8 @@ describe("doStartSession", () => {
     expect(deps.setContextSummary).not.toHaveBeenCalled();
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.any(String),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: "Help",
@@ -1772,6 +1837,8 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.any(String),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1808,6 +1875,8 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.any(String),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1837,6 +1906,8 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.any(String),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: null,
       initial_prompt: null,
@@ -1861,6 +1932,8 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.any(String),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: "Question",
@@ -2458,6 +2531,8 @@ describe("doSendMessage", () => {
     expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
     expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
       backend_session_id: expect.stringMatching(/^local-/),
+      chat_session_id: expect.any(String),
+      recording_worktree: null,
       harness: "claude",
       working_dir: "/repo/root",
       initial_prompt: "Retry after crash",

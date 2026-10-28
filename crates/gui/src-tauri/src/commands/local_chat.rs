@@ -2,10 +2,7 @@ use super::*;
 use crate::local_chat::{LocalChatAnnotation, LocalChatAnnotationStore, LocalChatHarnessKind};
 use crate::types::PermissionMode;
 use std::fs;
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
 use vertebrae_core::StepHarness;
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory};
 use vertebrae_harness_core::{
@@ -101,35 +98,7 @@ fn resolve_local_file(project_root: &str, path: &str) -> Result<PathBuf, Command
 }
 
 fn local_file_roots(project_root: &Path) -> Vec<PathBuf> {
-    let mut roots = vec![project_root.to_path_buf()];
-    let output = Command::new("git")
-        .args([
-            "-C",
-            &project_root.to_string_lossy(),
-            "worktree",
-            "list",
-            "--porcelain",
-        ])
-        .output();
-
-    let Ok(output) = output else {
-        return roots;
-    };
-    if !output.status.success() {
-        return roots;
-    }
-
-    for worktree in String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| line.strip_prefix("worktree "))
-    {
-        if let Ok(worktree) = fs::canonicalize(worktree) {
-            if worktree.is_dir() && !roots.contains(&worktree) {
-                roots.push(worktree);
-            }
-        }
-    }
-    roots
+    crate::local_chat::worktree_delta::project_worktree_roots(project_root)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -248,10 +217,12 @@ pub async fn create_local_chat_session(
     mut input: CreateLocalChatSessionInput,
 ) -> Result<(), LocalChatSessionError> {
     log::info!(
-        "create_local_chat_session called: harness={:?}, backend_session_id={}, working_dir={:?}, resume={:?}, model={:?}, permission_mode={:?}",
+        "create_local_chat_session called: harness={:?}, backend_session_id={}, chat_session_id={}, working_dir={:?}, recording_worktree={:?}, resume={:?}, model={:?}, permission_mode={:?}",
         input.harness,
         input.backend_session_id,
+        input.chat_session_id,
         input.working_dir,
+        input.recording_worktree,
         input.provider_resume_id,
         input.model_id,
         input.permission_mode
@@ -470,6 +441,24 @@ pub async fn close_local_chat_session(
         backend_session_id
     );
     local_chat_manager.close_session(&backend_session_id).await
+}
+
+/// Set, replace or clear the Git worktree whose per-tool-call changes a live
+/// local chat runtime records. The path must be the session's project root or
+/// one of its Git worktrees; otherwise recording stays off.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_local_chat_recording_worktree(
+    local_chat_manager: State<'_, LocalChatSessionManager>,
+    backend_session_id: String,
+    worktree_path: Option<String>,
+) -> Result<(), LocalChatSessionError> {
+    log::info!(
+        "set_local_chat_recording_worktree called: backend_session_id={backend_session_id}, worktree_path={worktree_path:?}"
+    );
+    local_chat_manager
+        .set_recording_worktree(&backend_session_id, worktree_path)
+        .await
 }
 
 /// Infer a concise display title for a local chat from its initial prompt.

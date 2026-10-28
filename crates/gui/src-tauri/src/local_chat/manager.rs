@@ -8,15 +8,17 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use vertebrae_core::{BuiltinProvider, ProviderId, ProviderProfile, StepHarness};
 
+use crate::local_chat::annotations::validate_session_id;
 use crate::local_chat::harnesses::claude::{ClaudeLocalChatHarness, ClaudeStartupCapabilities};
 use crate::local_chat::harnesses::codex::CodexLocalChatHarness;
 use crate::local_chat::permissions::{
     LocalPermissionDecision, PermissionBridge, PermissionBridgeError,
 };
+use crate::local_chat::worktree_delta::{resolve_recording_worktree, RecorderConfig, RecordingTap};
 use crate::local_chat::{
-    CreateLocalChatSessionInput, LocalChatHarness, LocalChatHarnessCatalog, LocalChatHarnessInfo,
-    LocalChatHarnessKind, LocalChatModelOption, LocalChatProviderInfo, LocalChatProviderSelection,
-    LocalChatRuntime, LocalChatSessionError,
+    CreateLocalChatSessionInput, LocalChatAnnotationStore, LocalChatHarness,
+    LocalChatHarnessCatalog, LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
+    LocalChatProviderInfo, LocalChatProviderSelection, LocalChatRuntime, LocalChatSessionError,
 };
 
 pub struct LocalChatSessionManager {
@@ -27,19 +29,20 @@ pub struct LocalChatSessionManager {
     shutdown_started: AtomicBool,
     provider_profiles: BTreeMap<ProviderId, ProviderProfile>,
     provider_config_path: Option<std::path::PathBuf>,
+    annotation_store: Option<LocalChatAnnotationStore>,
+    recorder_config: RecorderConfig,
+    recordings: std::sync::Mutex<HashMap<String, RuntimeRecording>>,
+}
+
+/// What the manager knows about a live runtime beyond its harness: the
+/// persistent chat session it serves and its worktree recorder.
+struct RuntimeRecording {
+    chat_session_id: String,
+    project_root: Option<String>,
+    tap: RecordingTap,
 }
 
 const LOCAL_CHAT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
-
-fn chat_session_id_of_runtime(backend_session_id: &str) -> Option<&str> {
-    let (chat_session_id, started_at) = backend_session_id
-        .strip_prefix("local-")?
-        .rsplit_once('-')?;
-    (!chat_session_id.is_empty()
-        && !started_at.is_empty()
-        && started_at.bytes().all(|byte| byte.is_ascii_digit()))
-    .then_some(chat_session_id)
-}
 
 pub(crate) struct ProjectSwitchGuard<'a> {
     _lifecycle: tokio::sync::RwLockWriteGuard<'a, ()>,
@@ -146,7 +149,23 @@ impl LocalChatSessionManager {
             shutdown_started: AtomicBool::new(false),
             provider_profiles: BTreeMap::new(),
             provider_config_path: None,
+            annotation_store: None,
+            recorder_config: RecorderConfig::default(),
+            recordings: std::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Store that worktree recorders append their annotations to; without
+    /// one, recording stays off.
+    pub(crate) fn with_annotation_store(mut self, store: LocalChatAnnotationStore) -> Self {
+        self.annotation_store = Some(store);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_recorder_config_for_tests(mut self, config: RecorderConfig) -> Self {
+        self.recorder_config = config;
+        self
     }
 
     pub async fn catalog(&self) -> Result<LocalChatHarnessCatalog, LocalChatSessionError> {
@@ -269,6 +288,9 @@ impl LocalChatSessionManager {
         }
         let harness_kind = input.harness;
         let backend_session_id = input.backend_session_id.clone();
+        validate_session_id(&input.chat_session_id).map_err(|_| {
+            LocalChatSessionError::InvalidChatSessionId(input.chat_session_id.clone())
+        })?;
         let provider = self
             .provider_selection(harness_kind, input.provider_id.as_deref())
             .await?;
@@ -290,10 +312,29 @@ impl LocalChatSessionManager {
         }
 
         // Bound before the harness starts: the initial turn may already
-        // submit the gate's resolution.
+        // submit the gate's resolution, or run tools worth recording.
         let permission_bridge = runtime.permission_bridge();
         if let Some(gate) = &input.gate {
             permission_bridge.bind_gate(&backend_session_id, gate.clone());
+        }
+        let tap = runtime.recording();
+        self.lock_recordings().insert(
+            backend_session_id.clone(),
+            RuntimeRecording {
+                chat_session_id: input.chat_session_id.clone(),
+                project_root: input.working_dir.clone(),
+                tap: tap.clone(),
+            },
+        );
+        if let Some(worktree) = input.recording_worktree.clone() {
+            if let Err(error) = self
+                .apply_recording_worktree(&backend_session_id, Some(worktree))
+                .await
+            {
+                log::warn!(
+                    "[LOCAL_CHAT] recording stays off for session {backend_session_id}: {error}"
+                );
+            }
         }
         match harness
             .create_session(input.into_harness_input(provider), runtime)
@@ -306,6 +347,84 @@ impl LocalChatSessionManager {
                     .await;
                 Err(err)
             }
+        }
+    }
+
+    fn lock_recordings(&self) -> std::sync::MutexGuard<'_, HashMap<String, RuntimeRecording>> {
+        self.recordings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Set, replace or clear the worktree a live runtime records into. A
+    /// changed target stops the old recorder (dropping its open windows) and
+    /// starts a fresh one; an invalid target leaves recording off.
+    pub async fn set_recording_worktree(
+        &self,
+        backend_session_id: &str,
+        worktree_path: Option<String>,
+    ) -> Result<(), LocalChatSessionError> {
+        let _lifecycle = self.lifecycle_gate.read().await;
+        self.registry_harness(backend_session_id).await?;
+        self.apply_recording_worktree(backend_session_id, worktree_path)
+            .await
+            .inspect_err(|error| {
+                log::warn!(
+                    "[LOCAL_CHAT] recording stopped for session {backend_session_id}: {error}"
+                );
+            })
+    }
+
+    async fn apply_recording_worktree(
+        &self,
+        backend_session_id: &str,
+        worktree_path: Option<String>,
+    ) -> Result<(), LocalChatSessionError> {
+        let (chat_session_id, project_root, tap) = {
+            let recordings = self.lock_recordings();
+            let recording = recordings.get(backend_session_id).ok_or_else(|| {
+                LocalChatSessionError::SessionNotFound(backend_session_id.to_string())
+            })?;
+            (
+                recording.chat_session_id.clone(),
+                recording.project_root.clone(),
+                recording.tap.clone(),
+            )
+        };
+        let Some(worktree_path) = worktree_path else {
+            tap.stop();
+            return Ok(());
+        };
+        let resolved = tokio::task::spawn_blocking(move || {
+            resolve_recording_worktree(project_root.as_deref(), &worktree_path)
+        })
+        .await
+        .unwrap_or_else(|error| Err(error.to_string()));
+        let worktree = match resolved {
+            Ok(worktree) => worktree,
+            Err(error) => {
+                tap.stop();
+                return Err(LocalChatSessionError::InvalidRecordingWorktree(error));
+            }
+        };
+        if tap.worktree().as_ref() == Some(&worktree) {
+            return Ok(());
+        }
+        let Some(store) = self.annotation_store.clone() else {
+            log::warn!("[LOCAL_CHAT] no annotation store; worktree recording is off");
+            return Ok(());
+        };
+        // A runtime closed while the target was resolving stays stopped.
+        if !self.lock_recordings().contains_key(backend_session_id) {
+            return Ok(());
+        }
+        tap.start(chat_session_id, worktree, store, self.recorder_config);
+        Ok(())
+    }
+
+    fn stop_recording(&self, backend_session_id: &str) {
+        if let Some(recording) = self.lock_recordings().remove(backend_session_id) {
+            recording.tap.stop();
         }
     }
 
@@ -390,14 +509,12 @@ impl LocalChatSessionManager {
     }
 
     /// Persistent chat session ids that currently own a registered runtime.
-    /// Runtime ids are `local-<chat session id>-<start millis>`.
     pub(crate) async fn live_chat_session_ids(&self) -> std::collections::HashSet<String> {
-        self.session_registry
-            .read()
-            .await
-            .keys()
-            .filter_map(|backend_session_id| chat_session_id_of_runtime(backend_session_id))
-            .map(str::to_owned)
+        let registry = self.session_registry.read().await;
+        self.lock_recordings()
+            .iter()
+            .filter(|(backend_session_id, _)| registry.contains_key(*backend_session_id))
+            .map(|(_, recording)| recording.chat_session_id.clone())
             .collect()
     }
 
@@ -443,6 +560,9 @@ impl LocalChatSessionManager {
             self.permission_bridge
                 .fail_pending_permissions_for_session(session_id, permission_message);
             self.permission_bridge.unbind_gate(session_id);
+        }
+        for (_, recording) in self.lock_recordings().drain() {
+            recording.tap.stop();
         }
 
         let results = futures::future::join_all(session_entries.into_iter().map(
@@ -549,6 +669,7 @@ impl LocalChatSessionManager {
         {
             registry.remove(backend_session_id);
             self.permission_bridge.unbind_gate(backend_session_id);
+            self.stop_recording(backend_session_id);
         }
     }
 }

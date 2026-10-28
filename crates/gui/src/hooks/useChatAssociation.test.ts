@@ -3,10 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands, type JsonValue } from "../bindings";
 import { useChatStore, type ChatMessage } from "../stores/chatStore";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
-import { useChatAssociation } from "./useChatAssociation";
+import {
+  noteRecordingTarget,
+  useChatAssociation,
+  useChatAssociationDriver,
+} from "./useChatAssociation";
 
 vi.mock("../bindings", () => ({
-  commands: { resolveChatAssociation: vi.fn(), getCurrentProjectPath: vi.fn() },
+  commands: {
+    resolveChatAssociation: vi.fn(),
+    getCurrentProjectPath: vi.fn(),
+    setLocalChatRecordingWorktree: vi.fn(),
+  },
 }));
 vi.mock("../stores/projectScopedStores", () => ({
   getProjectScopeGeneration: vi.fn(() => 0),
@@ -17,6 +25,12 @@ vi.mock("../utils/chatAssociation/candidates", () => ({
 }));
 
 const resolve = vi.mocked(commands.resolveChatAssociation);
+const setTarget = vi.mocked(commands.setLocalChatRecordingWorktree);
+/** The global driver plus what a chat window reads. */
+const useDriven = (sessionId: string) => {
+  useChatAssociationDriver(sessionId);
+  return useChatAssociation(sessionId);
+};
 const reply = (data: object) =>
   resolve.mockResolvedValueOnce({
     status: "ok",
@@ -55,18 +69,31 @@ const created = {
   branch: "worktree-f6f6bf5e-codex-retry-status",
 };
 
-function seed(messages: ChatMessage[], association: unknown = null) {
+function seed(
+  messages: ChatMessage[],
+  association: unknown = null,
+  runtime: object = {}
+) {
+  const patch = (id: string, value: object) =>
+    useChatStore.setState((s) => ({
+      sessions: { ...s.sessions, [id]: { ...s.sessions[id], ...value } },
+    }));
   useChatStore.setState({
-    sessions: { s1: { id: "s1", projectPath: "/p", messages, association } },
+    sessions: {
+      s1: { id: "s1", projectPath: "/p", messages, association, ...runtime },
+    },
     setSessionAssociation: (id: string, value: unknown) =>
-      useChatStore.setState((s) => ({
-        sessions: {
-          ...s.sessions,
-          [id]: { ...s.sessions[id], association: value as JsonValue },
-        },
-      })),
+      patch(id, { association: value as JsonValue }),
+    setSessionAssociationDiagnostic: (id: string, value: string | null) =>
+      patch(id, { associationDiagnostic: value }),
   } as never);
 }
+const setRuntime = (value: object) =>
+  act(() =>
+    useChatStore.setState((s) => ({
+      sessions: { ...s.sessions, s1: { ...s.sessions.s1, ...value } },
+    }))
+  );
 const push = (message: ChatMessage) =>
   act(() =>
     useChatStore.setState((s) => ({
@@ -84,6 +111,7 @@ describe("useChatAssociation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getProjectScopeGeneration).mockReturnValue(0);
+    setTarget.mockResolvedValue({ status: "ok", data: null } as never);
     vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
       status: "ok",
       data: "/p",
@@ -98,7 +126,7 @@ describe("useChatAssociation", () => {
         1
       ),
     ]);
-    const { result } = renderHook(() => useChatAssociation("s1"));
+    const { result } = renderHook(() => useDriven("s1"));
     await waitFor(() => expect(result.current.record.ticketId).toBe(TICKET.id));
     expect(result.current.record.awaitingWorktree).toEqual(["/p"]);
     expect(resolve.mock.calls[0][0]).toMatchObject({
@@ -134,7 +162,7 @@ describe("useChatAssociation", () => {
   it("attaches a worktree touched before the ticket was known", async () => {
     reply({ worktrees: [created] });
     seed([tool(`ls ${created.path}`, 1)]);
-    const { result } = renderHook(() => useChatAssociation("s1"));
+    const { result } = renderHook(() => useDriven("s1"));
     await waitFor(() =>
       expect(result.current.record.recentWorktrees).toEqual([created])
     );
@@ -150,7 +178,7 @@ describe("useChatAssociation", () => {
   it("skips a failed decision with a diagnostic so later events progress", async () => {
     reply({ diagnostic: "Decision request timed out." });
     seed([user("implement f6f6bf5e", 1)]);
-    const { result } = renderHook(() => useChatAssociation("s1"));
+    const { result } = renderHook(() => useDriven("s1"));
     await waitFor(() =>
       expect(result.current.diagnostic).toBe("Decision request timed out.")
     );
@@ -165,7 +193,7 @@ describe("useChatAssociation", () => {
   it("sends the selected project's path, not its slug, as the cache root", async () => {
     reply({});
     seed([user("implement f6f6bf5e", 1)]);
-    renderHook(() => useChatAssociation("s1"));
+    renderHook(() => useDriven("s1"));
     await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1));
     expect(resolve.mock.calls[0][0].candidate_project_root).toBe("/p");
   });
@@ -174,7 +202,7 @@ describe("useChatAssociation", () => {
     let release!: (value: never) => void;
     resolve.mockReturnValueOnce(new Promise((r) => (release = r)) as never);
     seed([user("implement f6f6bf5e", 1)]);
-    const { result } = renderHook(() => useChatAssociation("s1"));
+    const { result } = renderHook(() => useDriven("s1"));
     await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1));
     push(user("actually never mind", 2));
     reply({});
@@ -195,7 +223,7 @@ describe("useChatAssociation", () => {
   it("keeps an ambiguous pair of newly touched worktrees unbound", async () => {
     reply({ ...SELECT, create_worktree: true, worktrees: [main] });
     seed([user("implement f6f6bf5e in a new worktree", 1)]);
-    const { result } = renderHook(() => useChatAssociation("s1"));
+    const { result } = renderHook(() => useDriven("s1"));
     await waitFor(() => expect(result.current.record.ticketId).toBe(TICKET.id));
     reply({
       worktrees: [created, { path: "/other/f6f6bf5e", branch: "f6f6bf5e" }],
@@ -214,7 +242,7 @@ describe("useChatAssociation", () => {
       let release!: (value: never) => void;
       resolve.mockReturnValueOnce(new Promise((r) => (release = r)) as never);
       seed([user("implement f6f6bf5e", 1)]);
-      const { result } = renderHook(() => useChatAssociation("s1"));
+      const { result } = renderHook(() => useDriven("s1"));
       await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1));
       reply({});
       if (change === "generation") {
@@ -249,16 +277,141 @@ describe("useChatAssociation", () => {
     reply({});
     reply({ worktrees: [created] });
     seed([tool("ls /p", 1), tool(`ls ${created.path}`, 1)]);
-    const first = renderHook(() => useChatAssociation("s1"));
+    const first = renderHook(() => useDriven("s1"));
     await waitFor(() =>
       expect(first.result.current.record.processedAtCount).toBe(2)
     );
     expect(first.result.current.record.recentWorktrees).toEqual([created]);
     first.unmount();
 
-    const again = renderHook(() => useChatAssociation("s1"));
+    const again = renderHook(() => useDriven("s1"));
     await act(async () => undefined);
     expect(resolve).toHaveBeenCalledTimes(2);
     expect(again.result.current.record.recentWorktrees).toEqual([created]);
+  });
+  it("pushes a live runtime's new worktree, never the target it was created with", async () => {
+    noteRecordingTarget("local-s1-1", null);
+    reply({ worktrees: [created] });
+    seed(
+      [],
+      {
+        ticketId: TICKET.id,
+        ticketTitle: TICKET.title,
+        worktreePath: null,
+        branch: null,
+        lastProcessedAt: null,
+        processedAtCount: 0,
+        awaitingWorktree: null,
+        recentWorktrees: [],
+      },
+      { backendSessionId: "local-s1-1", lifecycle: "idle" }
+    );
+    const { result } = renderHook(() => useDriven("s1"));
+    await act(async () => undefined);
+    expect(setTarget).not.toHaveBeenCalled();
+
+    push(tool(`ls ${created.path}`, 1));
+    await waitFor(() =>
+      expect(result.current.record.worktreePath).toBe(created.path)
+    );
+    await waitFor(() =>
+      expect(setTarget).toHaveBeenCalledWith("local-s1-1", created.path)
+    );
+    expect(setTarget).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the target while the runtime starts, then sends it to the new runtime", async () => {
+    const bound = {
+      ticketId: TICKET.id,
+      ticketTitle: TICKET.title,
+      worktreePath: created.path,
+      branch: created.branch,
+      lastProcessedAt: null,
+      processedAtCount: 0,
+      awaitingWorktree: null,
+      recentWorktrees: [],
+    };
+    seed([], bound, { backendSessionId: "local-s1-2", lifecycle: "starting" });
+    renderHook(() => useDriven("s1"));
+    await act(async () => undefined);
+    expect(setTarget).not.toHaveBeenCalled();
+
+    setRuntime({ lifecycle: "idle" });
+    await waitFor(() =>
+      expect(setTarget).toHaveBeenCalledWith("local-s1-2", created.path)
+    );
+  });
+
+  it("drops a target result that arrives after the runtime was replaced", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let release!: (value: never) => void;
+    setTarget.mockReturnValueOnce(new Promise((r) => (release = r)) as never);
+    const bound = {
+      ticketId: null,
+      ticketTitle: null,
+      worktreePath: created.path,
+      branch: null,
+      lastProcessedAt: null,
+      processedAtCount: 0,
+      awaitingWorktree: null,
+      recentWorktrees: [],
+    };
+    seed([], bound, { backendSessionId: "local-s1-3", lifecycle: "idle" });
+    renderHook(() => useDriven("s1"));
+    await waitFor(() => expect(setTarget).toHaveBeenCalledTimes(1));
+    setRuntime({ backendSessionId: null, lifecycle: "closed" });
+    await act(async () =>
+      release({
+        status: "error",
+        error: { SessionNotFound: "local-s1-3" },
+      } as never)
+    );
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("keeps the previous target and records the diagnostic when resolving throws", async () => {
+    const bound = {
+      ticketId: null,
+      ticketTitle: null,
+      worktreePath: created.path,
+      branch: created.branch,
+      lastProcessedAt: null,
+      processedAtCount: 0,
+      awaitingWorktree: null,
+      recentWorktrees: [],
+    };
+    noteRecordingTarget("local-s1-4", created.path);
+    resolve.mockRejectedValueOnce(new Error("IPC unavailable"));
+    seed([user("implement something else", 1)], bound, {
+      backendSessionId: "local-s1-4",
+      lifecycle: "idle",
+    });
+    const { result } = renderHook(() => useDriven("s1"));
+
+    await waitFor(() =>
+      expect(result.current.diagnostic).toBe("IPC unavailable")
+    );
+    expect(result.current.record.worktreePath).toBe(created.path);
+    expect(result.current.record.lastProcessedAt).toBe(at(1));
+    expect(setTarget).not.toHaveBeenCalled();
+  });
+
+  it("lets a window correct the record the global driver keeps", async () => {
+    reply({ worktrees: [created] });
+    seed([tool(`ls ${created.path}`, 1)]);
+    const driver = renderHook(() => useChatAssociationDriver("s1"));
+    const view = renderHook(() => useChatAssociation("s1"));
+    await waitFor(() =>
+      expect(view.result.current.record.recentWorktrees).toEqual([created])
+    );
+
+    act(() => view.result.current.correct("f6f6bf5e"));
+
+    expect(view.result.current.record.ticketId).toBe(TICKET.id);
+    expect(view.result.current.record.worktreePath).toBe(created.path);
+    expect(view.result.current.diagnostic).toBeNull();
+    driver.unmount();
   });
 });
