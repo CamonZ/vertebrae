@@ -53,6 +53,7 @@ pub(crate) enum GitError {
     Task(String),
     Failed(String),
     Timeout,
+    OutputLimit,
     TooManyEntries(usize),
     Malformed(String),
 }
@@ -63,6 +64,7 @@ impl std::fmt::Display for GitError {
             Self::Spawn(error) => write!(formatter, "could not run git: {error}"),
             Self::Task(error) => write!(formatter, "git task failed: {error}"),
             Self::Failed(error) => write!(formatter, "git failed: {error}"),
+            Self::OutputLimit => write!(formatter, "git output size limit reached"),
             Self::Timeout => write!(formatter, "git timed out after {GIT_TIMEOUT:?}"),
             Self::TooManyEntries(count) => {
                 write!(formatter, "worktree has {count} status entries")
@@ -73,7 +75,7 @@ impl std::fmt::Display for GitError {
 }
 
 /// Why a changed file is listed without hunks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MarkerReason {
     Binary,
@@ -182,25 +184,31 @@ pub(crate) fn run_git(
     args: &[&str],
     stdin: Option<Vec<u8>>,
 ) -> Result<Vec<u8>, GitError> {
+    run_git_bounded(worktree, args, stdin, 128 * 1024 * 1024, &[0])
+}
+
+/// Shared runner with a retained-output budget and explicit accepted exit codes.
+pub(crate) fn run_git_bounded(
+    worktree: &Path,
+    args: &[&str],
+    stdin: Option<Vec<u8>>,
+    output_limit: usize,
+    accepted_codes: &[i32],
+) -> Result<Vec<u8>, GitError> {
     let mut command = Command::new("git");
     command
         .arg("--no-optional-locks")
         .arg("-C")
         .arg(worktree)
-        .args(args)
+        .args(args);
+    for (variable, _) in std::env::vars_os() {
+        if variable.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(variable);
+        }
+    }
+    command
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0");
-    for variable in [
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_COMMON_DIR",
-        "GIT_NAMESPACE",
-    ] {
-        command.env_remove(variable);
-    }
     command
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -223,7 +231,11 @@ pub(crate) fn run_git(
         std::thread::spawn(move || {
             let mut output = Vec::new();
             if let Some(mut pipe) = pipe {
-                let _ = pipe.read_to_end(&mut output);
+                let _ = pipe
+                    .by_ref()
+                    .take(output_limit as u64 + 1)
+                    .read_to_end(&mut output);
+                let _ = std::io::copy(&mut pipe, &mut std::io::sink());
             }
             output
         })
@@ -259,7 +271,12 @@ pub(crate) fn run_git(
     }
     let stdout = stdout.join().unwrap_or_default();
     let stderr = stderr.join().unwrap_or_default();
-    if status.success() {
+    if stdout.len() > output_limit || stderr.len() > output_limit {
+        Err(GitError::OutputLimit)
+    } else if status
+        .code()
+        .is_some_and(|code| accepted_codes.contains(&code))
+    {
         Ok(stdout)
     } else {
         Err(GitError::Failed(

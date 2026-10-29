@@ -2,6 +2,7 @@ import { Profiler, useCallback, useEffect, useRef, useState } from "react";
 import { useChatSession } from "../../hooks/useChatSession";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatAssociation } from "../../hooks/useChatAssociation";
+import { WorktreeChanges } from "./WorktreeChanges";
 import { ChatAssociation } from "./ChatAssociation";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
@@ -62,6 +63,7 @@ export function ChatWindow({
   projectLabel,
   renderObserver,
 }: ChatWindowProps) {
+  const [changesSession, setChangesSession] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [pendingCommentState, setPendingCommentState] = useState<{
     sessionId: string;
@@ -166,6 +168,8 @@ export function ChatWindow({
 
   if (!chat.session) return null;
 
+  const worktreePath = association.record?.worktreePath;
+  const showChanges = !!worktreePath && changesSession === sessionId;
   const isEmpty = chat.session.messages.length === 0;
 
   return (
@@ -207,98 +211,143 @@ export function ChatWindow({
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
       />
-      {gate && gateStatus && (
-        <GateChatStatusBar stepName={gate.step_name} status={gateStatus} />
+      {worktreePath && (
+        <div
+          role="group"
+          aria-label="Chat view"
+          className="flex gap-3 border-b border-white/10 px-3 py-2 text-sm"
+        >
+          <button
+            type="button"
+            aria-pressed={!showChanges}
+            onClick={() => setChangesSession(null)}
+          >
+            Conversation
+          </button>
+          <button
+            type="button"
+            aria-pressed={showChanges}
+            onClick={() => setChangesSession(sessionId)}
+          >
+            Changes
+          </button>
+        </div>
       )}
-      {gate && gateStatus && gateDraft && (gate.fields?.length ?? 0) > 0 && (
-        <GateDraftProgress
-          fields={gate.fields ?? []}
-          draft={gateDraft}
-          attempt={gateStatus.attempt}
-        />
-      )}
-      <Profiler
-        id={`${sessionId}-transcript`}
-        onRender={() => renderObserver?.("transcript")}
-      >
-        <ChatMessages
-          sessionId={sessionId}
-          projectPath={chat.session.projectPath}
-          messages={chat.messages}
-          assistantLabel={chat.assistantLabel}
-          gate={chat.session.gate}
-          isEmpty={isEmpty}
-          isActive={chat.isActive || childControlAvailable}
-          isWaiting={chat.isWaiting}
-          activityLabel={chat.activityLabel}
-          compactionSummary={chat.compactionSummary}
-          streamingAssistant={chat.streamingAssistant}
-          isLoadingInitialHistory={
-            chat.session.providerReplay?.loading === "initial"
-          }
-          hasOlderMessages={chat.session.providerReplay?.hasMore === true}
-          isLoadingOlderMessages={
-            chat.session.providerReplay?.loading === "older"
-          }
-          replayError={chat.session.providerReplay?.error ?? null}
-          onLoadOlderMessages={() => loadOlderReplayMessages(sessionId)}
-          onAddComment={handleAddComment}
-          footer={
-            gate && gateStatus && gateDraft ? (
-              <GateSteering
-                sessionId={sessionId}
-                gate={gate}
-                status={gateStatus}
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1">
+        {showChanges && (
+          <div className="flex min-h-0 flex-col" style={{ gridArea: "1 / 1" }}>
+            <WorktreeChanges
+              key={`${sessionId}:${worktreePath}`}
+              worktreePath={worktreePath}
+            />
+          </div>
+        )}
+        <div
+          className="flex min-h-0 flex-col"
+          style={{
+            gridArea: "1 / 1",
+            visibility: showChanges ? "hidden" : "visible",
+          }}
+          aria-hidden={showChanges}
+          inert={showChanges}
+        >
+          {gate && gateStatus && (
+            <GateChatStatusBar stepName={gate.step_name} status={gateStatus} />
+          )}
+          {gate &&
+            gateStatus &&
+            gateDraft &&
+            (gate.fields?.length ?? 0) > 0 && (
+              <GateDraftProgress
+                fields={gate.fields ?? []}
                 draft={gateDraft}
+                attempt={gateStatus.attempt}
               />
-            ) : null
-          }
-        />
-      </Profiler>
-      <Profiler
-        id={`${sessionId}-composer`}
-        onRender={() => renderObserver?.("composer")}
-      >
-        <ChatComposer
-          session={chat.session}
-          inputValue={chat.inputValue}
-          setInputValue={chat.setInputValue}
-          inputRef={inputRef}
-          harnessCatalog={chat.harnessCatalog}
-          visibleHarness={chat.visibleHarness}
-          providerOptions={chat.providerOptions}
-          selectedProviderId={chat.selectedProviderId}
-          supportedModelIds={chat.supportedModelIds}
-          reasoningEfforts={chat.reasoningEfforts}
-          supportedReasoningEffortIds={chat.supportedReasoningEffortIds}
-          speedTiers={chat.speedTiers}
-          supportedSpeedTierIds={chat.supportedSpeedTierIds}
-          isBusy={chat.isBusy}
-          isActive={chat.isActive}
-          lockedHarness={chat.lockedHarness}
-          hasResume={chat.hasResume}
-          hasAvailableHarness={chat.hasAvailableHarness}
-          canUseComposer={chat.canUseComposer}
-          canSendMessage={chat.canSendMessage}
-          shouldStartOrResume={chat.shouldStartOrResume}
-          submitLabel={chat.submitLabel}
-          composerPlaceholder={chat.composerPlaceholder}
-          ctxPct={chat.ctxPct}
-          ctxColor={chat.ctxColor}
-          usage={chat.usage}
-          threadTotalTokens={chat.threadTotalTokens}
-          pendingComments={pendingComments}
-          onUpdateComment={handleUpdateComment}
-          onRemoveComment={handleRemoveComment}
-          onSend={handleSend}
-          onStartSession={handleStartSession}
-          onHarnessChange={chat.handleHarnessChange}
-          onModelChange={chat.handleModelChange}
-          onReasoningEffortChange={chat.handleReasoningEffortChange}
-          onSpeedTierChange={chat.handleSpeedTierChange}
-          onPermissionModeChange={chat.handlePermissionModeChange}
-        />
-      </Profiler>
+            )}
+          <Profiler
+            id={`${sessionId}-transcript`}
+            onRender={() => renderObserver?.("transcript")}
+          >
+            <ChatMessages
+              sessionId={sessionId}
+              projectPath={chat.session.projectPath}
+              messages={chat.messages}
+              assistantLabel={chat.assistantLabel}
+              gate={chat.session.gate}
+              isEmpty={isEmpty}
+              isActive={chat.isActive || childControlAvailable}
+              isWaiting={chat.isWaiting}
+              activityLabel={chat.activityLabel}
+              compactionSummary={chat.compactionSummary}
+              streamingAssistant={chat.streamingAssistant}
+              isLoadingInitialHistory={
+                chat.session.providerReplay?.loading === "initial"
+              }
+              hasOlderMessages={chat.session.providerReplay?.hasMore === true}
+              isLoadingOlderMessages={
+                chat.session.providerReplay?.loading === "older"
+              }
+              replayError={chat.session.providerReplay?.error ?? null}
+              onLoadOlderMessages={() => loadOlderReplayMessages(sessionId)}
+              onAddComment={handleAddComment}
+              footer={
+                gate && gateStatus && gateDraft ? (
+                  <GateSteering
+                    sessionId={sessionId}
+                    gate={gate}
+                    status={gateStatus}
+                    draft={gateDraft}
+                  />
+                ) : null
+              }
+            />
+          </Profiler>
+          <Profiler
+            id={`${sessionId}-composer`}
+            onRender={() => renderObserver?.("composer")}
+          >
+            <ChatComposer
+              session={chat.session}
+              inputValue={chat.inputValue}
+              setInputValue={chat.setInputValue}
+              inputRef={inputRef}
+              harnessCatalog={chat.harnessCatalog}
+              visibleHarness={chat.visibleHarness}
+              providerOptions={chat.providerOptions}
+              selectedProviderId={chat.selectedProviderId}
+              supportedModelIds={chat.supportedModelIds}
+              reasoningEfforts={chat.reasoningEfforts}
+              supportedReasoningEffortIds={chat.supportedReasoningEffortIds}
+              speedTiers={chat.speedTiers}
+              supportedSpeedTierIds={chat.supportedSpeedTierIds}
+              isBusy={chat.isBusy}
+              isActive={chat.isActive}
+              lockedHarness={chat.lockedHarness}
+              hasResume={chat.hasResume}
+              hasAvailableHarness={chat.hasAvailableHarness}
+              canUseComposer={chat.canUseComposer}
+              canSendMessage={chat.canSendMessage}
+              shouldStartOrResume={chat.shouldStartOrResume}
+              submitLabel={chat.submitLabel}
+              composerPlaceholder={chat.composerPlaceholder}
+              ctxPct={chat.ctxPct}
+              ctxColor={chat.ctxColor}
+              usage={chat.usage}
+              threadTotalTokens={chat.threadTotalTokens}
+              pendingComments={pendingComments}
+              onUpdateComment={handleUpdateComment}
+              onRemoveComment={handleRemoveComment}
+              onSend={handleSend}
+              onStartSession={handleStartSession}
+              onHarnessChange={chat.handleHarnessChange}
+              onModelChange={chat.handleModelChange}
+              onReasoningEffortChange={chat.handleReasoningEffortChange}
+              onSpeedTierChange={chat.handleSpeedTierChange}
+              onPermissionModeChange={chat.handlePermissionModeChange}
+            />
+          </Profiler>
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 pub(crate) mod annotations;
+pub(crate) mod changes;
 pub(crate) mod events;
 pub(crate) mod gate;
 pub(crate) mod harness;
