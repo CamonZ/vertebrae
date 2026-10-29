@@ -33,6 +33,7 @@ vi.mock("../../bindings", async () => {
   const { withBuiltinProviders } = await import("../../test/localChatCatalog");
   return {
   commands: {
+    loadWorktreeChanges: vi.fn().mockResolvedValue({ status: "ok", data: { base_branch: null, base_unavailable: "No base", files: [] } }),
     getCurrentProjectPath: vi.fn().mockResolvedValue({
       status: "ok",
       data: "/test/project",
@@ -174,6 +175,63 @@ describe("ChatWindow", () => {
       paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
     });
+  });
+
+  it("opens changes on demand and preserves the composer and transcript nodes", async () => {
+    const association = {
+      ticketId: null,
+      ticketTitle: null,
+      worktreePath: "/worktree",
+      branch: "feature",
+      lastProcessedAt: null,
+      processedAtCount: 0,
+      awaitingWorktree: null,
+      recentWorktrees: [],
+    };
+    useChatStore.setState({
+      sessions: { "test-session": createSession({ association }) },
+    });
+    const { container } = render(<ChatWindow sessionId="test-session" />);
+    expect(mockedCommands.loadWorktreeChanges).not.toHaveBeenCalled();
+    const composer = screen.getByTestId("local-chat-composer");
+    fireEvent.change(composer, { target: { value: "keep this draft" } });
+    const conversation = screen.getByTestId("chat-messages-scroll");
+    conversation.scrollTop = 123;
+    fireEvent.click(
+      screen.getByRole("button", { name: "Changes" })
+    );
+    await screen.findByText("No changes against this baseline.");
+    expect(composer).not.toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Conversation" })
+    );
+    expect(screen.getByTestId("local-chat-composer")).toBe(composer);
+    expect(composer).toHaveValue("keep this draft");
+    expect(conversation.scrollTop).toBe(123);
+    expect(container.contains(conversation)).toBe(true);
+    act(() =>
+      useChatStore
+        .getState()
+        .setSessionAssociation("test-session", {
+          ...association,
+          worktreePath: "/new-worktree",
+        })
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Changes" })
+    );
+    await waitFor(() =>
+      expect(mockedCommands.loadWorktreeChanges).toHaveBeenLastCalledWith(
+        "/new-worktree",
+        false
+      )
+    );
+  });
+
+  it("hides the changes toggle without an associated worktree", () => {
+    useChatStore.setState({ sessions: { "test-session": createSession() } });
+    render(<ChatWindow sessionId="test-session" />);
+    expect(screen.queryByRole("group", { name: "Chat view" })).toBeNull();
   });
 
   it("returns null when session does not exist", () => {

@@ -1,0 +1,155 @@
+.changes-files-panel {
+  display: flex;
+  flex: 0 0 240px;
+  flex-direction: column;
+  min-height: 0;
+  max-width: 40%;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md, 6px);
+  background: var(--color-bg-1);
+}
+.changes-files-panel.is-collapsed {
+  flex-basis: 36px;
+}
+.changes-files-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 4px 6px 4px 12px;
+  border-bottom: 1px solid var(--color-line);
+}
+.is-collapsed .changes-files-header {
+  justify-content: center;
+  padding: 4px;
+  border-bottom: 0;
+}
+.changes-files-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 12px var(--sans, sans-serif);
+  color: var(--color-fg-soft);
+}
+.changes-files-count {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-bg);
+  font: 10px var(--mono, monospace);
+  color: var(--color-fg-mute);
+}
+.changes-files-toggle {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  color: var(--color-fg-mute);
+  cursor: pointer;
+}
+.changes-files-toggle:hover,
+.changes-file-row:hover {
+  background: color-mix(in srgb, var(--color-fg) 5%, transparent);
+  color: var(--color-fg);
+}
+.changes-files-toggle:focus-visible,
+.changes-file-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.changes-files-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+.changes-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+}
+.changes-file-row[aria-current="location"] {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+.changes-file-status {
+  flex-shrink: 0;
+  width: 14px;
+  font: 11px var(--mono, monospace);
+  color: var(--color-accent);
+}
+.changes-file-status.is-added,
+.changes-file-added {
+  color: var(--color-success, #5dbb86);
+}
+.changes-file-status.is-deleted,
+.changes-file-deleted {
+  color: var(--color-danger, #e07979);
+}
+.changes-file-path {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.changes-file-name,
+.changes-file-directory {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.changes-file-name {
+  font: 11px var(--mono, monospace);
+  color: var(--color-fg);
+}
+.changes-file-directory {
+  font: 10px var(--mono, monospace);
+  color: var(--color-fg-mute);
+}
+.changes-file-stats {
+  display: flex;
+  flex-shrink: 0;
+  gap: 5px;
+  font: 10px var(--mono, monospace);
+}
+.changes-file-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md, 6px);
+  color: var(--color-fg-mute);
+  font-size: 12px;
+}
+.changes-refresh {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md, 6px);
+  background: var(--color-bg-1);
+  color: var(--color-fg-mute);
+  cursor: pointer;
+}
+.changes-refresh:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-fg) 5%, var(--color-bg-1));
+  color: var(--color-fg);
+}
+.changes-refresh:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.changes-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

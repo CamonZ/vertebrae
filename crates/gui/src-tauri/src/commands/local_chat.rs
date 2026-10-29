@@ -1312,3 +1312,22 @@ mod tests {
         assert!(!annotations.join("later.jsonl").exists());
     }
 }
+
+/// Read a worktree only when the chat changes view is opened or refreshed.
+#[tauri::command]
+#[specta::specta]
+pub async fn load_worktree_changes(
+    worktree_path: String,
+    whole_branch: bool,
+) -> Result<crate::local_chat::changes::WorktreeChanges, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::local_chat::changes::load(Path::new(&worktree_path), whole_branch)
+    })
+    .await
+    .map_err(|error| CommandError {
+        message: error.to_string(),
+    })?
+    .map_err(|error| CommandError {
+        message: error.to_string(),
+    })
+}

@@ -1039,6 +1039,17 @@ async loadLocalChatAnnotations(sessionId: string) : Promise<Result<LocalChatAnno
 }
 },
 /**
+ * Read a worktree only when the chat changes view is opened or refreshed.
+ */
+async loadWorktreeChanges(worktreePath: string, wholeBranch: boolean) : Promise<Result<WorktreeChanges, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_worktree_changes", { worktreePath, wholeBranch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Delete a chat session's annotations; deleting absent annotations succeeds.
  */
 async deleteLocalChatAnnotations(sessionId: string) : Promise<Result<null, CommandError>> {
@@ -2944,3 +2955,8 @@ function __makeEvents__<T extends Record<string, any>>(
 		},
 	);
 }
+
+export type FileStatus = "added" | "modified" | "deleted" | "renamed"
+export type MarkerReason = "binary" | "too_large" | "baseline_unavailable" | "patch_limit" | "unreadable"
+export type WorktreeChange = { path: string; old_path: string | null; status: FileStatus; patch: string; marker: MarkerReason | null }
+export type WorktreeChanges = { base_branch: string | null; base_unavailable: string | null; files: WorktreeChange[] }

@@ -4,8 +4,9 @@
 //! blocks chat event delivery: the projection forwards tool boundaries through
 //! a bounded, non-blocking channel to one recorder task per runtime.
 
-mod git;
+pub(crate) mod git;
 mod patch;
+pub(crate) use patch::FileStatus;
 mod recorder;
 
 use std::fs;

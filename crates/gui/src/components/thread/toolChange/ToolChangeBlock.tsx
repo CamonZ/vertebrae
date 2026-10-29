@@ -39,9 +39,9 @@ function fileLabel(f: ChangedFile): string {
   return f.oldPath ? `${f.oldPath} → ${f.path}` : f.path;
 }
 
-function FileSummary({ file }: { file: ChangedFile }): ReactNode {
+export function FileChangeSummary({ file }: { file: ChangedFile }): ReactNode {
   return (
-    <li data-testid="tool-change-file">
+    <>
       <span className="font-mono">{fileLabel(file)}</span>{" "}
       <span>({file.status})</span>
       {file.additions !== undefined && file.deletions !== undefined ? (
@@ -51,7 +51,7 @@ function FileSummary({ file }: { file: ChangedFile }): ReactNode {
         </span>
       ) : null}
       {file.marker ? <span> — {MARKER_TEXT[file.marker]}</span> : null}
-    </li>
+    </>
   );
 }
 
@@ -106,7 +106,12 @@ export function ToolChangeBlock({
         <div className="evtool-bd" id={panelId}>
           <ul>
             {delta.files.map((f) => (
-              <FileSummary key={`${f.oldPath ?? ""}>${f.path}`} file={f} />
+              <li
+                key={`${f.oldPath ?? ""}>${f.path}`}
+                data-testid="tool-change-file"
+              >
+                <FileChangeSummary file={f} />
+              </li>
             ))}
           </ul>
           {hasPatch ? (

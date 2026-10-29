@@ -17,7 +17,7 @@ const MAX_RENAME_PAIRS: usize = 50;
 const RENAME_THRESHOLD_PERCENT: u32 = 50;
 const DIFF_TIMEOUT: Duration = Duration::from_millis(500);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum FileStatus {
     Added,
