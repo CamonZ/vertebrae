@@ -21,6 +21,7 @@ import { useId, useState, type ReactNode } from "react";
 import { IdChip, RunChip } from "../shared/HearthPrimitives";
 import { Card } from "../molecules/Card";
 import { BoundedTextContent, MarkdownContent } from "../shared/MarkdownContent";
+import { PayloadDiffs, ToolChangeBlock } from "./toolChange/ToolChangeBlock";
 
 import type {
   ActivityMessage,
@@ -205,7 +206,9 @@ export function ToolRow(props: ToolRowProps): ReactNode {
   }
 
   const pending = status === "pending";
-  const hasBody = !pending && props.body != null && props.body !== "";
+  const hasBody =
+    !pending &&
+    ((props.body != null && props.body !== "") || !!props.payloadDiffs);
   const collapsed = controlled ? !!props.collapsed : localCollapsed;
   const toggle = controlled
     ? props.onToggle
@@ -251,9 +254,14 @@ export function ToolRow(props: ToolRowProps): ReactNode {
       ) : (
         <div className="evtool-hd">{headerContent}</div>
       )}
+      {!pending && !props.payloadDiffs ? (
+        <ToolChangeBlock toolId={props.toolId} />
+      ) : null}
       {hasBody && !collapsed ? (
         <div className="evtool-bd" id={bodyId}>
-          {typeof props.body === "string" ? (
+          {props.payloadDiffs ? (
+            <PayloadDiffs diffs={props.payloadDiffs} />
+          ) : typeof props.body === "string" ? (
             <BoundedTextContent
               text={props.body}
               expanded={props.showFullContent}

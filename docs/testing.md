@@ -47,6 +47,10 @@ cargo test --quiet -p vertebrae-core
 cargo test --quiet -p vertebrae-cli
 ```
 
+### Property tests
+
+Invariant-style tests use [Hegel](https://hegel.dev) (`hegeltest`, a dev-dependency of the GUI crate), for example `recorder/properties.rs` in the worktree-delta recorder. They need Rust 1.86+ and build the Hegel engine through a nested `cargo` run, so the first build needs network access to crates.io. Hegel writes its failure database to `.hegel/` next to the crate (gitignored). `scripts/validate.sh rust` runs them with `cargo test -p gui --lib local_chat::worktree_delta`; the GUI crate is excluded from workspace coverage.
+
 ### Code Coverage
 
 Requires `cargo-llvm-cov` (`cargo install cargo-llvm-cov`).

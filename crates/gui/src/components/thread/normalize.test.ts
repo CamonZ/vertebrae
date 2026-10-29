@@ -506,11 +506,43 @@ describe("runToThreads — normalized harness events", () => {
     ) as ToolMessage[];
     const patch = tools.find((m) => m.cmd === "apply_patch")!;
     expect(patch.em).toBe("lib/x.ex");
-    expect(patch.body).toContain("@@");
+    expect(patch.payloadDiffs?.[0].diff).toContain("@@");
     const todo = tools.find((m) => m.name === "todo_list")!;
     expect(todo.summary).toBe("1/2");
     expect(todo.body).toContain("[x] write test");
     expect(todo.body).toContain("[ ] make it pass");
+  });
+
+  it("keeps file_change content without real hunks as plain text, not a payload diff", () => {
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [exec({ id: "e4" })],
+      logsByExecutionId: {
+        e4: [
+          harnessLog(
+            "e4",
+            "file_change",
+            {
+              tool_call_id: "patch-2",
+              status: "completed",
+              changes: [
+                { path: "a.ts", kind: "update", patch: "@@ -1 +1 @@\n-x\n+y" },
+                { path: "new.ts", kind: "add", patch: "hello\nworld" },
+              ],
+            },
+            "2024-01-01T10:00:02Z",
+            { turnId: "turn-1" }
+          ),
+        ],
+      },
+    };
+    const [t] = runToThreads(input);
+    const patch = t.turns[0].messages.find(
+      (m) => m.type === "tool"
+    ) as ToolMessage;
+    expect(patch.payloadDiffs).toBeUndefined();
+    expect(patch.toolId).toBe("patch-2");
+    expect(patch.body).toContain("hello");
   });
 });
 

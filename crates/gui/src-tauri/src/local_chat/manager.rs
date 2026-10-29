@@ -392,6 +392,7 @@ impl LocalChatSessionManager {
             )
         };
         let Some(worktree_path) = worktree_path else {
+            log::info!("[LOCAL_CHAT] recording cleared for session {backend_session_id}");
             tap.stop();
             return Ok(());
         };
@@ -403,11 +404,18 @@ impl LocalChatSessionManager {
         let worktree = match resolved {
             Ok(worktree) => worktree,
             Err(error) => {
+                log::warn!(
+                    "[LOCAL_CHAT] recording target rejected for session {backend_session_id}: {error}"
+                );
                 tap.stop();
                 return Err(LocalChatSessionError::InvalidRecordingWorktree(error));
             }
         };
         if tap.worktree().as_ref() == Some(&worktree) {
+            log::info!(
+                "[LOCAL_CHAT] recording already targets {} for session {backend_session_id}",
+                worktree.display()
+            );
             return Ok(());
         }
         let Some(store) = self.annotation_store.clone() else {
@@ -416,8 +424,13 @@ impl LocalChatSessionManager {
         };
         // A runtime closed while the target was resolving stays stopped.
         if !self.lock_recordings().contains_key(backend_session_id) {
+            log::info!("[LOCAL_CHAT] runtime {backend_session_id} closed before recording started");
             return Ok(());
         }
+        log::info!(
+            "[LOCAL_CHAT] recording started for session {backend_session_id} (chat {chat_session_id}) in {}",
+            worktree.display()
+        );
         tap.start(chat_session_id, worktree, store, self.recorder_config);
         Ok(())
     }

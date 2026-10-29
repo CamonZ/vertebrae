@@ -269,6 +269,7 @@ function toolMessage(
   const atMs = ms(call.timestamp);
   const m: ToolMessage = {
     evt: call.toolId || nextEvt("tool"),
+    toolId: call.toolId || undefined,
     type: "tool",
     at: clock(call.timestamp),
     rel: rel(runStartMs, atMs),
@@ -322,6 +323,9 @@ function isStatusOnlyAgentSpawnResult(result: string): boolean {
   );
 }
 
+/** A ranged unified-diff hunk header, e.g. `@@ -1,2 +1,3 @@`. */
+const HUNK_HEADER = /^@@ -\d+(,\d+)? \+\d+(,\d+)? @@/m;
+
 /** Build a ToolMessage from either harness's normalized file_edit event. */
 function fileEditMessage(
   ev: FileEditEvent,
@@ -329,13 +333,22 @@ function fileEditMessage(
 ): ToolMessage {
   const atMs = ms(ev.timestamp);
   const paths = ev.changes.map((c) => c.path).join(", ");
-  const diffs = ev.changes
-    .map((c) => c.diff)
-    .filter((d): d is string => typeof d === "string" && d.length > 0)
-    .join("\n");
+  const texts = ev.changes.flatMap((c) =>
+    typeof c.diff === "string" && c.diff.trim().length > 0
+      ? [{ path: c.path, diff: c.diff }]
+      : []
+  );
+  // Only content with real hunks is an actual diff. Synthetic replacements
+  // (bare `@@`), raw file content and move notes stay plain text so the
+  // recorded worktree annotation still renders the change.
+  const actual =
+    texts.length > 0 && texts.every((t) => HUNK_HEADER.test(t.diff));
   const status = fileEditMessageStatus(ev.status);
   return {
     evt: ev.toolId || nextEvt("edit"),
+    toolId: ev.toolId || undefined,
+    payloadDiffs: actual ? texts : undefined,
+    body: actual ? undefined : texts.map((t) => t.diff).join("\n") || undefined,
     type: "tool",
     kind: "shell",
     cmd: "apply_patch",
@@ -344,7 +357,6 @@ function fileEditMessage(
     rel: rel(runStartMs, atMs),
     status,
     error: status === "err" || undefined,
-    body: diffs || undefined,
     collapsed: true,
   };
 }

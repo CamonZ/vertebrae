@@ -88,6 +88,7 @@ fn fast_config() -> RecorderConfig {
         settle_delay: Duration::from_millis(20),
         settle_interval: Duration::from_millis(20),
         settle_timeout: Duration::from_millis(500),
+        idle_interval: Duration::from_millis(20),
         channel_capacity: 512,
         limits: Limits::default(),
     }
@@ -225,6 +226,15 @@ impl Session {
         self.root(tool_call(id, "Bash")).await;
         tool_starts().await;
         work();
+        self.root(tool_output(id)).await;
+    }
+
+    /// A root tool call whose provider runs `work` the instant the call is
+    /// announced, before the recorder can snapshot anything.
+    async fn racing_tool(&self, id: &str, work: impl FnOnce()) {
+        self.root(tool_call(id, "Edit")).await;
+        work();
+        tool_starts().await;
         self.root(tool_output(id)).await;
     }
 
@@ -422,6 +432,7 @@ async fn existing_changes_idle_edits_and_ignored_files_are_never_attributed() {
     // Between tool windows nothing is attributed.
     write(&worktree, "idle.txt", "idle edit\n");
     write(&worktree, "edit.txt", "edited while idle\n");
+    tokio::time::sleep(Duration::from_millis(150)).await;
     session
         .tool("toolu_2", || write(&worktree, "b.txt", "b\n"))
         .await;
@@ -701,6 +712,7 @@ async fn unreadable_files_are_marked_and_later_tools_record_normally() {
         std::fs::Permissions::from_mode(0o644),
     )
     .unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
     session
         .tool("toolu_2", || write(&worktree, "later.txt", "ok\n"))
         .await;
@@ -1092,3 +1104,20 @@ async fn an_invalid_create_target_leaves_recording_off_but_starts_the_chat() {
     assert!(manager.has_session("backend-1").await);
     assert!(session.annotations().is_empty());
 }
+
+#[tokio::test]
+async fn a_tool_that_finishes_before_its_snapshot_is_still_attributed() {
+    let (_repo, worktree) = repo();
+    let (_annotations, store) = store();
+    let session = Session::recording(&worktree, store, fast_config());
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    session
+        .racing_tool("toolu_1", || write(&worktree, "quick.txt", "quick\n"))
+        .await;
+
+    assert_eq!(paths(&session.annotation("toolu_1").await), ["quick.txt"]);
+}
+
+mod patch_roundtrip;
+mod recorder_attribution;
