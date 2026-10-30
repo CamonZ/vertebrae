@@ -14,6 +14,7 @@ import {
 } from "../thread/toolChange/worktreeDelta";
 
 import { Select } from "../atoms/Select";
+import { preloadDiffRenderer } from "../thread/toolChange/useWorktreeDelta";
 import "./worktreeChanges.css";
 
 const PatchFiles = lazy(() => import("../thread/toolChange/PatchFiles"));
@@ -35,6 +36,8 @@ export function WorktreeChanges({ worktreePath }: { worktreePath: string }) {
   const fileRefs = useRef(new Map<string, HTMLElement>());
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
 
+  // Warm Pierre and its highlight workers while Git computes the changes.
+  useEffect(preloadDiffRenderer, []);
   useEffect(() => {
     let current = true;
     setState({ status: "loading" });

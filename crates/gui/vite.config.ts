@@ -19,6 +19,10 @@ export default defineConfig({
       ignored: ["**/src-tauri/**"],
     },
   },
+  // Pierre's diff highlight worker lazy-loads grammars, which needs ES workers.
+  worker: {
+    format: "es",
+  },
   build: {
     // Tauri expects the frontend to be in ../dist relative to src-tauri
     outDir: "dist",
@@ -38,12 +42,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
-      exclude: [
-        "node_modules/",
-        "src/test/",
-        "src/bindings.ts",
-        "**/*.d.ts",
-      ],
+      exclude: ["node_modules/", "src/test/", "src/bindings.ts", "**/*.d.ts"],
     },
   },
 });

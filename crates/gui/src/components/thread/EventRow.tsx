@@ -21,7 +21,12 @@ import { useId, useState, type ReactNode } from "react";
 import { IdChip, RunChip } from "../shared/HearthPrimitives";
 import { Card } from "../molecules/Card";
 import { BoundedTextContent, MarkdownContent } from "../shared/MarkdownContent";
-import { PayloadDiffs, ToolChangeBlock } from "./toolChange/ToolChangeBlock";
+import {
+  ChangeUnavailable,
+  PayloadDiffs,
+  ToolChangeBlock,
+} from "./toolChange/ToolChangeBlock";
+import { useWorktreeDelta } from "./toolChange/useWorktreeDelta";
 
 import type {
   ActivityMessage,
@@ -177,7 +182,33 @@ function EventCardRow({
 
 type ToolRowProps = Omit<ToolMessage, "type" | "evt" | "at" | "rel" | "id">;
 
+/**
+ * A finished chat tool call with a recorded worktree delta renders as that
+ * diff instead of the call; everything else renders as the tool call row.
+ */
 export function ToolRow(props: ToolRowProps): ReactNode {
+  const change = useWorktreeDelta(props.toolId);
+  const settled = props.status !== "pending" || !!props.error;
+  if (settled && !props.payloadDiffs && change.status === "ready") {
+    return (
+      <ToolChangeBlock
+        delta={change.delta}
+        toolName={props.name ?? props.cmd}
+      />
+    );
+  }
+  return (
+    <ToolCallRow
+      {...props}
+      changeUnavailable={settled && change.status === "invalid"}
+    />
+  );
+}
+
+function ToolCallRow({
+  changeUnavailable,
+  ...props
+}: ToolRowProps & { changeUnavailable: boolean }): ReactNode {
   // When a surface supplies onToggle (chat) the row is controlled by that
   // surface; otherwise (read-only Traces) it self-manages its open/closed
   // state so the result body can still be expanded and collapsed.
@@ -254,11 +285,12 @@ export function ToolRow(props: ToolRowProps): ReactNode {
       ) : (
         <div className="evtool-hd">{headerContent}</div>
       )}
-      {!pending && !props.payloadDiffs ? (
-        <ToolChangeBlock toolId={props.toolId} />
-      ) : null}
+      {changeUnavailable && !props.payloadDiffs ? <ChangeUnavailable /> : null}
       {hasBody && !collapsed ? (
-        <div className="evtool-bd" id={bodyId}>
+        <div
+          className={`evtool-bd${props.payloadDiffs ? " is-diff" : ""}`}
+          id={bodyId}
+        >
           {props.payloadDiffs ? (
             <PayloadDiffs diffs={props.payloadDiffs} />
           ) : typeof props.body === "string" ? (

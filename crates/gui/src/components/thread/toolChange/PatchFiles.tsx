@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import type { ReactNode } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
-import { FileDiff } from "@pierre/diffs/react";
+import { FileDiff, WorkerPoolContext } from "@pierre/diffs/react";
+import { diffWorkerPool } from "./diffWorkerPool";
 
 /**
  * Render every file diff in a Git patch. Pierre's `PatchDiff` throws unless
@@ -19,11 +20,15 @@ export default function PatchFiles({ patch }: { patch: string }): ReactNode {
   if (!files) {
     return <div className="evtool-sum">Diff could not be displayed</div>;
   }
-  return files.map((file, i) => (
-    <FileDiff
-      key={`${i}:${file.prevName ?? ""}>${file.name}`}
-      fileDiff={file}
-      options={{ diffStyle: "unified" }}
-    />
-  ));
+  return (
+    <WorkerPoolContext.Provider value={diffWorkerPool}>
+      {files.map((file, i) => (
+        <FileDiff
+          key={`${i}:${file.prevName ?? ""}>${file.name}`}
+          fileDiff={file}
+          options={{ diffStyle: "unified" }}
+        />
+      ))}
+    </WorkerPoolContext.Provider>
+  );
 }
