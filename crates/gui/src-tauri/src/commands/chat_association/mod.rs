@@ -1,7 +1,9 @@
-//! Associates a local chat with a ticket and Git worktree. Prototype: the
-//! decision model reads only new user messages; tool events only yield worktrees.
+//! Associates a local chat with a ticket and Git worktree. The decision model
+//! reads only new user messages; tool events only yield worktrees. Explicit
+//! ticket IDs and worktree names resolve only within the conversation's project.
 mod inference;
 mod inventory;
+mod references;
 
 use super::CommandError;
 use serde::{Deserialize, Serialize};
@@ -42,17 +44,20 @@ pub struct AssociationInput {
 pub enum AssociationSelection {
     Keep,
     Unknown,
-    Ticket { id: String },
+    Ticket { id: String, title: String },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct AssociationResult {
     pub selection: AssociationSelection,
+    /// An existing project worktree the user explicitly tied to the conversation.
+    pub worktree: Option<AssociationWorktree>,
     /// User events: the inventory now, before any requested worktree exists.
     /// Tool events: the worktrees the event touched.
     pub worktrees: Vec<AssociationWorktree>,
     /// The user asked to create a worktree; a later tool event will reveal it.
     pub create_worktree: bool,
-    /// Set when the decision could not run; the caller keeps its association.
+    /// Set when the decision could not run or an explicit reference did not
+    /// resolve; nothing is guessed and the rest of the result still applies.
     pub diagnostic: Option<String>,
 }
 
@@ -79,9 +84,9 @@ pub async fn resolve_chat_association(
     let outcome = resolve(input, &attempt).await;
     match &outcome {
         Ok(result) => {
-            log::info!(target: "chat_association", "attempt={} phase=finish elapsed_ms={} selection={} worktrees={} create_worktree={} diagnostic={:?}",
+            log::info!(target: "chat_association", "attempt={} phase=finish elapsed_ms={} selection={} worktree={} worktrees={} create_worktree={} diagnostic={}",
             attempt, started.elapsed().as_millis(), match result.selection { AssociationSelection::Keep => "keep", AssociationSelection::Unknown => "unknown", AssociationSelection::Ticket { .. } => "ticket" },
-            result.worktrees.len(), result.create_worktree, result.diagnostic)
+            result.worktree.is_some(), result.worktrees.len(), result.create_worktree, result.diagnostic.is_some())
         }
         Err(error) => {
             log::info!(target: "chat_association", "attempt={} phase=finish elapsed_ms={} status=error reason={}", attempt, started.elapsed().as_millis(), error.message)
@@ -103,17 +108,27 @@ async fn resolve(
         ));
     }
     log::info!(target: "chat_association", "attempt={} phase=context project={} worktree={} cache={}", attempt, fingerprint(&input.project_root), input.worktree_path.as_deref().map(fingerprint).unwrap_or_default(), input.candidate_project_root.as_deref().map(fingerprint).unwrap_or_default());
+    let mut result = AssociationResult {
+        selection: AssociationSelection::Keep,
+        worktree: None,
+        worktrees: vec![],
+        create_worktree: false,
+        diagnostic: None,
+    };
+    let state = inference::State {
+        ticket_id: input.ticket_id.as_deref(),
+        worktree_path: input.worktree_path.as_deref(),
+    };
+    if input.event_kind == AssociationEventKind::User
+        && inference::questions(&input.text, state).is_empty()
+    {
+        return Ok(result);
+    }
     let blocking = input.clone();
     let scope = tokio::task::spawn_blocking(move || inventory::scope(&blocking.project_root))
         .await
         .map_err(|_| invalid("Could not inspect the conversation workspace."))??;
     log::info!(target: "chat_association", "attempt={} phase=inventory worktrees={} path_fingerprints={:?}", attempt, scope.worktrees.len(), scope.worktrees.iter().take(8).map(|w| fingerprint(&w.path)).collect::<Vec<_>>());
-    let mut result = AssociationResult {
-        selection: AssociationSelection::Keep,
-        worktrees: vec![],
-        create_worktree: false,
-        diagnostic: None,
-    };
     if input.event_kind == AssociationEventKind::Tool {
         result.worktrees =
             inventory::observed_worktrees(&input.text, &scope.root, &scope.worktrees);
@@ -123,36 +138,82 @@ async fn resolve(
         result.diagnostic = Some("Decision model disabled in Settings.".into());
         return Ok(result);
     }
-    // Cached candidates count only for this conversation's own project.
+    // Cached candidates count only for this conversation's own project;
+    // explicit IDs still resolve through the project's own backend.
     let cache_root = input
         .candidate_project_root
         .as_deref()
         .and_then(|root| std::fs::canonicalize(root).ok());
-    if !cache_root.is_some_and(|root| scope.worktrees.iter().any(|w| Path::new(&w.path) == root)) {
-        result.diagnostic = Some("Ticket cache does not belong to this project.".into());
-        return Ok(result);
-    }
-    result.worktrees = scope.worktrees;
-    let state = inference::State {
-        ticket_id: input.ticket_id.as_deref(),
-        worktree_path: input.worktree_path.as_deref(),
+    let own_cache =
+        cache_root.is_some_and(|root| scope.worktrees.iter().any(|w| Path::new(&w.path) == root));
+    let candidates = if own_cache {
+        &input.candidates[..]
+    } else {
+        &[]
     };
-    match inference::decide(
+    let lookup = ProjectTickets {
+        project: scope.project.clone(),
+    };
+    let decision = inference::decide(
         &scope.config,
         &input.text,
-        &input.candidates,
+        inference::Scope {
+            candidates,
+            lookup: &lookup,
+            worktrees: &scope.worktrees,
+        },
         state,
         attempt,
     )
-    .await
-    {
+    .await;
+    result.worktrees = scope.worktrees;
+    match decision {
         Ok(decision) => {
+            result.diagnostic = decision.diagnostic.or_else(|| {
+                (!own_cache && decision.selection == AssociationSelection::Unknown)
+                    .then(|| "Ticket cache does not belong to this project.".into())
+            });
             result.selection = decision.selection;
+            result.worktree = decision.worktree;
             result.create_worktree = decision.create_worktree;
         }
         Err(error) => result.diagnostic = Some(inference::diagnostic(&error)),
     }
     Ok(result)
+}
+
+/// Tickets of the conversation's registered project, independent of the
+/// project currently selected in the window.
+struct ProjectTickets {
+    project: String,
+}
+
+#[async_trait::async_trait]
+impl references::TicketLookup for ProjectTickets {
+    async fn by_prefix(&self, prefix: &str) -> Result<Option<AssociationTicket>, ()> {
+        let config = vertebrae_sacrum_client::SacrumConfig::load_for_project(&self.project)
+            .map_err(|_| ())?;
+        let services = vertebrae_sacrum_client::from_sacrum(std::sync::Arc::new(
+            vertebrae_sacrum_client::GraphqlClient::new(config),
+        ));
+        // Absent and ambiguous prefixes are both reported as not found.
+        let id = match services.tasks().resolve_short_id(prefix).await {
+            Ok(id) => id,
+            Err(vertebrae_core::ServiceError::TaskNotFound { .. }) => return Ok(None),
+            Err(_) => return Err(()),
+        };
+        let task = services
+            .tasks()
+            .get_task_summary(&id)
+            .await
+            .map_err(|_| ())?;
+        Ok(
+            (task.level == vertebrae_core::Level::Ticket).then(|| AssociationTicket {
+                id: task.id,
+                title: task.title.chars().take(160).collect(),
+            }),
+        )
+    }
 }
 
 /// Stable only within this binary's hash implementation; paths never enter logs.

@@ -7,6 +7,8 @@ use vertebrae_sacrum_client::VertebraeConfigFile;
 
 pub(super) struct Scope {
     pub root: PathBuf,
+    /// Registered project the conversation root belongs to.
+    pub project: String,
     pub config: VertebraeConfigFile,
     pub worktrees: Vec<AssociationWorktree>,
 }
@@ -79,13 +81,14 @@ pub(super) fn scope(root: &str) -> Result<Scope, CommandError> {
         .map_err(|_| invalid("Conversation workspace is unavailable."))?;
     let config = vertebrae_sacrum_client::load_config_file()
         .map_err(|_| invalid("Could not read shared settings."))?;
-    for project in config.projects.values() {
+    for (slug, project) in &config.projects {
         let Ok(entries) = worktrees(Path::new(&project.path)) else {
             continue;
         };
         if entries.iter().any(|w| Path::new(&w.path) == root) {
             return Ok(Scope {
                 root,
+                project: slug.clone(),
                 worktrees: entries,
                 config,
             });

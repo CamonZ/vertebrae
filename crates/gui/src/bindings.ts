@@ -1471,6 +1471,10 @@ candidates: AssociationTicket[]; candidate_project_root: string | null;
 ticket_id: string | null; worktree_path: string | null }
 export type AssociationResult = { selection: AssociationSelection;
 /**
+ * An existing project worktree the user explicitly tied to the conversation.
+ */
+worktree: AssociationWorktree | null;
+/**
  * User events: the inventory now, before any requested worktree exists.
  * Tool events: the worktrees the event touched.
  */
@@ -1480,10 +1484,11 @@ worktrees: AssociationWorktree[];
  */
 create_worktree: boolean;
 /**
- * Set when the decision could not run; the caller keeps its association.
+ * Set when the decision could not run or an explicit reference did not
+ * resolve; nothing is guessed and the rest of the result still applies.
  */
 diagnostic: string | null }
-export type AssociationSelection = { kind: "keep" } | { kind: "unknown" } | { kind: "ticket"; id: string }
+export type AssociationSelection = { kind: "keep" } | { kind: "unknown" } | { kind: "ticket"; id: string; title: string }
 export type AssociationTicket = { id: string; title: string }
 export type AssociationWorktree = { path: string; branch: string | null }
 /**
