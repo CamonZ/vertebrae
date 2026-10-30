@@ -1,6 +1,8 @@
 import {
   createContext,
+  lazy,
   memo,
+  Suspense,
   useContext,
   useEffect,
   useId,
@@ -13,12 +15,6 @@ import Markdown, { defaultUrlTransform } from "react-markdown";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import {
-  vs,
-  vscDarkPlus,
-} from "react-syntax-highlighter/dist/esm/styles/prism";
-import { useIsLightTheme } from "../../hooks/useTheme";
 import { requestMermaidSvg } from "../../mermaid/requestMermaidSvg";
 import { loadGraphviz } from "../../utils/graphviz";
 import { LocalFileReferenceLink } from "./LocalFileReferenceLink";
@@ -156,49 +152,24 @@ export function MarkdownProjectRootProvider({
 
 const remarkPlugins = [remarkGfm, remarkBreaks];
 
-function createSyntaxTheme(
-  baseTheme: { [key: string]: React.CSSProperties },
-  background: string
-) {
-  return {
-    ...baseTheme,
-    'pre[class*="language-"]': {
-      ...(baseTheme['pre[class*="language-"]'] as React.CSSProperties),
-      background,
-      backgroundColor: "transparent",
-      margin: 0,
-      borderRadius: "var(--radius-md)",
-    },
-    'code[class*="language-"]': {
-      ...(baseTheme['code[class*="language-"]'] as React.CSSProperties),
-      background: "none",
-      backgroundColor: "transparent",
-    },
-  };
-}
-
-const darkSyntaxTheme = createSyntaxTheme(vscDarkPlus, "var(--color-bg)");
-const lightSyntaxTheme = createSyntaxTheme(vs, "var(--color-bg-2)");
-
 type CodeProps = ComponentPropsWithoutRef<"code"> & {
   inline?: boolean;
   node?: unknown;
 };
 
-const codeBlockStyle: React.CSSProperties = {
-  margin: 0,
-  padding: "0.75rem",
-  background: "var(--color-bg)",
-  fontSize: "var(--text-13)",
-  lineHeight: "1.6",
-  overflow: "auto",
-  maxHeight: "24rem",
-  maxWidth: "100%",
-};
+const CodeSnippet = lazy(() => import("./CodeSnippet"));
 
-const codeTagStyle = {
-  className: "font-mono",
-};
+/**
+ * Unhighlighted source shown while the Pierre renderer loads. A div, because
+ * react-markdown already wraps fenced blocks in a `pre`.
+ */
+function PlainCodeSnippet({ source }: { source: string }) {
+  return (
+    <div className="px-3 py-3 font-mono text-13 leading-[1.6] whitespace-pre text-fg">
+      <code>{source}</code>
+    </div>
+  );
+}
 
 interface HighlightedCodeBlockProps {
   language: string;
@@ -212,12 +183,6 @@ function HighlightedCodeBlock({
   diagramError,
 }: HighlightedCodeBlockProps) {
   const hasLanguage = language !== "text";
-  const isLightTheme = useIsLightTheme();
-  const syntaxTheme = isLightTheme ? lightSyntaxTheme : darkSyntaxTheme;
-  const syntaxBlockStyle = {
-    ...codeBlockStyle,
-    background: isLightTheme ? "var(--color-bg-2)" : "var(--color-bg)",
-  };
 
   return (
     <div
@@ -240,15 +205,11 @@ function HighlightedCodeBlock({
           )}
         </div>
       )}
-      <SyntaxHighlighter
-        style={syntaxTheme as { [key: string]: React.CSSProperties }}
-        language={language}
-        PreTag="div"
-        customStyle={syntaxBlockStyle}
-        codeTagProps={codeTagStyle}
-      >
-        {source}
-      </SyntaxHighlighter>
+      <div className="max-h-96 max-w-full overflow-auto">
+        <Suspense fallback={<PlainCodeSnippet source={source} />}>
+          <CodeSnippet language={language} source={source} />
+        </Suspense>
+      </div>
     </div>
   );
 }
@@ -821,7 +782,7 @@ function createMarkdownComponents(
 
       return (
         <code
-          className="rounded bg-bg/80 px-1.5 py-0.5 font-mono text-13 text-accent"
+          className="rounded bg-[var(--inline-code-bg)] px-1.5 py-0.5 font-mono text-13 text-[var(--inline-code-fg)]"
           {...props}
         >
           {children}

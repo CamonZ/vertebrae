@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { ReactNode } from "react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, WorkerPoolContext } from "@pierre/diffs/react";
+import { usePierreDiffOptions } from "../../../hooks/useCodeAppearance";
 import { diffWorkerPool } from "./diffWorkerPool";
 
 /**
@@ -10,6 +11,7 @@ import { diffWorkerPool } from "./diffWorkerPool";
  * lazily so Pierre stays out of the main chunk.
  */
 export default function PatchFiles({ patch }: { patch: string }): ReactNode {
+  const options = usePierreDiffOptions();
   const files = useMemo(() => {
     try {
       return parsePatchFiles(patch).flatMap((p) => p.files);
@@ -26,7 +28,7 @@ export default function PatchFiles({ patch }: { patch: string }): ReactNode {
         <FileDiff
           key={`${i}:${file.prevName ?? ""}>${file.name}`}
           fileDiff={file}
-          options={{ diffStyle: "unified" }}
+          options={options}
         />
       ))}
     </WorkerPoolContext.Provider>

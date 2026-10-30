@@ -1,12 +1,16 @@
 import { withBuiltinProviders } from "../test/localChatCatalog";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SettingsPage } from "./SettingsPage";
 import { useLocalChatDefaultsStore } from "../utils/localChatDefaults";
 import { useUIStore } from "../stores/uiStore";
+import {
+  DEFAULT_DIFF_PREFERENCES,
+  codeThemesFor,
+} from "../utils/codeAppearance";
 import {
   initialGuiUpdateState,
   resetGuiUpdateState,
@@ -18,6 +22,18 @@ const mockGetSupportedLocalChatHarnesses = vi.fn();
 const mockGetLocalFileEditors = vi.fn();
 const mockLocalBackendProgressListen = vi.fn();
 const invokeMock = vi.mocked(invoke);
+
+vi.mock("../components/thread/toolChange/PatchFiles", () => ({
+  default: ({ patch }: { patch: string }) => (
+    <div data-testid="preview-patch-files">{patch}</div>
+  ),
+}));
+
+vi.mock("../components/shared/CodeSnippet", () => ({
+  default: ({ source }: { source: string }) => (
+    <div data-testid="preview-code-snippet">{source}</div>
+  ),
+}));
 
 vi.mock("../bindings", () => ({
   commands: {
@@ -140,6 +156,11 @@ describe("SettingsPage", () => {
       theme: "system",
       thinkingIndicatorStyle: "classic",
       externalEditor: "",
+      codeThemeDark: "pierre-dark",
+      codeThemeLight: "pierre-light",
+      diffPreferences: DEFAULT_DIFF_PREFERENCES,
+      inlineCodeForeground: null,
+      inlineCodeBackground: null,
     });
     mockGetSupportedLocalChatHarnesses.mockResolvedValue({
       status: "ok",
@@ -964,6 +985,229 @@ describe("SettingsPage", () => {
         anthropic: { modelId: "opus", permissionMode: "plan" },
         openai: { reasoningEffort: "high", speedTier: "fast" },
       },
+    });
+  });
+
+  it("configures code themes per appearance and inline code styling", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-appearance"));
+
+    // System appearance with a light OS (the default matchMedia mock).
+    const codeTheme = screen.getByRole("combobox", { name: "Code theme" });
+    expect(codeTheme).toHaveValue("pierre-light");
+    await user.selectOptions(codeTheme, "github-light");
+    expect(useUIStore.getState()).toMatchObject({
+      codeThemeLight: "github-light",
+      codeThemeDark: "pierre-dark",
+    });
+
+    const foreground = screen.getByRole("combobox", {
+      name: "Inline code text",
+    });
+    const background = screen.getByRole("combobox", {
+      name: "Inline code background",
+    });
+    const reset = screen.getByTestId("settings-inline-code-reset");
+    expect(foreground).toHaveValue("");
+    expect(reset).toBeDisabled();
+
+    await user.selectOptions(foreground, "info");
+    await user.selectOptions(background, "bg-2");
+    expect(useUIStore.getState()).toMatchObject({
+      inlineCodeForeground: "info",
+      inlineCodeBackground: "bg-2",
+    });
+
+    await user.click(reset);
+    expect(useUIStore.getState()).toMatchObject({
+      inlineCodeForeground: null,
+      inlineCodeBackground: null,
+      codeThemeLight: "github-light",
+    });
+    expect(foreground).toHaveValue("");
+    expect(background).toHaveValue("");
+  });
+
+  it("previews inline code, fenced code and a diff", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-appearance"));
+
+    const preview = screen.getByRole("region", { name: "Code preview" });
+    expect(preview.querySelector("code")).toHaveTextContent("npm run build");
+    expect(await screen.findByTestId("preview-code-snippet")).toHaveTextContent(
+      "export function greet"
+    );
+    const diffPreview = screen.getByRole("region", { name: "Diff preview" });
+    expect(
+      await within(diffPreview).findByTestId("preview-patch-files")
+    ).toHaveTextContent("diff --git a/src/greet.ts");
+  });
+
+  it("falls back to the default selection for unavailable stored values", async () => {
+    useUIStore.setState({
+      codeThemeLight: "removed-theme",
+      inlineCodeForeground: "removed-color",
+      diffPreferences: {
+        ...DEFAULT_DIFF_PREFERENCES,
+        diffStyle: "removed" as "split",
+      },
+    });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-appearance"));
+
+    expect(
+      screen.getByRole("combobox", { name: "Code theme" })
+    ).toHaveValue("pierre-light");
+    expect(screen.getByRole("combobox", { name: "Diff layout" })).toHaveValue(
+      "unified"
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Inline code text" })
+    ).toHaveValue("");
+  });
+
+  it("configures and resets diff options", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-appearance"));
+    const reset = screen.getByRole("button", { name: "Reset diff options" });
+    expect(reset).toBeDisabled();
+
+    const choose = (name: string, value: string) =>
+      user.selectOptions(screen.getByRole("combobox", { name }), value);
+    await choose("Diff layout", "split");
+    await choose("Change markers", "classic");
+    await choose("Inline changes", "char");
+    await choose("Long lines", "wrap");
+    await choose("Hunk separators", "metadata");
+    await choose("Diff line numbers", "off");
+    await choose("Change backgrounds", "off");
+
+    expect(useUIStore.getState().diffPreferences).toEqual({
+      diffStyle: "split",
+      diffIndicators: "classic",
+      lineDiffType: "char",
+      overflow: "wrap",
+      hunkSeparators: "metadata",
+      lineNumbers: false,
+      backgrounds: false,
+    });
+    expect(screen.getByTestId("settings-saved-indicator")).toBeVisible();
+
+    await user.click(reset);
+    expect(useUIStore.getState().diffPreferences).toEqual(
+      DEFAULT_DIFF_PREFERENCES
+    );
+    expect(screen.getByRole("combobox", { name: "Diff layout" })).toHaveValue(
+      "unified"
+    );
+  });
+
+  describe("contextual code theme", () => {
+    const originalMatchMedia = window.matchMedia;
+    afterEach(() => {
+      window.matchMedia = originalMatchMedia;
+    });
+
+    function mockOsDark(dark: boolean) {
+      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes("dark") ? dark : false,
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }));
+    }
+
+    async function openAppearance() {
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter>
+          <SettingsPage />
+        </MemoryRouter>
+      );
+      await user.click(screen.getByTestId("settings-nav-appearance"));
+      return user;
+    }
+
+    const picker = () => screen.getByRole("combobox", { name: "Code theme" });
+    const optionValues = () =>
+      Array.from(picker().querySelectorAll("option"), (option) => option.value);
+
+    it.each([
+      ["light", false, "light"],
+      ["light", true, "light"],
+      ["dark", false, "dark"],
+      ["dark", true, "dark"],
+      ["system", true, "dark"],
+      ["system", false, "light"],
+    ] as const)(
+      "with %s appearance and OS dark=%s lists only %s themes",
+      async (theme, osDark, scheme) => {
+        mockOsDark(osDark);
+        useUIStore.setState({ theme });
+        await openAppearance();
+
+        expect(
+          screen.getAllByRole("combobox", { name: "Code theme" })
+        ).toHaveLength(1);
+        expect(picker()).toHaveAttribute("data-scheme", scheme);
+        expect(optionValues()).toEqual(
+          codeThemesFor(scheme).map((option) => option.name)
+        );
+        expect(optionValues()).toHaveLength(scheme === "dark" ? 49 : 26);
+      }
+    );
+
+    it("swaps the listed themes with the appearance and keeps both choices", async () => {
+      mockOsDark(false);
+      useUIStore.setState({ theme: "light", codeThemeDark: "tokyo-night" });
+      const user = await openAppearance();
+
+      await user.selectOptions(picker(), "one-light");
+      expect(optionValues()).not.toContain("tokyo-night");
+
+      await user.selectOptions(screen.getByTestId("settings-theme"), "dark");
+      expect(picker()).toHaveValue("tokyo-night");
+      expect(optionValues()).not.toContain("one-light");
+      await user.selectOptions(picker(), "nord");
+
+      await user.selectOptions(screen.getByTestId("settings-theme"), "light");
+      expect(picker()).toHaveValue("one-light");
+      expect(useUIStore.getState()).toMatchObject({
+        codeThemeDark: "nord",
+        codeThemeLight: "one-light",
+      });
+    });
+
+    it("falls back when a stored theme belongs to the other appearance", async () => {
+      mockOsDark(false);
+      useUIStore.setState({ theme: "dark", codeThemeDark: "github-light" });
+      await openAppearance();
+
+      expect(picker()).toHaveValue("pierre-dark");
     });
   });
 });

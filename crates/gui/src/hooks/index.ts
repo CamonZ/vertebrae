@@ -37,6 +37,7 @@ export { useStepTransitionChangeListener } from "./useStepTransitionChangeListen
 export { useWorkflowTransitionChangeListener } from "./useWorkflowTransitionChangeListener";
 export { useTheme } from "./useTheme";
 export { useDensity } from "./useDensity";
+export { useInlineCodeStyle } from "./useCodeAppearance";
 export { useExpandedNodes } from "./useExpandedNodes";
 export { useElkLayout, calculateElkLayout } from "./useElkLayout";
 export type {

@@ -67,4 +67,21 @@ describe("LocalFileReferenceLink", () => {
       null
     );
   });
+
+  it("shares the inline code colors from Appearance settings", () => {
+    render(
+      <LocalFileReferenceLink
+        projectRoot="/repo"
+        reference={{ path: "a.ts", line: null, column: null }}
+      >
+        a.ts
+      </LocalFileReferenceLink>
+    );
+
+    const link = screen.getByRole("button", { name: "a.ts" });
+    expect(link).toHaveClass(
+      "text-[var(--inline-code-fg)]",
+      "bg-[var(--inline-code-bg)]"
+    );
+  });
 });
