@@ -3,7 +3,7 @@ import {
   SharedConfigSettings,
   type ConfigSection,
 } from "../components/settings/SharedConfigSettings";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   commands,
@@ -20,6 +20,7 @@ import { Button } from "../components/atoms/Button";
 import { Modal } from "../components/molecules/Modal";
 import { Input } from "../components/atoms/Input";
 import { Select } from "../components/atoms/Select";
+import { MarkdownContent } from "../components/shared/MarkdownContent";
 import {
   GUI_UPDATE_CHANNELS,
   GUI_UPDATE_CHANNEL,
@@ -43,7 +44,19 @@ import {
   relaunchGuiApplication,
 } from "../update";
 import { useUIStore, type ThinkingIndicatorStyle } from "../stores/uiStore";
+import { useIsLightTheme } from "../hooks/useTheme";
 import type { GateSteeringThresholds } from "../utils/gateDraft";
+import {
+  DIFF_CHOICES,
+  codeThemesFor,
+  INLINE_CODE_BACKGROUNDS,
+  INLINE_CODE_FOREGROUNDS,
+  inlineCodeColorValue,
+  resolveCodeTheme,
+  resolveDiffPreferences,
+  type ColorScheme,
+  type DiffPreferences,
+} from "../utils/codeAppearance";
 import {
   hasStaleModelDefault,
   hasStalePermissionDefault,
@@ -197,6 +210,310 @@ function GateSteeringSettings({ onSaved }: { onSaved: () => void }) {
           />
         </SettingRow>
       ))}
+    </div>
+  );
+}
+
+const PatchFiles = lazy(
+  () => import("../components/thread/toolChange/PatchFiles")
+);
+
+const CODE_PREVIEW_MARKDOWN = [
+  "Run `npm run build` before opening `src/main.ts`.",
+  "",
+  "```ts",
+  "export function greet(name: string): string {",
+  "  // Template literals keep this short",
+  "  return `Hello, ${name}!`;",
+  "}",
+  "```",
+].join("\n");
+
+const DIFF_PREVIEW_PATCH = [
+  "diff --git a/src/greet.ts b/src/greet.ts",
+  "--- a/src/greet.ts",
+  "+++ b/src/greet.ts",
+  "@@ -1,4 +1,4 @@",
+  " export function greet(name: string): string {",
+  '-  return "Hello, " + name;',
+  "+  return `Hello, ${name}!`;",
+  " }",
+  " ",
+  "@@ -12,3 +12,4 @@",
+  " export function farewell(name: string): string {",
+  '-  return "Goodbye " + name;',
+  "+  const trimmed = name.trim();",
+  "+  return `Goodbye, ${trimmed}.`;",
+  " }",
+  "",
+].join("\n");
+
+const CODE_THEME_DESCRIPTIONS: Record<ColorScheme, string> = {
+  dark: "Syntax colors for chat code blocks and diffs. Vertebrae is dark, so dark themes are listed; light appearance keeps its own choice.",
+  light:
+    "Syntax colors for chat code blocks and diffs. Vertebrae is light, so light themes are listed; dark appearance keeps its own choice.",
+};
+
+type DiffChoiceKey = keyof typeof DIFF_CHOICES;
+
+const DIFF_CHOICE_ROWS: {
+  key: DiffChoiceKey;
+  label: string;
+  description: string;
+}[] = [
+  {
+    key: "diffStyle",
+    label: "Diff layout",
+    description: "Show changes in one column or old and new side by side.",
+  },
+  {
+    key: "diffIndicators",
+    label: "Change markers",
+    description: "How added and removed lines are marked in the gutter.",
+  },
+  {
+    key: "lineDiffType",
+    label: "Inline changes",
+    description:
+      "Highlight the exact words or characters that changed within a line.",
+  },
+  {
+    key: "overflow",
+    label: "Long lines",
+    description: "Scroll long lines horizontally or wrap them.",
+  },
+  {
+    key: "hunkSeparators",
+    label: "Hunk separators",
+    description: "What appears between separate groups of changes.",
+  },
+];
+
+const DIFF_TOGGLE_ROWS: {
+  key: "lineNumbers" | "backgrounds";
+  label: string;
+  description: string;
+}[] = [
+  {
+    key: "lineNumbers",
+    label: "Diff line numbers",
+    description: "Show old and new line numbers beside each line.",
+  },
+  {
+    key: "backgrounds",
+    label: "Change backgrounds",
+    description: "Tint added and removed lines in addition to their markers.",
+  },
+];
+
+function inlineColorOptions(options: readonly { id: string; label: string }[]) {
+  return [
+    { value: "", label: "Hearth default" },
+    ...options.map((option) => ({ value: option.id, label: option.label })),
+  ];
+}
+
+function CodeAppearanceSettings({ onSaved }: { onSaved: () => void }) {
+  const codeThemes = {
+    dark: useUIStore((state) => state.codeThemeDark),
+    light: useUIStore((state) => state.codeThemeLight),
+  };
+  // The picker lists and edits the themes for the effective appearance
+  // (forced, or the OS when set to System); the other choice is kept.
+  const scheme: ColorScheme = useIsLightTheme() ? "light" : "dark";
+  const setCodeTheme = useUIStore((state) => state.setCodeTheme);
+  const foreground = useUIStore((state) => state.inlineCodeForeground);
+  const setForeground = useUIStore((state) => state.setInlineCodeForeground);
+  const background = useUIStore((state) => state.inlineCodeBackground);
+  const setBackground = useUIStore((state) => state.setInlineCodeBackground);
+  const resetInlineCodeStyle = useUIStore(
+    (state) => state.resetInlineCodeStyle
+  );
+  // Unknown stored values fall back to the defaults the renderers use.
+  const foregroundValue = inlineCodeColorValue(
+    INLINE_CODE_FOREGROUNDS,
+    foreground
+  )
+    ? (foreground ?? "")
+    : "";
+  const backgroundValue = inlineCodeColorValue(
+    INLINE_CODE_BACKGROUNDS,
+    background
+  )
+    ? (background ?? "")
+    : "";
+
+  return (
+    <div className="mt-8 border-t border-[var(--color-line)]">
+      <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+        Code
+      </p>
+      <SettingRow
+        label="Code theme"
+        description={CODE_THEME_DESCRIPTIONS[scheme]}
+      >
+        <Select
+          key={scheme}
+          aria-label="Code theme"
+          data-testid="settings-code-theme"
+          data-scheme={scheme}
+          value={resolveCodeTheme(codeThemes[scheme], scheme)}
+          onChange={(event) => {
+            setCodeTheme(scheme, event.target.value);
+            onSaved();
+          }}
+          options={codeThemesFor(scheme).map((theme) => ({
+            value: theme.name,
+            label: theme.label,
+          }))}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Inline code text"
+        description="Text color for inline code and file references in chat."
+      >
+        <Select
+          aria-label="Inline code text"
+          data-testid="settings-inline-code-foreground"
+          value={foregroundValue}
+          onChange={(event) => {
+            setForeground(event.target.value || null);
+            onSaved();
+          }}
+          options={inlineColorOptions(INLINE_CODE_FOREGROUNDS)}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Inline code background"
+        description="Background for inline code and file references in chat."
+      >
+        <div className="flex items-center gap-2">
+          <Select
+            aria-label="Inline code background"
+            data-testid="settings-inline-code-background"
+            value={backgroundValue}
+            onChange={(event) => {
+              setBackground(event.target.value || null);
+              onSaved();
+            }}
+            options={inlineColorOptions(INLINE_CODE_BACKGROUNDS)}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            data-testid="settings-inline-code-reset"
+            disabled={!foregroundValue && !backgroundValue}
+            onClick={() => {
+              resetInlineCodeStyle();
+              onSaved();
+            }}
+          >
+            Reset
+          </Button>
+        </div>
+      </SettingRow>
+      <section
+        aria-label="Code preview"
+        className="mb-4 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 text-sm text-[var(--color-fg)]"
+        data-testid="settings-code-preview"
+      >
+        <MarkdownContent text={CODE_PREVIEW_MARKDOWN} />
+      </section>
+    </div>
+  );
+}
+
+function DiffSettings({ onSaved }: { onSaved: () => void }) {
+  const stored = useUIStore((state) => state.diffPreferences);
+  const setDiffPreferences = useUIStore((state) => state.setDiffPreferences);
+  const resetDiffPreferences = useUIStore(
+    (state) => state.resetDiffPreferences
+  );
+  const preferences = resolveDiffPreferences(stored);
+  const update = (change: Partial<DiffPreferences>) => {
+    setDiffPreferences(change);
+    onSaved();
+  };
+
+  return (
+    <div className="mt-8 border-t border-[var(--color-line)]">
+      <div className="flex items-center justify-between pt-5">
+        <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+          Diffs
+        </p>
+        <Button
+          size="sm"
+          variant="ghost"
+          data-testid="settings-diff-reset"
+          disabled={
+            JSON.stringify(preferences) ===
+            JSON.stringify(resolveDiffPreferences(undefined))
+          }
+          onClick={() => {
+            resetDiffPreferences();
+            onSaved();
+          }}
+        >
+          Reset diff options
+        </Button>
+      </div>
+      {DIFF_CHOICE_ROWS.map((row) => (
+        <SettingRow
+          key={row.key}
+          label={row.label}
+          description={row.description}
+        >
+          <Select
+            aria-label={row.label}
+            data-testid={`settings-diff-${row.key}`}
+            value={preferences[row.key]}
+            onChange={(event) =>
+              update({
+                [row.key]: event.target.value,
+              } as Partial<DiffPreferences>)
+            }
+            options={DIFF_CHOICES[row.key].map((choice) => ({
+              value: choice.value,
+              label: choice.label,
+            }))}
+          />
+        </SettingRow>
+      ))}
+      {DIFF_TOGGLE_ROWS.map((row) => (
+        <SettingRow
+          key={row.key}
+          label={row.label}
+          description={row.description}
+        >
+          <Select
+            aria-label={row.label}
+            data-testid={`settings-diff-${row.key}`}
+            value={preferences[row.key] ? "on" : "off"}
+            onChange={(event) =>
+              update({ [row.key]: event.target.value === "on" })
+            }
+            options={[
+              { value: "on", label: "Shown" },
+              { value: "off", label: "Hidden" },
+            ]}
+          />
+        </SettingRow>
+      ))}
+      <section
+        aria-label="Diff preview"
+        className="mb-4 overflow-hidden rounded-md border border-border/50"
+        data-testid="settings-diff-preview"
+      >
+        <Suspense
+          fallback={
+            <div className="px-3 py-3 font-mono text-eyebrow text-fg-mute">
+              Loading diff preview…
+            </div>
+          }
+        >
+          <PatchFiles patch={DIFF_PREVIEW_PATCH} />
+        </Suspense>
+      </section>
     </div>
   );
 }
@@ -2212,6 +2529,8 @@ export function SettingsPage({
                   ]}
                 />
               </SettingRow>
+              <CodeAppearanceSettings onSaved={() => setSavedFeedback(true)} />
+              <DiffSettings onSaved={() => setSavedFeedback(true)} />
             </div>
           ) : activeSection === "updates" ? (
             <>

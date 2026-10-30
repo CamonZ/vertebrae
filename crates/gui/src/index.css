@@ -208,6 +208,10 @@
    creating a second source of truth.
    ============================================================================= */
 :root {
+  /* Inline code (Settings > Appearance overrides these on the root element) */
+  --inline-code-fg: var(--color-accent);
+  --inline-code-bg: color-mix(in oklab, var(--color-bg) 80%, transparent);
+
   /* Surfaces */
   --bg: var(--color-bg);
   --bg-1: var(--color-bg-1);

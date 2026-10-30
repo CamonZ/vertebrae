@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useUIStore } from "./uiStore";
+import { DEFAULT_DIFF_PREFERENCES } from "../utils/codeAppearance";
 
 describe("uiStore", () => {
   beforeEach(() => {
@@ -9,6 +10,11 @@ describe("uiStore", () => {
       thinkingIndicatorStyle: "classic",
       density: "auto",
       externalEditor: "",
+      codeThemeDark: "pierre-dark",
+      codeThemeLight: "pierre-light",
+      diffPreferences: DEFAULT_DIFF_PREFERENCES,
+      inlineCodeForeground: null,
+      inlineCodeBackground: null,
     });
   });
 
@@ -123,9 +129,121 @@ describe("uiStore", () => {
         density: "auto",
         externalEditor: "",
         gateSteeringThresholds: { soft: 3, form: 6, escape: 9 },
+        codeThemeDark: "pierre-dark",
+        codeThemeLight: "pierre-light",
+        diffPreferences: DEFAULT_DIFF_PREFERENCES,
+        inlineCodeForeground: null,
+        inlineCodeBackground: null,
       });
 
       setItemSpy.mockRestore();
+    });
+
+    it("persists code appearance preferences", () => {
+      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+
+      useUIStore.getState().setCodeTheme("dark", "tokyo-night");
+      useUIStore.getState().setCodeTheme("light", "github-light");
+      useUIStore.getState().setDiffPreferences({ diffStyle: "split" });
+      useUIStore.getState().setInlineCodeForeground("info");
+      useUIStore.getState().setInlineCodeBackground("bg-2");
+
+      const persistCalls = setItemSpy.mock.calls.filter(
+        ([key]) => key === "vertebrae-ui-storage"
+      );
+      const persisted = JSON.parse(persistCalls[persistCalls.length - 1][1]);
+      expect(persisted.state).toMatchObject({
+        codeThemeDark: "tokyo-night",
+        codeThemeLight: "github-light",
+        diffPreferences: { ...DEFAULT_DIFF_PREFERENCES, diffStyle: "split" },
+        inlineCodeForeground: "info",
+        inlineCodeBackground: "bg-2",
+      });
+
+      setItemSpy.mockRestore();
+    });
+
+    it("keeps code appearance defaults when rehydrating older settings", async () => {
+      localStorage.setItem(
+        "vertebrae-ui-storage",
+        JSON.stringify({
+          state: { theme: "dark", thinkingIndicatorStyle: "classic" },
+          version: 0,
+        })
+      );
+
+      await useUIStore.persist.rehydrate();
+
+      const state = useUIStore.getState();
+      expect(state.theme).toBe("dark");
+      expect(state.codeThemeDark).toBe("pierre-dark");
+      expect(state.codeThemeLight).toBe("pierre-light");
+      expect(state.diffPreferences).toEqual(DEFAULT_DIFF_PREFERENCES);
+      expect(state.inlineCodeForeground).toBeNull();
+      expect(state.inlineCodeBackground).toBeNull();
+      localStorage.removeItem("vertebrae-ui-storage");
+    });
+
+    it("repairs partial or invalid stored diff preferences", async () => {
+      localStorage.setItem(
+        "vertebrae-ui-storage",
+        JSON.stringify({
+          state: { diffPreferences: { diffStyle: "split", overflow: "bogus" } },
+          version: 0,
+        })
+      );
+
+      await useUIStore.persist.rehydrate();
+
+      expect(useUIStore.getState().diffPreferences).toEqual({
+        ...DEFAULT_DIFF_PREFERENCES,
+        diffStyle: "split",
+      });
+      localStorage.removeItem("vertebrae-ui-storage");
+    });
+  });
+
+  describe("code appearance", () => {
+    it("defaults to the Pierre themes and Hearth inline styling", () => {
+      const state = useUIStore.getState();
+      expect(state.codeThemeDark).toBe("pierre-dark");
+      expect(state.codeThemeLight).toBe("pierre-light");
+      expect(state.inlineCodeForeground).toBeNull();
+      expect(state.inlineCodeBackground).toBeNull();
+    });
+
+    it("resets inline code styling to the Hearth default", () => {
+      useUIStore.getState().setInlineCodeForeground("err");
+      useUIStore.getState().setInlineCodeBackground("none");
+      useUIStore.getState().setCodeTheme("dark", "nord");
+
+      useUIStore.getState().resetInlineCodeStyle();
+
+      const state = useUIStore.getState();
+      expect(state.inlineCodeForeground).toBeNull();
+      expect(state.inlineCodeBackground).toBeNull();
+      expect(state.codeThemeDark).toBe("nord");
+    });
+
+    it("sets dark and light themes independently", () => {
+      useUIStore.getState().setCodeTheme("light", "one-light");
+      expect(useUIStore.getState().codeThemeDark).toBe("pierre-dark");
+      expect(useUIStore.getState().codeThemeLight).toBe("one-light");
+    });
+
+    it("merges and resets diff preferences", () => {
+      useUIStore.getState().setDiffPreferences({ diffStyle: "split" });
+      useUIStore.getState().setDiffPreferences({ lineNumbers: false });
+      expect(useUIStore.getState().diffPreferences).toEqual({
+        ...DEFAULT_DIFF_PREFERENCES,
+        diffStyle: "split",
+        lineNumbers: false,
+      });
+
+      useUIStore.getState().resetDiffPreferences();
+      expect(useUIStore.getState().diffPreferences).toEqual(
+        DEFAULT_DIFF_PREFERENCES
+      );
     });
   });
 });

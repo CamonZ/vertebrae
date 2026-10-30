@@ -7,7 +7,7 @@ import {
 } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { AppShell } from "./components";
-import { useTheme, useDensity } from "./hooks";
+import { useTheme, useDensity, useInlineCodeStyle } from "./hooks";
 import {
   ProjectSetupPage,
   WelcomeInstallPage,
@@ -27,6 +27,8 @@ function RootLayout() {
   useTheme();
   // Initialize density management (Retina-aware type scale) at the app root
   useDensity();
+  // Apply inline code colors from Appearance settings
+  useInlineCodeStyle();
 
   return (
     <AppShell>

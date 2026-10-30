@@ -32,6 +32,16 @@ vi.mock("../../utils/graphviz", () => ({
 
 vi.mock("@tauri-apps/plugin-opener", () => openerMock);
 
+// Pierre renders into a shadow root; CodeSnippet.test.tsx covers it. Here the
+// snippet exposes its source and language so block structure stays testable.
+vi.mock("./CodeSnippet", () => ({
+  default: ({ language, source }: { language: string; source: string }) => (
+    <div data-testid="code-snippet" data-language={language}>
+      <code>{source}</code>
+    </div>
+  ),
+}));
+
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
 
@@ -103,7 +113,8 @@ describe("MarkdownContent", () => {
       const code = screen.getByText("console.log()");
       expect(code.tagName).toBe("CODE");
       expect(code.className).toContain("font-mono");
-      expect(code.className).toContain("text-accent");
+      expect(code.className).toContain("text-[var(--inline-code-fg)]");
+      expect(code.className).toContain("bg-[var(--inline-code-bg)]");
     });
   });
 
@@ -378,18 +389,12 @@ describe("MarkdownContent", () => {
       expect(codeEl!.textContent).toContain("42");
     });
 
-    it("uses a readable light syntax palette and code surface", () => {
-      document.documentElement.classList.add("light");
-      const { container } = render(
-        <MarkdownContent text={"```typescript\nconst x = 42;\n```"} />
-      );
+    it("renders fenced code blocks through the Pierre snippet", async () => {
+      render(<MarkdownContent text={"```typescript\nconst x = 42;\n```"} />);
 
-      const codeEl = container.querySelector("code");
-      expect(codeEl).not.toBeNull();
-      expect(codeEl).toHaveStyle({ color: "rgb(57, 58, 52)" });
-      expect(codeEl?.parentElement).toHaveStyle({
-        background: "var(--color-bg-2)",
-      });
+      const snippet = await screen.findByTestId("code-snippet");
+      expect(snippet).toHaveAttribute("data-language", "typescript");
+      expect(snippet.textContent).toBe("const x = 42;");
     });
 
     it("renders fenced code blocks without language and no language label", () => {
