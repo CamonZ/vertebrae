@@ -165,13 +165,15 @@ const setDiagnostic = (sessionId: string, diagnostic: string | null) =>
     .setSessionAssociationDiagnostic(sessionId, diagnostic);
 
 /**
- * Processes new user/tool events of one session in order, one request at a time,
- * until both a ticket and a worktree are known. User messages are asked whether
- * they request implementing a ticket or creating a worktree; a requested worktree
- * does not exist yet, so later tool events reveal it as a new Git worktree.
- * A failed decision is skipped with a diagnostic so later events still progress;
- * the next user message is the retry. Mounted once per live or open session by
- * the global driver, so association keeps progressing without a chat window;
+ * Processes new user/tool events of one session in order, one request at a time.
+ * User messages may select a ticket (discussing, implementing or tying it by
+ * name or ID), tie an existing project worktree, or request a new worktree,
+ * which does not exist yet, so later tool events reveal it as a new Git
+ * worktree. Once both are known, tool events are skipped and only explicit
+ * references in user messages can rebind. A failed or unresolved decision
+ * keeps the record with a diagnostic so later events still progress; the next
+ * user message is the retry. Mounted once per live or open session by the
+ * global driver, so association keeps progressing without a chat window;
  * whenever the bound worktree changes, the live runtime records into it.
  */
 export function useChatAssociationDriver(sessionId: string) {
@@ -212,10 +214,10 @@ export function useChatAssociationDriver(sessionId: string) {
       next.processedAtCount = last.n + 1;
       save(next);
     };
-    // Once the worktree is known only a user message can still add a ticket;
-    // skip everything before the next event that can change the record.
+    // Once the worktree is known only a user message can still change the
+    // record; skip everything before the next event that can.
     const needed = pending.findIndex(
-      (e) => !record.worktreePath || (e.kind === "user" && !record.ticketId)
+      (e) => e.kind === "user" || !record.worktreePath
     );
     if (needed !== 0) {
       const last = pending[(needed < 0 ? pending.length : needed) - 1];
@@ -233,6 +235,7 @@ export function useChatAssociationDriver(sessionId: string) {
     void (async () => {
       let result: AssociationResult | null = null;
       let failure: string | null = null;
+      let diagnostic: string | null = null;
       const generation = getProjectScopeGeneration();
       const attempt = crypto.randomUUID();
       const started = performance.now();
@@ -262,7 +265,7 @@ export function useChatAssociationDriver(sessionId: string) {
         if (response.status === "error") failure = response.error.message;
         else {
           result = response.data;
-          failure = result.diagnostic;
+          diagnostic = result.diagnostic;
         }
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error);
@@ -283,23 +286,30 @@ export function useChatAssociationDriver(sessionId: string) {
         return;
       }
       inflight.delete(sessionId);
-      setDiagnostic(sessionId, failure);
+      setDiagnostic(sessionId, failure ?? diagnostic);
       const next = { ...readRecord(live?.association) };
       if (failure || !result) {
         // Skipped: a recurring failure must not stall later events.
       } else if (event.kind === "user") {
         const { selection } = result;
-        const ticket =
-          selection.kind === "ticket"
-            ? candidates.find((t) => t.id === selection.id)
-            : undefined;
-        if (ticket && ticket.id !== next.ticketId) {
+        if (selection.kind === "ticket" && selection.id !== next.ticketId) {
+          // Replacing a ticket never keeps its worktree or pending creation.
+          if (next.ticketId) {
+            Object.assign(next, {
+              worktreePath: null,
+              branch: null,
+              awaitingWorktree: null,
+            });
+          }
           Object.assign(next, {
-            ticketId: ticket.id,
-            ticketTitle: ticket.title,
+            ticketId: selection.id,
+            ticketTitle: selection.title,
           });
-          attach(next, worktreeFor(ticket.id, next.recentWorktrees));
+          if (!next.worktreePath)
+            attach(next, worktreeFor(selection.id, next.recentWorktrees));
         }
+        // An explicitly tied worktree never changes the ticket.
+        attach(next, result.worktree ?? undefined);
         if (result.create_worktree && !next.worktreePath)
           next.awaitingWorktree = result.worktrees.map((w) => w.path);
       } else {

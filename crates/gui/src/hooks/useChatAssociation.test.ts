@@ -36,6 +36,7 @@ const reply = (data: object) =>
     status: "ok",
     data: {
       selection: { kind: "keep" },
+      worktree: null,
       worktrees: [],
       create_worktree: false,
       diagnostic: null,
@@ -62,7 +63,25 @@ const toolResult = (result: string, n: number): ChatMessage => ({
   isError: false,
   timestamp: at(n),
 });
-const SELECT = { selection: { kind: "ticket", id: TICKET.id } };
+const SELECT = { selection: { kind: "ticket", ...TICKET } };
+/** A project ticket the UI cache does not hold. */
+const UNCACHED = {
+  id: "f17de40f-4496-4d22-8edf-9c2192f4e860",
+  title: "Explicit association intents",
+};
+/** An existing worktree whose directory and branch omit any ticket short ID. */
+const scratch = { path: "/p/../scratch", branch: "experiment/retry" };
+const bound = (extra: object = {}) => ({
+  ticketId: TICKET.id,
+  ticketTitle: TICKET.title,
+  worktreePath: created.path,
+  branch: created.branch,
+  lastProcessedAt: null,
+  processedAtCount: 0,
+  awaitingWorktree: null,
+  recentWorktrees: [],
+  ...extra,
+});
 const main = { path: "/p", branch: "master" };
 const created = {
   path: "/p/.claude/worktrees/f6f6bf5e-codex-retry-status",
@@ -151,12 +170,20 @@ describe("useChatAssociation", () => {
     );
     expect(result.current.record.awaitingWorktree).toBeNull();
 
+    // Once bound, user messages are still checked; tool events are not.
+    reply({});
     push(user("ok, let's implement the ticket in the worktree", 4));
     push(tool(`cat ${created.path}/a.rs`, 5));
     await waitFor(() =>
       expect(result.current.record.lastProcessedAt).toBe(at(5))
     );
-    expect(resolve).toHaveBeenCalledTimes(3);
+    expect(resolve).toHaveBeenCalledTimes(4);
+    expect(resolve.mock.calls[3][0]).toMatchObject({
+      event_kind: "user",
+      ticket_id: TICKET.id,
+      worktree_path: created.path,
+    });
+    expect(result.current.record.worktreePath).toBe(created.path);
   });
 
   it("attaches a worktree touched before the ticket was known", async () => {
@@ -211,6 +238,7 @@ describe("useChatAssociation", () => {
       status: "ok",
       data: {
         ...SELECT,
+        worktree: null,
         worktrees: [],
         create_worktree: false,
         diagnostic: null,
@@ -262,6 +290,7 @@ describe("useChatAssociation", () => {
           status: "ok",
           data: {
             ...SELECT,
+            worktree: null,
             worktrees: [],
             create_worktree: false,
             diagnostic: null,
@@ -396,6 +425,154 @@ describe("useChatAssociation", () => {
     expect(result.current.record.worktreePath).toBe(created.path);
     expect(result.current.record.lastProcessedAt).toBe(at(1));
     expect(setTarget).not.toHaveBeenCalled();
+  });
+
+  it("binds a ticket absent from the cache by its resolved ID and title", async () => {
+    reply({ selection: { kind: "ticket", ...UNCACHED } });
+    seed([
+      user(
+        `Let’s tie this conversation with the following ticket ${UNCACHED.id.slice(0, 8)}`,
+        1
+      ),
+    ]);
+    const { result } = renderHook(() => useDriven("s1"));
+    await waitFor(() =>
+      expect(result.current.record.ticketId).toBe(UNCACHED.id)
+    );
+    expect(result.current.record.ticketTitle).toBe(UNCACHED.title);
+    expect(result.current.record.worktreePath).toBeNull();
+    expect(result.current.record.awaitingWorktree).toBeNull();
+  });
+
+  it("ties an existing worktree without inventing a ticket, and keeps it after reopening", async () => {
+    reply({ worktree: scratch, worktrees: [main, scratch] });
+    seed([
+      user(
+        `Let’s tie this conversation with the worktree ${scratch.branch}`,
+        1
+      ),
+    ]);
+    const first = renderHook(() => useDriven("s1"));
+    await waitFor(() =>
+      expect(first.result.current.record.worktreePath).toBe(scratch.path)
+    );
+    expect(first.result.current.record.branch).toBe(scratch.branch);
+    expect(first.result.current.record.ticketId).toBeNull();
+    first.unmount();
+
+    // Reopened/resumed: the persisted record is reused without a new request.
+    const again = renderHook(() => useDriven("s1"));
+    await act(async () => undefined);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(again.result.current.record).toMatchObject({
+      worktreePath: scratch.path,
+      branch: scratch.branch,
+    });
+
+    // A later ticket keeps the explicitly tied worktree.
+    reply(SELECT);
+    push(
+      user(
+        `Let’s tie this conversation with the following ticket ${TICKET.id}`,
+        2
+      )
+    );
+    await waitFor(() =>
+      expect(again.result.current.record.ticketId).toBe(TICKET.id)
+    );
+    expect(again.result.current.record.worktreePath).toBe(scratch.path);
+  });
+
+  it("rebinds an explicit new ticket and drops the previous ticket's worktree", async () => {
+    reply({ selection: { kind: "ticket", ...UNCACHED } });
+    seed(
+      [
+        user(
+          `Let’s tie this conversation with the following ticket ${UNCACHED.id}`,
+          1
+        ),
+      ],
+      bound()
+    );
+    const { result } = renderHook(() => useDriven("s1"));
+    await waitFor(() =>
+      expect(result.current.record.ticketId).toBe(UNCACHED.id)
+    );
+    expect(resolve.mock.calls[0][0]).toMatchObject({
+      ticket_id: TICKET.id,
+      worktree_path: created.path,
+    });
+    expect(result.current.record.worktreePath).toBeNull();
+    expect(result.current.record.branch).toBeNull();
+
+    // A ticket plus an explicit worktree in one message binds both.
+    reply({ ...SELECT, worktree: scratch });
+    push(user(`tie this to ${TICKET.id} in the worktree scratch`, 2));
+    await waitFor(() =>
+      expect(result.current.record).toMatchObject({
+        ticketId: TICKET.id,
+        worktreePath: scratch.path,
+      })
+    );
+
+    // Unrelated messages preserve both.
+    reply({});
+    push(user("what does this function do?", 3));
+    await waitFor(() =>
+      expect(result.current.record.lastProcessedAt).toBe(at(3))
+    );
+    expect(result.current.record).toMatchObject({
+      ticketId: TICKET.id,
+      worktreePath: scratch.path,
+    });
+  });
+
+  it("keeps the association and surfaces an unresolved reference", async () => {
+    const reason =
+      "No single ticket in this project matches 0123abcd. Use its full ID or a unique 8-character short ID.";
+    reply({ diagnostic: reason });
+    seed(
+      [
+        user(
+          "Let’s tie this conversation with the following ticket 0123abcd",
+          1
+        ),
+      ],
+      bound()
+    );
+    const { result } = renderHook(() => useDriven("s1"));
+    await waitFor(() => expect(result.current.diagnostic).toBe(reason));
+    expect(result.current.record).toMatchObject({
+      ticketId: TICKET.id,
+      worktreePath: created.path,
+      lastProcessedAt: at(1),
+    });
+  });
+
+  it("does not let an in-flight decision overwrite a newer correction", async () => {
+    let release!: (value: never) => void;
+    resolve.mockReturnValueOnce(new Promise((r) => (release = r)) as never);
+    seed([user(`tie this to ${UNCACHED.id}`, 1)]);
+    const { result } = renderHook(() => useDriven("s1"));
+    await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1));
+
+    act(() => result.current.correct(TICKET.id.slice(0, 8)));
+    reply({});
+    await act(async () =>
+      release({
+        status: "ok",
+        data: {
+          selection: { kind: "ticket", ...UNCACHED },
+          worktree: scratch,
+          worktrees: [],
+          create_worktree: false,
+          diagnostic: null,
+        },
+      } as never)
+    );
+    await waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
+    expect(result.current.record.ticketId).toBe(TICKET.id);
+    expect(result.current.record.worktreePath).toBeNull();
   });
 
   it("lets a window correct the record the global driver keeps", async () => {
