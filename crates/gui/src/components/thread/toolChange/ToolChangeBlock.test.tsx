@@ -1,14 +1,19 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../../../stores/chatStore";
 import { ChatSessionContext } from "./ChatSessionContext";
-import { ToolChangeBlock } from "./ToolChangeBlock";
+import { DEFAULT_DIFF_HEIGHT } from "./ResizableDiffViewport";
+import { ToolRow } from "../EventRow";
 
-vi.mock("@pierre/diffs/react", () => ({
-  FileDiff: ({ fileDiff }: { fileDiff: { name: string } }) => (
-    <div data-testid="patch-diff">{fileDiff.name}</div>
-  ),
-}));
+vi.mock("@pierre/diffs/react", async () => {
+  const { createContext } = await import("react");
+  return {
+    WorkerPoolContext: createContext(undefined),
+    FileDiff: ({ fileDiff }: { fileDiff: { name: string } }) => (
+      <div data-testid="patch-diff">{fileDiff.name}</div>
+    ),
+  };
+});
 
 function seed(payload: unknown) {
   useChatStore.setState({
@@ -32,23 +37,28 @@ function seed(payload: unknown) {
 function renderBlock(sessionId: string | null = "s1", toolId = "t1") {
   return render(
     <ChatSessionContext.Provider value={sessionId}>
-      <ToolChangeBlock toolId={toolId} />
+      <ToolRow name="Edit" status="done" toolId={toolId} body="tool output" />
     </ChatSessionContext.Provider>
   );
 }
 
 const PATCH = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y\n";
 
-describe("ToolChangeBlock", () => {
+describe("ToolRow with a recorded worktree delta", () => {
   beforeEach(() => useChatStore.setState({ sessions: {} } as never));
 
-  it("shows a summary and renders the diff only when expanded", async () => {
+  it("renders the diff in place of the tool call", async () => {
     seed({ patch: PATCH, files: [{ path: "a", status: "modified" }] });
     renderBlock();
     expect(screen.getByText("1 file changed")).toBeTruthy();
-    expect(screen.queryByTestId("patch-diff")).toBeNull();
-    fireEvent.click(screen.getByRole("button"));
+    expect(screen.getByText("by Edit")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByText("tool output")).toBeNull();
     expect(await screen.findByTestId("patch-diff")).toBeTruthy();
+    expect(screen.getByTestId("diff-viewport").style.maxHeight).toBe(
+      `${DEFAULT_DIFF_HEIGHT}px`
+    );
+    expect(screen.getByRole("separator", { name: "Resize diff" })).toBeTruthy();
   });
 
   it("renders one diff per file for multi-file patches", async () => {
@@ -61,7 +71,6 @@ describe("ToolChangeBlock", () => {
       ],
     });
     renderBlock();
-    fireEvent.click(screen.getByRole("button"));
     const diffs = await screen.findAllByTestId("patch-diff");
     expect(diffs.map((d) => d.textContent)).toEqual(["a", "b"]);
   });
@@ -72,20 +81,33 @@ describe("ToolChangeBlock", () => {
       files: [{ path: "b", status: "added", marker: { reason: "binary" } }],
     });
     renderBlock();
-    fireEvent.click(screen.getByRole("button"));
     expect(screen.getByText(/Binary file/)).toBeTruthy();
     expect(screen.queryByTestId("patch-diff")).toBeNull();
+    expect(screen.queryByTestId("diff-viewport")).toBeNull();
   });
 
-  it("shows an inline error for malformed payloads", () => {
+  it("keeps the tool call with an inline error for malformed payloads", () => {
     seed({ files: 3 });
     renderBlock();
-    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Edit/ })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toMatch(/could not be/);
   });
 
-  it("renders nothing without an annotation or for another session", () => {
+  it("renders the plain tool call without an annotation for its session", () => {
     seed({ patch: PATCH, files: [{ path: "a", status: "modified" }] });
-    const { container } = renderBlock("other");
-    expect(container.innerHTML).toBe("");
+    renderBlock("other");
+    expect(screen.getByRole("button", { name: /Edit/ })).toBeTruthy();
+    expect(screen.queryByTestId("tool-change-block")).toBeNull();
+  });
+
+  it("keeps a pending tool call until it settles", () => {
+    seed({ patch: PATCH, files: [{ path: "a", status: "modified" }] });
+    render(
+      <ChatSessionContext.Provider value="s1">
+        <ToolRow name="Edit" status="pending" toolId="t1" />
+      </ChatSessionContext.Provider>
+    );
+    expect(screen.getByText("Edit")).toBeTruthy();
+    expect(screen.queryByTestId("tool-change-block")).toBeNull();
   });
 });

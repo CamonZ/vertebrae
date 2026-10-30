@@ -229,6 +229,20 @@
 .evtool.err .evtool-dot { background: var(--err); }
 .evtool.err .evtool-name { color: var(--err); }
 
+/* inline diffs — worktree change summary and payload diffs, always rendered */
+.evtool-bd.is-diff { padding: 0; white-space: normal; max-height: none; overflow: visible; }
+.evtool.evchange .evtool-hd { cursor: default; }
+.evtool.evchange .evtool-hd:hover { background: transparent; }
+.evchange-files { margin: 0; padding: var(--s-1) var(--s-2) var(--s-1h); list-style: none; border-top: 1px solid var(--line); font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); }
+.evdiff { background: var(--bg); border-top: 1px solid var(--line); }
+.evdiff-scroll { overflow: auto; overscroll-behavior: contain; }
+.evdiff-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.evdiff-scroll::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-xs); }
+.evdiff-handle { position: relative; height: 10px; border-top: 1px solid var(--line); background: var(--bg-2); cursor: ns-resize; touch-action: none; }
+.evdiff-handle::after { content: ""; position: absolute; left: 50%; top: 3px; width: 32px; height: 3px; margin-left: -16px; border-radius: 2px; background: var(--line-strong); transition: background var(--t-fast) var(--ease); }
+.evdiff-handle:hover::after, .evdiff-handle[data-resizing]::after, .evdiff-handle:focus-visible::after { background: var(--accent); }
+.evdiff-handle:focus-visible { outline: none; }
+
 /* live activity — compact provider telemetry, not durable prose */
 .evrow--activity .evbody { min-width: 0; }
 .evactivity { display: flex; align-items: center; gap: var(--s-1h); min-width: 0; padding: var(--s-1) var(--s-2); border: 1px solid var(--line); border-radius: var(--r-sm); background: color-mix(in oklch, var(--bg-2) 52%, transparent); color: var(--fg-mute); font-family: var(--mono); font-size: var(--text-10); line-height: var(--leading-tight); }

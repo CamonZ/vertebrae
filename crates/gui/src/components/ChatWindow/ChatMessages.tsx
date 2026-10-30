@@ -1,4 +1,5 @@
 import { ChatSessionContext } from "../thread/toolChange/ChatSessionContext";
+import { preloadDiffRenderer } from "../thread/toolChange/useWorktreeDelta";
 import {
   memo,
   useCallback,
@@ -360,6 +361,8 @@ export function ChatMessages({
       left: Math.max(8, Math.min(rect.left, window.innerWidth - 312)),
     });
   }, [commentEditorOpen]);
+  // Tool calls with file changes render as diffs; warm Pierre ahead of them.
+  useEffect(preloadDiffRenderer, []);
   useEffect(() => {
     document.addEventListener("selectionchange", updateTextSelection);
     return () =>

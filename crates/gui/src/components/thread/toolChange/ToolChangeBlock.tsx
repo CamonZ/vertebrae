@@ -1,14 +1,13 @@
-import { lazy, Suspense, useContext, useId, useMemo, useState } from "react";
+import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
-import { useToolAnnotation } from "../../../hooks/useToolAnnotation";
-import { ChatSessionContext } from "./ChatSessionContext";
+import { ResizableDiffViewport } from "./ResizableDiffViewport";
 import {
   MARKER_TEXT,
-  parseWorktreeDelta,
   type ChangedFile,
+  type WorktreeDelta,
 } from "./worktreeDelta";
 
-// Pierre is loaded on first expand so it stays out of the main chunk.
+// Pierre is loaded on first render so it stays out of the main chunk.
 const LazyPatchFiles = lazy(() => import("./PatchFiles"));
 
 /** Ensure a bare unified diff has the file headers Pierre's parser expects. */
@@ -24,14 +23,16 @@ export function PayloadDiffs({
   diffs: { path: string; diff: string }[];
 }): ReactNode {
   return (
-    <Suspense fallback={<div className="evtool-sum">Loading diff…</div>}>
-      {diffs.map((d, i) => (
-        <LazyPatchFiles
-          key={`${i}:${d.path}`}
-          patch={toPatch(d.path, d.diff)}
-        />
-      ))}
-    </Suspense>
+    <ResizableDiffViewport>
+      <Suspense fallback={<div className="evtool-sum">Loading diff…</div>}>
+        {diffs.map((d, i) => (
+          <LazyPatchFiles
+            key={`${i}:${d.path}`}
+            patch={toPatch(d.path, d.diff)}
+          />
+        ))}
+      </Suspense>
+    </ResizableDiffViewport>
   );
 }
 
@@ -55,74 +56,69 @@ export function FileChangeSummary({ file }: { file: ChangedFile }): ReactNode {
   );
 }
 
+export function ChangeUnavailable(): ReactNode {
+  return (
+    <div className="evtool-sum" role="status">
+      Recorded change could not be displayed
+    </div>
+  );
+}
+
 /**
- * Compact per-tool-call worktree change summary that expands to the diff.
- * Renders nothing without a usable recorded delta.
+ * A tool call's worktree changes, shown in place of the call itself: a
+ * one-line attribution header followed by the diff.
  */
 export function ToolChangeBlock({
-  toolId,
+  delta,
+  toolName,
 }: {
-  toolId: string | undefined;
+  delta: WorktreeDelta;
+  toolName?: ReactNode;
 }): ReactNode {
-  const sessionId = useContext(ChatSessionContext);
-  const annotation = useToolAnnotation(sessionId, toolId, "worktree_delta");
-  const delta = useMemo(
-    () => (annotation ? parseWorktreeDelta(annotation.payload) : null),
-    [annotation]
-  );
-  const [open, setOpen] = useState(false);
-  const panelId = useId();
-  if (!annotation) return null;
-  if (!delta) {
-    return (
-      <div className="evtool-sum" role="status">
-        Recorded change could not be displayed
-      </div>
-    );
-  }
   const n = delta.files.length;
   const hasPatch = delta.patch.trim().length > 0;
+  // Pierre's file headers cover files with hunks; list the rest explicitly.
+  const listed = hasPatch ? delta.files.filter((f) => f.marker) : delta.files;
   return (
-    <div className="evtool has-body" data-testid="tool-change-block">
-      <button
-        type="button"
-        className="evtool-hd"
-        aria-expanded={open}
-        aria-controls={open ? panelId : undefined}
-        onClick={() => setOpen((o) => !o)}
-      >
+    <section
+      className="evtool has-body evchange"
+      data-testid="tool-change-block"
+      aria-label="Worktree changes"
+    >
+      <div className="evtool-hd">
+        <span className="evtool-dot" />
         <span className="evtool-name">
           {n} {n === 1 ? "file" : "files"} changed
         </span>
+        {toolName != null ? (
+          <span className="evtool-args">by {toolName}</span>
+        ) : null}
         {delta.aggregate ? (
           <span className="evtool-sum">includes subagent work</span>
         ) : null}
         {delta.overlapping ? (
           <span className="evtool-sum">overlaps other calls — approximate</span>
         ) : null}
-        <span className="evtool-chev">▾</span>
-      </button>
-      {open ? (
-        <div className="evtool-bd" id={panelId}>
-          <ul>
-            {delta.files.map((f) => (
-              <li
-                key={`${f.oldPath ?? ""}>${f.path}`}
-                data-testid="tool-change-file"
-              >
-                <FileChangeSummary file={f} />
-              </li>
-            ))}
-          </ul>
-          {hasPatch ? (
-            <Suspense
-              fallback={<div className="evtool-sum">Loading diff…</div>}
+      </div>
+      {listed.length > 0 ? (
+        <ul className="evchange-files">
+          {listed.map((f) => (
+            <li
+              key={`${f.oldPath ?? ""}>${f.path}`}
+              data-testid="tool-change-file"
             >
-              <LazyPatchFiles patch={delta.patch} />
-            </Suspense>
-          ) : null}
-        </div>
+              <FileChangeSummary file={f} />
+            </li>
+          ))}
+        </ul>
       ) : null}
-    </div>
+      {hasPatch ? (
+        <ResizableDiffViewport>
+          <Suspense fallback={<div className="evtool-sum">Loading diff…</div>}>
+            <LazyPatchFiles patch={delta.patch} />
+          </Suspense>
+        </ResizableDiffViewport>
+      ) : null}
+    </section>
   );
 }
