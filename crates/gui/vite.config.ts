@@ -23,6 +23,12 @@ export default defineConfig({
   worker: {
     format: "es",
   },
+  // The worker entry is only reachable through `new URL(..., import.meta.url)`,
+  // which the dev dependency scan misses; discovering it at runtime triggers a
+  // full page reload.
+  optimizeDeps: {
+    include: ["@pierre/diffs/worker/worker.js"],
+  },
   build: {
     // Tauri expects the frontend to be in ../dist relative to src-tauri
     outDir: "dist",
