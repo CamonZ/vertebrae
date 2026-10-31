@@ -3,7 +3,6 @@ import { useChatSession } from "../../hooks/useChatSession";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatAssociation } from "../../hooks/useChatAssociation";
 import { WorktreeChanges } from "./WorktreeChanges";
-import { ChatAssociation } from "./ChatAssociation";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
@@ -42,6 +41,7 @@ interface ChatWindowProps {
   autoFocusComposer?: boolean;
   /** Label resolved from this session's captured project association. */
   projectLabel?: string;
+  showProjectContext?: boolean;
 }
 
 /**
@@ -61,6 +61,7 @@ export function ChatWindow({
   onClosePane,
   autoFocusComposer = true,
   projectLabel,
+  showProjectContext = false,
   renderObserver,
 }: ChatWindowProps) {
   const [changesSession, setChangesSession] = useState<string | null>(null);
@@ -179,13 +180,7 @@ export function ChatWindow({
       data-project-path={chat.session.projectPath ?? ""}
     >
       <ChatHeader
-        association={
-          <ChatAssociation
-            record={association.record}
-            diagnostic={association.diagnostic}
-            onCorrect={association.correct}
-          />
-        }
+        showProjectContext={showProjectContext}
         label={chat.session.title?.trim() || chat.session.label}
         lifecycle={chat.lifecycle}
         isActive={chat.isActive}

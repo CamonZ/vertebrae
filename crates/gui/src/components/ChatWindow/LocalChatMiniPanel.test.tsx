@@ -719,15 +719,23 @@ describe("LocalChatMiniPanel search", () => {
     );
 
     const panel = within(screen.getByTestId("local-chat-mini-panel"));
-    const thinkingRow = panel.getByRole("button", {
+    const thinkingButton = panel.getByRole("button", {
       name: "Load local chat Thinking session into active pane",
     });
-    const compactingRow = panel.getByRole("button", {
-      name: "Load local chat Compacting session into active pane",
-    });
-    const idleRow = panel.getByRole("button", {
-      name: "Load local chat Idle session into active pane",
-    });
+    expect(thinkingButton.querySelector(".hc-mini-history-harness")).toBeNull();
+    const thinkingRow = thinkingButton.closest(
+      ".hc-mini-history-row"
+    ) as HTMLElement;
+    const compactingRow = panel
+      .getByRole("button", {
+        name: "Load local chat Compacting session into active pane",
+      })
+      .closest(".hc-mini-history-row") as HTMLElement;
+    const idleRow = panel
+      .getByRole("button", {
+        name: "Load local chat Idle session into active pane",
+      })
+      .closest(".hc-mini-history-row") as HTMLElement;
 
     expect(
       within(thinkingRow).getByTestId("thinking-indicator")
@@ -754,9 +762,11 @@ describe("LocalChatMiniPanel search", () => {
 
     const restoredThinkingRow = within(
       screen.getByTestId("local-chat-mini-panel")
-    ).getByRole("button", {
-      name: "Load local chat Thinking session into active pane",
-    });
+    )
+      .getByRole("button", {
+        name: "Load local chat Thinking session into active pane",
+      })
+      .closest(".hc-mini-history-row") as HTMLElement;
     expect(
       within(restoredThinkingRow).queryByTestId("thinking-indicator")
     ).not.toBeInTheDocument();
@@ -824,7 +834,9 @@ describe("LocalChatMiniPanel session limits", () => {
     expect(
       current.getAllByRole("button", { name: /^Load local chat/ })
     ).toHaveLength(8);
-    const projectToggle = current.getByRole("button", { name: "Current project" });
+    const projectToggle = current.getByRole("button", {
+      name: "Current project",
+    });
     expect(projectToggle).toHaveAttribute("aria-expanded", "true");
     expect(projectToggle).toHaveFocus();
     expect(
@@ -886,4 +898,36 @@ describe("LocalChatMiniPanel session limits", () => {
       current.queryByRole("button", { name: "Current project" })
     ).not.toBeInTheDocument();
   });
+});
+
+it("keeps association keyboard actions separate from conversation selection", () => {
+  const onSelect = vi.fn();
+  render(
+    <ControlledPanel
+      onSelect={onSelect}
+      sessionGroups={[
+        makeGroup("current", "Project", [
+          makeSession("associated", {
+            association: {
+              ticketId: "4694275d-ab38-423a-9e3e-17d8316cd070",
+              ticketTitle: "Ticket",
+              worktreePath: "/project/worktree",
+              branch: "feature",
+              lastProcessedAt: null,
+              processedAtCount: 0,
+              awaitingWorktree: null,
+              recentWorktrees: [],
+            },
+          }),
+        ]),
+      ]}
+    />
+  );
+  const ticket = screen.getByRole("img", { name: /^Ticket:/ });
+  const worktree = screen.getByRole("img", { name: /^Worktree:/ });
+  expect(ticket.closest(".hc-mini-history-entry")).toContainElement(worktree);
+  expect(ticket.closest(".hc-mini-history-open")).toBeNull();
+  expect(fireEvent.keyDown(ticket, { key: "Enter" })).toBe(true);
+  fireEvent.keyDown(worktree, { key: " " });
+  expect(onSelect).not.toHaveBeenCalled();
 });

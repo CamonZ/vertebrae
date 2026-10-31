@@ -43,7 +43,7 @@ const isWorktree = (v: unknown): v is Worktree =>
   typeof (v as Worktree).path === "string" &&
   isText((v as Worktree).branch);
 
-function readRecord(value: unknown): AssociationRecord {
+export function readRecord(value: unknown): AssociationRecord {
   const v = value as Record<string, unknown> | null;
   if (!v || typeof v !== "object") return EMPTY;
   const texts = [

@@ -177,6 +177,7 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
         }
         onClosePane={isMaximized && paneCount > 1 ? onClosePane : undefined}
         autoFocusComposer={!isMaximized || paneIsActive}
+        showProjectContext={paneCount > 1}
         projectLabel={projectLabelBySessionId?.get(session.id)}
         renderObserver={(part) => renderObserver?.(pane.id, part)}
       />

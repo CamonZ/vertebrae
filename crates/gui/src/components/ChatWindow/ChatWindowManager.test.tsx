@@ -1138,8 +1138,8 @@ describe("ChatWindowManager", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByTestId("local-chat-project-context")
-      ).toHaveTextContent("old-project");
+        screen.queryByTestId("local-chat-project-context")
+      ).not.toBeInTheDocument();
     });
 
     await user.click(screen.getByLabelText("Widen chat panel"));
@@ -1315,8 +1315,8 @@ describe("ChatWindowManager", () => {
     await waitFor(() => {
       expect(useChatStore.getState().activeSessionId).toBe(current);
       expect(
-        screen.getByTestId("local-chat-project-context")
-      ).toHaveTextContent("new-project");
+        screen.queryByTestId("local-chat-project-context")
+      ).not.toBeInTheDocument();
     });
   });
 
