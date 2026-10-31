@@ -8,7 +8,6 @@ mod references;
 use super::CommandError;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
 pub struct AssociationTicket {
@@ -144,8 +143,7 @@ async fn resolve(
         .candidate_project_root
         .as_deref()
         .and_then(|root| std::fs::canonicalize(root).ok());
-    let own_cache =
-        cache_root.is_some_and(|root| scope.worktrees.iter().any(|w| Path::new(&w.path) == root));
+    let own_cache = cache_root.is_some_and(|root| scope.owns_cache_root(&root));
     let candidates = if own_cache {
         &input.candidates[..]
     } else {
