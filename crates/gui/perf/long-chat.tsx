@@ -502,11 +502,8 @@ async function styleCheck() {
       const probe = document.createElement("span");
       probe.style.color = "var(--inline-code-fg)";
       probe.style.backgroundColor = "var(--inline-code-bg)";
-      const link = document.createElement("span");
-      link.style.color = "var(--link-fg)";
-      document.body.append(probe, link);
+      document.body.append(probe);
       const want = getComputedStyle(probe);
-      const wantLink = getComputedStyle(link).color;
       const pane = document.querySelector(".long-chat-pane")!;
       const surfaces = {
         userCode: pane.querySelector(".evrow--user code"),
@@ -527,7 +524,8 @@ async function styleCheck() {
       const result: Record<string, unknown> = {
         scheme,
         inline: fg ? "custom" : "default",
-        plainLink: plainLink && getComputedStyle(plainLink).color === wantLink,
+        plainLink:
+          plainLink && getComputedStyle(plainLink).color === want.color,
       };
       for (const [name, el] of Object.entries(surfaces)) {
         const got = el && getComputedStyle(el);
@@ -543,7 +541,6 @@ async function styleCheck() {
       }
       checks.push(result);
       probe.remove();
-      link.remove();
     }
   }
   root.style.removeProperty("--inline-code-fg");
