@@ -73,7 +73,7 @@ export function VtbEntityLink({
       data-vtb-route={target.route}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      className="inline-flex cursor-pointer items-center gap-1 rounded-sm align-baseline text-accent underline decoration-accent/30 outline-none hover:decoration-accent focus-visible:ring-2 focus-visible:ring-accent"
+      className="inline-flex cursor-pointer items-center gap-1 rounded-sm align-baseline text-[var(--link-fg)] underline decoration-current/30 outline-none hover:decoration-current focus-visible:ring-2 focus-visible:ring-accent"
     >
       {target.level && (
         <LevelMark

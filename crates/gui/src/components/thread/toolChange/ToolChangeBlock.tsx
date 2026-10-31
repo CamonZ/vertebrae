@@ -1,6 +1,9 @@
 import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
-import { ResizableDiffViewport } from "./ResizableDiffViewport";
+import {
+  DEFAULT_DIFF_HEIGHT,
+  ResizableDiffViewport,
+} from "./ResizableDiffViewport";
 import {
   MARKER_TEXT,
   type ChangedFile,
@@ -16,24 +19,63 @@ function toPatch(path: string, diff: string): string {
   return `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${diff}`;
 }
 
+/** Pierre's default row height, which the placeholder matches. */
+const PLAIN_ROW_PX = 20;
+
+/** Patch lines below the file headers, shown verbatim. */
+function patchBody(patch: string): string[] {
+  return patch
+    .split("\n")
+    .filter((line) => !/^(diff --git|index |--- |\+\+\+ )/.test(line));
+}
+
+/**
+ * Unhighlighted patch text, sized like Pierre's rows. Stands in for diffs far
+ * from the visible area and while Pierre loads, so long chats only pay for
+ * the diffs a user can reach. Only the rows that fit `limit` are laid out;
+ * the full height is reserved so scrolling inside stays consistent.
+ */
+export function PlainPatch({
+  patches,
+  limit = DEFAULT_DIFF_HEIGHT,
+}: {
+  patches: string[];
+  limit?: number;
+}): ReactNode {
+  const lines = patches.flatMap(patchBody);
+  return (
+    <pre
+      className="evdiff-plain"
+      data-testid="diff-placeholder"
+      style={{ height: lines.length * PLAIN_ROW_PX }}
+    >
+      {lines.slice(0, Math.ceil(limit / PLAIN_ROW_PX)).join("\n")}
+    </pre>
+  );
+}
+
+/** Lazily rendered Pierre diffs inside a resizable, viewport-gated frame. */
+function InlineDiffs({ patches }: { patches: string[] }): ReactNode {
+  return (
+    <ResizableDiffViewport
+      placeholder={(limit) => <PlainPatch patches={patches} limit={limit} />}
+    >
+      <Suspense fallback={<PlainPatch patches={patches} />}>
+        {patches.map((patch, i) => (
+          <LazyPatchFiles key={i} patch={patch} />
+        ))}
+      </Suspense>
+    </ResizableDiffViewport>
+  );
+}
+
 /** Pierre rendering of diffs carried by the tool payload itself. */
 export function PayloadDiffs({
   diffs,
 }: {
   diffs: { path: string; diff: string }[];
 }): ReactNode {
-  return (
-    <ResizableDiffViewport>
-      <Suspense fallback={<div className="evtool-sum">Loading diff…</div>}>
-        {diffs.map((d, i) => (
-          <LazyPatchFiles
-            key={`${i}:${d.path}`}
-            patch={toPatch(d.path, d.diff)}
-          />
-        ))}
-      </Suspense>
-    </ResizableDiffViewport>
-  );
+  return <InlineDiffs patches={diffs.map((d) => toPatch(d.path, d.diff))} />;
 }
 
 function fileLabel(f: ChangedFile): string {
@@ -112,13 +154,7 @@ export function ToolChangeBlock({
           ))}
         </ul>
       ) : null}
-      {hasPatch ? (
-        <ResizableDiffViewport>
-          <Suspense fallback={<div className="evtool-sum">Loading diff…</div>}>
-            <LazyPatchFiles patch={delta.patch} />
-          </Suspense>
-        </ResizableDiffViewport>
-      ) : null}
+      {hasPatch ? <InlineDiffs patches={[delta.patch]} /> : null}
     </section>
   );
 }

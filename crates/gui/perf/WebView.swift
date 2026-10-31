@@ -9,11 +9,13 @@ class Host: NSObject, NSApplicationDelegate {
     @objc func reload() { webview.reload() }
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 1200, height: 850), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "Markdown WKWebView Verification"
+        window.title = "Vertebrae WKWebView Verification"
         webview = WKWebView(frame: window.contentView!.bounds)
         webview.autoresizingMask = [.width, .height]
         window.contentView!.addSubview(webview)
-        webview.load(URLRequest(url: URL(string: "http://127.0.0.1:18420/perf/markdown-streaming.html")!))
+        // An optional first argument selects another fixture URL.
+        let fixture = CommandLine.arguments.dropFirst().first ?? "http://127.0.0.1:18420/perf/markdown-streaming.html"
+        webview.load(URLRequest(url: URL(string: fixture)!))
         let menu = NSMenu()
         let appItem = NSMenuItem()
         menu.addItem(appItem)

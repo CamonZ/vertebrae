@@ -44,6 +44,9 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // Stylesheets stay stubbed; `?raw` imports return the source so tests
+    // can check rules that jsdom cannot cascade.
+    css: { include: [/\.css\?raw$/] },
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     coverage: {
       provider: "v8",

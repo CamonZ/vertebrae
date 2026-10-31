@@ -119,7 +119,7 @@
 .evrow--user .ev-text .markdown-content ol { margin: var(--s-1) 0 var(--s-2) var(--s-3); padding-left: var(--s-3); font-size: inherit; line-height: inherit; color: inherit; }
 .evrow--user .ev-text .markdown-content li { line-height: inherit; }
 .evrow--user .ev-text .markdown-content blockquote { margin: var(--s-2) 0; padding-left: var(--s-2); border-left: 2px solid var(--line-strong); color: var(--fg-mute); font-size: inherit; line-height: inherit; }
-.evrow--user .ev-text .markdown-content code { font-family: var(--mono); font-size: var(--text-12); border-radius: var(--r-xs); background: color-mix(in oklch, var(--accent) 12%, transparent); padding: 1px var(--s-1); }
+.evrow--user .ev-text .markdown-content code { font-family: var(--mono); font-size: var(--text-12); border-radius: var(--r-xs); color: var(--inline-code-fg); background: var(--inline-code-bg); padding: 1px var(--s-1); }
 .evrow--user .ev-text .markdown-content pre { margin: var(--s-2) 0; overflow-x: auto; }
 .evrow--user .ev-text .markdown-content .group { margin: var(--s-2) 0; border-radius: var(--r-sm); }
 .evrow--user .ev-text .markdown-content .group code { color: inherit; background: transparent; padding: 0; border-radius: 0; }
@@ -196,7 +196,9 @@
 .evprose .markdown-content table { font-size: var(--text-12); }
 .evprose .markdown-content .group { margin: var(--s-2) 0; border-radius: var(--r-sm); }
 .evprose strong { color: var(--fg); font-weight: 600; }
-.evprose code { font-family: var(--mono); font-size: var(--text-12); color: var(--accent); background: var(--accent-wash); padding: 1px var(--s-1); border-radius: var(--r-xs); }
+/* This sheet is unlayered, so it outranks Tailwind utilities: inline code
+   reads the Appearance tokens here rather than relying on its classes. */
+.evprose code { font-family: var(--mono); font-size: var(--text-12); color: var(--inline-code-fg); background: var(--inline-code-bg); padding: 1px var(--s-1); border-radius: var(--r-xs); }
 .evprose .markdown-content .group code { color: inherit; background: transparent; padding: 0; border-radius: 0; }
 .ev-cursor { display: inline-block; width: 7px; height: 14px; background: var(--accent); margin-left: 2px; vertical-align: -2px; box-shadow: 0 0 6px var(--accent-glow); animation: ev-blink 1s step-end infinite; }
 @keyframes ev-blink { 50% { opacity: 0; } }
@@ -236,6 +238,8 @@
 .evchange-files { margin: 0; padding: var(--s-1) var(--s-2) var(--s-1h); list-style: none; border-top: 1px solid var(--line); font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); }
 .evdiff { background: var(--bg); border-top: 1px solid var(--line); }
 .evdiff-scroll { overflow: auto; overscroll-behavior: contain; }
+/* Stand-in for off-screen diffs; Pierre's default row metrics keep heights close. */
+.evdiff-plain { margin: 0; padding: 0 var(--s-2); font-family: var(--mono); font-size: 13px; line-height: 20px; white-space: pre; overflow: hidden; color: var(--fg-soft); }
 .evdiff-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
 .evdiff-scroll::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-xs); }
 .evdiff-handle { position: relative; height: 10px; border-top: 1px solid var(--line); background: var(--bg-2); cursor: ns-resize; touch-action: none; }
