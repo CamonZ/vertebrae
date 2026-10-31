@@ -20,7 +20,7 @@ h2 {
   margin: 12px 0;
   align-items: center;
 }
-button {
+.controls button {
   background: #333;
   color: white;
   padding: 8px 12px;
@@ -54,4 +54,10 @@ textarea {
 pre[aria-label="Measurements"] {
   font-size: 11px;
   white-space: pre-wrap;
+}
+.long-chat-pane {
+  height: 640px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #666;
 }
