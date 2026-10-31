@@ -1,12 +1,14 @@
 use super::{invalid, AssociationWorktree, CommandError};
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use vertebrae_sacrum_client::VertebraeConfigFile;
 
 pub(super) struct Scope {
     pub root: PathBuf,
+    project_root: PathBuf,
     /// Registered project the conversation root belongs to.
     pub project: String,
     pub config: VertebraeConfigFile,
@@ -15,13 +17,32 @@ pub(super) struct Scope {
 
 const GIT_OUTPUT_LIMIT: u64 = 256_000;
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
+const DIRECTORY_ENTRY_LIMIT: usize = 512;
+const WORKTREE_LIMIT: usize = 1024;
+
+impl Scope {
+    pub(super) fn owns_cache_root(&self, root: &Path) -> bool {
+        root == self.project_root || self.worktrees.iter().any(|w| Path::new(&w.path) == root)
+    }
+}
 
 /// Bounded `git worktree list`: output is capped while reading and a stuck
 /// process is killed and reaped at the deadline. Blocking; call from a blocking context.
-fn git_worktree_list(root: &Path) -> Result<Vec<u8>, CommandError> {
+fn git_worktree_list(root: &Path, deadline: Instant) -> Result<Vec<u8>, CommandError> {
     let unavailable = || invalid("Git worktree inventory is unavailable.");
-    let mut child = Command::new("git")
+    if Instant::now() >= deadline {
+        return Err(unavailable());
+    }
+    let mut command = Command::new("git");
+    // A caller's Git environment must not redirect this read-only inventory.
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(key);
+        }
+    }
+    let mut child = command
         .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
         .arg("-C")
         .arg(root)
         .args(["worktree", "list", "--porcelain", "-z"])
@@ -37,15 +58,26 @@ fn git_worktree_list(root: &Path) -> Result<Vec<u8>, CommandError> {
         let read = stdout.take(GIT_OUTPUT_LIMIT + 1).read_to_end(&mut buffer);
         let _ = sender.send(read.map(|_| buffer));
     });
-    match receiver.recv_timeout(GIT_TIMEOUT) {
-        Ok(Ok(buffer)) if buffer.len() as u64 <= GIT_OUTPUT_LIMIT => {
-            let status = child.wait().map_err(|_| unavailable())?;
-            if status.success() {
-                Ok(buffer)
-            } else {
-                Err(unavailable())
+    match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(Ok(buffer)) if buffer.len() as u64 <= GIT_OUTPUT_LIMIT => loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    return if status.success() {
+                        Ok(buffer)
+                    } else {
+                        Err(unavailable())
+                    }
+                }
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(unavailable());
+                }
             }
-        }
+        },
         _ => {
             let _ = child.kill();
             let _ = child.wait();
@@ -54,8 +86,8 @@ fn git_worktree_list(root: &Path) -> Result<Vec<u8>, CommandError> {
     }
 }
 
-fn worktrees(root: &Path) -> Result<Vec<AssociationWorktree>, CommandError> {
-    let stdout = git_worktree_list(root)?;
+fn worktrees(root: &Path, deadline: Instant) -> Result<Vec<AssociationWorktree>, CommandError> {
+    let stdout = git_worktree_list(root, deadline)?;
     let text = String::from_utf8_lossy(&stdout);
     let mut entries: Vec<AssociationWorktree> = vec![];
     for field in text.split('\0') {
@@ -75,23 +107,118 @@ fn worktrees(root: &Path) -> Result<Vec<AssociationWorktree>, CommandError> {
     Ok(entries)
 }
 
-/// The conversation root must be a registered project or one of its Git worktrees.
+/// Registered local workspaces are trusted directories, not a sandbox against
+/// concurrent hostile filesystem changes. Discovery is shallow and bounded;
+/// child symlinks and linked checkouts of foreign repositories are not roots.
+fn project_worktrees(
+    project_root: &Path,
+    registered: &[(String, PathBuf)],
+    deadline: Instant,
+) -> Result<Vec<AssociationWorktree>, CommandError> {
+    if project_root.join(".git").exists() {
+        return worktrees(project_root, deadline);
+    }
+    let unavailable = || invalid("Project repository inventory is unavailable.");
+    let children = std::fs::read_dir(project_root)
+        .map_err(|_| unavailable())?
+        .take(DIRECTORY_ENTRY_LIMIT + 1)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| unavailable())?;
+    if children.len() > DIRECTORY_ENTRY_LIMIT {
+        return Err(invalid(
+            "Project directory exceeds the repository discovery limit.",
+        ));
+    }
+    let mut repositories = vec![];
+    for child in children {
+        if !child.file_type().map_err(|_| unavailable())?.is_dir() {
+            continue;
+        }
+        let path = child.path();
+        // Owned primary repositories have a .git directory. A .git file may
+        // belong to a repository registered elsewhere (e.g. a sibling project).
+        let primary =
+            std::fs::symlink_metadata(path.join(".git")).is_ok_and(|metadata| metadata.is_dir());
+        if !primary {
+            continue;
+        }
+        let path = std::fs::canonicalize(path).map_err(|_| unavailable())?;
+        if registered.iter().any(|(_, other)| {
+            other != project_root && other.starts_with(project_root) && path.starts_with(other)
+        }) {
+            continue;
+        }
+        repositories.push(path);
+    }
+    repositories.sort();
+    let mut seen = HashSet::new();
+    let mut entries = vec![];
+    for repository in repositories {
+        for entry in worktrees(&repository, deadline)? {
+            if seen.insert(entry.path.clone()) {
+                entries.push(entry);
+            }
+            if entries.len() > WORKTREE_LIMIT {
+                return Err(invalid("Project exceeds the worktree discovery limit."));
+            }
+        }
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(entries)
+}
+
+/// Resolve the conversation against registered project containers and their
+/// actual Git worktrees. More-specific registrations own their own repositories.
 pub(super) fn scope(root: &str) -> Result<Scope, CommandError> {
     let root = std::fs::canonicalize(root)
         .map_err(|_| invalid("Conversation workspace is unavailable."))?;
     let config = vertebrae_sacrum_client::load_config_file()
         .map_err(|_| invalid("Could not read shared settings."))?;
-    for (slug, project) in &config.projects {
-        let Ok(entries) = worktrees(Path::new(&project.path)) else {
-            continue;
-        };
-        if entries.iter().any(|w| Path::new(&w.path) == root) {
+    scope_with_config(root, config)
+}
+
+fn scope_with_config(root: PathBuf, config: VertebraeConfigFile) -> Result<Scope, CommandError> {
+    let mut registered: Vec<_> = config
+        .projects
+        .iter()
+        .filter_map(|(slug, project)| {
+            std::fs::canonicalize(&project.path)
+                .ok()
+                .map(|path| (slug.clone(), path))
+        })
+        .collect();
+    registered.sort_by_key(|(_, path)| {
+        (
+            !root.starts_with(path),
+            std::cmp::Reverse(path.components().count()),
+        )
+    });
+    // One deadline covers all Git commands, not five seconds per repository.
+    let deadline = Instant::now() + GIT_TIMEOUT;
+    for (slug, project_root) in &registered {
+        let entries = project_worktrees(project_root, &registered, deadline);
+        if root == *project_root {
             return Ok(Scope {
                 root,
+                project_root: project_root.clone(),
                 project: slug.clone(),
-                worktrees: entries,
+                worktrees: entries?,
                 config,
             });
+        }
+        if let Ok(entries) = entries {
+            if entries.iter().any(|w| Path::new(&w.path) == root) {
+                return Ok(Scope {
+                    root,
+                    project_root: project_root.clone(),
+                    project: slug.clone(),
+                    worktrees: entries,
+                    config,
+                });
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(invalid("Project repository inventory timed out."));
         }
     }
     Err(invalid(
@@ -295,9 +422,170 @@ mod tests {
         git(&["init"]);
         git(&["commit", "--allow-empty", "-m", "fixture"]);
         git(&["worktree", "add", "-b", "feature", other.to_str().unwrap()]);
-        let all = worktrees(&repo).unwrap();
+        let all = worktrees(&repo, Instant::now() + GIT_TIMEOUT).unwrap();
         assert_eq!(all.len(), 2);
         assert!(all.iter().any(|w| w.branch.as_deref() == Some("feature")
             && Path::new(&w.path) == std::fs::canonicalize(&other).unwrap()));
+    }
+
+    fn fixture_git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn fixture_repo(path: &Path) -> PathBuf {
+        std::fs::create_dir_all(path).unwrap();
+        fixture_git(path, &["init"]);
+        fixture_git(path, &["commit", "--allow-empty", "-m", "fixture"]);
+        std::fs::canonicalize(path).unwrap()
+    }
+
+    fn register(config: &mut VertebraeConfigFile, slug: &str, path: &Path) {
+        config.projects.insert(
+            slug.into(),
+            vertebrae_sacrum_client::ProjectSection {
+                id: "unused-in-inventory-test".into(),
+                path: path.to_string_lossy().into(),
+            },
+        );
+    }
+
+    #[test]
+    fn project_container_discovers_child_repositories_and_a_later_created_worktree() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let repo = fixture_repo(&root.join("market_processor"));
+        let other_repo = fixture_repo(&root.join("trade_gym"));
+        let mut config = VertebraeConfigFile::default();
+        register(&mut config, "tradebananas", &root);
+        let before = scope_with_config(root.clone(), config.clone()).unwrap();
+        assert_eq!(before.project, "tradebananas");
+        assert_eq!(before.root, root);
+        assert_eq!(before.worktrees.len(), 2);
+        assert!(before.owns_cache_root(&root));
+        assert!(before.owns_cache_root(&other_repo));
+        assert!(!before.owns_cache_root(&root.join("unregistered")));
+
+        let created = root.join("market_processor-f6f6bf5e");
+        fixture_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "fix/f6f6bf5e",
+                created.to_str().unwrap(),
+            ],
+        );
+        let after = scope_with_config(root.clone(), config.clone()).unwrap();
+        let touched = observed_worktrees(
+            &serde_json::json!({"cwd": created, "cmd": "cargo test"}).to_string(),
+            &after.root,
+            &after.worktrees,
+        );
+        assert_eq!(touched.len(), 1);
+        assert_eq!(Path::new(&touched[0].path), created);
+        assert_eq!(touched[0].branch.as_deref(), Some("fix/f6f6bf5e"));
+        assert!(!before.worktrees.contains(&touched[0]));
+        let from_worktree = scope_with_config(created.clone(), config).unwrap();
+        assert_eq!(from_worktree.project, "tradebananas");
+        assert!(from_worktree.owns_cache_root(&root));
+        assert_eq!(from_worktree.worktrees, after.worktrees);
+    }
+
+    #[test]
+    fn container_does_not_claim_a_foreign_repositorys_linked_checkout() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        let owned = fixture_repo(&root.join("market_processor"));
+        let foreign = fixture_repo(&temp.path().join("foreign"));
+        let linked = root.join("foreign-worktree");
+        fixture_git(
+            &foreign,
+            &["worktree", "add", "-b", "foreign", linked.to_str().unwrap()],
+        );
+        let root = std::fs::canonicalize(root).unwrap();
+        let mut config = VertebraeConfigFile::default();
+        register(&mut config, "container", &root);
+        register(&mut config, "foreign", &foreign);
+        let scope = scope_with_config(root.clone(), config.clone()).unwrap();
+        assert_eq!(scope.worktrees.len(), 1);
+        assert_eq!(Path::new(&scope.worktrees[0].path), owned);
+        assert!(!scope.owns_cache_root(&foreign));
+        assert!(!scope.owns_cache_root(&linked));
+        assert!(observed_worktrees(linked.to_str().unwrap(), &root, &scope.worktrees).is_empty());
+        assert_eq!(
+            scope_with_config(std::fs::canonicalize(linked).unwrap(), config)
+                .unwrap()
+                .project,
+            "foreign"
+        );
+    }
+
+    #[test]
+    fn separately_registered_child_project_keeps_its_own_scope_and_cache() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let child = fixture_repo(&root.join("child"));
+        let mut config = VertebraeConfigFile::default();
+        register(&mut config, "parent", &root);
+        register(&mut config, "child", &child);
+        let parent = scope_with_config(root.clone(), config.clone()).unwrap();
+        assert!(parent.worktrees.is_empty());
+        assert!(parent.owns_cache_root(&root));
+        assert!(!parent.owns_cache_root(&child));
+        let scope = scope_with_config(child.clone(), config).unwrap();
+        assert_eq!(scope.project, "child");
+        assert!(scope.owns_cache_root(&child));
+        assert!(!scope.owns_cache_root(&root));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn container_discovery_does_not_follow_child_symlinks() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        let root = std::fs::canonicalize(root).unwrap();
+        let foreign = fixture_repo(&temp.path().join("foreign"));
+        std::os::unix::fs::symlink(&foreign, root.join("alias")).unwrap();
+        let mut config = VertebraeConfigFile::default();
+        register(&mut config, "container", &root);
+        assert!(scope_with_config(root, config.clone())
+            .unwrap()
+            .worktrees
+            .is_empty());
+        assert!(scope_with_config(foreign, config).is_err());
+    }
+
+    #[test]
+    fn container_discovery_rejects_an_incomplete_directory_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        for index in 0..=DIRECTORY_ENTRY_LIMIT {
+            std::fs::write(root.join(index.to_string()), "").unwrap();
+        }
+        let mut config = VertebraeConfigFile::default();
+        register(&mut config, "container", &root);
+        assert!(scope_with_config(root, config).is_err());
     }
 }

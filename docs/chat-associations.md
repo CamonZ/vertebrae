@@ -20,6 +20,12 @@ worktree it is happening in. This is a narrow prototype.
   it. Otherwise a touched worktree whose directory or branch contains the
   ticket's short ID binds once the ticket is known (the last 8 touched
   worktrees are kept for that).
+- Registered project roots can be Git checkouts or container directories with
+  primary Git repositories as immediate children. Container discovery scans at
+  most 512 directory entries, keeps at most 1024 worktrees, and shares one
+  five-second Git deadline. Child symlinks, foreign linked checkouts and
+  separately registered child projects are excluded. A container itself is a
+  valid project/cache root, but only real Git inventory entries can be bound.
 - Tool calls/results are scanned for absolute, `./` and `../` paths (or paths
   whose first component exists), plus `cwd`/`workdir`, and checked against
   `git worktree list`. Inspecting other checkouts never moves the association.
