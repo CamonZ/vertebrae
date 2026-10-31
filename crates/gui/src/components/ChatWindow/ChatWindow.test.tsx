@@ -281,7 +281,7 @@ describe("ChatWindow", () => {
       panelOpen: true,
     });
 
-    render(<ChatWindow sessionId="test-session" />);
+    render(<ChatWindow sessionId="test-session" showProjectContext />);
 
     expect(screen.getByTestId("local-chat-project-context")).toHaveTextContent(
       "project-alpha"

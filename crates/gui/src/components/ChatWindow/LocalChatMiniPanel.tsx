@@ -15,6 +15,7 @@ import { SearchInput } from "../molecules/SearchInput";
 import { scrollToSpawn, type SpawnOutlineItem } from "./sessionListUtils";
 import { SessionGroupList } from "./SessionGroupList";
 import { SessionDeleteButton } from "./SessionDeleteButton";
+import { ConversationAssociations } from "./ConversationAssociations";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 
 export type LocalChatSessionActivity = "thinking" | "compacting" | "stopping";
@@ -162,7 +163,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
         target.closest("[data-mini-history-search]") !== null;
       if (
         target.closest(
-          "[data-mini-delete], [data-mini-history-toggle], [data-mini-project-chat]"
+          "[data-mini-delete], [data-mini-history-toggle], [data-mini-project-chat], .conversation-associations"
         )
       ) {
         return;
@@ -379,38 +380,51 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                       className="hc-mini-history-row"
                       data-active={isActive || undefined}
                     >
-                      <button
-                        type="button"
-                        className="hc-mini-history-open"
-                        ref={(node) => {
-                          if (node) {
-                            sessionButtonRefs.current.set(session.id, node);
-                          } else {
-                            sessionButtonRefs.current.delete(session.id);
-                          }
-                        }}
-                        onFocus={() => setKeyboardSessionId(session.id)}
-                        onClick={() => onSelect(session.id)}
-                        title={`Open local chat ${title}`}
-                        aria-label={`Load local chat ${title} into active pane`}
-                        aria-current={isActive ? "true" : undefined}
-                      >
-                        {activityBySessionId?.has(session.id) ? (
-                          <SessionActivityBadge
-                            activity={activityBySessionId.get(session.id)!}
-                            style={thinkingIndicatorStyle}
+                      <div className="hc-mini-history-entry">
+                        <button
+                          type="button"
+                          className="hc-mini-history-open"
+                          ref={(node) => {
+                            if (node) {
+                              sessionButtonRefs.current.set(session.id, node);
+                            } else {
+                              sessionButtonRefs.current.delete(session.id);
+                            }
+                          }}
+                          onFocus={() => setKeyboardSessionId(session.id)}
+                          onClick={() => onSelect(session.id)}
+                          title={`Open local chat ${title}`}
+                          aria-label={`Load local chat ${title} into active pane`}
+                          aria-current={isActive ? "true" : undefined}
+                        >
+                          <span className="label">{title}</span>
+                        </button>
+                        <div className="hc-mini-history-secondary">
+                          {activityBySessionId?.has(session.id) ? (
+                            <SessionActivityBadge
+                              activity={activityBySessionId.get(session.id)!}
+                              style={thinkingIndicatorStyle}
+                            />
+                          ) : (
+                            <HarnessBadge harness={session.harness} />
+                          )}
+                          <ConversationAssociations session={session} />
+                          <SessionDeleteButton
+                            label={title}
+                            onClick={() => void onDelete(session.id)}
+                            dataMiniDelete
                           />
-                        ) : (
-                          <HarnessBadge harness={session.harness} />
-                        )}
-                        <span className="label">{title}</span>
-                        {age && <span className="meta">{age}</span>}
-                      </button>
-                      <SessionDeleteButton
-                        label={title}
-                        onClick={() => void onDelete(session.id)}
-                        dataMiniDelete
-                      />
+                          {age && (
+                            <time
+                              className="meta"
+                              dateTime={session.updatedAt}
+                              title={session.updatedAt}
+                            >
+                              {age}
+                            </time>
+                          )}
+                        </div>
+                      </div>
                     </div>
                     {spawnOutline.map((spawn) => {
                       const isAgentActive =

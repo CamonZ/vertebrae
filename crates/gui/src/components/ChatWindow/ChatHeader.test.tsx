@@ -17,6 +17,13 @@ function renderHeader(overrides: Record<string, unknown> = {}) {
 }
 
 describe("ChatHeader", () => {
+  it("hides project context for a single pane", () => {
+    renderHeader({ projectLabel: "project" });
+    expect(
+      screen.queryByTestId("local-chat-project-context")
+    ).not.toBeInTheDocument();
+  });
+
   it("renders the session label", () => {
     renderHeader({ label: "My Project Chat" });
     expect(screen.getByText("My Project Chat")).toBeInTheDocument();
@@ -26,6 +33,7 @@ describe("ChatHeader", () => {
     renderHeader({
       label: "My Project Chat",
       projectLabel: "a-very-long-project-name",
+      showProjectContext: true,
       onTitleRegenerate: vi.fn(),
     });
 
@@ -55,7 +63,7 @@ describe("ChatHeader", () => {
   });
 
   it("uses an accessible neutral fallback when project metadata is missing", () => {
-    renderHeader();
+    renderHeader({ showProjectContext: true });
 
     expect(
       screen.getByRole("note", { name: "Project: Unknown project" })

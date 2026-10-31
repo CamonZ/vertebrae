@@ -25,7 +25,7 @@ interface ChatHeaderProps {
   isTitleRegenerating?: boolean;
   titleError?: string | null;
   projectLabel?: string;
-  association?: React.ReactNode;
+  showProjectContext?: boolean;
 }
 
 interface HeaderAction {
@@ -83,7 +83,7 @@ export function ChatHeader({
   isTitleRegenerating = false,
   titleError,
   projectLabel = FALLBACK_CHAT_PROJECT_LABEL,
-  association,
+  showProjectContext = false,
 }: ChatHeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(label);
@@ -412,16 +412,17 @@ export function ChatHeader({
               )}
             </>
           )}
-          <span
-            className="hc-project-context"
-            data-testid="local-chat-project-context"
-            role="note"
-            aria-label={`Project: ${projectLabel}`}
-            title={`Project: ${projectLabel}`}
-          >
-            {projectLabel}
-          </span>
-          {association}
+          {showProjectContext && (
+            <span
+              className="hc-project-context"
+              data-testid="local-chat-project-context"
+              role="note"
+              aria-label={`Project: ${projectLabel}`}
+              title={`Project: ${projectLabel}`}
+            >
+              {projectLabel}
+            </span>
+          )}
           {lifecycle === "error" ? (
             <span
               data-testid="chat-error-dot"

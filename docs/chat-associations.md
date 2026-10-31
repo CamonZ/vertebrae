@@ -1,7 +1,14 @@
 # Local chat associations
 
-A local chat shows, in its header, the ticket being worked on and the Git
-worktree it is happening in. This is a narrow prototype.
+The left conversation list uses a title row and a compact secondary row,
+retaining project group headings. Entries have a 48px minimum height on the 4px spacing grid. The top row
+contains only the title. The provider/activity, ticket, worktree and trash icons sit on the left
+of the lower row; the last-changed timestamp is aligned right.
+Association icons appear only for established associations. Hover or keyboard
+focus reveals the ticket ID/title or worktree path/branch. Both icons are
+informational, use the default cursor, and perform no action. The chat header
+keeps the title without an association info control. Project context appears
+in headers only when more than one chat pane is visible.
 
 ## Behavior
 
@@ -36,16 +43,14 @@ worktree it is happening in. This is a narrow prototype.
 - A disabled, unsupported or failing model keeps the association and shows one
   diagnostic; that message is skipped and the next one is the retry. No
   fallback model.
-- The header is responsive by container width: short ID, then title (420px),
-  then worktree/branch (640px). The popover shows full details and one
-  correction: set the ticket by full or short ID (blank clears).
+
 
 ## Limits
 
 Per session the record keeps the ticket, worktree, pending-creation snapshot,
 recent worktrees and the last processed event. One request runs at a time; its
 result is dropped if the session changes or a newer user message arrives. Once
-both are known nothing more is asked; switching tickets needs the correction.
+both are known nothing more is asked.
 
 ## Investigation and diagnostic logs
 

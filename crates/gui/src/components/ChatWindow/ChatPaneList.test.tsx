@@ -5,8 +5,17 @@ import { useChatStore } from "../../stores/chatStore";
 import type { ChatPane, ChatSession } from "../../stores/chatStore";
 
 vi.mock("./ChatWindow", () => ({
-  ChatWindow: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid="mock-chat-window">
+  ChatWindow: ({
+    sessionId,
+    showProjectContext,
+  }: {
+    sessionId: string;
+    showProjectContext?: boolean;
+  }) => (
+    <div
+      data-testid="mock-chat-window"
+      data-project-visible={showProjectContext}
+    >
       <textarea
         data-testid="local-chat-composer"
         aria-label={`${sessionId} input`}
@@ -27,11 +36,16 @@ function createSession(id: string): ChatSession {
   };
 }
 
-function renderPaneList() {
-  const panes: ChatPane[] = [{ id: "pane-1", sessionId: "session-1" }];
+function renderPaneList(count = 1) {
+  const panes: ChatPane[] = Array.from({ length: count }, (_, index) => ({
+    id: `pane-${index + 1}`,
+    sessionId: `session-${index + 1}`,
+  }));
   const focusPane = vi.fn();
   useChatStore.setState({
-    sessions: { "session-1": createSession("session-1") },
+    sessions: Object.fromEntries(
+      panes.map((pane) => [pane.sessionId, createSession(pane.sessionId)])
+    ),
   });
 
   render(
@@ -55,6 +69,16 @@ function renderPaneList() {
 }
 
 describe("ChatPaneList", () => {
+  it.each([1, 2])(
+    "shows project context only with multiple visible panes (%s)",
+    (count) => {
+      renderPaneList(count);
+      for (const pane of screen.getAllByTestId("mock-chat-window")) {
+        expect(pane).toHaveAttribute("data-project-visible", String(count > 1));
+      }
+    }
+  );
+
   it("focuses the clicked pane input after selecting the pane", () => {
     const { focusPane } = renderPaneList();
     const pane = screen.getByTestId("chat-pane");

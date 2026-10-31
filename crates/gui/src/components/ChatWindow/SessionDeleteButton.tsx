@@ -19,7 +19,7 @@ export function SessionDeleteButton({
   return (
     <button
       type="button"
-      className="hc-ctrl danger shrink-0"
+      className="hc-ctrl shrink-0"
       data-mini-delete={dataMiniDelete || undefined}
       onClick={onClick}
       title={`Delete local chat ${label}`}

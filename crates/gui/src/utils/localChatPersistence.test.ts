@@ -2,6 +2,7 @@ import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "../stores/chatStore";
 import {
+  summarizeLocalChatSession,
   clearLastUsedLocalChatModelId,
   clearPersistedLocalChatSessions,
   findPersistedDefaultEmptyLocalChatSession,
@@ -519,10 +520,9 @@ describe("localChatPersistence", () => {
     );
 
     await waitFor(() => expect(saveIndex).toHaveBeenCalled());
-    const savedIds =
-      saveIndex.mock.calls[saveIndex.mock.calls.length - 1]?.[0].sessions.map(
-        (session) => session.id
-      );
+    const savedIds = saveIndex.mock.calls[
+      saveIndex.mock.calls.length - 1
+    ]?.[0].sessions.map((session) => session.id);
     expect(savedIds).toContain("new-empty");
     expect(savedIds).not.toContain("loaded-empty");
   });
@@ -690,4 +690,20 @@ describe("localChatPersistence", () => {
       ).toBeNull();
     });
   });
+});
+
+it("projects each conversation's bound associations into its sidebar summary", () => {
+  const association = {
+    ticketId: "4694275d-ab38-423a-9e3e-17d8316cd070",
+    ticketTitle: "Declutter chat headers",
+    worktreePath: "/repo/worktree",
+    branch: "feature",
+  };
+  expect(
+    summarizeLocalChatSession(makeSession({ association })).association
+  ).toEqual(association);
+  expect(
+    summarizeLocalChatSession(makeSession({ association: null })).association
+  ).toBeNull();
+  expect(summarizeLocalChatSession(makeSession()).association).toBeNull();
 });

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { AssociationRecord } from "../../hooks/useChatAssociation";
+import { Icon } from "../atoms/Icon";
 import "./chatAssociation.css";
 
 export function ChatAssociation({
@@ -27,16 +28,15 @@ export function ChatAssociation({
         }
       }}
     >
-      <summary ref={summary} aria-label={`Conversation context: ${label}`}>
-        <span className="association-short-id">{label}</span>
-        {record.ticketTitle && (
-          <span className="association-title">{record.ticketTitle}</span>
-        )}
-        {record.worktreePath && (
-          <span className="association-worktree">
-            {record.branch ?? record.worktreePath.split("/").pop()}
-          </span>
-        )}
+      <summary
+        ref={summary}
+        aria-label={`Conversation context: ${label}`}
+        title="Conversation details and ticket correction"
+      >
+        <Icon size="sm">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v6m0-10v1" />
+        </Icon>
       </summary>
       <div className="association-popover">
         {record.ticketId ? (

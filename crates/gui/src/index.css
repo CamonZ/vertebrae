@@ -3125,9 +3125,9 @@ html.light ::selection {
 }
 .hc-panel .hc-mini-history-new:hover,
 .hc-panel .hc-mini-history-new:focus-visible {
-  border-color: color-mix(in oklch, var(--accent) 55%, transparent);
-  background: color-mix(in oklch, var(--accent) 12%, transparent);
-  color: var(--accent);
+  border-color: color-mix(in oklch, var(--fg) 28%, transparent);
+  background: var(--bg-4);
+  color: var(--fg);
   outline: none;
 }
 .hc-panel .hc-mini-history-new:disabled {
@@ -3155,20 +3155,28 @@ html.light ::selection {
 .hc-panel .hc-mini-history-row {
   display: flex;
   align-items: center;
-  gap: 2px;
-  min-height: 28px;
+  gap: var(--s-1);
+  min-height: var(--s-12);
   border-radius: var(--r-xs);
   padding: 0 var(--s-1) 0 var(--s-2);
+}
+.hc-panel .hc-mini-history-entry {
+  min-width: 0;
+  flex: 1;
+  padding-block: var(--s-1);
+}
+.hc-panel .hc-mini-history-entry .hc-mini-history-open {
+  width: 100%;
 }
 .hc-panel .hc-mini-history-row[data-active] {
   background: color-mix(in oklch, var(--fg) 8%, transparent);
 }
 .hc-panel .hc-mini-history-open {
   min-width: 0;
-  min-height: 28px;
+  min-height: var(--s-5);
   flex: 1;
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: var(--s-2);
   border: none;
@@ -3182,20 +3190,34 @@ html.light ::selection {
   outline-offset: -1px;
 }
 .hc-panel .hc-mini-history-open .label,
-.hc-panel .hc-mini-history-open .meta {
+.hc-panel .hc-mini-history-secondary .meta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .hc-panel .hc-mini-history-open .label {
+  line-height: var(--s-5);
   font-size: var(--text-13);
   font-weight: 400;
   color: var(--fg);
 }
-.hc-panel .hc-mini-history-open .meta {
-  justify-self: end;
+.hc-panel .hc-mini-history-secondary {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--s-5);
+  min-width: 0;
+}
+.hc-panel .hc-mini-history-secondary .meta {
+  min-width: 0;
+  margin-left: auto;
+  text-align: right;
   font-size: var(--text-11);
-  color: var(--fg-faint);
+  color: var(--fg-mute);
+}
+.hc-panel .hc-mini-history-row .hc-mini-history-secondary .hc-ctrl {
+  width: var(--s-5);
+  height: var(--s-5);
 }
 .hc-panel .hc-mini-history-agent {
   width: calc(100% - var(--s-3));

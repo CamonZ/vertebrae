@@ -670,6 +670,7 @@ export function summarizeLocalChatSession(
 ): LocalChatSessionSummary {
   return {
     id: session.id,
+    association: session.association ?? null,
     label: session.label,
     title: session.title ?? null,
     titleStatus:
