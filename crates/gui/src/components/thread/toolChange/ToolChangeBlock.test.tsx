@@ -2,8 +2,9 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../../../stores/chatStore";
 import { ChatSessionContext } from "./ChatSessionContext";
-import { DEFAULT_DIFF_HEIGHT } from "./ResizableDiffViewport";
+import { DEFAULT_DIFF_HEIGHT, MAX_DIFF_HEIGHT } from "./ResizableDiffViewport";
 import { ToolRow } from "../EventRow";
+import { PlainPatch } from "./ToolChangeBlock";
 
 vi.mock("@pierre/diffs/react", async () => {
   const { createContext } = await import("react");
@@ -109,5 +110,33 @@ describe("ToolRow with a recorded worktree delta", () => {
     );
     expect(screen.getByText("Edit")).toBeTruthy();
     expect(screen.queryByTestId("tool-change-block")).toBeNull();
+  });
+});
+
+describe("PlainPatch", () => {
+  it("shows hunk lines without the file headers", () => {
+    render(
+      <PlainPatch
+        patches={[
+          "diff --git a/a.ts b/a.ts\nindex 1..2 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new",
+        ]}
+      />
+    );
+    expect(screen.getByTestId("diff-placeholder").textContent).toBe(
+      "@@ -1 +1 @@\n-old\n+new"
+    );
+  });
+
+  it("lays out only the rows that fit the limit but reserves full height", () => {
+    const rows = Array.from({ length: 500 }, (_, i) => `+line ${i}`);
+    render(
+      <PlainPatch
+        patches={[`@@ -0,0 +1,500 @@\n${rows.join("\n")}`]}
+        limit={MAX_DIFF_HEIGHT}
+      />
+    );
+    const plain = screen.getByTestId("diff-placeholder");
+    expect(plain.style.height).toBe(`${501 * 20}px`);
+    expect(plain.textContent!.split("\n")).toHaveLength(MAX_DIFF_HEIGHT / 20);
   });
 });

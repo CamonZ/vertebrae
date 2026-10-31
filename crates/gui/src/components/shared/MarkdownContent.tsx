@@ -7,6 +7,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type ComponentPropsWithoutRef,
   type ReactNode,
@@ -17,6 +18,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { requestMermaidSvg } from "../../mermaid/requestMermaidSvg";
 import { loadGraphviz } from "../../utils/graphviz";
+import { useNearViewport } from "../../hooks/useNearViewport";
 import { LocalFileReferenceLink } from "./LocalFileReferenceLink";
 import { parseLocalFileReference } from "./localFileReference";
 import { VtbEntityMarkdownLink } from "./VtbEntityLink";
@@ -183,6 +185,12 @@ function HighlightedCodeBlock({
   diagramError,
 }: HighlightedCodeBlockProps) {
   const hasLanguage = language !== "text";
+  // Each highlighted block is a Pierre shadow root with its own theme styles
+  // and a span per token. Long chats keep only blocks near the viewport
+  // highlighted; the plain fallback has the same metrics, so swapping does
+  // not move the scroll position.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const highlight = useNearViewport(bodyRef);
 
   return (
     <div
@@ -205,10 +213,14 @@ function HighlightedCodeBlock({
           )}
         </div>
       )}
-      <div className="max-h-96 max-w-full overflow-auto">
-        <Suspense fallback={<PlainCodeSnippet source={source} />}>
-          <CodeSnippet language={language} source={source} />
-        </Suspense>
+      <div ref={bodyRef} className="max-h-96 max-w-full overflow-auto">
+        {highlight ? (
+          <Suspense fallback={<PlainCodeSnippet source={source} />}>
+            <CodeSnippet language={language} source={source} />
+          </Suspense>
+        ) : (
+          <PlainCodeSnippet source={source} />
+        )}
       </div>
     </div>
   );
@@ -669,7 +681,7 @@ function createMarkdownComponents(
 
       return (
         <a
-          className={`text-accent underline decoration-accent/30 hover:decoration-accent${
+          className={`text-[var(--link-fg)] underline decoration-current/30 hover:decoration-current${
             canOpenExternally ? " cursor-pointer" : ""
           }`}
           {...props}

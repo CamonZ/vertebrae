@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -9,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { MarkdownContent } from "./MarkdownContent";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
+import { NEAR_VIEWPORT_DWELL_MS } from "../../hooks/useNearViewport";
 
 const requestMermaidSvgMock = vi.hoisted(() => vi.fn());
 
@@ -219,6 +221,44 @@ describe("MarkdownContent", () => {
       expect(task).toHaveTextContent("Ship [it] *now*");
     });
 
+    it("colors ordinary links with the link token and keeps nested code on the inline tokens", () => {
+      render(
+        <MarkdownContent text="See [docs](https://example.com) and [`useStore`](https://example.com/api)." />
+      );
+      const [plain, codeLink] = screen.getAllByTestId("external-url-link");
+      for (const link of [plain, codeLink]) {
+        expect(link.className).toContain("text-[var(--link-fg)]");
+        expect(link.className).not.toMatch(/(^|\s)text-accent(\s|$)/);
+      }
+      const code = screen.getByText("useStore");
+      expect(code.tagName).toBe("CODE");
+      expect(code.closest("a")).toBe(codeLink);
+      expect(code.className).toContain("text-[var(--inline-code-fg)]");
+      expect(code.className).toContain("bg-[var(--inline-code-bg)]");
+    });
+
+    it("keeps code inside entity links on the inline tokens", () => {
+      render(
+        <MarkdownContent text="Open [`fdf310ee`](vtb://ticket/fdf310ee-2189-4ca5-adeb-26b93bc918c2)" />
+      );
+      const link = screen.getByTestId("vtb-entity-link");
+      expect(link.className).toContain("text-[var(--link-fg)]");
+      const code = screen.getByText("fdf310ee");
+      expect(code.tagName).toBe("CODE");
+      expect(code.className).toContain("text-[var(--inline-code-fg)]");
+      expect(code.className).toContain("bg-[var(--inline-code-bg)]");
+    });
+
+    it("styles local file references with the inline code tokens", () => {
+      render(
+        <MarkdownContent projectPath="/repo" text="See `src/main.rs:12`." />
+      );
+      const link = screen.getByTestId("local-file-reference-link");
+      expect(link.className).toContain("text-[var(--inline-code-fg)]");
+      expect(link.className).toContain("bg-[var(--inline-code-bg)]");
+      expect(link.className).not.toContain("accent)");
+    });
+
     it("renders unsupported Vertebrae link types as inert text", () => {
       render(<MarkdownContent text="See [run](vtb://taskrun/abc)." />);
       expect(screen.queryByTestId("vtb-entity-link")).toBeNull();
@@ -321,6 +361,55 @@ describe("MarkdownContent", () => {
   });
 
   describe("code blocks", () => {
+    it("renders plain code far from the viewport and highlights it when near", async () => {
+      const callbacks: IntersectionObserverCallback[] = [];
+      vi.stubGlobal(
+        "IntersectionObserver",
+        class {
+          constructor(callback: IntersectionObserverCallback) {
+            callbacks.push(callback);
+          }
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        }
+      );
+      vi.useFakeTimers();
+      const rect = vi
+        .spyOn(Element.prototype, "getBoundingClientRect")
+        .mockReturnValue({ top: 50_000, bottom: 50_100 } as DOMRect);
+      try {
+        const { container } = render(
+          <MarkdownContent text={"```ts\nconst far = true;\n```"} />
+        );
+        expect(screen.queryByTestId("code-snippet")).toBeNull();
+        const plain = container.querySelector("code")!;
+        expect(plain.textContent).toBe("const far = true;");
+
+        const body = plain.parentElement!.parentElement!;
+        act(() =>
+          callbacks.forEach((callback) =>
+            callback(
+              [
+                { target: body, isIntersecting: true },
+              ] as unknown as IntersectionObserverEntry[],
+              {} as IntersectionObserver
+            )
+          )
+        );
+        expect(screen.queryByTestId("code-snippet")).toBeNull();
+        act(() => vi.advanceTimersByTime(NEAR_VIEWPORT_DWELL_MS));
+        vi.useRealTimers();
+        expect(await screen.findByTestId("code-snippet")).toHaveTextContent(
+          "const far = true;"
+        );
+      } finally {
+        rect.mockRestore();
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    });
+
     it("defers parsing and highlighting very large content until requested", () => {
       const source = `\`\`\`typescript\n${"const value = 1;\n".repeat(800)}\`\`\``;
       const { container } = render(<MarkdownContent text={source} />);
