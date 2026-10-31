@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import indexCss from "../../index.css?raw";
 import threadCss from "./thread.css?raw";
 
 // thread.css is unlayered, so any of its rules beats the Tailwind utilities
@@ -45,5 +46,20 @@ describe("thread.css inline code", () => {
         /var\(--accent/.test(body)
     );
     expect(offending.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+});
+
+describe("index.css link token", () => {
+  const rootDeclaration = (property: string) =>
+    [
+      ...indexCss
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .matchAll(/(?:^|})\s*:root\s*\{([^}]*)\}/g),
+    ]
+      .map(([, body]) => declaration(body, property))
+      .find(Boolean);
+
+  it("colors links with the configured inline code text color", () => {
+    expect(rootDeclaration("--link-fg")).toBe("var(--inline-code-fg)");
   });
 });

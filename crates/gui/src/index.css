@@ -211,9 +211,10 @@
   /* Inline code (Settings > Appearance overrides these on the root element) */
   --inline-code-fg: var(--color-accent);
   --inline-code-bg: color-mix(in oklab, var(--color-bg) 80%, transparent);
-  /* Ordinary prose links (Markdown URLs, entity links): the Hearth accent marks
-     interactive text. Inline code inside a link keeps the inline-code tokens. */
-  --link-fg: var(--color-accent);
+  /* Ordinary prose links (Markdown URLs, entity links) follow the Appearance
+     inline code text color, so one setting colors both. Declared on :root with
+     the inline override, so a changed setting re-resolves existing links. */
+  --link-fg: var(--inline-code-fg);
 
   /* Surfaces */
   --bg: var(--color-bg);

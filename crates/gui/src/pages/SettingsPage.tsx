@@ -370,7 +370,7 @@ function CodeAppearanceSettings({ onSaved }: { onSaved: () => void }) {
       </SettingRow>
       <SettingRow
         label="Inline code text"
-        description="Text color for inline code and file references in chat."
+        description="Text color for inline code, file references and links in chat."
       >
         <Select
           aria-label="Inline code text"
