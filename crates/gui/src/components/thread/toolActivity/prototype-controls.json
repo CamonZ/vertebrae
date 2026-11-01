@@ -1,0 +1,152 @@
+[
+  {
+    "id": "synthetic-0",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"cat docs/deploy.md\"}));",
+    "gold": ["read_docs"]
+  },
+  {
+    "id": "synthetic-1",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"rg \\\"cargo test|write_text|git worktree add\\\" src\"}));",
+    "gold": ["search_source"]
+  },
+  {
+    "id": "synthetic-2",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"cat src/main.rs; rg timeout src; cargo test\"}));",
+    "gold": ["read_source", "run_checks", "search_source"]
+  },
+  {
+    "id": "synthetic-3",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"cat > /tmp/a.rs <<'EOF'\\n// cargo test\\n// git status\\nEOF\"}));",
+    "gold": ["edit_files"]
+  },
+  {
+    "id": "synthetic-4",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"python3 - <<'PY'\\nfrom pathlib import Path\\np=Path('a.py');s=p.read_text();p.write_text(s.replace('x','y'))\\nPY\"}));",
+    "gold": ["edit_files"]
+  },
+  {
+    "id": "synthetic-5",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"vtb add --help\"}));",
+    "gold": ["read_docs"]
+  },
+  {
+    "id": "synthetic-6",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"vtb list --search \\\"create worktree\\\"\"}));",
+    "gold": ["manage_records"]
+  },
+  {
+    "id": "synthetic-7",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"git diff -- src/test.rs\"}));",
+    "gold": ["inspect_git"]
+  },
+  {
+    "id": "synthetic-8",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"git worktree add ../new -b example\"}));",
+    "gold": ["manage_environment"]
+  },
+  {
+    "id": "synthetic-9",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"curl http://127.0.0.1:46292/health\"}));",
+    "gold": ["manage_environment"]
+  },
+  {
+    "id": "synthetic-10",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"curl https://example.com/docs\"}));",
+    "gold": ["web_research"]
+  },
+  {
+    "id": "synthetic-11",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"cat docs/testing.md 2>/dev/null\"}));",
+    "gold": ["read_docs"]
+  },
+  {
+    "id": "synthetic-12",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"printf \\\"cargo test; rm -rf x\\\"\"}));",
+    "gold": []
+  },
+  {
+    "id": "synthetic-13",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"rg --files | head -10\"}));",
+    "gold": ["search_source"]
+  },
+  {
+    "id": "synthetic-14",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"cat Cargo.toml | head -20\"}));",
+    "gold": ["read_source"]
+  },
+  {
+    "id": "synthetic-15",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"python3 opaque_script.py\"}));",
+    "gold": []
+  },
+  {
+    "id": "synthetic-16",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"bash opaque_script.sh\"}));",
+    "gold": []
+  },
+  {
+    "id": "synthetic-17",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"cat src/sample.rs; cargo fmt --check; git status --short\"}));",
+    "gold": ["inspect_git", "read_source", "run_checks"]
+  },
+  {
+    "id": "synthetic-18",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"sed -i \\\"s/old/new/\\\" src/a.rs\"}));",
+    "gold": ["edit_files"]
+  },
+  {
+    "id": "synthetic-19",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"python3 - <<'PY'\\nprint('p.write_text(s); cargo test')\\nPY\"}));",
+    "gold": []
+  },
+  {
+    "id": "synthetic-20",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"rg \\\"deploy\\\" docs\"}));",
+    "gold": ["search_source"]
+  },
+  {
+    "id": "synthetic-21",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"cat docs/a.md src/a.rs\"}));",
+    "gold": ["read_docs", "read_source"]
+  },
+  {
+    "id": "synthetic-22",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"echo marker; cat > /tmp/a <<EOF\\npytest\\nEOF\\nrg marker /tmp/a\"}));",
+    "gold": ["edit_files", "search_source"]
+  },
+  {
+    "id": "synthetic-23",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"cargo check > /tmp/build.log 2>&1\"}));",
+    "gold": ["run_checks"]
+  },
+  {
+    "id": "synthetic-24",
+    "tool": "exec",
+    "input": "text(await tools.exec_command({\"cmd\": \"git log --oneline | head -5\"}));",
+    "gold": ["inspect_git"]
+  }
+]

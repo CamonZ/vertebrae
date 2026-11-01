@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ToolRow } from "./EventRow";
+import { ToolChanges, ToolRow } from "./EventRow";
 
 function ExpensiveBody({ onMount }: { onMount: () => void }) {
   useEffect(onMount, [onMount]);
@@ -144,4 +144,9 @@ describe("ToolRow", () => {
     expect(commandNode).not.toHaveTextContent("…");
     expect(container.querySelector(".evtool-prompt")).toHaveTextContent("$");
   });
+});
+
+it("does not repeat the generic call row inside an existing raw disclosure", () => {
+  const { container } = render(<ToolChanges name="Bash" status="done" />);
+  expect(container.querySelector(".evtool")).not.toBeInTheDocument();
 });

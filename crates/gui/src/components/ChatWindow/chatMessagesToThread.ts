@@ -415,6 +415,7 @@ function toToolCallEvent(
   const input = parseToolInput(m.input);
   return {
     kind: "tool_call",
+    rawInput: m.input,
     toolId: m.toolId,
     toolName: m.toolName,
     displayName: m.toolName,
@@ -432,6 +433,7 @@ function mergeToolCallEvent(
 ): void {
   if (!target) return;
   target.input = mergeToolCallInput(target.input, incoming.input);
+  target.rawInput = incoming.rawInput ?? target.rawInput;
   target.summary =
     toolCallSummary(target.input) || incoming.summary || target.summary;
 }

@@ -158,7 +158,9 @@ describe("ChatMessages", () => {
     expect(userRow?.querySelector(".evbody")).toBeInTheDocument();
     expect(userRow).toHaveTextContent("You");
     expect(eventLog?.querySelector(".evrow--agent")).toBeInTheDocument();
-    expect(eventLog?.querySelector(".evrow--tool")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /1 call for/ })
+    ).toBeInTheDocument();
   });
 
   it("renders assistant messages", () => {
@@ -294,9 +296,13 @@ describe("ChatMessages", () => {
       },
     ];
     render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
-    // The spawn row itself renders from the spawn call's description, while
-    // child-thread prose stays out of the parent transcript.
-    expect(screen.getByText("Inspect repo")).toBeInTheDocument();
+    // The original spawn arguments remain accessible while child-thread prose
+    // stays out of the parent transcript.
+    fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
+    expect(screen.getByLabelText("Raw arguments")).toHaveTextContent(
+      "Inspect repo"
+    );
     expect(screen.queryByText("child-only prose")).not.toBeInTheDocument();
   });
 
@@ -342,8 +348,8 @@ describe("ChatMessages", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Read/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Show full content/ }));
+    fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
     expect(screen.getByText((text) => text.endsWith(tail))).toBeInTheDocument();
 
     rerender(
@@ -374,10 +380,9 @@ describe("ChatMessages", () => {
     expect(
       screen.queryByTestId("bounded-content-preview")
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Read/ })).toHaveAttribute(
-      "aria-expanded",
-      "true"
-    );
+    expect(
+      screen.getByRole("button", { name: /Raw arguments/ })
+    ).toHaveAttribute("aria-expanded", "true");
   });
 
   it("renders a structured user question exactly once", () => {

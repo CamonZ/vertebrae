@@ -180,6 +180,7 @@ export function getToolIcon(toolName: string): string {
 /** Tool call event projected from a normalized harness tool_call payload. */
 export interface ToolCallEvent extends BaseEvent {
   kind: "tool_call";
+  rawInput?: string;
   toolId: string;
   toolName: string;
   displayName: string;
@@ -625,12 +626,13 @@ function parseHarnessEvent(
       const toolId = readString(data.tool_call_id);
       const toolName = readString(data.name);
       if (toolId && toolName) {
-        const input = readRecord(data.input) ?? {};
+        const input = readRecord(data.input) ?? { raw: data.input };
         events.push({
           kind: "tool_call",
           timestamp,
           toolId,
           toolName,
+          rawInput: typeof data.input === "string" ? data.input : undefined,
           displayName: getToolDisplayName(toolName),
           icon: getToolIcon(toolName),
           summary: getToolSummary(toolName, input),

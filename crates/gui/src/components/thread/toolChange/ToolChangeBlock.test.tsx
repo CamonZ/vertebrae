@@ -52,7 +52,7 @@ describe("ToolRow with a recorded worktree delta", () => {
     seed({ patch: PATCH, files: [{ path: "a", status: "modified" }] });
     renderBlock();
     expect(screen.getByText("1 file changed")).toBeTruthy();
-    expect(screen.getByText("by Edit")).toBeTruthy();
+    expect(screen.getByText("recorded around Edit")).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByText("tool output")).toBeNull();
     expect(await screen.findByTestId("patch-diff")).toBeTruthy();

@@ -890,6 +890,18 @@ async resolveChatAssociation(input: AssociationInput) : Promise<Result<Associati
 }
 },
 /**
+ * Uses the configured decision role only. Disabled/unavailable models leave
+ * commands unclassified. No transcript, result, or worktree delta is supplied.
+ */
+async classifyToolOperations(commands: string[]) : Promise<Result<string[][], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("classify_tool_operations", { commands }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Open a validated local-chat file reference with the operating system's
  * external file handler. The frontend supplies the captured project root and
  * the raw reference path; canonicalization here closes symlink and traversal

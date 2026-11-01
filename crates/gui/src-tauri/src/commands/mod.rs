@@ -82,6 +82,7 @@ mod runtime;
 mod settings;
 mod steps;
 mod task;
+mod tool_activity;
 mod workflow;
 
 pub use artifact::*;
@@ -98,6 +99,7 @@ pub use runtime::*;
 pub use settings::*;
 pub use steps::*;
 pub use task::*;
+pub use tool_activity::*;
 pub use workflow::*;
 
 #[cfg(test)]

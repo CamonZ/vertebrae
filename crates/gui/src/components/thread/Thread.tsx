@@ -1,3 +1,5 @@
+import { ToolActivityGroup } from "./toolActivity/ToolActivityGroup";
+import { groupToolMessages } from "./toolActivity/grouping";
 /**
  * Thread — the recursive rendering primitive.
  *
@@ -25,9 +27,8 @@ import { Fragment, useState, type ReactNode } from "react";
 
 import { IdChip } from "../shared/HearthPrimitives";
 
-import { EventRow } from "./EventRow";
+import { EventRow, ToolChanges } from "./EventRow";
 import type {
-  Message,
   StepKind,
   ThreadStep,
   Thread as ThreadModel,
@@ -106,7 +107,17 @@ function Turn(props: TurnProps): ReactNode {
           <div className="lab">turn {tindex + 1}</div>
         </div>
       ) : null}
-      {msgs.map((m: Message, i: number) => {
+      {groupToolMessages(msgs).map((m, i: number) => {
+        if (Array.isArray(m))
+          return (
+            <ToolActivityGroup
+              key={m[0].evt}
+              calls={m}
+              renderChanges={(call) => <ToolChanges {...call} />}
+              selectedEvt={selectedEvt}
+              onSelect={onSelect}
+            />
+          );
         if (m.type === "spawn") {
           return (
             <Thread

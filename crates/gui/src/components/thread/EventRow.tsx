@@ -1,3 +1,4 @@
+import { ToolActivityGroup } from "./toolActivity/ToolActivityGroup";
 /**
  * EventRow — the atom family of the unified event log.
  *
@@ -186,6 +187,22 @@ type ToolRowProps = Omit<ToolMessage, "type" | "evt" | "at" | "rel" | "id">;
  * A finished chat tool call with a recorded worktree delta renders as that
  * diff instead of the call; everything else renders as the tool call row.
  */
+export function ToolChanges(props: ToolRowProps): ReactNode {
+  const change = useWorktreeDelta(props.toolId);
+  const settled = props.status !== "pending" || !!props.error;
+  if (settled && !props.payloadDiffs && change.status === "ready") {
+    return (
+      <ToolChangeBlock
+        delta={change.delta}
+        toolName={props.name ?? props.cmd}
+        toolId={props.toolId}
+      />
+    );
+  }
+  if (props.payloadDiffs) return <PayloadDiffs diffs={props.payloadDiffs} />;
+  return settled && change.status === "invalid" ? <ChangeUnavailable /> : null;
+}
+
 export function ToolRow(props: ToolRowProps): ReactNode {
   const change = useWorktreeDelta(props.toolId);
   const settled = props.status !== "pending" || !!props.error;
@@ -455,9 +472,10 @@ function AgentBody({
       </div>
       {tools.length ? (
         <div className="ev-tools">
-          {tools.map((t, i) => (
-            <ToolRow key={t.evt || i} {...t} />
-          ))}
+          <ToolActivityGroup
+            calls={tools}
+            renderChanges={(t) => <ToolChanges {...t} />}
+          />
         </div>
       ) : null}
       <LogProse
