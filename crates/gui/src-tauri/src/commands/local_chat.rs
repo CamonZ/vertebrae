@@ -1331,3 +1331,80 @@ pub async fn load_worktree_changes(
         message: error.to_string(),
     })
 }
+
+async fn worktree_files_task<T: Send + 'static>(
+    task: impl FnOnce() -> Result<T, crate::local_chat::worktree_files::FilesError> + Send + 'static,
+) -> Result<T, CommandError> {
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| CommandError {
+            message: error.to_string(),
+        })?
+        .map_err(|error| CommandError {
+            message: error.to_string(),
+        })
+}
+
+/// List one worktree directory for the Files sidebar; `""` is the root.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_worktree_directory(
+    worktree_path: String,
+    path: String,
+) -> Result<crate::local_chat::worktree_files::DirectoryListing, CommandError> {
+    worktree_files_task(move || {
+        crate::local_chat::worktree_files::list_directory(Path::new(&worktree_path), &path)
+    })
+    .await
+}
+
+/// Read the working copy of a worktree file for editing.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_worktree_file(
+    worktree_path: String,
+    path: String,
+) -> Result<crate::local_chat::worktree_files::FileBody, CommandError> {
+    worktree_files_task(move || {
+        crate::local_chat::worktree_files::read_file(Path::new(&worktree_path), &path)
+    })
+    .await
+}
+
+/// Read a worktree file at the selected changes baseline.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_worktree_baseline_file(
+    worktree_path: String,
+    path: String,
+    whole_branch: bool,
+) -> Result<crate::local_chat::worktree_files::FileBody, CommandError> {
+    worktree_files_task(move || {
+        crate::local_chat::worktree_files::read_baseline(
+            Path::new(&worktree_path),
+            &path,
+            whole_branch,
+        )
+    })
+    .await
+}
+
+/// Save a worktree file only if it still holds the revision that was read.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_worktree_file(
+    worktree_path: String,
+    path: String,
+    contents: String,
+    expected_revision: String,
+) -> Result<crate::local_chat::worktree_files::SaveOutcome, CommandError> {
+    worktree_files_task(move || {
+        crate::local_chat::worktree_files::save_file(
+            Path::new(&worktree_path),
+            &path,
+            &contents,
+            &expected_revision,
+        )
+    })
+    .await
+}

@@ -13,6 +13,7 @@ import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
 import { commands } from "../../bindings";
+import { useDocumentStore } from "./workspace/documentStore";
 import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
 import {
   routeLocalChatSessionEndEvent,
@@ -34,6 +35,7 @@ vi.mock("../../bindings", async () => {
   return {
   commands: {
     loadWorktreeChanges: vi.fn().mockResolvedValue({ status: "ok", data: { base_branch: null, base_unavailable: "No base", files: [] } }),
+    listWorktreeDirectory: vi.fn().mockResolvedValue({ status: "ok", data: { path: "", entries: [], truncated: false } }),
     getCurrentProjectPath: vi.fn().mockResolvedValue({
       status: "ok",
       data: "/test/project",
@@ -226,6 +228,71 @@ describe("ChatWindow", () => {
         false
       )
     );
+  });
+
+  it("asks before leaving Changes with unsaved documents", async () => {
+    const association = {
+      ticketId: null,
+      ticketTitle: null,
+      worktreePath: "/dirty-worktree",
+      branch: "feature",
+      lastProcessedAt: null,
+      processedAtCount: 0,
+      awaitingWorktree: null,
+      recentWorktrees: [],
+    };
+    useChatStore.setState({
+      sessions: { "test-session": createSession({ association }) },
+    });
+    render(<ChatWindow sessionId="test-session" />);
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    await screen.findByText("No changes against this baseline.");
+    act(() =>
+      useDocumentStore.setState({
+        workspaces: {
+          "/dirty-worktree": {
+            order: ["a.txt"],
+            active: "a.txt",
+            documents: {
+              "a.txt": {
+                path: "a.txt",
+                disk: { kind: "text", contents: "disk", revision: "r1" },
+                draft: "draft",
+                seed: 0,
+                view: "file",
+                baseline: null,
+                conflict: null,
+                saving: false,
+                saveError: null,
+                loadToken: 1,
+              },
+            },
+          },
+        },
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Unsaved changes",
+    });
+    expect(dialog).toHaveTextContent("a.txt has unsaved changes.");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Changes" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    expect(screen.getByRole("button", { name: "Conversation" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(
+      useDocumentStore.getState().workspaces["/dirty-worktree"]?.documents[
+        "a.txt"
+      ]
+    ).toBeUndefined();
   });
 
   it("hides the changes toggle without an associated worktree", () => {
