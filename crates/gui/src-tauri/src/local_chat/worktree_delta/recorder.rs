@@ -49,8 +49,6 @@ pub(crate) struct RecorderConfig {
     pub(crate) settle_delay: Duration,
     pub(crate) settle_interval: Duration,
     pub(crate) settle_timeout: Duration,
-    /// How often the idle checkpoint is refreshed during a turn.
-    pub(crate) idle_interval: Duration,
     pub(crate) channel_capacity: usize,
     pub(crate) limits: Limits,
 }
@@ -61,7 +59,6 @@ impl Default for RecorderConfig {
             settle_delay: Duration::from_millis(300),
             settle_interval: Duration::from_millis(100),
             settle_timeout: Duration::from_secs(3),
-            idle_interval: Duration::from_millis(200),
             channel_capacity: 512,
             limits: Limits::default(),
         }
@@ -77,6 +74,10 @@ pub(crate) struct RecorderGate {
     /// Root tool starts queued but not yet processed; one ends a settle early.
     pending_starts: AtomicUsize,
     start_signal: Notify,
+    #[cfg(test)]
+    pub(crate) checkpoints: AtomicUsize,
+    #[cfg(test)]
+    pub(crate) idle_snapshot: Mutex<Option<Arc<Snapshot>>>,
 }
 
 impl RecorderGate {
@@ -86,6 +87,10 @@ impl RecorderGate {
             overflowed: AtomicBool::new(false),
             pending_starts: AtomicUsize::new(0),
             start_signal: Notify::new(),
+            #[cfg(test)]
+            checkpoints: AtomicUsize::new(0),
+            #[cfg(test)]
+            idle_snapshot: Mutex::new(None),
         }
     }
 
@@ -102,7 +107,7 @@ impl RecorderGate {
             });
     }
 
-    fn start_pending(&self) -> bool {
+    pub(super) fn start_pending(&self) -> bool {
         self.pending_starts.load(Ordering::Acquire) > 0
     }
 
@@ -243,33 +248,54 @@ pub(crate) struct Recorder {
 
 impl Recorder {
     pub(crate) async fn run(self, mut events: mpsc::Receiver<RecorderEvent>) {
+        // Capture the pre-tool baseline before potentially slow native watch
+        // registration. Tool boundaries can already be queued during startup.
+        let mut idle = self.snapshot().await.map(Arc::new).ok();
+        let changed = Arc::new(Notify::new());
+        let signal = changed.clone();
+        // Poll registration alongside tool events: installing a recursive
+        // watch must never hold up the recorder's boundary queue.
+        let registration = crate::worktree_watch::subscribe(
+            &self.worktree,
+            Duration::from_millis(25),
+            move || signal.notify_one(),
+        );
+        tokio::pin!(registration);
+        let mut subscription = None;
         let mut windows = Windows::default();
         let mut checkpoint: Option<Arc<Snapshot>> = None;
         // Last observed state while no window is open. A provider can run a
         // tool within milliseconds of announcing it, before a snapshot taken
         // at the announcement completes, so the next window starts from this
-        // one. It is refreshed every `idle_interval` during a turn, so edits
+        // one. Filesystem notifications refresh it during a turn, so edits
         // made between tools are absorbed rather than attributed, and it
         // carries a cut-short settle's end state, so nothing between two
         // tools is lost or doubled.
-        let mut idle: Option<Arc<Snapshot>> = self.snapshot().await.map(Arc::new).ok();
         let mut in_turn = true;
         loop {
-            let event = if in_turn && windows.is_empty() {
-                tokio::select! {
-                    event = events.recv() => event,
-                    () = tokio::time::sleep(self.config.idle_interval) => {
-                        let fresh = self.snapshot().await.map(Arc::new).ok();
-                        // A start queued meanwhile may already have changed
-                        // the worktree: keep the earlier checkpoint.
-                        if fresh.is_some() && !self.gate.start_pending() {
-                            idle = fresh;
+            let event = tokio::select! {
+                biased;
+                event = events.recv() => event,
+                registered = &mut registration, if subscription.is_none() => {
+                    match registered {
+                        Ok(watch) => subscription = Some(watch),
+                        Err(error) => {
+                            self.gate.deactivate();
+                            log::warn!("[WORKTREE_DELTA] cannot watch {}; recording disabled: {}", self.worktree.display(), error.message);
+                            break;
                         }
-                        continue;
                     }
+                    // Close the registration gap without replacing a tool's
+                    // baseline with edits it may already have made.
+                    if windows.is_empty() {
+                        self.refresh_idle(&mut idle).await;
+                    }
+                    continue;
                 }
-            } else {
-                events.recv().await
+                () = changed.notified(), if in_turn && windows.is_empty() => {
+                    self.refresh_idle(&mut idle).await;
+                    continue;
+                }
             };
             let Some(event) = event else {
                 break;
@@ -383,9 +409,28 @@ impl Recorder {
                 }
             }
         }
+        if let Some(subscription) = subscription {
+            subscription.stop().await;
+        }
         let dropped = windows.drop_all();
         if !dropped.is_empty() {
             log::debug!("[WORKTREE_DELTA] recorder stopped with open windows {dropped:?}");
+        }
+    }
+
+    async fn refresh_idle(&self, idle: &mut Option<Arc<Snapshot>>) {
+        if self.gate.start_pending() || !self.gate.is_active() {
+            return;
+        }
+        let fresh = self.snapshot().await.map(Arc::new).ok();
+        // A start queued meanwhile may already have changed the worktree:
+        // preserve the earlier baseline rather than absorb that tool's edits.
+        if fresh.is_some() && !self.gate.start_pending() && self.gate.is_active() {
+            *idle = fresh;
+            #[cfg(test)]
+            {
+                *self.gate.idle_snapshot.lock().unwrap() = idle.clone();
+            }
         }
     }
 
@@ -395,6 +440,10 @@ impl Recorder {
         let result = tokio::task::spawn_blocking(move || git::snapshot(&worktree, &limits))
             .await
             .unwrap_or_else(|error| Err(GitError::Task(error.to_string())));
+        #[cfg(test)]
+        {
+            self.gate.checkpoints.fetch_add(1, Ordering::AcqRel);
+        }
         if let Err(error) = &result {
             log::warn!(
                 "[WORKTREE_DELTA] could not checkpoint {}: {error}",

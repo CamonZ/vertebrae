@@ -35,6 +35,7 @@ import {
   useDocumentStore,
 } from "./workspace/documentStore";
 import { DocumentPane } from "./workspace/DocumentPane";
+import { useWorktreeWatch } from "./workspace/useWorktreeWatch";
 import { FilesTree } from "./workspace/FilesTree";
 import { STATUS_LETTER } from "./workspace/status";
 import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
@@ -56,7 +57,8 @@ type SidebarMode = "changes" | "files";
  * The worktree workspace: Git changes and a file browser in the sidebar,
  * every change in one virtualized viewport, and open documents edited as
  * files or diffs. Documents hold the file as read; the lists refresh after a
- * save or on request. Drafts survive unmounting in the per-worktree store.
+ * save, on request, or after filesystem notifications. Drafts survive
+ * unmounting in the per-worktree store.
  */
 export function WorktreeChanges({
   worktreePath,
@@ -97,27 +99,49 @@ export function WorktreeChanges({
 
   // Warm Pierre and its highlight workers while Git computes the changes.
   useEffect(preloadDiffRenderer, []);
+  const requestLoad = useRef<(() => void) | null>(null);
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
   useEffect(() => {
     let current = true;
-    if (!refresh.background) setState({ status: "loading" });
-    void commands.loadWorktreeChanges(worktreePath, wholeBranch).then(
-      (result) => {
-        if (!current) return;
-        if (result.status === "error") {
-          setState({ status: "error", message: result.error.message });
-        } else {
-          setBaseBranch(result.data.base_branch);
-          setState({ status: "ready", data: result.data, wholeBranch });
-          setGeneration((value) => value + 1);
+    let running = false;
+    let pending = false;
+    const load = async () => {
+      pending = true;
+      if (running) return;
+      running = true;
+      while (current && pending) {
+        pending = false;
+        if (!refreshRef.current.background) setState({ status: "loading" });
+        try {
+          const result = await commands.loadWorktreeChanges(
+            worktreePath,
+            wholeBranch
+          );
+          if (!current) break;
+          if (result.status === "error") {
+            setState({ status: "error", message: result.error.message });
+          } else {
+            setBaseBranch(result.data.base_branch);
+            setState({ status: "ready", data: result.data, wholeBranch });
+            setGeneration((value) => value + 1);
+          }
+        } catch (error) {
+          if (current) setState({ status: "error", message: String(error) });
         }
-      },
-      (error: unknown) => {
-        if (current) setState({ status: "error", message: String(error) });
       }
-    );
+      running = false;
+    };
+    requestLoad.current = () => {
+      void load();
+    };
     return () => {
       current = false;
+      requestLoad.current = null;
     };
+  }, [worktreePath, wholeBranch]);
+  useEffect(() => {
+    requestLoad.current?.();
   }, [worktreePath, wholeBranch, refresh]);
 
   const onChangesLoadedRef = useRef(onChangesLoaded);
@@ -138,6 +162,8 @@ export function WorktreeChanges({
     setRefresh((value) => ({ count: value.count + 1, background: true }));
     setTreeToken((value) => value + 1);
   }, []);
+
+  const watchError = useWorktreeWatch(worktreePath, refreshAll);
 
   useEffect(() => () => releaseCleanDocuments(worktreePath), [worktreePath]);
 
@@ -275,6 +301,11 @@ export function WorktreeChanges({
           </svg>
         </button>
       </div>
+      {watchError && (
+        <p role="status">
+          Automatic refresh unavailable: {watchError}. Use Refresh to update.
+        </p>
+      )}
       {state.status === "ready" && state.data.base_unavailable && (
         <p role="status">{state.data.base_unavailable}</p>
       )}
