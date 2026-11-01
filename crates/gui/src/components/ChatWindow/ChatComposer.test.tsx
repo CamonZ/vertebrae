@@ -7,7 +7,10 @@ import type {
   LocalChatHarnessCatalog,
   LocalChatHarnessInfo,
 } from "../../bindings";
-import type { PendingTextComment } from "./assistantTextComments";
+import type {
+  PendingDiffComment,
+  PendingTextComment,
+} from "./assistantTextComments";
 
 function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
@@ -97,6 +100,7 @@ function defaultProps(overrides: Record<string, unknown> = {}) {
 
 describe("ChatComposer", () => {
   const pendingComment: PendingTextComment = {
+    kind: "text",
     id: "comment-1",
     responseId: "response-1",
     itemId: "item-1",
@@ -659,7 +663,9 @@ describe("ChatComposer", () => {
       <ChatComposer
         {...defaultProps({
           visibleHarness: CODEX_INFO,
-          providerOptions: [{ provider: CATALOG.providers[1], info: CODEX_INFO }],
+          providerOptions: [
+            { provider: CATALOG.providers[1], info: CODEX_INFO },
+          ],
         })}
       />
     );
@@ -696,7 +702,9 @@ describe("ChatComposer", () => {
             providerResumeId: "codex-resume-1",
           }),
           visibleHarness: CODEX_INFO,
-          providerOptions: [{ provider: CATALOG.providers[0], info: CLAUDE_INFO }],
+          providerOptions: [
+            { provider: CATALOG.providers[0], info: CLAUDE_INFO },
+          ],
           lockedHarness: true,
           hasResume: true,
           canUseComposer: false,
@@ -861,9 +869,7 @@ describe("ChatComposer", () => {
 
   it("keeps a clicked comment open after the pointer leaves and closes it outside", () => {
     render(
-      <ChatComposer
-        {...defaultProps({ pendingComments: [pendingComment] })}
-      />
+      <ChatComposer {...defaultProps({ pendingComments: [pendingComment] })} />
     );
 
     const commentIcon = screen.getByTestId("local-chat-comment-icon-1");
@@ -929,5 +935,114 @@ describe("ChatComposer", () => {
     expect(onSend).toHaveBeenCalledWith(
       expect.stringContaining("Follow-up:\nAlso check the new tests.")
     );
+  });
+
+  describe("diff comments", () => {
+    const diffComment: PendingDiffComment = {
+      kind: "diff",
+      id: "diff-1",
+      body: "Why was this removed?",
+      home: { kind: "tool_call", toolUseId: "tool-1", toolName: "Edit" },
+      path: "src/a.ts",
+      side: "old",
+      startLine: 4,
+      endLine: 5,
+      hunk: "@@ -3,3 +3,1 @@\n ctx\n-a\n-b",
+      outdated: true,
+    };
+
+    it("lists a diff comment chip with its location, hunk and outdated marker", () => {
+      render(
+        <ChatComposer
+          {...defaultProps({ pendingComments: [pendingComment, diffComment] })}
+        />
+      );
+      expect(screen.getAllByTestId("local-chat-pending-comment")).toHaveLength(
+        2
+      );
+      fireEvent.mouseEnter(
+        screen.getAllByTestId("local-chat-pending-comment")[1]
+      );
+      const popover = screen.getByTestId("local-chat-comment-popover");
+      expect(popover).toHaveTextContent(
+        "Tool call Edit src/a.ts · src/a.ts:4-5 (old) · outdated"
+      );
+      expect(screen.getByTestId("local-chat-comment-hunk")).toHaveTextContent(
+        "@@ -3,3 +3,1 @@ ctx -a -b"
+      );
+      expect(popover).toHaveTextContent("Why was this removed?");
+    });
+
+    it("edits and removes a diff comment from its chip", () => {
+      const onUpdateComment = vi.fn();
+      const onRemoveComment = vi.fn();
+      render(
+        <ChatComposer
+          {...defaultProps({
+            pendingComments: [diffComment],
+            onUpdateComment,
+            onRemoveComment,
+          })}
+        />
+      );
+      fireEvent.mouseEnter(screen.getByTestId("local-chat-pending-comment"));
+      fireEvent.click(screen.getByRole("button", { name: "Edit comment 1" }));
+      fireEvent.change(screen.getByTestId("local-chat-comment-editor"), {
+        target: { value: "Explain the removal." },
+      });
+      fireEvent.click(screen.getByTestId("local-chat-save-edited-comment"));
+      expect(onUpdateComment).toHaveBeenCalledWith(
+        "diff-1",
+        "Explain the removal."
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Remove comment 1" }));
+      expect(onRemoveComment).toHaveBeenCalledWith("diff-1");
+    });
+
+    it("navigates to a diff comment when its chip is clicked, but not a text comment", () => {
+      const onNavigateComment = vi.fn();
+      render(
+        <ChatComposer
+          {...defaultProps({
+            pendingComments: [pendingComment, diffComment],
+            onNavigateComment,
+          })}
+        />
+      );
+      fireEvent.click(screen.getByTestId("local-chat-comment-icon-1"));
+      expect(onNavigateComment).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByTestId("local-chat-comment-icon-2"));
+      expect(onNavigateComment).toHaveBeenCalledExactlyOnceWith("diff-1");
+    });
+
+    it("sends diff comments in the review message format", () => {
+      const onSend = vi.fn(() => true);
+      render(
+        <ChatComposer
+          {...defaultProps({
+            pendingComments: [diffComment],
+            canSendMessage: true,
+            isActive: true,
+            submitLabel: "Send message",
+            onSend,
+          })}
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+      expect(onSend).toHaveBeenCalledWith(
+        [
+          "Review comments on the worktree changes:",
+          "",
+          "1. Tool call Edit src/a.ts · src/a.ts:4-5 (old) [outdated]",
+          "   ```diff",
+          "   @@ -3,3 +3,1 @@",
+          "    ctx",
+          "   -a",
+          "   -b",
+          "   ```",
+          "   Comment: Why was this removed?",
+        ].join("\n")
+      );
+    });
   });
 });

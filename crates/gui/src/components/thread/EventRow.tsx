@@ -194,6 +194,7 @@ export function ToolRow(props: ToolRowProps): ReactNode {
       <ToolChangeBlock
         delta={change.delta}
         toolName={props.name ?? props.cmd}
+        toolId={props.toolId}
       />
     );
   }

@@ -699,3 +699,28 @@ without preventing settings from loading; disabling retains the selection. See
 
 See [Local chat associations](chat-associations.md) for the inference flow,
 header disclosure, persistence and prototype limits.
+
+## Diff review comments
+
+Users comment on lines of a worktree diff (the Pierre gutter "+", click or
+drag) in the inline tool-call diffs and in the Changes tab's All Changes view.
+Comments are pending comments in `ChatWindow` (the `kind: "diff"` variant of
+`PendingComment`), sent with the next message by `formatTextCommentsForReply`
+and cleared on send. They are in-memory only; the DocumentEditor diff has none.
+
+- `thread/toolChange/diffLineMapper.ts` is the pure line arithmetic: it parses
+  patches into hunks and carries a line forward/backward through the ordered
+  chain of recorded tool-call patches (renames included) and onto the All
+  Changes patch. `diffComments.ts` turns that into per-surface placements and
+  marks All Changes comments outdated when a reload changes their hunk.
+- `DiffReviewContext` carries comments and placements from `ChatWindow` to the
+  surfaces; `hooks/useDiffComments.tsx` builds each surface's Pierre
+  annotations and gutter handler (separate from `usePierreDiffOptions`, which
+  is appearance only). Annotations share one slot per side and line.
+- All Changes is the canonical numbering. A comment is drawn on its home patch
+  and on the other patch where the same line exists: a tool-call line maps to
+  All Changes by shifting through later calls; an All Changes line maps to the
+  single call that added or removed it. Inline diffs stay gated by
+  `useNearViewport`, so their comments appear once the diff mounts.
+- CodeView only republishes an item when its `version` changes, so
+  `AllChangesView` bumps the version when annotations or the diff change.

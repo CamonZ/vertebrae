@@ -9,8 +9,10 @@ import type {
 } from "../../bindings";
 import type { ChatSession } from "../../stores/chatStore";
 import {
+  diffCommentHomeLabel,
+  diffCommentLocation,
   formatTextCommentsForReply,
-  type PendingTextComment,
+  type PendingComment,
 } from "./assistantTextComments";
 import {
   LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE,
@@ -175,9 +177,11 @@ interface ChatComposerProps {
   ctxColor: string;
   usage: { used: number; max: number } | null;
   threadTotalTokens?: number;
-  pendingComments?: readonly PendingTextComment[];
+  pendingComments?: readonly PendingComment[];
   onUpdateComment?: (id: string, body: string) => void;
   onRemoveComment?: (id: string) => void;
+  /** Bring a diff comment into view in the diff it was written on. */
+  onNavigateComment?: (id: string) => void;
   onSend: (message?: string) => boolean | void;
   onStartSession: (initialPrompt?: string) => boolean | void;
   onHarnessChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -220,6 +224,7 @@ export function ChatComposer({
   pendingComments = [],
   onUpdateComment,
   onRemoveComment,
+  onNavigateComment,
   onSend,
   onStartSession,
   onHarnessChange,
@@ -373,6 +378,7 @@ export function ChatComposer({
                 } else {
                   setPinnedCommentId(comment.id);
                   setActiveCommentId(comment.id);
+                  if (comment.kind === "diff") onNavigateComment?.(comment.id);
                 }
               }}
             >
@@ -412,7 +418,9 @@ export function ChatComposer({
               >
                 <div className="mb-1 flex min-w-0 items-center justify-between gap-3">
                   <p className="min-w-0 flex-1 text-[11px] font-medium text-[var(--color-fg-mute)]">
-                    Selected text and nearby context
+                    {comment.kind === "diff"
+                      ? `${diffCommentHomeLabel(comment)} · ${diffCommentLocation(comment)} (${comment.side})${comment.outdated ? " · outdated" : ""}`
+                      : "Selected text and nearby context"}
                   </p>
                   <div className="flex shrink-0 items-center gap-1">
                     {isEditing ? (
@@ -527,17 +535,26 @@ export function ChatComposer({
                   </div>
                 </div>
                 <div className="mb-2 w-full">
-                  <blockquote className="max-h-24 w-full overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-[var(--color-accent)] pl-2 text-xs leading-relaxed text-[var(--color-fg-soft)]">
-                    {comment.contextBefore ? (
-                      <span>{comment.contextBefore}</span>
-                    ) : null}
-                    <mark className="bg-[var(--color-accent)]/20 text-[var(--color-fg)]">
-                      {comment.quote}
-                    </mark>
-                    {comment.contextAfter ? (
-                      <span>{comment.contextAfter}</span>
-                    ) : null}
-                  </blockquote>
+                  {comment.kind === "diff" ? (
+                    <pre
+                      className="max-h-24 w-full overflow-auto whitespace-pre border-l-2 border-[var(--color-accent)] pl-2 font-mono text-xs leading-relaxed text-[var(--color-fg-soft)]"
+                      data-testid="local-chat-comment-hunk"
+                    >
+                      {comment.hunk}
+                    </pre>
+                  ) : (
+                    <blockquote className="max-h-24 w-full overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-[var(--color-accent)] pl-2 text-xs leading-relaxed text-[var(--color-fg-soft)]">
+                      {comment.contextBefore ? (
+                        <span>{comment.contextBefore}</span>
+                      ) : null}
+                      <mark className="bg-[var(--color-accent)]/20 text-[var(--color-fg)]">
+                        {comment.quote}
+                      </mark>
+                      {comment.contextAfter ? (
+                        <span>{comment.contextAfter}</span>
+                      ) : null}
+                    </blockquote>
+                  )}
                 </div>
                 {isEditing ? (
                   <textarea
