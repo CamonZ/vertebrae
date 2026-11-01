@@ -29,6 +29,13 @@ import {
 } from "./useLocalChatEventRouter";
 import { useLocalChat } from "./useLocalChat";
 
+const DEFAULT_TURN_SETTINGS = {
+  speed_tier: null,
+  model_id: null,
+  reasoning_effort: null,
+  permission_mode: "default",
+};
+
 const { listen, unlisteners } = vi.hoisted(() => {
   const unlisteners: Array<ReturnType<typeof vi.fn>> = [];
   const listen = vi.fn(() => {
@@ -548,7 +555,8 @@ describe("useLocalChatEventRouter route functions", () => {
     await waitFor(() => {
       expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledWith(
         "backend-hidden",
-        "queued follow-up"
+        "queued follow-up",
+        DEFAULT_TURN_SETTINGS
       );
     });
     const hidden = useChatStore.getState().sessions.hidden;
@@ -608,7 +616,8 @@ describe("useLocalChatEventRouter route functions", () => {
     });
     expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledWith(
       "backend-local",
-      "follow-up"
+      "follow-up",
+      DEFAULT_TURN_SETTINGS
     );
     expect(
       useChatStore.getState().sessions.local.queuedMessages
@@ -1367,7 +1376,8 @@ describe("useLocalChatEventRouter route functions", () => {
       expect(mockedCommands.sendLocalChatMessage).toHaveBeenNthCalledWith(
         1,
         "backend-local",
-        "second"
+        "second",
+        DEFAULT_TURN_SETTINGS
       );
       expect(useChatStore.getState().sessions.local.lifecycle).toBe(
         "streaming"
@@ -1401,7 +1411,8 @@ describe("useLocalChatEventRouter route functions", () => {
       expect(mockedCommands.sendLocalChatMessage).toHaveBeenNthCalledWith(
         2,
         "backend-local",
-        "third"
+        "third",
+        DEFAULT_TURN_SETTINGS
       );
     });
     startTurn("backend-local", "turn-3");

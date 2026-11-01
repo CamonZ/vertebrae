@@ -19,6 +19,7 @@ use crate::local_chat::{
     CreateLocalChatSessionInput, LocalChatAnnotationStore, LocalChatHarness,
     LocalChatHarnessCatalog, LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
     LocalChatProviderInfo, LocalChatProviderSelection, LocalChatRuntime, LocalChatSessionError,
+    LocalChatTurnSettings,
 };
 
 pub struct LocalChatSessionManager {
@@ -445,11 +446,14 @@ impl LocalChatSessionManager {
         &self,
         backend_session_id: &str,
         content: &str,
+        settings: LocalChatTurnSettings,
     ) -> Result<(), LocalChatSessionError> {
         let _lifecycle = self.lifecycle_gate.read().await;
         let harness_kind = self.registry_harness(backend_session_id).await?;
         let harness = self.harness(harness_kind)?;
-        let result = harness.send_message(backend_session_id, content).await;
+        let result = harness
+            .send_message(backend_session_id, content, settings)
+            .await;
         if matches!(result, Err(LocalChatSessionError::SessionNotFound(_))) {
             self.remove_registry_entry(backend_session_id, harness_kind)
                 .await;
@@ -478,6 +482,7 @@ impl LocalChatSessionManager {
         self.send_message(
             backend_session_id,
             &crate::local_chat::gate::gate_refresh_turn(&gate),
+            LocalChatTurnSettings::default(),
         )
         .await?;
         Ok(true)

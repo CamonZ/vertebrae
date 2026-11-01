@@ -114,6 +114,7 @@ impl LocalChatHarness for MockHarness {
         &self,
         backend_session_id: &str,
         content: &str,
+        _settings: LocalChatTurnSettings,
     ) -> Result<(), LocalChatSessionError> {
         self.calls
             .lock()
@@ -400,11 +401,19 @@ async fn manager_routes_create_send_and_close_through_registry() {
         .expect("Codex create should route");
 
     manager
-        .send_message("backend-claude", "message to claude")
+        .send_message(
+            "backend-claude",
+            "message to claude",
+            LocalChatTurnSettings::default(),
+        )
         .await
         .expect("Claude send should route by backend session id");
     manager
-        .send_message("backend-codex", "message to codex")
+        .send_message(
+            "backend-codex",
+            "message to codex",
+            LocalChatTurnSettings::default(),
+        )
         .await
         .expect("Codex send should route by backend session id");
     manager
@@ -520,7 +529,13 @@ async fn close_all_sessions_closes_transient_ownership_and_can_be_reused() {
     manager.close_all_sessions().await;
 
     assert_eq!(
-        manager.send_message("project-a-session", "stale").await,
+        manager
+            .send_message(
+                "project-a-session",
+                "stale",
+                LocalChatTurnSettings::default()
+            )
+            .await,
         Err(LocalChatSessionError::SessionNotFound(
             "project-a-session".to_string()
         ))
@@ -688,7 +703,9 @@ async fn failed_create_does_not_leave_stale_registry_entry() {
         ))
     );
     assert_eq!(
-        manager.send_message("backend-failed", "hello").await,
+        manager
+            .send_message("backend-failed", "hello", LocalChatTurnSettings::default())
+            .await,
         Err(LocalChatSessionError::SessionNotFound(
             "backend-failed".to_string()
         ))
@@ -966,7 +983,10 @@ async fn new_sessions_and_catalogs_reload_without_mutating_existing_sessions() {
         .await
         .unwrap_err();
     assert!(!error.to_string().contains("secret-that-must-not-leak"));
-    manager.send_message("first", "still active").await.unwrap();
+    manager
+        .send_message("first", "still active", LocalChatTurnSettings::default())
+        .await
+        .unwrap();
     assert!(
         matches!(harness.calls().last(), Some(MockCall::Send { backend_session_id, .. }) if backend_session_id == "first")
     );

@@ -134,6 +134,35 @@ fn file_tools_emit_a_terminal_structured_file_change() {
 }
 
 #[test]
+fn settings_control_responses_are_silent_unless_claude_rejects_the_change() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("settings-run"),
+        StreamId::from("settings-stream"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"settings-session"}"#)
+        .unwrap();
+
+    assert!(decoder
+        .decode_line(
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"vertebrae-settings:turn:flags"}}"#,
+        )
+        .unwrap()
+        .is_empty());
+    let rejected = decoder
+        .decode_line(
+            r#"{"type":"control_response","response":{"subtype":"error","request_id":"vertebrae-settings:turn:permission_mode","error":"invalid_mode"}}"#,
+        )
+        .unwrap();
+    assert!(rejected.iter().any(|draft| matches!(
+        &draft.payload,
+        HarnessEventPayloadV1::Warning(warning)
+            if warning.code.as_deref() == Some("claude_settings_rejected")
+                && warning.message.contains("invalid_mode")
+    )));
+}
+
+#[test]
 fn benign_protocol_records_are_silent_but_rate_limit_failures_are_errors() {
     let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
         RunId::from("protocol-run"),

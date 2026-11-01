@@ -10,7 +10,7 @@ use vertebrae_harness_core::{
     AgentMetadata, ControlSink, EventCorrelation, HarnessError, HarnessEventDraftV1,
     HarnessEventPayloadV1, ProviderThreadRef, RunId, SequencedEventSink, SessionCloseOutcome,
     SessionCloseStatus, SessionId, StreamId, TextEvent, ThreadDeclared, ThreadId, ThreadKind,
-    ToolCallId, TurnId, TurnInput, TurnInputProvenance, TurnOutcome, UpdateSemantics,
+    ToolCallId, TurnId, TurnInput, TurnInputProvenance, TurnOutcome, TurnSettings, UpdateSemantics,
 };
 
 use super::connection::CodexConnection;
@@ -18,7 +18,7 @@ use super::outcome::{TurnAccumulator, completion_status, outcome_from_completion
 use super::setup::attach;
 use super::subscription::OwnedThreads;
 use super::trace::trace;
-use crate::{CodexProviderConfig, optional_string};
+use crate::{CodexPermissionConfig, CodexProviderConfig, optional_string};
 
 #[derive(Clone)]
 pub(crate) struct ChildInfo {
@@ -42,16 +42,62 @@ pub(crate) struct SessionState {
     pub(super) root_session_id: SessionId,
     pub(super) root_thread_id: ThreadId,
     pub(super) default_output_schema: Option<Value>,
-    /// Reasoning effort sent with every `turn/start` of a resumed thread;
-    /// `thread/resume` has no effort field. `None` for new threads, whose
-    /// `thread/start` already carried it.
-    pub(super) reasoning_effort: Option<String>,
+    /// Settings sent with every `turn/start`. A turn's settings change them
+    /// for later turns too, and re-sending them keeps them after the session
+    /// reattaches with the original `thread/resume` params.
+    pub(super) turn_overrides: Mutex<TurnOverrides>,
     pub(super) root_turn_gate: AsyncMutex<()>,
     pub(super) cleanup: AsyncMutex<Option<watch::Receiver<Option<SessionCloseOutcome>>>>,
     pub(super) children: Mutex<HashMap<String, ChildInfo>>,
     pub(super) declared_threads: Mutex<HashSet<String>>,
     pub(super) closed: watch::Sender<bool>,
     pub(super) closed_rx: watch::Receiver<bool>,
+}
+
+#[derive(Clone)]
+pub(crate) struct TurnOverrides {
+    pub(super) speed_tier: Option<vertebrae_harness_core::SpeedTier>,
+    pub(super) model: Option<String>,
+    /// `thread/resume` has no effort field, so a resumed thread starts with
+    /// the requested effort here. `None` for new threads, whose
+    /// `thread/start` already carried it.
+    pub(super) reasoning_effort: Option<String>,
+    pub(super) permission: CodexPermissionConfig,
+}
+
+impl TurnOverrides {
+    /// Records a turn's settings for it and every later turn.
+    pub(super) fn record(&mut self, settings: TurnSettings) {
+        if settings.speed_tier.is_some() {
+            self.speed_tier = settings.speed_tier;
+        }
+        if let Some(model) = settings.model {
+            self.model = Some(model);
+        }
+        if let Some(effort) = settings.reasoning_effort {
+            self.reasoning_effort = Some(effort);
+        }
+        if let Some(mode) = &settings.permission_mode {
+            self.permission = self.permission.turn_override(mode);
+        }
+    }
+
+    /// Writes the overrides into `turn/start` params.
+    pub(super) fn write_params(&self, params: &mut Value) {
+        if let Some(tier) = self.speed_tier {
+            params["serviceTier"] = json!(match tier {
+                vertebrae_harness_core::SpeedTier::Default => "default",
+                vertebrae_harness_core::SpeedTier::Fast => "priority",
+            });
+        }
+        if let Some(model) = &self.model {
+            params["model"] = json!(model);
+        }
+        if let Some(effort) = &self.reasoning_effort {
+            params["effort"] = json!(effort);
+        }
+        self.permission.apply_to_params(params);
+    }
 }
 
 pub(crate) enum RecoveredTurn {
@@ -468,6 +514,69 @@ async fn wait_cleanup(
         rx.changed().await.map_err(|_| {
             HarnessError::Operation("Codex App Server cleanup ended without an outcome".into())
         })?;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vertebrae_harness_core::PermissionMode;
+
+    use super::*;
+
+    #[test]
+    fn turn_overrides_persist_for_later_turns_until_changed() {
+        let mut overrides = TurnOverrides {
+            speed_tier: None,
+            model: None,
+            reasoning_effort: None,
+            permission: CodexPermissionConfig::default(),
+        };
+        overrides.record(TurnSettings {
+            speed_tier: None,
+            model: Some("gpt-other".into()),
+            reasoning_effort: Some("low".into()),
+            permission_mode: Some(PermissionMode::Auto),
+        });
+        let mut first = json!({});
+        overrides.write_params(&mut first);
+        overrides.record(TurnSettings::default());
+        let mut later = json!({});
+        overrides.write_params(&mut later);
+
+        assert_eq!(first, later);
+        assert_eq!(later["model"], "gpt-other");
+        assert_eq!(later["effort"], "low");
+        assert_eq!(later["approvalPolicy"], "on-request");
+        assert_eq!(later["approvalsReviewer"], "auto_review");
+        assert_eq!(later["sandboxPolicy"], json!({"type": "workspaceWrite"}));
+
+        overrides.record(TurnSettings {
+            permission_mode: Some(PermissionMode::Default),
+            ..TurnSettings::default()
+        });
+        let mut restored = json!({});
+        overrides.write_params(&mut restored);
+        assert_eq!(restored["approvalsReviewer"], "user");
+        assert_eq!(restored["model"], "gpt-other");
+    }
+
+    #[test]
+    fn turn_permission_override_keeps_prefix_rules() {
+        let base = CodexPermissionConfig {
+            permissions: Some(":workspace".into()),
+            prefix_rules: Some(json!([{"pattern": ["rm"]}])),
+            ..CodexPermissionConfig::default()
+        };
+
+        let bypass = base.turn_override(&PermissionMode::BypassPermissions);
+
+        assert_eq!(bypass.permissions, None);
+        assert_eq!(bypass.prefix_rules, base.prefix_rules);
+        assert_eq!(bypass.approval_policy.as_deref(), Some("never"));
+        assert_eq!(
+            bypass.sandbox_policy,
+            Some(json!({"type": "dangerFullAccess"}))
+        );
     }
 }
 

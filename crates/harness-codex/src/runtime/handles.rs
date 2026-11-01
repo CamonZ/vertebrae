@@ -76,7 +76,6 @@ impl SessionHandle for CodexSessionHandle {
         let (cancel, cancel_rx) = watch::channel(false);
         let state = Arc::clone(&self.state);
         let turn_id = request.turn_id.clone();
-        let turn_id_for_task = turn_id.clone();
         let task_state = Arc::clone(&state);
         tokio::spawn(async move {
             let _gate = task_state.root_turn_gate.lock().await;
@@ -84,14 +83,7 @@ impl SessionHandle for CodexSessionHandle {
                 Ok(cancelled_outcome(CompletionStatus::Interrupted, None))
             } else {
                 task_state
-                    .execute_turn(
-                        turn_id_for_task,
-                        request.content,
-                        request.output_schema,
-                        None,
-                        TurnInputProvenance::Human,
-                        cancel_rx,
-                    )
+                    .execute_turn(request, None, TurnInputProvenance::Human, cancel_rx)
                     .await
             };
             let _ = tx.send(match result {

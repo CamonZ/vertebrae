@@ -17,8 +17,8 @@ use vertebrae_harness_codex::{
 };
 use vertebrae_harness_core::{
     CompletionStatus, ControlResolution, ControlSink, EventSink, HarnessError,
-    HarnessEventPayloadV1, HarnessRuntime, RunRequest, SendTurnRequest, SessionId, SessionMode,
-    StartSessionRequest, StreamId, TurnId, TurnInputProvenance,
+    HarnessEventPayloadV1, HarnessRuntime, PermissionMode, RunRequest, SendTurnRequest, SessionId,
+    SessionMode, StartSessionRequest, StreamId, TurnId, TurnInputProvenance, TurnSettings,
 };
 
 use lifecycle::{LifecycleProbeSink, assert_balanced_turn};
@@ -448,6 +448,7 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
             turn_id: "turn".into(),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -577,6 +578,7 @@ async fn persistent_session_satisfies_shared_lifecycle_ordering() {
             turn_id: TurnId::from("shared-ordering"),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -661,12 +663,24 @@ async fn resume_server(
     tokio::task::JoinHandle<()>,
     tokio::sync::mpsc::UnboundedReceiver<(String, Value)>,
 ) {
+    settings_server(missing_thread, false).await
+}
+
+async fn settings_server(
+    missing_thread: bool,
+    reject_first: bool,
+) -> (
+    String,
+    tokio::task::JoinHandle<()>,
+    tokio::sync::mpsc::UnboundedReceiver<(String, Value)>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (params_tx, params_rx) = tokio::sync::mpsc::unbounded_channel();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut socket = accept_async(stream).await.unwrap();
+        let mut turn_number = 0;
         while let Some(frame) = socket.next().await {
             let Ok(Message::Text(text)) = frame else {
                 break;
@@ -679,7 +693,13 @@ async fn resume_server(
                 continue;
             };
             let _ = params_tx.send((method.to_string(), request["params"].clone()));
+            if method == "turn/start" {
+                turn_number += 1;
+            }
             let response = match method {
+                "turn/start" if reject_first && turn_number == 1 => {
+                    json!({"id": id, "error": {"code": -32602, "message": "settings rejected"}})
+                }
                 "initialize" => json!({"id": id, "result": {"capabilities": {}}}),
                 "thread/resume" | "thread/fork" if missing_thread => json!({"id": id, "error": {
                     "code": -32600,
@@ -696,6 +716,9 @@ async fn resume_server(
                 .send(Message::Text(response.to_string()))
                 .await
                 .unwrap();
+            if reject_first && method == "turn/start" && turn_number > 1 {
+                socket.send(Message::Text(json!({"method":"turn/completed", "params":{"threadId":"root-thread", "turn":{"id":"provider-turn", "status":"completed"}}}).to_string())).await.unwrap();
+            }
         }
     });
     (format!("ws://{address}"), server, params_rx)
@@ -754,12 +777,64 @@ async fn resume_keeps_the_thread_and_sends_effort_per_turn() {
             turn_id: TurnId::new("turn"),
             content: "continue".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
     let turn = captured_params(&mut params, "turn/start").await;
     assert_eq!(turn["threadId"], "root-thread");
     assert_eq!(turn["effort"], "high");
+    let _ = session.close().await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn turn_settings_switch_model_effort_and_permissions_in_the_same_thread() {
+    let (url, server, mut params) = resume_server(false).await;
+    let session = runtime(url)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::new("execution-1"),
+                stream_id: StreamId::new("stream"),
+                mode: SessionMode::Resume("root-thread".into()),
+                config: vertebrae_harness_core::RequestConfig {
+                    model: Some("gpt-test".into()),
+                    reasoning_effort: Some("high".into()),
+                    ..Default::default()
+                },
+            },
+            Arc::new(CapturingSink::default()),
+            Arc::new(AutomaticControl),
+        )
+        .await
+        .unwrap();
+    let _resume = captured_params(&mut params, "thread/resume").await;
+
+    let _turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::new("turn"),
+            content: "continue".into(),
+            output_schema: None,
+            settings: TurnSettings {
+                speed_tier: None,
+                model: Some("gpt-other".into()),
+                reasoning_effort: Some("low".into()),
+                permission_mode: Some(PermissionMode::BypassPermissions),
+            },
+        })
+        .await
+        .unwrap();
+    let turn = captured_params(&mut params, "turn/start").await;
+    assert_eq!(turn["threadId"], "root-thread");
+    assert_eq!(turn["model"], "gpt-other");
+    assert_eq!(turn["effort"], "low");
+    assert_eq!(turn["approvalPolicy"], "never");
+    assert_eq!(turn["approvalsReviewer"], "user");
+    assert_eq!(turn["sandboxPolicy"], json!({"type": "dangerFullAccess"}));
+    assert_eq!(
+        session.provider_resume_id().unwrap().as_str(),
+        "root-thread"
+    );
     let _ = session.close().await;
     server.abort();
 }
@@ -791,6 +866,7 @@ async fn new_thread_sends_effort_only_with_thread_start() {
             turn_id: TurnId::new("turn"),
             content: "work".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -840,6 +916,7 @@ async fn fork_reports_the_new_thread_and_sends_effort_per_turn() {
             turn_id: TurnId::new("turn"),
             content: "branch".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -939,6 +1016,7 @@ async fn interactive_runtime_failures_emit_one_matching_failed_terminal() {
                 turn_id: TurnId::from("failed-turn"),
                 content: "hello".into(),
                 output_schema: None,
+                settings: Default::default(),
             })
             .await
             .unwrap();
@@ -972,6 +1050,7 @@ async fn queued_cancellation_is_balanced_without_starting_provider_work() {
             turn_id: TurnId::from("first"),
             content: "first".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -988,6 +1067,7 @@ async fn queued_cancellation_is_balanced_without_starting_provider_work() {
             turn_id: TurnId::from("queued"),
             content: "queued".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1027,6 +1107,7 @@ async fn explicit_session_close_preserves_terminal_before_outcome_ordering() {
             turn_id: TurnId::from("closed"),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1064,6 +1145,7 @@ async fn in_flight_interrupt_waits_for_provider_terminal_outcome() {
             turn_id: TurnId::from("interrupt"),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1107,6 +1189,7 @@ async fn in_flight_interrupt_uses_bounded_interrupted_fallback() {
                 turn_id: TurnId::from("fallback"),
                 content: "hello".into(),
                 output_schema: None,
+                settings: Default::default(),
             })
             .await
             .unwrap();
@@ -1143,6 +1226,7 @@ async fn duplicate_provider_terminal_notifications_settle_root_once() {
             turn_id: TurnId::from("duplicate"),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1168,6 +1252,7 @@ async fn child_terminal_does_not_settle_the_root_turn_handle() {
             turn_id: TurnId::from("root"),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -1268,6 +1353,7 @@ async fn structured_output_is_validated_before_terminal_settlement() {
                 turn_id: TurnId::from("structured"),
                 content: "return structured output".into(),
                 output_schema: Some(schema),
+                settings: Default::default(),
             })
             .await
             .unwrap();
@@ -1414,4 +1500,86 @@ async fn manual_compaction_waits_for_terminal_and_handles_failures_and_close() {
         session.close().await.unwrap();
         server.abort();
     }
+}
+
+#[tokio::test]
+async fn rejected_turn_settings_do_not_become_the_defaults_for_later_turns() {
+    let (url, server, mut params) = settings_server(false, true).await;
+    let events = Arc::new(CapturingSink::default());
+    let session = runtime(url)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::new("settings-session"),
+                stream_id: StreamId::new("stream"),
+                mode: SessionMode::Resume("root-thread".into()),
+                config: vertebrae_harness_core::RequestConfig {
+                    model: Some("original".into()),
+                    reasoning_effort: Some("high".into()),
+                    speed_tier: Some(vertebrae_harness_core::SpeedTier::Default),
+                    ..Default::default()
+                },
+            },
+            events.clone(),
+            Arc::new(AutomaticControl),
+        )
+        .await
+        .unwrap();
+    let selection = TurnSettings {
+        model: Some("replacement".into()),
+        reasoning_effort: Some("low".into()),
+        permission_mode: Some(PermissionMode::BypassPermissions),
+        speed_tier: Some(vertebrae_harness_core::SpeedTier::Fast),
+    };
+    for (id, settings, failed) in [
+        ("rejected", selection.clone(), true),
+        ("unchanged", TurnSettings::default(), false),
+        ("retry", selection, false),
+        ("keep", TurnSettings::default(), false),
+    ] {
+        let outcome = session
+            .send(SendTurnRequest {
+                turn_id: TurnId::new(id),
+                content: "hello".into(),
+                output_schema: None,
+                settings,
+            })
+            .await
+            .unwrap();
+        let outgoing = captured_params(&mut params, "turn/start").await;
+        let outcome = tokio::time::timeout(Duration::from_secs(2), outcome.await_outcome())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(outcome.status == CompletionStatus::Failed, failed);
+        if id == "unchanged" {
+            assert_eq!(outgoing["model"], "original");
+            assert_eq!(outgoing["effort"], "high");
+            assert_eq!(outgoing["serviceTier"], "default");
+            assert!(outgoing.get("sandboxPolicy").is_none());
+        } else {
+            assert_eq!(outgoing["model"], "replacement");
+            assert_eq!(outgoing["effort"], "low");
+            assert_eq!(outgoing["serviceTier"], "priority");
+            assert_eq!(
+                outgoing["sandboxPolicy"],
+                json!({"type":"dangerFullAccess"})
+            );
+        }
+    }
+    let models: Vec<_> = events
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| {
+            if let HarnessEventPayloadV1::SessionStarted(started) = &event.payload {
+                started.model.clone()
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(models, ["original", "replacement"]);
+    session.close().await.unwrap();
+    server.abort();
 }

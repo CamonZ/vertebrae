@@ -283,11 +283,13 @@ describe("ChatComposer", () => {
     ).toBeInTheDocument();
   });
 
-  it("disables permission picker when busy", () => {
-    render(<ChatComposer {...defaultProps({ isBusy: true })} />);
+  it("keeps the permission picker enabled during a running turn", () => {
+    render(
+      <ChatComposer {...defaultProps({ isBusy: true, isActive: true })} />
+    );
     expect(
       screen.getByTestId("local-chat-permission-mode-picker")
-    ).toBeDisabled();
+    ).toBeEnabled();
   });
 
   // --- Model picker ---
@@ -323,18 +325,23 @@ describe("ChatComposer", () => {
     expect(onModelChange).toHaveBeenCalledOnce();
   });
 
-  it("disables model picker when busy", () => {
-    render(<ChatComposer {...defaultProps({ isBusy: true })} />);
-    expect(screen.getByTestId("local-chat-model-picker")).toBeDisabled();
+  it.each([
+    ["busy", { isBusy: true }],
+    ["active", { isActive: true }],
+    ["locked to a resumed harness", { lockedHarness: true }],
+  ])("keeps the model picker enabled when %s", (_state, props) => {
+    render(<ChatComposer {...defaultProps(props)} />);
+    expect(screen.getByTestId("local-chat-model-picker")).toBeEnabled();
   });
 
-  it("disables model picker when active", () => {
-    render(<ChatComposer {...defaultProps({ isActive: true })} />);
-    expect(screen.getByTestId("local-chat-model-picker")).toBeDisabled();
-  });
-
-  it("disables model picker when locked", () => {
-    render(<ChatComposer {...defaultProps({ lockedHarness: true })} />);
+  it("disables the model picker when the harness is unavailable", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({
+          visibleHarness: { ...CLAUDE_INFO, available: false },
+        })}
+      />
+    );
     expect(screen.getByTestId("local-chat-model-picker")).toBeDisabled();
   });
 
@@ -346,7 +353,7 @@ describe("ChatComposer", () => {
     expect(picker.options[0].textContent).toBe("Default model");
   });
 
-  it("shows 'Original model' label when session has providerResumeId", () => {
+  it("shows 'Current model' label when session has providerResumeId", () => {
     render(
       <ChatComposer
         {...defaultProps({
@@ -357,7 +364,7 @@ describe("ChatComposer", () => {
     const picker = screen.getByTestId(
       "local-chat-model-picker"
     ) as HTMLSelectElement;
-    expect(picker.options[0].textContent).toBe("Original model");
+    expect(picker.options[0].textContent).toBe("Current model");
   });
 
   it("shows unsupported model entry when selected model is not in the catalog", () => {
@@ -476,32 +483,46 @@ describe("ChatComposer", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("explains why speed tiers are disabled while resuming", () => {
-    const speedHarness: LocalChatHarnessInfo = {
-      ...CLAUDE_INFO,
-      speed_tiers: [
-        { id: "default", label: "Standard", is_default: true },
-        { id: "fast", label: "Fast", is_default: false },
-      ],
-    };
-    render(
-      <ChatComposer
-        {...defaultProps({
-          visibleHarness: speedHarness,
-          speedTiers: speedHarness.speed_tiers,
-          supportedSpeedTierIds: new Set(["default", "fast"]),
-          hasResume: true,
-          session: createSession({ providerResumeId: "resume-1" }),
-        })}
-      />
-    );
-    const picker = screen.getByTestId("local-chat-speed-tier-picker");
-    expect(picker).toBeDisabled();
-    expect(picker.parentElement).toHaveAttribute(
-      "title",
-      "Speed tier cannot change while resuming"
-    );
-  });
+  it.each(["active", "resuming", "busy"])(
+    "keeps the provider fixed and turn settings editable when %s",
+    (state) => {
+      const speedHarness: LocalChatHarnessInfo = {
+        ...CLAUDE_INFO,
+        reasoning_efforts: [{ id: "high", label: "High" }],
+        speed_tiers: [
+          { id: "default", label: "Standard", is_default: true },
+          { id: "fast", label: "Fast", is_default: false },
+        ],
+      };
+      render(
+        <ChatComposer
+          {...defaultProps({
+            visibleHarness: speedHarness,
+            speedTiers: speedHarness.speed_tiers,
+            supportedSpeedTierIds: new Set(["default", "fast"]),
+            hasResume: state === "resuming",
+            isActive: state === "active",
+            isBusy: state === "busy",
+            lockedHarness: true,
+            supportedReasoningEffortIds: new Set(["high"]),
+            session: createSession({ providerResumeId: "resume-1" }),
+          })}
+        />
+      );
+      const picker = screen.getByTestId("local-chat-speed-tier-picker");
+      expect(picker).toBeEnabled();
+      expect(picker).toHaveValue("");
+      expect(
+        screen.getByRole("option", { name: "Current tier" })
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("local-chat-model-picker")).toBeEnabled();
+      expect(screen.getByTestId("local-chat-effort-picker")).toBeEnabled();
+      expect(
+        screen.getByTestId("local-chat-permission-mode-picker")
+      ).toBeEnabled();
+      expect(screen.getByTestId("local-chat-provider-picker")).toBeDisabled();
+    }
+  );
 
   it("renders only the selected model's supported effort options", () => {
     const harnessWithModelSpecificEfforts: LocalChatHarnessInfo = {
@@ -547,7 +568,7 @@ describe("ChatComposer", () => {
     ]);
   });
 
-  it("disables effort picker when harness is locked", () => {
+  it("keeps the effort picker enabled when the harness is locked", () => {
     const harnessWithEfforts: LocalChatHarnessInfo = {
       ...CLAUDE_INFO,
       reasoning_efforts: [{ id: "low", label: "Low" }],
@@ -561,7 +582,7 @@ describe("ChatComposer", () => {
         })}
       />
     );
-    expect(screen.getByTestId("local-chat-effort-picker")).toBeDisabled();
+    expect(screen.getByTestId("local-chat-effort-picker")).toBeEnabled();
   });
 
   // --- Composer input ---
@@ -659,7 +680,9 @@ describe("ChatComposer", () => {
       <ChatComposer
         {...defaultProps({
           visibleHarness: CODEX_INFO,
-          providerOptions: [{ provider: CATALOG.providers[1], info: CODEX_INFO }],
+          providerOptions: [
+            { provider: CATALOG.providers[1], info: CODEX_INFO },
+          ],
         })}
       />
     );
@@ -696,7 +719,9 @@ describe("ChatComposer", () => {
             providerResumeId: "codex-resume-1",
           }),
           visibleHarness: CODEX_INFO,
-          providerOptions: [{ provider: CATALOG.providers[0], info: CLAUDE_INFO }],
+          providerOptions: [
+            { provider: CATALOG.providers[0], info: CLAUDE_INFO },
+          ],
           lockedHarness: true,
           hasResume: true,
           canUseComposer: false,
@@ -712,7 +737,7 @@ describe("ChatComposer", () => {
     expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
   });
 
-  it("disables effort picker when resuming", () => {
+  it("keeps the effort picker enabled when resuming", () => {
     const harnessWithEfforts: LocalChatHarnessInfo = {
       ...CLAUDE_INFO,
       reasoning_efforts: [{ id: "low", label: "Low" }],
@@ -726,7 +751,7 @@ describe("ChatComposer", () => {
         })}
       />
     );
-    expect(screen.getByTestId("local-chat-effort-picker")).toBeDisabled();
+    expect(screen.getByTestId("local-chat-effort-picker")).toBeEnabled();
   });
 
   it("shows 'CLI default' when harness has no default model id and not resuming", () => {
@@ -763,7 +788,7 @@ describe("ChatComposer", () => {
     expect(picker.options[0].textContent).toBe("Provider default");
   });
 
-  it("shows 'Original effort' label when session has resume id", () => {
+  it("shows 'Current effort' label when session has resume id", () => {
     const harnessWithEfforts: LocalChatHarnessInfo = {
       ...CLAUDE_INFO,
       reasoning_efforts: [{ id: "low", label: "Low" }],
@@ -782,7 +807,7 @@ describe("ChatComposer", () => {
     const picker = screen.getByTestId(
       "local-chat-effort-picker"
     ) as HTMLSelectElement;
-    expect(picker.options[0].textContent).toBe("Original effort");
+    expect(picker.options[0].textContent).toBe("Current effort");
   });
 
   it("strips claude- prefix from model name in context meta", () => {
@@ -861,9 +886,7 @@ describe("ChatComposer", () => {
 
   it("keeps a clicked comment open after the pointer leaves and closes it outside", () => {
     render(
-      <ChatComposer
-        {...defaultProps({ pendingComments: [pendingComment] })}
-      />
+      <ChatComposer {...defaultProps({ pendingComments: [pendingComment] })} />
     );
 
     const commentIcon = screen.getByTestId("local-chat-comment-icon-1");

@@ -1,5 +1,5 @@
 import { renderHook, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import {
   dispatchCodexChatCommand,
   isCodexChatCommand,
@@ -26,6 +26,13 @@ import {
   type ChatSession,
 } from "../stores/chatStore";
 import { commands } from "../bindings";
+
+const DEFAULT_TURN_SETTINGS = {
+  speed_tier: null,
+  model_id: null,
+  reasoning_effort: null,
+  permission_mode: "default",
+};
 
 vi.mock("../bindings", () => ({
   commands: {
@@ -1854,7 +1861,7 @@ describe("doStartSession", () => {
     );
   });
 
-  it("does not pass selected model id when resuming a Claude conversation", async () => {
+  it("passes the selected model, effort and service tier when resuming a Claude conversation", async () => {
     const deps = {
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
@@ -1868,6 +1875,7 @@ describe("doStartSession", () => {
         providerResumeId: "conv-xyz",
         selectedModelId: "opus",
         selectedReasoningEffort: "high",
+        selectedSpeedTier: "fast",
       }),
       SESSION_ID,
       deps
@@ -1881,8 +1889,9 @@ describe("doStartSession", () => {
       working_dir: "/test/project",
       initial_prompt: null,
       provider_resume_id: "conv-xyz",
-      model_id: null,
-      reasoning_effort: null,
+      model_id: "opus",
+      reasoning_effort: "high",
+      speed_tier: "fast",
       personality: null,
       permission_mode: "default",
     });
@@ -2275,6 +2284,61 @@ describe("doSendMessage", () => {
     vi.clearAllMocks();
   });
 
+  it("sends the composer's current model, effort, service tier and permission with each turn", async () => {
+    const deps = {
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      markStreamingIfSending: vi.fn(),
+    };
+    const previousSessions = useChatStore.getState().sessions;
+    onTestFinished(() => {
+      useChatStore.setState({ sessions: previousSessions });
+    });
+    const resumed = makeSession({
+      providerResumeId: "conv-xyz",
+      selectedModelId: "opus",
+      selectedReasoningEffort: "high",
+      selectedSpeedTier: "fast",
+      permissionMode: "plan",
+    });
+    useChatStore.setState({ sessions: { [SESSION_ID]: resumed } });
+    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "First", deps);
+    useChatStore.setState({
+      sessions: {
+        [SESSION_ID]: {
+          ...resumed,
+          selectedModelId: "haiku",
+          selectedSpeedTier: "default",
+          permissionMode: "default",
+        },
+      },
+    });
+    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Second", deps);
+
+    expect(mockedCommands.sendLocalChatMessage).toHaveBeenNthCalledWith(
+      1,
+      CLAUDE_SESSION_ID,
+      "First",
+      {
+        model_id: "opus",
+        reasoning_effort: "high",
+        permission_mode: "plan",
+        speed_tier: "fast",
+      }
+    );
+    expect(mockedCommands.sendLocalChatMessage).toHaveBeenNthCalledWith(
+      2,
+      CLAUDE_SESSION_ID,
+      "Second",
+      {
+        model_id: "haiku",
+        speed_tier: "default",
+        reasoning_effort: "high",
+        permission_mode: "default",
+      }
+    );
+  });
+
   it("adds user message and calls sendLocalChatMessage", async () => {
     const deps = {
       addMessage: vi.fn(),
@@ -2301,7 +2365,8 @@ describe("doSendMessage", () => {
     );
     expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledWith(
       CLAUDE_SESSION_ID,
-      "Hello"
+      "Hello",
+      DEFAULT_TURN_SETTINGS
     );
     expect(deps.markStreamingIfSending).toHaveBeenCalledWith(SESSION_ID);
     expect(deps.setSessionLifecycle).not.toHaveBeenCalledWith(
@@ -2479,7 +2544,8 @@ describe("doSendMessage", () => {
     expect(mockedCommands.sendLocalChatMessage).toHaveBeenNthCalledWith(
       2,
       CLAUDE_SESSION_ID,
-      "Follow-up"
+      "Follow-up",
+      DEFAULT_TURN_SETTINGS
     );
   });
 
@@ -3010,7 +3076,8 @@ describe("Codex local chat commands", () => {
     });
     expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledWith(
       "backend",
-      "/clear name"
+      "/clear name",
+      DEFAULT_TURN_SETTINGS
     );
   });
 });
@@ -3044,5 +3111,67 @@ describe("Codex command rejection and project scope", () => {
     await operation;
     expect(useChatStore.getState().sessions).toEqual({});
     expect(useChatStore.getState().activeSessionId).toBeNull();
+  });
+});
+
+describe("live session settings rejection", () => {
+  it("keeps the backend available for a corrected send without opening another session", async () => {
+    useChatStore.getState().reset();
+    onTestFinished(() => useChatStore.getState().reset());
+    vi.clearAllMocks();
+    useChatStore.setState({
+      sessions: {
+        [SESSION_ID]: makeSession({
+          backendSessionId: CLAUDE_SESSION_ID,
+          providerResumeId: "conversation",
+          lifecycle: "idle",
+          selectedModelId: "sonnet",
+          selectedReasoningEffort: "high",
+          selectedSpeedTier: "fast",
+        }),
+      },
+    });
+    mockedCommands.sendLocalChatMessage.mockResolvedValueOnce({
+      status: "error",
+      error: {
+        SendFailed: "Claude rejected session settings. Message was not sent.",
+      },
+    });
+    const { result } = renderHook(() => useLocalChat(SESSION_ID));
+    await act(async () => {
+      await result.current.sendMessage("first attempt");
+    });
+    expect(useChatStore.getState().sessions[SESSION_ID].lifecycle).toBe(
+      "error"
+    );
+    expect(result.current.isActive).toBe(true);
+    expect(useChatStore.getState().sessions[SESSION_ID].backendSessionId).toBe(
+      CLAUDE_SESSION_ID
+    );
+    act(() => {
+      useChatStore.getState().setSessionReasoningEffort(SESSION_ID, "low");
+    });
+    mockedCommands.sendLocalChatMessage.mockResolvedValueOnce({
+      status: "ok",
+      data: null,
+    });
+    await act(async () => {
+      await result.current.sendMessage("retry");
+    });
+    expect(mockedCommands.sendLocalChatMessage).toHaveBeenLastCalledWith(
+      CLAUDE_SESSION_ID,
+      "retry",
+      {
+        model_id: "sonnet",
+        reasoning_effort: "low",
+        speed_tier: "fast",
+        permission_mode: "default",
+      }
+    );
+    expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
+    act(() => {
+      useChatStore.getState().setBackendSessionId(SESSION_ID, null);
+    });
+    expect(result.current.isActive).toBe(false);
   });
 });

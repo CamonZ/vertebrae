@@ -230,6 +230,7 @@ async fn interruption_and_cancellation_keep_their_distinct_lifecycle_contract() 
             turn_id: TurnId::from("parity-turn"),
             content: "exact prompt".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -389,6 +390,7 @@ fn gui_persistent_and_daemon_one_shot_own_distinct_exact_launch_policies() {
             "stream-json",
             "--verbose",
             "--include-partial-messages",
+            "--allow-dangerously-skip-permissions",
             "--mcp-config",
             "{\"mcpServers\":{\"vtb-gate\":{\"command\":\"gate\"}}}",
             "--permission-prompt-tool",
@@ -760,6 +762,7 @@ async fn run_persistent(
             turn_id: TurnId::from("parity-turn"),
             content: "exact prompt".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();

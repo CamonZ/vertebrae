@@ -608,7 +608,7 @@ impl HarnessRuntimeFactory {
             .permission_mode
             .as_ref()
             .or(self.config.default_permission_mode.as_ref())
-            .map(claude_permission_mode);
+            .map(ClaudePermissionMode::from);
         let executable = self.config.anthropic_executable.clone();
         let search_path = self.config.search_path.clone();
         let mut provider = ClaudeProviderConfig {
@@ -939,17 +939,6 @@ fn merge_plugin_root(agent_config: &mut AgentConfig, plugin_root: &Path) {
         agent_config
             .plugin_dirs
             .push(plugin_root.to_string_lossy().into_owned());
-    }
-}
-
-fn claude_permission_mode(mode: &PermissionMode) -> ClaudePermissionMode {
-    match mode {
-        PermissionMode::AcceptEdits => ClaudePermissionMode::AcceptEdits,
-        PermissionMode::Auto => ClaudePermissionMode::Auto,
-        PermissionMode::BypassPermissions => ClaudePermissionMode::BypassPermissions,
-        PermissionMode::Default => ClaudePermissionMode::Default,
-        PermissionMode::DontAsk => ClaudePermissionMode::DontAsk,
-        PermissionMode::Plan => ClaudePermissionMode::Plan,
     }
 }
 

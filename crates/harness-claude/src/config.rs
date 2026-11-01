@@ -11,7 +11,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use vertebrae_harness_core::{
-    HarnessError, ProviderThreadRef, RequestConfig, SessionId, SpeedTier,
+    HarnessError, PermissionMode, ProviderThreadRef, RequestConfig, SessionId, SpeedTier,
 };
 
 pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
@@ -41,6 +41,32 @@ pub enum ClaudePermissionMode {
     Plan,
     BypassPermissions,
     DontAsk,
+}
+
+impl From<ClaudePermissionMode> for PermissionMode {
+    fn from(mode: ClaudePermissionMode) -> Self {
+        match mode {
+            ClaudePermissionMode::AcceptEdits => Self::AcceptEdits,
+            ClaudePermissionMode::Auto => Self::Auto,
+            ClaudePermissionMode::BypassPermissions => Self::BypassPermissions,
+            ClaudePermissionMode::Default => Self::Default,
+            ClaudePermissionMode::DontAsk => Self::DontAsk,
+            ClaudePermissionMode::Plan => Self::Plan,
+        }
+    }
+}
+
+impl From<&PermissionMode> for ClaudePermissionMode {
+    fn from(mode: &PermissionMode) -> Self {
+        match mode {
+            PermissionMode::AcceptEdits => Self::AcceptEdits,
+            PermissionMode::Auto => Self::Auto,
+            PermissionMode::BypassPermissions => Self::BypassPermissions,
+            PermissionMode::Default => Self::Default,
+            PermissionMode::DontAsk => Self::DontAsk,
+            PermissionMode::Plan => Self::Plan,
+        }
+    }
 }
 
 impl ClaudePermissionMode {
@@ -329,6 +355,9 @@ impl ClaudeProviderConfig {
                     "stream-json".into(),
                     "--verbose".into(),
                     "--include-partial-messages".into(),
+                    // Make bypass selectable on a later turn without enabling
+                    // it until the user explicitly requests that mode.
+                    "--allow-dangerously-skip-permissions".into(),
                 ]);
             }
             ClaudeLaunchMode::OneShot { .. } => {}
@@ -357,6 +386,15 @@ impl ClaudeProviderConfig {
         {
             args.push("--model".into());
             args.push(model.into());
+        }
+        if let Some(effort) = request
+            .reasoning_effort
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            args.push("--effort".into());
+            args.push(effort.into());
         }
         if let Some(mode) = self.permission_mode {
             args.push("--permission-mode".into());
@@ -572,6 +610,37 @@ mod tests {
             .expect("append-system-prompt flag");
         assert_eq!(spec.args[flag + 1], "reference contract");
         assert!(spec.args.iter().any(|arg| arg == "--output-format"));
+    }
+
+    #[test]
+    fn command_spec_forwards_reasoning_effort_as_the_effort_flag() {
+        let directory = tempdir().expect("temporary directory");
+        let executable = directory.path().join("claude");
+        File::create(&executable).expect("placeholder executable");
+        let config = ClaudeProviderConfig {
+            executable: Some(executable),
+            ..Default::default()
+        };
+        let request = RequestConfig {
+            reasoning_effort: Some("xhigh".into()),
+            ..Default::default()
+        };
+
+        let spec = config
+            .command_spec(
+                ClaudeLaunchMode::Persistent {
+                    resume_id: Some("conversation"),
+                },
+                &request,
+            )
+            .expect("command spec");
+
+        let effort_flag = spec
+            .args
+            .iter()
+            .position(|arg| arg == "--effort")
+            .expect("effort flag");
+        assert_eq!(spec.args[effort_flag + 1], "xhigh");
     }
 
     #[test]

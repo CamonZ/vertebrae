@@ -183,6 +183,7 @@ async fn notification_burst_over_buffer_limit_completes_without_loss() {
             turn_id: TurnId::from("lagged"),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();

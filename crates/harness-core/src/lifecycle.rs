@@ -6,7 +6,8 @@ use serde_json::Value;
 
 use crate::{
     ControlRequestEnvelope, ControlResolution, HarnessCapabilities, HarnessEventV1,
-    OutputVerbosity, ProviderResumeId, RunId, SessionId, SpeedTier, StreamId, TurnId,
+    OutputVerbosity, PermissionMode, ProviderResumeId, RunId, SessionId, SpeedTier, StreamId,
+    TurnId,
 };
 
 /// Portable, per-request behavior shared by provider adapters.
@@ -82,6 +83,70 @@ pub struct SendTurnRequest {
     pub content: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<Value>,
+    /// Session settings this turn changes before it runs.
+    #[serde(default, skip_serializing_if = "TurnSettings::is_empty")]
+    pub settings: TurnSettings,
+}
+
+/// Session settings a turn can change without leaving its conversation.
+/// Adapters apply them inside the same native session, so history and the
+/// provider resume id are kept. An unset field keeps the session's current
+/// value; a successfully applied field also applies to later turns. Adapters
+/// must confirm requested changes before submitting the prompt and must not
+/// remember rejected changes as applied. Provider identity is fixed for a
+/// session and is deliberately absent from this type.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed_tier: Option<SpeedTier>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<PermissionMode>,
+}
+
+impl TurnSettings {
+    pub fn is_empty(&self) -> bool {
+        self.model.is_none()
+            && self.reasoning_effort.is_none()
+            && self.permission_mode.is_none()
+            && self.speed_tier.is_none()
+    }
+
+    /// The fields of `requested` that differ from these settings. Adapters
+    /// keep the applied settings and send a provider only the changes.
+    pub fn changes(&self, requested: &TurnSettings) -> TurnSettings {
+        fn changed<T: Clone + PartialEq>(current: &Option<T>, requested: &Option<T>) -> Option<T> {
+            requested
+                .as_ref()
+                .filter(|value| current.as_ref() != Some(*value))
+                .cloned()
+        }
+        TurnSettings {
+            speed_tier: changed(&self.speed_tier, &requested.speed_tier),
+            model: changed(&self.model, &requested.model),
+            reasoning_effort: changed(&self.reasoning_effort, &requested.reasoning_effort),
+            permission_mode: changed(&self.permission_mode, &requested.permission_mode),
+        }
+    }
+
+    /// Records `applied` over these settings; unset fields are kept.
+    pub fn merge(&mut self, applied: TurnSettings) {
+        if applied.speed_tier.is_some() {
+            self.speed_tier = applied.speed_tier;
+        }
+        if applied.model.is_some() {
+            self.model = applied.model;
+        }
+        if applied.reasoning_effort.is_some() {
+            self.reasoning_effort = applied.reasoning_effort;
+        }
+        if applied.permission_mode.is_some() {
+            self.permission_mode = applied.permission_mode;
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -431,4 +496,69 @@ pub async fn interrupt_close_and_await_with_timeouts(
         shutdown.outcome_timed_out = true;
     }
     shutdown
+}
+
+#[cfg(test)]
+mod turn_settings_tests {
+    use super::*;
+
+    #[test]
+    fn changes_keep_only_requested_values_that_differ() {
+        let applied = TurnSettings {
+            speed_tier: None,
+            model: Some("opus".into()),
+            reasoning_effort: Some("high".into()),
+            permission_mode: Some(PermissionMode::Default),
+        };
+        let requested = TurnSettings {
+            speed_tier: None,
+            model: Some("opus".into()),
+            reasoning_effort: None,
+            permission_mode: Some(PermissionMode::Plan),
+        };
+
+        assert_eq!(
+            applied.changes(&requested),
+            TurnSettings {
+                permission_mode: Some(PermissionMode::Plan),
+                ..TurnSettings::default()
+            }
+        );
+        assert!(applied.changes(&applied).is_empty());
+    }
+
+    #[test]
+    fn merge_keeps_unset_fields() {
+        let mut applied = TurnSettings {
+            speed_tier: None,
+            model: Some("opus".into()),
+            reasoning_effort: Some("high".into()),
+            permission_mode: None,
+        };
+        applied.merge(TurnSettings {
+            model: Some("haiku".into()),
+            ..TurnSettings::default()
+        });
+
+        assert_eq!(applied.model.as_deref(), Some("haiku"));
+        assert_eq!(applied.reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn empty_settings_are_omitted_from_the_wire() {
+        let request = SendTurnRequest {
+            turn_id: TurnId::new("turn"),
+            content: "hi".into(),
+            output_schema: None,
+            settings: TurnSettings::default(),
+        };
+
+        let json = serde_json::to_value(&request).unwrap();
+
+        assert!(json.get("settings").is_none(), "{json}");
+        assert_eq!(
+            serde_json::from_value::<SendTurnRequest>(json).unwrap(),
+            request
+        );
+    }
 }

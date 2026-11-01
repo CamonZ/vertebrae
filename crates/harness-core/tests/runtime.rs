@@ -424,6 +424,7 @@ async fn resumed_and_new_sessions_use_one_start_path_and_survive_turn_completion
             turn_id: TurnId::from("turn-1"),
             content: "hello".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -437,6 +438,7 @@ async fn resumed_and_new_sessions_use_one_start_path_and_survive_turn_completion
             turn_id: TurnId::from("turn-2"),
             content: "again".into(),
             output_schema: None,
+            settings: Default::default(),
         })
         .await
         .unwrap();
@@ -456,6 +458,7 @@ async fn resumed_and_new_sessions_use_one_start_path_and_survive_turn_completion
                 turn_id: TurnId::from(format!("turn-{content}")),
                 content: content.into(),
                 output_schema: None,
+                settings: Default::default(),
             })
             .await
             .unwrap();

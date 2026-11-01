@@ -1,11 +1,14 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use vertebrae_core::PermissionMode as CorePermissionMode;
 use vertebrae_harness_core::{
     CompactionState, CompletionStatus, ControlRequestEnvelope, ControlResolution, ControlSink,
     EventSink, FileChangeKind, HarnessError, HarnessEventPayloadV1, HarnessEventV1, ToolStatus,
     UpdateSemantics,
 };
+
+use crate::types::PermissionMode;
 #[cfg(test)]
 use vertebrae_harness_core::{
     EventCorrelation, EventId, FileChange, FileChangeEvent, StreamId, ToolCallId,
@@ -20,6 +23,17 @@ use crate::local_chat::{
     LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
     LocalChatTurnStartedEvent,
 };
+
+pub(crate) fn core_permission_mode(mode: &PermissionMode) -> CorePermissionMode {
+    match mode {
+        PermissionMode::AcceptEdits => CorePermissionMode::AcceptEdits,
+        PermissionMode::Auto => CorePermissionMode::Auto,
+        PermissionMode::BypassPermissions => CorePermissionMode::BypassPermissions,
+        PermissionMode::Default => CorePermissionMode::Default,
+        PermissionMode::DontAsk => CorePermissionMode::DontAsk,
+        PermissionMode::Plan => CorePermissionMode::Plan,
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct LocalChatSessionStats {
@@ -421,7 +435,7 @@ impl EventSink for LocalChatHarnessEventSink {
                     thread_id,
                     item_id,
                     outcome.status,
-                    outcome.result_text,
+                    outcome.result_text.or(outcome.error),
                     &outcome.metrics,
                 )?;
             }
@@ -437,7 +451,7 @@ impl EventSink for LocalChatHarnessEventSink {
                     thread_id,
                     item_id,
                     outcome.status,
-                    outcome.result_text,
+                    outcome.result_text.or(outcome.error),
                     &outcome.metrics,
                 )?;
             }
@@ -707,6 +721,44 @@ mod tests {
         assert_eq!(progress["kind"], "progress");
         assert_eq!(progress["elapsed_seconds"], 1.25);
         assert_eq!(progress["task_id"], "task-1");
+    }
+
+    #[tokio::test]
+    async fn preserves_settings_rejection_reason_in_the_failed_turn_event() {
+        let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
+        let sink = LocalChatHarnessEventSink::new(
+            "backend-1".into(),
+            LocalChatHarnessKind::Codex,
+            event_sink,
+            Some("gpt".into()),
+            0,
+            false,
+        );
+        sink.emit(HarnessEventV1 {
+            event_id: EventId::new("rejected"),
+            stream_id: StreamId::new("local-chat:backend-1"),
+            sequence: 1,
+            correlation: EventCorrelation {
+                turn_id: Some(vertebrae_harness_core::TurnId::new("turn")),
+                ..Default::default()
+            },
+            timestamp: chrono::Utc::now(),
+            semantics: UpdateSemantics::Snapshot,
+            provider_sequence: None,
+            payload: HarnessEventPayloadV1::TurnFinished(vertebrae_harness_core::TurnOutcome {
+                status: CompletionStatus::Failed,
+                result_text: None,
+                error: Some("settings rejected".into()),
+                structured_output: None,
+                usage: None,
+                metrics: Default::default(),
+            }),
+        })
+        .await
+        .unwrap();
+        assert!(
+            matches!(captured.lock().unwrap().as_slice(), [LocalChatEvent::End(end)] if end.is_error && end.result == "settings rejected")
+        );
     }
 
     #[tokio::test]

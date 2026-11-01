@@ -15,7 +15,7 @@ use vertebrae_harness_core::{
 };
 
 use super::connection::{CodexConnection, is_draining, is_missing_thread};
-use super::session::SessionState;
+use super::session::{SessionState, TurnOverrides};
 use super::subscription::OwnedThreads;
 use super::trace::trace;
 use crate::{
@@ -112,6 +112,12 @@ pub(crate) async fn setup_session(
     connection.set_root_thread(root_thread_id.clone());
     let provider_ref = ProviderThreadRef::new(thread.clone());
     let (closed, closed_rx) = watch::channel(false);
+    let turn_overrides = Mutex::new(TurnOverrides {
+        speed_tier: request_config.speed_tier,
+        model: Some(model.clone()),
+        reasoning_effort,
+        permission: config.permission.clone(),
+    });
     let state = Arc::new(SessionState {
         connection: Mutex::new(connection),
         reconnect_gate: AsyncMutex::new(()),
@@ -124,7 +130,7 @@ pub(crate) async fn setup_session(
         root_session_id: root_session_id.clone(),
         root_thread_id: root_thread_id.clone(),
         default_output_schema,
-        reasoning_effort,
+        turn_overrides,
         root_turn_gate: AsyncMutex::new(()),
         cleanup: AsyncMutex::new(None),
         children: Mutex::new(HashMap::new()),

@@ -21,6 +21,7 @@ mod handles;
 mod process;
 mod run;
 mod session;
+mod settings;
 
 use handles::{ClaudeRunHandle, ClaudeSessionHandle, OutcomeState};
 use process::spawn_process;
@@ -201,6 +202,12 @@ impl HarnessRuntime for ClaudeRuntime {
         let cleanup_timeout = self.config.cleanup_timeout;
         let initialization_timeout = self.config.initialization_timeout;
         let root_locator_resolver = self.config.root_locator_resolver.clone();
+        let initial_settings = vertebrae_harness_core::TurnSettings {
+            model: request.config.model.clone(),
+            reasoning_effort: request.config.reasoning_effort.clone(),
+            speed_tier: request.config.speed_tier,
+            permission_mode: self.config.permission_mode.map(Into::into),
+        };
         tokio::spawn(run_persistent_process_v2(
             child,
             stdin,
@@ -215,6 +222,7 @@ impl HarnessRuntime for ClaudeRuntime {
             cleanup_timeout,
             initialization_timeout,
             root_locator_resolver,
+            initial_settings,
         ));
         Ok(Arc::new(ClaudeSessionHandle {
             // Claude Code emits its canonical system/init record only after

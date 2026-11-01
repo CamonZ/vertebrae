@@ -930,9 +930,9 @@ async refreshLocalChatSessionGate(backendSessionId: string, gate: LocalChatGateB
 /**
  * Send a message to a provider-neutral local chat session.
  */
-async sendLocalChatMessage(backendSessionId: string, content: string) : Promise<Result<null, LocalChatSessionError>> {
+async sendLocalChatMessage(backendSessionId: string, content: string, settings: LocalChatTurnSettings | null) : Promise<Result<null, LocalChatSessionError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("send_local_chat_message", { backendSessionId, content }) };
+    return { status: "ok", data: await TAURI_INVOKE("send_local_chat_message", { backendSessionId, content, settings }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1993,6 +1993,12 @@ export type LocalChatSpeedTierStatus = { requested: string | null; active: strin
 export type LocalChatTextEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; text: string; is_partial: boolean; completion_status?: string | null; parent_tool_use_id: string | null; item_id?: string | null }
 export type LocalChatToolCallEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; tool_name: string; input: string; parent_tool_use_id: string | null }
 export type LocalChatToolResultEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; result: string; is_error: boolean; parent_tool_use_id: string | null }
+/**
+ * The composer's settings for one turn of a live session. Each harness
+ * applies the ones that changed inside the same conversation; unset fields
+ * keep the session's current value.
+ */
+export type LocalChatTurnSettings = { speed_tier?: string | null; model_id?: string | null; reasoning_effort?: string | null; permission_mode?: PermissionMode | null }
 export type LocalChatTurnStartedEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id: string; thread_id?: string | null; is_root: boolean }
 /**
  * An application or editor command that can open local source/text files.

@@ -352,6 +352,28 @@ impl ClaudeStreamDecoder {
                     ));
                 }
             }
+            "control_response" => {
+                // Answers to the harness's own settings requests. Claude keeps
+                // its previous setting when it rejects one, so say so.
+                let response = object.get("response").and_then(Value::as_object);
+                if let Some(response) =
+                    response.filter(|response| string(response, "subtype") == Some("error"))
+                {
+                    let error = string(response, "error").unwrap_or("no reason given");
+                    drafts.push(self.draft(
+                        stream_id,
+                        &thread_id,
+                        parent_tool_call,
+                        UpdateSemantics::Snapshot,
+                        HarnessEventPayloadV1::Warning(DiagnosticEvent {
+                            message: format!(
+                                "Claude rejected a session settings change and kept its previous setting: {error}"
+                            ),
+                            code: Some("claude_settings_rejected".into()),
+                        }),
+                    ));
+                }
+            }
             "content_block_start" | "content_block_stop" | "message_start" | "message_stop" => {}
             unknown => drafts.push(self.draft(
                 stream_id,

@@ -13,13 +13,13 @@ use async_trait::async_trait;
 use tauri::Manager;
 use tokio::sync::RwLock;
 use tracing::Instrument;
-use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, ProviderId};
+use vertebrae_core::{AgentConfig, ProviderId};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
     interrupt_close_and_await, CompletionStatus, EventSink, HarnessError, HarnessEventPayloadV1,
     HarnessEventV1, ProviderResumeId, ProviderThreadRef, RequestConfig, SendTurnRequest,
     SessionCloseStatus, SessionHandle, SessionId, SessionMode, SpeedTier, StartSessionRequest,
-    StreamId, TurnId, TurnInputProvenance, UpdateSemantics,
+    StreamId, TurnId, TurnInputProvenance, TurnSettings, UpdateSemantics,
 };
 
 use crate::commands::AppState;
@@ -31,14 +31,15 @@ use crate::local_chat::harnesses::claude::args::builtin_claude_output_styles;
 use crate::local_chat::harnesses::claude::args::{
     resolve_requested_claude_model, ResolvedClaudeModel,
 };
+use crate::local_chat::harnesses::shared::core_permission_mode;
 use crate::local_chat::{
     session_developer_instructions, HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink,
-    LocalChatHarnessKind, LocalChatPersonalityOption, LocalChatRuntime, LocalChatSessionError,
-    LocalChatSessionErrorEvent, LocalChatSessionWarningEvent,
+    LocalChatHarnessKind, LocalChatPersonalityOption, LocalChatProviderSelection, LocalChatRuntime,
+    LocalChatSessionError, LocalChatSessionErrorEvent, LocalChatSessionWarningEvent,
+    LocalChatTurnSettings,
 };
 use crate::shell_environment::{user_shell_environment, ShellEnvironment};
 use crate::telemetry;
-use crate::types::PermissionMode;
 use vertebrae_installer::{resolve_claude_plugin_dir, ClaudePluginDirResolution};
 use vertebrae_sacrum_client::ObservabilitySubsystem;
 
@@ -126,6 +127,7 @@ struct ActiveSession {
     active_turn: Arc<Mutex<Option<Arc<dyn vertebrae_harness_core::TurnHandle>>>>,
     turn_traces: TurnTraceRegistry,
     permission_bridge: crate::local_chat::permissions::PermissionBridge,
+    provider: Option<Box<LocalChatProviderSelection>>,
     #[cfg(unix)]
     _permission_socket: Option<crate::local_chat::permissions::PermissionSocketGuard>,
 }
@@ -802,6 +804,7 @@ impl ClaudeSessionRuntime {
                 runtime.clone(),
             ),
         );
+        let permission_mode = input.permission_mode.as_ref().map(core_permission_mode);
         let agent_config = AgentConfig {
             provider: Some(
                 input
@@ -810,7 +813,7 @@ impl ClaudeSessionRuntime {
                     .map_or_else(ProviderId::anthropic, |provider| provider.id.clone()),
             ),
             model: model.clone(),
-            permission_mode: input.permission_mode.as_ref().map(core_permission_mode),
+            permission_mode,
             ..AgentConfig::default()
         };
         let mut request = StartSessionRequest {
@@ -826,7 +829,7 @@ impl ClaudeSessionRuntime {
                 verbosity: None,
                 working_directory: Some(working_dir),
                 model,
-                reasoning_effort: input.reasoning_effort,
+                reasoning_effort: input.reasoning_effort.clone(),
                 speed_tier: input.speed_tier.as_deref().and_then(SpeedTier::parse),
                 personality,
                 developer_instructions: Some(session_developer_instructions(input.gate.as_ref())),
@@ -915,6 +918,7 @@ impl ClaudeSessionRuntime {
                 active_turn: active_turn.clone(),
                 turn_traces: turn_traces.clone(),
                 permission_bridge: runtime.permission_bridge(),
+                provider: input.provider.clone().map(Box::new),
                 #[cfg(unix)]
                 _permission_socket: started.take_permission_socket(),
             },
@@ -933,6 +937,7 @@ impl ClaudeSessionRuntime {
                 &active_turn,
                 &turn_traces,
                 prompt,
+                TurnSettings::default(),
             )
             .await
             {
@@ -969,18 +974,21 @@ impl ClaudeSessionRuntime {
         &self,
         session_id: &str,
         content: &str,
+        settings: LocalChatTurnSettings,
     ) -> Result<(), LocalChatSessionError> {
-        let (handle, active_turn, turn_traces) = self
+        let (handle, active_turn, turn_traces, settings) = self
             .sessions
             .read()
             .await
             .active
             .get(session_id)
             .map(|session| {
+                let requested = claude_turn_settings(session.provider.as_deref(), settings);
                 (
                     session.handle.clone(),
                     session.active_turn.clone(),
                     session.turn_traces.clone(),
+                    requested,
                 )
             })
             .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
@@ -990,6 +998,7 @@ impl ClaudeSessionRuntime {
             &active_turn,
             &turn_traces,
             content.to_string(),
+            settings,
         )
         .await
         .map_err(send_error)
@@ -1347,12 +1356,50 @@ fn output_style_name(contents: &str) -> Option<String> {
     None
 }
 
+/// Resolves the composer's selection for a Claude turn. A model outside the
+/// provider's catalog leaves the model unchanged.
+fn claude_turn_settings(
+    provider: Option<&LocalChatProviderSelection>,
+    settings: LocalChatTurnSettings,
+) -> TurnSettings {
+    let model = match provider {
+        Some(provider) => settings
+            .model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .and_then(|model| {
+                provider
+                    .profile
+                    .resolve_model(&provider.id, Some(model))
+                    .ok()
+            }),
+        None => {
+            let resolved = resolve_requested_claude_model(settings.model_id, true);
+            if let Some(warning) = resolved.warning {
+                log::warn!("[LOCAL_CHAT] {warning}");
+            }
+            resolved.model_id
+        }
+    };
+    TurnSettings {
+        speed_tier: settings.speed_tier.as_deref().and_then(SpeedTier::parse),
+        model,
+        reasoning_effort: settings
+            .reasoning_effort
+            .map(|effort| effort.trim().to_owned())
+            .filter(|effort| !effort.is_empty()),
+        permission_mode: settings.permission_mode.as_ref().map(core_permission_mode),
+    }
+}
+
 async fn send_turn(
     session_id: &str,
     handle: &Arc<dyn SessionHandle>,
     active_turn: &Arc<Mutex<Option<Arc<dyn vertebrae_harness_core::TurnHandle>>>>,
     turn_traces: &TurnTraceRegistry,
     content: String,
+    settings: TurnSettings,
 ) -> Result<(), HarnessError> {
     let requested_turn_id = TurnId::new(uuid::Uuid::new_v4().to_string());
     let trace_enabled = telemetry::traces_enabled(ObservabilitySubsystem::ClaudeCode);
@@ -1395,6 +1442,7 @@ async fn send_turn(
             turn_id: requested_turn_id.clone(),
             content,
             output_schema: None,
+            settings,
         })
         .instrument(span.clone())
         .await
@@ -1513,17 +1561,6 @@ fn start_error(error: HarnessError) -> LocalChatSessionError {
 
 fn send_error(error: HarnessError) -> LocalChatSessionError {
     LocalChatSessionError::SendFailed(error.to_string())
-}
-
-fn core_permission_mode(mode: &PermissionMode) -> CorePermissionMode {
-    match mode {
-        PermissionMode::AcceptEdits => CorePermissionMode::AcceptEdits,
-        PermissionMode::Auto => CorePermissionMode::Auto,
-        PermissionMode::BypassPermissions => CorePermissionMode::BypassPermissions,
-        PermissionMode::Default => CorePermissionMode::Default,
-        PermissionMode::DontAsk => CorePermissionMode::DontAsk,
-        PermissionMode::Plan => CorePermissionMode::Plan,
-    }
 }
 
 fn current_project_path<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> Option<String> {
