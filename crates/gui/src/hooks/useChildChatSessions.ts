@@ -6,8 +6,32 @@ import {
   getLocalChatLifecycle,
   isLocalChatLifecycleBusy,
   useChatStore,
+  providerThreadSessionId,
 } from "../stores/chatStore";
+import { isLocalChatSessionCleared } from "../utils/localChatPersistence";
 import type { SpawnOutlineItem } from "../components/ChatWindow/sessionListUtils";
+
+// Discovery rows are in ancestor-first order. Suppress a deleted branch even
+// when its deeper IDs have not yet been found by background deletion.
+function visibleChildRows(
+  rows: SpawnOutlineItem[],
+  harness: LocalChatHarnessKind
+) {
+  const blocked = new Set<string>();
+  const deleted = (thread: string) =>
+    blocked.has(thread) ||
+    isLocalChatSessionCleared(providerThreadSessionId(harness, thread));
+  return rows.filter((row) => {
+    if (
+      (row.threadId && deleted(row.threadId)) ||
+      (row.parentThreadId && deleted(row.parentThreadId))
+    ) {
+      if (row.threadId) blocked.add(row.threadId);
+      return false;
+    }
+    return true;
+  });
+}
 
 /** Discovers provider-owned child conversations. Refreshes are single-flight;
  * only visible child conversations request transcript replay. */
@@ -76,7 +100,14 @@ export function useChildChatSessions(
         ): Promise<SpawnOutlineItem[]> => {
           const key = `${harness}:${resumeId}`;
 
-          if (ancestors.has(key) || retired) return Promise.resolve([]);
+          if (
+            ancestors.has(key) ||
+            retired ||
+            isLocalChatSessionCleared(
+              providerThreadSessionId(harness, resumeId)
+            )
+          )
+            return Promise.resolve([]);
 
           const cached = discovered.get(key);
           if (cached) return cached;
@@ -100,13 +131,22 @@ export function useChildChatSessions(
             const lineage = new Set([...ancestors, key]);
 
             for (const child of result.data) {
-              if (lineage.has(`${harness}:${child.provider_resume_id}`))
+              if (
+                isLocalChatSessionCleared(
+                  providerThreadSessionId(harness, child.provider_resume_id)
+                ) ||
+                isLocalChatSessionCleared(
+                  providerThreadSessionId(harness, resumeId)
+                ) ||
+                lineage.has(`${harness}:${child.provider_resume_id}`)
+              )
                 continue;
 
               rows.push({
                 id: `${harness}:${child.provider_resume_id}`,
                 spawnId: child.spawn_tool_call_id ?? child.provider_resume_id,
                 threadId: child.provider_resume_id,
+                parentThreadId: resumeId,
                 label: child.label,
                 detail: "",
                 ...(child.is_active === null
@@ -160,8 +200,9 @@ export function useChildChatSessions(
             )
               continue;
 
-            next.set(session.id, rows);
-            for (const row of rows) {
+            const visibleRows = visibleChildRows(rows, session.harness);
+            next.set(session.id, visibleRows);
+            for (const row of visibleRows) {
               if (!row.threadId) continue;
               const childId = useChatStore
                 .getState()
@@ -172,6 +213,7 @@ export function useChildChatSessions(
                   providerId: session.providerId,
                   label: row.label,
                   ownerSessionId: session.id,
+                  providerParentResumeId: row.parentThreadId,
                 });
               const child = useChatStore.getState().sessions[childId];
 
@@ -180,7 +222,7 @@ export function useChildChatSessions(
               // while this older discovery request was in flight.
               if (
                 row.isWorking === false &&
-                child.providerChild?.active === true &&
+                child?.providerChild?.active === true &&
                 liveAtStart.has(childId) &&
                 child.updatedAt === liveAtStart.get(childId)
               ) {
@@ -280,7 +322,12 @@ export function useChildChatSessions(
 
   return useMemo(() => {
     void liveToken;
-    const merged = new Map([...outlines].map(([id, rows]) => [id, [...rows]]));
+    const sessions = useChatStore.getState().sessions;
+    const merged = new Map(
+      [...outlines]
+        .filter(([id]) => !!sessions[id])
+        .map(([id, rows]) => [id, visibleChildRows(rows, sessions[id].harness)])
+    );
 
     for (const session of Object.values(useChatStore.getState().sessions)) {
       const child = session.providerChild;

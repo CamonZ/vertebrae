@@ -96,6 +96,10 @@ describe("tool annotation helpers", () => {
 
 describe("chat store tool annotations", () => {
   beforeEach(() => {
+    vi.spyOn(commands, "discoverLocalChatChildSessions").mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
     localStorage.clear();
     clearPersistedLocalChatSessions();
     useChatStore.getState().reset();
@@ -242,7 +246,7 @@ describe("chat store tool annotations", () => {
       .mockResolvedValue({ status: "ok", data: null });
 
     await useChatStore.getState().selectPersistedSession("chat-1");
-    useChatStore.getState().deleteLocalSession("chat-1");
+    await useChatStore.getState().deleteLocalSession("chat-1");
     deleted.resolve({
       status: "ok",
       data: [annotation("chat-1", "tool-deleted", "worktree_delta")],

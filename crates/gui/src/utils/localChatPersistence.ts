@@ -444,6 +444,10 @@ function serializeSession(
   };
 }
 
+export function allPersistedLocalChatSessions(): Record<string, ChatSession> {
+  return { ...sessionIndexCache };
+}
+
 function readSessions(): Record<string, ChatSession> {
   return sessionIndexCache;
 }
@@ -594,10 +598,12 @@ async function hydrateSessionIndexCache(): Promise<boolean> {
     sessionIndexHydratePromise = loadSessionIndexFromCommand()
       .then((loaded) => {
         if (loaded === null) return false;
-        const merged = {
-          ...loaded,
-          ...sessionIndexCache,
-        };
+        const merged = Object.fromEntries(
+          Object.entries({
+            ...loaded,
+            ...sessionIndexCache,
+          }).filter(([id]) => !isLocalChatSessionCleared(id))
+        );
         const deduplicated = deduplicateDefaultEmptyLocalChatSessions(merged);
         sessionIndexCache = deduplicated.sessions;
         sessionIndexHydrated = true;

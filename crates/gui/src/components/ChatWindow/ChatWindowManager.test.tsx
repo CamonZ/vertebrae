@@ -3235,7 +3235,7 @@ describe("ChatWindowManager", () => {
         expect.arrayContaining([
           expect.objectContaining({
             message:
-              "The chat was deleted, but its provider session may still be running.",
+              "The chat was deleted, but some session cleanup may have failed.",
             type: "error",
             entity: "application",
             entityId: `local-chat-close-${id}`,
@@ -3274,7 +3274,7 @@ describe("ChatWindowManager", () => {
         expect.arrayContaining([
           expect.objectContaining({
             message:
-              "The chat was deleted, but its provider session may still be running.",
+              "The chat was deleted, but some session cleanup may have failed.",
             type: "error",
             entity: "application",
             entityId: `local-chat-close-${id}`,
