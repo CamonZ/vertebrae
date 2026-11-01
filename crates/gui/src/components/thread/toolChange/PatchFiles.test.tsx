@@ -37,6 +37,7 @@ describe("PatchFiles", () => {
       theme: { dark: "pierre-dark", light: "pierre-light" },
       themeType: "dark",
       preferredHighlighter: "highlights",
+      unsafeCSS: expect.stringContaining("--diffs-editor-selection-bg"),
       diffStyle: "unified",
       diffIndicators: "bars",
       lineDiffType: "word-alt",

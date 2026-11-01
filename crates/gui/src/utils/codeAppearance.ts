@@ -176,6 +176,26 @@ export function resolveCodeTheme(
     : DEFAULT_CODE_THEMES[scheme];
 }
 
+/** Selection colour for themes that do not define one. */
+export const FALLBACK_SELECTION_BG =
+  "color-mix(in lab, var(--diffs-fg) 25%, transparent)";
+
+/**
+ * Pierre `unsafeCSS` giving every view the same selection colour: the
+ * theme's own (`null` when it has none or is still resolving) or the
+ * fallback. Read-only views use the native selection, which the app's
+ * `::selection` rule cannot reach inside Pierre's shadow root. The editor
+ * hides the native selection and paints `--diffs-editor-selection-bg`, which
+ * Pierre leaves transparent for themes without a selection colour.
+ */
+export function pierreSelectionCSS(themeSelection: string | null): string {
+  const color = themeSelection ?? FALLBACK_SELECTION_BG;
+  return `
+[data-code] { --diffs-editor-selection-bg: ${color}; }
+::selection { background-color: ${color}; }
+`;
+}
+
 const themePairs = new Map<string, { dark: string; light: string }>();
 
 /** Pierre `theme` option; stable per combination so options stay equal. */

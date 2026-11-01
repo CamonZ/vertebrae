@@ -165,6 +165,10 @@ fn create_builder() -> Builder {
             commands::discover_local_chat_child_sessions,
             commands::load_local_chat_annotations,
             commands::load_worktree_changes,
+            commands::list_worktree_directory,
+            commands::read_worktree_file,
+            commands::read_worktree_baseline_file,
+            commands::save_worktree_file,
             commands::delete_local_chat_annotations,
             commands::resolve_permission_request,
             // WebSocket status command

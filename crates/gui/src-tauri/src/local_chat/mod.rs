@@ -8,6 +8,7 @@ pub(crate) mod manager;
 pub(crate) mod permissions;
 pub(crate) mod title_inference;
 pub(crate) mod worktree_delta;
+pub(crate) mod worktree_files;
 
 /// Shared local-chat rendering contract. Each harness maps this into its
 /// native additive developer/system instruction mechanism.

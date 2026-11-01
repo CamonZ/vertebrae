@@ -1011,17 +1011,17 @@ async saveLocalChatSessionIndex(input: SaveLocalChatSessionIndexInput) : Promise
  * provider-owned harness adapter. The GUI receives only normalized V1 event
  * JSON and never needs to know the Claude or Codex file layout.
  */
-async discoverLocalChatChildSessions(input: LoadLocalChatSessionReplayInput) : Promise<Result<LocalChatChildSession[], CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("discover_local_chat_child_sessions", { input }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e as any };
-}
-},
 async loadLocalChatSessionReplay(input: LoadLocalChatSessionReplayInput) : Promise<Result<LoadLocalChatSessionReplayOutput, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("load_local_chat_session_replay", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async discoverLocalChatChildSessions(input: LoadLocalChatSessionReplayInput) : Promise<Result<LocalChatChildSession[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("discover_local_chat_child_sessions", { input }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1044,6 +1044,50 @@ async loadLocalChatAnnotations(sessionId: string) : Promise<Result<LocalChatAnno
 async loadWorktreeChanges(worktreePath: string, wholeBranch: boolean) : Promise<Result<WorktreeChanges, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("load_worktree_changes", { worktreePath, wholeBranch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List one worktree directory for the Files sidebar; `""` is the root.
+ */
+async listWorktreeDirectory(worktreePath: string, path: string) : Promise<Result<DirectoryListing, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_worktree_directory", { worktreePath, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Read the working copy of a worktree file for editing.
+ */
+async readWorktreeFile(worktreePath: string, path: string) : Promise<Result<FileBody, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_worktree_file", { worktreePath, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Read a worktree file at the selected changes baseline.
+ */
+async readWorktreeBaselineFile(worktreePath: string, path: string, wholeBranch: boolean) : Promise<Result<FileBody, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_worktree_baseline_file", { worktreePath, path, wholeBranch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Save a worktree file only if it still holds the revision that was read.
+ */
+async saveWorktreeFile(worktreePath: string, path: string, contents: string, expectedRevision: string) : Promise<Result<SaveOutcome, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_worktree_file", { worktreePath, path, contents, expectedRevision }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1298,8 +1342,8 @@ artifactChangedEvent: ArtifactChangedEvent,
 daemonChangedEvent: DaemonChangedEvent,
 daemonMetricsEvent: DaemonMetricsEvent,
 localBackendProgressEvent: LocalBackendProgressEvent,
-localChatCompactionEvent: LocalChatCompactionEvent,
 localChatAnnotationEvent: LocalChatAnnotationEvent,
+localChatCompactionEvent: LocalChatCompactionEvent,
 localChatFileChangeEvent: LocalChatFileChangeEvent,
 localChatSessionEndEvent: LocalChatSessionEndEvent,
 localChatSessionErrorEvent: LocalChatSessionErrorEvent,
@@ -1330,8 +1374,8 @@ artifactChangedEvent: "artifact-changed-event",
 daemonChangedEvent: "daemon-changed-event",
 daemonMetricsEvent: "daemon-metrics-event",
 localBackendProgressEvent: "local-backend-progress-event",
-localChatCompactionEvent: "local-chat-compaction-event",
 localChatAnnotationEvent: "local-chat-annotation-event",
+localChatCompactionEvent: "local-chat-compaction-event",
 localChatFileChangeEvent: "local-chat-file-change-event",
 localChatSessionEndEvent: "local-chat-session-end-event",
 localChatSessionErrorEvent: "local-chat-session-error-event",
@@ -1621,6 +1665,21 @@ export type DaemonMetricsEvent = { connection_id: string; daemon_id: string; sch
 export type DaemonMutationResult = { connection_id: string; daemon: Daemon }
 export type DaemonNameUpdate = { kind: "unchanged" } | { kind: "clear" } | { kind: "set"; value: string }
 export type DecisionModelSettings = { enabled: boolean; provider: string; model: string; harness: string | null; validation_error: string | null }
+export type DirectoryEntry = { name: string;
+/**
+ * Worktree-relative path with `/` separators.
+ */
+path: string;
+/**
+ * What the entry is, following a symlink that stays in the worktree.
+ */
+kind: EntryKind; symlink: boolean }
+export type DirectoryListing = { path: string; entries: DirectoryEntry[]; truncated: boolean }
+export type EntryKind = "file" | "directory" |
+/**
+ * Special files, and symlinks that dangle or leave the worktree.
+ */
+"other"
 export type EnvironmentEdit = { name: string; secret: SecretEdit }
 /**
  * Execute config shared by workflow definitions and execution records.
@@ -1631,6 +1690,11 @@ export type ExecuteStepConfig = { version: number; script: string; context: Json
  * Execution status - mirrors db::ExecutionStatus
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
+/**
+ * One side of a document. `revision` is the SHA-256 of the bytes read.
+ */
+export type FileBody = { kind: "text"; contents: string; revision: string } | { kind: "binary" } | { kind: "too_large" } | { kind: "missing" } | { kind: "unreadable"; message: string }
+export type FileStatus = "added" | "modified" | "deleted" | "renamed"
 /**
  * The response being built on a draftable gate, as Sacrum reports it.
  */
@@ -1809,6 +1873,10 @@ export type LocalChatAnnotation = { session_id: string; tool_id: string; kind: s
  */
 recorded_at: string }
 export type LocalChatAnnotationEvent = { session_id: string; annotation: LocalChatAnnotation }
+/**
+ * A provider-owned child conversation available in the Chat Sessions panel.
+ */
+export type LocalChatChildSession = { provider_resume_id: string; spawn_tool_call_id: string | null; label: string; is_active: boolean | null }
 export type LocalChatCompactionEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; state: string; trigger?: string | null; pre_tokens?: number | null }
 export type LocalChatFileChange = { path: string; kind: string; diff: string | null }
 export type LocalChatFileChangeEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; status: string; changes: LocalChatFileChange[]; parent_tool_use_id: string | null }
@@ -1892,7 +1960,6 @@ export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id: string; thread_id?: string | null; is_root: boolean; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number; item_id?: string | null; completion_status?: string | null }
 export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { CompactionFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind } | { InvalidChatSessionId: string } | { InvalidRecordingWorktree: string }
 export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; error: string; item_id?: string | null }
-export type LocalChatChildSession = { provider_resume_id: string; spawn_tool_call_id: string | null; label: string; is_active: boolean | null }
 export type LocalChatSessionIndexEntry = {
 /**
  * Optional association metadata; no raw tool payloads.
@@ -1931,6 +1998,10 @@ export type LocalChatTurnStartedEvent = { backend_session_id: string; harness: L
  * An application or editor command that can open local source/text files.
  */
 export type LocalFileEditor = { id: string; name: string; path: string }
+/**
+ * Why a changed file is listed without hunks.
+ */
+export type MarkerReason = "binary" | "too_large" | "baseline_unavailable" | "patch_limit" | "unreadable"
 /**
  * A durable project notification. `message` is Markdown exactly as
  * published; timestamps are RFC 3339 with microseconds so they can be sent
@@ -2046,6 +2117,12 @@ url: string;
  */
 has_token: boolean }
 export type SaveLocalChatSessionIndexInput = { sessions: LocalChatSessionIndexEntry[] }
+export type SaveOutcome = { kind: "saved"; revision: string } |
+/**
+ * The file no longer matches the expected revision; nothing was written.
+ * `current` is absent when the file is missing or not a text document.
+ */
+{ kind: "conflict"; current: string | null }
 /**
  * A saved project in the project list
  */
@@ -2900,6 +2977,8 @@ workflow: Workflow;
  * Tasks associated with this workflow
  */
 tasks: Task[] }
+export type WorktreeChange = { path: string; old_path: string | null; status: FileStatus; patch: string; marker: MarkerReason | null }
+export type WorktreeChanges = { base_branch: string | null; base_unavailable: string | null; files: WorktreeChange[] }
 
 /** tauri-specta globals **/
 
@@ -2960,8 +3039,3 @@ function __makeEvents__<T extends Record<string, any>>(
 		},
 	);
 }
-
-export type FileStatus = "added" | "modified" | "deleted" | "renamed"
-export type MarkerReason = "binary" | "too_large" | "baseline_unavailable" | "patch_limit" | "unreadable"
-export type WorktreeChange = { path: string; old_path: string | null; status: FileStatus; patch: string; marker: MarkerReason | null }
-export type WorktreeChanges = { base_branch: string | null; base_unavailable: string | null; files: WorktreeChange[] }

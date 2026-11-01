@@ -89,22 +89,33 @@ fn parse_files(bytes: Vec<u8>) -> Result<Vec<WorktreeChange>, GitError> {
     Ok(files)
 }
 
-pub fn load(root: &Path, whole_branch: bool) -> Result<WorktreeChanges, GitError> {
+/// The verified worktree's base branch, if any, and the selected baseline
+/// commit: `HEAD`, or the branch merge-base for the whole-branch view.
+pub(crate) fn baseline(
+    root: &Path,
+    whole_branch: bool,
+) -> Result<(Option<(String, String)>, String), GitError> {
     git(root, &["rev-parse", "--show-toplevel"], LIST_LIMIT)?;
     // HEAD must exist: an unborn repository produces a visible baseline error.
     git(root, &["rev-parse", "--verify", "HEAD"], LIST_LIMIT)?;
     let base = branch_base(root)?;
-    let base_unavailable = base.is_none().then(|| "No merge-base with origin/HEAD, master or main; only uncommitted changes are available.".into());
     let baseline = if whole_branch {
-        &base
-            .as_ref()
+        base.as_ref()
             .ok_or_else(|| {
                 GitError::Failed("Whole-branch baseline is unavailable; select Uncommitted.".into())
             })?
             .1
+            .clone()
     } else {
-        "HEAD"
+        "HEAD".into()
     };
+    Ok((base, baseline))
+}
+
+pub fn load(root: &Path, whole_branch: bool) -> Result<WorktreeChanges, GitError> {
+    let (base, baseline) = baseline(root, whole_branch)?;
+    let baseline = baseline.as_str();
+    let base_unavailable = base.is_none().then(|| "No merge-base with origin/HEAD, master or main; only uncommitted changes are available.".into());
     let mut files = parse_files(git(
         root,
         &[

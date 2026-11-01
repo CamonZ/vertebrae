@@ -3,6 +3,13 @@ import { useChatSession } from "../../hooks/useChatSession";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatAssociation } from "../../hooks/useChatAssociation";
 import { WorktreeChanges } from "./WorktreeChanges";
+import {
+  activate,
+  discardDraft,
+  dirtyPaths,
+  saveDocuments,
+} from "./workspace/documentStore";
+import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
@@ -65,6 +72,9 @@ export function ChatWindow({
   renderObserver,
 }: ChatWindowProps) {
   const [changesSession, setChangesSession] = useState<string | null>(null);
+  // Dirty documents that block leaving the Changes view until resolved.
+  const [leaving, setLeaving] = useState<string[] | null>(null);
+  const [leaveBusy, setLeaveBusy] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [pendingCommentState, setPendingCommentState] = useState<{
     sessionId: string;
@@ -215,7 +225,11 @@ export function ChatWindow({
           <button
             type="button"
             aria-pressed={!showChanges}
-            onClick={() => setChangesSession(null)}
+            onClick={() => {
+              const dirty = showChanges ? dirtyPaths(worktreePath) : [];
+              if (dirty.length > 0) setLeaving(dirty);
+              else setChangesSession(null);
+            }}
           >
             Conversation
           </button>
@@ -236,6 +250,34 @@ export function ChatWindow({
               worktreePath={worktreePath}
             />
           </div>
+        )}
+        {worktreePath && (
+          <UnsavedChangesDialog
+            paths={leaving}
+            busy={leaveBusy}
+            onCancel={() => setLeaving(null)}
+            onDiscard={() => {
+              for (const path of leaving ?? []) {
+                discardDraft(worktreePath, path);
+              }
+              setLeaving(null);
+              setChangesSession(null);
+            }}
+            onSave={() => {
+              setLeaveBusy(true);
+              void saveDocuments(worktreePath, leaving ?? [])
+                .then((failed) => {
+                  // Stay in Changes on the first document that was not saved
+                  // so its error or conflict is visible.
+                  if (failed.length > 0) activate(worktreePath, failed[0]);
+                  else setChangesSession(null);
+                })
+                .finally(() => {
+                  setLeaveBusy(false);
+                  setLeaving(null);
+                });
+            }}
+          />
         )}
         <div
           className="flex min-h-0 flex-col"
