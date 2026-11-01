@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorktreeChanges } from "./WorktreeChanges";
+import { useWorktreeWatch } from "./workspace/useWorktreeWatch";
 import {
   commands,
   type FileBody,
@@ -16,6 +17,10 @@ import {
 import { useDocumentStore } from "./workspace/documentStore";
 import type { AllChangesViewProps } from "./workspace/AllChangesView";
 import type { DocumentEditorProps } from "./workspace/DocumentEditor";
+
+vi.mock("./workspace/useWorktreeWatch", () => ({
+  useWorktreeWatch: vi.fn(() => null),
+}));
 
 vi.mock("../../bindings", () => ({
   commands: {
@@ -330,6 +335,47 @@ describe("WorktreeChanges", () => {
     fireEvent.click(folder);
     fireEvent.click(folder);
     expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces watch invalidations while a Git refresh is in flight", async () => {
+    let resolve!: (
+      value: Awaited<ReturnType<typeof commands.loadWorktreeChanges>>
+    ) => void;
+    load.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      })
+    );
+    render(<WorktreeChanges worktreePath="/worktree" />);
+    const calls = vi.mocked(useWorktreeWatch).mock.calls;
+    const refresh = calls[calls.length - 1][1];
+    act(() => refresh());
+    act(() => refresh());
+    expect(load).toHaveBeenCalledTimes(1);
+    await act(async () => resolve({ status: "ok", data: empty }));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    await screen.findByText("No changes against this baseline.");
+  });
+
+  it("refreshes changes and loaded folders on watch signals while retaining document snapshots", async () => {
+    await openChangedFile();
+    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    const tree = screen.getByRole("navigation", { name: "Worktree files" });
+    fireEvent.click(await within(tree).findByRole("button", { name: /src/ }));
+    await within(tree).findByRole("button", { name: /util\.ts/ });
+    const reads = read.mock.calls.length;
+    const loads = load.mock.calls.length;
+    const lists = list.mock.calls.length;
+    disk["src/app.ts"] = text("external edit", "r2");
+    const calls = vi.mocked(useWorktreeWatch).mock.calls;
+    const refresh = calls[calls.length - 1][1];
+    act(() => refresh());
+    await waitFor(() => expect(load.mock.calls.length).toBeGreaterThan(loads));
+    await waitFor(() => expect(list.mock.calls.length).toBe(lists + 2));
+    expect(read).toHaveBeenCalledTimes(reads);
+    expect(
+      screen.getByRole("textbox", { name: "Edit src/app.ts" })
+    ).toHaveValue("unchanged line\nnew\n");
   });
 
   it("shares one draft between diff and file views and across files", async () => {

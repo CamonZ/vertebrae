@@ -88,7 +88,6 @@ fn fast_config() -> RecorderConfig {
         settle_delay: Duration::from_millis(20),
         settle_interval: Duration::from_millis(20),
         settle_timeout: Duration::from_millis(500),
-        idle_interval: Duration::from_millis(20),
         channel_capacity: 512,
         limits: Limits::default(),
     }
@@ -414,12 +413,58 @@ async fn later_tools_record_only_their_increment_reverts_and_no_ops() {
 }
 
 #[tokio::test]
+async fn idle_checkpoints_follow_filesystem_events_without_periodic_git_reads() {
+    let (_repo, worktree) = repo();
+    let (_annotations, store) = store();
+    let tap = RecordingTap::default();
+    tap.start(CHAT.into(), worktree.clone(), store, fast_config());
+    let gate = tap.lock().as_ref().unwrap().gate.clone();
+    let count = || gate.checkpoints.load(Ordering::Acquire);
+    let wait_for_checkpoint = |previous| {
+        let gate = gate.clone();
+        async move {
+            tokio::time::timeout(WAIT, async {
+                while gate.checkpoints.load(Ordering::Acquire) <= previous {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+    };
+    // Initial baseline plus the read closing watcher-registration startup.
+    wait_for_checkpoint(1).await;
+    // Longer than the removed 200 ms idle timer: a quiet worktree must not
+    // launch any further Git snapshots, even with no Changes view mounted.
+    let baseline = count();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(count(), baseline);
+    write(&worktree, "ignored/cache.bin", "ignored");
+    write(&worktree, "noise.log", "ignored");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(count(), baseline);
+    write(&worktree, "external.txt", "outside a tool");
+    wait_for_checkpoint(baseline).await;
+    // Drain the write burst, then stop the runtime subscription.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    tap.stop();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let stopped = count();
+    write(&worktree, "after-stop.txt", "outside the retired runtime");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(count(), stopped);
+}
+
+#[tokio::test]
 async fn existing_changes_idle_edits_and_ignored_files_are_never_attributed() {
     let (_repo, worktree) = repo();
     write(&worktree, "edit.txt", "dirty before recording\n");
     write(&worktree, "untracked.txt", "already here\n");
     let (_annotations, store) = store();
-    let session = Session::recording(&worktree, store, fast_config());
+    let tap = RecordingTap::default();
+    tap.start(CHAT.into(), worktree.clone(), store.clone(), fast_config());
+    let gate = tap.lock().as_ref().unwrap().gate.clone();
+    let session = Session::new("backend-1", CHAT, tap, store);
 
     session
         .tool("toolu_1", || {
@@ -432,7 +477,18 @@ async fn existing_changes_idle_edits_and_ignored_files_are_never_attributed() {
     // Between tool windows nothing is attributed.
     write(&worktree, "idle.txt", "idle edit\n");
     write(&worktree, "edit.txt", "edited while idle\n");
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    // Wait for the native signal's checkpoint rather than assuming a
+    // notification and Git read complete within a fixed wall-clock sleep.
+    tokio::time::timeout(WAIT, async {
+        loop {
+            let observed = gate.idle_snapshot.lock().unwrap().as_ref().is_some_and(|snapshot| {
+                snapshot.files.contains_key("idle.txt") && matches!(snapshot.files.get("edit.txt"),
+                    Some(super::git::Side::Content { bytes, .. }) if bytes.as_ref() == b"edited while idle\n")
+            });
+            if observed { break; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.unwrap();
     session
         .tool("toolu_2", || write(&worktree, "b.txt", "b\n"))
         .await;
@@ -731,10 +787,21 @@ async fn a_full_channel_drops_the_backlog_and_later_tools_record() {
     let mut config = fast_config();
     config.channel_capacity = 1;
     config.settle_delay = Duration::from_millis(200);
-    let session = Session::recording(&worktree, store, config);
+    let tap = RecordingTap::default();
+    tap.start(CHAT.into(), worktree.clone(), store.clone(), config);
+    let gate = tap.lock().as_ref().unwrap().gate.clone();
+    let session = Session::new("backend-1", CHAT, tap, store);
 
     session.root(tool_call("toolu_1", "Bash")).await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Ensure the first start was consumed before filling this one-slot
+    // channel; a fixed startup sleep races watcher setup under load.
+    tokio::time::timeout(WAIT, async {
+        while gate.start_pending() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     write(&worktree, "one.txt", "1\n");
     session.root(tool_output("toolu_1")).await;
     tokio::time::sleep(Duration::from_millis(50)).await;

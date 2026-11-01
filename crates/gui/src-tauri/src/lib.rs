@@ -13,6 +13,7 @@ pub(crate) mod telemetry;
 pub mod types;
 pub mod update;
 pub mod websocket_client;
+pub mod worktree_watch;
 
 #[cfg(test)]
 pub mod mock;
@@ -164,6 +165,8 @@ fn create_builder() -> Builder {
             commands::load_local_chat_session_replay,
             commands::discover_local_chat_child_sessions,
             commands::load_local_chat_annotations,
+            worktree_watch::watch_worktree,
+            worktree_watch::unwatch_worktree,
             commands::load_worktree_changes,
             commands::list_worktree_directory,
             commands::read_worktree_file,
@@ -198,6 +201,7 @@ fn create_builder() -> Builder {
             update::relaunch_application,
         ])
         .events(collect_events![
+            worktree_watch::WorktreeChangedEvent,
             ArtifactChangedEvent,
             NotificationChangedEvent,
             DaemonChangedEvent,
@@ -237,6 +241,14 @@ fn create_builder() -> Builder {
 pub fn run() {
     let builder = create_builder();
     let tauri_app_builder = tauri::Builder::default()
+        .manage(worktree_watch::WorktreeWatches::default())
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                window
+                    .state::<worktree_watch::WorktreeWatches>()
+                    .close_window(window.label());
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

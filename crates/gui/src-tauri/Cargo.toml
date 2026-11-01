@@ -29,6 +29,7 @@ serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 semver = "1"
 similar = "2"
+notify = "8"
 log = "0.4"
 thiserror = "2"
 tauri = { version = "2.11.5", features = ["macos-private-api", "specta"] }

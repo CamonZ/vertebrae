@@ -700,6 +700,32 @@ without preventing settings from loading; disabling retains the selection. See
 See [Local chat associations](chat-associations.md) for the inference flow,
 header disclosure, persistence and prototype limits.
 
+## Changes view filesystem refresh
+
+The mounted Changes view owns a Rust `notify` watch of its worktree. Native
+notifications are batched in fixed 150 ms windows and invalidate the Git change
+list and loaded Files folders. `.git` internals and access-only events are
+filtered before queueing; Git's `check-ignore` filters ignored paths, retaining
+tracked files and ignore negations. Queue overflow, OS rescan requests and
+filtering failures conservatively invalidate the lists. Watch startup failure
+is visible in the view, where manual Refresh remains available.
+
+The subscription is released on worktree changes, view unmount and native
+window destruction. Each mounted view has its own subscription identity, so
+notifications cannot refresh a different worktree. Git refreshes run serially
+and coalesce further invalidations into a pending read. Open documents retain
+their snapshot-at-read contents and drafts.
+
+The worktree-delta recorder uses the same native filesystem subscription
+implementation, owned by its runtime rather than the Changes view. A 25 ms
+batch window coalesces file events before refreshing an idle checkpoint;
+there is no periodic idle Git polling. Tool boundaries take priority over
+filesystem signals, and an idle snapshot is discarded if a tool start was
+queued while it was read. Tool completion still takes bounded settling
+snapshots to capture late writes. Watch registration failure disables recording
+with a warning instead of falling back to polling or using stale baselines.
+The recorder releases its subscription on shutdown or worktree replacement.
+
 ## Diff review comments
 
 Users comment on lines of a worktree diff (the Pierre gutter "+", click or

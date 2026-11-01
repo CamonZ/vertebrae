@@ -1038,6 +1038,22 @@ async loadLocalChatAnnotations(sessionId: string) : Promise<Result<LocalChatAnno
     else return { status: "error", error: e  as any };
 }
 },
+async watchWorktree(worktreePath: string) : Promise<Result<string, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("watch_worktree", { worktreePath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async unwatchWorktree(watchId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("unwatch_worktree", { watchId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Read a worktree only when the chat changes view is opened or refreshed.
  */
@@ -1368,7 +1384,8 @@ taskRunChangedEvent: TaskRunChangedEvent,
 taskRunStepChangedEvent: TaskRunStepChangedEvent,
 taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
-workflowTransitionChangedEvent: WorkflowTransitionChangedEvent
+workflowTransitionChangedEvent: WorkflowTransitionChangedEvent,
+worktreeChangedEvent: WorktreeChangedEvent
 }>({
 artifactChangedEvent: "artifact-changed-event",
 daemonChangedEvent: "daemon-changed-event",
@@ -1400,7 +1417,8 @@ taskRunChangedEvent: "task-run-changed-event",
 taskRunStepChangedEvent: "task-run-step-changed-event",
 taskStepChangedEvent: "task-step-changed-event",
 workflowChangedEvent: "workflow-changed-event",
-workflowTransitionChangedEvent: "workflow-transition-changed-event"
+workflowTransitionChangedEvent: "workflow-transition-changed-event",
+worktreeChangedEvent: "worktree-changed-event"
 })
 
 /** user-defined constants **/
@@ -2984,6 +3002,7 @@ workflow: Workflow;
  */
 tasks: Task[] }
 export type WorktreeChange = { path: string; old_path: string | null; status: FileStatus; patch: string; marker: MarkerReason | null }
+export type WorktreeChangedEvent = { watch_id: string }
 export type WorktreeChanges = { base_branch: string | null; base_unavailable: string | null; files: WorktreeChange[] }
 
 /** tauri-specta globals **/
