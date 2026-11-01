@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chatMessagesToThread } from "./chatMessagesToThread";
+import { EventRow } from "../thread/EventRow";
 import { EventLog, Thread } from "../thread";
 import { ChatSessionContext } from "../thread/toolChange/ChatSessionContext";
 import { routeLocalChatAnnotationEvent } from "../../hooks/useLocalChatEventRouter";
@@ -80,8 +81,16 @@ describe("tool change block in the chat transcript", () => {
           timestamp: TS,
         },
       ]);
-      expect(screen.getByText("1 file changed")).toBeTruthy();
-      expect(await screen.findByTestId("patch-diff")).toBeTruthy();
+      const group = screen.getByRole("button", { name: /1 call for/ });
+      expect(group).toHaveAttribute("aria-expanded", "false");
+      const diff = await screen.findByTestId("patch-diff");
+      expect(diff.closest(".tool-activity-group")).toBeNull();
+      expect(screen.getAllByText("1 file changed")).toHaveLength(1);
+      fireEvent.click(group);
+      fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
+      expect(screen.getAllByTestId("patch-diff")).toHaveLength(1);
+      fireEvent.click(group);
+      expect(diff).toBeInTheDocument();
     }
   );
 
@@ -116,6 +125,36 @@ describe("tool change block in the chat transcript", () => {
         timestamp: TS,
       },
     ]);
+    fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
     expect(screen.getByText("1 file changed")).toBeTruthy();
   });
+});
+
+it("keeps payload diffs outside nested agent tool groups at either disclosure level", async () => {
+  render(
+    <EventRow
+      type="agent"
+      evt="agent"
+      tools={[
+        {
+          type: "tool",
+          evt: "payload",
+          name: "Edit",
+          status: "done",
+          activityInput: { name: "Edit", input: { file_path: "a" } },
+          payloadDiffs: [{ path: "a", diff: PATCH }],
+          recordedResult: "edited",
+        },
+      ]}
+    />
+  );
+  const group = screen.getByRole("button", { name: /1 call for/ });
+  const diff = await screen.findByTestId("patch-diff");
+  expect(diff.closest(".tool-activity-group")).toBeNull();
+  fireEvent.click(group);
+  fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
+  expect(screen.getAllByTestId("patch-diff")).toHaveLength(1);
+  fireEvent.click(group);
+  expect(diff).toBeInTheDocument();
 });

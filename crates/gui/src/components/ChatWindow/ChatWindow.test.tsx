@@ -34,18 +34,14 @@ vi.mock("../../bindings", async () => {
   const { withBuiltinProviders } = await import("../../test/localChatCatalog");
   return {
     commands: {
-      loadWorktreeChanges: vi
-        .fn()
-        .mockResolvedValue({
-          status: "ok",
-          data: { base_branch: null, base_unavailable: "No base", files: [] },
-        }),
-      listWorktreeDirectory: vi
-        .fn()
-        .mockResolvedValue({
-          status: "ok",
-          data: { path: "", entries: [], truncated: false },
-        }),
+      loadWorktreeChanges: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: { base_branch: null, base_unavailable: "No base", files: [] },
+      }),
+      listWorktreeDirectory: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: { path: "", entries: [], truncated: false },
+      }),
       getCurrentProjectPath: vi.fn().mockResolvedValue({
         status: "ok",
         data: "/test/project",
@@ -788,8 +784,9 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    // Tool name is the collapsed header label.
-    expect(screen.getByText("Read")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /1 call for/ })
+    ).toBeInTheDocument();
     // Input is hidden until the block is expanded.
     expect(screen.queryByText('{"file_path": "/test.ts"}')).toBeNull();
   });
@@ -3337,9 +3334,10 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    // One tool row carrying the result body (a "has-body" card).
-    expect(screen.getByText("Read")).toBeInTheDocument();
-    expect(document.querySelector(".evtool.has-body")).toBeInTheDocument();
+    // The group counts the outer invocation once, including its late result.
+    expect(
+      screen.getByRole("button", { name: /1 call for/ })
+    ).toBeInTheDocument();
     // Collapsed tool bodies are not mounted until requested.
     expect(screen.queryByText("RESULT BODY")).not.toBeInTheDocument();
   });
@@ -3372,18 +3370,16 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    const header = document.querySelector(".evtool-hd") as HTMLElement;
-    expect(header).toBeTruthy();
-    // Collapsed by default.
-    expect(document.querySelector(".evtool.collapsed")).toBeInTheDocument();
-
-    // Click expands…
+    await user.click(screen.getByRole("button", { name: /1 call for/ }));
+    const header = screen.getByRole("button", { name: /Raw arguments/ });
+    expect(header).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("RESULT BODY")).not.toBeInTheDocument();
     await user.click(header);
-    expect(document.querySelector(".evtool.collapsed")).toBeNull();
-
-    // …and click again collapses.
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("RESULT BODY")).toBeInTheDocument();
     await user.click(header);
-    expect(document.querySelector(".evtool.collapsed")).toBeInTheDocument();
+    expect(header).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("RESULT BODY")).not.toBeInTheDocument();
   });
 
   // --- F) Permission request (interactive sibling of <Thread>) ---

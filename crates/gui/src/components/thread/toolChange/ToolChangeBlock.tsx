@@ -163,8 +163,11 @@ export function ToolChangeBlock({
           {n} {n === 1 ? "file" : "files"} changed
         </span>
         {toolName != null ? (
-          <span className="evtool-args">by {toolName}</span>
+          <span className="evtool-args">recorded around {toolName}</span>
         ) : null}
+        <span className="evtool-sum">
+          worktree observation · cause not established
+        </span>
         {delta.aggregate ? (
           <span className="evtool-sum">includes subagent work</span>
         ) : null}

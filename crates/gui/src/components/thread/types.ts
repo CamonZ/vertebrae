@@ -207,6 +207,10 @@ export interface SystemMessage extends BaseMessage {
  */
 export interface ToolMessage extends BaseMessage {
   type: "tool";
+  activityInput?: { name: string; input: Record<string, unknown> };
+  recordedResult?: string;
+  /** Original argument text, retained verbatim for raw disclosure. */
+  rawInput?: string;
   /** Provider tool-call id; joins the tool's recorded worktree annotation. */
   toolId?: string;
   /** Real diffs carried by the tool payload itself; rendered with Pierre. */

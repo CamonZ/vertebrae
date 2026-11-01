@@ -323,6 +323,8 @@ describe("ChatWindow diff review comments", () => {
   it("shares a tool-call comment with All Changes, then sends and clears it", async () => {
     seedSession();
     render(<ChatWindow sessionId="test-session" />);
+    fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
 
     fireEvent.click(
       await screen.findByRole("button", { name: "gutter file diff" })
@@ -366,6 +368,8 @@ describe("ChatWindow diff review comments", () => {
   it("writes a comment in All Changes, shows it inline and navigates back from its chip", async () => {
     seedSession();
     render(<ChatWindow sessionId="test-session" />);
+    fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
     fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await waitFor(() => expect(seen.items).toHaveLength(1));
     expect(seen.items[0].annotations).toEqual([]);
@@ -409,6 +413,8 @@ describe("ChatWindow diff review comments", () => {
   it("marks an All Changes comment outdated when the patch changes on refresh", async () => {
     seedSession();
     render(<ChatWindow sessionId="test-session" />);
+    fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
     fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await waitFor(() => expect(seen.items).toHaveLength(1));
     fireEvent.click(screen.getByRole("button", { name: "gutter code view" }));
@@ -454,6 +460,8 @@ describe("ChatWindow diff review comments", () => {
   it("places an All Changes comment on a tool call whose annotation arrives later", async () => {
     seedSession(false);
     render(<ChatWindow sessionId="test-session" />);
+    fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
     fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await waitFor(() => expect(seen.items).toHaveLength(1));
     fireEvent.click(screen.getByRole("button", { name: "gutter code view" }));

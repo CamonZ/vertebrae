@@ -1,0 +1,92 @@
+[
+  {
+    "label": "source inspection",
+    "title": "Read files",
+    "question": "read source files or local logs without modifying them?"
+  },
+  {
+    "label": "source search",
+    "title": "Search files",
+    "question": "search local files, symbols, or directory contents?"
+  },
+  {
+    "label": "file edits",
+    "title": "Edit files",
+    "question": "write or edit a file directly, or execute a script intended to write or edit a file? Include purposeful file creation, replacement, modification, moving or deletion through Python, shell, Node or other scripts. Use visible script contents and invocation context; do not assume an opaque external script writes files just because a path is mentioned. Reading files, printing source code, quoted editing instructions, incidental test/build artifacts and log redirection alone do not qualify."
+  },
+  {
+    "label": "documentation",
+    "title": "Documentation",
+    "question": "read documentation or command help?"
+  },
+  {
+    "label": "checks",
+    "title": "Validation",
+    "question": "run tests or validation? Include test runners, repository validation scripts, linters, formatters and type checks. A build-only command is building, not validation. Merely reading test logs, displaying CI results or mentioning tests in a string does not run tests or validation."
+  },
+  {
+    "label": "Git inspection",
+    "title": "Git inspection",
+    "question": "inspect Git history, refs, status, or diffs?"
+  },
+  {
+    "label": "Git changes",
+    "title": "Git changes",
+    "question": "change Git commits, index, refs, or checkout?"
+  },
+  {
+    "label": "Git synchronization",
+    "title": "Git synchronization",
+    "question": "fetch, push, pull, or clone a Git repository?"
+  },
+  {
+    "label": "GitHub inspection",
+    "title": "GitHub inspection",
+    "question": "read GitHub pull requests, issues, CI results, or repository metadata?"
+  },
+  {
+    "label": "GitHub changes",
+    "title": "GitHub changes",
+    "question": "create or change GitHub pull requests, issues, reviews, CI runs, or repository settings?"
+  },
+  {
+    "label": "environment management",
+    "title": "Environment management",
+    "question": "configure or manage development processes, services, dependencies, or worktrees?"
+  },
+  {
+    "label": "web requests",
+    "title": "Web requests",
+    "question": "retrieve data from a web service other than GitHub?"
+  },
+  {
+    "label": "builds",
+    "title": "Build",
+    "question": "build or compile an application, package, or other software artifact?"
+  },
+  {
+    "label": "task management",
+    "title": "Task management",
+    "question": "inspect, create, update, relate, or manage tasks, tickets, workflows, or execution records? Judge operations on those records, not source code or quoted text merely mentioning tasks or workflows."
+  },
+  {
+    "label": "coordination",
+    "title": "Coordination",
+    "question": "delegate work, exchange agent messages, wait for agents, or request a human decision? Merely polling a terminal process or sleeping is not agent or human coordination."
+  },
+  {
+    "label": "visual inspection",
+    "title": "Visual inspection",
+    "question": "inspect an application's UI structure, screenshots, images, or rendered output? Reading UI source code or merely creating an image does not qualify. This concerns observation, not clicking or typing."
+  },
+  {
+    "label": "UI interaction",
+    "title": "UI interaction",
+    "question": "operate a desktop application or browser through clicks, typing, keyboard input, navigation, or focus changes? Merely observing screenshots or UI structure does not qualify."
+  },
+  {
+    "label": "runtime inspection",
+    "title": "Runtime inspection",
+    "question": "inspect or diagnose a running application through runtime evaluation, logs, traces, database queries, or internal application state? Include application introspection through MCP tools such as Tidewave. Judge the visible code or query intent: runtime evaluation and SQL can mutate state, so a tool name alone does not establish inspection. Mutating application state, reading source code, or running tests alone does not qualify."
+  }
+]

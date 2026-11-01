@@ -750,3 +750,10 @@ and cleared on send. They are in-memory only; the DocumentEditor diff has none.
   `useNearViewport`, so their comments appear once the diff mounts.
 - CodeView only republishes an item when its `version` changes, so
   `AllChangesView` bumps the version when annotations or the diff change.
+
+### Tool activity disclosure
+
+The shared Thread renderer groups consecutive normalized tool calls with
+syntax-derived activity summaries and lazy raw disclosure. See
+[Tool activity summaries](tool-activity-summaries.md) for supported syntax,
+evidence limits, local evaluation and the compiled benchmark fixture.
