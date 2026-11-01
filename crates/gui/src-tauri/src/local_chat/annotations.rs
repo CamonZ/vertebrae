@@ -172,6 +172,15 @@ impl LocalChatAnnotationStore {
 
         let lock = self.session_lock(&annotation.session_id);
         let guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        // A late recorder may still own this session after UI deletion. The
+        // marker survives reload and shares the append/delete session lock.
+        if path
+            .with_extension("deleted")
+            .try_exists()
+            .map_err(|error| AnnotationStoreError::Io(error.to_string()))?
+        {
+            return Ok(());
+        }
         let written = fs::create_dir_all(self.directory()?)
             .and_then(|()| append_line(&path, &line))
             .map_err(|error| AnnotationStoreError::Io(error.to_string()));
@@ -219,6 +228,12 @@ impl LocalChatAnnotationStore {
         let path = self.session_path(session_id)?;
         let lock = self.session_lock(session_id);
         let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        // This app-owned directory is trusted, as for the annotation JSONL.
+        // Marker visibility prevents later appends; no power-loss durability
+        // guarantee is added to the existing metadata storage contract.
+        fs::create_dir_all(self.directory()?)
+            .and_then(|()| File::create(path.with_extension("deleted")))
+            .map_err(|error| AnnotationStoreError::Io(error.to_string()))?;
         remove_if_present(&path).map_err(|error| AnnotationStoreError::Io(error.to_string()))
     }
 

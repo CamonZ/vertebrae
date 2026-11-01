@@ -493,34 +493,37 @@ export function ChatWindowManager({
   const handleDeleteSession = useCallback(
     (sessionId: string) => {
       setDeleteError(null);
-      const target = useChatStore.getState().sessions[sessionId];
-      deleteLocalSession(sessionId);
-      bumpHistoryRevision();
 
-      if (target?.backendSessionId) {
-        const reportCloseFailure = () => {
-          try {
-            useNotificationStore.getState().addNotification({
-              message:
-                "The chat was deleted, but its provider session may still be running.",
-              type: "error",
-              entity: "application",
-              entityId: `local-chat-close-${sessionId}`,
-            });
-          } catch (error) {
-            console.error("Could not report local chat close failure", error);
+      const reportCloseFailure = () => {
+        try {
+          useNotificationStore.getState().addNotification({
+            message:
+              "The chat was deleted, but some session cleanup may have failed.",
+            type: "error",
+            entity: "application",
+            entityId: `local-chat-close-${sessionId}`,
+          });
+        } catch (error) {
+          console.error("Could not report local chat close failure", error);
+        }
+      };
+
+      void deleteLocalSession(sessionId, async (target) => {
+        const closed = await doCloseSession(
+          target.backendSessionId!,
+          target.id,
+          {
+            markSessionClosed,
+            setSessionLifecycle,
+            setBackendSessionId,
+            clearQueuedMessages,
           }
-        };
-
-        void doCloseSession(target.backendSessionId, sessionId, {
-          markSessionClosed,
-          setSessionLifecycle,
-          setBackendSessionId,
-          clearQueuedMessages,
-        }).then((closed) => {
-          if (!closed) reportCloseFailure();
-        }, reportCloseFailure);
-      }
+        );
+        if (!closed) throw new Error("Provider session close failed");
+      })
+        .catch(reportCloseFailure)
+        .finally(bumpHistoryRevision);
+      bumpHistoryRevision();
     },
     [
       bumpHistoryRevision,

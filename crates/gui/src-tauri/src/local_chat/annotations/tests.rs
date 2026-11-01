@@ -379,3 +379,18 @@ fn the_sweep_of_a_missing_directory_removes_nothing() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn deletion_blocks_late_appends_from_clones_and_after_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(&dir);
+    let entry = annotation("deleted-chat", "tool-1", "test", serde_json::json!({}));
+    store.append(entry.clone()).unwrap();
+    let producer = store.clone();
+    store.delete("deleted-chat").unwrap();
+    producer.append(entry.clone()).unwrap();
+    let reloaded = store_in(&dir);
+    reloaded.append(entry).unwrap();
+    assert!(reloaded.load("deleted-chat").unwrap().is_empty());
+    reloaded.delete("deleted-chat").unwrap();
+}

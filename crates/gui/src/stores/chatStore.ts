@@ -13,6 +13,8 @@ import {
   listPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
   markLocalChatSessionCleared,
+  isLocalChatSessionCleared,
+  allPersistedLocalChatSessions,
   normalizeProjectPath,
   persistLastUsedLocalChatModelId,
   persistLocalChatSession,
@@ -650,6 +652,7 @@ interface ChatStoreActions {
     title?: string | null;
     model?: string | null;
     ownerSessionId?: string;
+    providerParentResumeId?: string;
   }) => string;
   setProviderChildActivity: (
     sessionId: string,
@@ -674,7 +677,10 @@ interface ChatStoreActions {
   /** Create a fresh conversation in the source pane, retaining its settings and history. */
   clearConversation: (sessionId: string) => string | null;
   /** Delete one local persisted session and any in-memory copy */
-  deleteLocalSession: (sessionId: string) => void;
+  deleteLocalSession: (
+    sessionId: string,
+    close?: (session: ChatSession) => Promise<void>
+  ) => Promise<void>;
   /** Merge a live annotation into its open session; others load it on open. */
   applyToolAnnotation: (
     sessionId: string,
@@ -949,7 +955,7 @@ function createLocalSession(
   };
 }
 
-function providerThreadSessionId(
+export function providerThreadSessionId(
   harness: LocalChatHarnessKind,
   providerResumeId: string
 ): string {
@@ -1571,6 +1577,67 @@ function collapsePaneLayout(
 }
 
 export const useChatStore = create<ChatStore>((set, get) => {
+  const removeLocalSessionTree = (sessionId: string): ChatSession[] => {
+    // Resolve ownership before removing any records, including unloaded history.
+    const candidates = {
+      ...allPersistedLocalChatSessions(),
+      ...get().localSessionSummaries,
+      ...get().sessions,
+    };
+    const ids = new Set([sessionId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const session of Object.values(candidates)) {
+        const owner =
+          "providerChild" in session
+            ? session.providerChild?.ownerSessionId
+            : undefined;
+        const parent = session.providerParentResumeId;
+        if (
+          !ids.has(session.id) &&
+          ((owner && ids.has(owner)) ||
+            (parent &&
+              Object.values(candidates).some(
+                (ancestor) =>
+                  ids.has(ancestor.id) &&
+                  ancestor.harness === session.harness &&
+                  ancestor.providerResumeId === parent
+              )))
+        ) {
+          ids.add(session.id);
+          changed = true;
+        }
+      }
+    }
+    const removed = Object.values(get().sessions).filter((s) => ids.has(s.id));
+    for (const id of ids) {
+      markLocalChatSessionCleared(id);
+      const session = candidates[id];
+      if (session?.providerResumeId)
+        markLocalChatSessionCleared(
+          providerThreadSessionId(session.harness, session.providerResumeId)
+        );
+    }
+    set((state) => {
+      let next = state;
+      for (const id of ids)
+        next = { ...next, ...removeSessionFromRuntimeState(next, id) };
+      const keep = <T>(records: Record<string, T>) =>
+        Object.fromEntries(
+          Object.entries(records).filter(([id]) => !ids.has(id))
+        );
+      return {
+        ...next,
+        localSessionSummaries: keep(state.localSessionSummaries),
+        activityRevisions: keep(state.activityRevisions),
+        spawnOutlineRevisions: keep(state.spawnOutlineRevisions),
+        spawnOutlineSignatures: keep(state.spawnOutlineSignatures),
+      };
+    });
+    return removed;
+  };
+
   const requestProviderReplayPage = async (
     session: ChatSession,
     cursor: string | null
@@ -2519,9 +2586,24 @@ export const useChatStore = create<ChatStore>((set, get) => {
     ensureProviderThreadSession: (input) => {
       const id = providerThreadSessionId(input.harness, input.providerResumeId);
       const existing = get().sessions[id];
+      if (
+        isLocalChatSessionCleared(id) ||
+        (input.providerParentResumeId &&
+          isLocalChatSessionCleared(
+            providerThreadSessionId(input.harness, input.providerParentResumeId)
+          )) ||
+        (input.ownerSessionId &&
+          isLocalChatSessionCleared(input.ownerSessionId))
+      )
+        return id;
 
       if (!existing) {
         const session = hydrateLocalSession(createProviderThreadSession(input));
+        session.providerParentResumeId =
+          input.providerParentResumeId ??
+          (input.ownerSessionId
+            ? get().sessions[input.ownerSessionId]?.providerResumeId
+            : null);
         if (input.ownerSessionId)
           session.providerChild = {
             ownerSessionId: input.ownerSessionId,
@@ -2573,6 +2655,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }));
       }
 
+      if (input.ownerSessionId) {
+        const child = get().sessions[id];
+        const parent =
+          input.providerParentResumeId ??
+          child?.providerParentResumeId ??
+          get().sessions[input.ownerSessionId]?.providerResumeId;
+        if (child && parent && child.providerParentResumeId !== parent) {
+          const updated = { ...child, providerParentResumeId: parent };
+          set((state) => ({ sessions: { ...state.sessions, [id]: updated } }));
+          if (loadPersistedLocalChatSession(id))
+            void persistLocalChatSession(updated);
+        }
+      }
       return id;
     },
 
@@ -2660,6 +2755,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       });
 
       const selected = get().sessions[runtimeSessionId];
+      if (!selected) return null;
       hydrateProviderMessagesInPlace(runtimeSessionId, selected);
 
       set((state) => ({
@@ -2771,33 +2867,129 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return fresh.id;
     },
 
-    deleteLocalSession: (sessionId) => {
-      markLocalChatSessionCleared(sessionId);
-      if (typeof commands.deleteLocalChatAnnotations === "function") {
-        void commands.deleteLocalChatAnnotations(sessionId).then(
-          (result) => {
-            if (result.status === "error") {
-              console.warn(
-                "Failed to delete local chat annotations",
-                result.error
-              );
-            }
-          },
-          (error: unknown) =>
-            console.warn("Failed to delete local chat annotations", error)
+    deleteLocalSession: async (sessionId, close = async () => {}) => {
+      const known = new Map(
+        Object.entries({
+          ...allPersistedLocalChatSessions(),
+          ...get().localSessionSummaries,
+          ...get().sessions,
+        })
+      );
+      const removed = removeLocalSessionTree(sessionId);
+      const cleanup: Promise<unknown>[] = [];
+      const closed = new Set<string>();
+      const deleted = new Set<string>();
+      const visited = new Set<string>();
+      const errors: unknown[] = [];
+      const clean = (id: string) => {
+        if (deleted.has(id)) return;
+        deleted.add(id);
+        markLocalChatSessionCleared(id);
+        if (typeof commands.deleteLocalChatAnnotations === "function")
+          cleanup.push(
+            commands.deleteLocalChatAnnotations(id).then((result) => {
+              if (result.status === "error") throw result.error;
+            })
+          );
+      };
+      const closeRemoved = (sessions: ChatSession[]) => {
+        for (const session of sessions) {
+          if (!session.backendSessionId || closed.has(session.backendSessionId))
+            continue;
+          closed.add(session.backendSessionId);
+          cleanup.push(close(session));
+        }
+      };
+      closeRemoved(removed);
+      // Attach rejection handlers immediately while recursive discovery runs.
+      const observe = () =>
+        cleanup.splice(0).map((promise) =>
+          promise.catch((error: unknown) => {
+            errors.push(error);
+          })
         );
+      const pending = observe();
+      const visit = async (
+        session: Pick<
+          ChatSession,
+          "id" | "harness" | "providerResumeId" | "projectPath"
+        >
+      ) => {
+        clean(session.id);
+        pending.push(...observe());
+        if (!session.providerResumeId) return;
+        const id = providerThreadSessionId(
+          session.harness,
+          session.providerResumeId
+        );
+        clean(id);
+        pending.push(...observe());
+        if (visited.has(id)) return;
+        visited.add(id);
+        if (typeof commands.discoverLocalChatChildSessions !== "function")
+          return;
+        try {
+          const result = await commands.discoverLocalChatChildSessions({
+            session_id: session.id,
+            harness: session.harness,
+            provider_resume_id: session.providerResumeId,
+            project_path: session.projectPath ?? null,
+            created_at: null,
+            cursor: null,
+            limit: null,
+          });
+          if (result.status === "error") throw result.error;
+          for (const child of result.data) {
+            const childId = providerThreadSessionId(
+              session.harness,
+              child.provider_resume_id
+            );
+            closeRemoved(removeLocalSessionTree(childId));
+            pending.push(...observe());
+            await visit({
+              ...session,
+              id: childId,
+              providerResumeId: child.provider_resume_id,
+            });
+          }
+        } catch (error) {
+          errors.push(error);
+        }
+      };
+      // Hydration can contain descendants not represented by an open pane.
+      await hydrateLocalChatSessionIndex();
+      for (const [id, session] of Object.entries(
+        allPersistedLocalChatSessions()
+      ))
+        known.set(id, session);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const session of known.values()) {
+          if (
+            !deleted.has(session.id) &&
+            (session.id === sessionId ||
+              isLocalChatSessionCleared(session.id) ||
+              (session.providerParentResumeId &&
+                isLocalChatSessionCleared(
+                  providerThreadSessionId(
+                    session.harness,
+                    session.providerParentResumeId
+                  )
+                )))
+          ) {
+            changed = true;
+            closeRemoved(removeLocalSessionTree(session.id));
+            pending.push(...observe());
+            await visit(session);
+          }
+        }
       }
-      set((state) => {
-        const localSessionSummaries = omitLocalSessionSummary(
-          state.localSessionSummaries,
-          sessionId
-        );
-        if (!state.sessions[sessionId]) return { localSessionSummaries };
-        return {
-          ...removeSessionFromRuntimeState(state, sessionId),
-          localSessionSummaries,
-        };
-      });
+      clean(sessionId);
+      pending.push(...observe());
+      await Promise.all(pending);
+      if (errors.length)
+        throw new Error(`Chat tree cleanup failed (${errors.length} errors)`);
     },
 
     applyToolAnnotation: (sessionId, annotation) => {

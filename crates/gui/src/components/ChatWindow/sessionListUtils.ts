@@ -5,6 +5,7 @@ import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 export const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 
 export type SpawnOutlineItem = {
+  parentThreadId?: string;
   id: string;
   spawnId: string;
   threadId?: string;

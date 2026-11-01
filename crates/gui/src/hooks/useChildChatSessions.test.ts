@@ -25,6 +25,7 @@ const child = (id: string, active: boolean) => ({
 
 describe("child chat sessions", () => {
   beforeEach(() => {
+    localStorage.clear();
     vi.useFakeTimers();
     useChatStore.setState({
       sessions: { root },
@@ -61,6 +62,10 @@ describe("child chat sessions", () => {
       { threadId: "nested", isWorking: false, depth: 1 },
     ]);
     expect(replay).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().sessions["local-chat-codex-nested"]
+        .providerParentResumeId
+    ).toBe("worker");
 
     active = false;
     await act(async () => {
@@ -72,6 +77,72 @@ describe("child chat sessions", () => {
     const calls = discover.mock.calls.length;
     await vi.advanceTimersByTimeAsync(6000);
     expect(discover).toHaveBeenCalledTimes(calls);
+  });
+
+  it("does not recreate a deleted child from an in-flight response or later polls while the parent stays open", async () => {
+    const childId = useChatStore.getState().ensureProviderThreadSession({
+      harness: "codex",
+      providerResumeId: "worker",
+      ownerSessionId: "root",
+    });
+    const grandchildId = useChatStore.getState().ensureProviderThreadSession({
+      harness: "codex",
+      providerResumeId: "nested",
+      ownerSessionId: childId,
+    });
+    let resolve!: (
+      value: Awaited<ReturnType<typeof commands.discoverLocalChatChildSessions>>
+    ) => void;
+    const response = new Promise<
+      Awaited<ReturnType<typeof commands.discoverLocalChatChildSessions>>
+    >((done) => {
+      resolve = done;
+    });
+    let first = true;
+    const discover = vi
+      .spyOn(commands, "discoverLocalChatChildSessions")
+      .mockImplementation(async (input) => {
+        if (input.provider_resume_id === "root-thread") {
+          if (first) {
+            first = false;
+            return response;
+          }
+          return { status: "ok", data: [child("worker", true)] };
+        }
+        return {
+          status: "ok",
+          data:
+            input.provider_resume_id === "worker"
+              ? [child("nested", false)]
+              : [],
+        };
+      });
+    vi.spyOn(commands, "deleteLocalChatAnnotations").mockResolvedValue({
+      status: "ok",
+      data: null,
+    });
+    const { result, unmount } = renderHook(() =>
+      useChildChatSessions("root", true)
+    );
+    await act(async () => {
+      await useChatStore.getState().deleteLocalSession(childId);
+    });
+    await act(async () => {
+      resolve({ status: "ok", data: [child("worker", true)] });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(
+      discover.mock.calls.filter(
+        ([input]) => input.provider_resume_id === "root-thread"
+      ).length
+    ).toBeGreaterThan(1);
+    expect(useChatStore.getState().sessions.root).toBeDefined();
+    expect(useChatStore.getState().sessions[childId]).toBeUndefined();
+    expect(useChatStore.getState().sessions[grandchildId]).toBeUndefined();
+    expect(result.current.get("root")).toEqual([]);
+    unmount();
   });
 
   it("retries a transient discovery failure after an idle parent starts background work", async () => {
@@ -277,7 +348,10 @@ describe("child chat sessions", () => {
     await act(async () => {});
 
     expect(replay).toHaveBeenCalledTimes(1);
-    expect(useChatStore.getState().sessions[id].providerReplay).toMatchObject({ cacheKey: "assignment-ready", loaded: true });
+    expect(useChatStore.getState().sessions[id].providerReplay).toMatchObject({
+      cacheKey: "assignment-ready",
+      loaded: true,
+    });
     expect(useChatStore.getState().sessions[id].messages).toContainEqual(
       expect.objectContaining({ kind: "user", text: "The assigned prompt" })
     );

@@ -7,10 +7,19 @@ import {
   persistLocalChatSession,
 } from "../utils/localChatPersistence";
 import { commands } from "../bindings";
+import { routeLocalChatTextEvent } from "../hooks/useLocalChatEventRouter";
 import { doRegenerateSessionTitle } from "../hooks/useLocalChat";
 
 describe("chatStore", () => {
   beforeEach(() => {
+    vi.spyOn(commands, "discoverLocalChatChildSessions").mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+    vi.spyOn(commands, "deleteLocalChatAnnotations").mockResolvedValue({
+      status: "ok",
+      data: null,
+    });
     localStorage.clear();
     clearPersistedLocalChatSessions();
     // Reset store to initial state
@@ -1333,12 +1342,10 @@ describe("chatStore", () => {
       vi.spyOn(commands, "loadLocalChatSessionReplay")
         .mockResolvedValueOnce(page("partial answer", "r1"))
         .mockResolvedValueOnce(page("complete answer", "r2"));
-      const id = await useChatStore
-        .getState()
-        .selectProviderThreadSession({
-          harness: "codex",
-          providerResumeId: "child-thread",
-        });
+      const id = await useChatStore.getState().selectProviderThreadSession({
+        harness: "codex",
+        providerResumeId: "child-thread",
+      });
       await new Promise((resolve) => setTimeout(resolve, 0));
       useChatStore.getState().refreshProviderThreadSession(id!);
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1366,12 +1373,10 @@ describe("chatStore", () => {
               resolve = done;
             })
         );
-      const id = await useChatStore
-        .getState()
-        .selectProviderThreadSession({
-          harness: "codex",
-          providerResumeId: "background-child",
-        });
+      const id = await useChatStore.getState().selectProviderThreadSession({
+        harness: "codex",
+        providerResumeId: "background-child",
+      });
       await new Promise((done) => setTimeout(done, 0));
       useChatStore.getState().refreshProviderThreadSession(id!);
       expect(
@@ -1965,14 +1970,14 @@ describe("chatStore", () => {
       });
     });
 
-    it("deletes one local session without removing unrelated persisted sessions", () => {
+    it("deletes one local session without removing unrelated persisted sessions", async () => {
       const keep = useChatStore.getState().openSession("Keep", "/repo");
       const remove = useChatStore
         .getState()
         .startFreshSession("Remove", "/repo");
       useChatStore.getState().setProviderResumeId(remove, "conv-remove");
 
-      useChatStore.getState().deleteLocalSession(remove);
+      await useChatStore.getState().deleteLocalSession(remove);
 
       expect(loadPersistedLocalChatSession(remove)).toBeNull();
       expect(loadPersistedLocalChatSession(keep)?.id).toBe(keep);
@@ -1981,7 +1986,213 @@ describe("chatStore", () => {
       expect(isLocalChatSessionCleared(remove)).toBe(true);
     });
 
-    it("activates the newest remaining local session when deleting the active one", () => {
+    it("deletes a full tree including unloaded history and annotations, without closing a shared runtime twice", async () => {
+      const root = useChatStore.getState().openSession("Root", "/repo");
+      useChatStore.getState().setProviderResumeId(root, "root-thread");
+      const child = useChatStore.getState().ensureProviderThreadSession({
+        harness: "claude",
+        providerResumeId: "child",
+        ownerSessionId: root,
+      });
+      const grandchild = useChatStore.getState().ensureProviderThreadSession({
+        harness: "claude",
+        providerResumeId: "grandchild",
+        ownerSessionId: child,
+      });
+      const sibling = useChatStore.getState().ensureProviderThreadSession({
+        harness: "claude",
+        providerResumeId: "sibling",
+        ownerSessionId: root,
+      });
+      for (const id of [root, child, grandchild, sibling]) {
+        useChatStore
+          .getState()
+          .setBackendSessionId(id, id === sibling ? "shared" : "runtime-" + id);
+        await persistLocalChatSession(useChatStore.getState().sessions[id]);
+      }
+      useChatStore.getState().setBackendSessionId(child, "shared");
+      const keep = useChatStore
+        .getState()
+        .startFreshSession("Unrelated", "/repo");
+      const unloaded = {
+        ...useChatStore.getState().sessions[grandchild],
+        id: "unloaded",
+        providerResumeId: "unloaded-thread",
+        providerParentResumeId: "grandchild",
+      };
+      await persistLocalChatSession(unloaded);
+      const close = vi.fn().mockResolvedValue(undefined);
+      const deleting = useChatStore.getState().deleteLocalSession(root, close);
+      expect(Object.keys(useChatStore.getState().sessions)).toEqual([keep]);
+      await deleting;
+      expect(close).toHaveBeenCalledTimes(3);
+      for (const id of [root, child, grandchild, sibling, "unloaded"]) {
+        expect(loadPersistedLocalChatSession(id)).toBeNull();
+        expect(commands.deleteLocalChatAnnotations).toHaveBeenCalledWith(id);
+        expect(isLocalChatSessionCleared(id)).toBe(true);
+      }
+      await useChatStore.getState().hydrateLocalSessionIndex();
+      expect(Object.keys(useChatStore.getState().sessions)).toEqual([keep]);
+      await useChatStore.getState().deleteLocalSession(root, close);
+      expect(close).toHaveBeenCalledTimes(3);
+    });
+
+    it("deletes a child subtree, preserves its parent and sibling, and rejects late child creation", async () => {
+      const root = useChatStore.getState().openSession("Root", "/repo");
+      useChatStore.getState().setProviderResumeId(root, "root-thread");
+      const child = useChatStore.getState().ensureProviderThreadSession({
+        harness: "claude",
+        providerResumeId: "child",
+        ownerSessionId: root,
+      });
+      const grandchild = useChatStore.getState().ensureProviderThreadSession({
+        harness: "claude",
+        providerResumeId: "grandchild",
+        ownerSessionId: child,
+      });
+      const sibling = useChatStore.getState().ensureProviderThreadSession({
+        harness: "claude",
+        providerResumeId: "sibling",
+        ownerSessionId: root,
+      });
+      useChatStore.setState({
+        panelOpen: true,
+        activeSessionId: grandchild,
+        paneLayout: {
+          activePaneId: "child-pane",
+          panes: [
+            { id: "root-pane", sessionId: root },
+            { id: "child-pane", sessionId: grandchild },
+          ],
+        },
+      });
+      await useChatStore.getState().deleteLocalSession(child);
+      expect(Object.keys(useChatStore.getState().sessions).sort()).toEqual(
+        [root, sibling].sort()
+      );
+      expect(useChatStore.getState().activeSessionId).toBe(root);
+      expect(useChatStore.getState().panelOpen).toBe(true);
+      expect(
+        useChatStore
+          .getState()
+          .paneLayout.panes.every((p) => p.sessionId !== grandchild)
+      ).toBe(true);
+      useChatStore.getState().ensureProviderThreadSession({
+        harness: "claude",
+        providerResumeId: "child",
+        ownerSessionId: root,
+      });
+      useChatStore.getState().ensureProviderThreadSession({
+        harness: "claude",
+        providerResumeId: "late",
+        ownerSessionId: child,
+      });
+      expect(Object.keys(useChatStore.getState().sessions).sort()).toEqual(
+        [root, sibling].sort()
+      );
+      await useChatStore.getState().deleteLocalSession(root);
+      expect(useChatStore.getState().panelOpen).toBe(false);
+      expect(useChatStore.getState().activeSessionId).toBeNull();
+      expect(useChatStore.getState().paneLayout.panes).toEqual([]);
+    });
+
+    it("drops a late replay response and streamed child text after subtree deletion", async () => {
+      const root = useChatStore.getState().openSession("Root", "/repo");
+      useChatStore.getState().setBackendSessionId(root, "root-backend");
+      let resolve!: (
+        value: Awaited<ReturnType<typeof commands.loadLocalChatSessionReplay>>
+      ) => void;
+      vi.spyOn(commands, "loadLocalChatSessionReplay").mockImplementation(
+        () =>
+          new Promise((done) => {
+            resolve = done;
+          })
+      );
+      vi.spyOn(commands, "loadLocalChatAnnotations").mockResolvedValue({
+        status: "ok",
+        data: [],
+      });
+      const child = await useChatStore
+        .getState()
+        .selectProviderThreadSession({
+          harness: "claude",
+          providerResumeId: "child",
+          projectPath: "/repo",
+        });
+      expect(child).not.toBeNull();
+      await useChatStore.getState().deleteLocalSession(child!);
+      resolve({
+        status: "ok",
+        data: {
+          events: [],
+          cache_key: "old",
+          next_cursor: null,
+          has_more: false,
+        },
+      });
+      await new Promise((done) => setTimeout(done, 0));
+      expect(
+        routeLocalChatTextEvent({
+          backend_session_id: "root-backend",
+          harness: "claude",
+          thread_id: "child",
+          turn_id: "old-turn",
+          is_root: false,
+          parent_tool_use_id: null,
+          text: "late",
+          is_partial: false,
+        })
+      ).toBe(false);
+      expect(useChatStore.getState().sessions[child!]).toBeUndefined();
+      expect(useChatStore.getState().sessions[root].messages).toEqual([]);
+      expect(loadPersistedLocalChatSession(child!)).toBeNull();
+    });
+
+    it("discovers never-opened descendants and clears their annotations even when runtime cleanup fails", async () => {
+      const root = useChatStore.getState().openSession("Root", "/repo");
+      useChatStore.getState().setProviderResumeId(root, "root-thread");
+      useChatStore.getState().setBackendSessionId(root, "backend");
+      const annotations = new Set([
+        root,
+        "local-chat-claude-unopened",
+        "local-chat-claude-deeper",
+        "unrelated",
+      ]);
+      vi.mocked(commands.deleteLocalChatAnnotations).mockImplementation(
+        async (id) => {
+          annotations.delete(id);
+          return { status: "ok", data: null };
+        }
+      );
+      vi.mocked(commands.discoverLocalChatChildSessions).mockImplementation(
+        async (input) => ({
+          status: "ok",
+          data: (input.provider_resume_id === "root-thread"
+            ? ["unopened"]
+            : input.provider_resume_id === "unopened"
+              ? ["deeper"]
+              : []
+          ).map((id) => ({
+            provider_resume_id: id,
+            spawn_tool_call_id: null,
+            label: id,
+            is_active: null,
+          })),
+        })
+      );
+      await expect(
+        useChatStore.getState().deleteLocalSession(root, async () => {
+          throw new Error("close failed");
+        })
+      ).rejects.toThrow("cleanup failed");
+      expect(annotations).toEqual(new Set(["unrelated"]));
+      expect(useChatStore.getState().sessions).toEqual({});
+      expect(isLocalChatSessionCleared("local-chat-claude-deeper")).toBe(true);
+      await useChatStore.getState().hydrateLocalSessionIndex();
+      expect(useChatStore.getState().sessions).toEqual({});
+    });
+
+    it("activates the newest remaining local session when deleting the active one", async () => {
       const older = useChatStore.getState().openSession("Older", "/repo");
       useChatStore.getState().addMessage(older, {
         kind: "user",
@@ -1998,7 +2209,7 @@ describe("chatStore", () => {
         .getState()
         .startFreshSession("Active", "/repo");
 
-      useChatStore.getState().deleteLocalSession(active);
+      await useChatStore.getState().deleteLocalSession(active);
 
       expect(useChatStore.getState().activeSessionId).toBe(newer);
     });
