@@ -1,9 +1,10 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useContext, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import {
   DEFAULT_DIFF_HEIGHT,
   ResizableDiffViewport,
 } from "./ResizableDiffViewport";
+import { DiffReviewContext } from "./DiffReviewContext";
 import {
   MARKER_TEXT,
   type ChangedFile,
@@ -55,14 +56,20 @@ export function PlainPatch({
 }
 
 /** Lazily rendered Pierre diffs inside a resizable, viewport-gated frame. */
-function InlineDiffs({ patches }: { patches: string[] }): ReactNode {
+function InlineDiffs({
+  patches,
+  review,
+}: {
+  patches: string[];
+  review?: { toolUseId: string; toolName?: string };
+}): ReactNode {
   return (
     <ResizableDiffViewport
       placeholder={(limit) => <PlainPatch patches={patches} limit={limit} />}
     >
       <Suspense fallback={<PlainPatch patches={patches} />}>
         {patches.map((patch, i) => (
-          <LazyPatchFiles key={i} patch={patch} />
+          <LazyPatchFiles key={i} patch={patch} review={review} />
         ))}
       </Suspense>
     </ResizableDiffViewport>
@@ -113,16 +120,39 @@ export function ChangeUnavailable(): ReactNode {
 export function ToolChangeBlock({
   delta,
   toolName,
+  toolId,
 }: {
   delta: WorktreeDelta;
   toolName?: ReactNode;
+  /** Provider tool-call id; enables line comments on this call's patch. */
+  toolId?: string;
 }): ReactNode {
+  const sectionRef = useRef<HTMLElement>(null);
+  const review = useContext(DiffReviewContext);
+  const focusId = review?.focus?.commentId;
+  const focusNonce = review?.focus?.nonce;
+  const placements = review?.placements;
+  // Bring a requested comment's diff into view; the comment itself scrolls
+  // into view once the near-viewport diff has mounted.
+  useEffect(() => {
+    if (focusNonce === undefined || !toolId) return;
+    const here = placements?.some(
+      (placement) =>
+        placement.commentId === focusId &&
+        placement.surface.kind === "tool_call" &&
+        placement.surface.toolUseId === toolId
+    );
+    if (here) sectionRef.current?.scrollIntoView?.({ block: "center" });
+    // Only a new request should scroll, not later placement changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNonce]);
   const n = delta.files.length;
   const hasPatch = delta.patch.trim().length > 0;
   // Pierre's file headers cover files with hunks; list the rest explicitly.
   const listed = hasPatch ? delta.files.filter((f) => f.marker) : delta.files;
   return (
     <section
+      ref={sectionRef}
       className="evtool has-body evchange"
       data-testid="tool-change-block"
       aria-label="Worktree changes"
@@ -154,7 +184,19 @@ export function ToolChangeBlock({
           ))}
         </ul>
       ) : null}
-      {hasPatch ? <InlineDiffs patches={[delta.patch]} /> : null}
+      {hasPatch ? (
+        <InlineDiffs
+          patches={[delta.patch]}
+          review={
+            toolId
+              ? {
+                  toolUseId: toolId,
+                  ...(typeof toolName === "string" ? { toolName } : {}),
+                }
+              : undefined
+          }
+        />
+      ) : null}
     </section>
   );
 }

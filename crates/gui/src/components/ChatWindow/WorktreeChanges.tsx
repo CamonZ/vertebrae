@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useId,
   type KeyboardEvent,
@@ -14,6 +15,10 @@ import {
   type WorktreeChanges as Changes,
 } from "../../bindings";
 import { countPatchLines } from "../thread/toolChange/worktreeDelta";
+import {
+  parseWorktreeSnapshot,
+  type WorktreeSnapshot,
+} from "../thread/toolChange/diffComments";
 
 import { Select } from "../atoms/Select";
 import { preloadDiffRenderer } from "../thread/toolChange/useWorktreeDelta";
@@ -43,7 +48,7 @@ const NO_PATHS: readonly string[] = [];
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; data: Changes };
+  | { status: "ready"; data: Changes; wholeBranch: boolean };
 
 type SidebarMode = "changes" | "files";
 
@@ -53,7 +58,14 @@ type SidebarMode = "changes" | "files";
  * files or diffs. Documents hold the file as read; the lists refresh after a
  * save or on request. Drafts survive unmounting in the per-worktree store.
  */
-export function WorktreeChanges({ worktreePath }: { worktreePath: string }) {
+export function WorktreeChanges({
+  worktreePath,
+  onChangesLoaded,
+}: {
+  worktreePath: string;
+  /** Called with the parsed All Changes patch after every successful load. */
+  onChangesLoaded?: (snapshot: WorktreeSnapshot) => void;
+}) {
   const [wholeBranch, setWholeBranch] = useState(false);
   // Background refreshes keep the current list visible while Git runs.
   const [refresh, setRefresh] = useState({ count: 0, background: false });
@@ -95,7 +107,7 @@ export function WorktreeChanges({ worktreePath }: { worktreePath: string }) {
           setState({ status: "error", message: result.error.message });
         } else {
           setBaseBranch(result.data.base_branch);
-          setState({ status: "ready", data: result.data });
+          setState({ status: "ready", data: result.data, wholeBranch });
           setGeneration((value) => value + 1);
         }
       },
@@ -107,6 +119,20 @@ export function WorktreeChanges({ worktreePath }: { worktreePath: string }) {
       current = false;
     };
   }, [worktreePath, wholeBranch, refresh]);
+
+  const onChangesLoadedRef = useRef(onChangesLoaded);
+  onChangesLoadedRef.current = onChangesLoaded;
+  useEffect(() => {
+    if (state.status !== "ready") return;
+    onChangesLoadedRef.current?.(
+      parseWorktreeSnapshot(
+        state.wholeBranch,
+        state.data.files
+          .filter((file) => !file.marker)
+          .map((file) => file.patch)
+      )
+    );
+  }, [state]);
 
   const refreshAll = useCallback(() => {
     setRefresh((value) => ({ count: value.count + 1, background: true }));

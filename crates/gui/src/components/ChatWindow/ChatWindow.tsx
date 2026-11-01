@@ -1,4 +1,11 @@
-import { Profiler, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Profiler,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useChatSession } from "../../hooks/useChatSession";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatAssociation } from "../../hooks/useChatAssociation";
@@ -19,11 +26,28 @@ import { GateSteering } from "./GateSteering";
 import { useHumanInputDraft } from "../../hooks/useHumanInputDraft";
 import { localChatSessionProjectDisplayName } from "../../utils/localChatSessionGroups";
 import type {
-  PendingTextComment,
+  PendingComment,
+  PendingDiffComment,
   TextSelectionAnchor,
 } from "./assistantTextComments";
+import {
+  DiffReviewContext,
+  type DiffReviewFocus,
+  type DiffReviewValue,
+  type NewDiffComment,
+} from "../thread/toolChange/DiffReviewContext";
+import {
+  buildToolChain,
+  computePlacements,
+  createDiffComment,
+  reconcileWorktreeComments,
+  type WorktreeSnapshot,
+} from "../thread/toolChange/diffComments";
 
 let nextPendingCommentId = 0;
+let nextFocusNonce = 0;
+const NO_CHAIN: never[] = [];
+const NO_COMMENTS: PendingComment[] = [];
 
 interface ChatWindowProps {
   renderObserver?: (part: "transcript" | "composer") => void;
@@ -78,8 +102,18 @@ export function ChatWindow({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [pendingCommentState, setPendingCommentState] = useState<{
     sessionId: string;
-    comments: PendingTextComment[];
+    comments: PendingComment[];
   }>(() => ({ sessionId, comments: [] }));
+  // The All Changes patch as last loaded, kept after the Changes view closes
+  // so its comments can still be placed on the conversation's tool calls.
+  const [worktreeState, setWorktreeState] = useState<{
+    sessionId: string;
+    snapshot: WorktreeSnapshot;
+  } | null>(null);
+  const [focusState, setFocusState] = useState<{
+    sessionId: string;
+    focus: DiffReviewFocus;
+  } | null>(null);
 
   const childControlAvailable = useChatStore((state) => {
     const ownerId = state.sessions[sessionId]?.providerChild?.ownerSessionId;
@@ -97,9 +131,9 @@ export function ChatWindow({
   const pendingComments =
     pendingCommentState.sessionId === sessionId
       ? pendingCommentState.comments
-      : [];
+      : NO_COMMENTS;
   const updatePendingComments = useCallback(
-    (update: (comments: PendingTextComment[]) => PendingTextComment[]) => {
+    (update: (comments: PendingComment[]) => PendingComment[]) => {
       setPendingCommentState((current) => ({
         sessionId,
         comments: update(
@@ -115,12 +149,35 @@ export function ChatWindow({
         ...comments,
         {
           ...anchor,
+          kind: "text",
           id: `local-comment-${nextPendingCommentId++}`,
           body,
         },
       ]);
     },
     [updatePendingComments]
+  );
+  const handleAddDiffComment = useCallback(
+    (input: NewDiffComment) => {
+      const comment = createDiffComment({
+        ...input,
+        id: `local-comment-${nextPendingCommentId++}`,
+      });
+      if (comment) updatePendingComments((comments) => [...comments, comment]);
+    },
+    [updatePendingComments]
+  );
+  const handleWorktreeLoaded = useCallback(
+    (snapshot: WorktreeSnapshot) => {
+      setWorktreeState({ sessionId, snapshot });
+      // A refresh, baseline change or moved HEAD may have changed the lines
+      // All Changes comments were written on.
+      updatePendingComments(
+        (comments) =>
+          reconcileWorktreeComments(comments, snapshot) as PendingComment[]
+      );
+    },
+    [sessionId, updatePendingComments]
   );
   const handleUpdateComment = useCallback(
     (id: string, body: string) => {
@@ -157,6 +214,69 @@ export function ChatWindow({
     [chat.handleStartSession, updatePendingComments]
   );
 
+  const toolAnnotations = useChatStore(
+    (state) => state.sessions[sessionId]?.toolAnnotations
+  );
+  const hasDiffComments = pendingComments.some(
+    (comment) => comment.kind === "diff"
+  );
+  const toolChain = useMemo(
+    () => (hasDiffComments ? buildToolChain(toolAnnotations) : NO_CHAIN),
+    [hasDiffComments, toolAnnotations]
+  );
+  const worktreeSnapshot =
+    worktreeState?.sessionId === sessionId ? worktreeState.snapshot : null;
+  const placements = useMemo(
+    () => computePlacements(pendingComments, toolChain, worktreeSnapshot),
+    [pendingComments, toolChain, worktreeSnapshot]
+  );
+  const focus = focusState?.sessionId === sessionId ? focusState.focus : null;
+  const diffReview = useMemo<DiffReviewValue>(
+    () => ({
+      comments: pendingComments.filter(
+        (comment): comment is PendingDiffComment => comment.kind === "diff"
+      ),
+      placements,
+      chain: toolChain,
+      worktree: worktreeSnapshot,
+      focus,
+      addComment: handleAddDiffComment,
+      updateComment: handleUpdateComment,
+      removeComment: handleRemoveComment,
+    }),
+    [
+      pendingComments,
+      placements,
+      toolChain,
+      worktreeSnapshot,
+      focus,
+      handleAddDiffComment,
+      handleUpdateComment,
+      handleRemoveComment,
+    ]
+  );
+  const ownWorktreePath = association.record?.worktreePath;
+  const handleNavigateComment = useCallback(
+    (id: string) => {
+      const comment = pendingComments.find((candidate) => candidate.id === id);
+      if (comment?.kind !== "diff") return;
+      setFocusState({
+        sessionId,
+        focus: { commentId: id, nonce: nextFocusNonce++ },
+      });
+      if (comment.home.kind === "worktree") {
+        if (!ownWorktreePath) return;
+        activate(ownWorktreePath, null);
+        setChangesSession(sessionId);
+      } else if (changesSession === sessionId && ownWorktreePath) {
+        const dirty = dirtyPaths(ownWorktreePath);
+        if (dirty.length > 0) setLeaving(dirty);
+        else setChangesSession(null);
+      }
+    },
+    [pendingComments, sessionId, ownWorktreePath, changesSession]
+  );
+
   // A draftable gate's draft, read again whenever realtime updates report
   // that it changed; null for every other chat.
   const gate = chat.session?.gate ?? null;
@@ -183,7 +303,7 @@ export function ChatWindow({
   const showChanges = !!worktreePath && changesSession === sessionId;
   const isEmpty = chat.session.messages.length === 0;
 
-  return (
+  const content = (
     <div
       className="chat-association-panel flex h-full min-h-0 flex-col"
       data-testid="local-chat-window"
@@ -224,6 +344,7 @@ export function ChatWindow({
         >
           <button
             type="button"
+            data-testid="local-chat-view-conversation"
             aria-pressed={!showChanges}
             onClick={() => {
               const dirty = showChanges ? dirtyPaths(worktreePath) : [];
@@ -235,6 +356,7 @@ export function ChatWindow({
           </button>
           <button
             type="button"
+            data-testid="local-chat-view-changes"
             aria-pressed={showChanges}
             onClick={() => setChangesSession(sessionId)}
           >
@@ -248,6 +370,7 @@ export function ChatWindow({
             <WorktreeChanges
               key={`${sessionId}:${worktreePath}`}
               worktreePath={worktreePath}
+              onChangesLoaded={handleWorktreeLoaded}
             />
           </div>
         )}
@@ -374,6 +497,7 @@ export function ChatWindow({
               pendingComments={pendingComments}
               onUpdateComment={handleUpdateComment}
               onRemoveComment={handleRemoveComment}
+              onNavigateComment={handleNavigateComment}
               onSend={handleSend}
               onStartSession={handleStartSession}
               onHarnessChange={chat.handleHarnessChange}
@@ -386,5 +510,10 @@ export function ChatWindow({
         </div>
       </div>
     </div>
+  );
+  return (
+    <DiffReviewContext.Provider value={diffReview}>
+      {content}
+    </DiffReviewContext.Provider>
   );
 }
