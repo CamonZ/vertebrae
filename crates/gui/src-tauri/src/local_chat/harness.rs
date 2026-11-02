@@ -122,6 +122,11 @@ pub struct CreateLocalChatSessionInput {
     #[serde(default)]
     #[specta(optional)]
     pub recording_worktree: Option<String>,
+    /// Intended branch from the persisted association. Missing or detached
+    /// associations do not record; this is never inferred again on resume.
+    #[serde(default)]
+    #[specta(optional)]
+    pub recording_branch: Option<String>,
     pub working_dir: Option<String>,
     pub initial_prompt: Option<String>,
     pub provider_resume_id: Option<String>,

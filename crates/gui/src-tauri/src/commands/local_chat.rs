@@ -455,12 +455,13 @@ pub async fn set_local_chat_recording_worktree(
     local_chat_manager: State<'_, LocalChatSessionManager>,
     backend_session_id: String,
     worktree_path: Option<String>,
+    intended_branch: Option<String>,
 ) -> Result<(), LocalChatSessionError> {
     log::info!(
         "set_local_chat_recording_worktree called: backend_session_id={backend_session_id}, worktree_path={worktree_path:?}"
     );
     local_chat_manager
-        .set_recording_worktree(&backend_session_id, worktree_path)
+        .set_recording_worktree(&backend_session_id, worktree_path, intended_branch)
         .await
 }
 

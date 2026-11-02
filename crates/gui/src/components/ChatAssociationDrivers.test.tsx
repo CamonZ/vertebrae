@@ -118,7 +118,8 @@ describe("ChatAssociationDrivers", () => {
     await waitFor(() =>
       expect(commands.setLocalChatRecordingWorktree).toHaveBeenCalledWith(
         "local-s1-1",
-        worktree.path
+        worktree.path,
+        worktree.branch
       )
     );
     expect(resolve).toHaveBeenCalledTimes(1);

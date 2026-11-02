@@ -200,7 +200,13 @@ impl Session {
 
     fn recording(worktree: &Path, store: LocalChatAnnotationStore, config: RecorderConfig) -> Self {
         let tap = RecordingTap::default();
-        tap.start(CHAT.into(), worktree.to_path_buf(), store.clone(), config);
+        tap.start(
+            CHAT.into(),
+            worktree.to_path_buf(),
+            Some("main".into()),
+            store.clone(),
+            config,
+        );
         Self::new("backend-1", CHAT, tap, store)
     }
 
@@ -417,7 +423,13 @@ async fn idle_checkpoints_follow_filesystem_events_without_periodic_git_reads() 
     let (_repo, worktree) = repo();
     let (_annotations, store) = store();
     let tap = RecordingTap::default();
-    tap.start(CHAT.into(), worktree.clone(), store, fast_config());
+    tap.start(
+        CHAT.into(),
+        worktree.clone(),
+        Some("main".into()),
+        store,
+        fast_config(),
+    );
     let gate = tap.lock().as_ref().unwrap().gate.clone();
     let count = || gate.checkpoints.load(Ordering::Acquire);
     let wait_for_checkpoint = |previous| {
@@ -462,7 +474,13 @@ async fn existing_changes_idle_edits_and_ignored_files_are_never_attributed() {
     write(&worktree, "untracked.txt", "already here\n");
     let (_annotations, store) = store();
     let tap = RecordingTap::default();
-    tap.start(CHAT.into(), worktree.clone(), store.clone(), fast_config());
+    tap.start(
+        CHAT.into(),
+        worktree.clone(),
+        Some("main".into()),
+        store.clone(),
+        fast_config(),
+    );
     let gate = tap.lock().as_ref().unwrap().gate.clone();
     let session = Session::new("backend-1", CHAT, tap, store);
 
@@ -750,7 +768,16 @@ async fn unreadable_files_are_marked_and_later_tools_record_normally() {
     use std::os::unix::fs::PermissionsExt;
     let (_repo, worktree) = repo();
     let (_annotations, store) = store();
-    let session = Session::recording(&worktree, store, fast_config());
+    let tap = RecordingTap::default();
+    tap.start(
+        CHAT.into(),
+        worktree.clone(),
+        Some("main".into()),
+        store.clone(),
+        fast_config(),
+    );
+    let gate = tap.lock().as_ref().unwrap().gate.clone();
+    let session = Session::new("backend-1", CHAT, tap, store);
 
     session
         .tool("toolu_1", || {
@@ -768,7 +795,27 @@ async fn unreadable_files_are_marked_and_later_tools_record_normally() {
         std::fs::Permissions::from_mode(0o644),
     )
     .unwrap();
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    tokio::time::timeout(WAIT, async {
+        loop {
+            let readable = gate
+                .idle_snapshot
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|snapshot| {
+                    matches!(
+                        snapshot.files.get("secret.txt"),
+                        Some(super::git::Side::Content { .. })
+                    )
+                });
+            if readable {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("watcher absorbed the permission change");
     session
         .tool("toolu_2", || write(&worktree, "later.txt", "ok\n"))
         .await;
@@ -788,7 +835,13 @@ async fn a_full_channel_drops_the_backlog_and_later_tools_record() {
     config.channel_capacity = 1;
     config.settle_delay = Duration::from_millis(200);
     let tap = RecordingTap::default();
-    tap.start(CHAT.into(), worktree.clone(), store.clone(), config);
+    tap.start(
+        CHAT.into(),
+        worktree.clone(),
+        Some("main".into()),
+        store.clone(),
+        config,
+    );
     let gate = tap.lock().as_ref().unwrap().gate.clone();
     let session = Session::new("backend-1", CHAT, tap, store);
 
@@ -851,7 +904,13 @@ async fn stopping_discards_open_windows_and_late_results() {
     let mut config = fast_config();
     config.settle_delay = Duration::from_millis(200);
     let tap = RecordingTap::default();
-    tap.start(CHAT.into(), worktree.clone(), store.clone(), config);
+    tap.start(
+        CHAT.into(),
+        worktree.clone(),
+        Some("main".into()),
+        store.clone(),
+        config,
+    );
     let session = Session::new("backend-1", CHAT, tap.clone(), store);
 
     session
@@ -935,6 +994,7 @@ fn input(
         backend_session_id: backend.into(),
         chat_session_id: chat.into(),
         recording_worktree: worktree.map(|path| path.to_string_lossy().into_owned()),
+        recording_branch: worktree.and_then(|path| super::git::branch(path).unwrap()),
         working_dir: Some(project.to_string_lossy().into_owned()),
         initial_prompt: None,
         provider_resume_id: None,
@@ -1046,15 +1106,27 @@ async fn recording_target_contract_validates_switches_and_clears() {
         .tool("toolu_off", || write(&project, "off.txt", "off\n"))
         .await;
     let foreign_error = manager
-        .set_recording_worktree("backend-1", Some(foreign.to_string_lossy().into_owned()))
+        .set_recording_worktree(
+            "backend-1",
+            Some(foreign.to_string_lossy().into_owned()),
+            Some("main".into()),
+        )
         .await
         .unwrap_err();
     let unknown_error = manager
-        .set_recording_worktree("missing", Some(project.to_string_lossy().into_owned()))
+        .set_recording_worktree(
+            "missing",
+            Some(project.to_string_lossy().into_owned()),
+            Some("main".into()),
+        )
         .await
         .unwrap_err();
     manager
-        .set_recording_worktree("backend-1", Some(project.to_string_lossy().into_owned()))
+        .set_recording_worktree(
+            "backend-1",
+            Some(project.to_string_lossy().into_owned()),
+            Some("main".into()),
+        )
         .await
         .unwrap();
     session
@@ -1080,7 +1152,11 @@ async fn recording_target_contract_validates_switches_and_clears() {
         ],
     );
     manager
-        .set_recording_worktree("backend-1", Some(linked.to_string_lossy().into_owned()))
+        .set_recording_worktree(
+            "backend-1",
+            Some(linked.to_string_lossy().into_owned()),
+            Some("feature".into()),
+        )
         .await
         .unwrap();
     session.root(tool_output("toolu_switched")).await;
@@ -1088,7 +1164,7 @@ async fn recording_target_contract_validates_switches_and_clears() {
 
     // Clearing stops recording.
     manager
-        .set_recording_worktree("backend-1", None)
+        .set_recording_worktree("backend-1", None, None)
         .await
         .unwrap();
     session
@@ -1193,3 +1269,5 @@ async fn a_tool_that_finishes_before_its_snapshot_is_still_attributed() {
 
 mod patch_roundtrip;
 mod recorder_attribution;
+
+mod branch_guard;

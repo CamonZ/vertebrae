@@ -153,6 +153,7 @@ fn create_input(
         backend_session_id: backend_session_id.to_string(),
         chat_session_id: "chat-1".to_string(),
         recording_worktree: None,
+        recording_branch: None,
         working_dir: Some("/tmp/project".to_string()),
         initial_prompt: Some("hello".to_string()),
         provider_resume_id: Some("provider-resume-1".to_string()),

@@ -180,13 +180,13 @@ fn applying_the_recorded_patch_to_the_start_state_reproduces_the_end_state(tc: T
     let (_repo, worktree) = repo();
     run_ops(&tc, &worktree, 6, "before");
     let limits = git::Limits::default();
-    let start = git::snapshot(&worktree, &limits).unwrap();
+    let start = git::snapshot(&worktree, &limits, "main").unwrap();
     let scratch = TempDir::new().unwrap();
     let start_copy = scratch.path().join("start");
     copy_dir(&worktree, &start_copy);
 
     run_ops(&tc, &worktree, 6, "tool");
-    let end = git::snapshot(&worktree, &limits).unwrap();
+    let end = git::snapshot(&worktree, &limits, "main").unwrap();
     let delta = patch::compute(&worktree, &start, &end, &limits).unwrap();
 
     if delta.patch.is_empty() {

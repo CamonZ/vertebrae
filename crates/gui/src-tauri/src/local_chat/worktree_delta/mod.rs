@@ -23,6 +23,7 @@ use recorder::{Boundary, Recorder, RecorderEvent, RecorderGate};
 
 struct ActiveRecorder {
     worktree: PathBuf,
+    intended_branch: String,
     sender: mpsc::Sender<RecorderEvent>,
     gate: Arc<RecorderGate>,
 }
@@ -84,20 +85,27 @@ impl RecordingTap {
         &self,
         chat_session_id: String,
         worktree: PathBuf,
+        intended_branch: Option<String>,
         store: LocalChatAnnotationStore,
         config: RecorderConfig,
     ) {
+        let Some(intended_branch) = intended_branch else {
+            self.stop();
+            return;
+        };
         let (sender, receiver) = mpsc::channel(config.channel_capacity.max(1));
         let gate = Arc::new(RecorderGate::new());
         let recorder = Recorder {
             chat_session_id,
             worktree: worktree.clone(),
+            intended_branch: intended_branch.clone(),
             store,
             config,
             gate: gate.clone(),
         };
         let previous = self.lock().replace(ActiveRecorder {
             worktree,
+            intended_branch,
             sender,
             gate,
         });
@@ -116,10 +124,18 @@ impl RecordingTap {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn worktree(&self) -> Option<PathBuf> {
         self.lock()
             .as_ref()
             .map(|recorder| recorder.worktree.clone())
+    }
+
+    pub(crate) fn targets(&self, worktree: &Path, intended_branch: Option<&str>) -> bool {
+        self.lock().as_ref().is_some_and(|recorder| {
+            recorder.worktree == worktree
+                && Some(recorder.intended_branch.as_str()) == intended_branch
+        })
     }
 }
 
