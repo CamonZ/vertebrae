@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # A real rootless Podman lane in the disposable GUI acceptance container.
 set -euo pipefail
+feature_args=()
+if [ -n "${VTB_ACCEPTANCE_FEATURE_GLOB:-}" ]; then
+    feature_args=(--input "$VTB_ACCEPTANCE_FEATURE_GLOB")
+fi
 if [ "$(id -u)" -eq 0 ]; then
     # Assert absence on disk, not just a PATH that hides Docker binaries.
     test -z "$(find /usr /opt /bin /sbin -name docker -o -name docker-compose)"
@@ -94,4 +98,4 @@ for attempt in $(seq 1 100); do
     sleep 0.1
 done
 cd /app/crates/gui-acceptance
-"$1"
+"$1" "${feature_args[@]}"

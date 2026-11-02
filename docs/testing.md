@@ -514,12 +514,37 @@ and share a bounded deadline, including slow WebDriver requests. Failure
 screenshots are enabled by default; `GUI_ACCEPTANCE_SCREENSHOTS=all` restores
 per-action diagnostics. Mock delays that test cancellation remain intact.
 
-Suite execution remains sequential by default. The GUI already reuses a single
-WebDriver session and shares its installation links and mock response path.
-Any future GUI sharding must isolate those resources and assign every feature
-exactly once. Likewise, suite-level parallelism requires a separate build phase
-and immutable runtime artifacts; concurrently invoking today's build entrypoints
-would contend for the same Cargo target and staging paths. Compare the recorded
-execution times and available CPU/memory before adding either mechanism.
+Local suite execution remains sequential by default. CI runs two CLI, two daemon,
+and four GUI feature shards on separate runners. Each job owns its checkout,
+Compose project/database, build-cache identity, GUI installation links, WebDriver,
+mock response path and diagnostics artifact. Builds remain sequential within each
+job; separate runners deliberately repeat compilation rather than concurrently
+mutating shared targets or staged binaries. Sharing a single build in the future
+requires distributing immutable artifacts before runtime jobs start.
+
+Run one partition explicitly (indexes are one-based):
+
+```bash
+python3 scripts/acceptance.py gui --shard-index 1 --shard-count 4
+```
+
+Feature paths are sorted recursively and distributed round-robin. Each feature
+belongs to exactly one shard, preserving scenario/feature setup and the GUI's
+serial browser lifecycle. Existing `@skip`, Colima and Podman filtering still
+applies within each partition; the Podman phase receives the same feature glob.
+Empty/invalid partitions fail before containers start. `shard-manifest.json`
+records the selected feature paths alongside the normal diagnostics. Partitions
+balance file counts, not measured duration, so one long feature can still dominate.
+Adding features can rebalance partitions. Do not run shards concurrently in the
+same checkout/cache: the runner's exclusive locks remain enforced.
+
+CI also runs Rust validation/coverage, GUI static checks, and four Vitest file
+shards independently. Each Vitest shard has at most two workers; the full property
+case counts and assertions are retained. Rust coverage stays in one job to preserve
+the aggregate 75% gate without duplicating tests or incorrectly combining partial
+coverage. The `Check & Test` and `Acceptance Tests` aggregate jobs require every
+constituent job to succeed, including failed/canceled shards (`fail-fast: false`).
+Colima retains its existing independent required check.
+
 The existing dev/test optimization profiles are retained until a controlled
 benchmark demonstrates that aligning them improves total build-plus-test time.

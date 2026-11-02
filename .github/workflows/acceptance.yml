@@ -7,6 +7,10 @@ on:
     branches: [master]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   colima:
     name: Colima GUI project setup
@@ -81,7 +85,20 @@ jobs:
           if-no-files-found: warn
 
   acceptance:
-    name: Acceptance Tests
+    name: Acceptance ${{ matrix.suite }} (${{ matrix.shard }}/${{ matrix.count }})
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {suite: cli, shard: 1, count: 2}
+          - {suite: cli, shard: 2, count: 2}
+          - {suite: daemon, shard: 1, count: 2}
+          - {suite: daemon, shard: 2, count: 2}
+          - {suite: gui, shard: 1, count: 4}
+          - {suite: gui, shard: 2, count: 4}
+          - {suite: gui, shard: 3, count: 4}
+          - {suite: gui, shard: 4, count: 4}
     runs-on: ubuntu-24.04
     env:
       # Pin the source; bumping it also invalidates the image archive cache.
@@ -137,9 +154,9 @@ jobs:
       - name: Run acceptance suites
         env:
           # Isolate build caches for this disposable GitHub-hosted job.
-          VTB_ACCEPTANCE_CACHE_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          VTB_ACCEPTANCE_CACHE_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suite }}-${{ matrix.shard }}
           VTB_ACCEPTANCE_OUTPUT: ${{ github.workspace }}/test-output/acceptance
-        run: python3 scripts/acceptance.py
+        run: python3 scripts/acceptance.py ${{ matrix.suite }} --shard-index ${{ matrix.shard }} --shard-count ${{ matrix.count }}
 
       - name: Ensure acceptance resources are removed
         if: always()
@@ -151,6 +168,17 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          name: acceptance-${{ matrix.suite }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-output/acceptance
           if-no-files-found: warn
+
+  acceptance-summary:
+    name: Acceptance Tests
+    if: always()
+    needs: [acceptance]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every acceptance shard
+        env:
+          RESULT: ${{ needs.acceptance.result }}
+        run: test "$RESULT" = success

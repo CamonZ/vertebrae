@@ -8,15 +8,16 @@ use std::{
     fs::{self, File},
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Mutex,
     time::SystemTime,
 };
 
 const MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
 const MAX_INDEX_BYTES: usize = 2 * 1024 * 1024;
-const MAX_INDEXES: usize = 32;
+const MAX_INDEXES: usize = 512;
+const MAX_RETAINED_BYTES: usize = 64 * 1024 * 1024;
 
-type Entries<T> = VecDeque<(PathBuf, Arc<Mutex<FileIndex<T>>>)>;
+type Entries<T> = VecDeque<(PathBuf, FileIndex<T>)>;
 
 pub struct TranscriptDiscoveryIndex<T> {
     entries: Mutex<Entries<T>>,
@@ -24,6 +25,7 @@ pub struct TranscriptDiscoveryIndex<T> {
 
 struct FileIndex<T> {
     state: T,
+    weight: usize,
     offset: u64,
     ordinal: u64,
     length: u64,
@@ -35,6 +37,7 @@ impl<T: Default> Default for FileIndex<T> {
     fn default() -> Self {
         Self {
             state: T::default(),
+            weight: 0,
             offset: 0,
             ordinal: 0,
             length: 0,
@@ -56,159 +59,165 @@ impl<T: Default + Clone + Serialize> TranscriptDiscoveryIndex<T> {
     pub fn read(
         &self,
         path: &Path,
-        mut apply: impl FnMut(&mut T, &Value, u64) -> bool,
+        apply: impl FnMut(&mut T, &Value, u64) -> bool,
     ) -> Result<T, HarnessError> {
-        let entry = {
-            let mut entries = self
-                .entries
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-            let found = entries
-                .iter()
-                .position(|(key, _)| key == path)
-                .and_then(|index| entries.remove(index));
-            let value = found
-                .map(|(_, entry)| entry)
-                .unwrap_or_else(|| Arc::new(Mutex::new(FileIndex::default())));
-
-            entries.push_back((path.to_owned(), value.clone()));
-            while entries.len() > MAX_INDEXES {
-                entries.pop_front();
-            }
-
-            value
-        };
-
-        let mut index = entry
+        // Hold the bounded cache owner through a read: concurrent misses share
+        // the resulting index and cannot evict an in-flight entry then duplicate it.
+        let mut entries = self
+            .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-        let mut file = File::open(path).map_err(|error| {
-            HarnessError::Operation(format!(
-                "could not index transcript {}: {error}",
-                path.display()
-            ))
-        })?;
-        let metadata = file
-            .metadata()
-            .map_err(|error| HarnessError::Operation(error.to_string()))?;
-
-        let modified = metadata.modified().ok();
-        let identity = file_identity(&metadata);
-
-        if index.identity != identity
-            || metadata.len() < index.length
-            || (metadata.len() == index.length && index.modified != modified)
-        {
+        let found = entries
+            .iter()
+            .position(|(key, _)| key == path)
+            .and_then(|i| entries.remove(i));
+        entries.push_back((
+            path.to_owned(),
+            found.map(|(_, entry)| entry).unwrap_or_default(),
+        ));
+        while entries.len() > MAX_INDEXES {
+            entries.pop_front();
+        }
+        let index = &mut entries.back_mut().expect("inserted index").1;
+        let result = read_index(index, path, apply);
+        // I/O failures must not retain unaccounted partial state.
+        if result.is_err() {
             *index = FileIndex::default();
         }
+        while entries.iter().map(|(_, entry)| entry.weight).sum::<usize>() > MAX_RETAINED_BYTES {
+            entries.pop_front();
+        }
+        result
+    }
+}
 
-        if index.identity == identity
-            && index.length == metadata.len()
-            && index.modified == modified
-        {
-            return Ok(index.state.clone());
+fn read_index<T: Default + Clone + Serialize>(
+    index: &mut FileIndex<T>,
+    path: &Path,
+    mut apply: impl FnMut(&mut T, &Value, u64) -> bool,
+) -> Result<T, HarnessError> {
+    let mut file = File::open(path).map_err(|error| {
+        HarnessError::Operation(format!(
+            "could not index transcript {}: {error}",
+            path.display()
+        ))
+    })?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| HarnessError::Operation(error.to_string()))?;
+
+    let modified = metadata.modified().ok();
+    let identity = file_identity(&metadata);
+
+    if index.identity != identity
+        || metadata.len() < index.length
+        || (metadata.len() == index.length && index.modified != modified)
+    {
+        *index = FileIndex::default();
+    }
+
+    if index.identity == identity && index.length == metadata.len() && index.modified == modified {
+        return Ok(index.state.clone());
+    }
+
+    file.seek(SeekFrom::Start(index.offset))
+        .map_err(|error| HarnessError::Operation(error.to_string()))?;
+
+    // Freeze this read at the observed length; later appends belong to the
+    // next update. Partial final records are retried from their first byte.
+    let mut reader = BufReader::new(file.take(metadata.len().saturating_sub(index.offset)));
+    let mut bytes = Vec::new();
+
+    loop {
+        bytes.clear();
+        let read = reader
+            .by_ref()
+            .take(MAX_RECORD_BYTES as u64 + 1)
+            .read_until(b'\n', &mut bytes)
+            .map_err(|error| {
+                HarnessError::Operation(format!(
+                    "could not read transcript index {}: {error}",
+                    path.display()
+                ))
+            })?;
+
+        if read == 0 {
+            break;
         }
 
-        file.seek(SeekFrom::Start(index.offset))
-            .map_err(|error| HarnessError::Operation(error.to_string()))?;
+        if read > MAX_RECORD_BYTES {
+            log::warn!(
+                "skipping oversized discovery record path={} ordinal={} limit={MAX_RECORD_BYTES}",
+                path.display(),
+                index.ordinal
+            );
 
-        // Freeze this read at the observed length; later appends belong to the
-        // next update. Partial final records are retried from their first byte.
-        let mut reader = BufReader::new(file.take(metadata.len().saturating_sub(index.offset)));
-        let mut bytes = Vec::new();
+            let skipped = if bytes.ends_with(b"\n") {
+                0
+            } else {
+                reader
+                    .skip_until(b'\n')
+                    .map_err(|error| HarnessError::Operation(error.to_string()))?
+            };
 
-        loop {
-            bytes.clear();
-            let read = reader
-                .by_ref()
-                .take(MAX_RECORD_BYTES as u64 + 1)
-                .read_until(b'\n', &mut bytes)
-                .map_err(|error| {
-                    HarnessError::Operation(format!(
-                        "could not read transcript index {}: {error}",
-                        path.display()
-                    ))
-                })?;
+            index.offset += (read + skipped) as u64;
+            index.ordinal += 1;
+            continue;
+        }
 
-            if read == 0 {
-                break;
-            }
-
-            if read > MAX_RECORD_BYTES {
-                log::warn!(
-                    "skipping oversized discovery record path={} ordinal={} limit={MAX_RECORD_BYTES}",
-                    path.display(),
-                    index.ordinal
-                );
-
-                let skipped = if bytes.ends_with(b"\n") {
-                    0
-                } else {
-                    reader
-                        .skip_until(b'\n')
+        let complete = bytes.ends_with(b"\n");
+        match std::str::from_utf8(&bytes)
+            .ok()
+            .and_then(|line| serde_json::from_str::<Value>(line).ok())
+        {
+            Some(raw) => {
+                let ordinal = index.ordinal;
+                if apply(&mut index.state, &raw, ordinal) {
+                    let weight = serde_json::to_vec(&index.state)
                         .map_err(|error| HarnessError::Operation(error.to_string()))?
-                };
-
-                index.offset += (read + skipped) as u64;
-                index.ordinal += 1;
-                continue;
-            }
-
-            let complete = bytes.ends_with(b"\n");
-            match std::str::from_utf8(&bytes)
-                .ok()
-                .and_then(|line| serde_json::from_str::<Value>(line).ok())
-            {
-                Some(raw) => {
-                    let ordinal = index.ordinal;
-                    if apply(&mut index.state, &raw, ordinal) {
-                        let weight = serde_json::to_vec(&index.state)
-                            .map_err(|error| HarnessError::Operation(error.to_string()))?
-                            .len();
-                        if weight > MAX_INDEX_BYTES {
-                            *index = FileIndex::default();
-                            return Err(HarnessError::Operation(format!(
-                                "transcript discovery index exceeds {MAX_INDEX_BYTES} bytes: {}",
-                                path.display()
-                            )));
-                        }
+                        .len();
+                    if weight > MAX_INDEX_BYTES {
+                        *index = FileIndex::default();
+                        return Err(HarnessError::Operation(format!(
+                            "transcript discovery index exceeds {MAX_INDEX_BYTES} bytes: {}",
+                            path.display()
+                        )));
                     }
                 }
-                None if complete => log::warn!(
-                    "skipping malformed discovery record path={} ordinal={}",
-                    path.display(),
-                    index.ordinal
-                ),
-                None => {} // The provider may still be writing this codepoint/JSON record.
             }
-
-            if !complete {
-                break;
-            }
-
-            index.offset += read as u64;
-            index.ordinal += 1;
+            None if complete => log::warn!(
+                "skipping malformed discovery record path={} ordinal={}",
+                path.display(),
+                index.ordinal
+            ),
+            None => {} // The provider may still be writing this codepoint/JSON record.
         }
 
-        let weight = serde_json::to_vec(&index.state)
-            .map_err(|error| HarnessError::Operation(error.to_string()))?
-            .len();
-        if weight > MAX_INDEX_BYTES {
-            *index = FileIndex::default();
-            return Err(HarnessError::Operation(format!(
-                "transcript discovery index exceeds {MAX_INDEX_BYTES} bytes: {}",
-                path.display()
-            )));
+        if !complete {
+            break;
         }
 
-        index.length = metadata.len();
-        index.modified = modified;
-        index.identity = identity;
-
-        Ok(index.state.clone())
+        index.offset += read as u64;
+        index.ordinal += 1;
     }
+
+    let weight = serde_json::to_vec(&index.state)
+        .map_err(|error| HarnessError::Operation(error.to_string()))?
+        .len();
+    if weight > MAX_INDEX_BYTES {
+        *index = FileIndex::default();
+        return Err(HarnessError::Operation(format!(
+            "transcript discovery index exceeds {MAX_INDEX_BYTES} bytes: {}",
+            path.display()
+        )));
+    }
+
+    index.weight = weight;
+    index.length = metadata.len();
+    index.modified = modified;
+    index.identity = identity;
+
+    Ok(index.state.clone())
 }
 
 #[cfg(unix)]
@@ -262,6 +271,74 @@ mod tests {
             cache.read(&path, apply).unwrap(),
             vec![serde_json::json!({"id":3})]
         );
+    }
+
+    #[test]
+    fn unchanged_history_larger_than_the_old_cache_does_not_reparse() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = TranscriptDiscoveryIndex::<Vec<Value>>::default();
+        for id in 0..346 {
+            let path = dir.path().join(format!("{id}.jsonl"));
+            fs::write(&path, "{\"id\":1}\n").unwrap();
+            cache
+                .read(&path, |state, value, _| {
+                    state.push(value.clone());
+                    true
+                })
+                .unwrap();
+        }
+        for id in 0..346 {
+            cache
+                .read(&dir.path().join(format!("{id}.jsonl")), |_, _, _| {
+                    panic!("unchanged history reparsed")
+                })
+                .unwrap();
+        }
+        assert_eq!(cache.entries.lock().unwrap().len(), 346);
+    }
+
+    #[test]
+    fn evicts_by_entry_and_byte_budgets() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = TranscriptDiscoveryIndex::<Vec<Value>>::default();
+        let apply = |state: &mut Vec<Value>, value: &Value, _: u64| {
+            state.push(value.clone());
+            true
+        };
+        for id in 0..=MAX_INDEXES {
+            let path = dir.path().join(format!("{id}.jsonl"));
+            fs::write(&path, "{\"id\":1}\n").unwrap();
+            cache.read(&path, apply).unwrap();
+        }
+        assert_eq!(cache.entries.lock().unwrap().len(), MAX_INDEXES);
+        cache.entries.lock().unwrap()[0].1.weight = MAX_RETAINED_BYTES;
+        cache.read(&dir.path().join("0.jsonl"), apply).unwrap();
+        let entries = cache.entries.lock().unwrap();
+        assert!(entries.iter().map(|(_, entry)| entry.weight).sum::<usize>() <= MAX_RETAINED_BYTES);
+        assert!(!entries.iter().any(|(path, _)| path.ends_with("1.jsonl")));
+    }
+
+    #[test]
+    fn concurrent_reads_apply_each_record_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("records.jsonl");
+        fs::write(&path, "{\"id\":1}\n").unwrap();
+        let cache = TranscriptDiscoveryIndex::<Vec<Value>>::default();
+        let count = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    cache
+                        .read(&path, |state, value, _| {
+                            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            state.push(value.clone());
+                            true
+                        })
+                        .unwrap();
+                });
+            }
+        });
+        assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -351,6 +428,22 @@ struct PathEntry {
 }
 
 impl TranscriptDiscoveryPaths {
+    /// Seed a directly discovered child path, bypassing stale negative inventory.
+    pub fn remember(&self, root: &Path, id: &str, path: &Path) {
+        if id.len() > 1024 {
+            return;
+        }
+        if let Some(path) = super::validated_file(root, path) {
+            self.retain(PathEntry {
+                root: root.to_owned(),
+                id: id.to_owned(),
+                path: Some(path),
+                retry: std::time::Instant::now(),
+                misses: 0,
+            });
+        }
+    }
+
     pub fn find(
         &self,
         root: &Path,

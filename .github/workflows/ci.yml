@@ -9,9 +9,13 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  ci:
-    name: Check & Test
+  rust:
+    name: Rust checks and coverage
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -36,13 +40,61 @@ jobs:
           cache: npm
           cache-dependency-path: crates/gui/package-lock.json
 
-      - name: Install GUI dependencies
-        run: npm ci
-        working-directory: crates/gui
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Run authoritative validation
-        run: scripts/validate.sh
+      - name: Stage Tauri sidecars
+        run: SIDECAR_PROFILE=debug npm --prefix crates/gui run tauri:prepare-sidecars
+
+      - name: Run Rust validation
+        run: scripts/validate.sh rust
+
+  gui-static:
+    name: GUI static checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: crates/gui/package-lock.json
+      - run: npm ci
+        working-directory: crates/gui
+      - run: npm run test:sidecars && npm run lint && npm run typecheck
+        working-directory: crates/gui
+      - name: Test acceptance orchestration contracts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_acceptance*.py'
+
+  gui-tests:
+    name: GUI tests (${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: crates/gui/package-lock.json
+      - run: npm ci
+        working-directory: crates/gui
+      - name: Run GUI test shard
+        run: npx vitest run --shard=${{ matrix.shard }}/4 --maxWorkers=2
+        working-directory: crates/gui
+
+  ci:
+    name: Check & Test
+    if: always()
+    needs: [rust, gui-static, gui-tests]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every validation job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 -c 'import json, os; results=json.loads(os.environ["RESULTS"]); assert all(job["result"] == "success" for job in results.values()), results'

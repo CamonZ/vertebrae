@@ -289,6 +289,7 @@ impl ClaudeTranscriptReplay {
                 .and_then(|meta| meta.get("finished"))
                 .and_then(Value::as_bool);
 
+            crate::replay::discovery_paths().remember(&self.provider_root()?, stem, &candidate);
             children.push(TranscriptChildSession {
                 provider_resume_id: ProviderResumeId::new(stem),
                 spawn_tool_call_id: Some(ToolCallId::new(tool_id)),

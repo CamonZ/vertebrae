@@ -8,12 +8,14 @@
 mod adapter;
 mod cache;
 mod cursor;
+mod directory;
 mod index;
 mod revision;
 mod tail;
 
 pub use adapter::{record_timestamp, safe_filename, validated_file};
 pub use cache::TranscriptReplayCache;
+pub use directory::TranscriptDirectorySnapshot;
 pub use index::{TranscriptDiscoveryIndex, TranscriptDiscoveryPaths};
 pub use revision::TranscriptRevision;
 pub use tail::{TranscriptTailLines, tail_read_budget};

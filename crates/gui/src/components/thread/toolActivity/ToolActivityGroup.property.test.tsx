@@ -179,5 +179,6 @@ test(
       },
       { testCases: 60 }
     ),
-  15000
+  // Sixty DOM-heavy generated cases take longer on two-core CI runners.
+  60000
 );

@@ -11,6 +11,20 @@ import {
 import { isLocalChatSessionCleared } from "../utils/localChatPersistence";
 import type { SpawnOutlineItem } from "../components/ChatWindow/sessionListUtils";
 
+// Tauri invokes cannot be aborted. Serialize command ownership across close/open
+// and Strict Mode rechecks; a retired queued request never starts native work.
+let discoveryTail: Promise<unknown> = Promise.resolve();
+function discoverWhenCurrent(
+  input: Parameters<typeof commands.discoverLocalChatChildSessions>[0],
+  retired: () => boolean
+) {
+  const result = discoveryTail.then(() =>
+    retired() ? null : commands.discoverLocalChatChildSessions(input)
+  );
+  discoveryTail = result.catch(() => {});
+  return result;
+}
+
 // Discovery rows are in ancestor-first order. Suppress a deleted branch even
 // when its deeper IDs have not yet been found by background deletion.
 function visibleChildRows(
@@ -43,15 +57,18 @@ export function useChildChatSessions(
     () => new Map()
   );
 
+  const previousBusy = useRef(new Set<string>());
   const wake = useRef<() => void>(() => {});
-  const liveToken = useChatStore((state) =>
-    Object.values(state.sessions)
-      .map((session) =>
-        session.providerChild
-          ? `${session.id}:${session.providerChild.active}:${session.providerChild.turnId}`
-          : `${session.id}:${session.providerChildrenStopped ?? false}`
-      )
-      .join("\0")
+  const liveToken = useChatStore(
+    (state) =>
+      Object.values(state.sessions)
+        .map((session) =>
+          session.providerChild
+            ? `${session.id}:${session.providerChild.active}:${session.providerChild.turnId}`
+            : `${session.id}:${session.providerChildrenStopped ?? false}:${getLocalChatLifecycle(session)}:${session.providerResumeId}`
+        )
+        .join("\0") +
+      `:${state.activeSessionId}:${state.paneLayout.panes.map((pane) => pane.sessionId).join(",")}`
   );
 
   useEffect(() => {
@@ -64,6 +81,7 @@ export function useChildChatSessions(
     let retired = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let running = false;
+    let pendingWake = false;
     let failures = 0;
     const reportedFailures = new Set<string>();
 
@@ -81,13 +99,46 @@ export function useChildChatSessions(
       running = true;
 
       try {
-        const sessions = Object.values(useChatStore.getState().sessions).filter(
-          (session) => session.status === "open" && !!session.providerResumeId
+        const stateAtStart = useChatStore.getState();
+        const selected = new Set(
+          stateAtStart.paneLayout.panes.map((pane) => pane.sessionId)
         );
+        if (stateAtStart.activeSessionId)
+          selected.add(stateAtStart.activeSessionId);
+        // Selecting a child also refreshes its owner so sibling/terminal evidence
+        // is retained. Idle history is discovered only when selected again.
+        for (const id of [...selected]) {
+          const owner =
+            stateAtStart.sessions[id]?.providerChild?.ownerSessionId;
+          if (owner) selected.add(owner);
+        }
+        const busyIds = new Set(
+          Object.values(stateAtStart.sessions)
+            .filter(
+              (session) =>
+                session.providerChild?.active === true ||
+                isLocalChatLifecycleBusy(getLocalChatLifecycle(session))
+            )
+            .map(
+              (session) => session.providerChild?.ownerSessionId ?? session.id
+            )
+        );
+        const sessions = Object.values(stateAtStart.sessions).filter(
+          (session) =>
+            session.status === "open" &&
+            !!session.providerResumeId &&
+            (selected.has(session.id) ||
+              busyIds.has(session.id) ||
+              previousBusy.current.has(session.id))
+        );
+        previousBusy.current = busyIds;
 
         let discoveryFailed = false;
         const liveAtStart = new Map(
-          sessions.map((session) => [session.id, session.updatedAt])
+          Object.values(stateAtStart.sessions).map((session) => [
+            session.id,
+            session.updatedAt,
+          ])
         );
         const next = new Map<string, SpawnOutlineItem[]>();
         const discovered = new Map<string, Promise<SpawnOutlineItem[]>>();
@@ -112,21 +163,31 @@ export function useChildChatSessions(
           const cached = discovered.get(key);
           if (cached) return cached;
 
-          const pending = (async () => {
-            const result = await commands.discoverLocalChatChildSessions({
-              session_id: key,
-              harness,
-              provider_resume_id: resumeId,
-              project_path: projectPath ?? null,
-              created_at: null,
-              cursor: null,
-              limit: null,
-            });
+          if (discovered.size >= 256 || ancestors.size >= 32)
+            return Promise.reject(
+              new Error("Child discovery exceeds its conversation/depth budget")
+            );
 
-            if (retired) return [];
+          const pending = (async () => {
+            const result = await discoverWhenCurrent(
+              {
+                session_id: key,
+                harness,
+                provider_resume_id: resumeId,
+                project_path: projectPath ?? null,
+                created_at: null,
+                cursor: null,
+                limit: null,
+              },
+              () => retired
+            );
+
+            if (retired || !result) return [];
             if (result.status === "error")
               throw new Error(providerReplayErrorMessage(result.error));
 
+            if (result.data.length > 2048)
+              throw new Error("Child discovery exceeds its row budget");
             const rows: SpawnOutlineItem[] = [];
             const lineage = new Set([...ancestors, key]);
 
@@ -142,6 +203,8 @@ export function useChildChatSessions(
               )
                 continue;
 
+              if (rows.length >= 2048)
+                throw new Error("Child discovery exceeds its row budget");
               rows.push({
                 id: `${harness}:${child.provider_resume_id}`,
                 spawnId: child.spawn_tool_call_id ?? child.provider_resume_id,
@@ -162,6 +225,8 @@ export function useChildChatSessions(
                   projectPath,
                   lineage
                 );
+                if (rows.length + nested.length > 2048)
+                  throw new Error("Child discovery exceeds its row budget");
                 rows.push(
                   ...nested.map((row) => ({
                     ...row,
@@ -241,10 +306,28 @@ export function useChildChatSessions(
 
         setOutlines((previous) => {
           const merged = new Map(previous);
-          for (const [id, rows] of next) merged.set(id, rows);
+          for (const [id, rows] of next) {
+            merged.delete(id);
+            merged.set(id, rows);
+          }
           for (const id of merged.keys()) {
-            if (!sessions.some((session) => session.id === id))
+            if (!useChatStore.getState().sessions[id]) merged.delete(id);
+          }
+          // Detailed snapshots are expendable: persisted child lineage in the
+          // store/history projection preserves older outlines after eviction.
+          let retainedBytes = 0;
+          let retainedEntries = 0;
+          for (const [id, rows] of [...merged].reverse()) {
+            const bytes = JSON.stringify(rows).length * 2;
+            if (
+              retainedEntries >= 128 ||
+              retainedBytes + bytes > 8 * 1024 * 1024
+            )
               merged.delete(id);
+            else {
+              retainedBytes += bytes;
+              retainedEntries += 1;
+            }
           }
           return JSON.stringify([...merged]) === JSON.stringify([...previous])
             ? previous
@@ -283,9 +366,7 @@ export function useChildChatSessions(
         if (!discoveryFailed) reportedFailures.clear();
 
         const busy =
-          Object.values(useChatStore.getState().sessions).some(
-            (session) => session.providerChild?.active === true
-          ) ||
+          busyIds.size > 0 ||
           sessions.some((session) =>
             isLocalChatLifecycleBusy(getLocalChatLifecycle(session))
           ) ||
@@ -300,13 +381,22 @@ export function useChildChatSessions(
         timer = setTimeout(() => void refresh(), delay);
       } finally {
         running = false;
+        if (pendingWake && !retired) {
+          pendingWake = false;
+          clearTimeout(timer);
+          timer = setTimeout(() => void refresh(), 0);
+        }
       }
     };
 
     // Metadata/activity changes wake the existing owner; they never retire an
     // in-flight request merely because another streamed message arrived.
     wake.current = () => {
-      if (running || retired) return;
+      if (retired) return;
+      if (running) {
+        pendingWake = true;
+        return;
+      }
       clearTimeout(timer);
       timer = setTimeout(() => void refresh(), 0);
     };
