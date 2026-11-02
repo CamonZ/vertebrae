@@ -4,6 +4,10 @@
 # writes the Sacrum config, and hands off to cargo test.
 
 set -euo pipefail
+feature_args=()
+if [ -n "${VTB_ACCEPTANCE_FEATURE_GLOB:-}" ]; then
+    feature_args=(--input "$VTB_ACCEPTANCE_FEATURE_GLOB")
+fi
 source /app/docker/acceptance-timing.sh
 ACCEPTANCE_SUITE=daemon
 
@@ -44,4 +48,4 @@ export CUCUMBER_FILTER_TAGS="${CUCUMBER_FILTER_TAGS:-not @skip}"
 
 echo "==> Running daemon-acceptance tests..."
 acceptance_time build-tests cargo test --locked -p daemon-acceptance --test daemon_acceptance --no-run
-acceptance_time scenarios cargo test --locked -p daemon-acceptance --test daemon_acceptance
+acceptance_time scenarios cargo test --locked -p daemon-acceptance --test daemon_acceptance -- "${feature_args[@]}"

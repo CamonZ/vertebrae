@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+feature_args=()
+if [ -n "${VTB_ACCEPTANCE_FEATURE_GLOB:-}" ]; then
+    feature_args=(--input "$VTB_ACCEPTANCE_FEATURE_GLOB")
+fi
 source /app/docker/acceptance-timing.sh
 ACCEPTANCE_SUITE=gui
 cleanup() {
@@ -136,7 +140,7 @@ echo "==> Running GUI acceptance tests..."
 acceptance_time build-tests cargo test --locked -p gui-acceptance --test gui_acceptance --no-run --message-format=json > /tmp/gui-acceptance-build.jsonl
 status=0
 if [ "${GUI_ACCEPTANCE_PODMAN_ONLY:-0}" != 1 ]; then
-    acceptance_time scenarios cargo test --locked -p gui-acceptance --test gui_acceptance -- "$@" || status=$?
+    acceptance_time scenarios cargo test --locked -p gui-acceptance --test gui_acceptance -- "${feature_args[@]}" "$@" || status=$?
 fi
 podman_status=0
 acceptance_time podman-scenarios /app/docker/gui-podman-entrypoint.sh || podman_status=$?

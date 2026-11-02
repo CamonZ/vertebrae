@@ -30,6 +30,23 @@ def cache_key(value):
     return f"vtb-acceptance-{slug}-{digest}"
 
 
+def shard_features(suite, index, count):
+    """Stable file partition: every feature belongs to exactly one isolated job."""
+    if not 1 <= index <= count:
+        raise ValueError("shard index must be between 1 and shard count")
+    crate = {"cli": "acceptance", "gui": "gui-acceptance", "daemon": "daemon-acceptance"}[suite]
+    directory = ROOT / "crates" / crate / "tests/features"
+    features = sorted(directory.rglob("*.feature"))
+    selected = features[index - 1::count]
+    if not selected:
+        raise ValueError("empty acceptance shard; reduce shard count")
+    names = [path.relative_to(directory).as_posix() for path in selected]
+    if any(not re.fullmatch(r"(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.feature", name) for name in names):
+        raise ValueError("feature filename cannot be represented safely in the shard glob")
+    pattern = names[0] if len(names) == 1 else "{" + ",".join(names) + "}"
+    return f"/app/crates/{crate}/tests/features/{pattern}", names
+
+
 def image_env(suite):
     return f"VTB_ACCEPTANCE_IMAGE_{suite.upper()}"
 
@@ -161,7 +178,9 @@ def execute(suites, env, output):
             status = run(compose + ["run", "--rm", "seeder"], env, output, "seed")
         if not status:
             for suite in suites:
-                result = run(compose + ["run", "--rm", "--no-deps", SUITES[suite]], env, output, suite)
+                shard_env = (["-e", f"VTB_ACCEPTANCE_FEATURE_GLOB={env['VTB_ACCEPTANCE_FEATURE_GLOB']}"]
+                             if env.get("VTB_ACCEPTANCE_FEATURE_GLOB") else [])
+                result = run(compose + ["run", "--rm", "--no-deps"] + shard_env + [SUITES[suite]], env, output, suite)
                 status = status or result
     finally:
         # External build caches survive; database and GUI node_modules do not.
@@ -177,7 +196,13 @@ def main():
     # Older argparse versions validate the entire default list as one choice.
     # Validate supplied names separately and apply the default after parsing.
     parser.add_argument("suites", nargs="*", metavar="{cli,gui,daemon}")
+    parser.add_argument("--shard-index", type=int, default=1)
+    parser.add_argument("--shard-count", type=int, default=1)
     args = parser.parse_args()
+    if not 1 <= args.shard_index <= args.shard_count:
+        parser.error("shard index must be between 1 and shard count")
+    if args.shard_count > 1 and len(args.suites) != 1:
+        parser.error("sharding requires exactly one suite")
     for suite in args.suites:
         if suite not in SUITES:
             parser.error(f"unknown suite {suite!r}; choose from {', '.join(SUITES)}")
@@ -190,6 +215,14 @@ def main():
     output = Path(env.get("VTB_ACCEPTANCE_OUTPUT", ROOT / "test-output" / env["COMPOSE_PROJECT_NAME"])).resolve()
     output.mkdir(parents=True, exist_ok=True)
     env["VTB_ACCEPTANCE_OUTPUT"] = str(output)
+    if args.shard_count > 1 and not args.cleanup:
+        try:
+            pattern, features = shard_features(args.suites[0], args.shard_index, args.shard_count)
+        except ValueError as error:
+            parser.error(str(error))
+        env["VTB_ACCEPTANCE_FEATURE_GLOB"] = pattern
+        (output / "shard-manifest.json").write_text(json.dumps({"suite": args.suites[0],
+            "index": args.shard_index, "count": args.shard_count, "features": features}, indent=2))
     context_file = output / "runner-context.json"
     if args.publish_images:
         return publish_images(env, output)

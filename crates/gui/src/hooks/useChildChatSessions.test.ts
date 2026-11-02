@@ -24,11 +24,149 @@ const child = (id: string, active: boolean) => ({
 });
 
 describe("child chat sessions", () => {
+  it.each(["codex", "claude"] as const)(
+    "polls selected/live %s conversations without sweeping 400 idle histories",
+    async (harness) => {
+      const histories = Object.fromEntries(
+        Array.from({ length: 400 }, (_, i) => [
+          `history-${i}`,
+          {
+            ...root,
+            id: `history-${i}`,
+            harness,
+            lifecycle: "idle" as const,
+            projectPath: `/unrelated/${i}`,
+            providerResumeId: `old-${i}`,
+          },
+        ])
+      );
+      useChatStore.setState({
+        sessions: { ...histories, root: { ...root, harness } },
+      });
+      const discover = vi
+        .spyOn(commands, "discoverLocalChatChildSessions")
+        .mockResolvedValue({ status: "ok", data: [] });
+      const { rerender, unmount } = renderHook(
+        ({ enabled }) => useChildChatSessions("history", enabled),
+        { initialProps: { enabled: true } }
+      );
+      await act(async () => {});
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(
+        discover.mock.calls.every(
+          ([input]) => input.provider_resume_id === "root-thread"
+        )
+      ).toBe(true);
+      expect(discover.mock.calls.length).toBeGreaterThan(1);
+      rerender({ enabled: false });
+      const count = discover.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(discover).toHaveBeenCalledTimes(count);
+      unmount();
+    }
+  );
+
+  it("retains historical outlines and refreshes explicitly selected history", async () => {
+    useChatStore.setState({
+      sessions: {
+        root: { ...root, lifecycle: "idle" },
+        other: {
+          ...root,
+          id: "other",
+          providerResumeId: "other-thread",
+          lifecycle: "idle",
+          projectPath: "/other",
+        },
+      },
+    });
+    const discover = vi
+      .spyOn(commands, "discoverLocalChatChildSessions")
+      .mockImplementation(async (input) => ({
+        status: "ok",
+        data:
+          input.provider_resume_id === "root-thread"
+            ? [child("known", false)]
+            : [],
+      }));
+    const { result } = renderHook(() => useChildChatSessions("history", true));
+    await act(async () => {});
+    discover.mockClear();
+    await act(async () => {
+      useChatStore.setState({ activeSessionId: "other" });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(
+      discover.mock.calls.map(([input]) => input.provider_resume_id)
+    ).toEqual(["other-thread"]);
+    expect(result.current.get("root")?.[0].threadId).toBe("known");
+  });
+
+  it("captures the last terminal pass then stops polling an unselected idle conversation", async () => {
+    useChatStore.setState({ activeSessionId: null });
+    const discover = vi
+      .spyOn(commands, "discoverLocalChatChildSessions")
+      .mockResolvedValue({ status: "ok", data: [] });
+    renderHook(() => useChildChatSessions("terminal", true));
+    await act(async () => {});
+    await act(async () => {
+      useChatStore.setState({
+        sessions: { root: { ...root, lifecycle: "idle" } },
+      });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(discover).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(discover).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits for an uncancellable invoke before reopening discovery", async () => {
+    let resolve!: (
+      value: Awaited<ReturnType<typeof commands.discoverLocalChatChildSessions>>
+    ) => void;
+    const discover = vi
+      .spyOn(commands, "discoverLocalChatChildSessions")
+      .mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolve = done;
+          })
+      )
+      .mockResolvedValue({ status: "ok", data: [] });
+    const { rerender, result } = renderHook(
+      ({ enabled }) => useChildChatSessions("root", enabled),
+      { initialProps: { enabled: true } }
+    );
+    await act(async () => {});
+    rerender({ enabled: false });
+    rerender({ enabled: true });
+    await act(async () => {});
+    expect(discover).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolve({ status: "ok", data: [child("retired", true)] });
+    });
+    expect(discover).toHaveBeenCalledTimes(2);
+    expect(result.current.get("root")).toEqual([]);
+    expect(
+      useChatStore.getState().sessions["local-chat-codex-retired"]
+    ).toBeUndefined();
+  });
+
   beforeEach(() => {
     localStorage.clear();
     vi.useFakeTimers();
     useChatStore.setState({
       sessions: { root },
+      activeSessionId: "root",
       paneLayout: { panes: [], activePaneId: null },
     });
   });
@@ -203,6 +341,7 @@ describe("child chat sessions", () => {
       ({ token }) => useChildChatSessions(token, true),
       { initialProps: { token: "first" } }
     );
+    await act(async () => {});
     rerender({ token: "streaming-1" });
     rerender({ token: "streaming-2" });
     await act(async () => {

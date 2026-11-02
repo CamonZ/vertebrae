@@ -27,6 +27,44 @@ class RunnerTests(unittest.TestCase):
         self.calls.append((phase, args))
         return 7 if phase == "cli" else 0
 
+    def test_feature_shards_cover_each_suite_exactly_once(self):
+        for suite, count in [("cli", 2), ("daemon", 2), ("gui", 4)]:
+            partitions = [runner.shard_features(suite, index, count) for index in range(1, count + 1)]
+            names = [name for _, selected in partitions for name in selected]
+            crate = {"cli": "acceptance", "daemon": "daemon-acceptance", "gui": "gui-acceptance"}[suite]
+            directory = runner.ROOT / "crates" / crate / "tests/features"
+            expected = sorted(path.relative_to(directory).as_posix() for path in directory.rglob("*.feature"))
+            self.assertEqual(sorted(names), expected)
+            self.assertEqual(len(names), len(set(names)))
+            self.assertTrue(all(selected for _, selected in partitions))
+            self.assertEqual(partitions, [runner.shard_features(suite, index, count) for index in range(1, count + 1)])
+
+    def test_nested_features_are_not_silently_omitted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            features = root / "crates/acceptance/tests/features"
+            (features / "nested").mkdir(parents=True)
+            for name in ["a.feature", "nested/b.feature"]:
+                (features / name).write_text("Feature: fixture\n")
+            with patch.object(runner, "ROOT", root):
+                partitions = [runner.shard_features("cli", i, 2) for i in [1, 2]]
+            self.assertEqual([names for _, names in partitions], [["a.feature"], ["nested/b.feature"]])
+            self.assertTrue(partitions[1][0].endswith("nested/b.feature"))
+
+    def test_invalid_and_empty_shards_fail(self):
+        for index, count in [(0, 2), (3, 2), (1, 0), (10000, 10000)]:
+            with self.assertRaises(ValueError):
+                runner.shard_features("cli", index, count)
+
+    @patch.object(runner.subprocess, "run")
+    def test_feature_filter_reaches_container_and_cleanup_is_unchanged(self, _volume_create):
+        self.env["VTB_ACCEPTANCE_FEATURE_GLOB"] = "/app/crates/acceptance/tests/features/{a,b}.feature"
+        with patch.object(runner, "run", side_effect=self.fake_run):
+            runner.execute(["cli"], self.env, Path("unused"))
+        command = next(args for phase, args in self.calls if phase == "cli")
+        self.assertEqual(command[-3:], ["-e", "VTB_ACCEPTANCE_FEATURE_GLOB=" + self.env["VTB_ACCEPTANCE_FEATURE_GLOB"], "test-runner"])
+        self.assertEqual(self.calls[-1][0], "cleanup")
+
     @patch.object(runner.subprocess, "run")
     def test_failed_suite_does_not_skip_other_suites_and_cleanup(self, volume_create):
         with patch.object(runner, "run", side_effect=self.fake_run):

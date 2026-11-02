@@ -9,13 +9,18 @@ beforeAll(async () => {
   await Parser.init({
     wasmBinary: await readFile("node_modules/web-tree-sitter/tree-sitter.wasm"),
   });
-  const [javascript, bash, python] = await Promise.all(
-    ["javascript", "bash", "python"].map((l) =>
-      readFile(`node_modules/tree-sitter-wasms/out/tree-sitter-${l}.wasm`).then(
-        (bytes) => Language.load(new Uint8Array(bytes))
+  // The grammars share one Emscripten linker; match the worker's serial loading.
+  const load = async (name: string) =>
+    Language.load(
+      new Uint8Array(
+        await readFile(
+          `node_modules/tree-sitter-wasms/out/tree-sitter-${name}.wasm`
+        )
       )
-    )
-  );
+    );
+  const javascript = await load("javascript");
+  const bash = await load("bash");
+  const python = await load("python");
   languages = { javascript, bash, python };
 });
 const labels = (r: ActivityAnalysis) =>

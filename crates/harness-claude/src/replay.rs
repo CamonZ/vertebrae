@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File},
+    fs::File,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     sync::OnceLock,
@@ -23,6 +23,11 @@ use crate::{ClaudeDecodeContext, ClaudeStreamDecoder};
 #[derive(Debug, Clone, Default)]
 pub struct ClaudeTranscriptReplay {
     pub home_dir: Option<PathBuf>,
+}
+
+pub(crate) fn discovery_paths() -> &'static vertebrae_harness_core::TranscriptDiscoveryPaths {
+    static PATHS: OnceLock<vertebrae_harness_core::TranscriptDiscoveryPaths> = OnceLock::new();
+    PATHS.get_or_init(Default::default)
 }
 
 impl ClaudeTranscriptReplay {
@@ -85,13 +90,10 @@ impl ClaudeTranscriptReplay {
         &self,
         request: &TranscriptReplayRequest,
     ) -> Result<Option<PathBuf>, HarnessError> {
-        static PATHS: OnceLock<vertebrae_harness_core::TranscriptDiscoveryPaths> = OnceLock::new();
         let root = self.provider_root()?;
-        PATHS
-            .get_or_init(Default::default)
-            .find(&root, request.provider_resume_id.as_str(), || {
-                self.discover_uncached(request)
-            })
+        discovery_paths().find(&root, request.provider_resume_id.as_str(), || {
+            self.discover_uncached(request)
+        })
     }
 
     fn discover_uncached(
@@ -113,12 +115,15 @@ impl ClaudeTranscriptReplay {
             }
         }
 
-        let found = find_jsonl_by_stem(&projects, request.provider_resume_id.as_str()).map_err(
-            |error| {
-                HarnessError::Operation(format!("failed to search Claude transcripts: {error}"))
-            },
-        )?;
-        Ok(found.and_then(|path| validated_file(&projects, &path)))
+        static DIRECTORY: OnceLock<vertebrae_harness_core::TranscriptDirectorySnapshot> =
+            OnceLock::new();
+        DIRECTORY
+            .get_or_init(Default::default)
+            .find(&projects, |path| {
+                path.extension().is_some_and(|ext| ext == "jsonl")
+                    && path.file_stem().and_then(|stem| stem.to_str())
+                        == Some(request.provider_resume_id.as_str())
+            })
     }
 
     pub(crate) fn provider_root(&self) -> Result<PathBuf, HarnessError> {
@@ -412,26 +417,6 @@ fn claude_project_dir_name(project_path: &Path) -> String {
             }
         })
         .collect()
-}
-
-fn find_jsonl_by_stem(root: &Path, stem: &str) -> std::io::Result<Option<PathBuf>> {
-    if !root.is_dir() {
-        return Ok(None);
-    }
-    for entry in fs::read_dir(root)? {
-        let entry = entry?;
-        let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            if let Some(found) = find_jsonl_by_stem(&path, stem)? {
-                return Ok(Some(found));
-            }
-        } else if path.extension().and_then(|value| value.to_str()) == Some("jsonl")
-            && path.file_stem().and_then(|value| value.to_str()) == Some(stem)
-        {
-            return Ok(Some(path));
-        }
-    }
-    Ok(None)
 }
 
 #[cfg(test)]

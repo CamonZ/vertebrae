@@ -11,17 +11,18 @@ beforeAll(async () => {
   await Parser.init({
     wasmBinary: await readFile("node_modules/web-tree-sitter/tree-sitter.wasm"),
   });
-  const [javascript, bash, python] = await Promise.all(
-    ["javascript", "bash", "python"].map(async (name) =>
-      Language.load(
-        new Uint8Array(
-          await readFile(
-            `node_modules/tree-sitter-wasms/out/tree-sitter-${name}.wasm`
-          )
+  // Linking grammars concurrently races in the shared Emscripten runtime.
+  const load = async (name: string) =>
+    Language.load(
+      new Uint8Array(
+        await readFile(
+          `node_modules/tree-sitter-wasms/out/tree-sitter-${name}.wasm`
         )
       )
-    )
-  );
+    );
+  const javascript = await load("javascript");
+  const bash = await load("bash");
+  const python = await load("python");
   languages = { javascript, bash, python };
 });
 const shell = (cmd: string) =>

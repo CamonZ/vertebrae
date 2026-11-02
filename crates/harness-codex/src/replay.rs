@@ -1,14 +1,9 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    sync::OnceLock,
-};
+use std::{fs, path::PathBuf, sync::OnceLock};
 
-use chrono::NaiveDate;
 use vertebrae_harness_core::{
     HarnessError, TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayCache,
     TranscriptReplayPage, TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision,
-    load_transcript_page, safe_filename, sequence_replay_drafts, tail_read_budget, validated_file,
+    load_transcript_page, safe_filename, sequence_replay_drafts, tail_read_budget,
 };
 
 use crate::rollout::{read_rollout, read_rollout_tail};
@@ -144,40 +139,23 @@ impl CodexTranscriptReplay {
             return Ok(None);
         }
         let root = self.provider_root()?;
-        let mut roots = Vec::new();
+        static DIRECTORY: OnceLock<vertebrae_harness_core::TranscriptDirectorySnapshot> =
+            OnceLock::new();
         for name in ["sessions", "archived_sessions"] {
-            let candidate = root.join(name);
-            if candidate.is_dir() {
-                roots.push(candidate);
-            }
-        }
-        let date = request.created_at.as_deref().and_then(parse_date_prefix);
-        for search_root in roots {
-            if let Some(date) = date {
-                let date_root = search_root.join(date.format("%Y/%m/%d").to_string());
-                if let Some(path) = find_jsonl_by_id(
-                    &date_root,
-                    request.provider_resume_id.as_str(),
-                )
-                .map_err(|error| {
-                    HarnessError::Operation(format!("failed to search Codex transcripts: {error}"))
-                })? {
-                    return Ok(Some(validated_file(&search_root, &path).ok_or_else(
-                        || {
-                            HarnessError::Operation(format!(
-                                "Codex transcript escaped provider home: {}",
-                                path.display()
-                            ))
-                        },
-                    )?));
-                }
-            }
-            if let Some(path) = find_jsonl_by_id(&search_root, request.provider_resume_id.as_str())
-                .map_err(|error| {
-                    HarnessError::Operation(format!("failed to search Codex transcripts: {error}"))
-                })?
-            {
-                return Ok(validated_file(&search_root, &path));
+            let found = DIRECTORY
+                .get_or_init(Default::default)
+                .find(&root.join(name), |path| {
+                    let id = request.provider_resume_id.as_str();
+                    path.extension().is_some_and(|ext| ext == "jsonl")
+                        && path
+                            .file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .is_some_and(|stem| {
+                                stem == id || stem == format!("rollout-{id}") || stem.ends_with(id)
+                            })
+                })?;
+            if found.is_some() {
+                return Ok(found);
             }
         }
         Ok(None)
@@ -227,36 +205,6 @@ fn codex_projection_key(request: &TranscriptReplayRequest) -> String {
         request.project_path,
         request.created_at
     )
-}
-
-fn parse_date_prefix(value: &str) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(value.get(..10)?, "%Y-%m-%d").ok()
-}
-
-fn find_jsonl_by_id(root: &Path, id: &str) -> std::io::Result<Option<PathBuf>> {
-    if !root.is_dir() {
-        return Ok(None);
-    }
-    for entry in fs::read_dir(root)? {
-        let entry = entry?;
-        let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            if let Some(found) = find_jsonl_by_id(&path, id)? {
-                return Ok(Some(found));
-            }
-            continue;
-        }
-        if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
-            continue;
-        }
-        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        if stem == id || stem == format!("rollout-{id}") || stem.ends_with(id) {
-            return Ok(Some(path));
-        }
-    }
-    Ok(None)
 }
 
 #[cfg(test)]
