@@ -96,6 +96,7 @@ export function ChatWindowManager({
   );
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [historyVisible, setHistoryVisible] = useState(true);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const sessionList = useMemo(
@@ -443,25 +444,53 @@ export function ChatWindowManager({
   );
 
   const toggleHistorySelector = useCallback(() => {
+    setHistoryVisible(true);
+
     if (!isMaximized) {
       toggleMaximized();
     }
+
     // Focus the mini panel after maximize renders it.
     requestAnimationFrame(() => {
       document
         .querySelector<HTMLElement>('[data-testid="local-chat-mini-panel"]')
         ?.focus();
     });
+
     return true;
   }, [isMaximized, toggleMaximized]);
+
+  const toggleHistoryVisibility = useCallback(() => {
+    if (!isMaximized) {
+      toggleHistorySelector();
+
+      return;
+    }
+
+    if (
+      historyVisible &&
+      document.activeElement?.closest(
+        ".hc-mini-history, .hc-history-resize-handle"
+      )
+    ) {
+      panelRef.current
+        ?.querySelector<HTMLElement>('[data-pane-active="true"]')
+        ?.focus();
+    }
+
+    setHistoryVisible((visible) => !visible);
+  }, [historyVisible, isMaximized, panelRef, toggleHistorySelector]);
 
   const selectHistorySessionForActivePane = useCallback(
     async (sessionId: string, preferredPaneId?: string) => {
       setDeleteError(null);
+
       const selected = await selectPersistedSession(sessionId, preferredPaneId);
+
       if (!selected) {
         bumpHistoryRevision();
       }
+
       return selected;
     },
     [bumpHistoryRevision, selectPersistedSession]
@@ -469,13 +498,22 @@ export function ChatWindowManager({
 
   const focusHistorySearch = useCallback(() => {
     if (!isMaximized) return false;
-    const input = document.querySelector<HTMLInputElement>(
-      "#local-chat-session-search"
-    );
-    if (!input) return false;
-    input.focus();
+
+    const focusSearch = () => {
+      document
+        .querySelector<HTMLInputElement>("#local-chat-session-search")
+        ?.focus();
+    };
+
+    if (!historyVisible) {
+      setHistoryVisible(true);
+      requestAnimationFrame(focusSearch);
+    } else {
+      focusSearch();
+    }
+
     return true;
-  }, [isMaximized]);
+  }, [historyVisible, isMaximized]);
 
   const selectHistorySessionByOffset = useCallback(
     async (offset: number) => {
@@ -484,6 +522,7 @@ export function ChatWindowManager({
       const sessionItems = matchingHistorySessions;
 
       if (sessionItems.length === 0) return false;
+
       const currentIndex = sessionItems.findIndex(
         (session) => session.id === activeSessionId
       );
@@ -494,6 +533,7 @@ export function ChatWindowManager({
             : 0
           : (currentIndex + offset + sessionItems.length) % sessionItems.length;
       const sessionId = sessionItems[nextIndex].id;
+
       setRevealSession((current) => ({
         sessionId,
         revision: (current?.revision ?? 0) + 1,
@@ -527,14 +567,18 @@ export function ChatWindowManager({
         useChatStore.getState().paneLayout.activePaneId ??
         undefined;
       const parent = useChatStore.getState().sessions[parentSessionId];
+
       if (!parent || !agent.threadId) {
         await selectHistorySessionForActivePane(parentSessionId, targetPaneId);
         requestAnimationFrame(() =>
           scrollToSpawn(parentSessionId, agent.spawnId)
         );
+
         return null;
       }
+
       setDeleteError(null);
+
       return selectProviderThreadSession({
         harness: parent.harness,
         providerId: parent.providerId ?? null,
@@ -617,6 +661,7 @@ export function ChatWindowManager({
       splitWithFreshSession,
       startFreshActiveSession: startFreshActiveSessionForKeyboard,
       toggleHistorySelector,
+      toggleHistoryVisibility,
       toggleMaximized: toggleFromShortcut,
     },
     setShortcutsOpen,
@@ -693,7 +738,7 @@ export function ChatWindowManager({
       />
       {visiblePanes.length > 0 && (
         <div className="hc-panel-main">
-          {isMaximized && (
+          {isMaximized && historyVisible && (
             <LocalChatMiniPanel
               width={effectiveHistoryWidth}
               activeSessionId={activeSessionId ?? visiblePanes[0].sessionId}
@@ -720,7 +765,7 @@ export function ChatWindowManager({
               onDelete={(sessionId) => void handleDeleteSession(sessionId)}
             />
           )}
-          {isMaximized && (
+          {isMaximized && historyVisible && (
             <ChatHistoryResizeHandle
               historyWidth={effectiveHistoryWidth}
               maxWidth={historyMaxWidth}

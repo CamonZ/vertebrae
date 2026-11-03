@@ -273,7 +273,7 @@ export interface LocalChatTicketGroup {
   sessions: LocalChatSessionSummary[];
 }
 
-/** Preserve recency order within each ticket; standalone chats keep their place. */
+/** Preserve recency within groups and collect unassociated chats after tickets. */
 export function groupLocalChatSessionsByTicket(
   sessions: LocalChatSessionSummary[]
 ): LocalChatTicketGroup[] {
@@ -292,12 +292,13 @@ export function groupLocalChatSessionsByTicket(
       typeof record?.ticketId === "string" && record.ticketId.trim()
         ? record.ticketId
         : null;
-    const id = ticketId ? `ticket:${ticketId}` : `session:${session.id}`;
+
+    const id = ticketId ? `ticket:${ticketId}` : "ungrouped";
     const title =
       typeof record?.ticketTitle === "string" ? record.ticketTitle.trim() : "";
     const group = groups.get(id) ?? {
       id,
-      label: title || ticketId || "",
+      label: ticketId ? title || ticketId : "Other chats",
       ticketId,
       sessions: [],
     };
@@ -309,7 +310,10 @@ export function groupLocalChatSessionsByTicket(
     groups.set(id, group);
   }
 
-  return [...groups.values()];
+  const ungrouped = groups.get("ungrouped");
+  groups.delete("ungrouped");
+
+  return [...groups.values(), ...(ungrouped ? [ungrouped] : [])];
 }
 
 export function selectedLocalChatProject(

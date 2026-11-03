@@ -11,6 +11,7 @@ export const CHAT_SHORTCUT_SECTIONS = [
       { keys: chatHelpKeys, label: CHAT_HELP_SHORTCUT.label },
       { keys: ["⌘", "⌥", "[ / ]"], label: "Previous/next project" },
       { keys: ["⌘", "F"], label: "Focus chat search" },
+      { keys: ["⌘", "B"], label: "Show/hide chat sidebar" },
       { keys: ["Esc"], label: "Close hints or focused panel" },
     ],
   },

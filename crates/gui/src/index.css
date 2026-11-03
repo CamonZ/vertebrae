@@ -3016,7 +3016,6 @@ html.light ::selection {
 .hc-panel .hc-mini-history {
   flex: 0 0 auto;
   min-width: 272px;
-  max-width: 400px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -3067,10 +3066,6 @@ html.light ::selection {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-.hc-panel .hc-mini-history-search-label {
-  font-size: var(--text-10);
-  letter-spacing: 0.04em;
 }
 .hc-panel .hc-mini-history-search {
   width: 100%;
@@ -3127,6 +3122,62 @@ html.light ::selection {
   padding: var(--s-1) var(--s-2);
   overflow-wrap: anywhere;
 }
+.hc-panel .hc-mini-history-project-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hc-panel .hc-mini-history-ticket-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: var(--s-1) var(--s-2);
+}
+
+.hc-panel .hc-mini-history-chevron {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.hc-panel .hc-mini-history-chevron[data-expanded] {
+  transform: rotate(90deg);
+}
+
+.hc-panel .hc-mini-history-ticket-id {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-soft);
+}
+
+.hc-panel .hc-mini-history-ticket-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-11);
+  font-weight: 400;
+}
+
+.hc-panel .hc-mini-history-ticket-count {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-mute);
+}
+
+.hc-panel .hc-mini-history-ticket-rows {
+  margin-left: 14px;
+  padding-left: 8px;
+  border-left: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+}
 .hc-panel .hc-mini-history-new {
   display: inline-flex;
   align-self: center;
@@ -3178,11 +3229,15 @@ html.light ::selection {
   display: flex;
   align-items: center;
   gap: var(--s-1);
-  min-height: var(--s-12);
+  min-height: 36px;
   border-radius: var(--r-xs);
   padding: 0 var(--s-1) 0 var(--s-2);
 }
 .hc-panel .hc-mini-history-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  position: relative;
   min-width: 0;
   flex: 1;
   padding-block: var(--s-1);
@@ -3219,11 +3274,12 @@ html.light ::selection {
 }
 .hc-panel .hc-mini-history-open .label {
   line-height: var(--s-5);
-  font-size: var(--text-13);
+  font-size: var(--text-12);
   font-weight: 400;
   color: var(--fg);
 }
 .hc-panel .hc-mini-history-secondary {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--s-2);
@@ -3237,10 +3293,102 @@ html.light ::selection {
   font-size: var(--text-11);
   color: var(--fg-mute);
 }
+/* Keep the title and live activity primary; disclose idle details on intent. */
+.hc-panel .hc-mini-history-row-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+
+  padding-left: var(--s-2);
+  border-radius: var(--r-xs);
+  background: var(--bg-2);
+
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hc-panel .hc-mini-history-row:hover .hc-mini-history-row-actions,
+.hc-panel .hc-mini-history-row:focus-within .hc-mini-history-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.hc-panel .hc-mini-history-row:hover .hc-mini-history-secondary .meta,
+.hc-panel .hc-mini-history-row:focus-within .hc-mini-history-secondary .meta {
+  visibility: hidden;
+}
+
+.hc-panel .hc-mini-history-row[data-activity] .hc-mini-history-row-actions {
+  position: static;
+  background: transparent;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.hc-panel .hc-mini-history-projects .hc-mini-history-new {
+  opacity: 0;
+}
+
+.hc-panel
+  .hc-mini-history-projects
+  .hc-mini-history-group-title:hover
+  .hc-mini-history-new,
+.hc-panel
+  .hc-mini-history-projects
+  .hc-mini-history-group-title:focus-within
+  .hc-mini-history-new,
+.hc-panel
+  .hc-mini-history-projects
+  .hc-mini-history-group-title[data-selected]
+  .hc-mini-history-new {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .hc-panel .hc-mini-history-row-actions {
+    position: static;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .hc-panel .hc-mini-history-secondary .meta {
+    display: none;
+  }
+
+  .hc-panel .hc-mini-history-projects .hc-mini-history-new,
+  .hc-panel .hc-mini-history-row .hc-ctrl {
+    opacity: 1;
+  }
+}
 .hc-panel .hc-mini-history-row .hc-mini-history-secondary .hc-ctrl {
   width: var(--s-5);
   height: var(--s-5);
 }
+.hc-panel .hc-mini-history-other-title {
+  padding: var(--s-2);
+  font-size: var(--text-11);
+}
+
+.hc-panel .hc-mini-history-agents-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 24px;
+  margin-left: var(--s-3);
+  padding: var(--s-1) var(--s-2);
+  color: var(--fg-muted);
+  font-size: var(--text-11);
+}
+
+.hc-panel .hc-mini-history-agents-toggle:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
 .hc-panel .hc-mini-history-agent {
   width: calc(100% - var(--s-3));
   min-height: 24px;

@@ -28,6 +28,7 @@ function makeDispatch(
     splitWithFreshSession: vi.fn(async () => true),
     startFreshActiveSession: vi.fn(async () => true),
     toggleHistorySelector: vi.fn(() => true),
+    toggleHistoryVisibility: vi.fn(),
     toggleMaximized: vi.fn(),
     ...overrides,
   };
@@ -457,4 +458,26 @@ describe("paneNumberShortcutIndex", () => {
       paneNumberShortcutIndex({ code: "KeyA", key: "a" } as KeyboardEvent)
     ).toBeNull();
   });
+});
+
+it("toggles the sidebar on Cmd+B and ignores repeats, composition, and extra modifiers", () => {
+  const dispatch = makeDispatch();
+  renderShortcutHook(dispatch);
+
+  expect(
+    fireKey({ key: "b", code: "KeyB", metaKey: true }).defaultPrevented
+  ).toBe(true);
+  expect(dispatch.toggleHistoryVisibility).toHaveBeenCalledTimes(1);
+
+  for (const modifiers of [
+    { repeat: true },
+    { isComposing: true },
+    { altKey: true },
+    { ctrlKey: true },
+    { shiftKey: true },
+  ]) {
+    fireKey({ key: "b", code: "KeyB", metaKey: true, ...modifiers });
+  }
+
+  expect(dispatch.toggleHistoryVisibility).toHaveBeenCalledTimes(1);
 });

@@ -105,8 +105,18 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     [sessionItems]
   );
 
+  const groupedSessionIds = useMemo(
+    () =>
+      new Set(
+        ticketGroups
+          .filter((group) => group.ticketId)
+          .flatMap((group) => group.sessions.map((session) => session.id))
+      ),
+    [ticketGroups]
+  );
+
   // Accordion preferences live only for this mounted sidebar, keyed by project + ticket.
-  const [collapsedTickets, setCollapsedTickets] = useState<Set<string>>(
+  const [expandedTickets, setExpandedTickets] = useState<Set<string>>(
     () => new Set()
   );
 
@@ -117,7 +127,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 
   const toggleTicket = useCallback(
     (id: string) => {
-      setCollapsedTickets((current) => {
+      setExpandedTickets((current) => {
         const next = new Set(current);
         const key = ticketKey(id);
 
@@ -139,7 +149,8 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     null
   );
 
-  const handledReveal = useRef<typeof revealSession>(null);
+  // A previous reveal must not reopen a group when the sidebar mounts again.
+  const handledReveal = useRef(revealSession);
 
   useEffect(() => {
     if (!revealSession || handledReveal.current === revealSession) return;
@@ -153,11 +164,11 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     handledReveal.current = revealSession;
     const key = ticketKey(group.id);
 
-    setCollapsedTickets((current) => {
-      if (!current.has(key)) return current;
+    setExpandedTickets((current) => {
+      if (current.has(key)) return current;
 
       const next = new Set(current);
-      next.delete(key);
+      next.add(key);
 
       return next;
     });
@@ -173,7 +184,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [revealSession, ticketGroups, collapsedTickets]);
+  }, [revealSession, ticketGroups, expandedTickets]);
 
   const focusSearchInput = useCallback(() => {
     searchInputRef.current?.focus();
@@ -182,6 +193,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   useEffect(() => {
     if (sessionItems.length === 0) {
       setKeyboardSessionId(null);
+
       return;
     }
 
@@ -192,12 +204,15 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     const activeSession = sessionItems.find(
       (session) => session.id === activeSessionId
     );
+
     setKeyboardSessionId(activeSession?.id ?? sessionItems[0].id);
   }, [activeSessionId, keyboardSessionId, sessionItems]);
 
   const focusHistorySession = useCallback((sessionId: string) => {
     setKeyboardSessionId(sessionId);
+
     const button = sessionButtonRefs.current.get(sessionId);
+
     button?.focus();
     button?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, []);
@@ -225,7 +240,9 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
       }
 
       const sessionItems = ticketGroups.flatMap((group) =>
-        !hasSearchQuery && collapsedTickets.has(ticketKey(group.id))
+        !hasSearchQuery &&
+        group.ticketId &&
+        !expandedTickets.has(ticketKey(group.id))
           ? []
           : group.sessions
       );
@@ -278,6 +295,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
         keyboardSessionId ??
         sessionItems.find((session) => session.id === activeSessionId)?.id ??
         sessionItems[0].id;
+
       onSelect(selectedSessionId);
     },
     [
@@ -287,7 +305,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
       onSelect,
       ticketGroups,
       hasSearchQuery,
-      collapsedTickets,
+      expandedTickets,
       ticketKey,
     ]
   );
@@ -304,6 +322,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     >
       <section className="hc-mini-history-projects" aria-label="Chat projects">
         <h2 className="hc-mini-history-head">Projects</h2>
+
         <div
           className="hc-mini-history-list"
           data-testid="local-chat-project-scroll-region"
@@ -323,6 +342,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                   data-mini-project-select
                   className="hc-mini-history-project-title hc-mini-history-toggle"
                   aria-pressed={group.id === selectedProjectId}
+                  title={group.label}
                   onClick={() => onSelectProject(group.id)}
                   ref={
                     group.id === selectedProjectId
@@ -330,8 +350,11 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                       : undefined
                   }
                 >
-                  {group.label}
+                  <span className="hc-mini-history-project-label">
+                    {group.label}
+                  </span>
                 </button>
+
                 <button
                   type="button"
                   className="hc-mini-history-new"
@@ -367,6 +390,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
           })}
         </div>
       </section>
+
       <section
         className="hc-mini-history-sessions"
         aria-label={
@@ -374,13 +398,10 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
         }
       >
         <div className="hc-mini-history-head">
-          <span>{selectedProject?.label ?? "Chats"}</span>
-          <label
-            className="hc-mini-history-search-label"
-            htmlFor="local-chat-session-search"
-          >
+          <label className="sr-only" htmlFor="local-chat-session-search">
             Search chats
           </label>
+
           <div
             data-mini-history-search
             className="hc-mini-history-search"
@@ -398,6 +419,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
             />
           </div>
         </div>
+
         <div
           data-testid="local-chat-history-drawer"
           className="hc-mini-history-body"
@@ -407,11 +429,13 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
               {deleteError}
             </div>
           )}
+
           {projectWarning && (
             <div role="alert" className="hc-mini-history-error">
               {projectWarning}
             </div>
           )}
+
           {sessionItems.length === 0 ? (
             <div
               className="hc-mini-history-empty"
@@ -436,11 +460,23 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                 sessionGroups={ticketGroups}
                 activeSessionId={activeSessionId}
                 renderGroup={(group, rows) => {
-                  if (!group.ticketId) return rows;
+                  if (!group.ticketId) {
+                    return (
+                      <section
+                        className="hc-mini-history-group"
+                        aria-label="Other chats"
+                      >
+                        <h3 className="hc-mini-history-group-title hc-mini-history-other-title">
+                          Other chats
+                        </h3>
+
+                        {rows}
+                      </section>
+                    );
+                  }
 
                   const expanded =
-                    hasSearchQuery ||
-                    !collapsedTickets.has(ticketKey(group.id));
+                    hasSearchQuery || expandedTickets.has(ticketKey(group.id));
                   const rowsId = `local-chat-ticket-${encodeURIComponent(selectedProjectId ?? "")}-${encodeURIComponent(group.id)}`;
 
                   return (
@@ -451,19 +487,54 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                       <h3 className="hc-mini-history-group-title">
                         <button
                           type="button"
-                          className="hc-mini-history-project-title hc-mini-history-toggle"
+                          className="hc-mini-history-ticket-toggle hc-mini-history-toggle"
                           data-mini-history-toggle
+                          aria-label={group.label}
+                          title={`${group.label} · ${group.ticketId}`}
                           aria-expanded={expanded}
                           aria-controls={rowsId}
                           onClick={() => toggleTicket(group.id)}
                         >
-                          <span aria-hidden="true">
-                            {expanded ? "▾ " : "▸ "}
+                          <svg
+                            className="hc-mini-history-chevron"
+                            data-expanded={expanded || undefined}
+                            aria-hidden="true"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                          >
+                            <path
+                              d="m6 4 4 4-4 4"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+
+                          <span className="hc-mini-history-ticket-id">
+                            {group.ticketId.slice(0, 8)}
                           </span>
-                          {group.label}
+
+                          <span className="hc-mini-history-ticket-label">
+                            {group.label !== group.ticketId
+                              ? group.label
+                              : "Ticket"}
+                          </span>
+
+                          <span
+                            className="hc-mini-history-ticket-count"
+                            aria-hidden="true"
+                          >
+                            {group.sessions.length}
+                          </span>
                         </button>
                       </h3>
-                      <div id={rowsId} hidden={!expanded}>
+
+                      <div
+                        id={rowsId}
+                        className="hc-mini-history-ticket-rows"
+                        hidden={!expanded}
+                      >
                         {expanded ? rows : null}
                       </div>
                     </section>
@@ -480,6 +551,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                       <div
                         className="hc-mini-history-row"
                         data-active={isActive || undefined}
+                        data-activity={activityBySessionId?.get(session.id)}
                       >
                         <div className="hc-mini-history-entry">
                           <button
@@ -500,21 +572,32 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                           >
                             <span className="label">{title}</span>
                           </button>
+
                           <div className="hc-mini-history-secondary">
                             {activityBySessionId?.has(session.id) ? (
                               <SessionActivityBadge
                                 activity={activityBySessionId.get(session.id)!}
                                 style={thinkingIndicatorStyle}
                               />
-                            ) : (
-                              <HarnessBadge harness={session.harness} />
-                            )}
-                            <ConversationAssociations session={session} />
-                            <SessionDeleteButton
-                              label={title}
-                              onClick={() => void onDelete(session.id)}
-                              dataMiniDelete
-                            />
+                            ) : null}
+
+                            <div className="hc-mini-history-row-actions">
+                              {!activityBySessionId?.has(session.id) && (
+                                <HarnessBadge harness={session.harness} />
+                              )}
+
+                              <ConversationAssociations
+                                session={session}
+                                hideTicket={groupedSessionIds.has(session.id)}
+                              />
+
+                              <SessionDeleteButton
+                                label={title}
+                                onClick={() => void onDelete(session.id)}
+                                dataMiniDelete
+                              />
+                            </div>
+
                             {age && (
                               <time
                                 className="meta"
@@ -527,59 +610,16 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                           </div>
                         </div>
                       </div>
-                      {spawnOutline.map((spawn) => {
-                        const isAgentActive =
-                          !!spawn.threadId &&
-                          spawn.threadId === activeProviderThreadId;
 
-                        return (
-                          <button
-                            key={spawn.id}
-                            type="button"
-                            className="hc-mini-history-agent"
-                            style={{
-                              paddingLeft: `${12 + (spawn.depth ?? 0) * 12}px`,
-                            }}
-                            data-working={spawn.isWorking || undefined}
-                            data-active={isAgentActive || undefined}
-                            aria-current={isAgentActive ? "true" : undefined}
-                            onClick={() => {
-                              if (spawn.threadId && onSelectAgent) {
-                                void onSelectAgent(session.id, spawn);
-
-                                return;
-                              }
-
-                              void onSelect(session.id);
-                              requestAnimationFrame(() =>
-                                scrollToSpawn(session.id, spawn.spawnId)
-                              );
-                            }}
-                            title={
-                              spawn.threadId
-                                ? `Open spawned agent ${spawn.label}`
-                                : `Jump to spawned agent ${spawn.label}`
-                            }
-                            aria-label={
-                              spawn.threadId
-                                ? `Open spawned agent ${spawn.label} from ${title}`
-                                : `Jump to spawned agent ${spawn.label} in ${title}`
-                            }
-                          >
-                            {spawn.isWorking && (
-                              <ThinkingIndicator
-                                compact
-                                label="Subagent working"
-                                style={thinkingIndicatorStyle}
-                              />
-                            )}
-                            <span className="label">{spawn.label}</span>
-                            {spawn.detail && (
-                              <span className="meta">{spawn.detail}</span>
-                            )}
-                          </button>
-                        );
-                      })}
+                      <SessionAgents
+                        sessionId={session.id}
+                        title={title}
+                        spawnOutline={spawnOutline}
+                        activeProviderThreadId={activeProviderThreadId}
+                        thinkingIndicatorStyle={thinkingIndicatorStyle}
+                        onSelect={onSelect}
+                        onSelectAgent={onSelectAgent}
+                      />
                     </>
                   );
                 }}
@@ -592,9 +632,129 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   );
 });
 
+function SessionAgents({
+  sessionId,
+  title,
+  spawnOutline,
+  activeProviderThreadId,
+  thinkingIndicatorStyle,
+  onSelect,
+  onSelectAgent,
+}: Pick<
+  LocalChatMiniPanelProps,
+  | "activeProviderThreadId"
+  | "thinkingIndicatorStyle"
+  | "onSelect"
+  | "onSelectAgent"
+> & {
+  sessionId: string;
+  title: string;
+  spawnOutline: SpawnOutlineItem[];
+}) {
+  const activeChild = spawnOutline.some(
+    (spawn) => !!spawn.threadId && spawn.threadId === activeProviderThreadId
+  );
+  const [expanded, setExpanded] = useState(activeChild);
+
+  useEffect(() => {
+    if (activeChild) setExpanded(true);
+  }, [activeChild, activeProviderThreadId]);
+
+  if (spawnOutline.length === 0) return null;
+
+  const rowsId = `local-chat-agents-${encodeURIComponent(sessionId)}`;
+  const workingCount = spawnOutline.filter((spawn) => spawn.isWorking).length;
+
+  return (
+    <div className="hc-mini-history-agents">
+      <button
+        type="button"
+        className="hc-mini-history-agents-toggle hc-mini-history-toggle"
+        data-mini-history-toggle
+        aria-label={`Subagents for ${title}`}
+        aria-expanded={expanded}
+        aria-controls={rowsId}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+
+        <span>
+          {spawnOutline.length}{" "}
+          {spawnOutline.length === 1 ? "subagent" : "subagents"}
+        </span>
+
+        {workingCount > 0 && (
+          <span className="meta">{workingCount} working</span>
+        )}
+      </button>
+
+      <div id={rowsId} hidden={!expanded}>
+        {expanded && (
+          <>
+            {spawnOutline.map((spawn) => {
+              const isAgentActive =
+                !!spawn.threadId && spawn.threadId === activeProviderThreadId;
+
+              return (
+                <button
+                  key={spawn.id}
+                  type="button"
+                  className="hc-mini-history-agent"
+                  style={{
+                    paddingLeft: `${12 + (spawn.depth ?? 0) * 12}px`,
+                  }}
+                  data-working={spawn.isWorking || undefined}
+                  data-active={isAgentActive || undefined}
+                  aria-current={isAgentActive ? "true" : undefined}
+                  onClick={() => {
+                    if (spawn.threadId && onSelectAgent) {
+                      void onSelectAgent(sessionId, spawn);
+
+                      return;
+                    }
+
+                    void onSelect(sessionId);
+                    requestAnimationFrame(() =>
+                      scrollToSpawn(sessionId, spawn.spawnId)
+                    );
+                  }}
+                  title={
+                    spawn.threadId
+                      ? `Open spawned agent ${spawn.label}`
+                      : `Jump to spawned agent ${spawn.label}`
+                  }
+                  aria-label={
+                    spawn.threadId
+                      ? `Open spawned agent ${spawn.label} from ${title}`
+                      : `Jump to spawned agent ${spawn.label} in ${title}`
+                  }
+                >
+                  {spawn.isWorking && (
+                    <ThinkingIndicator
+                      compact
+                      label="Subagent working"
+                      style={thinkingIndicatorStyle}
+                    />
+                  )}
+
+                  <span className="label">{spawn.label}</span>
+
+                  {spawn.detail && <span className="meta">{spawn.detail}</span>}
+                </button>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function miniThreadAge(updatedAt: string): string {
   const relative = formatRelative(updatedAt);
+
   if (relative === "Just now") return "now";
+
   return relative.replace(/ ago$/, "");
 }
 
@@ -611,6 +771,7 @@ function miniThreadTitle(
 function HarnessBadge({ harness }: { harness: LocalChatHarnessKind }) {
   const label = harnessDisplayName(harness);
   const isCodex = harness === "codex";
+
   return (
     <span
       className="hc-mini-history-harness"

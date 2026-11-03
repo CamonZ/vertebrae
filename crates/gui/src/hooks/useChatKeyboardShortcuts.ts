@@ -19,6 +19,7 @@ export type ShortcutDispatchState = {
   splitWithFreshSession: () => Promise<boolean>;
   startFreshActiveSession: () => Promise<boolean>;
   toggleHistorySelector: () => boolean;
+  toggleHistoryVisibility: () => void;
   toggleMaximized: () => void;
 };
 
@@ -78,6 +79,7 @@ export function useChatKeyboardShortcuts({
     const onKeyDown = (event: KeyboardEvent) => {
       const current = dispatchRef.current;
       if (!current) return;
+
       const key = event.key.toLowerCase();
 
       if (isShortcutHintsKey(event)) {
@@ -104,6 +106,20 @@ export function useChatKeyboardShortcuts({
 
       if (!event.metaKey) return;
 
+      if (
+        isLetterShortcutKey(event, "KeyB", "b") &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.shiftKey &&
+        !event.isComposing
+      ) {
+        event.preventDefault();
+
+        if (!event.repeat) current.toggleHistoryVisibility();
+
+        return;
+      }
+
       if (key === "f" && !event.altKey && !event.ctrlKey && !event.shiftKey) {
         if (current.focusHistorySearch()) {
           event.preventDefault();
@@ -113,6 +129,7 @@ export function useChatKeyboardShortcuts({
 
       if (event.altKey && !event.ctrlKey && !event.isComposing) {
         const historyOffset = historyShortcutOffset(event);
+
         if (historyOffset !== null && current.historyNavigationEnabled) {
           event.preventDefault();
 

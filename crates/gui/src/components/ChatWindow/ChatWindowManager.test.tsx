@@ -472,6 +472,9 @@ describe("ChatWindowManager", () => {
 
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     expect(miniPanel.getByText("Inspect Repo")).toBeInTheDocument();
+    await user.click(
+      miniPanel.getByRole("button", { name: "Subagents for Inspect Repo" })
+    );
     expect(miniPanel.getByText("Pasteur")).toBeInTheDocument();
     expect(miniPanel.getByText("reviewer")).toBeInTheDocument();
     expect(miniPanel.getByText("Codex Chat")).toBeInTheDocument();
@@ -609,6 +612,12 @@ describe("ChatWindowManager", () => {
       })
     );
 
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Subagents for History parent",
+      })
+    );
+
     expect(
       await screen.findByRole("button", {
         name: "Open spawned agent History worker from History parent",
@@ -686,6 +695,12 @@ describe("ChatWindowManager", () => {
     });
     render(<ChatWindowManager />);
     await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Subagents for Root conversation",
+      })
+    );
+
     const row = await screen.findByRole("button", {
       name: "Open spawned agent Codex worker from Root conversation",
     });
@@ -768,6 +783,10 @@ describe("ChatWindowManager", () => {
         name: "Load local chat Pasteur into active pane",
       })
     ).not.toBeInTheDocument();
+    await user.click(
+      miniPanel.getByRole("button", { name: "Subagents for Inspect Repo" })
+    );
+
     await user.click(
       miniPanel.getByRole("button", {
         name: "Open spawned agent Pasteur from Inspect Repo",
@@ -890,7 +909,7 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
     const handle = screen.getByTestId("chat-history-resize-handle");
-    expect(handle).toHaveAttribute("aria-valuemax", "400");
+    expect(handle).toHaveAttribute("aria-valuemax", "632");
     expect(screen.getByTestId("local-chat-mini-panel")).toHaveAttribute(
       "data-sidebar-width",
       "400"
@@ -1436,6 +1455,10 @@ describe("ChatWindowManager", () => {
       ])
     );
     expect(panel).toHaveStyle({ width: "1128px" });
+
+    await user.click(
+      miniPanel.getByRole("button", { name: "Subagents for Overflow active" })
+    );
 
     const nestedAgent = miniPanel.getByRole("button", {
       name: "Open spawned agent Nested history reviewer from Overflow active",
@@ -2929,6 +2952,7 @@ describe("ChatWindowManager", () => {
     const search = screen.getByRole("searchbox");
 
     search.focus();
+
     fireEvent.keyDown(search, {
       code: "BracketRight",
       key: "≠",
@@ -3036,9 +3060,9 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
-    await user.click(
+    expect(
       await screen.findByRole("button", { name: "Grouped ticket" })
-    );
+    ).toHaveAttribute("aria-expanded", "false");
 
     expect(
       screen.queryByRole("button", {
@@ -3079,6 +3103,19 @@ describe("ChatWindowManager", () => {
       expect(useChatStore.getState().activeSessionId).toBe(first.id)
     );
 
+    // Opening maximize again starts collapsed, even after a shortcut reveal.
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    expect(
+      screen.getByRole("button", { name: "Grouped ticket" })
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("button", {
+        name: /Load local chat First ticket chat/,
+      })
+    ).not.toBeInTheDocument();
+    expect(useChatStore.getState().activeSessionId).toBe(first.id);
     expect(commands.sendLocalChatMessage).not.toHaveBeenCalled();
   });
 
@@ -3610,5 +3647,81 @@ describe("ChatWindowManager", () => {
       renderedWidth: 0,
       isMaximized: false,
     });
+  });
+
+  it("drags the sidebar beyond 400px and restores its width and chats with Cmd+B", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1600,
+    });
+    const id = useChatStore
+      .getState()
+      .openSession("Sidebar resizing", "/test/project");
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const handle = screen.getByRole("separator", {
+      name: "Resize chat history",
+    });
+    expect(handle).toHaveAttribute("aria-valuemax", "640");
+
+    fireEvent.mouseDown(handle, { button: 0, clientX: 272 });
+    fireEvent.mouseMove(document, { clientX: 560 });
+    fireEvent.mouseUp(document);
+
+    expect(screen.getByTestId("local-chat-mini-panel")).toHaveStyle({
+      width: "560px",
+    });
+    expect(localStorage.getItem(HISTORY_WIDTH_STORAGE_KEY)).toBe("560");
+    const panes = useChatStore.getState().paneLayout;
+    const search = screen.getByRole("searchbox", {
+      name: "Search local chats",
+    });
+    search.focus();
+
+    fireEvent.keyDown(search, { key: "b", metaKey: true });
+
+    expect(
+      screen.queryByTestId("local-chat-mini-panel")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("separator", { name: "Resize chat history" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-pane")).toHaveFocus();
+    expect(useChatStore.getState().paneLayout).toEqual(panes);
+    expect(useChatStore.getState().activeSessionId).toBe(id);
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(screen.getByTestId("local-chat-mini-panel")).toHaveStyle({
+      width: "560px",
+    });
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("searchbox", { name: "Search local chats" })
+      ).toHaveFocus()
+    );
+  });
+
+  it("opens the sidebar from compact mode with Cmd+B and reveals hidden history with the history shortcut", async () => {
+    useChatStore.getState().openSession("Sidebar toggle", "/test/project");
+    render(<ChatWindowManager />);
+    expect(
+      screen.queryByTestId("local-chat-mini-panel")
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    fireEvent.keyDown(window, {
+      key: "h",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+    expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
   });
 });
