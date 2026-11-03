@@ -83,7 +83,11 @@ function CopyIcon(): ReactNode {
   );
 }
 
-function CopyIdButton({ id, label, className }: CopyIdButtonProps): ReactNode {
+export function CopyIdButton({
+  id,
+  label,
+  className,
+}: CopyIdButtonProps): ReactNode {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {

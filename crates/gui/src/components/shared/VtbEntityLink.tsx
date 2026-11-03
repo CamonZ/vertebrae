@@ -1,13 +1,27 @@
 import {
   Children,
+  createContext,
+  useContext,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
 } from "react";
 import { useInRouterContext, useNavigate } from "react-router-dom";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
+import { CopyIdButton } from "./EntityId";
 import { LevelMark } from "./LevelMark";
 import type { VtbEntityTarget } from "./vtbEntityLinkTarget";
+
+const EntityCopyContext = createContext(false);
+
+/** Enable ID copying only within chat's rendered references. */
+export function VtbEntityCopyProvider({ children }: { children: ReactNode }) {
+  return (
+    <EntityCopyContext.Provider value={true}>
+      {children}
+    </EntityCopyContext.Provider>
+  );
+}
 
 interface VtbEntityLinkProps {
   target: VtbEntityTarget;
@@ -32,6 +46,13 @@ export function VtbEntityLink({
   children,
   onOpen,
 }: VtbEntityLinkProps) {
+  const copyEnabled = useContext(EntityCopyContext);
+  const copyable =
+    copyEnabled &&
+    (target.type === "ticket" ||
+      target.type === "workflow" ||
+      target.type === "step" ||
+      target.type === "artifact");
   const label = typeLabel(target.type);
   const hasLabel = hasRenderableChildren(children);
 
@@ -60,7 +81,7 @@ export function VtbEntityLink({
     }
   };
 
-  return (
+  const link = (
     <a
       href={target.route}
       title={`Open ${label}`}
@@ -86,6 +107,15 @@ export function VtbEntityLink({
         {hasLabel ? children : label}
       </span>
     </a>
+  );
+
+  return copyable ? (
+    <span className="inline-flex items-center gap-1 align-baseline">
+      {link}
+      <CopyIdButton id={target.id} label={target.type} />
+    </span>
+  ) : (
+    link
   );
 }
 

@@ -27,6 +27,7 @@ import { UserQuestionTurn } from "./UserQuestionTurn";
 import { useChatStore } from "../../stores/chatStore";
 import { useUIStore } from "../../stores/uiStore";
 import { ThinkingIndicator } from "./ThinkingIndicator";
+import { VtbEntityCopyProvider } from "../shared/VtbEntityLink";
 import { MarkdownProjectRootProvider } from "../shared/MarkdownContent";
 import {
   CHAT_HELP_SHORTCUT,
@@ -693,210 +694,215 @@ export function ChatMessages({
   }, [sessionId]);
 
   return (
-    <MarkdownProjectRootProvider
-      projectPath={projectPath}
-      projectRoots={projectRoots}
-    >
-      <div
-        ref={messagesContainerRef}
-        className="min-h-0 flex-1 overflow-y-auto p-4"
-        data-testid="chat-messages-scroll"
-        onMouseUp={updateTextSelection}
-        onKeyUp={updateTextSelection}
-        onScroll={() => {
-          const container = messagesContainerRef.current;
-          if (container) {
-            keepAtBottomRef.current = isNearBottom(container);
-            const anchor = prependAnchorRef.current;
-            if (anchor) {
-              anchor.scrollHeight = container.scrollHeight;
-              anchor.scrollTop = container.scrollTop;
-            }
-          }
-        }}
+    <VtbEntityCopyProvider>
+      <MarkdownProjectRootProvider
+        projectPath={projectPath}
+        projectRoots={projectRoots}
       >
-        {isEmpty && !isActive && !isLoadingInitialHistory && (
-          <ChatEmptyState notice={notice} />
-        )}
-        <div ref={contentRef} className="min-w-0 flex flex-col gap-3">
-          {isLoadingInitialHistory && (
-            <div
-              className="text-center text-xs text-[var(--color-fg-mute)]"
-              role="status"
-            >
-              Loading conversation history…
-            </div>
+        <div
+          ref={messagesContainerRef}
+          className="min-h-0 flex-1 overflow-y-auto p-4"
+          data-testid="chat-messages-scroll"
+          onMouseUp={updateTextSelection}
+          onKeyUp={updateTextSelection}
+          onScroll={() => {
+            const container = messagesContainerRef.current;
+            if (container) {
+              keepAtBottomRef.current = isNearBottom(container);
+              const anchor = prependAnchorRef.current;
+              if (anchor) {
+                anchor.scrollHeight = container.scrollHeight;
+                anchor.scrollTop = container.scrollTop;
+              }
+            }
+          }}
+        >
+          {isEmpty && !isActive && !isLoadingInitialHistory && (
+            <ChatEmptyState notice={notice} />
           )}
-          {(hasOlderMessages || isLoadingOlderMessages) && (
-            <div className="flex justify-center">
-              <button
-                type="button"
-                className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-hover)] disabled:cursor-wait disabled:opacity-60"
-                disabled={isLoadingOlderMessages}
-                onClick={handleLoadOlderMessages}
-              >
-                {isLoadingOlderMessages
-                  ? "Loading older messages…"
-                  : "Load older messages"}
-              </button>
-            </div>
-          )}
-          {replayError && (
-            <div
-              className="text-center text-xs text-[var(--color-warn)]"
-              role="status"
-            >
-              {replayError}
-              <button type="button" onClick={() => retryHistory(sessionId)}>
-                Retry history
-              </button>
-            </div>
-          )}
-          <HistoricalChatItems
-            items={renderItems}
-            sessionId={sessionId}
-            isActive={isActive}
-            registerRef={registerMessageRef}
-            resolveUserQuestion={resolveUserQuestion}
-            markUserQuestionUnavailable={markUserQuestionUnavailable}
-          />
-          {streamingTail && (
-            <div data-testid="chat-streaming-tail">
-              <ChatSessionContext.Provider value={sessionId}>
-                <EventLog mode="bare">
-                  <Thread
-                    thread={streamingTail}
-                    depth={0}
-                    mode="bare"
-                    reveal="shallow"
-                    showHead={false}
-                    interactive
-                  />
-                </EventLog>
-              </ChatSessionContext.Provider>
-            </div>
-          )}
-          {isWaiting && (
-            <ThinkingIndicator
-              label={activityLabel ?? undefined}
-              style={thinkingIndicatorStyle}
-            />
-          )}
-          {!isWaiting && compactionSummary && (
-            <div
-              className="flex justify-start"
-              data-testid="chat-compaction-summary"
-              role="status"
-              aria-live="polite"
-            >
-              <span className="text-xs text-[var(--color-fg-mute)]">
-                Conversation compacted
-                {compactionSummary.trigger
-                  ? ` (${compactionSummary.trigger})`
-                  : ""}
-                {compactionSummary.preTokens !== null
-                  ? ` · ${compactionSummary.preTokens.toLocaleString()} tokens before compaction`
-                  : ""}
-              </span>
-            </div>
-          )}
-          {footer}
-        </div>
-        {selectionAction && !commentEditorOpen
-          ? createPortal(
-              <button
-                type="button"
-                className="fixed z-[80] flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] text-[var(--color-fg)] shadow-lg transition-colors hover:bg-[var(--color-bg-2)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-                data-testid="local-chat-add-comment"
-                aria-label="Add comment"
-                title="Add comment"
-                style={{ top: selectionAction.top, left: selectionAction.left }}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  setCommentDraft("");
-                  setCommentEditorOpen(true);
-                }}
-              >
-                <svg
-                  aria-hidden="true"
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.8}
-                  viewBox="0 0 24 24"
-                >
-                  <path d="M20.5 11.5a8.5 8.5 0 0 1-8.5 8.5 8.6 8.6 0 0 1-4-.95L3 20l.95-4.55A8.5 8.5 0 1 1 20.5 11.5Z" />
-                  <path d="M12 8.5v6M9 11.5h6" />
-                </svg>
-              </button>,
-              document.body
-            )
-          : null}
-        {selectionAction && commentEditorOpen
-          ? createPortal(
+          <div ref={contentRef} className="min-w-0 flex flex-col gap-3">
+            {isLoadingInitialHistory && (
               <div
-                className="fixed z-[80] w-96 max-w-[calc(100vw-1rem)] rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] p-3 shadow-xl"
-                role="group"
-                aria-label="Add a comment to selected text"
-                style={{
-                  top: selectionAction.top,
-                  left: Math.max(
-                    COMMENT_EDITOR_VIEWPORT_GUTTER_PX,
-                    Math.min(
-                      selectionAction.left,
-                      window.innerWidth -
-                        COMMENT_EDITOR_MAX_WIDTH_PX -
-                        COMMENT_EDITOR_VIEWPORT_GUTTER_PX
-                    )
-                  ),
-                }}
+                className="text-center text-xs text-[var(--color-fg-mute)]"
+                role="status"
               >
-                <label
-                  htmlFor="local-chat-comment-draft"
-                  className="mb-1 block text-xs font-medium text-[var(--color-fg)]"
+                Loading conversation history…
+              </div>
+            )}
+            {(hasOlderMessages || isLoadingOlderMessages) && (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-hover)] disabled:cursor-wait disabled:opacity-60"
+                  disabled={isLoadingOlderMessages}
+                  onClick={handleLoadOlderMessages}
                 >
-                  Comment on selected text
-                </label>
-                <textarea
-                  id="local-chat-comment-draft"
-                  data-testid="local-chat-comment-draft"
-                  aria-label="Comment on selected text"
-                  value={commentDraft}
-                  onChange={(event) => setCommentDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter" || !event.metaKey) return;
-                    event.preventDefault();
-                    submitCommentDraft();
+                  {isLoadingOlderMessages
+                    ? "Loading older messages…"
+                    : "Load older messages"}
+                </button>
+              </div>
+            )}
+            {replayError && (
+              <div
+                className="text-center text-xs text-[var(--color-warn)]"
+                role="status"
+              >
+                {replayError}
+                <button type="button" onClick={() => retryHistory(sessionId)}>
+                  Retry history
+                </button>
+              </div>
+            )}
+            <HistoricalChatItems
+              items={renderItems}
+              sessionId={sessionId}
+              isActive={isActive}
+              registerRef={registerMessageRef}
+              resolveUserQuestion={resolveUserQuestion}
+              markUserQuestionUnavailable={markUserQuestionUnavailable}
+            />
+            {streamingTail && (
+              <div data-testid="chat-streaming-tail">
+                <ChatSessionContext.Provider value={sessionId}>
+                  <EventLog mode="bare">
+                    <Thread
+                      thread={streamingTail}
+                      depth={0}
+                      mode="bare"
+                      reveal="shallow"
+                      showHead={false}
+                      interactive
+                    />
+                  </EventLog>
+                </ChatSessionContext.Provider>
+              </div>
+            )}
+            {isWaiting && (
+              <ThinkingIndicator
+                label={activityLabel ?? undefined}
+                style={thinkingIndicatorStyle}
+              />
+            )}
+            {!isWaiting && compactionSummary && (
+              <div
+                className="flex justify-start"
+                data-testid="chat-compaction-summary"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="text-xs text-[var(--color-fg-mute)]">
+                  Conversation compacted
+                  {compactionSummary.trigger
+                    ? ` (${compactionSummary.trigger})`
+                    : ""}
+                  {compactionSummary.preTokens !== null
+                    ? ` · ${compactionSummary.preTokens.toLocaleString()} tokens before compaction`
+                    : ""}
+                </span>
+              </div>
+            )}
+            {footer}
+          </div>
+          {selectionAction && !commentEditorOpen
+            ? createPortal(
+                <button
+                  type="button"
+                  className="fixed z-[80] flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] text-[var(--color-fg)] shadow-lg transition-colors hover:bg-[var(--color-bg-2)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                  data-testid="local-chat-add-comment"
+                  aria-label="Add comment"
+                  title="Add comment"
+                  style={{
+                    top: selectionAction.top,
+                    left: selectionAction.left,
                   }}
-                  autoFocus
-                  rows={3}
-                  className="w-full resize-y rounded-md border border-[var(--color-line)] bg-[var(--color-bg)] p-2 text-sm text-[var(--color-fg)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-                />
-                <div className="mt-2 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="rounded-md px-2 py-1 text-xs text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-hover)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-                    onClick={() => setCommentEditorOpen(false)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setCommentDraft("");
+                    setCommentEditorOpen(true);
+                  }}
+                >
+                  <svg
+                    aria-hidden="true"
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.8}
+                    viewBox="0 0 24 24"
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="local-chat-save-comment"
-                    className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={!commentDraft.trim()}
-                    onClick={submitCommentDraft}
+                    <path d="M20.5 11.5a8.5 8.5 0 0 1-8.5 8.5 8.6 8.6 0 0 1-4-.95L3 20l.95-4.55A8.5 8.5 0 1 1 20.5 11.5Z" />
+                    <path d="M12 8.5v6M9 11.5h6" />
+                  </svg>
+                </button>,
+                document.body
+              )
+            : null}
+          {selectionAction && commentEditorOpen
+            ? createPortal(
+                <div
+                  className="fixed z-[80] w-96 max-w-[calc(100vw-1rem)] rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] p-3 shadow-xl"
+                  role="group"
+                  aria-label="Add a comment to selected text"
+                  style={{
+                    top: selectionAction.top,
+                    left: Math.max(
+                      COMMENT_EDITOR_VIEWPORT_GUTTER_PX,
+                      Math.min(
+                        selectionAction.left,
+                        window.innerWidth -
+                          COMMENT_EDITOR_MAX_WIDTH_PX -
+                          COMMENT_EDITOR_VIEWPORT_GUTTER_PX
+                      )
+                    ),
+                  }}
+                >
+                  <label
+                    htmlFor="local-chat-comment-draft"
+                    className="mb-1 block text-xs font-medium text-[var(--color-fg)]"
                   >
-                    Add to reply
-                  </button>
-                </div>
-              </div>,
-              document.body
-            )
-          : null}
-      </div>
-    </MarkdownProjectRootProvider>
+                    Comment on selected text
+                  </label>
+                  <textarea
+                    id="local-chat-comment-draft"
+                    data-testid="local-chat-comment-draft"
+                    aria-label="Comment on selected text"
+                    value={commentDraft}
+                    onChange={(event) => setCommentDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" || !event.metaKey) return;
+                      event.preventDefault();
+                      submitCommentDraft();
+                    }}
+                    autoFocus
+                    rows={3}
+                    className="w-full resize-y rounded-md border border-[var(--color-line)] bg-[var(--color-bg)] p-2 text-sm text-[var(--color-fg)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                  />
+                  <div className="mt-2 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md px-2 py-1 text-xs text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-hover)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                      onClick={() => setCommentEditorOpen(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="local-chat-save-comment"
+                      className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={!commentDraft.trim()}
+                      onClick={submitCommentDraft}
+                    >
+                      Add to reply
+                    </button>
+                  </div>
+                </div>,
+                document.body
+              )
+            : null}
+        </div>
+      </MarkdownProjectRootProvider>
+    </VtbEntityCopyProvider>
   );
 }

@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { VtbEntityCopyProvider } from "./VtbEntityLink";
 import { MarkdownContent } from "./MarkdownContent";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import { NEAR_VIEWPORT_DWELL_MS } from "../../hooks/useNearViewport";
@@ -172,6 +173,56 @@ describe("MarkdownContent", () => {
   });
 
   describe("links", () => {
+    it.each(["ticket", "workflow", "step", "artifact"])(
+      "copies the full %s target independently of Markdown label formatting",
+      async (type) => {
+        const id = "860cde1b-9093-42ff-a19d-7453f3b7891b";
+        const user = userEvent.setup();
+        const writeText = vi
+          .spyOn(navigator.clipboard, "writeText")
+          .mockResolvedValue();
+        const { rerender } = render(<span />);
+        for (const label of [
+          "A descriptive title",
+          id.slice(0, 8),
+          `\`${id.slice(0, 8)}\``,
+        ]) {
+          rerender(
+            <VtbEntityCopyProvider>
+              <MarkdownContent text={`[${label}](vtb://${type}/${id})`} />
+            </VtbEntityCopyProvider>
+          );
+          await user.click(screen.getByRole("button"));
+          expect(writeText).toHaveBeenLastCalledWith(id);
+          expect(useEntityPanelStore.getState().selection).toBeNull();
+          expect(screen.getByRole("link")).toHaveTextContent(
+            label.replace(/`/g, "")
+          );
+        }
+        expect(writeText).toHaveBeenCalledTimes(3);
+      }
+    );
+
+    it("does not add entity copy controls to external links, prose, code, or other entity types", async () => {
+      render(
+        <VtbEntityCopyProvider>
+          <MarkdownContent
+            text={
+              "[Docs](https://example.com) and `860cde1b` and 860cde1b\n\n```text\n[Ticket](vtb://ticket/full-id)\n```\n\n[Project](vtb://project/project-id) [Task](vtb://task/task-id) [Epic](vtb://epic/epic-id)"
+            }
+          />
+        </VtbEntityCopyProvider>
+      );
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+      expect(screen.getByTestId("external-url-link")).toHaveAttribute(
+        "href",
+        "https://example.com"
+      );
+      expect(await screen.findByTestId("code-snippet")).toHaveTextContent(
+        "[Ticket](vtb://ticket/full-id)"
+      );
+    });
+
     it("renders typed Vertebrae entity links as actionable links", () => {
       render(
         <MarkdownContent text="Open [ticket](vtb://ticket/03111754-4769-47c1-a64c-078d73554af8)" />
