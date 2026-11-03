@@ -1,11 +1,17 @@
 import { useMemo } from "react";
 import type { ReactNode } from "react";
-import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, WorkerPoolContext } from "@pierre/diffs/react";
 import { usePierreDiffOptions } from "../../../hooks/useCodeAppearance";
 import { useDiffComments } from "../../../hooks/useDiffComments";
 import { diffWorkerPool } from "./diffWorkerPool";
-import { parsePatch } from "./diffLineMapper";
+import { useBackgroundTask } from "../../../background/useBackgroundTask";
+import type { BackgroundTask } from "../../../background/types";
+import { preparePatches } from "./preparePatches";
+import { PlainPatch } from "./PlainPatch";
+
+const NO_REVIEW_FILES: ReturnType<
+  typeof preparePatches
+>[number]["reviewFiles"] = [];
 
 /** The recorded tool call a patch belongs to; enables line comments. */
 export interface PatchReview {
@@ -26,17 +32,16 @@ export default function PatchFiles({
   review?: PatchReview;
 }): ReactNode {
   const options = usePierreDiffOptions();
-  const files = useMemo(() => {
-    try {
-      return parsePatchFiles(patch).flatMap((p) => p.files);
-    } catch {
-      return null;
-    }
-  }, [patch]);
-  const patchFiles = useMemo(
-    () => (review ? parsePatch(patch) : []),
-    [patch, review]
+  const wantsReview = review !== undefined;
+  const task = useMemo<Extract<BackgroundTask, { kind: "patch" }>>(
+    () => ({ kind: "patch", patches: [patch], review: wantsReview }),
+    [patch, wantsReview]
   );
+
+  const prepared = useBackgroundTask(task, preparePatches);
+  const files = prepared.value?.[0]?.files;
+  const patchFiles = prepared.value?.[0]?.reviewFiles ?? NO_REVIEW_FILES;
+
   const comments = useDiffComments(
     { kind: "tool_call", toolUseId: review?.toolUseId ?? "" },
     patchFiles,
@@ -65,6 +70,20 @@ export default function PatchFiles({
       ),
     [files, options, reviewing, openComposer, onSelectionChange]
   );
+
+  if (prepared.pending) return <PlainPatch patches={[patch]} />;
+
+  if (prepared.error) {
+    return (
+      <div role="alert">
+        Diff preparation failed: {prepared.error}{" "}
+        <button type="button" onClick={prepared.retry}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   if (!files) {
     return <div className="evtool-sum">Diff could not be displayed</div>;
   }

@@ -1,3 +1,6 @@
+import { backgroundClient } from "../../background/client";
+import type { BackgroundTask, BackgroundOutputs } from "../../background/types";
+
 import {
   lazy,
   Suspense,
@@ -15,10 +18,7 @@ import {
   type WorktreeChanges as Changes,
 } from "../../bindings";
 import { countPatchLines } from "../thread/toolChange/worktreeDelta";
-import {
-  parseWorktreeSnapshot,
-  type WorktreeSnapshot,
-} from "../thread/toolChange/diffComments";
+import { type WorktreeSnapshot } from "../thread/toolChange/diffComments";
 
 import { Select } from "../atoms/Select";
 import { preloadDiffRenderer } from "../thread/toolChange/useWorktreeDelta";
@@ -49,7 +49,12 @@ const NO_PATHS: readonly string[] = [];
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; data: Changes; wholeBranch: boolean };
+  | {
+      status: "ready";
+      data: Changes;
+      wholeBranch: boolean;
+      parsed: BackgroundOutputs["patch"];
+    };
 
 type SidebarMode = "changes" | "files";
 
@@ -106,56 +111,85 @@ export function WorktreeChanges({
     let current = true;
     let running = false;
     let pending = false;
+    const controller = new AbortController();
+
     const load = async () => {
       pending = true;
       if (running) return;
+
       running = true;
+
       while (current && pending) {
         pending = false;
         if (!refreshRef.current.background) setState({ status: "loading" });
+
         try {
           const result = await commands.loadWorktreeChanges(
             worktreePath,
             wholeBranch
           );
           if (!current) break;
+
           if (result.status === "error") {
             setState({ status: "error", message: result.error.message });
           } else {
+            const task: Extract<BackgroundTask, { kind: "patch" }> = {
+              kind: "patch",
+              patches: result.data.files.map((file) =>
+                file.marker ? "" : file.patch
+              ),
+              review: true,
+            };
+
+            const parsed =
+              typeof Worker === "undefined"
+                ? (
+                    await import("../thread/toolChange/preparePatches")
+                  ).preparePatches(task)
+                : await backgroundClient.run(task, controller.signal);
+            if (!current) break;
+
             setBaseBranch(result.data.base_branch);
-            setState({ status: "ready", data: result.data, wholeBranch });
+            setState({
+              status: "ready",
+              data: result.data,
+              wholeBranch,
+              parsed,
+            });
             setGeneration((value) => value + 1);
           }
         } catch (error) {
           if (current) setState({ status: "error", message: String(error) });
         }
       }
+
       running = false;
     };
+
     requestLoad.current = () => {
       void load();
     };
+
     return () => {
       current = false;
+      controller.abort();
       requestLoad.current = null;
     };
   }, [worktreePath, wholeBranch]);
+
   useEffect(() => {
     requestLoad.current?.();
   }, [worktreePath, wholeBranch, refresh]);
 
   const onChangesLoadedRef = useRef(onChangesLoaded);
   onChangesLoadedRef.current = onChangesLoaded;
+
   useEffect(() => {
     if (state.status !== "ready") return;
-    onChangesLoadedRef.current?.(
-      parseWorktreeSnapshot(
-        state.wholeBranch,
-        state.data.files
-          .filter((file) => !file.marker)
-          .map((file) => file.patch)
-      )
-    );
+    onChangesLoadedRef.current?.({
+      wholeBranch: state.wholeBranch,
+      files: state.parsed.flatMap((file) => file.reviewFiles),
+    });
   }, [state]);
 
   const refreshAll = useCallback(() => {
@@ -238,6 +272,7 @@ export function WorktreeChanges({
         <Suspense fallback={<p role="status">Loading diffs…</p>}>
           <AllChangesView
             files={state.data.files}
+            parsedPatches={state.parsed}
             jumpTarget={jumpTarget}
             onOpen={(path) => open(path, "diff")}
           />

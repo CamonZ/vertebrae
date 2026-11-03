@@ -113,7 +113,12 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
   focusPane,
   renderObserver,
 }: ChatPaneWindowProps) {
-  const session = useChatStore((state) => state.sessions[sessionId]);
+  // Only the label is read here; selecting the session object would re-render
+  // the pane on every live text batch.
+  const label = useChatStore((state) => {
+    const session = state.sessions[sessionId];
+    return session ? session.title?.trim() || session.label : undefined;
+  });
   const onStartFresh = useCallback(
     () => void startFreshActiveSession(pane.id),
     [pane.id, startFreshActiveSession]
@@ -131,13 +136,13 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
     [closePane, pane.id]
   );
 
-  if (!session) return null;
+  if (label === undefined) return null;
   return (
     <section
       className="hc-chat-pane"
       data-testid="chat-pane"
       data-pane-active={paneIsActive || undefined}
-      aria-label={`Chat pane ${index + 1}: ${session.title?.trim() || session.label}`}
+      aria-label={`Chat pane ${index + 1}: ${label}`}
       aria-selected={paneIsActive}
       tabIndex={0}
       onMouseDownCapture={(event) => {
@@ -163,8 +168,8 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
       }}
     >
       <ChatWindow
-        key={session.id}
-        sessionId={session.id}
+        key={sessionId}
+        sessionId={sessionId}
         onClosePanel={closeChatPanel}
         onStartFresh={onStartFresh}
         onToggleHistory={toggleHistorySelector}
@@ -178,7 +183,7 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
         onClosePane={isMaximized && paneCount > 1 ? onClosePane : undefined}
         autoFocusComposer={!isMaximized || paneIsActive}
         showProjectContext={paneCount > 1}
-        projectLabel={projectLabelBySessionId?.get(session.id)}
+        projectLabel={projectLabelBySessionId?.get(sessionId)}
         renderObserver={(part) => renderObserver?.(pane.id, part)}
       />
     </section>

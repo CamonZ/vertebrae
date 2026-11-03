@@ -40,23 +40,32 @@ export function useGateSteering(
   status: GateChatStatus,
   draft: GateDraft | null
 ): GateSteering {
-  const session = useChatStore((state) => state.sessions[sessionId]);
+  // Field selectors: live text deltas replace the session object every batch,
+  // and none of these fields change with them.
+  const busy = useChatStore((state) =>
+    isLocalChatLifecycleBusy(getLocalChatLifecycle(state.sessions[sessionId]))
+  );
+  const messages = useChatStore((state) => state.sessions[sessionId]?.messages);
+  const hasBackendSession = useChatStore(
+    (state) => !!state.sessions[sessionId]?.backendSessionId
+  );
+  const resetAt = useChatStore(
+    (state) => state.sessions[sessionId]?.gateSteering?.resetAt ?? null
+  );
+  const softHintBaseline = useChatStore(
+    (state) => state.sessions[sessionId]?.gateSteering?.softHintBaseline ?? null
+  );
   const setGateSteering = useChatStore((state) => state.setGateSteering);
   const thresholds = useUIStore((state) => state.gateSteeringThresholds);
 
-  const busy = session
-    ? isLocalChatLifecycleBusy(getLocalChatLifecycle(session))
-    : false;
-  const resetAt = session?.gateSteering?.resetAt ?? null;
-  const softHintBaseline = session?.gateSteering?.softHintBaseline ?? null;
   const baseline = stallBaselineMs(
     status.draftUpdatedAt,
     status.waitingSince,
     resetAt
   );
   const stalledTurns = useMemo(
-    () => stalledUserTurns(session?.messages ?? [], baseline, busy),
-    [baseline, busy, session?.messages]
+    () => stalledUserTurns(messages ?? [], baseline, busy),
+    [baseline, busy, messages]
   );
   const remaining = useMemo(
     () => remainingFields(gate.fields ?? [], draft),
@@ -70,7 +79,7 @@ export function useGateSteering(
   const hintDue =
     tier !== "none" &&
     !busy &&
-    !!session?.backendSessionId &&
+    hasBackendSession &&
     baseline !== softHintBaseline;
   useEffect(() => {
     if (!hintDue) return;

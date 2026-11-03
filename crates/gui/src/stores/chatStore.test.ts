@@ -1,3 +1,4 @@
+import { materializeLiveAssistantMessages } from "./liveAssistantMessages";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useChatStore, type ChatMessage } from "./chatStore";
 import {
@@ -2663,7 +2664,10 @@ describe("chatStore", () => {
         lifecycle: "streaming",
       });
 
-      expect(useChatStore.getState().sessions[id].messages[0]).toMatchObject({
+      expect(
+        materializeLiveAssistantMessages(useChatStore.getState().sessions[id])
+          .messages[0]
+      ).toMatchObject({
         text: "prefixprefix suffix",
         lifecycle: "streaming",
       });

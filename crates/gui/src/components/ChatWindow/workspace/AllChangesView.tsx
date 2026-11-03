@@ -1,5 +1,4 @@
 import { useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { parsePatchFiles } from "@pierre/diffs";
 import {
   CodeView,
   WorkerPoolContext,
@@ -12,7 +11,7 @@ import { usePierreDiffOptions } from "../../../hooks/useCodeAppearance";
 import { useDiffComments } from "../../../hooks/useDiffComments";
 import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread";
 import { DiffReviewContext } from "../../thread/toolChange/DiffReviewContext";
-import { parseWorktreeSnapshot } from "../../thread/toolChange/diffComments";
+import type { BackgroundOutputs } from "../../../background/types";
 import { MARKER_TEXT } from "../../thread/toolChange/worktreeDelta";
 import { diffWorkerPool } from "../../thread/toolChange/diffWorkerPool";
 
@@ -24,6 +23,7 @@ export interface JumpTarget {
 
 export interface AllChangesViewProps {
   files: readonly WorktreeChange[];
+  parsedPatches: BackgroundOutputs["patch"];
   /** Scroll the shared viewport to this changed file. */
   jumpTarget: JumpTarget | null;
   onOpen(path: string): void;
@@ -39,6 +39,7 @@ const FALLBACK_ATTRIBUTE = "data-changes-fallback";
  */
 export default function AllChangesView({
   files,
+  parsedPatches,
   jumpTarget,
   onOpen,
 }: AllChangesViewProps): ReactNode {
@@ -49,18 +50,19 @@ export default function AllChangesView({
     const items: CodeViewDiffItem<ReviewAnnotation>[] = [];
     const fallbacks: { file: WorktreeChange; text: string }[] = [];
     const itemPaths = new Map<string, string>();
-    for (const file of files) {
+
+    for (const [fileIndex, file] of files.entries()) {
       if (file.marker) {
         fallbacks.push({ file, text: MARKER_TEXT[file.marker] });
         continue;
       }
-      let diffs;
-      try {
-        diffs = parsePatchFiles(file.patch).flatMap((patch) => patch.files);
-      } catch {
+
+      const diffs = parsedPatches[fileIndex]?.files;
+      if (!diffs) {
         fallbacks.push({ file, text: "Diff could not be displayed" });
         continue;
       }
+
       if (diffs.length === 0) {
         fallbacks.push({
           file,
@@ -68,24 +70,22 @@ export default function AllChangesView({
         });
         continue;
       }
+
       diffs.forEach((fileDiff, index) => {
         const id = index === 0 ? file.path : `${file.path}#${index}`;
         itemPaths.set(id, file.path);
         items.push({ id, type: "diff", fileDiff });
       });
     }
+
     return { items, fallbacks, itemPaths };
-  }, [files]);
+  }, [files, parsedPatches]);
 
   // Review comments: parsed patch files for resolving gutter selections, and
   // Pierre annotations per file from the shared pending comments.
   const patchFiles = useMemo(
-    () =>
-      parseWorktreeSnapshot(
-        false,
-        files.filter((file) => !file.marker).map((file) => file.patch)
-      ).files,
-    [files]
+    () => parsedPatches.flatMap((result) => result.reviewFiles),
+    [parsedPatches]
   );
   const review = useDiffComments({ kind: "worktree" }, patchFiles);
   const { annotationsFor, openComposer, onSelectionChange, selectedLinesFor } =

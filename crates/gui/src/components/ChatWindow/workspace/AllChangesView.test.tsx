@@ -2,12 +2,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import {
   forwardRef,
   useImperativeHandle,
+  useMemo,
   type ReactNode,
   type Ref,
 } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodeViewDiffItem } from "@pierre/diffs/react";
-import AllChangesView from "./AllChangesView";
+import AllChangesRenderer, { type AllChangesViewProps } from "./AllChangesView";
+import { preparePatches } from "../../thread/toolChange/preparePatches";
 import type { WorktreeChange } from "../../../bindings";
 
 const scrollTo = vi.fn();
@@ -124,3 +126,17 @@ describe("AllChangesView", () => {
     });
   });
 });
+
+function AllChangesView(props: Omit<AllChangesViewProps, "parsedPatches">) {
+  const parsedPatches = useMemo(
+    () =>
+      preparePatches({
+        kind: "patch",
+        patches: props.files.map((file) => (file.marker ? "" : file.patch)),
+        review: true,
+      }),
+    [props.files]
+  );
+
+  return <AllChangesRenderer {...props} parsedPatches={parsedPatches} />;
+}

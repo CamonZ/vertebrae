@@ -206,7 +206,14 @@ describe("ChatWindow", () => {
     const composer = screen.getByTestId("local-chat-composer");
     fireEvent.change(composer, { target: { value: "keep this draft" } });
     const conversation = screen.getByTestId("chat-messages-scroll");
+
+    Object.defineProperties(conversation, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 500 },
+    });
     conversation.scrollTop = 123;
+    fireEvent.scroll(conversation);
+
     fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await screen.findByText("No changes against this baseline.");
     expect(composer).not.toBeVisible();

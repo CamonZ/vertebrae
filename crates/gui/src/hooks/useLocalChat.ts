@@ -1,3 +1,4 @@
+import { flushPendingLocalChatText } from "../utils/localChatTextBatch";
 import { useCallback, useState } from "react";
 import { commands } from "../bindings";
 import type {
@@ -998,6 +999,8 @@ export async function doCloseSession(
     interruptItemId?: string | null;
   } = {}
 ): Promise<boolean> {
+  flushPendingLocalChatText();
+
   const completionIsStale = makeStalenessCheck(
     deps,
     sessionId,
