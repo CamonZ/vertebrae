@@ -161,6 +161,7 @@ pub(crate) struct DirtyEntry {
 #[derive(Debug, Clone)]
 pub(crate) struct Snapshot {
     pub(crate) head: Option<String>,
+    pub(crate) branch: String,
     pub(crate) dirty: BTreeMap<String, DirtyEntry>,
     pub(crate) files: BTreeMap<String, Side>,
 }
@@ -168,7 +169,8 @@ pub(crate) struct Snapshot {
 impl Snapshot {
     /// Whether two snapshots observed the same worktree state; used to settle.
     pub(crate) fn agrees_with(&self, other: &Snapshot) -> bool {
-        self.head == other.head
+        self.branch == other.branch
+            && self.head == other.head
             && self.dirty == other.dirty
             && self.files.len() == other.files.len()
             && self
@@ -294,6 +296,20 @@ fn head(worktree: &Path) -> Result<Option<String>, GitError> {
         Err(GitError::Failed(_)) => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+/// Current symbolic branch; detached HEAD is deliberately not a branch.
+pub(crate) fn branch(worktree: &Path) -> Result<Option<String>, GitError> {
+    let output = run_git_bounded(
+        worktree,
+        &["symbolic-ref", "--quiet", "HEAD"],
+        None,
+        4096,
+        &[0, 1],
+    )?;
+    let name =
+        String::from_utf8(output).map_err(|_| GitError::Malformed("non-UTF-8 branch".into()))?;
+    Ok(name.trim().strip_prefix("refs/heads/").map(str::to_owned))
 }
 
 fn parse_mode(text: &str) -> Option<u32> {
@@ -540,7 +556,16 @@ fn file_mode(_metadata: &fs::Metadata) -> u32 {
 }
 
 /// Checkpoint the worktree: HEAD, dirty paths and their on-disk state.
-pub(crate) fn snapshot(worktree: &Path, limits: &Limits) -> Result<Snapshot, GitError> {
+pub(crate) fn snapshot(
+    worktree: &Path,
+    limits: &Limits,
+    intended_branch: &str,
+) -> Result<Snapshot, GitError> {
+    if branch(worktree)?.as_deref() != Some(intended_branch) {
+        return Err(GitError::Failed(
+            "worktree is not on the intended branch".into(),
+        ));
+    }
     let head = head(worktree)?;
     let dirty = status(worktree, limits)?;
     let mut budget = CacheBudget::new(limits);
@@ -548,7 +573,15 @@ pub(crate) fn snapshot(worktree: &Path, limits: &Limits) -> Result<Snapshot, Git
         .keys()
         .map(|path| (path.clone(), read_side(worktree, path, limits, &mut budget)))
         .collect();
-    Ok(Snapshot { head, dirty, files })
+    if branch(worktree)?.as_deref() != Some(intended_branch) {
+        return Err(GitError::Failed("branch changed during checkpoint".into()));
+    }
+    Ok(Snapshot {
+        head,
+        branch: intended_branch.to_owned(),
+        dirty,
+        files,
+    })
 }
 
 /// Blob contents of `paths` at `commit`. Paths absent from the commit map to

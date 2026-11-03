@@ -329,7 +329,11 @@ impl LocalChatSessionManager {
         );
         if let Some(worktree) = input.recording_worktree.clone() {
             if let Err(error) = self
-                .apply_recording_worktree(&backend_session_id, Some(worktree))
+                .apply_recording_worktree(
+                    &backend_session_id,
+                    Some(worktree),
+                    input.recording_branch.clone(),
+                )
                 .await
             {
                 log::warn!(
@@ -364,10 +368,11 @@ impl LocalChatSessionManager {
         &self,
         backend_session_id: &str,
         worktree_path: Option<String>,
+        intended_branch: Option<String>,
     ) -> Result<(), LocalChatSessionError> {
         let _lifecycle = self.lifecycle_gate.read().await;
         self.registry_harness(backend_session_id).await?;
-        self.apply_recording_worktree(backend_session_id, worktree_path)
+        self.apply_recording_worktree(backend_session_id, worktree_path, intended_branch)
             .await
             .inspect_err(|error| {
                 log::warn!(
@@ -380,6 +385,7 @@ impl LocalChatSessionManager {
         &self,
         backend_session_id: &str,
         worktree_path: Option<String>,
+        intended_branch: Option<String>,
     ) -> Result<(), LocalChatSessionError> {
         let (chat_session_id, project_root, tap) = {
             let recordings = self.lock_recordings();
@@ -412,7 +418,7 @@ impl LocalChatSessionManager {
                 return Err(LocalChatSessionError::InvalidRecordingWorktree(error));
             }
         };
-        if tap.worktree().as_ref() == Some(&worktree) {
+        if tap.targets(&worktree, intended_branch.as_deref()) {
             log::info!(
                 "[LOCAL_CHAT] recording already targets {} for session {backend_session_id}",
                 worktree.display()
@@ -432,7 +438,13 @@ impl LocalChatSessionManager {
             "[LOCAL_CHAT] recording started for session {backend_session_id} (chat {chat_session_id}) in {}",
             worktree.display()
         );
-        tap.start(chat_session_id, worktree, store, self.recorder_config);
+        tap.start(
+            chat_session_id,
+            worktree,
+            intended_branch,
+            store,
+            self.recorder_config,
+        );
         Ok(())
     }
 

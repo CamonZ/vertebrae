@@ -68,7 +68,7 @@ export function WorktreeChanges({
   /** Called with the parsed All Changes patch after every successful load. */
   onChangesLoaded?: (snapshot: WorktreeSnapshot) => void;
 }) {
-  const [wholeBranch, setWholeBranch] = useState(false);
+  const [wholeBranch, setWholeBranch] = useState(true);
   // Background refreshes keep the current list visible while Git runs.
   const [refresh, setRefresh] = useState({ count: 0, background: false });
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -226,7 +226,13 @@ export function WorktreeChanges({
     ) : state.status === "error" ? (
       <p role="alert">{state.message}</p>
     ) : files.length === 0 ? (
-      <p>No changes against this baseline.</p>
+      <div
+        role="status"
+        aria-label="No changes"
+        className="flex flex-1 items-center justify-center text-[var(--color-fg-mute)]"
+      >
+        <p>No changes against this baseline.</p>
+      </div>
     ) : (
       <div aria-label="All file diffs" className="changes-viewport">
         <Suspense fallback={<p role="status">Loading diffs…</p>}>
@@ -259,15 +265,13 @@ export function WorktreeChanges({
               }));
             }}
             options={[
+              {
+                value: "branch",
+                label: baseBranch
+                  ? `Whole branch · merge-base with ${baseBranch}`
+                  : "Whole branch",
+              },
               { value: "head", label: "Uncommitted · working tree vs HEAD" },
-              ...(baseBranch
-                ? [
-                    {
-                      value: "branch",
-                      label: `Whole branch · merge-base with ${baseBranch}`,
-                    },
-                  ]
-                : []),
             ]}
           />
         </label>

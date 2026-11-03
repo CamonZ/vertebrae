@@ -191,7 +191,7 @@ async function openChangedFile() {
 }
 
 describe("WorktreeChanges", () => {
-  it("loads on open and refresh and requests the labeled branch baseline", async () => {
+  it("defaults to the whole branch on open and refresh and can select Uncommitted", async () => {
     render(<WorktreeChanges worktreePath="/worktree" />);
     expect(screen.getByText("Loading changes…")).toHaveAttribute(
       "role",
@@ -202,15 +202,15 @@ describe("WorktreeChanges", () => {
       screen.getByRole("button", { name: "Refresh changes" })
     ).toBeDisabled();
     await screen.findByText("No changes against this baseline.");
-    expect(load).toHaveBeenCalledExactlyOnceWith("/worktree", false);
+    expect(load).toHaveBeenCalledExactlyOnceWith("/worktree", true);
     fireEvent.click(screen.getByRole("button", { name: "Refresh changes" }));
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
     await screen.findByText("No changes against this baseline.");
     fireEvent.change(screen.getByLabelText("Changes baseline"), {
-      target: { value: "branch" },
+      target: { value: "head" },
     });
     await waitFor(() =>
-      expect(load).toHaveBeenLastCalledWith("/worktree", true)
+      expect(load).toHaveBeenLastCalledWith("/worktree", false)
     );
   });
 
@@ -270,20 +270,104 @@ describe("WorktreeChanges", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps failures inline and hides unavailable branch baselines", async () => {
-    load.mockResolvedValueOnce({
-      status: "error",
-      error: { message: "git timed out" },
-    });
+  it("keeps an unavailable whole-branch baseline distinct from empty success and permits recovery", async () => {
+    load.mockImplementation(async (_worktree, wholeBranch) =>
+      wholeBranch
+        ? {
+            status: "error",
+            error: {
+              message:
+                "Whole-branch baseline is unavailable; select Uncommitted.",
+            },
+          }
+        : {
+            status: "ok",
+            data: {
+              ...empty,
+              base_branch: null,
+              base_unavailable: "No base branch",
+            },
+          }
+    );
     render(<WorktreeChanges worktreePath="/missing" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("git timed out");
-    load.mockResolvedValueOnce({
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Whole-branch baseline is unavailable"
+    );
+    expect(screen.queryByRole("status", { name: "No changes" })).toBeNull();
+    const baseline = screen.getByRole("combobox", { name: "Changes baseline" });
+    expect(baseline).toHaveValue("branch");
+    expect(baseline).toBeEnabled();
+    fireEvent.change(baseline, { target: { value: "head" } });
+    expect(
+      await screen.findByRole("status", { name: "No changes" })
+    ).toBeVisible();
+    expect(await screen.findByText("No base branch")).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(baseline).toHaveValue("head");
+  });
+
+  it("shows committed branch changes by default even when Uncommitted is empty", async () => {
+    load.mockImplementation(async (_worktree, wholeBranch) => ({
       status: "ok",
-      data: { ...empty, base_branch: null, base_unavailable: "No base branch" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Refresh changes" }));
-    await screen.findByText("No base branch");
-    expect(screen.getAllByRole("option")).toHaveLength(1);
+      data: wholeBranch ? modified : empty,
+    }));
+    render(<WorktreeChanges worktreePath="/worktree" />);
+    await screen.findByRole("region", { name: "Diff for src/app.ts" });
+    const baseline = screen.getByRole("combobox", { name: "Changes baseline" });
+    expect(baseline).toHaveValue("branch");
+    expect(
+      screen.getByRole("option", {
+        name: "Whole branch · merge-base with refs/heads/main",
+      })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "No changes" })).toBeNull();
+    fireEvent.change(baseline, { target: { value: "head" } });
+    expect(
+      await screen.findByRole("status", { name: "No changes" })
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("region", { name: "Diff for src/app.ts" })
+    ).toBeNull();
+    expect(baseline).toBeEnabled();
+    fireEvent.change(baseline, { target: { value: "branch" } });
+    await screen.findByRole("region", { name: "Diff for src/app.ts" });
+    expect(screen.queryByRole("status", { name: "No changes" })).toBeNull();
+    expect(load).toHaveBeenLastCalledWith("/worktree", true);
+  });
+
+  it("renders valid empty states for both baselines and responds to filesystem changes", async () => {
+    render(<WorktreeChanges worktreePath="/worktree" />);
+    const baseline = screen.getByRole("combobox", { name: "Changes baseline" });
+    // The initial selection is valid before Git discovers the base branch.
+    expect(baseline).toHaveValue("branch");
+    expect(
+      await screen.findByRole("status", { name: "No changes" })
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.change(baseline, { target: { value: "head" } });
+    await waitFor(() =>
+      expect(load).toHaveBeenLastCalledWith("/worktree", false)
+    );
+    expect(
+      await screen.findByRole("status", { name: "No changes" })
+    ).toBeVisible();
+    const calls = vi.mocked(useWorktreeWatch).mock.calls;
+    const refresh = calls[calls.length - 1][1];
+    load.mockResolvedValue({ status: "ok", data: modified });
+    act(() => refresh());
+    await screen.findByRole("region", { name: "Diff for src/app.ts" });
+    expect(baseline).toHaveValue("head");
+    expect(screen.queryByRole("status", { name: "No changes" })).toBeNull();
+    load.mockResolvedValue({ status: "ok", data: empty });
+    act(() => refresh());
+    expect(
+      await screen.findByRole("status", { name: "No changes" })
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("region", { name: "Diff for src/app.ts" })
+    ).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(baseline).toBeEnabled();
   });
 
   it("drops late failures after worktree changes", async () => {
@@ -301,7 +385,7 @@ describe("WorktreeChanges", () => {
       resolveOld({ status: "error", error: { message: "stale error" } })
     );
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(load).toHaveBeenLastCalledWith("/new", false);
+    expect(load).toHaveBeenLastCalledWith("/new", true);
   });
 
   it("browses folders lazily with status decorations and opens full files", async () => {
@@ -386,7 +470,7 @@ describe("WorktreeChanges", () => {
         "unchanged line old"
       )
     );
-    expect(readBaseline).toHaveBeenCalledWith("/worktree", "src/app.ts", false);
+    expect(readBaseline).toHaveBeenCalledWith("/worktree", "src/app.ts", true);
     fireEvent.change(screen.getByRole("textbox", { name: "Edit src/app.ts" }), {
       target: { value: "draft\n" },
     });

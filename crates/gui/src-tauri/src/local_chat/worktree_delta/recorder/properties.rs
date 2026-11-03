@@ -15,6 +15,7 @@ enum Op {
     Finish(u8, Boundary),
     Child(Option<u8>),
     EndTurn,
+    Discard(Option<u8>),
 }
 
 fn id(n: u8) -> String {
@@ -57,6 +58,13 @@ impl Model {
                 }
             }
             Op::Child(parent) => windows.child(parent.map(id).as_deref()),
+            Op::Discard(tool) => {
+                windows.discard(tool.map(id).as_deref());
+                self.finished.extend(self.open.drain(..).map(|(id, _)| id));
+                if let Some(tool) = tool {
+                    self.finished.insert(id(tool));
+                }
+            }
             Op::EndTurn => {
                 let dropped = windows.end_turn();
                 assert_eq!(dropped.len(), self.open.len());
@@ -67,6 +75,7 @@ impl Model {
     }
 
     fn check(&self, windows: &Windows) {
+        assert!(windows.discarded.is_subset(&windows.finished));
         let open: Vec<_> = windows.open.iter().map(|w| w.tool_id.clone()).collect();
         let expected: Vec<_> = self.open.iter().map(|(i, _)| i.clone()).collect();
         assert_eq!(open, expected, "open windows diverge from the model");
@@ -93,11 +102,12 @@ fn draw_op(tc: &TestCase) -> Op {
     } else {
         Boundary::FileChange
     };
-    match tc.draw(gs::integers::<u8>().max_value(3)) {
+    match tc.draw(gs::integers::<u8>().max_value(4)) {
         0 => Op::Start(tool, boundary),
         1 => Op::Finish(tool, boundary),
         2 => Op::Child(tc.draw(gs::booleans()).then_some(tool)),
-        _ => Op::EndTurn,
+        3 => Op::EndTurn,
+        _ => Op::Discard(tc.draw(gs::booleans()).then_some(tool)),
     }
 }
 

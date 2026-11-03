@@ -140,14 +140,17 @@ const inflight = new Map<string, object>();
  * Recording target last sent to each backend runtime: the value passed on
  * create, then every pushed change. Missing means never sent.
  */
-const recordingTargets = new Map<string, string | null>();
+const recordingTargets = new Map<string, string>();
+const recordingKey = (path: string | null, branch: string | null) =>
+  JSON.stringify([path, branch]);
 
 /** Remember the target a runtime was created with, so it is not re-sent. */
 export function noteRecordingTarget(
   backendSessionId: string,
-  worktreePath: string | null
+  worktreePath: string | null,
+  branch: string | null = null
 ) {
-  recordingTargets.set(backendSessionId, worktreePath);
+  recordingTargets.set(backendSessionId, recordingKey(worktreePath, branch));
 }
 
 /** Forget a runtime's target once the runtime is gone or never started. */
@@ -156,8 +159,10 @@ export function forgetRecordingTarget(backendSessionId: string) {
 }
 
 /** Worktree a persisted association binds, for starting a runtime. */
-export const associationWorktreePath = (association: unknown) =>
-  readRecord(association).worktreePath;
+export const associationRecordingTarget = (association: unknown) => {
+  const { worktreePath, branch } = readRecord(association);
+  return { worktreePath, branch };
+};
 
 const setDiagnostic = (sessionId: string, diagnostic: string | null) =>
   useChatStore
@@ -351,6 +356,7 @@ export function useChatAssociationDriver(sessionId: string) {
   }, [messages, root, replayLoading, record, tick, sessionId]);
 
   const worktreePath = record.worktreePath;
+  const intendedBranch = record.branch;
   // Targets are per runtime: drop the entry when the runtime or driver goes.
   useEffect(
     () => () => {
@@ -366,15 +372,20 @@ export function useChatAssociationDriver(sessionId: string) {
       lifecycle === "resuming"
     )
       return;
-    if (recordingTargets.get(backendSessionId) === worktreePath) return;
-    recordingTargets.set(backendSessionId, worktreePath);
+    const key = recordingKey(worktreePath, intendedBranch);
+    if (recordingTargets.get(backendSessionId) === key) return;
+    recordingTargets.set(backendSessionId, key);
     const generation = getProjectScopeGeneration();
     const isStale = () =>
       generation !== getProjectScopeGeneration() ||
       useChatStore.getState().sessions[sessionId]?.backendSessionId !==
         backendSessionId;
     void commands
-      .setLocalChatRecordingWorktree(backendSessionId, worktreePath)
+      .setLocalChatRecordingWorktree(
+        backendSessionId,
+        worktreePath,
+        intendedBranch
+      )
       .then((result) => {
         if (isStale() || result.status === "ok") return;
         // Rejected by backend validation: retrying the same path cannot help.
@@ -393,7 +404,7 @@ export function useChatAssociationDriver(sessionId: string) {
           error,
         });
       });
-  }, [backendSessionId, lifecycle, worktreePath, sessionId]);
+  }, [backendSessionId, lifecycle, worktreePath, intendedBranch, sessionId]);
 }
 
 /** User intent: blank clears; otherwise one cached ticket matching a full or short ID. */

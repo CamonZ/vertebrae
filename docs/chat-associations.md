@@ -59,3 +59,26 @@ response boundaries, reproducible context failures, diagnostic configuration,
 privacy limits and remaining hypotheses. Execution-directory keys include `cwd`,
 `workdir`, `working_directory` and `working_dir`; late responses are also retired
 when the conversation root or project generation changes.
+
+## Recording branch guard
+
+The branch captured when a worktree is associated is the intended recording
+branch. It is sent with the worktree path when a local runtime starts or its
+association changes, including when only the intended branch changes. Resuming
+a runtime preserves the persisted branch rather than adopting the checkout's
+current branch. An association with no branch (including detached HEAD) leaves
+recording off until a named branch is explicitly associated.
+
+The delta recorder checks branch identity before opening a tool window, around
+checkpoints, and before appending an annotation. A mismatch, detached HEAD or
+Git read failure drops the affected windows and clears the baseline. Recording
+on return to the intended branch uses a fresh baseline; commits on the intended
+branch remain supported. These checks do not lock Git against an external branch
+switch, and a switch away and back entirely between checks is not observable.
+The Changes view still displays the checkout's current contents; the guard
+controls persisted per-tool deltas, not that live workspace browser.
+
+Discarded tool IDs stay retired until the turn ends. A later completion for a
+retired tool invalidates the idle checkpoint when no other tool is open, so
+late writes cannot be handed to the next tool before filesystem notifications
+arrive. Duplicate starts of completed tools do not consume idle checkpoints.

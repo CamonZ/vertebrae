@@ -164,6 +164,7 @@ struct Window {
 pub(crate) struct Windows {
     open: Vec<Window>,
     finished: HashSet<String>,
+    discarded: HashSet<String>,
 }
 
 impl Windows {
@@ -217,8 +218,21 @@ impl Windows {
         self.open.drain(..).map(|window| window.tool_id).collect()
     }
 
+    /// Branch-invalid windows and their late/repeated starts stay retired
+    /// until the turn ends, just like completed tools.
+    fn discard(&mut self, tool_id: Option<&str>) {
+        let dropped = self.drop_all();
+        self.finished.extend(dropped.iter().cloned());
+        self.discarded.extend(dropped);
+        if let Some(tool_id) = tool_id {
+            self.finished.insert(tool_id.to_owned());
+            self.discarded.insert(tool_id.to_owned());
+        }
+    }
+
     pub(crate) fn end_turn(&mut self) -> Vec<String> {
         self.finished.clear();
+        self.discarded.clear();
         self.drop_all()
     }
 
@@ -241,6 +255,7 @@ struct WorktreeDeltaPayload {
 pub(crate) struct Recorder {
     pub(crate) chat_session_id: String,
     pub(crate) worktree: PathBuf,
+    pub(crate) intended_branch: String,
     pub(crate) store: LocalChatAnnotationStore,
     pub(crate) config: RecorderConfig,
     pub(crate) gate: Arc<RecorderGate>,
@@ -322,17 +337,29 @@ impl Recorder {
             match event {
                 RecorderEvent::Started { tool_id, boundary } => {
                     self.gate.start_dequeued();
-                    let handed_off = idle.take();
+                    // A branch can switch without any file notification (even
+                    // when both branches name the same commit). Never hand a
+                    // previous branch's idle checkpoint into a new window.
+                    if !self.branch_matches().await {
+                        log::info!("[WORKTREE_DELTA] skipping tool {tool_id}: branch mismatch or unreadable branch");
+                        windows.discard(Some(&tool_id));
+                        checkpoint = None;
+                        idle = None;
+                        continue;
+                    }
                     let opened = windows.start(&tool_id, boundary);
                     log::info!(
                         "[WORKTREE_DELTA] start tool={tool_id} boundary={boundary:?} opened={opened:?} worktree={}",
                         self.worktree.display()
                     );
                     if opened == Some(true) {
-                        checkpoint = match handed_off {
+                        checkpoint = match idle.take() {
                             Some(snapshot) => Some(snapshot),
                             None => self.snapshot().await.map(Arc::new).ok(),
                         };
+                        if checkpoint.is_none() {
+                            windows.discard(Some(&tool_id));
+                        }
                     }
                 }
                 RecorderEvent::Finished { tool_id, boundary } => {
@@ -340,6 +367,13 @@ impl Recorder {
                         log::info!(
                             "[WORKTREE_DELTA] finish tool={tool_id} boundary={boundary:?}: no matching open window"
                         );
+                        if windows.is_empty() && windows.discarded.contains(&tool_id) {
+                            // A retired tool can still write after returning to
+                            // the intended branch. Notifications may lag behind
+                            // the next start, so never hand that stale idle
+                            // checkpoint into the next legitimate tool.
+                            idle = None;
+                        }
                         continue;
                     };
                     // A tool that left the worktree as it found it needs no
@@ -371,6 +405,12 @@ impl Recorder {
                             "[WORKTREE_DELTA] skipping tool {tool_id}: could not snapshot {}: {error}",
                             self.worktree.display()
                         );
+                    }
+                    if end.is_err() {
+                        windows.discard(None);
+                        checkpoint = None;
+                        idle = None;
+                        continue;
                     }
                     match (checkpoint.take(), &end) {
                         (Some(_), Ok(_)) if unchanged => {}
@@ -425,7 +465,7 @@ impl Recorder {
         let fresh = self.snapshot().await.map(Arc::new).ok();
         // A start queued meanwhile may already have changed the worktree:
         // preserve the earlier baseline rather than absorb that tool's edits.
-        if fresh.is_some() && !self.gate.start_pending() && self.gate.is_active() {
+        if !self.gate.start_pending() && self.gate.is_active() {
             *idle = fresh;
             #[cfg(test)]
             {
@@ -434,12 +474,25 @@ impl Recorder {
         }
     }
 
+    async fn branch_matches(&self) -> bool {
+        let worktree = self.worktree.clone();
+        let intended = self.intended_branch.clone();
+        tokio::task::spawn_blocking(move || {
+            git::branch(&worktree).is_ok_and(|branch| branch.as_deref() == Some(intended.as_str()))
+        })
+        .await
+        .unwrap_or(false)
+    }
+
     async fn snapshot(&self) -> Result<Snapshot, GitError> {
         let worktree = self.worktree.clone();
         let limits = self.config.limits;
-        let result = tokio::task::spawn_blocking(move || git::snapshot(&worktree, &limits))
-            .await
-            .unwrap_or_else(|error| Err(GitError::Task(error.to_string())));
+        let intended_branch = self.intended_branch.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            git::snapshot(&worktree, &limits, &intended_branch)
+        })
+        .await
+        .unwrap_or_else(|error| Err(GitError::Task(error.to_string())));
         #[cfg(test)]
         {
             self.gate.checkpoints.fetch_add(1, Ordering::AcqRel);
@@ -507,7 +560,14 @@ impl Recorder {
         let gate = self.gate.clone();
         let chat_session_id = self.chat_session_id.clone();
         let tool_id = window.tool_id.clone();
+        let intended_branch = self.intended_branch.clone();
         let outcome = tokio::task::spawn_blocking(move || {
+            if start.branch != intended_branch
+                || end.branch != intended_branch
+                || git::branch(&worktree)?.as_deref() != Some(intended_branch.as_str())
+            {
+                return Ok(None);
+            }
             let delta = patch::compute(&worktree, &start, &end, &limits)?;
             if delta.files.is_empty() {
                 return Ok(None);
@@ -529,6 +589,9 @@ impl Recorder {
                 WORKTREE_DELTA_KIND,
                 payload,
             );
+            if git::branch(&worktree)?.as_deref() != Some(intended_branch.as_str()) {
+                return Ok(None);
+            }
             Ok(gate.while_active(|| store.append(annotation)))
         })
         .await

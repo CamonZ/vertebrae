@@ -34,7 +34,7 @@ import {
   isAutomaticLocalChatLabel,
 } from "../utils/localChatPersistence";
 import {
-  associationWorktreePath,
+  associationRecordingTarget,
   forgetRecordingTarget,
   noteRecordingTarget,
 } from "./useChatAssociation";
@@ -705,7 +705,8 @@ function makeStalenessCheck(
   deps: TurnOwnershipDeps,
   sessionId: string | null,
   backendSessionId: string | null,
-  expectedActiveTurnLocalId?: string | null
+  expectedActiveTurnLocalId?: string | null,
+  allowSettledTurn = false
 ): () => boolean {
   return () => {
     if (!sessionId) return false;
@@ -716,10 +717,13 @@ function makeStalenessCheck(
     ) {
       return true;
     }
-    if (!expectedActiveTurnLocalId) return false;
-    const currentLocalId = deps.getActiveTurnLocalId?.(sessionId) ?? null;
+    if (!expectedActiveTurnLocalId || !deps.getActiveTurnLocalId) return false;
+    const currentLocalId = deps.getActiveTurnLocalId(sessionId);
+    // A cleared turn retires a create/send reply. Close still owns teardown
+    // on the same backend when that turn ends while its IPC is in flight.
     return (
-      currentLocalId !== null && currentLocalId !== expectedActiveTurnLocalId
+      currentLocalId !== expectedActiveTurnLocalId &&
+      !(allowSettledTurn && currentLocalId === null)
     );
   };
 }
@@ -802,13 +806,15 @@ export async function doStartSession(
       );
     }
 
-    const recordingWorktree = associationWorktreePath(session.association);
-    noteRecordingTarget(backendSessionId, recordingWorktree);
+    const { worktreePath: recordingWorktree, branch: recordingBranch } =
+      associationRecordingTarget(session.association);
+    noteRecordingTarget(backendSessionId, recordingWorktree, recordingBranch);
     const result = await commands.createLocalChatSession({
       harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
       backend_session_id: backendSessionId,
       chat_session_id: session.id,
       recording_worktree: recordingWorktree,
+      recording_branch: recordingBranch,
       working_dir: workingDir,
       initial_prompt: initialPrompt ?? null,
       provider_resume_id: resumeId,
@@ -833,8 +839,8 @@ export async function doStartSession(
     if (completionIsStale()) return;
     deps.setSessionLifecycle(sessionId, userMessage ? "streaming" : "idle");
   } catch (error) {
-    forgetRecordingTarget(backendSessionId);
     if (completionIsStale()) return;
+    forgetRecordingTarget(backendSessionId);
     const message = commandErrorMessage(error);
     deps.setBackendSessionId(sessionId, null);
     deps.setBackendSessionIdRef?.(null);
@@ -996,7 +1002,8 @@ export async function doCloseSession(
     deps,
     sessionId,
     backendSessionId,
-    options.expectedActiveTurnLocalId
+    options.expectedActiveTurnLocalId,
+    true
   );
 
   if (sessionId) {

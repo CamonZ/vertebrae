@@ -1,4 +1,4 @@
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import {
   dispatchCodexChatCommand,
@@ -1250,6 +1250,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.stringMatching(/^local-/),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1291,6 +1292,7 @@ describe("doStartSession", () => {
       expect.objectContaining({
         chat_session_id: SESSION_ID,
         recording_worktree: "/test/project-b3d8a9c9",
+        recording_branch: "b3d8a9c9-record",
       })
     );
   });
@@ -1315,6 +1317,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.stringMatching(/^local-/),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: "/captured/project",
       initial_prompt: null,
@@ -1411,6 +1414,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.stringMatching(/^local-/),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1441,6 +1445,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.stringMatching(/^local-/),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1474,6 +1479,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.stringMatching(/^local-/),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "codex",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1508,6 +1514,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.stringMatching(/^local-/),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "codex",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1566,6 +1573,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.stringMatching(/^local-/),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1816,6 +1824,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.any(String),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: "Help",
@@ -1846,6 +1855,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.any(String),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1885,6 +1895,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.any(String),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
@@ -1917,6 +1928,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.any(String),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: null,
       initial_prompt: null,
@@ -1943,6 +1955,7 @@ describe("doStartSession", () => {
       backend_session_id: expect.any(String),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: "/test/project",
       initial_prompt: "Question",
@@ -2042,6 +2055,53 @@ describe("doStartSession", () => {
       "claude missing"
     );
   });
+
+  it.each(["ok", "error"] as const)(
+    "ignores a late %s create response after the first turn completed on the same backend",
+    async (status) => {
+      const create = deferredCommandResult();
+      mockedCommands.createLocalChatSession.mockReturnValueOnce(
+        create.promise as never
+      );
+      let backendSessionId: string | null = null;
+      let activeTurnLocalId: string | null = "local-turn-1";
+      const deps = {
+        setBackendSessionId: vi.fn((_id: string, backendId: string | null) => {
+          backendSessionId = backendId;
+        }),
+        addMessage: vi.fn(),
+        setSessionLifecycle: vi.fn(),
+        beginActiveTurn: vi.fn(() => "local-turn-1"),
+        settleActiveTurn: vi.fn(),
+        getActiveTurnLocalId: vi.fn(() => activeTurnLocalId),
+        getBackendSessionId: vi.fn(() => backendSessionId),
+      };
+      const starting = doStartSession(makeSession(), SESSION_ID, deps, "hello");
+      await waitFor(() =>
+        expect(mockedCommands.createLocalChatSession).toHaveBeenCalled()
+      );
+      // The provider's terminal event settled the first turn, but the runtime
+      // remains alive for a follow-up. The create IPC reply arrives afterward.
+      activeTurnLocalId = null;
+      const retainedBackend = backendSessionId;
+      deps.setSessionLifecycle.mockClear();
+      deps.setBackendSessionId.mockClear();
+      deps.addMessage.mockClear();
+      create.resolve(
+        status === "ok"
+          ? { status: "ok" }
+          : ({
+              status: "error",
+              error: { StartFailed: "late failure" },
+            } as never)
+      );
+      await starting;
+      expect(deps.setSessionLifecycle).not.toHaveBeenCalled();
+      expect(deps.setBackendSessionId).not.toHaveBeenCalled();
+      expect(deps.addMessage).not.toHaveBeenCalled();
+      expect(backendSessionId).toBe(retainedBackend);
+    }
+  );
 
   it("does not resurrect a lifecycle when a stop lands before the start resolves", async () => {
     const create = deferredCommandResult();
@@ -2599,6 +2659,7 @@ describe("doSendMessage", () => {
       backend_session_id: expect.stringMatching(/^local-/),
       chat_session_id: expect.any(String),
       recording_worktree: null,
+      recording_branch: null,
       harness: "claude",
       working_dir: "/repo/root",
       initial_prompt: "Retry after crash",
@@ -2609,6 +2670,43 @@ describe("doSendMessage", () => {
       permission_mode: "default",
     });
   });
+
+  it.each(["ok", "error"] as const)(
+    "ignores a late %s send response after its turn completes on the same backend",
+    async (status) => {
+      const send = deferredCommandResult();
+      mockedCommands.sendLocalChatMessage.mockReturnValueOnce(
+        send.promise as never
+      );
+      let activeTurnLocalId: string | null = "local-turn-1";
+      const deps = {
+        addMessage: vi.fn(),
+        setSessionLifecycle: vi.fn(),
+        markStreamingIfSending: vi.fn(),
+        beginActiveTurn: vi.fn(() => "local-turn-1"),
+        settleActiveTurn: vi.fn(),
+        setBackendSessionId: vi.fn(),
+        getActiveTurnLocalId: vi.fn(() => activeTurnLocalId),
+        getBackendSessionId: vi.fn(() => CLAUDE_SESSION_ID),
+      };
+      const sending = doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "hi", deps);
+      activeTurnLocalId = null;
+      deps.setSessionLifecycle.mockClear();
+      send.resolve(
+        status === "ok"
+          ? { status: "ok" }
+          : ({
+              status: "error",
+              error: { SendFailed: "late failure" },
+            } as never)
+      );
+      await sending;
+      expect(deps.setSessionLifecycle).not.toHaveBeenCalled();
+      expect(deps.markStreamingIfSending).not.toHaveBeenCalled();
+      expect(deps.settleActiveTurn).not.toHaveBeenCalled();
+      expect(deps.setBackendSessionId).not.toHaveBeenCalled();
+    }
+  );
 
   it("does not settle a replacement turn when an abandoned send fails late", async () => {
     const firstSend = deferredCommandResult();

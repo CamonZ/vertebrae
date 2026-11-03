@@ -977,9 +977,9 @@ async closeLocalChatSession(backendSessionId: string) : Promise<Result<null, Loc
  * local chat runtime records. The path must be the session's project root or
  * one of its Git worktrees; otherwise recording stays off.
  */
-async setLocalChatRecordingWorktree(backendSessionId: string, worktreePath: string | null) : Promise<Result<null, LocalChatSessionError>> {
+async setLocalChatRecordingWorktree(backendSessionId: string, worktreePath: string | null, intendedBranch: string | null) : Promise<Result<null, LocalChatSessionError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("set_local_chat_recording_worktree", { backendSessionId, worktreePath }) };
+    return { status: "ok", data: await TAURI_INVOKE("set_local_chat_recording_worktree", { backendSessionId, worktreePath, intendedBranch }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1637,7 +1637,12 @@ chat_session_id: string;
  * Git worktree whose per-tool-call changes are recorded: the project
  * root or one of its worktrees. Absent leaves recording off.
  */
-recording_worktree?: string | null; working_dir: string | null; initial_prompt: string | null; provider_resume_id: string | null; model_id: string | null; reasoning_effort: string | null; speed_tier?: string | null; permission_mode: PermissionMode | null; personality: string | null;
+recording_worktree?: string | null;
+/**
+ * Intended branch from the persisted association. Missing or detached
+ * associations do not record; this is never inferred again on resume.
+ */
+recording_branch?: string | null; working_dir: string | null; initial_prompt: string | null; provider_resume_id: string | null; model_id: string | null; reasoning_effort: string | null; speed_tier?: string | null; permission_mode: PermissionMode | null; personality: string | null;
 /**
  * Provider ID selected in the picker. Absent or built-in IDs use the
  * harness's built-in provider; custom IDs must be configured in

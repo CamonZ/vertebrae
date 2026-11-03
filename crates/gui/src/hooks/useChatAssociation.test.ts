@@ -344,9 +344,43 @@ describe("useChatAssociation", () => {
       expect(result.current.record.worktreePath).toBe(created.path)
     );
     await waitFor(() =>
-      expect(setTarget).toHaveBeenCalledWith("local-s1-1", created.path)
+      expect(setTarget).toHaveBeenCalledWith(
+        "local-s1-1",
+        created.path,
+        created.branch
+      )
     );
     expect(setTarget).toHaveBeenCalledTimes(1);
+  });
+
+  it("pushes a changed intended branch even when the worktree path stays the same", async () => {
+    const bound = {
+      ticketId: TICKET.id,
+      ticketTitle: TICKET.title,
+      worktreePath: created.path,
+      branch: created.branch,
+      lastProcessedAt: null,
+      processedAtCount: 0,
+      awaitingWorktree: null,
+      recentWorktrees: [],
+    };
+    noteRecordingTarget("local-s1-branch", created.path, created.branch);
+    seed([], bound, { backendSessionId: "local-s1-branch", lifecycle: "idle" });
+    renderHook(() => useDriven("s1"));
+    await act(async () => undefined);
+    expect(setTarget).not.toHaveBeenCalled();
+    act(() =>
+      useChatStore
+        .getState()
+        .setSessionAssociation("s1", { ...bound, branch: "new-intended" })
+    );
+    await waitFor(() =>
+      expect(setTarget).toHaveBeenCalledWith(
+        "local-s1-branch",
+        created.path,
+        "new-intended"
+      )
+    );
   });
 
   it("holds the target while the runtime starts, then sends it to the new runtime", async () => {
@@ -367,7 +401,11 @@ describe("useChatAssociation", () => {
 
     setRuntime({ lifecycle: "idle" });
     await waitFor(() =>
-      expect(setTarget).toHaveBeenCalledWith("local-s1-2", created.path)
+      expect(setTarget).toHaveBeenCalledWith(
+        "local-s1-2",
+        created.path,
+        created.branch
+      )
     );
   });
 
@@ -411,7 +449,7 @@ describe("useChatAssociation", () => {
       awaitingWorktree: null,
       recentWorktrees: [],
     };
-    noteRecordingTarget("local-s1-4", created.path);
+    noteRecordingTarget("local-s1-4", created.path, created.branch);
     resolve.mockRejectedValueOnce(new Error("IPC unavailable"));
     seed([user("implement something else", 1)], bound, {
       backendSessionId: "local-s1-4",

@@ -702,6 +702,12 @@ header disclosure, persistence and prototype limits.
 
 ## Changes view filesystem refresh
 
+The Changes view opens with **Whole branch** selected: the current worktree
+(including local edits and untracked files) compared with its branch merge-base.
+**Uncommitted · working tree vs HEAD** remains selectable in the baseline
+dropdown. Empty results render a **No changes** status and retain the selector;
+baseline errors remain errors, with Uncommitted available for recovery.
+
 The mounted Changes view owns a Rust `notify` watch of its worktree. Native
 notifications are batched in fixed 150 ms windows and invalidate the Git change
 list and loaded Files folders. `.git` internals and access-only events are
