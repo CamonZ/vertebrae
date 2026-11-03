@@ -1,3 +1,5 @@
+import { LiveAssistantText } from "./LiveAssistantText";
+import { liveAssistantKey } from "../../stores/liveAssistantMessages";
 import { ChatSessionContext } from "../thread/toolChange/ChatSessionContext";
 import { preloadDiffRenderer } from "../thread/toolChange/useWorktreeDelta";
 import {
@@ -38,6 +40,8 @@ import {
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 const BOTTOM_SCROLL_TOLERANCE_PX = 24;
+// Stay inside WebKit's signed scrolling range; MAX_SAFE_INTEGER wraps to zero.
+const BOTTOM_SCROLL_TARGET_PX = 1_000_000_000;
 const COMMENT_EDITOR_MAX_WIDTH_PX = 384;
 const COMMENT_EDITOR_VIEWPORT_GUTTER_PX = 8;
 
@@ -132,6 +136,7 @@ type ChatRenderItem =
     };
 
 function buildChatRenderItems(
+  sessionId: string,
   messages: readonly ChatMessage[],
   assistantLabel: string,
   gate: LocalChatGateBinding | null | undefined,
@@ -146,18 +151,63 @@ function buildChatRenderItems(
 
   const flushSegment = () => {
     if (segment.length === 0) return;
+
+    const thread = chatMessagesToThread(segment, {
+      assistantLabel,
+      gate: gate ?? null,
+      expanded: expandedToolIds,
+      onToggleTool,
+      fullContent: fullContentToolIds,
+      onToggleFullContent,
+    });
+
+    const liveSlots = new Map<
+      string,
+      Extract<ChatMessage, { kind: "assistant" }>[]
+    >();
+
+    for (const message of segment) {
+      if (
+        message.kind !== "assistant" ||
+        !message.itemId ||
+        message.parentToolUseId ||
+        (message.lifecycle ??
+          (message.isPartial ? "streaming" : "completed")) !== "streaming"
+      )
+        continue;
+
+      const slots = liveSlots.get(message.itemId) ?? [];
+      slots.push(message);
+      liveSlots.set(message.itemId, slots);
+    }
+
+    for (const turn of thread.turns)
+      for (const row of turn.messages) {
+        if (
+          row.type !== "agent" ||
+          !row.itemId ||
+          (row.lifecycle ?? (row.streaming ? "streaming" : "completed")) !==
+            "streaming"
+        )
+          continue;
+
+        const slot = liveSlots.get(row.itemId)?.shift();
+        if (slot)
+          row.prose = (
+            <LiveAssistantText
+              sessionId={sessionId}
+              liveKey={liveAssistantKey(slot)}
+              fallback={slot.text}
+            />
+          );
+      }
+
     items.push({
       kind: "thread",
       key: `thread-${segmentSeq++}`,
-      thread: chatMessagesToThread(segment, {
-        assistantLabel,
-        gate: gate ?? null,
-        expanded: expandedToolIds,
-        onToggleTool,
-        fullContent: fullContentToolIds,
-        onToggleFullContent,
-      }),
+      thread,
     });
+
     segment = [];
   };
 
@@ -244,6 +294,7 @@ interface ChatMessagesProps {
   gate?: LocalChatGateBinding | null;
   isEmpty: boolean;
   isActive: boolean;
+  isVisible?: boolean;
   notice?: ReactNode;
   isWaiting: boolean;
   activityLabel?: string | null;
@@ -267,6 +318,7 @@ export function ChatMessages({
   gate,
   isEmpty,
   isActive,
+  isVisible = true,
   notice,
   isWaiting,
   activityLabel,
@@ -283,6 +335,9 @@ export function ChatMessages({
   const resolveUserQuestion = useChatStore(
     (state) => state.resolveUserQuestion
   );
+  const retryHistory = useChatStore(
+    (state) => state.refreshProviderThreadSession
+  );
   const markUserQuestionUnavailable = useChatStore(
     (state) => state.markUserQuestionUnavailable
   );
@@ -290,6 +345,44 @@ export function ChatMessages({
     (state) => state.thinkingIndicatorStyle
   );
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  const visibleRef = useRef(isVisible);
+  visibleRef.current = isVisible;
+
+  const loadingOlderRef = useRef(isLoadingOlderMessages);
+  loadingOlderRef.current = isLoadingOlderMessages;
+
+  const bottomFollowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  const scheduleBottomFollow = useCallback(() => {
+    if (
+      !visibleRef.current ||
+      document.hidden ||
+      bottomFollowTimerRef.current !== null
+    )
+      return;
+
+    bottomFollowTimerRef.current = setTimeout(() => {
+      bottomFollowTimerRef.current = null;
+
+      const container = messagesContainerRef.current;
+      if (
+        !container ||
+        !visibleRef.current ||
+        document.hidden ||
+        !keepAtBottomRef.current ||
+        prependAnchorRef.current
+      )
+        return;
+
+      // The browser clamps this write. Do not force a full-transcript height read.
+      container.scrollTop = BOTTOM_SCROLL_TARGET_PX;
+    }, 32);
+  }, []);
+
   const latestMessagesRef = useRef(messages);
   latestMessagesRef.current = messages;
   const prependAnchorRef = useRef<{
@@ -449,6 +542,7 @@ export function ChatMessages({
   const renderItems = useMemo(
     () =>
       buildChatRenderItems(
+        sessionId,
         messages,
         assistantLabel,
         gate,
@@ -458,6 +552,7 @@ export function ChatMessages({
         toggleFullContent
       ),
     [
+      sessionId,
       assistantLabel,
       gate,
       expandedToolIds,
@@ -495,6 +590,15 @@ export function ChatMessages({
     );
   }, [assistantLabel, messages, streamingAssistant]);
 
+  useLayoutEffect(() => {
+    keepAtBottomRef.current = true;
+    prependAnchorRef.current = null;
+
+    if (bottomFollowTimerRef.current !== null)
+      clearTimeout(bottomFollowTimerRef.current);
+    bottomFollowTimerRef.current = null;
+  }, [sessionId]);
+
   // Keep streaming updates inside this scroll container. Calling
   // scrollIntoView on every delta also scrolls ancestor containers and queues
   // a smooth animation for every line, which makes the entire chat panel jump
@@ -519,8 +623,50 @@ export function ChatMessages({
       return;
     }
     if (!keepAtBottomRef.current) return;
-    container.scrollTop = container.scrollHeight;
-  }, [isLoadingOlderMessages, isWaiting, messages, streamingAssistant]);
+    scheduleBottomFollow();
+  }, [
+    isLoadingOlderMessages,
+    isWaiting,
+    messages,
+    streamingAssistant,
+    scheduleBottomFollow,
+  ]);
+
+  // Live text subscribers and lazy diffs can resize without rebuilding history.
+  useEffect(() => {
+    if (!isVisible) return;
+
+    const content = contentRef.current;
+
+    const resized = () => {
+      const anchor = prependAnchorRef.current;
+      const container = messagesContainerRef.current;
+
+      if (anchor && container && loadingOlderRef.current) {
+        anchor.scrollHeight = container.scrollHeight;
+        anchor.scrollTop = container.scrollTop;
+      }
+
+      scheduleBottomFollow();
+    };
+
+    const observer =
+      typeof ResizeObserver !== "undefined" && content
+        ? new ResizeObserver(resized)
+        : null;
+
+    if (content) observer?.observe(content);
+    document.addEventListener("visibilitychange", scheduleBottomFollow);
+    scheduleBottomFollow();
+
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", scheduleBottomFollow);
+      if (bottomFollowTimerRef.current !== null)
+        clearTimeout(bottomFollowTimerRef.current);
+      bottomFollowTimerRef.current = null;
+    };
+  }, [sessionId, isVisible, scheduleBottomFollow]);
 
   useEffect(() => {
     const handleScrollToSpawn = (event: Event) => {
@@ -572,7 +718,7 @@ export function ChatMessages({
         {isEmpty && !isActive && !isLoadingInitialHistory && (
           <ChatEmptyState notice={notice} />
         )}
-        <div className="flex flex-col gap-3">
+        <div ref={contentRef} className="min-w-0 flex flex-col gap-3">
           {isLoadingInitialHistory && (
             <div
               className="text-center text-xs text-[var(--color-fg-mute)]"
@@ -601,6 +747,9 @@ export function ChatMessages({
               role="status"
             >
               {replayError}
+              <button type="button" onClick={() => retryHistory(sessionId)}>
+                Retry history
+              </button>
             </div>
           )}
           <HistoricalChatItems

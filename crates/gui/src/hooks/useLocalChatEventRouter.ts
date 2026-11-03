@@ -1,3 +1,4 @@
+import { createLocalChatTextBatch } from "../utils/localChatTextBatch";
 import { useEffect } from "react";
 import { events } from "../bindings";
 import type {
@@ -688,6 +689,9 @@ function subscribeLocalChatEvents(): Unlisten {
   };
   activeRouterSubscription = subscription;
 
+  const textBatch = createLocalChatTextBatch(routeLocalChatTextEvent);
+  subscription.unlisteners.push(textBatch.dispose);
+
   const register = async (promise: Promise<Unlisten>) => {
     const unlisten = await promise;
     if (subscription.isCancelled) {
@@ -699,44 +703,51 @@ function subscribeLocalChatEvents(): Unlisten {
 
   void register(
     events.localChatSessionInitEvent.listen((event) => {
+      textBatch.flush();
       routeLocalChatSessionInitEvent(event.payload);
     })
   );
   if (events.localChatSessionTitleEvent) {
     void register(
       events.localChatSessionTitleEvent.listen((event) => {
+        textBatch.flush();
         routeLocalChatSessionTitleEvent(event.payload);
       })
     );
   }
   void register(
     events.localChatTurnStartedEvent.listen((event) => {
+      textBatch.flush();
       routeLocalChatTurnStartedEvent(event.payload);
     })
   );
   void register(
     events.localChatSessionUsageEvent.listen((event) => {
+      textBatch.flush();
       routeLocalChatSessionUsageEvent(event.payload);
     })
   );
   void register(
     events.localChatTextEvent.listen((event) => {
-      routeLocalChatTextEvent(event.payload);
+      textBatch.push(event.payload);
     })
   );
   void register(
     events.localChatToolCallEvent.listen((event) => {
+      textBatch.flush();
       routeLocalChatToolCallEvent(event.payload);
     })
   );
   void register(
     events.localChatToolResultEvent.listen((event) => {
+      textBatch.flush();
       routeLocalChatToolResultEvent(event.payload);
     })
   );
   if (events.localChatFileChangeEvent) {
     void register(
       events.localChatFileChangeEvent.listen((event) => {
+        textBatch.flush();
         routeLocalChatFileChangeEvent(event.payload);
       })
     );
@@ -744,32 +755,38 @@ function subscribeLocalChatEvents(): Unlisten {
   if (events.permissionRequestEvent) {
     void register(
       events.permissionRequestEvent.listen((event) => {
+        textBatch.flush();
         routePermissionRequestEvent(event.payload);
       })
     );
   }
   void register(
     events.localChatSessionEndEvent.listen((event) => {
+      textBatch.flush();
       routeLocalChatSessionEndEvent(event.payload);
     })
   );
   void register(
     events.localChatSessionErrorEvent.listen((event) => {
+      textBatch.flush();
       routeLocalChatSessionErrorEvent(event.payload);
     })
   );
   void register(
     events.localChatSessionWarningEvent.listen((event) => {
+      textBatch.flush();
       routeLocalChatSessionWarningEvent(event.payload);
     })
   );
   void register(
     events.localChatCompactionEvent.listen((event) => {
+      textBatch.flush();
       routeLocalChatCompactionEvent(event.payload);
     })
   );
   void register(
     events.localChatAnnotationEvent.listen((event) => {
+      textBatch.flush();
       routeLocalChatAnnotationEvent(event.payload);
     })
   );

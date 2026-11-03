@@ -9,7 +9,8 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorktreeChange } from "../../../bindings";
 import PatchFiles from "../../thread/toolChange/PatchFiles";
-import AllChangesView from "./AllChangesView";
+import AllChangesRenderer, { type AllChangesViewProps } from "./AllChangesView";
+import { preparePatches } from "../../thread/toolChange/preparePatches";
 import {
   DiffReviewContext,
   type DiffReviewValue,
@@ -450,3 +451,17 @@ describe("diff review across PatchFiles and AllChangesView", () => {
     });
   });
 });
+
+function AllChangesView(props: Omit<AllChangesViewProps, "parsedPatches">) {
+  const parsedPatches = useMemo(
+    () =>
+      preparePatches({
+        kind: "patch",
+        patches: props.files.map((file) => (file.marker ? "" : file.patch)),
+        review: true,
+      }),
+    [props.files]
+  );
+
+  return <AllChangesRenderer {...props} parsedPatches={parsedPatches} />;
+}

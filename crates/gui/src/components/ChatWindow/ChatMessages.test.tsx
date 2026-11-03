@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatEmptyState, ChatMessages } from "./ChatMessages";
-import type { ChatMessage } from "../../stores/chatStore";
+import { useChatStore, type ChatMessage } from "../../stores/chatStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import { useUIStore } from "../../stores/uiStore";
 import { CHAT_HELP_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
@@ -674,6 +674,8 @@ describe("ChatMessages", () => {
   });
 
   it("scrolls the message container instead of scrolling ancestors for streaming updates", () => {
+    vi.useFakeTimers();
+
     const messages: ChatMessage[] = [
       { kind: "user", text: "Hello", timestamp: "2024-01-01T12:00:00Z" },
     ];
@@ -681,13 +683,16 @@ describe("ChatMessages", () => {
       <ChatMessages {...defaultProps({ messages, isEmpty: false })} />
     );
     const container = screen.getByTestId("chat-messages-scroll");
+    const heightReads = vi.fn(() => 400);
+
     Object.defineProperties(container, {
       clientHeight: { configurable: true, value: 100 },
-      scrollHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, get: heightReads },
     });
     container.scrollTop = 300;
     fireEvent.scroll(container);
     vi.mocked(Element.prototype.scrollIntoView).mockClear();
+    heightReads.mockClear();
 
     rerender(
       <ChatMessages
@@ -699,7 +704,10 @@ describe("ChatMessages", () => {
       />
     );
 
-    expect(container.scrollTop).toBe(400);
+    act(() => vi.advanceTimersByTime(32));
+
+    expect(container.scrollTop).toBe(1_000_000_000);
+    expect(heightReads).not.toHaveBeenCalled();
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
 
     Object.defineProperty(container, "scrollHeight", {
@@ -716,10 +724,17 @@ describe("ChatMessages", () => {
       />
     );
 
-    expect(container.scrollTop).toBe(500);
+    act(() => vi.advanceTimersByTime(32));
+
+    expect(container.scrollTop).toBe(1_000_000_000);
+    expect(heightReads).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
   });
 
   it("does not steal the user's position when they scroll away from the bottom", () => {
+    vi.useFakeTimers();
+
     const messages: ChatMessage[] = [
       { kind: "user", text: "Hello", timestamp: "2024-01-01T12:00:00Z" },
     ];
@@ -744,7 +759,11 @@ describe("ChatMessages", () => {
       />
     );
 
+    act(() => vi.advanceTimersByTime(32));
+
     expect(container.scrollTop).toBe(200);
+
+    vi.useRealTimers();
   });
 
   it("shows explicit initial and older-history loading states", () => {
@@ -981,4 +1000,22 @@ describe("ChatMessages", () => {
     expect(container.scrollTop).toBe(420);
     await act(async () => resolveLoad?.(true));
   });
+});
+
+it("retries failed history preparation for the displayed session", () => {
+  const retry = vi
+    .spyOn(useChatStore.getState(), "refreshProviderThreadSession")
+    .mockImplementation(() => {});
+
+  try {
+    render(
+      <ChatMessages
+        {...defaultProps({ replayError: "History preparation failed" })}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry history" }));
+    expect(retry).toHaveBeenCalledExactlyOnceWith("test-session");
+  } finally {
+    retry.mockRestore();
+  }
 });

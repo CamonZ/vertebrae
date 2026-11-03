@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ChatPaneList } from "./ChatPaneList";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatPane, ChatSession } from "../../stores/chatStore";
+
+const windowRenders = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock("./ChatWindow", () => ({
   ChatWindow: ({
@@ -12,15 +14,18 @@ vi.mock("./ChatWindow", () => ({
     sessionId: string;
     showProjectContext?: boolean;
   }) => (
-    <div
-      data-testid="mock-chat-window"
-      data-project-visible={showProjectContext}
-    >
-      <textarea
-        data-testid="local-chat-composer"
-        aria-label={`${sessionId} input`}
-      />
-    </div>
+    windowRenders.count++,
+    (
+      <div
+        data-testid="mock-chat-window"
+        data-project-visible={showProjectContext}
+      >
+        <textarea
+          data-testid="local-chat-composer"
+          aria-label={`${sessionId} input`}
+        />
+      </div>
+    )
   ),
 }));
 
@@ -69,6 +74,40 @@ function renderPaneList(count = 1) {
 }
 
 describe("ChatPaneList", () => {
+  it("does not re-render the pane for live text deltas", () => {
+    renderPaneList();
+    const delta = (text: string) =>
+      useChatStore.getState().addMessage("session-1", {
+        kind: "assistant",
+        itemId: "live",
+        turnId: "turn",
+        text,
+        timestamp: "2026-11-03T12:00:00Z",
+        lifecycle: "streaming",
+        isPartial: true,
+      });
+
+    act(() => delta("first"));
+    const before = windowRenders.count;
+    act(() => {
+      for (let index = 0; index < 10; index++) delta(` ${index}`);
+    });
+    expect(windowRenders.count).toBe(before);
+
+    act(() =>
+      useChatStore.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          "session-1": { ...state.sessions["session-1"], title: "Renamed" },
+        },
+      }))
+    );
+    expect(screen.getByTestId("chat-pane")).toHaveAttribute(
+      "aria-label",
+      "Chat pane 1: Renamed"
+    );
+  });
+
   it.each([1, 2])(
     "shows project context only with multiple visible panes (%s)",
     (count) => {

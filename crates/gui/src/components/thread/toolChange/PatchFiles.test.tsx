@@ -1,5 +1,6 @@
-import { act, render } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { InProcessWorker } from "../../../background/inProcessWorker.test.helpers";
 import { useUIStore } from "../../../stores/uiStore";
 import { DEFAULT_DIFF_PREFERENCES } from "../../../utils/codeAppearance";
 import PatchFiles from "./PatchFiles";
@@ -87,5 +88,46 @@ describe("PatchFiles", () => {
       disableLineNumbers: true,
       disableBackground: true,
     });
+  });
+});
+
+describe("PatchFiles on the background worker", () => {
+  beforeEach(() => {
+    InProcessWorker.reset();
+    vi.stubGlobal("Worker", InProcessWorker);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the plain patch while the worker prepares, then the diff", async () => {
+    render(<PatchFiles patch={PATCH} />);
+
+    expect(screen.getByTestId("diff-placeholder")).toBeInTheDocument();
+    expect(await screen.findByTestId("patch-diff")).toBeInTheDocument();
+    expect(InProcessWorker.instances.at(-1)?.requests).toContain("patch");
+  });
+
+  it("keeps one worker while diffs mount and unmount", async () => {
+    const first = render(<PatchFiles patch={PATCH} />);
+    first.unmount();
+    render(<PatchFiles patch={PATCH.replace("+y", "+z")} />);
+
+    expect(await screen.findByTestId("patch-diff")).toBeInTheDocument();
+    expect(InProcessWorker.instances.every((w) => !w.terminated)).toBe(true);
+  });
+
+  it("surfaces a worker crash and recovers on retry", async () => {
+    InProcessWorker.crash = true;
+    render(<PatchFiles patch={PATCH} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Background preparation worker failed."
+    );
+
+    InProcessWorker.crash = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByTestId("patch-diff")).toBeInTheDocument();
   });
 });

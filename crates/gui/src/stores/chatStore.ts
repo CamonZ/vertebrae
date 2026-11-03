@@ -1,3 +1,22 @@
+import {
+  isSelfProviderAgentToolCall,
+  sanitizeSessionMessages,
+  parseJsonObjectInput,
+} from "./chatMessagePolicy";
+import {
+  mergeProjectedReplay,
+  prepareProviderReplay,
+  type ReplayPreparation,
+} from "./prepareProviderReplay";
+import { replayClient } from "../background/client";
+import { indexLiveAssistantMessages } from "./liveAssistantMessages";
+import { flushPendingLocalChatText } from "../utils/localChatTextBatch";
+import {
+  reconcileLiveAssistantMessages,
+  liveAssistantKey,
+  materializeLiveAssistantMessages,
+  type LiveAssistantMessages,
+} from "./liveAssistantMessages";
 import { create } from "zustand";
 import {
   clearLastUsedLocalChatModelId,
@@ -23,8 +42,6 @@ import {
   summarizeLocalChatSession,
 } from "../utils/localChatPersistence";
 import {
-  parseSessionLogs,
-  type ConversationEvent,
   type FileUpdateChange,
   type AssistantMessageLifecycle,
 } from "../types/conversation";
@@ -62,11 +79,6 @@ import {
   toolAnnotationLoadToken,
   type ToolAnnotations,
 } from "./toolAnnotations";
-import {
-  mergeReplayMessages,
-  reconcileReplayMessages,
-  unmatchedMessages,
-} from "./providerReplayMerge";
 
 /**
  * Message types for the Claude chat
@@ -153,124 +165,6 @@ export type ChatMessage =
       timestamp: string;
     }
   | { kind: "error"; message: string; timestamp: string };
-
-function stringArrayValue(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === "string");
-  }
-  return typeof value === "string" ? [value] : [];
-}
-
-function toolCallReferencesThread(
-  message: Extract<ChatMessage, { kind: "tool_call" }>,
-  threadId: string
-): boolean {
-  const input = parseJsonObjectInput(message.input);
-  if (!input) return false;
-  const directThreadIds = [
-    ...stringArrayValue(input.receiver_thread_ids),
-    ...stringArrayValue(input.receiverThreadIds),
-    ...stringArrayValue(input.thread_id),
-    ...stringArrayValue(input.threadId),
-    ...stringArrayValue(input.agent_path),
-    ...stringArrayValue(input.agentPath),
-  ];
-  if (directThreadIds.includes(threadId)) return true;
-
-  const receiverAgents =
-    Array.isArray(input.receiver_agents) || Array.isArray(input.receiverAgents)
-      ? (input.receiver_agents ?? input.receiverAgents)
-      : [];
-  return Array.isArray(receiverAgents)
-    ? receiverAgents.some((agent) => {
-        if (!agent || typeof agent !== "object") return false;
-        const record = agent as Record<string, unknown>;
-        return [
-          ...stringArrayValue(record.thread_id),
-          ...stringArrayValue(record.threadId),
-          ...stringArrayValue(record.agent_path),
-          ...stringArrayValue(record.agentPath),
-        ].includes(threadId);
-      })
-    : false;
-}
-
-function isAgentSpawnToolName(toolName: string): boolean {
-  return ["agent", "task"].includes(toolName.trim().toLowerCase());
-}
-
-function isSelfProviderAgentToolCall(
-  message: ChatMessage,
-  providerResumeId: string | null | undefined
-): boolean {
-  return (
-    !!providerResumeId &&
-    message.kind === "tool_call" &&
-    !message.parentToolUseId &&
-    isAgentSpawnToolName(message.toolName) &&
-    toolCallReferencesThread(message, providerResumeId)
-  );
-}
-
-function sanitizeSessionMessages(
-  messages: ChatMessage[],
-  providerResumeId: string | null | undefined
-): ChatMessage[] {
-  const askUserQuestionToolIds = new Set(
-    messages
-      .filter(
-        (message): message is Extract<ChatMessage, { kind: "tool_call" }> =>
-          message.kind === "tool_call" && message.toolName === "AskUserQuestion"
-      )
-      .map((message) => message.toolId)
-  );
-  const selfAgentToolIds = new Set<string>();
-  const filtered = messages.filter((message) => {
-    if (
-      (message.kind === "tool_call" || message.kind === "tool_result") &&
-      askUserQuestionToolIds.has(message.toolId)
-    ) {
-      return false;
-    }
-    if (
-      providerResumeId &&
-      message.kind === "tool_call" &&
-      isSelfProviderAgentToolCall(message, providerResumeId)
-    ) {
-      selfAgentToolIds.add(message.toolId);
-      return false;
-    }
-    if (
-      (message.kind === "tool_result" ||
-        message.kind === "assistant" ||
-        message.kind === "tool_call") &&
-      message.parentToolUseId &&
-      selfAgentToolIds.has(message.parentToolUseId)
-    ) {
-      return false;
-    }
-    if (
-      message.kind === "tool_result" &&
-      selfAgentToolIds.has(message.toolId)
-    ) {
-      return false;
-    }
-    return true;
-  });
-  return filtered.length === messages.length ? messages : filtered;
-}
-
-function parseJsonObjectInput(input: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(input) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    // Keep non-JSON tool inputs unchanged.
-  }
-  return null;
-}
 
 function mergeToolCallInput(previous: string, next: string): string {
   const previousObject = parseJsonObjectInput(previous);
@@ -523,6 +417,8 @@ export interface ChatSession {
   };
   /** Ephemeral assistant text currently streaming; not durable transcript state */
   streamingAssistant?: StreamingAssistantMessage | null;
+  /** Keyed live text; messages retains stable ordered slots until a semantic boundary. */
+  liveAssistantMessages?: LiveAssistantMessages;
   /** Runtime-only progressive provider transcript replay state. */
   providerReplay?: ProviderReplayState;
   /** Runtime-only Vertebrae annotations keyed by provider tool id, then kind. */
@@ -1026,160 +922,9 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
     lifecycleError: null,
     activeTurn: null,
     streamingAssistant: null,
+    liveAssistantMessages: undefined,
     messageCount: session.messageCount ?? messages.length,
   };
-}
-
-function conversationEventToChatMessage(
-  event: ConversationEvent
-): ChatMessage | null {
-  switch (event.kind) {
-    case "gate_evaluation":
-      return {
-        kind: "gate_evaluation",
-        attempt: event.attempt,
-        verdict: event.verdict,
-        timestamp: event.timestamp,
-      };
-    case "user_message":
-      return { kind: "user", text: event.text, timestamp: event.timestamp };
-    case "assistant_message":
-      return {
-        kind: "assistant",
-        text: event.text,
-        timestamp: event.timestamp,
-        ...(event.itemId ? { itemId: event.itemId } : {}),
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        ...(event.lifecycle
-          ? {
-              lifecycle: event.lifecycle,
-              isPartial: event.lifecycle === "streaming",
-            }
-          : {}),
-        ...(event.parentToolUseId
-          ? { parentToolUseId: event.parentToolUseId }
-          : {}),
-      };
-    case "tool_call":
-      return {
-        kind: "tool_call",
-        toolName: event.toolName,
-        toolId: event.toolId,
-        input: JSON.stringify(event.input ?? {}),
-        timestamp: event.timestamp,
-        ...(event.parentToolUseId
-          ? { parentToolUseId: event.parentToolUseId }
-          : {}),
-      };
-    case "tool_result":
-      return {
-        kind: "tool_result",
-        toolId: event.toolUseId,
-        result: event.result,
-        isError: event.isError,
-        timestamp: event.timestamp,
-        ...(event.parentToolUseId
-          ? { parentToolUseId: event.parentToolUseId }
-          : {}),
-      };
-    case "file_edit":
-      return {
-        kind: "file_edit",
-        toolId: event.toolId,
-        status: event.status,
-        changes: event.changes,
-        timestamp: event.timestamp,
-        ...(event.parentToolUseId
-          ? { parentToolUseId: event.parentToolUseId }
-          : {}),
-      };
-    case "session_start":
-      return {
-        kind: "session_start",
-        model: event.model,
-        timestamp: event.timestamp,
-      };
-    case "session_end":
-      return {
-        kind: "session_end",
-        durationMs: event.durationMs,
-        costUsd: event.costUsd,
-        numTurns: event.numTurns,
-        timestamp: event.timestamp,
-      };
-    case "task_notification":
-      return {
-        kind: "task_notification",
-        message: event.message,
-        timestamp: event.timestamp,
-      };
-    case "thinking":
-      return event.text.startsWith("[error]")
-        ? {
-            kind: "error",
-            message: event.text.replace(/^\[error\]\s*/, ""),
-            timestamp: event.timestamp,
-          }
-        : null;
-    default:
-      return null;
-  }
-}
-
-/**
- * Project accumulated replay lines into chat messages.
- *
- * Log IDs are derived from each line's own harness event ID (not list
- * position) so prepending an older page never shifts the identity of
- * already-projected lines. Re-projecting the full accumulated line list is
- * intentional: `parseSessionLogs` is stateful across lines (delta merging,
- * tool-pair and file-edit pairing), so a page boundary is not a projection
- * boundary.
- */
-function replayLinesToChatMessages(
-  lines: string[],
-  session: ChatSession
-): ChatMessage[] {
-  const logs = lines.map((content) => {
-    let eventId: string | undefined;
-    try {
-      const parsed: unknown = JSON.parse(content);
-      if (
-        typeof parsed === "object" &&
-        parsed !== null &&
-        "event_id" in parsed &&
-        typeof (parsed as { event_id: unknown }).event_id === "string"
-      ) {
-        eventId = (parsed as { event_id: string }).event_id;
-      }
-    } catch {
-      eventId = undefined;
-    }
-    return {
-      id: eventId
-        ? `local-replay-${session.id}-${eventId}`
-        : `local-replay-${session.id}-${contentDigest(content)}`,
-      step_execution_id: session.id,
-      content,
-      format: "harness",
-      created_at: session.createdAt ?? "",
-    };
-  });
-  return sanitizeSessionMessages(
-    parseSessionLogs(logs)
-      .map(conversationEventToChatMessage)
-      .filter((message): message is ChatMessage => message !== null),
-    session.providerResumeId
-  );
-}
-
-/** Deterministic content digest for lines without a harness event ID. */
-function contentDigest(content: string): string {
-  let hash = 0;
-  for (let index = 0; index < content.length; index += 1) {
-    hash = (Math.imul(31, hash) + content.charCodeAt(index)) | 0;
-  }
-  return (hash >>> 0).toString(36);
 }
 
 function localSessionSummaryFor(
@@ -1772,7 +1517,93 @@ export const useChatStore = create<ChatStore>((set, get) => {
     };
   };
 
-  const refreshingProviderThreads = new Set<string>();
+  const refreshingProviderThreads = new Map<string, symbol>();
+
+  /**
+   * Project replay lines off the UI thread, then merge inside `set` against
+   * the latest transcript. When messages changed while the worker ran, the
+   * projection is rebased onto the newer snapshot instead of being discarded,
+   * so busy turns never re-run the expensive projection or fail.
+   */
+  const prepareAndApplyReplay = async (
+    sessionId: string,
+    owns: (session: ChatSession | undefined) => boolean,
+    input: (session: ChatSession) => ReplayPreparation,
+    apply: (
+      session: ChatSession,
+      result: { messages: ChatMessage[]; installedMessageCount: number }
+    ) => ChatSession
+  ): Promise<boolean> => {
+    const controller = new AbortController();
+    const unsubscribe = useChatStore.subscribe((state) => {
+      if (!owns(state.sessions[sessionId])) controller.abort();
+    });
+
+    try {
+      const source = get().sessions[sessionId];
+      if (!source || !owns(source)) return false;
+
+      const preparation = input(materializeLiveAssistantMessages(source));
+      const prepared =
+        typeof Worker === "undefined"
+          ? prepareProviderReplay(preparation)
+          : await replayClient.run(
+              { kind: "replay", input: preparation },
+              controller.signal
+            );
+
+      let applied = false;
+
+      set((state) => {
+        const latest = state.sessions[sessionId];
+        if (!latest || !owns(latest)) return state;
+
+        const result =
+          latest.messages === source.messages
+            ? prepared
+            : mergeProjectedReplay(
+                prepared.projected,
+                input(materializeLiveAssistantMessages(latest))
+              );
+
+        const messages = result.messages.map((message) => {
+          if (
+            message.kind !== "assistant" ||
+            assistantLifecycle(message) !== "streaming" ||
+            !message.itemId
+          )
+            return message;
+
+          return (
+            latest.liveAssistantMessages?.[liveAssistantKey(message)] ?? message
+          );
+        });
+
+        const nextSession = {
+          ...apply(latest, {
+            messages,
+            installedMessageCount: result.installedMessageCount,
+          }),
+          liveAssistantMessages: indexLiveAssistantMessages(messages),
+        };
+        applied = true;
+
+        return {
+          sessions: { ...state.sessions, [sessionId]: nextSession },
+          ...spawnOutlineMetadataPatch(state, sessionId, latest, nextSession),
+        };
+      });
+
+      return applied;
+    } catch (error) {
+      if (controller.signal.aborted) return false;
+
+      throw error;
+    } finally {
+      unsubscribe();
+      controller.abort();
+    }
+  };
 
   /**
    * Load a session's annotations once per open session, independently of
@@ -1854,7 +1685,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     const backgroundRefresh = refresh && !!currentReplay?.loaded;
     if (backgroundRefresh && refreshingProviderThreads.has(sessionId)) return;
-    if (backgroundRefresh) refreshingProviderThreads.add(sessionId);
+    const refreshToken = Symbol();
+    if (backgroundRefresh)
+      refreshingProviderThreads.set(sessionId, refreshToken);
 
     const generation = backgroundRefresh
       ? currentReplay.generation
@@ -1884,106 +1717,111 @@ export const useChatStore = create<ChatStore>((set, get) => {
         };
       });
 
+    const installedBaseline =
+      get().sessions[sessionId]?.providerReplay?.installedMessages;
+
     void requestInitialProviderReplayPage(
       session,
       retainFromEventId,
       refresh ? currentReplay?.cacheKey : undefined
     )
-      .then((result) => {
-        set((state) => {
-          const current = state.sessions[sessionId];
-          const replay = current?.providerReplay;
-          if (
-            !current ||
-            current.providerResumeId !== session.providerResumeId ||
-            replay?.loading !== (backgroundRefresh ? null : "initial") ||
-            replay.generation !== generation
-          ) {
-            return state;
-          }
-          if (result.status === "error") {
-            return updateProviderReplay(sessionId, state, (r) =>
-              failReplay(r, result.error)
+      .then(async (result) => {
+        const owns = (current: ChatSession | undefined) =>
+          !!current &&
+          current.providerResumeId === session.providerResumeId &&
+          current.providerReplay?.loading ===
+            (backgroundRefresh ? null : "initial") &&
+          current.providerReplay.generation === generation &&
+          current.providerReplay.installedMessages === installedBaseline;
+
+        if (!owns(get().sessions[sessionId])) return;
+
+        if (result.status === "error") {
+          set((state) =>
+            owns(state.sessions[sessionId])
+              ? updateProviderReplay(sessionId, state, (replay) =>
+                  failReplay(replay, result.error)
+                )
+              : state
+          );
+          return;
+        }
+
+        if (
+          refresh &&
+          currentReplay?.cacheKey &&
+          result.page.cache_key === currentReplay.cacheKey
+        ) {
+          if (!backgroundRefresh)
+            set((state) =>
+              owns(state.sessions[sessionId])
+                ? updateProviderReplay(sessionId, state, (replay) => ({
+                    ...replay,
+                    loading: null,
+                    error: null,
+                  }))
+                : state
             );
-          }
-          if (
-            refresh &&
-            currentReplay?.cacheKey &&
-            result.page.cache_key === currentReplay.cacheKey
-          ) {
-            return backgroundRefresh
-              ? state
-              : updateProviderReplay(sessionId, state, (r) => ({
-                  ...r,
-                  loading: null,
-                  error: null,
-                }));
-          }
-          const lines = result.page.events.filter(
-            (line): line is string => typeof line === "string"
-          );
-          const projected = replayLinesToChatMessages(lines, current);
-          // Previously installed replay is a baseline, not a live override.
-          // Reconcile changes made since that baseline before installing a new
-          // snapshot of the same durable item.
-          const previousInstalled = refresh
-            ? (currentReplay?.installedMessages ?? [])
-            : [];
-          const currentPrefix = current.messages.slice(
-            0,
-            previousInstalled.length
-          );
-          const reconciled = refresh
-            ? reconcileReplayMessages(
-                projected,
-                previousInstalled,
-                currentPrefix
-              )
-            : projected;
-          const liveMessages = refresh
-            ? [
-                ...unmatchedMessages(previousInstalled, currentPrefix),
-                ...current.messages.slice(previousInstalled.length),
-              ]
-            : current.messages;
-          const merged = mergeReplayMessages(reconciled, liveMessages);
-          const nextSession = {
-            ...current,
-            messages: merged.messages,
-            messageCount: Math.max(
-              merged.messages.length,
-              current.messageCount ?? 0
-            ),
-            hasUserMessage:
-              current.hasUserMessage ??
-              merged.messages.some((message) => message.kind === "user"),
-            providerReplay: applyInitialPage(
-              replay,
-              {
-                cacheKey: result.page.cache_key,
-                events: lines,
-                nextCursor: result.page.next_cursor,
-                hasMore: result.page.has_more,
+          return;
+        }
+
+        const lines = result.page.events.filter(
+          (line): line is string => typeof line === "string"
+        );
+
+        try {
+          await prepareAndApplyReplay(
+            sessionId,
+            owns,
+            (current) => ({
+              kind: "initial",
+              refresh,
+              lines,
+              context: {
+                id: current.id,
+                createdAt: current.createdAt,
+                providerResumeId: current.providerResumeId,
               },
-              merged
-            ),
-          };
-          return {
-            sessions: {
-              ...state.sessions,
-              [sessionId]: nextSession,
-            },
-            ...spawnOutlineMetadataPatch(
-              state,
-              sessionId,
-              current,
-              nextSession
-            ),
-          };
-        });
+              previousInstalled: refresh
+                ? (currentReplay?.installedMessages ?? [])
+                : [],
+              messages: current.messages,
+            }),
+            (current, merged) => ({
+              ...current,
+              messages: merged.messages,
+              messageCount: Math.max(
+                merged.messages.length,
+                current.messageCount ?? 0
+              ),
+              hasUserMessage:
+                current.hasUserMessage ??
+                merged.messages.some((message) => message.kind === "user"),
+              providerReplay: applyInitialPage(
+                current.providerReplay!,
+                {
+                  cacheKey: result.page.cache_key,
+                  events: lines,
+                  nextCursor: result.page.next_cursor,
+                  hasMore: result.page.has_more,
+                },
+                merged
+              ),
+            })
+          );
+        } catch (error) {
+          set((state) =>
+            owns(state.sessions[sessionId])
+              ? updateProviderReplay(sessionId, state, (replay) =>
+                  failReplay(replay, providerReplayErrorMessage(error))
+                )
+              : state
+          );
+        }
       })
       .finally(() => {
-        refreshingProviderThreads.delete(sessionId);
+        if (refreshingProviderThreads.get(sessionId) === refreshToken)
+          refreshingProviderThreads.delete(sessionId);
       });
   };
 
@@ -1998,11 +1836,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (!session) return state;
       const next = updater(session);
       if (next === session) return state;
+
       const normalized =
         next.messages !== session.messages
-          ? { ...next, messageCount: next.messages.length }
+          ? {
+              ...next,
+              messageCount: next.messages.length,
+              liveAssistantMessages: reconcileLiveAssistantMessages(
+                session,
+                next.messages
+              ),
+            }
           : next;
       updated = normalized;
+
       const messagesChanged = normalized.messages !== session.messages;
       const outlineInputsChanged =
         messagesChanged ||
@@ -2500,87 +2347,89 @@ export const useChatStore = create<ChatStore>((set, get) => {
       });
 
       const result = await requestProviderReplayPage(session, requestedCursor);
-      let applied = false;
-      set((state) => {
-        const current = state.sessions[sessionId];
-        const currentReplay = current?.providerReplay;
-        if (
-          !current ||
-          current.providerResumeId !== session.providerResumeId ||
-          currentReplay?.loading !== "older" ||
-          currentReplay.generation !== expectedGeneration ||
-          currentReplay.nextCursor !== requestedCursor ||
-          currentReplay.cacheKey !== expectedCacheKey
-        ) {
-          return state;
-        }
-        if (result.status === "error") {
-          return updateProviderReplay(sessionId, state, (r) =>
-            failReplay(r, result.error)
-          );
-        }
-        const previousInstalled = currentReplay.installedMessages;
-        const outcome = applyOlderPage(
-          currentReplay,
-          {
-            cacheKey: result.page.cache_key,
-            events: result.page.events.filter(
-              (line): line is string => typeof line === "string"
-            ),
-            nextCursor: result.page.next_cursor,
-            hasMore: result.page.has_more,
-          },
-          (lines) => {
-            // Re-project the full accumulated history, then reconcile the
-            // replayed prefix against live enrichments recorded since the
-            // last page so user-resolved tools/questions are not clobbered.
-            const projected = replayLinesToChatMessages(lines, current);
-            const currentPrefix = current.messages.slice(
-              0,
-              previousInstalled.length
-            );
-            const reconciled = reconcileReplayMessages(
-              projected,
-              previousInstalled,
-              currentPrefix
-            );
-            const liveMessages = [
-              ...unmatchedMessages(previousInstalled, currentPrefix),
-              ...current.messages.slice(
-                Math.min(previousInstalled.length, current.messages.length)
-              ),
-            ];
-            return [...reconciled, ...liveMessages];
-          }
+      const owns = (current: ChatSession | undefined) =>
+        !!current &&
+        current.providerResumeId === session.providerResumeId &&
+        current.providerReplay?.loading === "older" &&
+        current.providerReplay.generation === expectedGeneration &&
+        current.providerReplay.nextCursor === requestedCursor &&
+        current.providerReplay.cacheKey === expectedCacheKey;
+      const current = get().sessions[sessionId];
+
+      if (!current || !owns(current)) return false;
+
+      if (result.status === "error") {
+        set((state) =>
+          owns(state.sessions[sessionId])
+            ? updateProviderReplay(sessionId, state, (replay) =>
+                failReplay(replay, result.error)
+              )
+            : state
         );
-        if (outcome.status === "rejected") {
-          return updateProviderReplay(sessionId, state, () => outcome.replay);
-        }
-        applied = true;
-        const nextSession = {
-          ...current,
-          messages: outcome.messages,
-          messageCount: Math.max(
-            outcome.messages.length,
-            current.messageCount ?? 0
-          ),
-          providerReplay: {
-            ...outcome.replay,
-            installedMessages: outcome.messages.slice(
-              0,
-              outcome.installedMessageCount
+        return false;
+      }
+
+      const page = {
+        cacheKey: result.page.cache_key,
+        events: result.page.events.filter(
+          (line): line is string => typeof line === "string"
+        ),
+        nextCursor: result.page.next_cursor,
+        hasMore: result.page.has_more,
+      };
+      const outcome = applyOlderPage(current.providerReplay!, page, () => []);
+
+      if (outcome.status === "rejected") {
+        set((state) =>
+          owns(state.sessions[sessionId])
+            ? updateProviderReplay(sessionId, state, () => outcome.replay)
+            : state
+        );
+        return false;
+      }
+
+      try {
+        return await prepareAndApplyReplay(
+          sessionId,
+          owns,
+          (latest) => ({
+            kind: "older",
+            refresh: true,
+            lines: outcome.replay.lines,
+            context: {
+              id: latest.id,
+              createdAt: latest.createdAt,
+              providerResumeId: latest.providerResumeId,
+            },
+            previousInstalled: latest.providerReplay!.installedMessages,
+            messages: latest.messages,
+          }),
+          (latest, merged) => ({
+            ...latest,
+            messages: merged.messages,
+            messageCount: Math.max(
+              merged.messages.length,
+              latest.messageCount ?? 0
             ),
-          },
-        };
-        return {
-          sessions: {
-            ...state.sessions,
-            [sessionId]: nextSession,
-          },
-          ...spawnOutlineMetadataPatch(state, sessionId, current, nextSession),
-        };
-      });
-      return applied;
+            providerReplay: {
+              ...outcome.replay,
+              installedMessages: merged.messages.slice(
+                0,
+                merged.installedMessageCount
+              ),
+            },
+          })
+        );
+      } catch (error) {
+        set((state) =>
+          owns(state.sessions[sessionId])
+            ? updateProviderReplay(sessionId, state, (replay) =>
+                failReplay(replay, providerReplayErrorMessage(error))
+              )
+            : state
+        );
+        return false;
+      }
     },
 
     ensureProviderThreadSession: (input) => {
@@ -3014,13 +2863,47 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     addMessage: (sessionId, message) => {
+      if (
+        message.kind === "assistant" &&
+        message.itemId &&
+        assistantLifecycle(message) === "streaming"
+      ) {
+        const key = liveAssistantKey(message);
+        const session = get().sessions[sessionId];
+        const live = session?.liveAssistantMessages?.[key];
+
+        if (live) {
+          set((state) => ({
+            sessions: {
+              ...state.sessions,
+              [sessionId]: {
+                ...session,
+                updatedAt: message.timestamp,
+                liveAssistantMessages: {
+                  ...session.liveAssistantMessages,
+                  [key]: {
+                    ...live,
+                    text: live.text + message.text,
+                  },
+                },
+              },
+            },
+          }));
+
+          return;
+        }
+      }
+
       const persistMessage =
         message.kind === "user" ||
         (message.kind === "assistant" &&
           assistantLifecycle(message) !== "streaming");
+
       updateSession(
         sessionId,
-        (session) => {
+        (storedSession) => {
+          const session = materializeLiveAssistantMessages(storedSession);
+
           if (isSelfProviderAgentToolCall(message, session.providerResumeId)) {
             return session;
           }
@@ -3107,6 +2990,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               (existing): existing is AssistantChatMessage =>
                 existing.kind === "assistant" &&
                 existing.itemId === message.itemId &&
+                (existing.turnId ?? null) === (message.turnId ?? null) &&
                 sameParentToolUseId(existing, message.parentToolUseId)
             );
             if (existingIndex !== -1) {
@@ -3248,9 +3132,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
       itemId = null,
       text = null
     ) => {
+      flushPendingLocalChatText();
+
       updateSession(
         sessionId,
-        (session) => {
+        (storedSession) => {
+          const session = materializeLiveAssistantMessages(storedSession);
+
           let changed = false;
           const messages = session.messages.map((message) => {
             if (
@@ -3263,7 +3151,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             changed = true;
             return {
               ...message,
-              ...(itemId && text ? { text } : {}),
+              ...(itemId && text !== null ? { text } : {}),
               isPartial: false,
               lifecycle: "completed" as const,
             };
@@ -3413,7 +3301,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     markActiveTurnStopping: (sessionId) => {
+      flushPendingLocalChatText();
+
       let marked = false;
+
       updateSession(
         sessionId,
         (session) => {
@@ -3551,7 +3442,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     interruptStreamingAssistant: (sessionId, turnId = null, itemId = null) => {
-      updateSession(sessionId, (session) => {
+      flushPendingLocalChatText();
+
+      updateSession(sessionId, (storedSession) => {
+        const session = materializeLiveAssistantMessages(storedSession);
+
         const streaming = session.streamingAssistant;
         let messagesChanged = false;
         const messages = session.messages.map((message) => {
@@ -3903,6 +3798,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     markSessionClosed: (sessionId) => {
+      flushPendingLocalChatText();
+      get().interruptStreamingAssistant(sessionId);
+
       const session = get().sessions[sessionId];
       if (!session) return;
       const closedSession = {
@@ -3936,7 +3834,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     clearMessages: (sessionId) => {
+      flushPendingLocalChatText();
+
       if (!get().sessions[sessionId]) return;
+
       markLocalChatSessionCleared(sessionId);
       const timestamp = new Date().toISOString();
       updateSession(
@@ -3960,6 +3861,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           lifecycleError: null,
           activeTurn: null,
           streamingAssistant: null,
+          liveAssistantMessages: undefined,
           providerReplay: undefined,
           queuedMessages: undefined,
           updatedAt: timestamp,
@@ -3983,6 +3885,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
       set({ panelOpen: open });
     },
 
-    reset: () => set(emptyState),
+    reset: () => {
+      flushPendingLocalChatText();
+
+      set(emptyState);
+    },
   };
 });

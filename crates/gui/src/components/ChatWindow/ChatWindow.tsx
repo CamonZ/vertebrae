@@ -1,3 +1,5 @@
+import { useBackgroundTask } from "../../background/useBackgroundTask";
+import type { BackgroundTask } from "../../background/types";
 import {
   Profiler,
   useCallback,
@@ -46,6 +48,10 @@ import {
 
 let nextPendingCommentId = 0;
 let nextFocusNonce = 0;
+const prepareToolChain = (
+  task: Extract<BackgroundTask, { kind: "tool_chain" }>
+) => buildToolChain(task.annotations);
+
 const NO_CHAIN: never[] = [];
 const NO_COMMENTS: PendingComment[] = [];
 
@@ -220,10 +226,20 @@ export function ChatWindow({
   const hasDiffComments = pendingComments.some(
     (comment) => comment.kind === "diff"
   );
-  const toolChain = useMemo(
-    () => (hasDiffComments ? buildToolChain(toolAnnotations) : NO_CHAIN),
+  const toolChainTask = useMemo<Extract<
+    BackgroundTask,
+    { kind: "tool_chain" }
+  > | null>(
+    () =>
+      hasDiffComments
+        ? { kind: "tool_chain", annotations: toolAnnotations }
+        : null,
     [hasDiffComments, toolAnnotations]
   );
+
+  const preparedChain = useBackgroundTask(toolChainTask, prepareToolChain);
+  const toolChain = preparedChain.value ?? NO_CHAIN;
+
   const worktreeSnapshot =
     worktreeState?.sessionId === sessionId ? worktreeState.snapshot : null;
   const placements = useMemo(
@@ -424,12 +440,21 @@ export function ChatWindow({
                 attempt={gateStatus.attempt}
               />
             )}
+          {preparedChain.error && (
+            <div role="alert">
+              Diff comments could not be prepared: {preparedChain.error}{" "}
+              <button type="button" onClick={preparedChain.retry}>
+                Retry
+              </button>
+            </div>
+          )}
           <Profiler
             id={`${sessionId}-transcript`}
             onRender={() => renderObserver?.("transcript")}
           >
             <ChatMessages
               sessionId={sessionId}
+              isVisible={!showChanges}
               projectPath={chat.session.projectPath}
               messages={chat.messages}
               assistantLabel={chat.assistantLabel}
