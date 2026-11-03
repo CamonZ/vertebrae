@@ -9,7 +9,7 @@ export const CHAT_SHORTCUT_SECTIONS = [
       { keys: ["⌥", "⌥"], label: "Toggle chat" },
       { keys: ["⌘", "\\"], label: "Maximize or collapse" },
       { keys: chatHelpKeys, label: CHAT_HELP_SHORTCUT.label },
-      { keys: ["⌘", "⌥", "[ / ]"], label: "Previous/next conversation" },
+      { keys: ["⌘", "⌥", "[ / ]"], label: "Previous/next project" },
       { keys: ["⌘", "F"], label: "Focus chat search" },
       { keys: ["Esc"], label: "Close hints or focused panel" },
     ],
@@ -28,6 +28,10 @@ export const CHAT_SHORTCUT_SECTIONS = [
   {
     title: "Sessions",
     shortcuts: [
+      {
+        keys: ["⌘", "⌥", "⇧", "[ / ]"],
+        label: "Previous/next conversation in project",
+      },
       { keys: ["⌘", "⇧", "⌥", "N"], label: "Fresh chat in active pane" },
       { keys: ["⌘", "⇧", "⌥", "H"], label: "History for active pane" },
       { keys: ["Enter"], label: "Send message" },

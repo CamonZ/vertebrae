@@ -69,10 +69,12 @@ export function localChatSessionDisplayTitle(
  */
 export function filterLocalChatSessionGroups(
   groups: LocalChatSessionGroup[],
-  query: unknown
+  query: unknown,
+  excludedProviderThreadIds?: ReadonlySet<string>
 ): LocalChatSessionGroup[] {
   const normalizedQuery = normalizeLocalChatSessionQuery(query);
-  if (!normalizedQuery) return groups;
+
+  if (!normalizedQuery && !excludedProviderThreadIds) return groups;
 
   return groups
     .map((group) => {
@@ -103,9 +105,13 @@ export function filterLocalChatSessionGroups(
         }
       }
 
-      const sessions = sourceSessions.filter((session) =>
-        matches.has(session.id)
+      const sessions = sourceSessions.filter(
+        (session) =>
+          matches.has(session.id) &&
+          (!session.providerResumeId ||
+            !excludedProviderThreadIds?.has(session.providerResumeId))
       );
+
       return {
         ...group,
         sessions,
@@ -211,10 +217,18 @@ function resolveLocalChatSessionProject(
 export function groupLocalChatSessionsByProject(
   sessions: LocalChatSessionSummary[],
   projects: SavedProject[],
-  currentProjectPath: string | null
+  currentProjectPath: string | null,
+  includeEmptyProjects = false
 ): LocalChatSessionGroup[] {
   const context = buildProjectResolutionContext(projects, currentProjectPath);
   const groups = new Map<string, LocalChatSessionGroup>();
+
+  if (includeEmptyProjects) {
+    for (const project of projects) {
+      const group = resolveLocalChatSessionProject(project.path, context);
+      groups.set(group.id, { ...group, sessions: [] });
+    }
+  }
 
   for (const session of sessions) {
     const baseGroup = resolveLocalChatSessionProject(
@@ -234,7 +248,7 @@ export function groupLocalChatSessionsByProject(
       ...group,
       sessions: [...group.sessions].sort(compareLocalChatSessionRecency),
     }))
-    .filter((group) => group.sessions.length > 0)
+    .filter((group) => includeEmptyProjects || group.sessions.length > 0)
     .sort((a, b) => {
       if (a.isCurrentProject !== b.isCurrentProject) {
         return a.isCurrentProject ? -1 : 1;
@@ -250,4 +264,73 @@ export function groupLocalChatSessionsByProject(
 
       return a.label.localeCompare(b.label);
     });
+}
+
+export interface LocalChatTicketGroup {
+  id: string;
+  ticketId: string | null;
+  label: string;
+  sessions: LocalChatSessionSummary[];
+}
+
+/** Preserve recency order within each ticket; standalone chats keep their place. */
+export function groupLocalChatSessionsByTicket(
+  sessions: LocalChatSessionSummary[]
+): LocalChatTicketGroup[] {
+  const groups = new Map<string, LocalChatTicketGroup>();
+
+  for (const session of sessions) {
+    const association = session.association;
+    const record =
+      association &&
+      typeof association === "object" &&
+      !Array.isArray(association)
+        ? association
+        : null;
+
+    const ticketId =
+      typeof record?.ticketId === "string" && record.ticketId.trim()
+        ? record.ticketId
+        : null;
+    const id = ticketId ? `ticket:${ticketId}` : `session:${session.id}`;
+    const title =
+      typeof record?.ticketTitle === "string" ? record.ticketTitle.trim() : "";
+    const group = groups.get(id) ?? {
+      id,
+      label: title || ticketId || "",
+      ticketId,
+      sessions: [],
+    };
+
+    // Another association can supply a title missing from the first row.
+    if (ticketId && title && group.label === ticketId) group.label = title;
+
+    group.sessions.push(session);
+    groups.set(id, group);
+  }
+
+  return [...groups.values()];
+}
+
+export function selectedLocalChatProject(
+  groups: LocalChatSessionGroup[],
+  selectedId: string | null,
+  activeSessionId: string | null,
+  activeProjectPath?: string | null
+): LocalChatSessionGroup | undefined {
+  return (
+    groups.find((group) => group.id === selectedId) ??
+    groups.find((group) =>
+      (group.allSessions ?? group.sessions).some(
+        (session) => session.id === activeSessionId
+      )
+    ) ??
+    groups.find(
+      (group) =>
+        activeProjectPath &&
+        group.projectPath === normalizeProjectPath(activeProjectPath)
+    ) ??
+    groups.find((group) => group.isCurrentProject) ??
+    groups[0]
+  );
 }

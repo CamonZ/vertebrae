@@ -21,7 +21,9 @@ import { useLocalChatHistory } from "../../hooks/useLocalChatHistory";
 import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import {
-  projectLocalChatSessionGroups,
+  filterLocalChatSessionGroups,
+  groupLocalChatSessionsByTicket,
+  selectedLocalChatProject,
   type LocalChatSessionGroup,
 } from "../../utils/localChatSessionGroups";
 import { normalizeProjectPath } from "../../utils/localChatPersistence";
@@ -55,6 +57,9 @@ export function ChatWindowManager({
   renderObserver?: (paneId: string, part: "transcript" | "composer") => void;
 }) {
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const activeProjectPath = useChatStore((s) =>
+    s.activeSessionId ? s.sessions[s.activeSessionId]?.projectPath : null
+  );
   const activeProviderThreadId = useChatStore((s) =>
     s.activeSessionId
       ? (s.sessions[s.activeSessionId]?.providerResumeId ?? null)
@@ -245,7 +250,7 @@ export function ChatWindowManager({
     loadCurrentProjectPath,
     commitCurrentProjectPath,
     allLocalSessionGroups,
-    localSessionGroups,
+    projectsReady,
     sessionQuery,
     setSessionQuery,
     projectGroupingWarning,
@@ -267,31 +272,80 @@ export function ChatWindowManager({
     }
     return labels;
   }, [allLocalSessionGroups, localSessionSummaries, projectLabelsByPath]);
-  const visibleLocalSessionGroups = useMemo(() => {
-    // Search and child-thread filtering must precede the cap so older
-    // matching sessions remain eligible for the visible seven rows.
-    const childFilteredGroups = localSessionGroups
-      .map((group) => ({
-        ...group,
-        sessions: group.sessions.filter(
-          (session) =>
-            !session.providerResumeId ||
-            !childProviderThreadIds.has(session.providerResumeId)
-        ),
-      }))
-      .filter((group) => group.sessions.length > 0);
-    return projectLocalChatSessionGroups(childFilteredGroups);
-  }, [childProviderThreadIds, localSessionGroups]);
-  const hasLocalChatSessions = useMemo(
+
+  const historyProjectGroups = useMemo(
     () =>
-      allLocalSessionGroups.some((group) =>
-        group.sessions.some(
-          (session) =>
-            !session.providerResumeId ||
-            !childProviderThreadIds.has(session.providerResumeId)
-        )
-      ),
-    [allLocalSessionGroups, childProviderThreadIds]
+      allLocalSessionGroups.map((group) => ({
+        ...group,
+        // Search retains child titles until ancestor matching has run.
+        // Association corrections regroup immediately even if the index lags.
+        sessions: group.sessions.map(
+          (session) => localSessionSummaries[session.id] ?? session
+        ),
+      })),
+    [allLocalSessionGroups, localSessionSummaries]
+  );
+  // Browsing belongs to the manager's mounted lifetime, independent of pane routing.
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    null
+  );
+  const selectedProject = selectedLocalChatProject(
+    historyProjectGroups,
+    selectedProjectId,
+    activeSessionId,
+    activeProjectPath
+  );
+
+  useEffect(() => {
+    if (
+      projectsReady &&
+      isMaximized &&
+      panelOpen &&
+      selectedProject &&
+      selectedProject.id !== selectedProjectId
+    ) {
+      setSelectedProjectId(selectedProject.id);
+    }
+  }, [
+    projectsReady,
+    isMaximized,
+    panelOpen,
+    selectedProject,
+    selectedProjectId,
+  ]);
+
+  const matchingHistorySessions = useMemo(
+    () =>
+      groupLocalChatSessionsByTicket(
+        filterLocalChatSessionGroups(
+          selectedProject ? [selectedProject] : [],
+          sessionQuery,
+          childProviderThreadIds
+        ).flatMap((group) => group.sessions)
+      ).flatMap((group) => group.sessions),
+    [selectedProject, sessionQuery, childProviderThreadIds]
+  );
+
+  const [revealSession, setRevealSession] = useState<{
+    sessionId: string;
+    revision: number;
+  } | null>(null);
+
+  const selectHistoryProjectByOffset = useCallback(
+    (offset: number) => {
+      if (!isMaximized || !historyProjectGroups.length) return false;
+
+      const index = historyProjectGroups.findIndex(
+        (group) => group.id === selectedProject?.id
+      );
+      const next =
+        (Math.max(0, index) + offset + historyProjectGroups.length) %
+        historyProjectGroups.length;
+      setSelectedProjectId(historyProjectGroups[next].id);
+
+      return true;
+    },
+    [historyProjectGroups, isMaximized, selectedProject]
   );
 
   const {
@@ -426,9 +480,9 @@ export function ChatWindowManager({
   const selectHistorySessionByOffset = useCallback(
     async (offset: number) => {
       if (!isMaximized) return false;
-      const sessionItems = visibleLocalSessionGroups.flatMap(
-        (group) => group.sessions
-      );
+
+      const sessionItems = matchingHistorySessions;
+
       if (sessionItems.length === 0) return false;
       const currentIndex = sessionItems.findIndex(
         (session) => session.id === activeSessionId
@@ -439,8 +493,14 @@ export function ChatWindowManager({
             ? sessionItems.length - 1
             : 0
           : (currentIndex + offset + sessionItems.length) % sessionItems.length;
+      const sessionId = sessionItems[nextIndex].id;
+      setRevealSession((current) => ({
+        sessionId,
+        revision: (current?.revision ?? 0) + 1,
+      }));
+
       return selectHistorySessionForActivePane(
-        sessionItems[nextIndex].id,
+        sessionId,
         normalizedPaneLayout.panes.some((pane) => pane.id === activePaneId)
           ? (activePaneId ?? undefined)
           : undefined
@@ -452,7 +512,7 @@ export function ChatWindowManager({
       isMaximized,
       normalizedPaneLayout,
       selectHistorySessionForActivePane,
-      visibleLocalSessionGroups,
+      matchingHistorySessions,
     ]
   );
 
@@ -551,6 +611,7 @@ export function ChatWindowManager({
       historyNavigationEnabled: isMaximized,
       focusHistorySearch,
       selectHistorySessionByOffset,
+      selectHistoryProjectByOffset,
       closeActivePane,
       keepOnlyActivePane,
       splitWithFreshSession,
@@ -639,8 +700,11 @@ export function ChatWindowManager({
               activeProviderThreadId={activeProviderThreadId}
               searchQuery={sessionQuery}
               onSearchQueryChange={setSessionQuery}
-              hasLocalChatSessions={hasLocalChatSessions}
-              sessionGroups={visibleLocalSessionGroups}
+              selectedProjectId={selectedProject?.id ?? null}
+              onSelectProject={setSelectedProjectId}
+              revealSession={revealSession}
+              sessionGroups={historyProjectGroups}
+              excludedProviderThreadIds={childProviderThreadIds}
               spawnOutlineBySessionId={spawnOutlineBySessionId}
               activityBySessionId={activityBySessionId}
               thinkingIndicatorStyle={thinkingIndicatorStyle}

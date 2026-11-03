@@ -31,6 +31,7 @@ interface UseLocalChatHistoryResult {
   /** Persist a freshly-resolved project path + scope generation. */
   commitCurrentProjectPath: (projectPath: string | null) => void;
   allLocalSessionGroups: LocalChatSessionGroup[];
+  projectsReady: boolean;
   localSessionGroups: LocalChatSessionGroup[];
   sessionQuery: string;
   setSessionQuery: (query: string) => void;
@@ -157,16 +158,15 @@ export function useLocalChatHistory({
     // Persisted-only deletes need a React-side invalidation even when the
     // in-memory session map is unchanged.
     void historyRevision;
+    void sessionChangeToken;
     const summaries = listLocalSessions(
       projectsLoadFailed ? currentProjectPath : undefined
     );
-    if (!sessionChangeToken && summaries.length === 0) {
-      return [];
-    }
     return groupLocalChatSessionsByProject(
       summaries,
       savedProjects,
-      currentProjectPath
+      currentProjectPath,
+      true
     );
   }, [
     currentProjectPath,
@@ -177,7 +177,10 @@ export function useLocalChatHistory({
     sessionChangeToken,
   ]);
   const localSessionGroups = useMemo(
-    () => filterLocalChatSessionGroups(allLocalSessionGroups, sessionQuery),
+    () =>
+      filterLocalChatSessionGroups(allLocalSessionGroups, sessionQuery).filter(
+        (group) => group.sessions.length > 0
+      ),
     [allLocalSessionGroups, sessionQuery]
   );
 
@@ -194,6 +197,9 @@ export function useLocalChatHistory({
     loadCurrentProjectPath,
     commitCurrentProjectPath,
     allLocalSessionGroups,
+    projectsReady:
+      projectGroupingState.generation === projectScopeGeneration &&
+      projectGroupingState.projectsStatus !== "idle",
     localSessionGroups,
     sessionQuery,
     setSessionQuery,

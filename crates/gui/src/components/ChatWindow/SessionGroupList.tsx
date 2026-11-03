@@ -1,13 +1,17 @@
 import { Fragment, type ReactNode } from "react";
-import type { LocalChatSessionGroup } from "../../utils/localChatSessionGroups";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 
 export interface SessionRowState {
   isActive: boolean;
 }
 
-interface SessionGroupListProps {
-  sessionGroups: LocalChatSessionGroup[];
+interface SessionListGroup {
+  id: string;
+  sessions: LocalChatSessionSummary[];
+}
+
+interface SessionGroupListProps<Group extends SessionListGroup> {
+  sessionGroups: Group[];
   activeSessionId: string;
   /** Render a single session row. The list keys rows by session id. */
   renderRow: (
@@ -15,26 +19,21 @@ interface SessionGroupListProps {
     state: SessionRowState
   ) => ReactNode;
   /** Wrap a group's rows with its title/section markup. */
-  renderGroup: (
-    group: LocalChatSessionGroup,
-    rows: ReactNode[]
-  ) => ReactNode;
+  renderGroup: (group: Group, rows: ReactNode[]) => ReactNode;
 }
 
 /**
- * Shared iteration over project-grouped local chat sessions. Computes the
- * active/deleting state for each row and delegates rendering to consumers,
- * which supply their own group-section and row markup. The two history views
- * (mini panel + drawer) render nearly identical session-group data with
- * different row styling; this component holds the shared iteration and
+ * Shared iteration over grouped local chat sessions. Computes the
+ * active state for each row and delegates section and row markup to consumers.
+ * Project history and ticket accordions share stable session keys and the same
  * active/inactive state derivation.
  */
-export function SessionGroupList({
+export function SessionGroupList<Group extends SessionListGroup>({
   sessionGroups,
   activeSessionId,
   renderRow,
   renderGroup,
-}: SessionGroupListProps) {
+}: SessionGroupListProps<Group>) {
   return (
     <>
       {sessionGroups.map((group) => {

@@ -6,6 +6,8 @@ import {
   LOCAL_CHAT_SESSION_ROW_LIMIT,
   filterLocalChatSessionGroups,
   groupLocalChatSessionsByProject,
+  groupLocalChatSessionsByTicket,
+  selectedLocalChatProject,
   localChatSessionDisplayTitle,
   localChatSessionProjectDisplayName,
   normalizeLocalChatSessionQuery,
@@ -419,5 +421,111 @@ describe("local chat session display projection", () => {
     expect(projected[0].sessions.map((session) => session.id)).toEqual([
       "session-8",
     ]);
+  });
+});
+
+describe("project selection and ticket grouping", () => {
+  const row = (
+    id: string,
+    ticketId: string | null,
+    ticketTitle: string | null = "Same title"
+  ) =>
+    makeSummary(id, "/work/alpha", "2026-01-01T00:00:00Z", {
+      association: { ticketId, ticketTitle },
+    });
+
+  it("groups ticket IDs independently of titles and keeps standalone rows in order", () => {
+    const rows = [
+      row("a", "ticket-a"),
+      row("standalone", null),
+      row("b", "ticket-b"),
+      row("a-older", "ticket-a"),
+    ];
+    const groups = groupLocalChatSessionsByTicket(rows);
+
+    expect(groups.map((g) => [g.id, g.sessions.map((s) => s.id)])).toEqual([
+      ["ticket:ticket-a", ["a", "a-older"]],
+      ["session:standalone", ["standalone"]],
+      ["ticket:ticket-b", ["b"]],
+    ]);
+    expect(groups[0].label).toBe(groups[2].label);
+    expect(rows.map((s) => s.id)).toEqual(["a", "standalone", "b", "a-older"]);
+  });
+
+  it("falls back to ticket ID without a title and accepts a later title", () => {
+    expect(
+      groupLocalChatSessionsByTicket([row("a", "ticket-a", null)])[0].label
+    ).toBe("ticket-a");
+    expect(
+      groupLocalChatSessionsByTicket([
+        row("a", "ticket-a", null),
+        row("b", "ticket-a", "Resolved"),
+      ])[0].label
+    ).toBe("Resolved");
+    expect(
+      groupLocalChatSessionsByTicket([
+        row("a", null),
+        row("b", "ticket-b"),
+      ]).map((g) => g.sessions.map((s) => s.id))
+    ).toEqual([["a"], ["b"]]);
+  });
+
+  it("includes empty saved projects on request and deterministically recovers selection", () => {
+    const groups = groupLocalChatSessionsByProject(
+      [row("active", null)],
+      projects,
+      "/work/beta",
+      true
+    );
+
+    expect(groups.map((g) => g.id)).toEqual(["project:beta", "project:alpha"]);
+    expect(groups[0].sessions).toEqual([]);
+    expect(selectedLocalChatProject(groups, null, "active")?.id).toBe(
+      "project:alpha"
+    );
+    expect(selectedLocalChatProject(groups, "project:beta", "active")?.id).toBe(
+      "project:beta"
+    );
+    expect(selectedLocalChatProject(groups, "removed", "missing")?.id).toBe(
+      "project:beta"
+    );
+    expect(
+      selectedLocalChatProject(
+        groups.map((g) => ({ ...g, isCurrentProject: false })),
+        null,
+        null
+      )?.id
+    ).toBe("project:beta");
+    expect(
+      selectedLocalChatProject(groups, null, "fresh", "/work/alpha")?.id
+    ).toBe("project:alpha");
+    expect(selectedLocalChatProject([], "removed", "active")).toBeUndefined();
+  });
+
+  it("matches a nested child title before removing its duplicate top-level row", () => {
+    const parent = makeSummary(
+      "parent",
+      "/work/alpha",
+      "2026-01-01T00:00:00Z",
+      { providerResumeId: "root" }
+    );
+    const child = makeSummary("child", "/work/alpha", "2026-01-01T00:00:00Z", {
+      title: "Worker needle",
+      providerResumeId: "child-thread",
+      providerParentResumeId: "root",
+    });
+    const groups = groupLocalChatSessionsByProject(
+      [parent, child],
+      projects,
+      "/work/alpha"
+    );
+
+    expect(
+      filterLocalChatSessionGroups(
+        groups,
+        "needle",
+        new Set(["child-thread"])
+      )[0].sessions.map((s) => s.id)
+    ).toEqual(["parent"]);
   });
 });

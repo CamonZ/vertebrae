@@ -972,7 +972,8 @@ function upsertLocalSessionSummary(
   if (
     existing &&
     hasStableLocalChatTitle(existing) &&
-    existing.title === summary.title
+    existing.title === summary.title &&
+    existing.association === summary.association
   ) {
     return summaries;
   }
@@ -1150,11 +1151,16 @@ function focusSessionInPaneLayout(
     };
   }
   if (preferredPane) {
+    // Keep the requested pane active; swap a target already visible elsewhere.
     return {
       activeSessionId: sessionId,
       paneLayout: {
         panes: paneLayout.panes.map((pane) =>
-          pane.id === preferredPane.id ? { ...pane, sessionId } : pane
+          pane.id === preferredPane.id
+            ? { ...pane, sessionId }
+            : pane.sessionId === sessionId
+              ? { ...pane, sessionId: preferredPane.sessionId }
+              : pane
         ),
         activePaneId: preferredPane.id,
       },
