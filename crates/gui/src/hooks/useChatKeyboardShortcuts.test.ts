@@ -21,12 +21,14 @@ function makeDispatch(
     focusPaneByOffset: vi.fn(() => true),
     historyNavigationEnabled: true,
     focusHistorySearch: vi.fn(() => true),
+    selectHistoryProjectByOffset: vi.fn(() => true),
     selectHistorySessionByOffset: vi.fn(async () => true),
     closeActivePane: vi.fn(() => true),
     keepOnlyActivePane: vi.fn(() => true),
     splitWithFreshSession: vi.fn(async () => true),
     startFreshActiveSession: vi.fn(async () => true),
     toggleHistorySelector: vi.fn(() => true),
+    toggleHistoryVisibility: vi.fn(),
     toggleMaximized: vi.fn(),
     ...overrides,
   };
@@ -170,15 +172,18 @@ describe("useChatKeyboardShortcuts", () => {
     expect(dispatch.focusPaneByOffset).toHaveBeenCalledWith(-1);
   });
 
-  it("selects the previous and next history sessions with cmd+alt brackets", () => {
+  it("selects the previous and next projects with cmd+alt brackets", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
 
     fireKey({ key: "[", code: "BracketLeft", metaKey: true, altKey: true });
     fireKey({ key: "]", code: "BracketRight", metaKey: true, altKey: true });
 
-    expect(dispatch.selectHistorySessionByOffset).toHaveBeenNthCalledWith(1, -1);
-    expect(dispatch.selectHistorySessionByOffset).toHaveBeenNthCalledWith(2, 1);
+    expect(dispatch.selectHistoryProjectByOffset).toHaveBeenNthCalledWith(
+      1,
+      -1
+    );
+    expect(dispatch.selectHistoryProjectByOffset).toHaveBeenNthCalledWith(2, 1);
   });
 
   it("leaves bracket keys alone outside maximized history navigation", () => {
@@ -193,7 +198,44 @@ describe("useChatKeyboardShortcuts", () => {
     });
 
     expect(event.defaultPrevented).toBe(false);
-    expect(dispatch.selectHistorySessionByOffset).not.toHaveBeenCalled();
+    expect(dispatch.selectHistoryProjectByOffset).not.toHaveBeenCalled();
+  });
+
+  it("routes shifted transformed brackets only to sessions while an input is focused", () => {
+    const dispatch = makeDispatch();
+
+    renderShortcutHook(dispatch);
+
+    const input = document.createElement("textarea");
+
+    document.body.append(input);
+    input.focus();
+
+    for (const [code, key, offset] of [
+      ["BracketLeft", "{", -1],
+      ["BracketRight", "}", 1],
+    ] as const) {
+      const event = new KeyboardEvent("keydown", {
+        code,
+        key,
+        metaKey: true,
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+
+      input.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(dispatch.selectHistorySessionByOffset).toHaveBeenLastCalledWith(
+        offset
+      );
+    }
+
+    expect(dispatch.selectHistoryProjectByOffset).not.toHaveBeenCalled();
+
+    input.remove();
   });
 
   it("focuses history search with cmd+f", () => {
@@ -233,7 +275,14 @@ describe("useChatKeyboardShortcuts", () => {
   it("starts fresh session on cmd+shift+alt+N", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
-    fireKey({ key: "n", code: "KeyN", metaKey: true, altKey: true, shiftKey: true });
+    fireKey({
+      key: "n",
+      code: "KeyN",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+
     expect(dispatch.startFreshActiveSession).toHaveBeenCalled();
   });
 
@@ -247,7 +296,14 @@ describe("useChatKeyboardShortcuts", () => {
   it("toggles history on cmd+shift+alt+H", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
-    fireKey({ key: "h", code: "KeyH", metaKey: true, altKey: true, shiftKey: true });
+    fireKey({
+      key: "h",
+      code: "KeyH",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+
     expect(dispatch.toggleHistorySelector).toHaveBeenCalled();
   });
 
@@ -261,7 +317,14 @@ describe("useChatKeyboardShortcuts", () => {
   it("does not start fresh session when hasActiveSession is false", () => {
     const dispatch = makeDispatch({ hasActiveSession: false });
     renderShortcutHook(dispatch);
-    fireKey({ key: "n", code: "KeyN", metaKey: true, altKey: true, shiftKey: true });
+    fireKey({
+      key: "n",
+      code: "KeyN",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+
     expect(dispatch.startFreshActiveSession).not.toHaveBeenCalled();
   });
 
@@ -367,22 +430,54 @@ describe("isLetterShortcutKey", () => {
 
 describe("paneNumberShortcutIndex", () => {
   it("returns 0 for Digit1", () => {
-    expect(paneNumberShortcutIndex({ code: "Digit1" } as KeyboardEvent)).toBe(0);
+    expect(paneNumberShortcutIndex({ code: "Digit1" } as KeyboardEvent)).toBe(
+      0
+    );
   });
 
   it("returns 5 for Digit6", () => {
-    expect(paneNumberShortcutIndex({ code: "Digit6" } as KeyboardEvent)).toBe(5);
+    expect(paneNumberShortcutIndex({ code: "Digit6" } as KeyboardEvent)).toBe(
+      5
+    );
   });
 
   it("returns 0 for key='1'", () => {
-    expect(paneNumberShortcutIndex({ code: "", key: "1" } as KeyboardEvent)).toBe(0);
+    expect(
+      paneNumberShortcutIndex({ code: "", key: "1" } as KeyboardEvent)
+    ).toBe(0);
   });
 
   it("returns null for Digit7 (out of range)", () => {
-    expect(paneNumberShortcutIndex({ code: "Digit7" } as KeyboardEvent)).toBeNull();
+    expect(
+      paneNumberShortcutIndex({ code: "Digit7" } as KeyboardEvent)
+    ).toBeNull();
   });
 
   it("returns null for non-numeric keys", () => {
-    expect(paneNumberShortcutIndex({ code: "KeyA", key: "a" } as KeyboardEvent)).toBeNull();
+    expect(
+      paneNumberShortcutIndex({ code: "KeyA", key: "a" } as KeyboardEvent)
+    ).toBeNull();
   });
+});
+
+it("toggles the sidebar on Cmd+B and ignores repeats, composition, and extra modifiers", () => {
+  const dispatch = makeDispatch();
+  renderShortcutHook(dispatch);
+
+  expect(
+    fireKey({ key: "b", code: "KeyB", metaKey: true }).defaultPrevented
+  ).toBe(true);
+  expect(dispatch.toggleHistoryVisibility).toHaveBeenCalledTimes(1);
+
+  for (const modifiers of [
+    { repeat: true },
+    { isComposing: true },
+    { altKey: true },
+    { ctrlKey: true },
+    { shiftKey: true },
+  ]) {
+    fireKey({ key: "b", code: "KeyB", metaKey: true, ...modifiers });
+  }
+
+  expect(dispatch.toggleHistoryVisibility).toHaveBeenCalledTimes(1);
 });

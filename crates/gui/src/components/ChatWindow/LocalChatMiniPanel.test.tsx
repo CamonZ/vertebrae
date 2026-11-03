@@ -1,9 +1,18 @@
 import { useState } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
-import type { LocalChatSessionGroup } from "../../utils/localChatSessionGroups";
+import {
+  selectedLocalChatProject,
+  type LocalChatSessionGroup,
+} from "../../utils/localChatSessionGroups";
 import {
   DEFAULT_HISTORY_WIDTH,
   MAX_HISTORY_WIDTH,
@@ -51,9 +60,10 @@ function makeGroup(
 
 interface ControlledPanelProps {
   initialQuery?: string;
-  hasLocalChatSessions?: boolean;
+  revealSession?: { sessionId: string; revision: number };
   sessionGroups?: LocalChatSessionGroup[];
   activeSessionId?: string;
+  activeProviderThreadId?: string | null;
   spawnOutlineBySessionId?: Map<string, SpawnOutlineItem[]>;
   activityBySessionId?: ReadonlyMap<string, LocalChatSessionActivity>;
   thinkingIndicatorStyle?: "classic" | "futuristic";
@@ -67,9 +77,10 @@ interface ControlledPanelProps {
 
 function ControlledPanel({
   initialQuery = "",
-  hasLocalChatSessions,
+  revealSession,
   sessionGroups = [],
   activeSessionId,
+  activeProviderThreadId = null,
   spawnOutlineBySessionId = new Map(),
   activityBySessionId = new Map(),
   thinkingIndicatorStyle = "classic",
@@ -82,19 +93,28 @@ function ControlledPanel({
 }: ControlledPanelProps) {
   const [query, setQuery] = useState(initialQuery);
 
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = selectedLocalChatProject(
+    sessionGroups,
+    selectedId,
+    activeSessionId ?? sessionGroups[0]?.sessions[0]?.id ?? null
+  );
+
   return (
     <LocalChatMiniPanel
       width={width}
       activeSessionId={
         activeSessionId ?? sessionGroups[0]?.sessions[0]?.id ?? "active"
       }
-      activeProviderThreadId={null}
+      activeProviderThreadId={activeProviderThreadId}
       searchQuery={query}
       onSearchQueryChange={(nextQuery) => {
         setQuery(nextQuery);
         onQueryChange?.(nextQuery);
       }}
-      hasLocalChatSessions={hasLocalChatSessions ?? sessionGroups.length > 0}
+      selectedProjectId={selected?.id ?? null}
+      onSelectProject={setSelectedId}
+      revealSession={revealSession}
       deleteError={null}
       projectWarning={null}
       sessionGroups={sessionGroups}
@@ -126,7 +146,8 @@ function DeletingPanel() {
       activeProviderThreadId={null}
       searchQuery={query}
       onSearchQueryChange={setQuery}
-      hasLocalChatSessions={sessionGroups.length > 0}
+      selectedProjectId="current"
+      onSelectProject={vi.fn()}
       deleteError={null}
       projectWarning={null}
       sessionGroups={sessionGroups}
@@ -142,38 +163,6 @@ function DeletingPanel() {
               ),
             }))
             .filter((group) => group.sessions.length > 0)
-        );
-      }}
-    />
-  );
-}
-
-function ExpandableDeletingPanel() {
-  const [sessions, setSessions] = useState(
-    Array.from({ length: 8 }, (_, index) =>
-      makeSession(`deletable-${index + 1}`, {
-        title: `Deletable ${index + 1}`,
-        label: `Deletable ${index + 1}`,
-      })
-    )
-  );
-
-  return (
-    <LocalChatMiniPanel
-      width={DEFAULT_HISTORY_WIDTH}
-      activeSessionId={sessions[0].id}
-      activeProviderThreadId={null}
-      searchQuery=""
-      onSearchQueryChange={vi.fn()}
-      hasLocalChatSessions
-      deleteError={null}
-      projectWarning={null}
-      sessionGroups={[makeGroup("current", "Current project", sessions)]}
-      spawnOutlineBySessionId={new Map()}
-      onSelect={vi.fn()}
-      onDelete={(sessionId) => {
-        setSessions((current) =>
-          current.filter((session) => session.id !== sessionId)
         );
       }}
     />
@@ -258,11 +247,16 @@ describe("LocalChatMiniPanel search", () => {
     );
 
     const panel = screen.getByTestId("local-chat-mini-panel");
-    const header = panel.querySelector<HTMLDivElement>(".hc-mini-history-head");
+    const header = panel.querySelector<HTMLDivElement>(
+      ".hc-mini-history-sessions .hc-mini-history-head"
+    );
     const body = screen.getByTestId("local-chat-history-drawer");
     const scrollRegion = screen.getByTestId("local-chat-history-scroll-region");
 
-    expect(header).toBe(panel.firstElementChild);
+    expect(panel.firstElementChild).toHaveClass("hc-mini-history-projects");
+    expect(panel.querySelector(".hc-mini-history-sessions")).toContainElement(
+      header
+    );
     expect(body).toHaveClass("hc-mini-history-body");
     expect(body).toContainElement(scrollRegion);
     expect(scrollRegion).toHaveClass("hc-mini-history-list");
@@ -271,9 +265,9 @@ describe("LocalChatMiniPanel search", () => {
       within(scrollRegion).getAllByRole("button", {
         name: /^Load local chat Overflow session/,
       })
-    ).toHaveLength(7);
+    ).toHaveLength(24);
     expect(
-      within(body).getByRole("button", { name: "Current project" })
+      within(panel).getByRole("button", { name: "Current project" })
     ).toBeInTheDocument();
   });
 
@@ -330,7 +324,15 @@ describe("LocalChatMiniPanel search", () => {
     );
     emptyRender.unmount();
 
-    render(<ControlledPanel initialQuery="missing" hasLocalChatSessions />);
+    render(
+      <ControlledPanel
+        initialQuery="missing"
+        sessionGroups={[
+          makeGroup("current", "Current project", [makeSession("existing")]),
+        ]}
+      />
+    );
+
     expect(
       screen.getByTestId("local-chat-history-no-results")
     ).toHaveTextContent("No local chats match “missing”.");
@@ -340,9 +342,7 @@ describe("LocalChatMiniPanel search", () => {
   });
 
   it("keeps the no-local-chats state when the underlying history is empty", () => {
-    render(
-      <ControlledPanel initialQuery="missing" hasLocalChatSessions={false} />
-    );
+    render(<ControlledPanel initialQuery="missing" />);
 
     expect(screen.getByTestId("local-chat-history-empty")).toHaveTextContent(
       "No local chats yet."
@@ -407,7 +407,10 @@ describe("LocalChatMiniPanel search", () => {
     );
 
     const panel = within(screen.getByTestId("local-chat-mini-panel"));
-    expect(panel.getAllByRole("heading", { level: 3 })).toHaveLength(1);
+
+    expect(
+      panel.getByRole("heading", { name: "Other chats" })
+    ).toBeInTheDocument();
     expect(
       panel.getByRole("region", { name: "Current project chats" })
     ).toBeInTheDocument();
@@ -421,6 +424,10 @@ describe("LocalChatMiniPanel search", () => {
       })
     );
     expect(onSelect).toHaveBeenCalledWith(parent.id);
+
+    await user.click(
+      panel.getByRole("button", { name: "Subagents for Inspect repository" })
+    );
 
     await user.click(
       panel.getByRole("button", {
@@ -537,6 +544,8 @@ describe("LocalChatMiniPanel search", () => {
           onSelect={onSelect}
         />
       );
+
+      scrollIntoView.mockClear();
 
       const panel = screen.getByTestId("local-chat-mini-panel");
       const buttons = screen.getAllByRole("button", {
@@ -666,6 +675,10 @@ describe("LocalChatMiniPanel search", () => {
         thinkingIndicatorStyle="futuristic"
       />
     );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Subagents for Parent" })
+    );
+
     const row = screen.getByRole("button", {
       name: "Open spawned agent Worker from Parent",
     });
@@ -776,127 +789,291 @@ describe("LocalChatMiniPanel search", () => {
   });
 });
 
-describe("LocalChatMiniPanel session limits", () => {
-  it("caps each project independently and exposes accessible expansion state", async () => {
-    const user = userEvent.setup();
-    const makeSessions = (prefix: string, count: number) =>
-      Array.from({ length: count }, (_, index) =>
-        makeSession(`${prefix}-${index + 1}`, {
-          title: `${prefix} ${index + 1}`,
-          label: `${prefix} ${index + 1}`,
-          updatedAt: `2026-01-${String(count - index).padStart(2, "0")}T00:00:00Z`,
-        })
-      );
-    const currentSessions = makeSessions("Current", 8);
-    const otherSessions = makeSessions("Other", 8);
-    const shortSessions = makeSessions("Short", 7);
-    const onSelect = vi.fn();
-    const onStartProjectChat = vi.fn();
+describe("LocalChatMiniPanel project and ticket browsing", () => {
+  const association = (ticketId: string, ticketTitle = "Shared title") => ({
+    ticketId,
+    ticketTitle,
+    worktreePath: null,
+    branch: null,
+    lastProcessedAt: null,
+    processedAtCount: 0,
+    awaitingWorktree: null,
+    recentWorktrees: [],
+  });
+
+  it("keeps ticket headings compact while retaining full context and nested chats", () => {
+    const ticketId = "32fcee8a-20cd-4301-9d8a-748ab49e95d9";
+    const ticketTitle =
+      "A very long ticket title that should not compete with conversation titles";
 
     render(
       <ControlledPanel
-        onSelect={onSelect}
-        onStartProjectChat={onStartProjectChat}
         sessionGroups={[
-          makeGroup("current", "Current project", currentSessions),
-          makeGroup("other", "Other project", otherSessions),
-          makeGroup("short", "Short project", shortSessions),
+          makeGroup("current", "Current project", [
+            makeSession("grouped-one", {
+              association: association(ticketId, ticketTitle),
+            }),
+            makeSession("grouped-two", {
+              association: association(ticketId, ticketTitle),
+            }),
+            makeSession("standalone"),
+          ]),
         ]}
       />
     );
 
-    const panel = within(screen.getByTestId("local-chat-mini-panel"));
-    const current = within(
-      panel.getByRole("region", { name: "Current project chats" })
-    );
-    const other = within(
-      panel.getByRole("region", { name: "Other project chats" })
-    );
-    const short = within(
-      panel.getByRole("region", { name: "Short project chats" })
-    );
+    const heading = screen.getByRole("button", { name: ticketTitle });
 
-    expect(
-      current.getAllByRole("button", { name: /^Load local chat/ })
-    ).toHaveLength(7);
-    expect(
-      other.getAllByRole("button", { name: /^Load local chat/ })
-    ).toHaveLength(7);
-    expect(
-      short.getAllByRole("button", { name: /^Load local chat/ })
-    ).toHaveLength(7);
-    expect(
-      short.queryByRole("button", { name: "Short project" })
-    ).not.toBeInTheDocument();
+    expect(within(heading).getByText("32fcee8a")).toBeInTheDocument();
+    expect(within(heading).getByText("2")).toBeInTheDocument();
+    expect(heading).toHaveAttribute("title", `${ticketTitle} · ${ticketId}`);
 
-    await user.click(current.getByRole("button", { name: "Current project" }));
+    expect(heading).toHaveAttribute("aria-expanded", "false");
 
-    expect(
-      current.getAllByRole("button", { name: /^Load local chat/ })
-    ).toHaveLength(8);
-    const projectToggle = current.getByRole("button", {
-      name: "Current project",
-    });
-    expect(projectToggle).toHaveAttribute("aria-expanded", "true");
-    expect(projectToggle).toHaveFocus();
-    expect(
-      other.getAllByRole("button", { name: /^Load local chat/ })
-    ).toHaveLength(7);
-    expect(
-      other.getByRole("button", { name: "Other project" })
-    ).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(heading);
 
+    const nestedRows = document.getElementById(
+      heading.getAttribute("aria-controls")!
+    )!;
+
+    expect(nestedRows).toHaveClass("hc-mini-history-ticket-rows");
     expect(
-      document.getElementById(projectToggle.getAttribute("aria-controls")!)
-    ).toContainElement(
-      current.getAllByRole("button", { name: /^Load local chat/ })[0]
+      within(nestedRows).getAllByRole("button", { name: /^Load local chat/ })
+    ).toHaveLength(2);
+    expect(nestedRows).not.toContainElement(
+      screen.getByRole("button", { name: /Load local chat standalone/ })
     );
-    await user.keyboard("{Enter}");
-    expect(projectToggle).toHaveAttribute("aria-expanded", "false");
-    await user.keyboard(" ");
-    expect(projectToggle).toHaveAttribute("aria-expanded", "true");
-    expect(onSelect).not.toHaveBeenCalled();
-    await user.click(
-      current.getByRole("button", { name: "Start new chat in Current project" })
-    );
-    expect(onStartProjectChat).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "current" })
-    );
-    expect(projectToggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.queryByText(/Show all|Show less/)).not.toBeInTheDocument();
-    await user.click(projectToggle);
-    expect(
-      current.getAllByRole("button", { name: /^Load local chat/ })
-    ).toHaveLength(7);
-    expect(
-      current.getByRole("button", { name: "Current project" })
-    ).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("collapses the control when deleting the final row beyond the default limit", async () => {
-    const user = userEvent.setup();
-    render(<ExpandableDeletingPanel />);
+  it("starts newly loaded ticket groups collapsed and keeps Other chats visible", () => {
+    const { rerender } = render(<ControlledPanel sessionGroups={[]} />);
 
-    const panel = within(screen.getByTestId("local-chat-mini-panel"));
-    const current = within(
-      panel.getByRole("region", { name: "Current project chats" })
+    rerender(
+      <ControlledPanel
+        sessionGroups={[
+          makeGroup("current", "Project", [
+            makeSession("grouped", {
+              association: association("ticket-a", "Loaded ticket"),
+            }),
+            makeSession("standalone"),
+          ]),
+        ]}
+      />
     );
 
-    await user.click(current.getByRole("button", { name: "Current project" }));
     expect(
-      current.getAllByRole("button", { name: /^Load local chat/ })
-    ).toHaveLength(8);
-
-    await user.click(
-      current.getByRole("button", { name: "Delete local chat Deletable 8" })
-    );
-
+      screen.getByRole("button", { name: "Loaded ticket" })
+    ).toHaveAttribute("aria-expanded", "false");
     expect(
-      current.getAllByRole("button", { name: /^Load local chat/ })
-    ).toHaveLength(7);
-    expect(
-      current.queryByRole("button", { name: "Current project" })
+      screen.queryByRole("button", { name: /Load local chat grouped/ })
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Load local chat standalone/ })
+    ).toBeInTheDocument();
+  });
+
+  it("browses one project at a time without selecting a chat, including empty projects", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <ControlledPanel
+        onSelect={onSelect}
+        sessionGroups={[
+          makeGroup("alpha", "Alpha", [makeSession("alpha-chat")]),
+          makeGroup("beta", "Beta", [makeSession("beta-chat")]),
+          makeGroup("empty", "Empty", []),
+        ]}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(
+      screen.queryByRole("button", { name: /Load local chat beta-chat/ })
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Beta" }));
+
+    expect(
+      screen.getByRole("button", { name: /Load local chat beta-chat/ })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Load local chat alpha-chat/ })
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Empty" }));
+
+    expect(screen.getByTestId("local-chat-history-empty")).toBeInTheDocument();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("groups stable ticket IDs, toggles by keyboard, and searches older collapsed rows", async () => {
+    const user = userEvent.setup();
+    const sessions = Array.from({ length: 9 }, (_, index) =>
+      makeSession(`chat-${index}`, {
+        title: index === 8 ? "Older needle" : `Chat ${index}`,
+        association: association("ticket-a"),
+      })
+    );
+
+    render(
+      <ControlledPanel
+        sessionGroups={[
+          makeGroup("alpha", "Alpha", [
+            ...sessions,
+            makeSession("distinct", { association: association("ticket-b") }),
+            makeSession("standalone"),
+          ]),
+        ]}
+      />
+    );
+
+    const headings = screen.getAllByRole("button", { name: "Shared title" });
+
+    expect(headings).toHaveLength(2);
+
+    expect(headings[0]).toHaveAttribute("aria-expanded", "false");
+    expect(
+      document.getElementById(headings[0].getAttribute("aria-controls")!)
+    ).toHaveAttribute("hidden");
+    expect(
+      screen.queryByRole("button", { name: /Load local chat Older needle/ })
+    ).not.toBeInTheDocument();
+    headings[0].focus();
+    await user.keyboard("{Enter}");
+
+    expect(headings[0]).toHaveAttribute("aria-expanded", "true");
+
+    await user.keyboard(" ");
+
+    expect(headings[0]).toHaveAttribute("aria-expanded", "false");
+
+    await user.type(screen.getByRole("searchbox"), "needle");
+
+    expect(
+      screen.getByRole("button", { name: /Load local chat Older needle/ })
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "Shared title" })
+    ).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+
+    expect(headings[0]).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByRole("button", { name: /Load local chat standalone/ })
+    ).toBeInTheDocument();
+  });
+
+  it("reveals a shortcut target in a collapsed ticket and regroups corrected associations", async () => {
+    const originalScrollIntoView = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView"
+    );
+    const scrollIntoView = vi.fn();
+
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    try {
+      const user = userEvent.setup();
+      const session = makeSession("target", {
+        association: association("ticket-a", "Original"),
+      });
+      const group = makeGroup("alpha", "Alpha", [session]);
+      const { rerender } = render(<ControlledPanel sessionGroups={[group]} />);
+
+      expect(
+        screen.queryByRole("button", { name: /Load local chat target/ })
+      ).not.toBeInTheDocument();
+
+      rerender(
+        <ControlledPanel
+          sessionGroups={[group]}
+          revealSession={{ sessionId: "target", revision: 1 }}
+        />
+      );
+
+      expect(
+        await screen.findByRole("button", { name: /Load local chat target/ })
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Original" })).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      );
+
+      const target = screen.getByRole("button", {
+        name: /Load local chat target/,
+      });
+
+      await waitFor(() => {
+        const callIndex = scrollIntoView.mock.contexts.indexOf(target);
+
+        expect(callIndex).toBeGreaterThanOrEqual(0);
+        expect(scrollIntoView.mock.calls[callIndex]).toEqual([
+          { block: "nearest", inline: "nearest" },
+        ]);
+      });
+      // A handled shortcut must not force this accordion to stay open afterward.
+      await user.click(screen.getByRole("button", { name: "Original" }));
+
+      expect(screen.getByRole("button", { name: "Original" })).toHaveAttribute(
+        "aria-expanded",
+        "false"
+      );
+
+      rerender(
+        <ControlledPanel
+          sessionGroups={[
+            {
+              ...group,
+              sessions: [
+                {
+                  ...session,
+                  association: association("ticket-b", "Corrected"),
+                },
+              ],
+            },
+          ]}
+        />
+      );
+
+      expect(
+        screen.queryByRole("button", { name: "Original" })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Corrected" })
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /Load local chat target/ })
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Corrected" })).toHaveAttribute(
+        "aria-expanded",
+        "false"
+      );
+
+      rerender(
+        <ControlledPanel sessionGroups={[{ ...group, sessions: [] }]} />
+      );
+
+      expect(
+        screen.queryByRole("button", { name: "Corrected" })
+      ).not.toBeInTheDocument();
+    } finally {
+      if (originalScrollIntoView) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          originalScrollIntoView
+        );
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+      }
+    }
   });
 });
 
@@ -923,11 +1100,102 @@ it("keeps association keyboard actions separate from conversation selection", ()
       ]}
     />
   );
-  const ticket = screen.getByRole("img", { name: /^Ticket:/ });
+  expect(
+    screen.queryByRole("img", { name: /^Ticket:/ })
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Ticket" }));
+
   const worktree = screen.getByRole("img", { name: /^Worktree:/ });
-  expect(ticket.closest(".hc-mini-history-entry")).toContainElement(worktree);
-  expect(ticket.closest(".hc-mini-history-open")).toBeNull();
-  expect(fireEvent.keyDown(ticket, { key: "Enter" })).toBe(true);
+  expect(worktree.closest(".hc-mini-history-entry")).not.toBeNull();
+  expect(worktree.closest(".hc-mini-history-open")).toBeNull();
+  expect(fireEvent.keyDown(worktree, { key: "Enter" })).toBe(true);
   fireEvent.keyDown(worktree, { key: " " });
   expect(onSelect).not.toHaveBeenCalled();
+});
+
+it("collapses twenty subagents, supports keyboard toggling, and reveals the active child", async () => {
+  const user = userEvent.setup();
+  const onSelect = vi.fn();
+  const agents = Array.from({ length: 20 }, (_, i) => ({
+    id: `agent-${i}`,
+    threadId: `thread-${i}`,
+    spawnId: `spawn-${i}`,
+    label: `Worker ${i}`,
+    detail: "",
+    isWorking: i === 0,
+  }));
+  const props = {
+    sessionGroups: [
+      makeGroup("current", "Project", [
+        makeSession("parent", { title: "Parent" }),
+      ]),
+    ],
+    spawnOutlineBySessionId: new Map([["parent", agents]]),
+    onSelect,
+  };
+  const { rerender } = render(<ControlledPanel {...props} />);
+  const toggle = screen.getByRole("button", { name: "Subagents for Parent" });
+
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(toggle).toHaveTextContent("20 subagents");
+  expect(toggle).toHaveTextContent("1 working");
+  expect(
+    screen.queryByRole("button", { name: /^Open spawned agent/ })
+  ).not.toBeInTheDocument();
+
+  toggle.focus();
+  await user.keyboard("{Enter}");
+
+  expect(
+    screen.getAllByRole("button", { name: /^Open spawned agent/ })
+  ).toHaveLength(20);
+  expect(onSelect).not.toHaveBeenCalled();
+
+  await user.keyboard(" ");
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+  rerender(<ControlledPanel {...props} activeProviderThreadId="thread-19" />);
+  expect(
+    screen.getByRole("button", {
+      name: "Open spawned agent Worker 19 from Parent",
+    })
+  ).toHaveAttribute("aria-current", "true");
+
+  await user.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+});
+
+it("renders unassociated chats together after every ticket group", () => {
+  render(
+    <ControlledPanel
+      sessionGroups={[
+        makeGroup("current", "Project", [
+          makeSession("first-loose"),
+          makeSession("ticket-a", {
+            association: { ticketId: "a", ticketTitle: "A" },
+          }),
+          makeSession("second-loose"),
+          makeSession("ticket-b", {
+            association: { ticketId: "b", ticketTitle: "B" },
+          }),
+        ]),
+      ]}
+    />
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "A" }));
+  fireEvent.click(screen.getByRole("button", { name: "B" }));
+
+  expect(
+    screen
+      .getAllByRole("button", { name: /^Load local chat/ })
+      .map((e) => e.textContent)
+  ).toEqual(["ticket-a", "ticket-b", "first-loose", "second-loose"]);
+  const other = screen.getByRole("region", { name: "Other chats" });
+  expect(
+    within(other).getByRole("heading", { name: "Other chats" })
+  ).toBeInTheDocument();
+  expect(
+    within(other).getAllByRole("button", { name: /^Load local chat/ })
+  ).toHaveLength(2);
 });

@@ -30,7 +30,7 @@ describe("ChatHistoryResizeHandle", () => {
     expect(handle).toHaveAttribute("aria-label", "Resize chat history");
     expect(handle).toHaveAttribute("aria-valuenow", "300");
     expect(handle).toHaveAttribute("aria-valuemin", "272");
-    expect(handle).toHaveAttribute("aria-valuemax", "400");
+    expect(handle).toHaveAttribute("aria-valuemax", String(MAX_HISTORY_WIDTH));
     expect(handle).toHaveAttribute(
       "aria-valuetext",
       "300px; arrow keys adjust by 16px"

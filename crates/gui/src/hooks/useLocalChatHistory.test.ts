@@ -169,13 +169,16 @@ describe("useLocalChatHistory", () => {
     });
   });
 
-  it("returns empty groups when no sessions and no summaries", async () => {
+  it("keeps empty saved projects browsable without adding session results", async () => {
     const { result } = renderHook(() =>
       useLocalChatHistory({ sessionChangeToken: "" })
     );
-    await waitFor(() =>
-      expect(result.current.localSessionGroups).toBeDefined()
-    );
+
+    await waitFor(() => expect(result.current.projectsReady).toBe(true));
+
+    expect(result.current.allLocalSessionGroups).toMatchObject([
+      { id: "project:test-project", sessions: [] },
+    ]);
     expect(result.current.localSessionGroups).toEqual([]);
   });
 

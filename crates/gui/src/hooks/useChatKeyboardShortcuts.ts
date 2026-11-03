@@ -12,12 +12,14 @@ export type ShortcutDispatchState = {
   focusPaneByOffset: (offset: number) => boolean;
   historyNavigationEnabled: boolean;
   focusHistorySearch: () => boolean;
+  selectHistoryProjectByOffset: (offset: number) => boolean;
   selectHistorySessionByOffset: (offset: number) => Promise<boolean>;
   closeActivePane: () => boolean;
   keepOnlyActivePane: () => boolean;
   splitWithFreshSession: () => Promise<boolean>;
   startFreshActiveSession: () => Promise<boolean>;
   toggleHistorySelector: () => boolean;
+  toggleHistoryVisibility: () => void;
   toggleMaximized: () => void;
 };
 
@@ -77,6 +79,7 @@ export function useChatKeyboardShortcuts({
     const onKeyDown = (event: KeyboardEvent) => {
       const current = dispatchRef.current;
       if (!current) return;
+
       const key = event.key.toLowerCase();
 
       if (isShortcutHintsKey(event)) {
@@ -104,22 +107,36 @@ export function useChatKeyboardShortcuts({
       if (!event.metaKey) return;
 
       if (
-        key === "f" &&
+        isLetterShortcutKey(event, "KeyB", "b") &&
         !event.altKey &&
         !event.ctrlKey &&
-        !event.shiftKey
+        !event.shiftKey &&
+        !event.isComposing
       ) {
+        event.preventDefault();
+
+        if (!event.repeat) current.toggleHistoryVisibility();
+
+        return;
+      }
+
+      if (key === "f" && !event.altKey && !event.ctrlKey && !event.shiftKey) {
         if (current.focusHistorySearch()) {
           event.preventDefault();
         }
         return;
       }
 
-      if (event.altKey && !event.shiftKey) {
+      if (event.altKey && !event.ctrlKey && !event.isComposing) {
         const historyOffset = historyShortcutOffset(event);
+
         if (historyOffset !== null && current.historyNavigationEnabled) {
           event.preventDefault();
-          void current.selectHistorySessionByOffset(historyOffset);
+
+          if (event.shiftKey)
+            void current.selectHistorySessionByOffset(historyOffset);
+          else current.selectHistoryProjectByOffset(historyOffset);
+
           return;
         }
       }

@@ -3,10 +3,10 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { LocalChatHarnessKind } from "../../bindings";
 import type { ThinkingIndicatorStyle } from "../../stores/uiStore";
 import {
-  LOCAL_CHAT_SESSION_ROW_LIMIT,
+  filterLocalChatSessionGroups,
+  groupLocalChatSessionsByTicket,
   localChatSessionDisplayTitle,
   normalizeLocalChatSessionQuery,
-  projectLocalChatSessionGroups,
   type LocalChatSessionGroup,
 } from "../../utils/localChatSessionGroups";
 import { formatRelative } from "../../utils/formatRelative";
@@ -26,10 +26,13 @@ interface LocalChatMiniPanelProps {
   activeProviderThreadId?: string | null;
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
-  hasLocalChatSessions: boolean;
+  selectedProjectId: string | null;
+  onSelectProject: (projectId: string) => void;
+  revealSession?: { sessionId: string; revision: number } | null;
   deleteError: string | null;
   projectWarning: string | null;
   sessionGroups: LocalChatSessionGroup[];
+  excludedProviderThreadIds?: ReadonlySet<string>;
   spawnOutlineBySessionId: Map<string, SpawnOutlineItem[]>;
   /** Runtime-only activity keyed by session; absent rows show their harness. */
   activityBySessionId?: ReadonlyMap<string, LocalChatSessionActivity>;
@@ -55,10 +58,13 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   activeProviderThreadId,
   searchQuery,
   onSearchQueryChange,
-  hasLocalChatSessions,
+  selectedProjectId,
+  onSelectProject,
+  revealSession,
   deleteError,
   projectWarning,
   sessionGroups,
+  excludedProviderThreadIds,
   spawnOutlineBySessionId,
   activityBySessionId,
   thinkingIndicatorStyle = "classic",
@@ -67,61 +73,73 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   onStartProjectChat,
   onDelete,
 }: LocalChatMiniPanelProps) {
+  const selectedProjectButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    selectedProjectButtonRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [selectedProjectId]);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const visibleSessionGroups = useMemo(
+  const selectedProject = sessionGroups.find(
+    (group) => group.id === selectedProjectId
+  );
+
+  const matchingGroups = useMemo(
     () =>
-      projectLocalChatSessionGroups(
-        sessionGroups.filter((group) => group.sessions.length > 0)
+      filterLocalChatSessionGroups(
+        selectedProject ? [selectedProject] : [],
+        searchQuery,
+        excludedProviderThreadIds
       ),
-    [sessionGroups]
+    [selectedProject, searchQuery, excludedProviderThreadIds]
   );
-  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(
-    () => new Set()
+
+  const sessionItems = useMemo(
+    () =>
+      matchingGroups.flatMap((group) => group.allSessions ?? group.sessions),
+    [matchingGroups]
   );
-  const expandableGroupIds = useMemo(
+
+  const ticketGroups = useMemo(
+    () => groupLocalChatSessionsByTicket(sessionItems),
+    [sessionItems]
+  );
+
+  const groupedSessionIds = useMemo(
     () =>
       new Set(
-        visibleSessionGroups
-          .filter(
-            (group) =>
-              (group.allSessions?.length ?? group.sessions.length) >
-              LOCAL_CHAT_SESSION_ROW_LIMIT
-          )
-          .map((group) => group.id)
+        ticketGroups
+          .filter((group) => group.ticketId)
+          .flatMap((group) => group.sessions.map((session) => session.id))
       ),
-    [visibleSessionGroups]
+    [ticketGroups]
   );
-  useEffect(() => {
-    setExpandedGroupIds((current) => {
-      const next = new Set(
-        [...current].filter((groupId) => expandableGroupIds.has(groupId))
-      );
-      return next.size === current.size ? current : next;
-    });
-  }, [expandableGroupIds]);
-  const toggleGroupExpansion = useCallback((groupId: string) => {
-    setExpandedGroupIds((current) => {
-      const next = new Set(current);
-      if (next.has(groupId)) next.delete(groupId);
-      else next.add(groupId);
-      return next;
-    });
-  }, []);
-  const expandedSessionGroups = useMemo(
-    () =>
-      visibleSessionGroups.map((group) => {
-        const allSessions = group.allSessions ?? group.sessions;
-        const isExpanded =
-          expandedGroupIds.has(group.id) &&
-          allSessions.length > LOCAL_CHAT_SESSION_ROW_LIMIT;
-        return isExpanded ? { ...group, sessions: allSessions } : group;
-      }),
-    [expandedGroupIds, visibleSessionGroups]
+
+  // Accordion preferences live only for this mounted sidebar, keyed by project + ticket.
+  const [expandedTickets, setExpandedTickets] = useState<Set<string>>(
+    () => new Set()
   );
-  const sessionItems = useMemo(
-    () => expandedSessionGroups.flatMap((group) => group.sessions),
-    [expandedSessionGroups]
+
+  const ticketKey = useCallback(
+    (id: string) => `${selectedProjectId}:${id}`,
+    [selectedProjectId]
   );
+
+  const toggleTicket = useCallback(
+    (id: string) => {
+      setExpandedTickets((current) => {
+        const next = new Set(current);
+        const key = ticketKey(id);
+
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+
+        return next;
+      });
+    },
+    [ticketKey]
+  );
+
   const sessionButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [keyboardSessionId, setKeyboardSessionId] = useState<string | null>(
     activeSessionId
@@ -131,6 +149,43 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     null
   );
 
+  // A previous reveal must not reopen a group when the sidebar mounts again.
+  const handledReveal = useRef(revealSession);
+
+  useEffect(() => {
+    if (!revealSession || handledReveal.current === revealSession) return;
+
+    const group = ticketGroups.find((group) =>
+      group.sessions.some((session) => session.id === revealSession.sessionId)
+    );
+
+    if (!group) return;
+
+    handledReveal.current = revealSession;
+    const key = ticketKey(group.id);
+
+    setExpandedTickets((current) => {
+      if (current.has(key)) return current;
+
+      const next = new Set(current);
+      next.add(key);
+
+      return next;
+    });
+  }, [revealSession, ticketGroups, ticketKey]);
+
+  useEffect(() => {
+    if (!revealSession) return;
+
+    const frame = requestAnimationFrame(() => {
+      sessionButtonRefs.current
+        .get(revealSession.sessionId)
+        ?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [revealSession, ticketGroups, expandedTickets]);
+
   const focusSearchInput = useCallback(() => {
     searchInputRef.current?.focus();
   }, []);
@@ -138,20 +193,26 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   useEffect(() => {
     if (sessionItems.length === 0) {
       setKeyboardSessionId(null);
+
       return;
     }
+
     if (sessionItems.some((session) => session.id === keyboardSessionId)) {
       return;
     }
+
     const activeSession = sessionItems.find(
       (session) => session.id === activeSessionId
     );
+
     setKeyboardSessionId(activeSession?.id ?? sessionItems[0].id);
   }, [activeSessionId, keyboardSessionId, sessionItems]);
 
   const focusHistorySession = useCallback((sessionId: string) => {
     setKeyboardSessionId(sessionId);
+
     const button = sessionButtonRefs.current.get(sessionId);
+
     button?.focus();
     button?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, []);
@@ -161,13 +222,15 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
       const target = event.target as HTMLElement;
       const isSearchTarget =
         target.closest("[data-mini-history-search]") !== null;
+
       if (
         target.closest(
-          "[data-mini-delete], [data-mini-history-toggle], [data-mini-project-chat], .conversation-associations"
+          "[data-mini-delete], [data-mini-history-toggle], [data-mini-project-chat], [data-mini-project-select], .hc-mini-history-agent, .conversation-associations"
         )
       ) {
         return;
       }
+
       if (
         isSearchTarget &&
         event.key !== "ArrowDown" &&
@@ -175,7 +238,17 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
       ) {
         return;
       }
+
+      const sessionItems = ticketGroups.flatMap((group) =>
+        !hasSearchQuery &&
+        group.ticketId &&
+        !expandedTickets.has(ticketKey(group.id))
+          ? []
+          : group.sessions
+      );
+
       if (sessionItems.length === 0) return;
+
       const navigationSessionId = isSearchTarget
         ? activeSessionId
         : keyboardSessionId;
@@ -204,21 +277,25 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
       if (nextIndex !== null) {
         event.preventDefault();
         const nextSessionId = sessionItems[nextIndex].id;
+
         if (isSearchTarget) {
           setKeyboardSessionId(nextSessionId);
           void onSelect(nextSessionId);
         } else {
           focusHistorySession(nextSessionId);
         }
+
         return;
       }
 
       if (event.key !== "Enter" && event.key !== " ") return;
+
       event.preventDefault();
       const selectedSessionId =
         keyboardSessionId ??
         sessionItems.find((session) => session.id === activeSessionId)?.id ??
         sessionItems[0].id;
+
       onSelect(selectedSessionId);
     },
     [
@@ -226,7 +303,10 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
       focusHistorySession,
       keyboardSessionId,
       onSelect,
-      sessionItems,
+      ticketGroups,
+      hasSearchQuery,
+      expandedTickets,
+      ticketKey,
     ]
   );
 
@@ -240,256 +320,441 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
       tabIndex={-1}
       onKeyDown={handleHistoryKeyDown}
     >
-      <div className="hc-mini-history-head">
-        <span>Chats</span>
-        <label
-          className="hc-mini-history-search-label"
-          htmlFor="local-chat-session-search"
-        >
-          Search chats
-        </label>
+      <section className="hc-mini-history-projects" aria-label="Chat projects">
+        <h2 className="hc-mini-history-head">Projects</h2>
+
         <div
-          data-mini-history-search
-          className="hc-mini-history-search"
-          onClick={focusSearchInput}
+          className="hc-mini-history-list"
+          data-testid="local-chat-project-scroll-region"
         >
-          <SearchInput
-            ref={searchInputRef}
-            id="local-chat-session-search"
-            value={searchQuery}
-            onChange={onSearchQueryChange}
-            debounceMs={0}
-            placeholder="Search chats…"
-            aria-label="Search local chats"
-            data-testid="local-chat-session-search"
-          />
+          {sessionGroups.map((group) => {
+            const canStart =
+              !!onStartProjectChat && !!group.projectId && !!group.projectPath;
+
+            return (
+              <div
+                key={group.id}
+                className="hc-mini-history-group-title"
+                data-selected={group.id === selectedProjectId || undefined}
+              >
+                <button
+                  type="button"
+                  data-mini-project-select
+                  className="hc-mini-history-project-title hc-mini-history-toggle"
+                  aria-pressed={group.id === selectedProjectId}
+                  title={group.label}
+                  onClick={() => onSelectProject(group.id)}
+                  ref={
+                    group.id === selectedProjectId
+                      ? selectedProjectButtonRef
+                      : undefined
+                  }
+                >
+                  <span className="hc-mini-history-project-label">
+                    {group.label}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="hc-mini-history-new"
+                  data-mini-project-chat
+                  data-testid={`new-project-chat-${group.id}`}
+                  aria-label={`Start new chat in ${group.label}`}
+                  aria-busy={
+                    (!!startingProjectId &&
+                      startingProjectId === group.projectId) ||
+                    undefined
+                  }
+                  disabled={!canStart || startingProjectId !== null}
+                  title={
+                    canStart
+                      ? `Start a new chat in ${group.label}`
+                      : `Cannot start a chat in ${group.label}: project directory unavailable`
+                  }
+                  onClick={() => {
+                    if (!canStart || !onStartProjectChat) return;
+
+                    setStartingProjectId(group.projectId);
+
+                    void Promise.resolve()
+                      .then(() => onStartProjectChat(group))
+                      .catch(() => undefined)
+                      .finally(() => setStartingProjectId(null));
+                  }}
+                >
+                  <span aria-hidden="true">+</span>
+                </button>
+              </div>
+            );
+          })}
         </div>
-      </div>
-      <div
-        data-testid="local-chat-history-drawer"
-        className="hc-mini-history-body"
+      </section>
+
+      <section
+        className="hc-mini-history-sessions"
+        aria-label={
+          selectedProject ? `${selectedProject.label} chats` : "Project chats"
+        }
       >
-        {deleteError && (
-          <div role="alert" className="hc-mini-history-error">
-            {deleteError}
-          </div>
-        )}
-        {projectWarning && (
-          <div role="alert" className="hc-mini-history-error">
-            {projectWarning}
-          </div>
-        )}
-        {visibleSessionGroups.length === 0 ? (
+        <div className="hc-mini-history-head">
+          <label className="sr-only" htmlFor="local-chat-session-search">
+            Search chats
+          </label>
+
           <div
-            className="hc-mini-history-empty"
-            data-testid={
-              hasSearchQuery && hasLocalChatSessions
-                ? "local-chat-history-no-results"
-                : "local-chat-history-empty"
-            }
-            role="status"
-            aria-live="polite"
+            data-mini-history-search
+            className="hc-mini-history-search"
+            onClick={focusSearchInput}
           >
-            {hasSearchQuery && hasLocalChatSessions
-              ? `No local chats match “${searchQuery.trim()}”.`
-              : "No local chats yet."}
-          </div>
-        ) : (
-          <div
-            className="hc-mini-history-list"
-            data-testid="local-chat-history-scroll-region"
-          >
-            <SessionGroupList
-              sessionGroups={expandedSessionGroups}
-              activeSessionId={activeSessionId}
-              renderGroup={(group, rows) => {
-                const allSessionCount =
-                  group.allSessions?.length ?? group.sessions.length;
-                const isExpanded = expandedGroupIds.has(group.id);
-                const groupRowsId = `local-chat-history-group-${encodeURIComponent(group.id)}`;
-                const canStartProjectChat =
-                  !!onStartProjectChat &&
-                  !!group.projectId &&
-                  !!group.projectPath;
-                const isStartingProjectChat =
-                  startingProjectId === group.projectId;
-                return (
-                  <section
-                    key={group.id}
-                    className="hc-mini-history-group"
-                    aria-label={`${group.label} chats`}
-                  >
-                    <h3 className="hc-mini-history-group-title">
-                      {allSessionCount > LOCAL_CHAT_SESSION_ROW_LIMIT ? (
-                        <button
-                          type="button"
-                          className="hc-mini-history-project-title hc-mini-history-toggle"
-                          data-mini-history-toggle
-                          aria-expanded={isExpanded}
-                          aria-controls={groupRowsId}
-                          onClick={() => toggleGroupExpansion(group.id)}
-                        >
-                          {group.label}
-                        </button>
-                      ) : (
-                        <span className="hc-mini-history-project-title">
-                          {group.label}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className="hc-mini-history-new"
-                        data-mini-project-chat
-                        data-testid={`new-project-chat-${group.id}`}
-                        aria-label={`Start new chat in ${group.label}`}
-                        aria-busy={isStartingProjectChat || undefined}
-                        disabled={
-                          !canStartProjectChat || startingProjectId !== null
-                        }
-                        title={
-                          canStartProjectChat
-                            ? `Start a new chat in ${group.label}`
-                            : `Cannot start a chat in ${group.label}: project directory unavailable`
-                        }
-                        onClick={() => {
-                          if (!canStartProjectChat || !onStartProjectChat) {
-                            return;
-                          }
-                          setStartingProjectId(group.projectId);
-                          void Promise.resolve()
-                            .then(() => onStartProjectChat(group))
-                            .catch(() => undefined)
-                            .finally(() => setStartingProjectId(null));
-                        }}
-                      >
-                        <span aria-hidden="true">+</span>
-                      </button>
-                    </h3>
-                    <div id={groupRowsId}>{rows}</div>
-                  </section>
-                );
-              }}
-              renderRow={(session, { isActive }) => {
-                const age = miniThreadAge(session.updatedAt);
-                const title = miniThreadTitle(session.title, session.label);
-                const spawnOutline =
-                  spawnOutlineBySessionId.get(session.id) ?? [];
-                return (
-                  <>
-                    <div
-                      className="hc-mini-history-row"
-                      data-active={isActive || undefined}
-                    >
-                      <div className="hc-mini-history-entry">
-                        <button
-                          type="button"
-                          className="hc-mini-history-open"
-                          ref={(node) => {
-                            if (node) {
-                              sessionButtonRefs.current.set(session.id, node);
-                            } else {
-                              sessionButtonRefs.current.delete(session.id);
-                            }
-                          }}
-                          onFocus={() => setKeyboardSessionId(session.id)}
-                          onClick={() => onSelect(session.id)}
-                          title={`Open local chat ${title}`}
-                          aria-label={`Load local chat ${title} into active pane`}
-                          aria-current={isActive ? "true" : undefined}
-                        >
-                          <span className="label">{title}</span>
-                        </button>
-                        <div className="hc-mini-history-secondary">
-                          {activityBySessionId?.has(session.id) ? (
-                            <SessionActivityBadge
-                              activity={activityBySessionId.get(session.id)!}
-                              style={thinkingIndicatorStyle}
-                            />
-                          ) : (
-                            <HarnessBadge harness={session.harness} />
-                          )}
-                          <ConversationAssociations session={session} />
-                          <SessionDeleteButton
-                            label={title}
-                            onClick={() => void onDelete(session.id)}
-                            dataMiniDelete
-                          />
-                          {age && (
-                            <time
-                              className="meta"
-                              dateTime={session.updatedAt}
-                              title={session.updatedAt}
-                            >
-                              {age}
-                            </time>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    {spawnOutline.map((spawn) => {
-                      const isAgentActive =
-                        !!spawn.threadId &&
-                        spawn.threadId === activeProviderThreadId;
-                      return (
-                        <button
-                          key={spawn.id}
-                          type="button"
-                          className="hc-mini-history-agent"
-                          style={{
-                            paddingLeft: `${12 + (spawn.depth ?? 0) * 12}px`,
-                          }}
-                          data-working={spawn.isWorking || undefined}
-                          data-active={isAgentActive || undefined}
-                          aria-current={isAgentActive ? "true" : undefined}
-                          onClick={() => {
-                            if (spawn.threadId && onSelectAgent) {
-                              void onSelectAgent(session.id, spawn);
-                              return;
-                            }
-                            void onSelect(session.id);
-                            requestAnimationFrame(() =>
-                              scrollToSpawn(session.id, spawn.spawnId)
-                            );
-                          }}
-                          title={
-                            spawn.threadId
-                              ? `Open spawned agent ${spawn.label}`
-                              : `Jump to spawned agent ${spawn.label}`
-                          }
-                          aria-label={
-                            spawn.threadId
-                              ? `Open spawned agent ${spawn.label} from ${title}`
-                              : `Jump to spawned agent ${spawn.label} in ${title}`
-                          }
-                        >
-                          {spawn.isWorking && (
-                            <ThinkingIndicator
-                              compact
-                              label="Subagent working"
-                              style={thinkingIndicatorStyle}
-                            />
-                          )}
-                          <span className="label">{spawn.label}</span>
-                          {spawn.detail && (
-                            <span className="meta">{spawn.detail}</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </>
-                );
-              }}
+            <SearchInput
+              ref={searchInputRef}
+              id="local-chat-session-search"
+              value={searchQuery}
+              onChange={onSearchQueryChange}
+              debounceMs={0}
+              placeholder="Search chats…"
+              aria-label="Search local chats"
+              data-testid="local-chat-session-search"
             />
           </div>
-        )}
-      </div>
+        </div>
+
+        <div
+          data-testid="local-chat-history-drawer"
+          className="hc-mini-history-body"
+        >
+          {deleteError && (
+            <div role="alert" className="hc-mini-history-error">
+              {deleteError}
+            </div>
+          )}
+
+          {projectWarning && (
+            <div role="alert" className="hc-mini-history-error">
+              {projectWarning}
+            </div>
+          )}
+
+          {sessionItems.length === 0 ? (
+            <div
+              className="hc-mini-history-empty"
+              data-testid={
+                hasSearchQuery && (selectedProject?.sessions.length ?? 0) > 0
+                  ? "local-chat-history-no-results"
+                  : "local-chat-history-empty"
+              }
+              role="status"
+              aria-live="polite"
+            >
+              {hasSearchQuery && (selectedProject?.sessions.length ?? 0) > 0
+                ? `No local chats match “${searchQuery.trim()}”.`
+                : "No local chats yet."}
+            </div>
+          ) : (
+            <div
+              className="hc-mini-history-list"
+              data-testid="local-chat-history-scroll-region"
+            >
+              <SessionGroupList
+                sessionGroups={ticketGroups}
+                activeSessionId={activeSessionId}
+                renderGroup={(group, rows) => {
+                  if (!group.ticketId) {
+                    return (
+                      <section
+                        className="hc-mini-history-group"
+                        aria-label="Other chats"
+                      >
+                        <h3 className="hc-mini-history-group-title hc-mini-history-other-title">
+                          Other chats
+                        </h3>
+
+                        {rows}
+                      </section>
+                    );
+                  }
+
+                  const expanded =
+                    hasSearchQuery || expandedTickets.has(ticketKey(group.id));
+                  const rowsId = `local-chat-ticket-${encodeURIComponent(selectedProjectId ?? "")}-${encodeURIComponent(group.id)}`;
+
+                  return (
+                    <section
+                      className="hc-mini-history-group"
+                      aria-label={`${group.label} conversations`}
+                    >
+                      <h3 className="hc-mini-history-group-title">
+                        <button
+                          type="button"
+                          className="hc-mini-history-ticket-toggle hc-mini-history-toggle"
+                          data-mini-history-toggle
+                          aria-label={group.label}
+                          title={`${group.label} · ${group.ticketId}`}
+                          aria-expanded={expanded}
+                          aria-controls={rowsId}
+                          onClick={() => toggleTicket(group.id)}
+                        >
+                          <svg
+                            className="hc-mini-history-chevron"
+                            data-expanded={expanded || undefined}
+                            aria-hidden="true"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                          >
+                            <path
+                              d="m6 4 4 4-4 4"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+
+                          <span className="hc-mini-history-ticket-id">
+                            {group.ticketId.slice(0, 8)}
+                          </span>
+
+                          <span className="hc-mini-history-ticket-label">
+                            {group.label !== group.ticketId
+                              ? group.label
+                              : "Ticket"}
+                          </span>
+
+                          <span
+                            className="hc-mini-history-ticket-count"
+                            aria-hidden="true"
+                          >
+                            {group.sessions.length}
+                          </span>
+                        </button>
+                      </h3>
+
+                      <div
+                        id={rowsId}
+                        className="hc-mini-history-ticket-rows"
+                        hidden={!expanded}
+                      >
+                        {expanded ? rows : null}
+                      </div>
+                    </section>
+                  );
+                }}
+                renderRow={(session, { isActive }) => {
+                  const age = miniThreadAge(session.updatedAt);
+                  const title = miniThreadTitle(session.title, session.label);
+                  const spawnOutline =
+                    spawnOutlineBySessionId.get(session.id) ?? [];
+
+                  return (
+                    <>
+                      <div
+                        className="hc-mini-history-row"
+                        data-active={isActive || undefined}
+                        data-activity={activityBySessionId?.get(session.id)}
+                      >
+                        <div className="hc-mini-history-entry">
+                          <button
+                            type="button"
+                            className="hc-mini-history-open"
+                            ref={(node) => {
+                              if (node) {
+                                sessionButtonRefs.current.set(session.id, node);
+                              } else {
+                                sessionButtonRefs.current.delete(session.id);
+                              }
+                            }}
+                            onFocus={() => setKeyboardSessionId(session.id)}
+                            onClick={() => onSelect(session.id)}
+                            title={`Open local chat ${title}`}
+                            aria-label={`Load local chat ${title} into active pane`}
+                            aria-current={isActive ? "true" : undefined}
+                          >
+                            <span className="label">{title}</span>
+                          </button>
+
+                          <div className="hc-mini-history-secondary">
+                            {activityBySessionId?.has(session.id) ? (
+                              <SessionActivityBadge
+                                activity={activityBySessionId.get(session.id)!}
+                                style={thinkingIndicatorStyle}
+                              />
+                            ) : null}
+
+                            <div className="hc-mini-history-row-actions">
+                              {!activityBySessionId?.has(session.id) && (
+                                <HarnessBadge harness={session.harness} />
+                              )}
+
+                              <ConversationAssociations
+                                session={session}
+                                hideTicket={groupedSessionIds.has(session.id)}
+                              />
+
+                              <SessionDeleteButton
+                                label={title}
+                                onClick={() => void onDelete(session.id)}
+                                dataMiniDelete
+                              />
+                            </div>
+
+                            {age && (
+                              <time
+                                className="meta"
+                                dateTime={session.updatedAt}
+                                title={session.updatedAt}
+                              >
+                                {age}
+                              </time>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <SessionAgents
+                        sessionId={session.id}
+                        title={title}
+                        spawnOutline={spawnOutline}
+                        activeProviderThreadId={activeProviderThreadId}
+                        thinkingIndicatorStyle={thinkingIndicatorStyle}
+                        onSelect={onSelect}
+                        onSelectAgent={onSelectAgent}
+                      />
+                    </>
+                  );
+                }}
+              />
+            </div>
+          )}
+        </div>
+      </section>
     </aside>
   );
 });
 
+function SessionAgents({
+  sessionId,
+  title,
+  spawnOutline,
+  activeProviderThreadId,
+  thinkingIndicatorStyle,
+  onSelect,
+  onSelectAgent,
+}: Pick<
+  LocalChatMiniPanelProps,
+  | "activeProviderThreadId"
+  | "thinkingIndicatorStyle"
+  | "onSelect"
+  | "onSelectAgent"
+> & {
+  sessionId: string;
+  title: string;
+  spawnOutline: SpawnOutlineItem[];
+}) {
+  const activeChild = spawnOutline.some(
+    (spawn) => !!spawn.threadId && spawn.threadId === activeProviderThreadId
+  );
+  const [expanded, setExpanded] = useState(activeChild);
+
+  useEffect(() => {
+    if (activeChild) setExpanded(true);
+  }, [activeChild, activeProviderThreadId]);
+
+  if (spawnOutline.length === 0) return null;
+
+  const rowsId = `local-chat-agents-${encodeURIComponent(sessionId)}`;
+  const workingCount = spawnOutline.filter((spawn) => spawn.isWorking).length;
+
+  return (
+    <div className="hc-mini-history-agents">
+      <button
+        type="button"
+        className="hc-mini-history-agents-toggle hc-mini-history-toggle"
+        data-mini-history-toggle
+        aria-label={`Subagents for ${title}`}
+        aria-expanded={expanded}
+        aria-controls={rowsId}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+
+        <span>
+          {spawnOutline.length}{" "}
+          {spawnOutline.length === 1 ? "subagent" : "subagents"}
+        </span>
+
+        {workingCount > 0 && (
+          <span className="meta">{workingCount} working</span>
+        )}
+      </button>
+
+      <div id={rowsId} hidden={!expanded}>
+        {expanded && (
+          <>
+            {spawnOutline.map((spawn) => {
+              const isAgentActive =
+                !!spawn.threadId && spawn.threadId === activeProviderThreadId;
+
+              return (
+                <button
+                  key={spawn.id}
+                  type="button"
+                  className="hc-mini-history-agent"
+                  style={{
+                    paddingLeft: `${12 + (spawn.depth ?? 0) * 12}px`,
+                  }}
+                  data-working={spawn.isWorking || undefined}
+                  data-active={isAgentActive || undefined}
+                  aria-current={isAgentActive ? "true" : undefined}
+                  onClick={() => {
+                    if (spawn.threadId && onSelectAgent) {
+                      void onSelectAgent(sessionId, spawn);
+
+                      return;
+                    }
+
+                    void onSelect(sessionId);
+                    requestAnimationFrame(() =>
+                      scrollToSpawn(sessionId, spawn.spawnId)
+                    );
+                  }}
+                  title={
+                    spawn.threadId
+                      ? `Open spawned agent ${spawn.label}`
+                      : `Jump to spawned agent ${spawn.label}`
+                  }
+                  aria-label={
+                    spawn.threadId
+                      ? `Open spawned agent ${spawn.label} from ${title}`
+                      : `Jump to spawned agent ${spawn.label} in ${title}`
+                  }
+                >
+                  {spawn.isWorking && (
+                    <ThinkingIndicator
+                      compact
+                      label="Subagent working"
+                      style={thinkingIndicatorStyle}
+                    />
+                  )}
+
+                  <span className="label">{spawn.label}</span>
+
+                  {spawn.detail && <span className="meta">{spawn.detail}</span>}
+                </button>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function miniThreadAge(updatedAt: string): string {
   const relative = formatRelative(updatedAt);
+
   if (relative === "Just now") return "now";
+
   return relative.replace(/ ago$/, "");
 }
 
@@ -506,6 +771,7 @@ function miniThreadTitle(
 function HarnessBadge({ harness }: { harness: LocalChatHarnessKind }) {
   const label = harnessDisplayName(harness);
   const isCodex = harness === "codex";
+
   return (
     <span
       className="hc-mini-history-harness"

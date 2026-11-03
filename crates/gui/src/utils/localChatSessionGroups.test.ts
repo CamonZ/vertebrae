@@ -6,6 +6,8 @@ import {
   LOCAL_CHAT_SESSION_ROW_LIMIT,
   filterLocalChatSessionGroups,
   groupLocalChatSessionsByProject,
+  groupLocalChatSessionsByTicket,
+  selectedLocalChatProject,
   localChatSessionDisplayTitle,
   localChatSessionProjectDisplayName,
   normalizeLocalChatSessionQuery,
@@ -420,4 +422,244 @@ describe("local chat session display projection", () => {
       "session-8",
     ]);
   });
+});
+
+describe("project selection and ticket grouping", () => {
+  const row = (
+    id: string,
+    ticketId: string | null,
+    ticketTitle: string | null = "Same title"
+  ) =>
+    makeSummary(id, "/work/alpha", "2026-01-01T00:00:00Z", {
+      association: { ticketId, ticketTitle },
+    });
+
+  it("groups ticket IDs independently of titles and collects standalone rows after ticket groups", () => {
+    const rows = [
+      row("a", "ticket-a"),
+      row("standalone", null),
+      row("b", "ticket-b"),
+      row("a-older", "ticket-a"),
+    ];
+    const groups = groupLocalChatSessionsByTicket(rows);
+
+    expect(groups.map((g) => [g.id, g.sessions.map((s) => s.id)])).toEqual([
+      ["ticket:ticket-a", ["a", "a-older"]],
+      ["ticket:ticket-b", ["b"]],
+      ["ungrouped", ["standalone"]],
+    ]);
+    expect(groups[0].label).toBe(groups[1].label);
+    expect(rows.map((s) => s.id)).toEqual(["a", "standalone", "b", "a-older"]);
+  });
+
+  it("falls back to ticket ID without a title and accepts a later title", () => {
+    expect(
+      groupLocalChatSessionsByTicket([row("a", "ticket-a", null)])[0].label
+    ).toBe("ticket-a");
+    expect(
+      groupLocalChatSessionsByTicket([
+        row("a", "ticket-a", null),
+        row("b", "ticket-a", "Resolved"),
+      ])[0].label
+    ).toBe("Resolved");
+    expect(
+      groupLocalChatSessionsByTicket([
+        row("a", null),
+        row("b", "ticket-b"),
+      ]).map((g) => g.sessions.map((s) => s.id))
+    ).toEqual([["b"], ["a"]]);
+  });
+
+  it("includes empty saved projects on request and deterministically recovers selection", () => {
+    const groups = groupLocalChatSessionsByProject(
+      [row("active", null)],
+      projects,
+      "/work/beta",
+      true
+    );
+
+    expect(groups.map((g) => g.id)).toEqual(["project:beta", "project:alpha"]);
+    expect(groups[0].sessions).toEqual([]);
+    expect(selectedLocalChatProject(groups, null, "active")?.id).toBe(
+      "project:alpha"
+    );
+    expect(selectedLocalChatProject(groups, "project:beta", "active")?.id).toBe(
+      "project:beta"
+    );
+    expect(selectedLocalChatProject(groups, "removed", "missing")?.id).toBe(
+      "project:beta"
+    );
+    expect(
+      selectedLocalChatProject(
+        groups.map((g) => ({ ...g, isCurrentProject: false })),
+        null,
+        null
+      )?.id
+    ).toBe("project:beta");
+    expect(
+      selectedLocalChatProject(groups, null, "fresh", "/work/alpha")?.id
+    ).toBe("project:alpha");
+    expect(selectedLocalChatProject([], "removed", "active")).toBeUndefined();
+  });
+
+  it("matches a nested child title before removing its duplicate top-level row", () => {
+    const parent = makeSummary(
+      "parent",
+      "/work/alpha",
+      "2026-01-01T00:00:00Z",
+      { providerResumeId: "root" }
+    );
+    const child = makeSummary("child", "/work/alpha", "2026-01-01T00:00:00Z", {
+      title: "Worker needle",
+      providerResumeId: "child-thread",
+      providerParentResumeId: "root",
+    });
+    const groups = groupLocalChatSessionsByProject(
+      [parent, child],
+      projects,
+      "/work/alpha"
+    );
+
+    expect(
+      filterLocalChatSessionGroups(
+        groups,
+        "needle",
+        new Set(["child-thread"])
+      )[0].sessions.map((s) => s.id)
+    ).toEqual(["parent"]);
+  });
+});
+
+// Exhaust every sequence up to four rows, including malformed and colliding associations.
+describe("ticket grouping invariants", () => {
+  const variants = [
+    { ticketId: null, association: null },
+    { ticketId: null, association: [] },
+    { ticketId: null, association: { ticketId: 7 } },
+    { ticketId: null, association: { ticketId: "  " } },
+    {
+      ticketId: "ticket-a",
+      association: { ticketId: "ticket-a", ticketTitle: "Shared title" },
+    },
+    {
+      ticketId: "ticket-b",
+      association: { ticketId: "ticket-b", ticketTitle: "Shared title" },
+    },
+    {
+      ticketId: "ticket-a",
+      association: { ticketId: "ticket-a", ticketTitle: null },
+    },
+    {
+      ticketId: "ungrouped",
+      association: { ticketId: "ungrouped", ticketTitle: "長い title" },
+    },
+  ];
+
+  it.each([0, 1, 2, 3, 4])(
+    "preserves membership, stable order and input data for generated %i-row histories",
+    (length) => {
+      for (let encoded = 0; encoded < variants.length ** length; encoded += 1) {
+        let remaining = encoded;
+        const selected = Array.from({ length }, () => {
+          const variant = variants[remaining % variants.length];
+          remaining = Math.floor(remaining / variants.length);
+
+          return variant;
+        });
+        const rows = selected.map((variant, index) =>
+          makeSummary(
+            `session-${index}`,
+            "/work/alpha",
+            "2026-01-01T00:00:00Z",
+            { association: variant.association }
+          )
+        );
+        const before = JSON.parse(JSON.stringify(rows));
+        const context = `length=${length}, case=${encoded}`;
+
+        // A grouping helper must not rewrite input rows or their association records.
+        for (const row of rows) {
+          if (row.association && typeof row.association === "object")
+            Object.freeze(row.association);
+          Object.freeze(row);
+        }
+        Object.freeze(rows);
+
+        const groups = groupLocalChatSessionsByTicket(rows);
+        const flattened = groups.flatMap((group) => group.sessions);
+
+        expect(flattened.map((row) => row.id).sort(), context).toEqual(
+          rows.map((row) => row.id).sort()
+        );
+        expect(new Set(groups.map((group) => group.id)).size, context).toBe(
+          groups.length
+        );
+        expect(
+          new Set(groups.map((group) => group.ticketId)).size,
+          context
+        ).toBe(groups.length);
+        expect(rows, context).toEqual(before);
+        expect(groupLocalChatSessionsByTicket(rows), context).toEqual(groups);
+
+        const ticketIds = [
+          ...new Set(
+            selected
+              .map((variant) => variant.ticketId)
+              .filter((id) => id !== null)
+          ),
+        ];
+        expect(
+          groups
+            .filter((group) => group.ticketId !== null)
+            .map((group) => group.ticketId),
+          context
+        ).toEqual(ticketIds);
+
+        for (const group of groups) {
+          const expected = rows.filter(
+            (_, index) => selected[index].ticketId === group.ticketId
+          );
+
+          expect(group.sessions, context).toEqual(expected);
+          expect(group.sessions.length, context).toBeGreaterThan(0);
+          expect(
+            group.sessions.every((row) => rows.includes(row)),
+            context
+          ).toBe(true);
+        }
+
+        const unassociated = rows.filter(
+          (_, index) => selected[index].ticketId === null
+        );
+        if (unassociated.length > 0) {
+          expect(groups.at(-1)?.ticketId, context).toBeNull();
+          expect(groups.at(-1)?.sessions, context).toEqual(unassociated);
+        }
+
+        // Renaming tickets cannot change partition membership or ordering.
+        const renamed = rows.map((row, index) => ({
+          ...row,
+          association:
+            selected[index].ticketId === null
+              ? row.association
+              : {
+                  ticketId: selected[index].ticketId,
+                  ticketTitle: `Renamed ${index}`,
+                },
+        }));
+        const partition = (
+          items: ReturnType<typeof groupLocalChatSessionsByTicket>
+        ) =>
+          items.map((group) => ({
+            ticketId: group.ticketId,
+            sessionIds: group.sessions.map((row) => row.id),
+          }));
+
+        expect(
+          partition(groupLocalChatSessionsByTicket(renamed)),
+          context
+        ).toEqual(partition(groups));
+      }
+    }
+  );
 });

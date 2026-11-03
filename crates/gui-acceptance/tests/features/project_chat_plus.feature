@@ -19,7 +19,7 @@ Feature: Project chat plus actions
     And I press the "Enter" key
     Then the GUI should show "local-chat-acceptance reply" within 10 seconds
     When I click on the element with title "Toggle chat history"
-    Then the local chat history drawer should show the active project within 5 seconds
+    Then the local chat history drawer should show the "second" project within 5 seconds
     When I click the local chat plus action for the "primary" project
     Then the active local chat should use the "primary" project directory within 5 seconds
     When I type "hello from primary project" into the element with test id "local-chat-composer"

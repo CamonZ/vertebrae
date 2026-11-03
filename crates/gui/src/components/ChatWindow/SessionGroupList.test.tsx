@@ -106,7 +106,7 @@ describe("SessionGroupList", () => {
 
   it("renders an empty list when there are no groups", () => {
     const { container } = render(
-      <SessionGroupList
+      <SessionGroupList<LocalChatSessionGroup>
         sessionGroups={[]}
         activeSessionId=""
         renderGroup={(group) => <div key={group.id} data-testid="group" />}

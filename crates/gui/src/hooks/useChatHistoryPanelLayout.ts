@@ -3,12 +3,13 @@ import { MIN_SPLIT_PANE_WIDTH } from "./useChatPaneManagement";
 
 export const HISTORY_WIDTH_STORAGE_KEY = "chat-window-manager-history-width";
 export const MIN_HISTORY_WIDTH = 272;
-export const MAX_HISTORY_WIDTH = 400;
+export const MAX_HISTORY_WIDTH = 640;
 export const DEFAULT_HISTORY_WIDTH = 272;
 export const HISTORY_RESIZE_STEP = 16;
 
 export function clampHistoryWidth(width: number): number {
   if (!Number.isFinite(width)) return DEFAULT_HISTORY_WIDTH;
+
   return Math.min(MAX_HISTORY_WIDTH, Math.max(MIN_HISTORY_WIDTH, width));
 }
 
@@ -26,6 +27,7 @@ export function maxHistoryWidthForLayout(
   const availableWidth = Number.isFinite(renderedPanelWidth)
     ? renderedPanelWidth - safePaneCount * MIN_SPLIT_PANE_WIDTH
     : Number.NaN;
+
   return clampHistoryWidth(availableWidth);
 }
 
@@ -45,9 +47,11 @@ function readPersistedHistoryWidth(): number {
 
   try {
     const stored = window.localStorage.getItem(HISTORY_WIDTH_STORAGE_KEY);
+
     if (!stored || stored.trim() === "") return DEFAULT_HISTORY_WIDTH;
 
     const parsed = Number(stored);
+
     return Number.isFinite(parsed)
       ? clampHistoryWidth(parsed)
       : DEFAULT_HISTORY_WIDTH;
@@ -67,6 +71,7 @@ export function useChatHistoryPanelLayout(): UseChatHistoryPanelLayoutResult {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+
     try {
       window.localStorage.setItem(
         HISTORY_WIDTH_STORAGE_KEY,

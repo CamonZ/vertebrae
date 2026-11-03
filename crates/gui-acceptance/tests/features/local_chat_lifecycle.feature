@@ -11,6 +11,7 @@ Feature: Local project chat lifecycle
     And I press the "Enter" key
     Then the GUI should show "local-chat-acceptance reply" within 10 seconds
     And the GUI should not show an element with test id "chat-lifecycle-label" within 5 seconds
+    And the GUI should show "Local Chat Acceptance" within 10 seconds
     When I click on the element with title "Close chat panel"
     Then the GUI should show an element with test id "local-chat-launcher" within 5 seconds
     When I click on the element with test id "local-chat-launcher"
@@ -18,13 +19,13 @@ Feature: Local project chat lifecycle
     And the GUI should not show an element with test id "chat-lifecycle-label" within 5 seconds
     When I click on the element with title "Toggle chat history"
     Then the GUI should show an element with test id "local-chat-history-drawer" within 5 seconds
-    And the local chat history drawer should show the active project within 5 seconds
+    And the local chat history drawer should show the "primary" project within 5 seconds
     And the GUI should show "local-chat-acceptance reply" within 5 seconds
     When I click on the element with title "Start fresh local chat"
     Then the GUI should not show "local-chat-acceptance reply" within 5 seconds
-    And I click on the inactive local chat row with title "Open local chat New Chat"
+    When I click on the inactive local chat row with title "Open local chat Local Chat Acceptance"
     Then the GUI should show "local-chat-acceptance reply" within 5 seconds
-    And I click on the active local chat row with title "Delete local chat New Chat"
+    When I click on the active local chat row with title "Delete local chat Local Chat Acceptance"
     Then the GUI should not show "local-chat-acceptance reply" within 5 seconds
 
   Scenario: Project chat displays its inferred title

@@ -472,6 +472,9 @@ describe("ChatWindowManager", () => {
 
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     expect(miniPanel.getByText("Inspect Repo")).toBeInTheDocument();
+    await user.click(
+      miniPanel.getByRole("button", { name: "Subagents for Inspect Repo" })
+    );
     expect(miniPanel.getByText("Pasteur")).toBeInTheDocument();
     expect(miniPanel.getByText("reviewer")).toBeInTheDocument();
     expect(miniPanel.getByText("Codex Chat")).toBeInTheDocument();
@@ -603,6 +606,18 @@ describe("ChatWindowManager", () => {
     vi.mocked(commands.loadLocalChatSessionReplay).mockClear();
     render(<ChatWindowManager />);
     await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Unknown project",
+      })
+    );
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Subagents for History parent",
+      })
+    );
+
     expect(
       await screen.findByRole("button", {
         name: "Open spawned agent History worker from History parent",
@@ -680,6 +695,12 @@ describe("ChatWindowManager", () => {
     });
     render(<ChatWindowManager />);
     await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Subagents for Root conversation",
+      })
+    );
+
     const row = await screen.findByRole("button", {
       name: "Open spawned agent Codex worker from Root conversation",
     });
@@ -762,6 +783,10 @@ describe("ChatWindowManager", () => {
         name: "Load local chat Pasteur into active pane",
       })
     ).not.toBeInTheDocument();
+    await user.click(
+      miniPanel.getByRole("button", { name: "Subagents for Inspect Repo" })
+    );
+
     await user.click(
       miniPanel.getByRole("button", {
         name: "Open spawned agent Pasteur from Inspect Repo",
@@ -884,7 +909,7 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
     const handle = screen.getByTestId("chat-history-resize-handle");
-    expect(handle).toHaveAttribute("aria-valuemax", "400");
+    expect(handle).toHaveAttribute("aria-valuemax", "632");
     expect(screen.getByTestId("local-chat-mini-panel")).toHaveAttribute(
       "data-sidebar-width",
       "400"
@@ -1291,17 +1316,19 @@ describe("ChatWindowManager", () => {
     await user.click(screen.getByLabelText("Widen chat panel"));
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     await waitFor(() => {
-      expect(miniPanel.getAllByRole("heading", { level: 3 })).toHaveLength(3);
+      expect(
+        miniPanel.getByRole("button", { name: "old-project" })
+      ).toHaveAttribute("aria-pressed", "true");
     });
-    expect(
-      miniPanel
-        .getAllByRole("heading", { level: 3 })
-        .map(
-          (heading) =>
-            heading.querySelector("[data-mini-history-toggle], span")
-              ?.textContent
-        )
-    ).toEqual(["new-project", "old-project", "Unknown project"]);
+
+    const projects = within(
+      screen.getByTestId("local-chat-project-scroll-region")
+    );
+
+    expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
+    expect(miniPanel.queryByText("No Project Chat")).not.toBeInTheDocument();
+
+    fireEvent.click(projects.getByRole("button", { name: "new-project" }));
 
     const currentGroup = within(
       miniPanel.getByRole("region", { name: "new-project chats" })
@@ -1314,22 +1341,11 @@ describe("ChatWindowManager", () => {
       "Load local chat Current Project Chat into active pane",
       "Load local chat Older Current Project Chat into active pane",
     ]);
+    expect(useChatStore.getState().activeSessionId).toBe(stale);
 
-    expect(miniPanel.getByText("Current Project Chat")).toBeInTheDocument();
-    expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
+    fireEvent.click(projects.getByRole("button", { name: "Unknown project" }));
+
     expect(miniPanel.getByText("No Project Chat")).toBeInTheDocument();
-
-    await user.click(
-      currentGroup.getByRole("button", {
-        name: "Load local chat Current Project Chat into active pane",
-      })
-    );
-    await waitFor(() => {
-      expect(useChatStore.getState().activeSessionId).toBe(current);
-      expect(
-        screen.queryByTestId("local-chat-project-context")
-      ).not.toBeInTheDocument();
-    });
   });
 
   it("keeps long multi-project history scrollable through full-list, search, focus, agent, and deletion flows", async () => {
@@ -1402,17 +1418,8 @@ describe("ChatWindowManager", () => {
 
     const panel = screen.getByTestId("chat-window-manager");
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
-    await waitFor(() => {
-      expect(
-        miniPanel
-          .getAllByRole("heading", { level: 3 })
-          .map(
-            (heading) =>
-              heading.querySelector("[data-mini-history-toggle], span")
-                ?.textContent
-          )
-      ).toEqual(["test-project", "old-project"]);
-    });
+
+    await screen.findByRole("button", { name: "old-project" });
 
     const currentGroup = within(
       miniPanel.getByRole("region", { name: "test-project chats" })
@@ -1420,10 +1427,7 @@ describe("ChatWindowManager", () => {
     const scrollRegion = screen.getByTestId("local-chat-history-scroll-region");
     expect(
       currentGroup.getAllByRole("button", { name: /^Load local chat/ })
-    ).toHaveLength(7);
-    expect(
-      currentGroup.getByRole("button", { name: "test-project" })
-    ).toBeInTheDocument();
+    ).toHaveLength(16);
     expect(panel).toHaveClass("hc-panel");
     expect(screen.getByTestId("local-chat-history-drawer")).toHaveClass(
       "hc-mini-history-body"
@@ -1431,9 +1435,6 @@ describe("ChatWindowManager", () => {
     expect(scrollRegion).toHaveClass("hc-mini-history-list");
     expect(screen.getByTestId("chat-pane")).toHaveClass("hc-chat-pane");
 
-    await user.click(
-      currentGroup.getByRole("button", { name: "test-project" })
-    );
     await waitFor(() => {
       expect(
         currentGroup.getByRole("button", {
@@ -1453,10 +1454,11 @@ describe("ChatWindowManager", () => {
         "Load local chat Overflow active into active pane",
       ])
     );
-    expect(
-      currentGroup.getByRole("button", { name: "test-project" })
-    ).toBeInTheDocument();
     expect(panel).toHaveStyle({ width: "1128px" });
+
+    await user.click(
+      miniPanel.getByRole("button", { name: "Subagents for Overflow active" })
+    );
 
     const nestedAgent = miniPanel.getByRole("button", {
       name: "Open spawned agent Nested history reviewer from Overflow active",
@@ -1469,6 +1471,8 @@ describe("ChatWindowManager", () => {
     const search = screen.getByRole("searchbox", {
       name: "Search local chats",
     });
+
+    await user.click(miniPanel.getByRole("button", { name: "old-project" }));
     await user.type(search, "needle");
     await waitFor(() => {
       expect(
@@ -1489,6 +1493,7 @@ describe("ChatWindowManager", () => {
       })
     ).not.toBeInTheDocument();
 
+    await user.click(miniPanel.getByRole("button", { name: "test-project" }));
     fireEvent.keyDown(screen.getByTestId("local-chat-mini-panel"), {
       key: "Home",
     });
@@ -1655,26 +1660,14 @@ describe("ChatWindowManager", () => {
     await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
 
-    await waitFor(() => {
-      expect(
-        miniPanel
-          .getAllByRole("heading", { level: 3 })
-          .map(
-            (heading) =>
-              heading.querySelector("[data-mini-history-toggle], span")
-                ?.textContent
-          )
-      ).toEqual(["test-project", "old-project", "Unknown project"]);
-    });
+    await screen.findByRole("button", { name: "old-project" });
+
     const currentGroup = within(
       miniPanel.getByRole("region", { name: "test-project chats" })
     );
     expect(
       currentGroup.getAllByRole("button", { name: /^Load local chat/ })
-    ).toHaveLength(7);
-    expect(
-      currentGroup.getByRole("button", { name: "test-project" })
-    ).toHaveAttribute("aria-expanded", "false");
+    ).toHaveLength(8);
     expect(
       currentGroup.queryByRole("button", {
         name: "Load local chat Nested hidden thread into active pane",
@@ -2837,6 +2830,295 @@ describe("ChatWindowManager", () => {
     expect(useChatStore.getState().sessions[second]).toBeDefined();
   });
 
+  it("initializes project browsing from a fresh active chat without adding it to history", async () => {
+    const user = userEvent.setup();
+    const active = useChatStore
+      .getState()
+      .openSession("Fresh old project", "/old/project");
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "old-project" })
+      ).toHaveAttribute("aria-pressed", "true")
+    );
+
+    expect(screen.getByTestId("local-chat-history-empty")).toBeInTheDocument();
+    expect(useChatStore.getState().activeSessionId).toBe(active);
+    expect(commands.sendLocalChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("regroups live association corrections while preserving the conversation", async () => {
+    const user = userEvent.setup();
+    const association = (
+      ticketId: string | null,
+      ticketTitle: string | null
+    ) => ({
+      ticketId,
+      ticketTitle,
+      worktreePath: null,
+      branch: null,
+      lastProcessedAt: null,
+      processedAtCount: 0,
+      awaitingWorktree: null,
+      recentWorktrees: [],
+    });
+    const session = createPersistedHistorySession(
+      "corrected-history",
+      "Corrected chat",
+      "/test/project",
+      "2026-01-01T00:00:00Z",
+      { association: association("ticket-a", "Original ticket") }
+    );
+
+    useChatStore.setState({
+      sessions: { [session.id]: session },
+      activeSessionId: session.id,
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    await screen.findByRole("button", { name: "Original ticket" });
+
+    act(() =>
+      useChatStore
+        .getState()
+        .setSessionAssociation(
+          session.id,
+          association("ticket-b", "Corrected ticket")
+        )
+    );
+    await screen.findByRole("button", { name: "Corrected ticket" });
+
+    expect(
+      screen.queryByRole("button", { name: "Original ticket" })
+    ).not.toBeInTheDocument();
+
+    act(() =>
+      useChatStore
+        .getState()
+        .setSessionAssociation(session.id, association(null, null))
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Corrected ticket" })
+      ).not.toBeInTheDocument()
+    );
+
+    expect(
+      screen.getAllByRole("button", {
+        name: "Load local chat Corrected chat into active pane",
+      })
+    ).toHaveLength(1);
+    expect(useChatStore.getState().activeSessionId).toBe(session.id);
+  });
+
+  it("browses projects with unshifted brackets and wraps matching sessions without sending", async () => {
+    const user = userEvent.setup();
+    const first = createPersistedHistorySession(
+      "project-first",
+      "Alpha chat",
+      "/test/project",
+      "2026-01-03T00:00:00Z"
+    );
+    const second = createPersistedHistorySession(
+      "project-second",
+      "Beta needle",
+      "/old/project",
+      "2026-01-02T00:00:00Z"
+    );
+
+    createPersistedHistorySession(
+      "project-third",
+      "Beta other",
+      "/old/project",
+      "2026-01-01T00:00:00Z"
+    );
+    useChatStore.setState({
+      sessions: { [first.id]: first },
+      activeSessionId: first.id,
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    await screen.findByRole("button", { name: "old-project" });
+
+    const search = screen.getByRole("searchbox");
+
+    search.focus();
+
+    fireEvent.keyDown(search, {
+      code: "BracketRight",
+      key: "≠",
+      metaKey: true,
+      altKey: true,
+    });
+
+    expect(screen.getByRole("button", { name: "old-project" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(useChatStore.getState().activeSessionId).toBe(first.id);
+    expect(Object.keys(useChatStore.getState().sessions).sort()).toEqual(
+      [first.id, second.id, "project-third"].sort()
+    );
+
+    await user.type(search, "needle");
+    fireEvent.keyDown(search, {
+      code: "BracketRight",
+      key: "}",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+    await waitFor(() =>
+      expect(useChatStore.getState().activeSessionId).toBe(second.id)
+    );
+    fireEvent.keyDown(search, {
+      code: "BracketLeft",
+      key: "{",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+    await waitFor(() =>
+      expect(useChatStore.getState().activeSessionId).toBe(second.id)
+    );
+    await user.clear(search);
+    // One eligible filtered session wraps safely; no-match session navigation is inert.
+    await user.type(search, "missing");
+    fireEvent.keyDown(search, {
+      code: "BracketRight",
+      key: "}",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+
+    expect(useChatStore.getState().activeSessionId).toBe(second.id);
+
+    fireEvent.keyDown(search, {
+      code: "BracketLeft",
+      key: "[",
+      metaKey: true,
+      altKey: true,
+    });
+
+    expect(
+      screen.getByRole("button", { name: "test-project" })
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(useChatStore.getState().activeSessionId).toBe(second.id);
+    expect(commands.sendLocalChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("navigates matching ticket rows in displayed order, revealing collapsed targets and wrapping", async () => {
+    const user = userEvent.setup();
+    const association = {
+      ticketId: "ticket-a",
+      ticketTitle: "Grouped ticket",
+      worktreePath: null,
+      branch: null,
+      lastProcessedAt: null,
+      processedAtCount: 0,
+      awaitingWorktree: null,
+      recentWorktrees: [],
+    };
+    const first = createPersistedHistorySession(
+      "ticket-first",
+      "First ticket chat",
+      "/test/project",
+      "2026-01-03T00:00:00Z",
+      { association, updatedAt: "2026-01-03T00:00:00Z" }
+    );
+    const standalone = createPersistedHistorySession(
+      "standalone-middle",
+      "Standalone chat",
+      "/test/project",
+      "2026-01-02T00:00:00Z",
+      { updatedAt: "2026-01-02T00:00:00Z" }
+    );
+    const older = createPersistedHistorySession(
+      "ticket-older",
+      "Older ticket chat",
+      "/test/project",
+      "2026-01-01T00:00:00Z",
+      { association, updatedAt: "2026-01-01T00:00:00Z" }
+    );
+
+    useChatStore.setState({
+      sessions: { [first.id]: first },
+      activeSessionId: first.id,
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    expect(
+      await screen.findByRole("button", { name: "Grouped ticket" })
+    ).toHaveAttribute("aria-expanded", "false");
+
+    expect(
+      screen.queryByRole("button", {
+        name: /Load local chat Older ticket chat/,
+      })
+    ).not.toBeInTheDocument();
+
+    const next = () =>
+      fireEvent.keyDown(window, {
+        code: "BracketRight",
+        key: "}",
+        metaKey: true,
+        altKey: true,
+        shiftKey: true,
+      });
+
+    next();
+
+    await waitFor(() =>
+      expect(useChatStore.getState().activeSessionId).toBe(older.id)
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Grouped ticket" })
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("button", { name: /Load local chat Older ticket chat/ })
+    ).toHaveAttribute("aria-current", "true");
+
+    next();
+
+    await waitFor(() =>
+      expect(useChatStore.getState().activeSessionId).toBe(standalone.id)
+    );
+    next();
+
+    await waitFor(() =>
+      expect(useChatStore.getState().activeSessionId).toBe(first.id)
+    );
+
+    // Opening maximize again starts collapsed, even after a shortcut reveal.
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    expect(
+      screen.getByRole("button", { name: "Grouped ticket" })
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("button", {
+        name: /Load local chat First ticket chat/,
+      })
+    ).not.toBeInTheDocument();
+    expect(useChatStore.getState().activeSessionId).toBe(first.id);
+    expect(commands.sendLocalChatMessage).not.toHaveBeenCalled();
+  });
+
   it("uses maximized history shortcuts to focus search and switch conversations", async () => {
     const user = userEvent.setup();
     const first = createPersistedHistorySession(
@@ -2902,6 +3184,7 @@ describe("ChatWindowManager", () => {
       code: "BracketRight",
       metaKey: true,
       altKey: true,
+      shiftKey: true,
     });
     await waitFor(() => {
       expect(useChatStore.getState().activeSessionId).toBe(second.id);
@@ -2917,6 +3200,7 @@ describe("ChatWindowManager", () => {
       code: "BracketLeft",
       metaKey: true,
       altKey: true,
+      shiftKey: true,
     });
     await waitFor(() => {
       expect(useChatStore.getState().activeSessionId).toBe(first.id);
@@ -2985,6 +3269,7 @@ describe("ChatWindowManager", () => {
       code: "BracketRight",
       metaKey: true,
       altKey: true,
+      shiftKey: true,
     });
     await waitFor(() => {
       expect(useChatStore.getState().activeSessionId).toBe(second.id);
@@ -2996,6 +3281,7 @@ describe("ChatWindowManager", () => {
       code: "BracketRight",
       metaKey: true,
       altKey: true,
+      shiftKey: true,
     });
     await waitFor(() => {
       expect(useChatStore.getState().activeSessionId).toBe(third.id);
@@ -3003,12 +3289,12 @@ describe("ChatWindowManager", () => {
     expect(useChatStore.getState().paneLayout.activePaneId).toBe("pane-two");
     expect(
       useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
-    ).toEqual([third.id, third.id]);
+    ).toEqual([second.id, third.id]);
     expect(
       screen
         .getAllByTestId("chat-pane")
         .map((pane) => pane.getAttribute("aria-label"))
-    ).toEqual(["Chat pane 1: Third chat", "Chat pane 2: Third chat"]);
+    ).toEqual(["Chat pane 1: Second chat", "Chat pane 2: Third chat"]);
   });
 
   it("shows chat keyboard shortcut hints with Cmd+Shift+Slash", () => {
@@ -3098,31 +3384,29 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
-    await waitFor(() => {
-      expect(miniPanel.getAllByRole("heading", { level: 3 })).toHaveLength(3);
-    });
-    expect(
-      miniPanel
-        .getAllByRole("heading", { level: 3 })
-        .map(
-          (heading) =>
-            heading.querySelector("[data-mini-history-toggle], span")
-              ?.textContent
-        )
-    ).toEqual(["new-project", "old-project", "Unknown project"]);
 
-    const currentGroup = within(
-      miniPanel.getByRole("region", { name: "new-project chats" })
+    await waitFor(() =>
+      expect(
+        miniPanel.getByRole("button", { name: "old-project" })
+      ).toHaveAttribute("aria-pressed", "true")
     );
-    expect(
-      currentGroup
-        .getAllByRole("button", { name: /^Load local chat/ })
-        .map((button) => button.getAttribute("aria-label"))
-    ).toEqual([
+
+    expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
+
+    fireEvent.click(miniPanel.getByRole("button", { name: "new-project" }));
+
+    const rows = within(
+      miniPanel.getByRole("region", { name: "new-project chats" })
+    ).getAllByRole("button", { name: /^Load local chat/ });
+
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
       "Load local chat Current Newer Chat into active pane",
       "Load local chat Current Older Chat into active pane",
     ]);
-    expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
+    expect(useChatStore.getState().activeSessionId).toBe(oldProject);
+
+    fireEvent.click(miniPanel.getByRole("button", { name: "Unknown project" }));
+
     expect(miniPanel.getByText("No Project Chat")).toBeInTheDocument();
   });
 
@@ -3363,5 +3647,81 @@ describe("ChatWindowManager", () => {
       renderedWidth: 0,
       isMaximized: false,
     });
+  });
+
+  it("drags the sidebar beyond 400px and restores its width and chats with Cmd+B", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1600,
+    });
+    const id = useChatStore
+      .getState()
+      .openSession("Sidebar resizing", "/test/project");
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const handle = screen.getByRole("separator", {
+      name: "Resize chat history",
+    });
+    expect(handle).toHaveAttribute("aria-valuemax", "640");
+
+    fireEvent.mouseDown(handle, { button: 0, clientX: 272 });
+    fireEvent.mouseMove(document, { clientX: 560 });
+    fireEvent.mouseUp(document);
+
+    expect(screen.getByTestId("local-chat-mini-panel")).toHaveStyle({
+      width: "560px",
+    });
+    expect(localStorage.getItem(HISTORY_WIDTH_STORAGE_KEY)).toBe("560");
+    const panes = useChatStore.getState().paneLayout;
+    const search = screen.getByRole("searchbox", {
+      name: "Search local chats",
+    });
+    search.focus();
+
+    fireEvent.keyDown(search, { key: "b", metaKey: true });
+
+    expect(
+      screen.queryByTestId("local-chat-mini-panel")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("separator", { name: "Resize chat history" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-pane")).toHaveFocus();
+    expect(useChatStore.getState().paneLayout).toEqual(panes);
+    expect(useChatStore.getState().activeSessionId).toBe(id);
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(screen.getByTestId("local-chat-mini-panel")).toHaveStyle({
+      width: "560px",
+    });
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("searchbox", { name: "Search local chats" })
+      ).toHaveFocus()
+    );
+  });
+
+  it("opens the sidebar from compact mode with Cmd+B and reveals hidden history with the history shortcut", async () => {
+    useChatStore.getState().openSession("Sidebar toggle", "/test/project");
+    render(<ChatWindowManager />);
+    expect(
+      screen.queryByTestId("local-chat-mini-panel")
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    fireEvent.keyDown(window, {
+      key: "h",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+    expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
   });
 });

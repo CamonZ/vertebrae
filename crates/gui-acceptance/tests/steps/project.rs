@@ -1,5 +1,6 @@
 use cucumber::{then, when};
 use fantoccini::Locator;
+use fantoccini::actions::{InputSource, MouseActions, PointerAction};
 
 use crate::GuiWorld;
 
@@ -191,6 +192,42 @@ async fn click_local_chat_plus_action(world: &mut GuiWorld, project: String) {
         .clone();
     let client = wd.lock().await;
     let title = format!("Start a new chat in {slug}");
+    let project_row = client
+        .find(Locator::XPath(&format!(
+            "//*[@data-mini-project-select and @title='{slug}']"
+        )))
+        .await
+        .expect("project row should be present before using its plus action");
+
+    // Unselected project actions appear on hover. Wait for maximize's finite
+    // animations before moving the real pointer, so it stays over the row.
+    gui_acceptance::wait_for_js(
+        &client,
+        "project row to finish animating",
+        r#"
+          const panel = arguments[0].closest('.hc-panel');
+          return !panel.getAnimations({ subtree: true }).some(animation =>
+            animation.playState === 'running' &&
+            Number.isFinite(animation.effect?.getComputedTiming().endTime)
+          );
+        "#,
+        vec![serde_json::to_value(&project_row).expect("project element serializes")],
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+
+    client
+        .perform_actions(MouseActions::new("project-history-hover".into()).then(
+            PointerAction::MoveToElement {
+                element: project_row,
+                duration: None,
+                x: 0,
+                y: 0,
+            },
+        ))
+        .await
+        .expect("hover project row to reveal its plus action");
+
     // Opening history resizes the panel; wait for the plus button to stop
     // moving before WebDriver dispatches its pointer click.
     gui_acceptance::click_when_ready(
@@ -351,9 +388,19 @@ async fn second_project_is_active_within(world: &mut GuiWorld, timeout: u64) {
         .await;
 }
 
-#[then(expr = "the local chat history drawer should show the active project within {int} seconds")]
-async fn local_chat_history_drawer_shows_active_project(world: &mut GuiWorld, timeout: u64) {
-    let slug = active_project_slug(world);
+#[then(
+    expr = "the local chat history drawer should show the {string} project within {int} seconds"
+)]
+async fn local_chat_history_drawer_shows_project(
+    world: &mut GuiWorld,
+    project: String,
+    timeout: u64,
+) {
+    let slug = match project.as_str() {
+        "primary" => active_project_slug(world),
+        "second" => second_project_slug(world),
+        other => panic!("unknown acceptance project {other:?}; use primary or second"),
+    };
 
     let wd = world
         .webdriver
@@ -367,8 +414,10 @@ async fn local_chat_history_drawer_shows_active_project(world: &mut GuiWorld, ti
         .await;
 
     let locator = Locator::XPath(&format!(
-        "//*[@data-testid='local-chat-history-drawer']//h3/*[self::span or self::button[@data-mini-history-toggle]][normalize-space(.)='{}']",
-        slug
+        "//*[@data-testid='local-chat-mini-panel']\
+         [.//button[@data-mini-project-select and @aria-pressed='true' and @title='{}']]\
+         //section[@aria-label='{} chats']//*[@data-testid='local-chat-history-drawer']",
+        slug, slug
     ));
     let element = client
         .wait()
@@ -384,7 +433,7 @@ async fn local_chat_history_drawer_shows_active_project(world: &mut GuiWorld, ti
 
     assert!(
         element.is_ok(),
-        "expected local chat history drawer to show active project heading '{}' within {} seconds",
+        "expected local chat history drawer for selected project '{}' within {} seconds",
         slug,
         timeout
     );

@@ -8,12 +8,15 @@ import "./chatAssociation.css";
 /** Read each row's own live record; history snapshots can lag corrections. */
 export function ConversationAssociations({
   session,
+  hideTicket = false,
 }: {
   session: LocalChatSessionSummary;
+  hideTicket?: boolean;
 }) {
   const liveSession = useChatStore(
     (state) => state.localSessionSummaries[session.id]
   );
+
   const record = readRecord((liveSession ?? session).association);
   const ticket = record.ticketId
     ? `Ticket: ${record.ticketId}${record.ticketTitle ? ` · ${record.ticketTitle}` : ""}`
@@ -21,12 +24,13 @@ export function ConversationAssociations({
   const worktree = record.worktreePath
     ? `Worktree: ${record.worktreePath}${record.branch ? ` (${record.branch})` : ""}`
     : null;
+
   return (
     <div
       className="conversation-associations"
       aria-label="Conversation associations"
     >
-      {ticket && (
+      {ticket && !hideTicket && (
         <Tooltip
           portal
           label={<span className="association-tooltip-text">{ticket}</span>}
@@ -40,6 +44,7 @@ export function ConversationAssociations({
           </span>
         </Tooltip>
       )}
+
       {worktree && (
         <Tooltip
           portal
