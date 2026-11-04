@@ -57,3 +57,36 @@ fn each_tool_is_attributed_exactly_the_file_it_wrote(tc: TestCase) {
         }
     });
 }
+
+/// Hold patch computation until after the next writer has changed both a dirty
+/// path and a path that reverted to HEAD. No scheduler/timing assumption is
+/// needed: the channel is the end-capture/next-write barrier.
+#[test]
+fn captured_end_excludes_later_writes_even_when_a_path_reverted_to_head() {
+    let (_repo, root) = repo();
+    let limits = git::Limits::default();
+    write(&root, "edit.txt", "dirty before\n");
+    let start = git::snapshot(&root, &limits, "main").unwrap();
+
+    write(&root, "edit.txt", numbered(10));
+    write(&root, "new.txt", "first tool\n");
+    let end = git::snapshot(&root, &limits, "main").unwrap();
+
+    let (resume, wait) = std::sync::mpsc::sync_channel(0);
+    let worker_root = root.clone();
+    let worker = std::thread::spawn(move || {
+        wait.recv().unwrap();
+        patch::compute(&worker_root, &start, &end, &limits).unwrap()
+    });
+
+    write(&root, "edit.txt", "later edit\n");
+    write(&root, "new.txt", "next tool\n");
+    resume.send(()).unwrap();
+    let delta = worker.join().unwrap();
+
+    assert!(delta.patch.contains("-dirty before"));
+    assert!(delta.patch.contains("+line 1"));
+    assert!(delta.patch.contains("+first tool"));
+    assert!(!delta.patch.contains("later edit"));
+    assert!(!delta.patch.contains("next tool"));
+}

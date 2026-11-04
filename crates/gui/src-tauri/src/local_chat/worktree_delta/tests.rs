@@ -295,7 +295,7 @@ fn paths(payload: &Value) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn shell_tool_records_modify_add_delete_and_plain_mv_as_an_exact_patch() {
+async fn shell_tool_records_modify_add_delete_and_plain_mv_as_an_applicable_patch() {
     let (_repo, worktree) = repo();
     let (_annotations, store) = store();
     let session = Session::recording(&worktree, store, fast_config());
@@ -315,37 +315,6 @@ async fn shell_tool_records_modify_add_delete_and_plain_mv_as_an_exact_patch() {
         .await;
     let payload = session.annotation("toolu_1").await;
 
-    assert_eq!(
-        payload["patch"].as_str().unwrap(),
-        "diff --git a/edit.txt b/edit.txt\n\
-         --- a/edit.txt\n\
-         +++ b/edit.txt\n\
-         @@ -2,7 +2,7 @@\n \
-         line 2\n \
-         line 3\n \
-         line 4\n\
-         -line 5\n\
-         +line five\n \
-         line 6\n \
-         line 7\n \
-         line 8\n\
-         diff --git a/move.txt b/moved.txt\n\
-         similarity index 100%\n\
-         rename from move.txt\n\
-         rename to moved.txt\n\
-         diff --git a/new.txt b/new.txt\n\
-         new file mode 100644\n\
-         --- /dev/null\n\
-         +++ b/new.txt\n\
-         @@ -0,0 +1 @@\n\
-         +fresh\n\
-         diff --git a/remove.txt b/remove.txt\n\
-         deleted file mode 100644\n\
-         --- a/remove.txt\n\
-         +++ /dev/null\n\
-         @@ -1 +0,0 @@\n\
-         -gone\n"
-    );
     assert_eq!(
         payload["files"],
         json!([
@@ -404,17 +373,12 @@ async fn later_tools_record_only_their_increment_reverts_and_no_ops() {
     session.tool("toolu_4", || {}).await;
     session.sentinel(&worktree, "sentinel").await;
 
-    assert_eq!(
-        increment["patch"].as_str().unwrap(),
-        "diff --git a/edit.txt b/edit.txt\n--- a/edit.txt\n+++ b/edit.txt\n\
-         @@ -6,5 +6,5 @@\n line 6\n line 7\n line 8\n-line 9\n+line nine\n line 10\n"
-    );
-    assert_eq!(
-        revert["patch"].as_str().unwrap(),
-        "diff --git a/edit.txt b/edit.txt\n--- a/edit.txt\n+++ b/edit.txt\n\
-         @@ -1,10 +1,10 @@\n line 1\n-line two\n+line 2\n line 3\n line 4\n line 5\n \
-         line 6\n line 7\n line 8\n-line nine\n+line 9\n line 10\n"
-    );
+    let increment = increment["patch"].as_str().unwrap();
+    assert!(increment.contains("-line 9\n+line nine\n"));
+    assert!(!increment.contains("line two"));
+    let revert = revert["patch"].as_str().unwrap();
+    assert!(revert.contains("-line two\n+line 2\n"));
+    assert!(revert.contains("-line nine\n+line 9\n"));
     session.assert_none("toolu_4");
 }
 
@@ -678,61 +642,111 @@ async fn windows_open_at_turn_end_are_dropped() {
     session.assert_none("toolu_open");
 }
 
-fn tree_state(worktree: &Path) -> BTreeMap<String, Vec<u8>> {
-    fn walk(root: &Path, dir: &Path, state: &mut BTreeMap<String, Vec<u8>>) {
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            let relative = path
-                .strip_prefix(root)
-                .unwrap()
-                .to_string_lossy()
-                .into_owned();
-            if path.is_dir() {
-                walk(root, &path, state);
+fn tree_state(root: &Path) -> BTreeMap<PathBuf, (Vec<u8>, u32)> {
+    fn walk(root: &Path, path: &Path, out: &mut BTreeMap<PathBuf, (Vec<u8>, u32)>) {
+        for entry in std::fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let metadata = std::fs::symlink_metadata(&path).unwrap();
+
+            if metadata.is_dir() {
+                walk(root, &path, out);
             } else {
-                let metadata = std::fs::metadata(&path).unwrap();
-                let mut value = std::fs::read(&path).unwrap();
-                if relative == ".git/index" {
-                    value.extend_from_slice(
+                #[cfg(unix)]
+                let mode = {
+                    use std::os::unix::fs::PermissionsExt;
+                    metadata.permissions().mode()
+                };
+                #[cfg(not(unix))]
+                let mode = u32::from(metadata.permissions().readonly());
+
+                let mut bytes = if metadata.is_symlink() {
+                    std::fs::read_link(&path)
+                        .unwrap()
+                        .as_os_str()
+                        .as_encoded_bytes()
+                        .to_vec()
+                } else {
+                    std::fs::read(&path).unwrap()
+                };
+
+                let relative = path.strip_prefix(root).unwrap();
+                if relative.starts_with(".git")
+                    && path.file_name().is_some_and(|name| name == "index")
+                {
+                    bytes.extend_from_slice(
                         format!("{:?}", metadata.modified().unwrap()).as_bytes(),
                     );
                 }
-                state.insert(relative, value);
+
+                out.insert(relative.to_owned(), (bytes, mode));
             }
         }
     }
-    let mut state = BTreeMap::new();
-    walk(worktree, worktree, &mut state);
-    state
+
+    let mut files = BTreeMap::new();
+    walk(root, root, &mut files);
+    files
 }
 
 #[tokio::test]
 async fn recording_never_writes_the_index_refs_objects_or_worktree() {
-    let (_repo, worktree) = repo();
-    // Make the index stat data stale so a refreshing status would rewrite it.
+    let (_repo, root) = repo();
+    let linked_dir = TempDir::new().unwrap();
+    let linked = linked_dir.path().canonicalize().unwrap().join("linked");
+    git(
+        &root,
+        &["worktree", "add", "-b", "linked", linked.to_str().unwrap()],
+    );
+
+    // Make index stat data stale so a refreshing status would rewrite it.
     std::thread::sleep(Duration::from_millis(1100));
-    write(&worktree, "edit.txt", numbered(10));
-    let (_annotations, store) = store();
-    let session = Session::recording(&worktree, store, fast_config());
-    let mut expected = tree_state(&worktree);
 
-    session
-        .tool("toolu_1", || {
-            write(&worktree, "edit.txt", "rewritten\n");
-            write(&worktree, "new/nested.txt", "nested\n");
-            std::fs::remove_file(worktree.join("remove.txt")).unwrap();
-        })
-        .await;
-    session.annotation("toolu_1").await;
-    session
-        .tool("toolu_2", || write(&worktree, "edit.txt", numbered(10)))
-        .await;
-    session.annotation("toolu_2").await;
+    for worktree in [&root, &linked] {
+        write(worktree, "edit.txt", numbered(10));
+        let (_annotations, store) = store();
+        let tap = RecordingTap::default();
+        tap.start(
+            CHAT.into(),
+            worktree.clone(),
+            git::branch(worktree).unwrap(),
+            store.clone(),
+            fast_config(),
+        );
+        let session = Session::new("backend-1", CHAT, tap, store);
+        let mut expected_root = tree_state(&root);
+        let mut expected_linked = tree_state(&linked);
 
-    expected.insert("edit.txt".into(), numbered(10).into_bytes());
-    expected.insert("new/nested.txt".into(), b"nested\n".to_vec());
-    expected.remove("remove.txt");
-    assert_eq!(tree_state(&worktree), expected);
+        session
+            .tool("toolu_1", || {
+                write(worktree, "edit.txt", "rewritten\n");
+                write(worktree, "new/nested.txt", "nested\n");
+                std::fs::remove_file(worktree.join("remove.txt")).unwrap();
+            })
+            .await;
+        session.annotation("toolu_1").await;
+        session
+            .tool("toolu_2", || write(worktree, "edit.txt", numbered(10)))
+            .await;
+        session.annotation("toolu_2").await;
+
+        // The Changes view shares the observer and must also stay read-only.
+        crate::local_chat::changes::load(worktree, false).unwrap();
+
+        let expected = if worktree == &root {
+            &mut expected_root
+        } else {
+            &mut expected_linked
+        };
+        let (bytes, mode) = expected.get_mut(Path::new("edit.txt")).unwrap();
+        *bytes = numbered(10).into_bytes();
+        let mode = *mode;
+        expected.insert("new/nested.txt".into(), (b"nested\n".to_vec(), mode));
+        expected.remove(Path::new("remove.txt"));
+
+        assert_eq!(tree_state(&root), expected_root);
+        assert_eq!(tree_state(&linked), expected_linked);
+    }
 }
 
 #[tokio::test]
@@ -1271,3 +1285,5 @@ mod patch_roundtrip;
 mod recorder_attribution;
 
 mod branch_guard;
+
+mod library_git;

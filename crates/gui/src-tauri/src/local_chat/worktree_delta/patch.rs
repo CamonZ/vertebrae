@@ -1,21 +1,11 @@
-//! Turns two checkpoints into the Git-format patch of what changed between
-//! them. Hunks are generated here, never by Git, so recording stays read-only.
+//! Library-rendered patches between captured observations, never mutable files.
 
-use std::collections::BTreeSet;
-use std::fmt::Write as _;
-use std::path::Path;
-use std::time::Duration;
+use super::git::{self, GitError, Limits, MarkerReason, Side, Snapshot};
 
 use serde::Serialize;
-use similar::{Algorithm, ChangeTag, TextDiff};
 
-use super::git::{self, CacheBudget, GitError, Limits, MarkerReason, Side, Snapshot};
-
-const BINARY_SNIFF_BYTES: usize = 8 * 1024;
-const CONTEXT_LINES: usize = 3;
-const MAX_RENAME_PAIRS: usize = 50;
-const RENAME_THRESHOLD_PERCENT: u32 = 50;
-const DIFF_TIMEOUT: Duration = Duration::from_millis(500);
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -50,31 +40,50 @@ pub(crate) struct Delta {
     pub(crate) files: Vec<FileEntry>,
 }
 
-struct Change {
-    path: String,
-    old_path: Option<String>,
-    similarity: u32,
-    before: Side,
-    after: Side,
-}
+/// Resolve clean paths from immutable commit objects, dirty paths from the
+/// checkpoint cache. In particular a reverted/deleted path is never reread.
+fn sides(
+    worktree: &Path,
+    snapshot: &Snapshot,
+    paths: &BTreeSet<String>,
+    limits: &Limits,
+) -> Result<BTreeMap<String, Side>, GitError> {
+    let clean = paths
+        .iter()
+        .filter(|path| !snapshot.files.contains_key(*path))
+        .map(|path| (path.clone(), git::DEFAULT_MODE))
+        .collect::<Vec<_>>();
 
-impl Change {
-    fn status(&self) -> FileStatus {
-        if self.old_path.is_some() {
-            FileStatus::Renamed
-        } else if matches!(self.before, Side::Absent) {
-            FileStatus::Added
-        } else if matches!(self.after, Side::Absent) {
-            FileStatus::Deleted
-        } else {
-            FileStatus::Modified
-        }
+    let mut result = match &snapshot.head {
+        Some(head) => git::commit_sides(worktree, head, &clean, limits)?,
+        None => BTreeMap::new(),
+    };
+
+    result.extend(
+        snapshot
+            .files
+            .iter()
+            .filter(|(path, _)| paths.contains(*path))
+            .map(|(path, side)| (path.clone(), side.clone())),
+    );
+
+    for path in paths {
+        result.entry(path.clone()).or_insert_with(|| {
+            if snapshot.dirty.contains(path) {
+                snapshot
+                    .files
+                    .get(path)
+                    .cloned()
+                    .unwrap_or(Side::Unreadable)
+            } else {
+                Side::Absent
+            }
+        });
     }
+
+    Ok(result)
 }
 
-/// Compare `start` with the worktree as it is now (`end` supplies the dirty
-/// paths and HEAD it settled on). A path changed iff its content or mode at
-/// the start differs from the file on disk now.
 pub(crate) fn compute(
     worktree: &Path,
     start: &Snapshot,
@@ -82,362 +91,216 @@ pub(crate) fn compute(
     limits: &Limits,
 ) -> Result<Delta, GitError> {
     let head_changed = start.head != end.head;
-    let mut candidates: BTreeSet<String> = start.dirty.keys().cloned().collect();
-    candidates.extend(end.dirty.keys().cloned());
-    if let (true, Some(from), Some(to)) = (head_changed, &start.head, &end.head) {
-        candidates.extend(git::changed_between(worktree, from, to)?);
-    }
-
-    let mut budget = CacheBudget::unlimited();
-    let after: Vec<(String, Side)> = candidates
+    let mut paths: BTreeSet<_> = start
+        .dirty
         .iter()
-        .map(|path| {
-            (
-                path.clone(),
-                git::read_side(worktree, path, limits, &mut budget),
-            )
-        })
+        .chain(end.dirty.iter())
+        .cloned()
         .collect();
 
-    let clean_at_start: Vec<(String, u32)> = after
-        .iter()
-        .filter(|(path, _)| !start.dirty.contains_key(path))
-        .map(|(path, side)| {
-            let known = (!head_changed)
-                .then(|| end.dirty.get(path).and_then(|entry| entry.head_mode))
-                .flatten();
-            (
-                path.clone(),
-                known.or(side.mode()).unwrap_or(git::DEFAULT_MODE),
-            )
-        })
-        .collect();
-    let mut head_sides = match &start.head {
-        Some(head) => git::commit_sides(worktree, head, &clean_at_start, limits)?,
-        None => Default::default(),
-    };
-
-    let mut changes = Vec::new();
-    for (path, after) in after {
-        let before = match start.files.get(&path) {
-            Some(side) if start.dirty.contains_key(&path) => side.clone(),
-            _ => head_sides.remove(&path).unwrap_or(Side::Absent),
-        };
-        if !before.same_as(&after) {
-            changes.push(Change {
-                path,
-                old_path: None,
-                similarity: 0,
-                before,
-                after,
-            });
+    if let Some(to) = &end.head {
+        if head_changed {
+            paths.extend(git::changed_between(worktree, start.head.as_deref(), to)?);
         }
     }
-    pair_renames(&mut changes);
-    changes.sort_by(|a, b| a.path.cmp(&b.path));
 
-    let (patch, files) = render(&changes, limits);
+    if paths.len() > limits.status_entries {
+        return Err(GitError::TooManyEntries(paths.len()));
+    }
+
+    let before = sides(worktree, start, &paths, limits)?;
+    let after = sides(worktree, end, &paths, limits)?;
+    let rendered = compare(&before, &after, limits)?;
+
     Ok(Delta {
         base_head: start.head.clone(),
         head_changed,
-        patch,
-        files,
+        patch: rendered.iter().map(|(_, text)| text.as_str()).collect(),
+        files: rendered.into_iter().map(|(file, _)| file).collect(),
     })
 }
 
-/// Pair deleted with added paths: identical content first, then the most
-/// similar text with at least 50% line similarity, at most 50 pairs.
-fn pair_renames(changes: &mut Vec<Change>) {
-    let deleted: Vec<usize> = (0..changes.len())
-        .filter(|&index| changes[index].status() == FileStatus::Deleted)
-        .collect();
-    let mut added: Vec<usize> = (0..changes.len())
-        .filter(|&index| changes[index].status() == FileStatus::Added)
-        .collect();
-    let mut pairs: Vec<(usize, usize, u32)> = Vec::new();
-    let mut unmatched = Vec::new();
-    for &from in &deleted {
-        if pairs.len() == MAX_RENAME_PAIRS {
-            break;
-        }
-        let before = &changes[from].before;
-        let empty = matches!(before, Side::Content { bytes, .. } if bytes.is_empty());
-        match added
-            .iter()
-            .position(|&to| !empty && before.same_content(&changes[to].after))
-        {
-            Some(position) => pairs.push((from, added.remove(position), 100)),
-            None => unmatched.push(from),
-        }
-    }
-    for from in unmatched {
-        if pairs.len() == MAX_RENAME_PAIRS {
-            break;
-        }
-        let Ok(old) = text_of(&changes[from].before) else {
-            continue;
-        };
-        let best = added
-            .iter()
-            .enumerate()
-            .filter_map(|(position, &to)| {
-                let new = text_of(&changes[to].after).ok()?;
-                let (small, large) = if old.len() < new.len() {
-                    (old.len(), new.len())
-                } else {
-                    (new.len(), old.len())
-                };
-                if large > 0 && small * 2 < large {
-                    return None;
-                }
-                let score = similarity(old, new);
-                (score >= RENAME_THRESHOLD_PERCENT).then_some((position, score))
-            })
-            .max_by_key(|(_, score)| *score);
-        if let Some((position, score)) = best {
-            pairs.push((from, added.remove(position), score));
-        }
-    }
-
-    let mut removed = Vec::new();
-    for (from, to, score) in pairs {
-        let old_path = changes[from].path.clone();
-        let before = std::mem::replace(&mut changes[from].before, Side::Absent);
-        let target = &mut changes[to];
-        target.old_path = Some(old_path);
-        target.similarity = score;
-        target.before = before;
-        removed.push(from);
-    }
-    removed.sort_unstable();
-    for index in removed.into_iter().rev() {
-        changes.remove(index);
-    }
-}
-
-fn similarity(old: &str, new: &str) -> u32 {
-    if old == new {
-        return 100;
-    }
-    let diff = TextDiff::configure()
-        .algorithm(Algorithm::Myers)
-        .timeout(DIFF_TIMEOUT)
-        .diff_lines(old, new);
-    (diff.ratio() * 100.0).floor() as u32
-}
-
-/// Text of a side, or why it cannot be shown as hunks.
-fn text_of(side: &Side) -> Result<&str, MarkerReason> {
+fn marker(side: &Side) -> Option<MarkerReason> {
     match side {
-        Side::Absent => Ok(""),
-        Side::Unreadable => Err(MarkerReason::Unreadable),
-        Side::Opaque { reason, .. } => Err(*reason),
-        Side::Content { bytes, .. } => {
-            let sniff = &bytes[..bytes.len().min(BINARY_SNIFF_BYTES)];
-            if sniff.contains(&0) {
-                return Err(MarkerReason::Binary);
-            }
-            std::str::from_utf8(bytes).map_err(|_| MarkerReason::Binary)
-        }
+        Side::Unreadable => Some(MarkerReason::Unreadable),
+        Side::Opaque { reason, .. } => Some(*reason),
+        _ => None,
     }
 }
 
-fn render(changes: &[Change], limits: &Limits) -> (String, Vec<FileEntry>) {
-    let mut patch = String::new();
-    let mut files = Vec::new();
+/// A private, memory-only libgit2 repository. Its ODB has only a mempack
+/// backend, no path or disk backend. Neither blobs nor trees can reach the
+/// user's object store, refs, index or worktree. Dropping it frees everything.
+fn memory_repository() -> Result<git2::Repository, GitError> {
+    let odb = git2::Odb::new()?;
+    {
+        let _memory = odb.add_new_mempack_backend(1000)?;
+    }
+
+    Ok(git2::Repository::from_odb(odb)?)
+}
+
+fn tree<'repo>(
+    repo: &'repo git2::Repository,
+    sides: &BTreeMap<String, Side>,
+) -> Result<git2::Tree<'repo>, GitError> {
+    let mut index = git2::Index::new()?;
+
+    for (path, side) in sides {
+        if let Side::Content { mode, bytes } = side {
+            index.add(&git2::IndexEntry {
+                ctime: git2::IndexTime::new(0, 0),
+                mtime: git2::IndexTime::new(0, 0),
+                dev: 0,
+                ino: 0,
+                mode: *mode,
+                uid: 0,
+                gid: 0,
+                file_size: bytes.len() as u32,
+                id: repo.blob(bytes)?,
+                flags: 0,
+                flags_extended: 0,
+                path: path.as_bytes().to_vec(),
+            })?;
+        }
+    }
+
+    Ok(repo.find_tree(index.write_tree_to(repo)?)?)
+}
+
+/// Shared recorder/Changes renderer. Libgit2 owns rename matching, modes,
+/// symlinks, path quoting, binary classification and patch/hunk formatting.
+pub(crate) fn compare(
+    before: &BTreeMap<String, Side>,
+    after: &BTreeMap<String, Side>,
+    limits: &Limits,
+) -> Result<Vec<(FileEntry, String)>, GitError> {
+    let repo = memory_repository()?;
+    let mut old = BTreeMap::new();
+    let mut new = BTreeMap::new();
     let mut markers = Vec::new();
-    for change in changes {
-        let entry = |marker: Option<MarkerReason>| FileEntry {
-            path: change.path.clone(),
-            old_path: change.old_path.clone(),
-            status: change.status(),
-            marker: marker.map(|reason| FileMarker { reason }),
-        };
-        match render_file(change) {
-            Ok(text) if patch.len() + text.len() <= limits.patch_bytes => {
-                patch.push_str(&text);
-                files.push(entry(None));
-            }
-            Ok(_) => markers.push(entry(Some(MarkerReason::PatchLimit))),
-            Err(reason) => markers.push(entry(Some(reason))),
-        }
-    }
-    files.extend(markers);
-    (patch, files)
-}
+    let paths: BTreeSet<_> = before.keys().chain(after.keys()).collect();
 
-fn render_file(change: &Change) -> Result<String, MarkerReason> {
-    let same_content = change.before.same_content(&change.after);
-    let (old, new) = if same_content {
-        ("", "")
-    } else {
-        // A side over a limit fails first so its reason wins over binary.
-        let old = text_of(&change.before);
-        let new = text_of(&change.after);
-        for side in [&old, &new] {
-            if let Err(reason) = side {
-                if *reason != MarkerReason::Binary {
-                    return Err(*reason);
-                }
-            }
-        }
-        (old?, new?)
-    };
+    for path in paths {
+        let a = before.get(path).unwrap_or(&Side::Absent);
+        let b = after.get(path).unwrap_or(&Side::Absent);
 
-    let old_path = change.old_path.as_deref().unwrap_or(&change.path);
-    let mut text = String::new();
-    let _ = writeln!(
-        text,
-        "diff --git {} {}",
-        quote_path("a/", old_path),
-        quote_path("b/", &change.path)
-    );
-    let (old_mode, new_mode) = (change.before.mode(), change.after.mode());
-    match change.status() {
-        FileStatus::Added => {
-            let _ = writeln!(text, "new file mode {:06o}", new_mode.unwrap_or_default());
-        }
-        FileStatus::Deleted => {
-            let _ = writeln!(
-                text,
-                "deleted file mode {:06o}",
-                old_mode.unwrap_or_default()
-            );
-        }
-        FileStatus::Modified | FileStatus::Renamed => {
-            if let (Some(old_mode), Some(new_mode)) = (old_mode, new_mode) {
-                if old_mode != new_mode {
-                    let _ = writeln!(text, "old mode {old_mode:06o}\nnew mode {new_mode:06o}");
-                }
-            }
-            if let Some(from) = &change.old_path {
-                let _ = writeln!(
-                    text,
-                    "similarity index {}%\nrename from {}\nrename to {}",
-                    change.similarity,
-                    quote_path("", from),
-                    quote_path("", &change.path)
-                );
-            }
-        }
-    }
-    if same_content || old == new {
-        return Ok(text);
-    }
-
-    let from = if matches!(change.before, Side::Absent) {
-        "/dev/null".to_string()
-    } else {
-        quote_path("a/", old_path)
-    };
-    let to = if matches!(change.after, Side::Absent) {
-        "/dev/null".to_string()
-    } else {
-        quote_path("b/", &change.path)
-    };
-    let _ = writeln!(text, "--- {from}\n+++ {to}");
-    write_hunks(&mut text, old, new);
-    Ok(text)
-}
-
-fn write_hunks(text: &mut String, old: &str, new: &str) {
-    let diff = TextDiff::configure()
-        .algorithm(Algorithm::Myers)
-        .timeout(DIFF_TIMEOUT)
-        .diff_lines(old, new);
-    for group in diff.grouped_ops(CONTEXT_LINES) {
-        let Some(first) = group.first() else {
+        if a.same_as(b) {
             continue;
+        }
+
+        if let Some(reason) = marker(a).or_else(|| marker(b)) {
+            markers.push((
+                FileEntry {
+                    path: path.clone(),
+                    old_path: None,
+                    status: if matches!(a, Side::Absent) {
+                        FileStatus::Added
+                    } else if matches!(b, Side::Absent) {
+                        FileStatus::Deleted
+                    } else {
+                        FileStatus::Modified
+                    },
+                    marker: Some(FileMarker { reason }),
+                },
+                String::new(),
+            ));
+        } else {
+            old.insert(path.clone(), a.clone());
+            new.insert(path.clone(), b.clone());
+        }
+    }
+
+    let old_tree = tree(&repo, &old)?;
+    let new_tree = tree(&repo, &new)?;
+    let mut options = git2::DiffOptions::new();
+    options
+        .context_lines(3)
+        .include_typechange(true)
+        .update_index(false);
+    let mut diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut options))?;
+
+    let mut find = git2::DiffFindOptions::new();
+    find.renames(true).rename_threshold(50).rename_limit(50);
+    diff.find_similar(Some(&mut find))?;
+
+    let mut result = Vec::new();
+    let mut remaining = limits.patch_bytes;
+
+    for i in 0..diff.deltas().len() {
+        let mut patch = git2::Patch::from_diff(&diff, i)?
+            .ok_or_else(|| GitError::Failed("missing patch".into()))?;
+        let delta = patch.delta();
+        let deleted = delta.status() == git2::Delta::Deleted;
+        let renamed = delta.status() == git2::Delta::Renamed;
+
+        let path = git::utf8_path(
+            if deleted {
+                delta.old_file().path_bytes()
+            } else {
+                delta.new_file().path_bytes()
+            }
+            .ok_or_else(|| GitError::Malformed("missing diff path".into()))?,
+        )?;
+        let old_path = if renamed {
+            Some(git::utf8_path(
+                delta.old_file().path_bytes().unwrap_or_default(),
+            )?)
+        } else {
+            None
         };
-        // Hunk lengths are counted from the emitted lines rather than read
-        // from the ops' ranges, so the header can never disagree with the body.
-        let (mut old_len, mut new_len) = (0, 0);
-        let mut body = String::new();
-        for op in &group {
-            for change in diff.iter_changes(op) {
-                let sign = match change.tag() {
-                    ChangeTag::Equal => {
-                        old_len += 1;
-                        new_len += 1;
-                        ' '
-                    }
-                    ChangeTag::Delete => {
-                        old_len += 1;
-                        '-'
-                    }
-                    ChangeTag::Insert => {
-                        new_len += 1;
-                        '+'
-                    }
-                };
-                let value = change.value();
-                body.push(sign);
-                body.push_str(value);
-                if !value.ends_with('\n') {
-                    body.push_str("\n\\ No newline at end of file\n");
-                }
-            }
+
+        let invalid_text = [old.get(old_path.as_ref().unwrap_or(&path)), new.get(&path)]
+            .into_iter()
+            .flatten()
+            .any(|side| {
+                matches!(side, Side::Content { bytes, .. } if std::str::from_utf8(bytes).is_err())
+            });
+
+        let mut entry = FileEntry {
+            path,
+            old_path,
+            status: match delta.status() {
+                git2::Delta::Added => FileStatus::Added,
+                git2::Delta::Deleted => FileStatus::Deleted,
+                git2::Delta::Renamed => FileStatus::Renamed,
+                _ => FileStatus::Modified,
+            },
+            marker: None,
+        };
+
+        if delta.old_file().is_binary() || delta.new_file().is_binary() || invalid_text {
+            entry.marker = Some(FileMarker {
+                reason: MarkerReason::Binary,
+            });
+            markers.push((entry, String::new()));
+            continue;
         }
-        let _ = writeln!(
-            text,
-            "@@ -{} +{} @@",
-            hunk_range(first.old_range().start, old_len),
-            hunk_range(first.new_range().start, new_len)
-        );
-        text.push_str(&body);
-    }
-}
 
-/// Unified range: 1-based start, with the length omitted when it is one and
-/// the start naming the preceding line when it is zero.
-fn hunk_range(start: usize, length: usize) -> String {
-    match length {
-        0 => format!("{start},0"),
-        1 => format!("{}", start + 1),
-        length => format!("{},{length}", start + 1),
-    }
-}
-
-/// Git's default path quoting (`core.quotePath=true`): C-style escapes and
-/// octal for control and non-ASCII bytes, applied to the prefixed path.
-fn quote_path(prefix: &str, path: &str) -> String {
-    let needs_quotes = path
-        .bytes()
-        .any(|byte| !(0x20..0x7f).contains(&byte) || byte == b'"' || byte == b'\\');
-    if !needs_quotes {
-        return format!("{prefix}{path}");
-    }
-    let mut quoted = format!("\"{prefix}");
-    for byte in path.bytes() {
-        match byte {
-            b'"' => quoted.push_str("\\\""),
-            b'\\' => quoted.push_str("\\\\"),
-            b'\t' => quoted.push_str("\\t"),
-            b'\n' => quoted.push_str("\\n"),
-            0x20..=0x7e => quoted.push(byte as char),
-            _ => {
-                let _ = write!(quoted, "\\{byte:03o}");
-            }
+        let buffer = patch.to_buf()?;
+        let file_limit = limits.file_patch_bytes.unwrap_or(remaining);
+        if buffer.len() > remaining.min(file_limit) {
+            entry.marker = Some(FileMarker {
+                reason: if limits
+                    .file_patch_bytes
+                    .is_some_and(|limit| limit <= remaining)
+                {
+                    MarkerReason::TooLarge
+                } else {
+                    MarkerReason::PatchLimit
+                },
+            });
+            markers.push((entry, String::new()));
+        } else {
+            let text = String::from_utf8(buffer.to_vec())
+                .map_err(|_| GitError::Malformed("non-UTF-8 patch".into()))?;
+            remaining -= text.len();
+            result.push((entry, text));
         }
     }
-    quoted.push('"');
-    quoted
-}
 
-#[cfg(test)]
-mod tests {
-    use super::write_hunks;
+    markers.sort_by(|(a, _), (b, _)| a.path.cmp(&b.path));
+    result.extend(markers);
 
-    /// Found by the patch round-trip property: the old side lacks a final
-    /// newline and the diff's last op is a deletion, which made the new-side
-    /// range of the hunk header too short, so `git apply` rejected the patch.
-    #[test]
-    fn hunk_header_lengths_match_the_body_after_an_unterminated_last_line() {
-        let mut text = String::new();
-        write_hunks(&mut text, "d\na", "b\n\nd\nc\nd\n");
-        assert_eq!(
-            text,
-            "@@ -1,2 +1,5 @@\n+b\n+\n+d\n+c\n d\n-a\n\\ No newline at end of file\n"
-        );
-    }
+    Ok(result)
 }

@@ -10,7 +10,7 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 use tauri_specta::Event;
-use tokio::{io::AsyncWriteExt, sync::mpsc};
+use tokio::sync::mpsc;
 
 use crate::commands::CommandError;
 
@@ -72,35 +72,26 @@ fn relevant_path(root: &Path, path: &Path) -> Option<PathBuf> {
 /// Git supplies repository, global and info/exclude rules, including negation
 /// and tracked-file exceptions. Deleted paths are deliberately retained.
 async fn has_visible_path(root: &Path, paths: &[PathBuf]) -> std::io::Result<bool> {
-    let mut child = tokio::process::Command::new("git")
-        .args(["check-ignore", "--stdin", "-z"])
-        .current_dir(root)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .spawn()?;
-    let mut input = child.stdin.take().expect("piped stdin");
-    // Input is bounded by the notification batch; write and drain concurrently
-    // so a large ignored batch cannot fill both process pipes.
-    let write = async {
+    let root = root.to_owned();
+    let paths = paths.to_vec();
+
+    tokio::task::spawn_blocking(move || {
+        let repo = crate::local_chat::worktree_delta::git::repository(&root)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        let index = repo.index().map_err(std::io::Error::other)?;
+
         for path in paths {
-            input.write_all(path.as_os_str().as_encoded_bytes()).await?;
-            input.write_all(&[0]).await?;
+            if (0..=3).any(|stage| index.get_path(&path, stage).is_some())
+                || !repo.is_path_ignored(&path).map_err(std::io::Error::other)?
+            {
+                return Ok(true);
+            }
         }
-        drop(input);
-        Ok::<_, std::io::Error>(())
-    };
-    let ((), output) = tokio::try_join!(write, child.wait_with_output())?;
-    if !matches!(output.status.code(), Some(0 | 1)) {
-        return Err(std::io::Error::other("git check-ignore failed"));
-    }
-    let ignored = output
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .count();
-    Ok(ignored < paths.len())
+
+        Ok(false)
+    })
+    .await
+    .map_err(std::io::Error::other)?
 }
 
 #[tauri::command]

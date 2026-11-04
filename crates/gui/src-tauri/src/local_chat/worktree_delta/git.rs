@@ -1,20 +1,14 @@
-//! Read-only Git access for worktree checkpoints. Every command runs with
-//! `--no-optional-locks` and `GIT_OPTIONAL_LOCKS=0`, so the index is never
-//! refreshed or rewritten; only `status`, `rev-parse`, `diff --name-only` and
-//! `cat-file` are used, and nothing is staged, committed or hashed into the
-//! object store.
+//! Read-only repository observations through libgit2. Filesystem contents are
+//! captured once; clean sides are resolved from immutable commit objects.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
-use std::io::{ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read};
 use std::path::Path;
-use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
-const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const SYMLINK_MODE: u32 = 0o120000;
 const EXECUTABLE_MODE: u32 = 0o100755;
 const REGULAR_MODE: u32 = 0o100644;
@@ -32,6 +26,8 @@ pub(crate) struct Limits {
     pub(crate) status_entries: usize,
     /// Largest patch text of one annotation.
     pub(crate) patch_bytes: usize,
+    /// Optional per-file patch cap used by the Changes view.
+    pub(crate) file_patch_bytes: Option<usize>,
 }
 
 impl Default for Limits {
@@ -42,18 +38,16 @@ impl Default for Limits {
             cache_bytes: 64 * 1024 * 1024,
             status_entries: 5_000,
             patch_bytes: 1024 * 1024,
+            file_patch_bytes: None,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GitError {
-    Spawn(String),
     /// A blocking task panicked or was cancelled.
     Task(String),
     Failed(String),
-    Timeout,
-    OutputLimit,
     TooManyEntries(usize),
     Malformed(String),
 }
@@ -61,11 +55,8 @@ pub(crate) enum GitError {
 impl std::fmt::Display for GitError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Spawn(error) => write!(formatter, "could not run git: {error}"),
             Self::Task(error) => write!(formatter, "git task failed: {error}"),
             Self::Failed(error) => write!(formatter, "git failed: {error}"),
-            Self::OutputLimit => write!(formatter, "git output size limit reached"),
-            Self::Timeout => write!(formatter, "git timed out after {GIT_TIMEOUT:?}"),
             Self::TooManyEntries(count) => {
                 write!(formatter, "worktree has {count} status entries")
             }
@@ -104,13 +95,6 @@ pub(crate) enum Side {
 }
 
 impl Side {
-    pub(crate) fn mode(&self) -> Option<u32> {
-        match self {
-            Self::Content { mode, .. } | Self::Opaque { mode, .. } => Some(*mode),
-            Self::Absent | Self::Unreadable => None,
-        }
-    }
-
     fn fingerprint(&self) -> Option<(u32, u64, Option<[u8; 32]>)> {
         match self {
             Self::Content { mode, bytes } => Some((
@@ -141,20 +125,6 @@ impl Side {
             },
         }
     }
-
-    /// Same content regardless of mode; used for exact rename pairing.
-    pub(crate) fn same_content(&self, other: &Side) -> bool {
-        match (self.fingerprint(), other.fingerprint()) {
-            (Some((_, x, Some(p))), Some((_, y, Some(q)))) => x == y && p == q,
-            _ => false,
-        }
-    }
-}
-
-/// Head mode of a dirty path; absent for untracked files.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct DirtyEntry {
-    pub(crate) head_mode: Option<u32>,
 }
 
 /// HEAD plus every dirty path and its on-disk state when the snapshot ran.
@@ -162,7 +132,7 @@ pub(crate) struct DirtyEntry {
 pub(crate) struct Snapshot {
     pub(crate) head: Option<String>,
     pub(crate) branch: String,
-    pub(crate) dirty: BTreeMap<String, DirtyEntry>,
+    pub(crate) dirty: BTreeSet<String>,
     pub(crate) files: BTreeMap<String, Side>,
 }
 
@@ -181,248 +151,106 @@ impl Snapshot {
     }
 }
 
-pub(crate) fn run_git(
-    worktree: &Path,
-    args: &[&str],
-    stdin: Option<Vec<u8>>,
-) -> Result<Vec<u8>, GitError> {
-    run_git_bounded(worktree, args, stdin, 128 * 1024 * 1024, &[0])
-}
-
-/// Shared runner with a retained-output budget and explicit accepted exit codes.
-pub(crate) fn run_git_bounded(
-    worktree: &Path,
-    args: &[&str],
-    stdin: Option<Vec<u8>>,
-    output_limit: usize,
-    accepted_codes: &[i32],
-) -> Result<Vec<u8>, GitError> {
-    let mut command = Command::new("git");
-    command
-        .arg("--no-optional-locks")
-        .arg("-C")
-        .arg(worktree)
-        .args(args);
-    for (variable, _) in std::env::vars_os() {
-        if variable.to_string_lossy().starts_with("GIT_") {
-            command.env_remove(variable);
-        }
-    }
-    command
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_TERMINAL_PROMPT", "0");
-    command
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|error| GitError::Spawn(error.to_string()))?;
-
-    let writer = stdin.and_then(|input| {
-        let mut pipe = child.stdin.take()?;
-        Some(std::thread::spawn(move || {
-            let _ = pipe.write_all(&input);
-        }))
-    });
-    let reader = |pipe: Option<Box<dyn Read + Send>>| {
-        std::thread::spawn(move || {
-            let mut output = Vec::new();
-            if let Some(mut pipe) = pipe {
-                let _ = pipe
-                    .by_ref()
-                    .take(output_limit as u64 + 1)
-                    .read_to_end(&mut output);
-                let _ = std::io::copy(&mut pipe, &mut std::io::sink());
-            }
-            output
-        })
-    };
-    let stdout = reader(
-        child
-            .stdout
-            .take()
-            .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
-    );
-    let stderr = reader(
-        child
-            .stderr
-            .take()
-            .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
-    );
-
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() > GIT_TIMEOUT => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(GitError::Timeout);
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
-            Err(error) => return Err(GitError::Failed(error.to_string())),
-        }
-    };
-    if let Some(writer) = writer {
-        let _ = writer.join();
-    }
-    let stdout = stdout.join().unwrap_or_default();
-    let stderr = stderr.join().unwrap_or_default();
-    if stdout.len() > output_limit || stderr.len() > output_limit {
-        Err(GitError::OutputLimit)
-    } else if status
-        .code()
-        .is_some_and(|code| accepted_codes.contains(&code))
-    {
-        Ok(stdout)
-    } else {
-        Err(GitError::Failed(
-            String::from_utf8_lossy(&stderr).trim().to_string(),
-        ))
+impl From<git2::Error> for GitError {
+    fn from(error: git2::Error) -> Self {
+        Self::Failed(error.to_string())
     }
 }
 
-/// The current HEAD commit, or `None` on an unborn branch.
-fn head(worktree: &Path) -> Result<Option<String>, GitError> {
-    // Fails outside a repository, which must not look like an unborn HEAD.
-    run_git(worktree, &["rev-parse", "--git-dir"], None)?;
-    match run_git(worktree, &["rev-parse", "--verify", "-q", "HEAD"], None) {
-        Ok(output) => Ok(Some(String::from_utf8_lossy(&output).trim().to_string())),
-        Err(GitError::Failed(_)) => Ok(None),
-        Err(error) => Err(error),
+/// Open precisely this worktree, without consulting process GIT_* variables.
+/// No index write/refresh API is used. Status explicitly disables index updates.
+pub(crate) fn repository(worktree: &Path) -> Result<git2::Repository, GitError> {
+    let repo = git2::Repository::open(worktree)?;
+    let root = repo
+        .workdir()
+        .ok_or_else(|| GitError::Failed("bare repository".into()))?;
+
+    if root.canonicalize().ok() != worktree.canonicalize().ok() {
+        return Err(GitError::Failed("not a worktree root".into()));
+    }
+
+    Ok(repo)
+}
+
+pub(crate) fn head_id(repo: &git2::Repository) -> Result<Option<String>, GitError> {
+    match repo.head() {
+        Ok(head) => Ok(Some(head.peel_to_commit()?.id().to_string())),
+        Err(error) if error.code() == git2::ErrorCode::UnbornBranch => Ok(None),
+        Err(error) => Err(error.into()),
     }
 }
 
-/// Current symbolic branch; detached HEAD is deliberately not a branch.
 pub(crate) fn branch(worktree: &Path) -> Result<Option<String>, GitError> {
-    let output = run_git_bounded(
-        worktree,
-        &["symbolic-ref", "--quiet", "HEAD"],
-        None,
-        4096,
-        &[0, 1],
-    )?;
-    let name =
-        String::from_utf8(output).map_err(|_| GitError::Malformed("non-UTF-8 branch".into()))?;
-    Ok(name.trim().strip_prefix("refs/heads/").map(str::to_owned))
+    let repo = repository(worktree)?;
+    let head = repo.find_reference("HEAD")?;
+
+    Ok(head
+        .symbolic_target()?
+        .and_then(|name| name.strip_prefix("refs/heads/"))
+        .map(str::to_owned))
 }
 
-fn parse_mode(text: &str) -> Option<u32> {
-    u32::from_str_radix(text, 8).ok().filter(|mode| *mode != 0)
+/// String annotation paths must round-trip; never replace invalid bytes with
+/// U+FFFD and risk attributing a different file.
+pub(crate) fn utf8_path(path: &[u8]) -> Result<String, GitError> {
+    String::from_utf8(path.to_vec())
+        .map_err(|_| GitError::Malformed("non-UTF-8 path is unsupported".into()))
 }
 
-/// Dirty paths from `git status --porcelain=v2 -z`, ignoring submodules.
-/// Renamed index entries list both paths.
-fn status(worktree: &Path, limits: &Limits) -> Result<BTreeMap<String, DirtyEntry>, GitError> {
-    let output = run_git(
-        worktree,
-        &[
-            "status",
-            "--porcelain=v2",
-            "-z",
-            "--untracked-files=all",
-            "--ignore-submodules=all",
-            "--no-renames",
-        ],
-        None,
-    )?;
-    let mut records = output
-        .split(|byte| *byte == 0)
-        .filter(|record| !record.is_empty())
-        .map(|record| String::from_utf8_lossy(record).into_owned());
-    let mut dirty = BTreeMap::new();
-    let mut entries = 0_usize;
-    while let Some(record) = records.next() {
-        entries += 1;
-        if entries > limits.status_entries {
-            return Err(GitError::TooManyEntries(entries));
-        }
-        let malformed = || GitError::Malformed(format!("status record {record:?}"));
-        match record.as_bytes().first() {
-            Some(b'1') => {
-                let fields: Vec<_> = record.splitn(9, ' ').collect();
-                let [_, _, sub, head_mode, _, _, _, _, path] = fields[..] else {
-                    return Err(malformed());
-                };
-                if !sub.starts_with('S') {
-                    dirty.insert(
-                        path.to_string(),
-                        DirtyEntry {
-                            head_mode: parse_mode(head_mode),
-                        },
-                    );
-                }
-            }
-            Some(b'2') => {
-                let fields: Vec<_> = record.splitn(10, ' ').collect();
-                let [_, _, sub, head_mode, _, _, _, _, _, path] = fields[..] else {
-                    return Err(malformed());
-                };
-                let original = records.next().ok_or_else(malformed)?;
-                if !sub.starts_with('S') {
-                    dirty.insert(
-                        path.to_string(),
-                        DirtyEntry {
-                            head_mode: parse_mode(head_mode),
-                        },
-                    );
-                    dirty.insert(original, DirtyEntry { head_mode: None });
-                }
-            }
-            Some(b'u') => {
-                let fields: Vec<_> = record.splitn(11, ' ').collect();
-                let [_, _, sub, head_mode, _, _, _, _, _, _, path] = fields[..] else {
-                    return Err(malformed());
-                };
-                if !sub.starts_with('S') {
-                    dirty.insert(
-                        path.to_string(),
-                        DirtyEntry {
-                            head_mode: parse_mode(head_mode),
-                        },
-                    );
-                }
-            }
-            Some(b'?') => {
-                let path = record.get(2..).ok_or_else(malformed)?;
-                dirty.insert(path.to_string(), DirtyEntry { head_mode: None });
-            }
-            _ => {}
-        }
+pub(crate) fn status(worktree: &Path, limits: &Limits) -> Result<BTreeSet<String>, GitError> {
+    let repo = repository(worktree)?;
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .exclude_submodules(true)
+        .renames_head_to_index(false)
+        .renames_index_to_workdir(false)
+        .update_index(false);
+
+    let entries = repo.statuses(Some(&mut options))?;
+
+    if entries.len() > limits.status_entries {
+        return Err(GitError::TooManyEntries(entries.len()));
     }
-    Ok(dirty)
+
+    entries
+        .iter()
+        .map(|entry| utf8_path(entry.path_bytes()))
+        .collect()
 }
 
-/// Paths that differ between two commits.
 pub(crate) fn changed_between(
     worktree: &Path,
-    from: &str,
+    from: Option<&str>,
     to: &str,
 ) -> Result<BTreeSet<String>, GitError> {
-    let output = run_git(
-        worktree,
-        &[
-            "diff",
-            "--name-only",
-            "-z",
-            "--no-renames",
-            "--ignore-submodules=all",
-            from,
-            to,
-            "--",
-        ],
-        None,
-    )?;
-    Ok(output
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .map(|path| String::from_utf8_lossy(path).into_owned())
-        .collect())
+    let repo = repository(worktree)?;
+    let old = from
+        .map(|from| repo.revparse_single(from)?.peel_to_tree())
+        .transpose()?;
+    let new = repo.revparse_single(to)?.peel_to_tree()?;
+
+    let mut options = git2::DiffOptions::new();
+    options.update_index(false);
+    let diff = repo.diff_tree_to_tree(old.as_ref(), Some(&new), Some(&mut options))?;
+
+    let mut paths = BTreeSet::new();
+
+    for delta in diff.deltas() {
+        if delta.old_file().mode() == git2::FileMode::Commit
+            || delta.new_file().mode() == git2::FileMode::Commit
+        {
+            continue;
+        }
+        for file in [delta.old_file(), delta.new_file()] {
+            if let Some(path) = file.path_bytes() {
+                paths.insert(utf8_path(path)?);
+            }
+        }
+    }
+
+    Ok(paths)
 }
 
 /// Running budget for content kept by one checkpoint.
@@ -436,13 +264,6 @@ impl CacheBudget {
         Self {
             paths: limits.cache_paths,
             bytes: limits.cache_bytes,
-        }
-    }
-
-    pub(crate) fn unlimited() -> Self {
-        Self {
-            paths: usize::MAX,
-            bytes: u64::MAX,
         }
     }
 
@@ -472,6 +293,7 @@ pub(crate) fn read_side(
         }
         Err(_) => return Side::Unreadable,
     };
+
     if metadata.file_type().is_symlink() {
         let Ok(target) = fs::read_link(&full) else {
             return Side::Unreadable;
@@ -479,24 +301,46 @@ pub(crate) fn read_side(
         let bytes = target.to_string_lossy().into_owned().into_bytes();
         return keep_or_digest(SYMLINK_MODE, bytes, limits, budget);
     }
+
     if !metadata.is_file() {
         return Side::Absent;
     }
+
     let mode = file_mode(&metadata);
     let Ok(mut file) = File::open(&full) else {
         return Side::Unreadable;
     };
+
+    let mut hasher = Sha256::new();
+    let mut size = 0_u64;
+
     if metadata.len() <= limits.side_bytes {
         let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        if file.read_to_end(&mut bytes).is_err() {
+        if file
+            .by_ref()
+            .take(limits.side_bytes + 1)
+            .read_to_end(&mut bytes)
+            .is_err()
+        {
             return Side::Unreadable;
         }
-        return keep_or_digest(mode, bytes, limits, budget);
+        if bytes.len() as u64 <= limits.side_bytes {
+            return keep_or_digest(mode, bytes, limits, budget);
+        }
+        // A growing file crossed the cap after metadata. Hash its remaining
+        // bytes too, rather than treating a prefix digest as a file identity.
+        hasher.update(&bytes);
+        size = bytes.len() as u64;
     }
-    let mut hasher = Sha256::new();
+
     let mut buffer = vec![0_u8; 64 * 1024];
-    let mut size = 0_u64;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+
     loop {
+        if std::time::Instant::now() >= deadline {
+            return Side::Unreadable;
+        }
+
         match file.read(&mut buffer) {
             Ok(0) => break,
             Ok(read) => {
@@ -507,6 +351,7 @@ pub(crate) fn read_side(
             Err(_) => return Side::Unreadable,
         }
     }
+
     Side::Opaque {
         mode,
         size,
@@ -517,6 +362,7 @@ pub(crate) fn read_side(
 
 fn keep_or_digest(mode: u32, bytes: Vec<u8>, limits: &Limits, budget: &mut CacheBudget) -> Side {
     let size = bytes.len() as u64;
+
     if size > limits.side_bytes {
         return Side::Opaque {
             mode,
@@ -525,6 +371,7 @@ fn keep_or_digest(mode: u32, bytes: Vec<u8>, limits: &Limits, budget: &mut Cache
             reason: MarkerReason::TooLarge,
         };
     }
+
     if budget.take(size) {
         Side::Content {
             mode,
@@ -543,6 +390,7 @@ fn keep_or_digest(mode: u32, bytes: Vec<u8>, limits: &Limits, budget: &mut Cache
 #[cfg(unix)]
 fn file_mode(metadata: &fs::Metadata) -> u32 {
     use std::os::unix::fs::PermissionsExt;
+
     if metadata.permissions().mode() & 0o111 != 0 {
         EXECUTABLE_MODE
     } else {
@@ -566,22 +414,79 @@ pub(crate) fn snapshot(
             "worktree is not on the intended branch".into(),
         ));
     }
-    let head = head(worktree)?;
+
+    let head = head_id(&repository(worktree)?)?;
     let dirty = status(worktree, limits)?;
+
     let mut budget = CacheBudget::new(limits);
     let files = dirty
-        .keys()
+        .iter()
         .map(|path| (path.clone(), read_side(worktree, path, limits, &mut budget)))
         .collect();
+
     if branch(worktree)?.as_deref() != Some(intended_branch) {
         return Err(GitError::Failed("branch changed during checkpoint".into()));
     }
+
     Ok(Snapshot {
         head,
         branch: intended_branch.to_owned(),
         dirty,
         files,
     })
+}
+
+/// Capture end candidates, including paths which became clean (or were
+/// committed) during a tool. Physical end bytes must be observed here, even
+/// when attributes make a file compare clean against its commit blob.
+pub(crate) fn snapshot_since(
+    worktree: &Path,
+    limits: &Limits,
+    intended_branch: &str,
+    start: Option<&Snapshot>,
+) -> Result<Snapshot, GitError> {
+    let mut end = snapshot(worktree, limits, intended_branch)?;
+
+    if let Some(start) = start {
+        let mut paths: BTreeSet<_> = start
+            .dirty
+            .iter()
+            .chain(end.dirty.iter())
+            .cloned()
+            .collect();
+
+        if let Some(to) = &end.head {
+            if start.head != end.head {
+                paths.extend(changed_between(worktree, start.head.as_deref(), to)?);
+            }
+        }
+
+        if paths.len() > limits.status_entries {
+            return Err(GitError::TooManyEntries(paths.len()));
+        }
+
+        // Reuse captured dirty sides, accounting for their retained content.
+        let mut budget = CacheBudget::new(limits);
+        for side in end.files.values() {
+            if let Side::Content { bytes, .. } = side {
+                budget.take(bytes.len() as u64);
+            }
+        }
+
+        for path in paths {
+            end.files
+                .entry(path.clone())
+                .or_insert_with(|| read_side(worktree, &path, limits, &mut budget));
+        }
+
+        if branch(worktree)?.as_deref() != Some(intended_branch) {
+            return Err(GitError::Failed(
+                "branch changed during end checkpoint".into(),
+            ));
+        }
+    }
+
+    Ok(end)
 }
 
 /// Blob contents of `paths` at `commit`. Paths absent from the commit map to
@@ -593,95 +498,41 @@ pub(crate) fn commit_sides(
     paths: &[(String, u32)],
     limits: &Limits,
 ) -> Result<BTreeMap<String, Side>, GitError> {
+    let repo = repository(worktree)?;
+    let tree = repo.revparse_single(commit)?.peel_to_tree()?;
+    let odb = repo.odb()?;
     let mut sides = BTreeMap::new();
-    let mut queried = Vec::new();
-    let mut input = Vec::new();
-    for (path, mode) in paths {
-        if path.contains('\n') {
-            sides.insert(path.clone(), Side::Unreadable);
-            continue;
-        }
-        input.extend_from_slice(format!("{commit}:{path}\n").as_bytes());
-        queried.push((path.clone(), *mode));
-    }
-    if queried.is_empty() {
-        return Ok(sides);
-    }
+    let mut budget = CacheBudget::new(limits);
 
-    let check = run_git(
-        worktree,
-        &["cat-file", "--batch-check=%(objecttype) %(objectsize)"],
-        Some(input),
-    )?;
-    let mut wanted = Vec::new();
-    let mut content_input = Vec::new();
-    let check = String::from_utf8_lossy(&check);
-    let mut lines = check.lines();
-    for (path, mode) in queried {
-        let line = lines
-            .next()
-            .ok_or_else(|| GitError::Malformed("short cat-file output".into()))?;
-        let mut fields = line.split(' ');
-        match (
-            fields.next(),
-            fields.next().and_then(|size| size.parse::<u64>().ok()),
-        ) {
-            (Some("blob"), Some(size)) if size <= limits.side_bytes => {
-                content_input.extend_from_slice(format!("{commit}:{path}\n").as_bytes());
-                wanted.push((path, mode));
-            }
-            (Some("blob"), Some(size)) => {
-                sides.insert(
-                    path,
+    for (path, _) in paths {
+        let side = match tree.get_path(Path::new(path)) {
+            Ok(entry) => {
+                let mode = entry.filemode() as u32;
+                let (size, kind) = odb.read_header(entry.id())?;
+                if kind != git2::ObjectType::Blob {
+                    Side::Unreadable
+                } else if size as u64 > limits.side_bytes {
                     Side::Opaque {
                         mode,
-                        size,
+                        size: size as u64,
                         digest: None,
                         reason: MarkerReason::TooLarge,
-                    },
-                );
+                    }
+                } else {
+                    keep_or_digest(
+                        mode,
+                        repo.find_blob(entry.id())?.content().to_vec(),
+                        limits,
+                        &mut budget,
+                    )
+                }
             }
-            _ if line.ends_with(" missing") => {
-                sides.insert(path, Side::Absent);
-            }
-            _ => {
-                sides.insert(path, Side::Unreadable);
-            }
-        }
-    }
-    if wanted.is_empty() {
-        return Ok(sides);
+            Err(error) if error.code() == git2::ErrorCode::NotFound => Side::Absent,
+            Err(error) => return Err(error.into()),
+        };
+        sides.insert(path.clone(), side);
     }
 
-    let output = run_git(
-        worktree,
-        &["cat-file", "--batch=%(objectsize)"],
-        Some(content_input),
-    )?;
-    let mut cursor = 0_usize;
-    for (path, mode) in wanted {
-        let newline = output[cursor..]
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .ok_or_else(|| GitError::Malformed("truncated cat-file header".into()))?;
-        let size: usize = String::from_utf8_lossy(&output[cursor..cursor + newline])
-            .trim()
-            .parse()
-            .map_err(|_| GitError::Malformed("cat-file size".into()))?;
-        let start = cursor + newline + 1;
-        let end = start + size;
-        if end > output.len() {
-            return Err(GitError::Malformed("truncated cat-file body".into()));
-        }
-        sides.insert(
-            path,
-            Side::Content {
-                mode,
-                bytes: output[start..end].into(),
-            },
-        );
-        cursor = end + 1;
-    }
     Ok(sides)
 }
 

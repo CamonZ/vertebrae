@@ -379,7 +379,7 @@ impl Recorder {
                     // A tool that left the worktree as it found it needs no
                     // settle: one snapshot equal to the checkpoint ends it.
                     let mut observed = match &checkpoint {
-                        Some(_) => self.snapshot().await.ok(),
+                        Some(_) => self.end_snapshot(checkpoint.clone()).await.ok(),
                         None => None,
                     };
                     let (end, cut_short, unchanged) = match (&checkpoint, observed.take()) {
@@ -387,7 +387,7 @@ impl Recorder {
                             (Ok(Arc::new(now)), false, true)
                         }
                         (_, observed) => {
-                            let settled = self.settle(observed).await;
+                            let settled = self.settle(observed, checkpoint.clone()).await;
                             let cut_short = matches!(settled, Ok((_, true)));
                             (
                                 settled.map(|(snapshot, _)| Arc::new(snapshot)),
@@ -506,17 +506,37 @@ impl Recorder {
         result
     }
 
+    // End observations keep all candidate sides up to the total cache-byte
+    // budget. The idle baseline's path budget must not force a late disk read
+    // or discard an otherwise renderable newly added file.
+    async fn end_snapshot(&self, start: Option<Arc<Snapshot>>) -> Result<Snapshot, GitError> {
+        let worktree = self.worktree.clone();
+        let mut limits = self.config.limits;
+        limits.cache_paths = limits.status_entries;
+        let intended = self.intended_branch.clone();
+
+        tokio::task::spawn_blocking(move || {
+            git::snapshot_since(&worktree, &limits, &intended, start.as_deref())
+        })
+        .await
+        .unwrap_or_else(|error| Err(GitError::Task(error.to_string())))
+    }
+
     /// Wait, then re-snapshot until two consecutive snapshots agree or the
     /// settle timeout passes; the last snapshot wins. `observed` is a snapshot
     /// taken as the tool finished. A queued root tool start ends the settle at
     /// once, and the segment then closes at the newest snapshot taken before
     /// that start: the starting tool may already be writing, and its first
     /// writes belong to it. Returns whether it was cut short.
-    async fn settle(&self, observed: Option<Snapshot>) -> Result<(Snapshot, bool), GitError> {
+    async fn settle(
+        &self,
+        observed: Option<Snapshot>,
+        start: Option<Arc<Snapshot>>,
+    ) -> Result<(Snapshot, bool), GitError> {
         let deadline = tokio::time::Instant::now() + self.config.settle_timeout;
         let mut last = match observed {
             Some(snapshot) => snapshot,
-            None => self.snapshot().await?,
+            None => self.end_snapshot(start.clone()).await?,
         };
         if !self.wait_unless_started(self.config.settle_delay).await {
             return Ok((last, true));
@@ -525,7 +545,7 @@ impl Recorder {
             if !self.wait_unless_started(self.config.settle_interval).await {
                 return Ok((last, true));
             }
-            let next = self.snapshot().await?;
+            let next = self.end_snapshot(start.clone()).await?;
             if self.gate.start_pending() {
                 return Ok((last, true));
             }
