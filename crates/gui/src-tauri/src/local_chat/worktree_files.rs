@@ -20,14 +20,12 @@ use std::path::{Component, Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use super::changes::baseline;
-use super::worktree_delta::git::{run_git_bounded, GitError};
+use super::worktree_delta::git::{self, GitError};
 
 /// Largest file opened as an editable text document or saved.
 pub(crate) const EDIT_LIMIT: u64 = 2 * 1024 * 1024;
 /// Entries read for one directory; the rest are reported as truncated.
 const DIRECTORY_LIMIT: usize = 5_000;
-/// Bound for single-line Git answers such as paths and object IDs.
-const LINE_LIMIT: usize = 4_096;
 /// Leading bytes searched for NUL when classifying text.
 const BINARY_SNIFF: usize = 8_000;
 
@@ -127,15 +125,8 @@ fn worktree_root(worktree: &Path) -> Result<PathBuf, FilesError> {
     if !root.is_dir() {
         return Err(not_worktree());
     }
-    let top = run_git_bounded(
-        &root,
-        &["rev-parse", "--show-toplevel"],
-        None,
-        LINE_LIMIT,
-        &[0],
-    )
-    .map_err(|_| not_worktree())?;
-    let top = std::str::from_utf8(top.trim_ascii_end()).map_err(|_| not_worktree())?;
+    let repo = git::repository(&root).map_err(|_| not_worktree())?;
+    let top = repo.workdir().ok_or_else(not_worktree)?;
     if fs::canonicalize(top).map_err(io)? == root {
         Ok(root)
     } else {
@@ -305,40 +296,38 @@ pub(crate) fn read_baseline(
     let root = worktree_root(worktree)?;
     let path = relative(path)?;
     let (_, commit) = baseline(&root, whole_branch).map_err(FilesError::Git)?;
-    // `./` keeps the path relative to the worktree rather than the repository.
-    // `--verify -q` exits 1 without output only when the path is absent; the
-    // baseline commit itself was verified above.
-    let object = run_git_bounded(
-        &root,
-        &["rev-parse", "--verify", "-q", &format!("{commit}:./{path}")],
-        None,
-        LINE_LIMIT,
-        &[0, 1],
-    )
-    .map_err(FilesError::Git)?;
-    let object = std::str::from_utf8(object.trim_ascii())
-        .map_err(|_| FilesError::Invalid("Git returned a malformed object ID".into()))?;
-    if object.is_empty() {
-        return Ok(FileBody::Missing);
-    }
-    let kind = run_git_bounded(&root, &["cat-file", "-t", object], None, LINE_LIMIT, &[0])
-        .map_err(FilesError::Git)?;
-    if kind.trim_ascii() != b"blob" {
+
+    let repo = git::repository(&root).map_err(FilesError::Git)?;
+    let tree = repo
+        .revparse_single(&commit)
+        .and_then(|object| object.peel_to_tree())
+        .map_err(|error| FilesError::Git(error.into()))?;
+    let entry = match tree.get_path(Path::new(&path)) {
+        Ok(entry) => entry,
+        Err(error) if error.code() == git2::ErrorCode::NotFound => return Ok(FileBody::Missing),
+        Err(error) => return Err(FilesError::Git(error.into())),
+    };
+
+    if entry.kind() != Some(git2::ObjectType::Blob) {
         return Ok(FileBody::Unreadable {
             message: format!("{path} is not a file at the baseline"),
         });
     }
-    match run_git_bounded(
-        &root,
-        &["cat-file", "blob", object],
-        None,
-        EDIT_LIMIT as usize,
-        &[0],
-    ) {
-        Ok(bytes) => Ok(classify(bytes)),
-        Err(GitError::OutputLimit) => Ok(FileBody::TooLarge),
-        Err(error) => Err(FilesError::Git(error)),
+
+    let odb = repo.odb().map_err(|error| FilesError::Git(error.into()))?;
+    let (size, _) = odb
+        .read_header(entry.id())
+        .map_err(|error| FilesError::Git(error.into()))?;
+
+    if size as u64 > EDIT_LIMIT {
+        return Ok(FileBody::TooLarge);
     }
+
+    let blob = repo
+        .find_blob(entry.id())
+        .map_err(|error| FilesError::Git(error.into()))?;
+
+    Ok(classify(blob.content().to_vec()))
 }
 
 /// Replace a text file only if it still holds `expected_revision`.

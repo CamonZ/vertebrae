@@ -5,7 +5,7 @@
 //! a bounded, non-blocking channel to one recorder task per runtime.
 
 pub(crate) mod git;
-mod patch;
+pub(super) mod patch;
 pub(crate) use patch::FileStatus;
 mod recorder;
 
