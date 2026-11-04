@@ -1322,10 +1322,27 @@ mod tests {
 #[specta::specta]
 pub async fn load_worktree_changes(
     worktree_path: String,
-    whole_branch: bool,
+    request: crate::local_chat::changes::ComparisonRequest,
 ) -> Result<crate::local_chat::changes::WorktreeChanges, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::local_chat::changes::load(Path::new(&worktree_path), whole_branch)
+        crate::local_chat::changes::load_comparison(Path::new(&worktree_path), request)
+    })
+    .await
+    .map_err(|error| CommandError {
+        message: error.to_string(),
+    })?
+    .map_err(|error| CommandError {
+        message: error.to_string(),
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_comparison_choices(
+    worktree_path: String,
+) -> Result<Vec<crate::local_chat::changes::ComparisonChoice>, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::local_chat::changes::choices(Path::new(&worktree_path))
     })
     .await
     .map_err(|error| CommandError {
@@ -1381,14 +1398,10 @@ pub async fn read_worktree_file(
 pub async fn read_worktree_baseline_file(
     worktree_path: String,
     path: String,
-    whole_branch: bool,
+    commit: String,
 ) -> Result<crate::local_chat::worktree_files::FileBody, CommandError> {
     worktree_files_task(move || {
-        crate::local_chat::worktree_files::read_baseline(
-            Path::new(&worktree_path),
-            &path,
-            whole_branch,
-        )
+        crate::local_chat::worktree_files::read_commit(Path::new(&worktree_path), &path, &commit)
     })
     .await
 }

@@ -311,3 +311,27 @@ describe("buildToolChain", () => {
     expect(buildToolChain(undefined)).toEqual([]);
   });
 });
+
+it("invalidates identical hunks when the resolved comparison identity changes", () => {
+  const snapshot = { ...worktree, comparisonIdentity: "feature-A..feature-B" };
+  const comment = createDiffComment({
+    id: "identity",
+    body: "note",
+    home: {
+      kind: "worktree",
+      wholeBranch: false,
+      comparisonIdentity: snapshot.comparisonIdentity,
+    },
+    file: snapshot.files[0],
+    span: { side: "new", startLine: 6, endLine: 6 },
+  })!;
+  expect(reconcileWorktreeComments([comment], snapshot)[0]).toMatchObject({
+    outdated: false,
+  });
+  expect(
+    reconcileWorktreeComments([comment], {
+      ...snapshot,
+      comparisonIdentity: "main..feature-B",
+    })[0]
+  ).toMatchObject({ outdated: true });
+});

@@ -15,12 +15,17 @@ import {
 import {
   commands,
   type FileStatus,
+  type ComparisonRequest,
+  type ComparisonEndpoint,
+  type ComparisonChoice,
   type WorktreeChanges as Changes,
 } from "../../bindings";
-import { countPatchLines } from "../thread/toolChange/worktreeDelta";
+import { usePierreDiffOptions } from "../../hooks/useCodeAppearance";
+import { useSidebarResize } from "./workspace/useSidebarResize";
+import { HistoricalDocument } from "./workspace/HistoricalDocument";
 import { type WorktreeSnapshot } from "../thread/toolChange/diffComments";
 
-import { Select } from "../atoms/Select";
+import { ComparisonSelect } from "./workspace/ComparisonSelect";
 import { preloadDiffRenderer } from "../thread/toolChange/useWorktreeDelta";
 import {
   activate,
@@ -40,6 +45,7 @@ import { FilesTree } from "./workspace/FilesTree";
 import { STATUS_LETTER } from "./workspace/status";
 import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
 import type { JumpTarget } from "./workspace/AllChangesView";
+import "./workspaceTabs.css";
 import "./worktreeChanges.css";
 
 const AllChangesView = lazy(() => import("./workspace/AllChangesView"));
@@ -73,7 +79,42 @@ export function WorktreeChanges({
   /** Called with the parsed All Changes patch after every successful load. */
   onChangesLoaded?: (snapshot: WorktreeSnapshot) => void;
 }) {
-  const [wholeBranch, setWholeBranch] = useState(true);
+  const [base, setBase] = useState<ComparisonEndpoint | null>(null);
+  const [target, setTarget] = useState<ComparisonEndpoint>({
+    kind: "working_tree",
+  });
+  const preferredDiffOptions = usePierreDiffOptions();
+  const [diffStyle, setDiffStyle] = useState(preferredDiffOptions.diffStyle);
+  const wholeBranch = base?.kind !== "head";
+
+  const [choices, setChoices] = useState<ComparisonChoice[]>([]);
+  const [choicesError, setChoicesError] = useState<string | null>(null);
+  const [historicalPath, setHistoricalPath] = useState<string | null>(null);
+
+  const comparisonRequest = useMemo<ComparisonRequest>(
+    () => ({ base, target, merge_base: wholeBranch }),
+    [base, target, wholeBranch]
+  );
+
+  const endpointKey = (endpoint: ComparisonEndpoint) =>
+    endpoint.kind === "head"
+      ? "head"
+      : endpoint.kind === "working_tree"
+        ? "working"
+        : JSON.stringify(endpoint);
+
+  const endpointFor = (value: string): ComparisonEndpoint | undefined =>
+    value === "head"
+      ? { kind: "head" }
+      : value === "working"
+        ? { kind: "working_tree" }
+        : choices.find((choice) => endpointKey(choice.endpoint) === value)
+            ?.endpoint;
+
+  const historical = comparisonRequest.target.kind !== "working_tree";
+
+  const resize = useSidebarResize();
+
   // Background refreshes keep the current list visible while Git runs.
   const [refresh, setRefresh] = useState({ count: 0, background: false });
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -87,6 +128,7 @@ export function WorktreeChanges({
   const [closeBusy, setCloseBusy] = useState(false);
   const fileListId = useId();
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
+
   // Narrow selections: typing in a draft must not re-render the workspace.
   const order = useDocumentStore(
     (store) => store.workspaces[worktreePath]?.order ?? NO_PATHS
@@ -96,6 +138,7 @@ export function WorktreeChanges({
   );
   const dirtyKey = useDocumentStore((store) => {
     const workspace = store.workspaces[worktreePath];
+
     return (workspace?.order ?? NO_PATHS)
       .filter((path) => isDirty(workspace?.documents[path]))
       .join("\n");
@@ -104,9 +147,33 @@ export function WorktreeChanges({
 
   // Warm Pierre and its highlight workers while Git computes the changes.
   useEffect(preloadDiffRenderer, []);
+
+  useEffect(() => {
+    let current = true;
+
+    setChoicesError(null);
+
+    commands
+      .listComparisonChoices(worktreePath)
+      .then((result) => {
+        if (!current) return;
+
+        if (result.status === "ok") setChoices(result.data);
+        else setChoicesError(result.error.message);
+      })
+      .catch((error: unknown) => {
+        if (current) setChoicesError(String(error));
+      });
+
+    return () => {
+      current = false;
+    };
+  }, [worktreePath, refresh.count]);
+
   const requestLoad = useRef<(() => void) | null>(null);
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
+
   useEffect(() => {
     let current = true;
     let running = false;
@@ -126,7 +193,7 @@ export function WorktreeChanges({
         try {
           const result = await commands.loadWorktreeChanges(
             worktreePath,
-            wholeBranch
+            comparisonRequest
           );
           if (!current) break;
 
@@ -175,19 +242,21 @@ export function WorktreeChanges({
       controller.abort();
       requestLoad.current = null;
     };
-  }, [worktreePath, wholeBranch]);
+  }, [worktreePath, wholeBranch, comparisonRequest]);
 
   useEffect(() => {
     requestLoad.current?.();
-  }, [worktreePath, wholeBranch, refresh]);
+  }, [worktreePath, wholeBranch, comparisonRequest, refresh]);
 
   const onChangesLoadedRef = useRef(onChangesLoaded);
   onChangesLoadedRef.current = onChangesLoaded;
 
   useEffect(() => {
     if (state.status !== "ready") return;
+
     onChangesLoadedRef.current?.({
       wholeBranch: state.wholeBranch,
+      comparisonIdentity: JSON.stringify(state.data.comparison),
       files: state.parsed.flatMap((file) => file.reviewFiles),
     });
   }, [state]);
@@ -204,16 +273,7 @@ export function WorktreeChanges({
   const files = useMemo(
     () =>
       state.status === "ready"
-        ? state.data.files.map((item) => {
-            const counts = [...countPatchLines(item.patch).values()].reduce(
-              (sum, value) => ({
-                additions: sum.additions + value.additions,
-                deletions: sum.deletions + value.deletions,
-              }),
-              { additions: 0, deletions: 0 }
-            );
-            return { ...item, summary: counts };
-          })
+        ? state.data.files.map((item) => ({ ...item, summary: item.totals }))
         : [],
     [state]
   );
@@ -230,18 +290,23 @@ export function WorktreeChanges({
     activate(worktreePath, null);
     setJumpTarget((current) => ({ path, nonce: (current?.nonce ?? 0) + 1 }));
   };
+
   const open = (path: string, view: "file" | "diff") => {
     setActivePath(path);
-    openDocument(worktreePath, path, view);
+    if (historical) setHistoricalPath(path);
+    else openDocument(worktreePath, path, view);
   };
+
   const save = (path: string) =>
     void saveDocument(worktreePath, path).then((saved) => {
       if (saved) refreshAll();
     });
+
   const requestClose = (path: string) => {
     if (isDirty(documentOf(worktreePath, path))) setClosing(path);
     else closeDocument(worktreePath, path);
   };
+
   const onKeyDownCapture = (event: KeyboardEvent) => {
     if (
       closing == null &&
@@ -250,7 +315,7 @@ export function WorktreeChanges({
       event.key.toLowerCase() === "s"
     ) {
       event.preventDefault();
-      if (activeDocument) save(activeDocument);
+      if (!historical && activeDocument) save(activeDocument);
     }
   };
 
@@ -275,6 +340,7 @@ export function WorktreeChanges({
             parsedPatches={state.parsed}
             jumpTarget={jumpTarget}
             onOpen={(path) => open(path, "diff")}
+            diffStyle={diffStyle}
           />
         </Suspense>
       </div>
@@ -287,29 +353,79 @@ export function WorktreeChanges({
       onKeyDownCapture={onKeyDownCapture}
     >
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex min-w-0 flex-1 items-center gap-2 text-xs text-[var(--color-fg-mute)]">
-          Baseline
-          <Select
-            aria-label="Changes baseline"
-            value={wholeBranch ? "branch" : "head"}
-            onChange={(event) => {
-              setWholeBranch(event.target.value === "branch");
-              setRefresh((value) => ({
-                count: value.count + 1,
-                background: false,
-              }));
-            }}
-            options={[
-              {
-                value: "branch",
-                label: baseBranch
-                  ? `Whole branch · merge-base with ${baseBranch}`
-                  : "Whole branch",
-              },
-              { value: "head", label: "Uncommitted · working tree vs HEAD" },
-            ]}
-          />
-        </label>
+        <div className="changes-comparison-controls">
+          <label>
+            Base
+            <ComparisonSelect
+              label="Comparison base"
+              value={base ? endpointKey(base) : "auto"}
+              onChange={(value) => {
+                const endpoint = value === "auto" ? null : endpointFor(value);
+
+                if (endpoint !== undefined) {
+                  setBase(endpoint);
+                  setRefresh((value) => ({
+                    count: value.count + 1,
+                    background: false,
+                  }));
+                }
+              }}
+              options={[
+                {
+                  value: "auto",
+                  label: baseBranch
+                    ? `${baseBranch.replace(/^refs\/(heads|remotes)\//, "")} (default)`
+                    : "Default branch",
+                },
+                { value: "head", label: "HEAD (current commit)" },
+                ...choices.map((choice) => ({
+                  value: JSON.stringify(choice.endpoint),
+                  label: choice.label.replace(/^refs\/(heads|remotes)\//, ""),
+                })),
+              ]}
+            />
+          </label>
+          <label>
+            Compare
+            <ComparisonSelect
+              label="Comparison target"
+              value={endpointKey(target)}
+              onChange={(value) => {
+                const endpoint = endpointFor(value);
+
+                if (endpoint) {
+                  setTarget(endpoint);
+                  setHistoricalPath(null);
+                  setMode("changes");
+                  setRefresh((value) => ({
+                    count: value.count + 1,
+                    background: false,
+                  }));
+                }
+              }}
+              options={[
+                { value: "working", label: "Working tree (current changes)" },
+                { value: "head", label: "HEAD (current commit)" },
+                ...choices.map((choice) => ({
+                  value: JSON.stringify(choice.endpoint),
+                  label: choice.label.replace(/^refs\/(heads|remotes)\//, ""),
+                })),
+              ]}
+            />
+          </label>
+        </div>
+        <div role="group" aria-label="Diff layout" className="document-views">
+          {(["unified", "split"] as const).map((style) => (
+            <button
+              key={style}
+              type="button"
+              aria-pressed={diffStyle === style}
+              onClick={() => setDiffStyle(style)}
+            >
+              {style === "unified" ? "Unified" : "Split"}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           className="changes-refresh"
@@ -340,6 +456,37 @@ export function WorktreeChanges({
           </svg>
         </button>
       </div>
+      {choicesError && (
+        <p role="status">
+          Comparison choices unavailable: {choicesError}. Refresh to retry.
+        </p>
+      )}
+      {state.status === "ready" && (
+        <div className="changes-summary" role="status">
+          <div className="changes-totals" aria-label="Comparison totals">
+            <span className="changes-total-files">
+              {files.length}{" "}
+              <span>{files.length === 1 ? "file" : "files"}</span>
+            </span>
+            <span className="changes-total-added">
+              +{state.data.totals.additions}
+            </span>
+            <span className="changes-total-deleted">
+              −{state.data.totals.deletions}
+            </span>
+            {state.data.totals.binary_files > 0 && (
+              <span className="changes-total-binary">
+                {state.data.totals.binary_files} binary
+              </span>
+            )}
+          </div>
+          <span className="changes-summary-note">
+            {state.data.comparison.working_tree
+              ? "Includes active working tree: staged, unstaged and untracked"
+              : "Committed contents only · read-only · linked worktree dirty files excluded"}
+          </span>
+        </div>
+      )}
       {watchError && (
         <p role="status">
           Automatic refresh unavailable: {watchError}. Use Refresh to update.
@@ -348,16 +495,20 @@ export function WorktreeChanges({
       {state.status === "ready" && state.data.base_unavailable && (
         <p role="status">{state.data.base_unavailable}</p>
       )}
-      <div className="flex min-h-0 flex-1 gap-3">
+      <div
+        ref={resize.containerRef}
+        className="changes-workspace flex min-h-0 flex-1"
+      >
         <aside
           className={`changes-files-panel${filesOpen ? "" : " is-collapsed"}`}
+          style={{ flexBasis: filesOpen ? resize.width : 36 }}
         >
           <div className="changes-files-header">
             {filesOpen && (
               <div
                 role="group"
                 aria-label="Sidebar mode"
-                className="changes-modes"
+                className="changes-modes workspace-tabs"
               >
                 <button
                   type="button"
@@ -371,6 +522,7 @@ export function WorktreeChanges({
                   type="button"
                   aria-pressed={mode === "files"}
                   onClick={() => setMode("files")}
+                  disabled={historical}
                 >
                   Files
                 </button>
@@ -443,7 +595,7 @@ export function WorktreeChanges({
                                 </span>
                               )}
                             </span>
-                            {!item.marker && (
+                            {item.totals.binary_files === 0 && (
                               <span className="changes-file-stats">
                                 <span className="changes-file-added">
                                   +{item.summary.additions}
@@ -458,23 +610,10 @@ export function WorktreeChanges({
                             type="button"
                             className="changes-file-open"
                             aria-label={`Open ${item.path}`}
-                            title="Open file"
+                            title="Open"
                             onClick={() => open(item.path, "diff")}
                           >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <path d="M12 20h9" />
-                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                            </svg>
+                            Open
                           </button>
                         </li>
                       );
@@ -483,7 +622,7 @@ export function WorktreeChanges({
                 </nav>
               )}
               <div
-                hidden={mode !== "files"}
+                hidden={mode !== "files" || historical}
                 className="flex min-h-0 flex-1 flex-col"
               >
                 <FilesTree
@@ -497,48 +636,73 @@ export function WorktreeChanges({
             </div>
           )}
         </aside>
+        {filesOpen && (
+          <div {...resize.handleProps} className="changes-resize-handle" />
+        )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-          <nav aria-label="Open documents" className="changes-tabs">
+          <nav
+            aria-label="Open documents"
+            className="changes-tabs workspace-tabs"
+          >
             <button
               type="button"
               className="changes-tab"
-              aria-current={activeDocument == null ? "page" : undefined}
-              onClick={() => activate(worktreePath, null)}
+              aria-current={
+                (historical ? historicalPath == null : activeDocument == null)
+                  ? "page"
+                  : undefined
+              }
+              onClick={() => {
+                activate(worktreePath, null);
+                setHistoricalPath(null);
+              }}
             >
               All changes
             </button>
-            {order.map((path) => (
-              <span key={path} className="changes-tab-group">
-                <button
-                  type="button"
-                  className="changes-tab"
-                  aria-current={activeDocument === path ? "page" : undefined}
-                  title={path}
-                  onClick={() => {
-                    setActivePath(path);
-                    activate(worktreePath, path);
-                  }}
-                >
-                  {path.slice(path.lastIndexOf("/") + 1)}
-                  {dirty.has(path) && (
-                    <span className="changes-tab-dirty">
-                      <span aria-hidden="true">{" ●"}</span>
-                      <span className="sr-only"> (unsaved)</span>
-                    </span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="changes-tab-close"
-                  aria-label={`Close ${path}`}
-                  onClick={() => requestClose(path)}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
+            {!historical &&
+              order.map((path) => (
+                <span key={path} className="changes-tab-group">
+                  <button
+                    type="button"
+                    className="changes-tab"
+                    aria-current={activeDocument === path ? "page" : undefined}
+                    title={path}
+                    onClick={() => {
+                      setActivePath(path);
+                      activate(worktreePath, path);
+                    }}
+                  >
+                    {path.slice(path.lastIndexOf("/") + 1)}
+                    {dirty.has(path) && (
+                      <span className="changes-tab-dirty">
+                        <span aria-hidden="true">{" ●"}</span>
+                        <span className="sr-only"> (unsaved)</span>
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="changes-tab-close"
+                    aria-label={`Close ${path}`}
+                    onClick={() => requestClose(path)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
           </nav>
-          {activeDocument == null ? (
+          {historical && historicalPath && state.status === "ready" ? (
+            <HistoricalDocument
+              key={`${historicalPath}:${state.data.comparison.base_commit}:${state.data.comparison.target_commit}`}
+              worktreePath={worktreePath}
+              path={historicalPath}
+              change={state.data.files.find(
+                (file) => file.path === historicalPath
+              )}
+              comparison={state.data.comparison}
+              diffStyle={diffStyle}
+            />
+          ) : historical || activeDocument == null ? (
             changesBody
           ) : (
             <DocumentPane
@@ -546,8 +710,13 @@ export function WorktreeChanges({
               worktreePath={worktreePath}
               path={activeDocument}
               change={files.find((file) => file.path === activeDocument)}
-              wholeBranch={wholeBranch}
+              baselineCommit={
+                state.status === "ready"
+                  ? state.data.comparison.base_commit
+                  : null
+              }
               changesGeneration={generation}
+              diffStyle={diffStyle}
               onSave={save}
               onSaved={refreshAll}
             />

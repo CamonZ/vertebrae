@@ -1,3 +1,4 @@
+import type { DiffPreferences } from "../../../utils/codeAppearance";
 import { lazy, Suspense, useEffect } from "react";
 import type { WorktreeChange } from "../../../bindings";
 import {
@@ -19,11 +20,12 @@ export interface DocumentPaneProps {
   path: string;
   /** The file's entry in the changes list, when it has one. */
   change: WorktreeChange | undefined;
-  wholeBranch: boolean;
+  baselineCommit: string | null;
   /** Bumped whenever the changes list reloads, so baselines are re-read. */
   changesGeneration: number;
   onSave(path: string): void;
   onSaved(): void;
+  diffStyle?: DiffPreferences["diffStyle"];
 }
 
 function unavailable(body: Body, side: string): string | null {
@@ -45,10 +47,11 @@ export function DocumentPane({
   worktreePath,
   path,
   change,
-  wholeBranch,
+  baselineCommit,
   changesGeneration,
   onSave,
   onSaved,
+  diffStyle,
 }: DocumentPaneProps) {
   const document = useDocumentStore(
     (state) => state.workspaces[worktreePath]?.documents[path]
@@ -58,19 +61,19 @@ export function DocumentPane({
     change?.status === "deleted" && document?.disk.kind === "missing";
   const view = deleted ? "diff" : diffable ? document?.view : "file";
   const sourcePath = change?.old_path ?? path;
-  const baselineKey = `${wholeBranch}:${sourcePath}:${changesGeneration}`;
+  const baselineKey = `${baselineCommit}:${sourcePath}:${changesGeneration}`;
 
   useEffect(() => {
-    if (view === "diff") {
+    if (view === "diff" && baselineCommit) {
       void loadBaseline(
         worktreePath,
         path,
         sourcePath,
-        wholeBranch,
+        baselineCommit,
         baselineKey
       );
     }
-  }, [view, worktreePath, path, sourcePath, wholeBranch, baselineKey]);
+  }, [view, worktreePath, path, sourcePath, baselineCommit, baselineKey]);
 
   if (!document) return null;
   const dirty = isDirty(document);
@@ -84,7 +87,7 @@ export function DocumentPane({
     body = <p className="changes-file-fallback">{diskProblem}</p>;
   } else if (document.disk.kind === "missing" && !deleted) {
     body = <p className="changes-file-fallback">This file no longer exists.</p>;
-  } else if (view === "diff") {
+  } else if (view === "diff" && baselineCommit) {
     const baseline = document.baseline?.body ?? { kind: "loading" };
     const baselineProblem = unavailable(baseline, "baseline");
     body =
@@ -102,6 +105,7 @@ export function DocumentPane({
             key={`diff:${document.seed}`}
             path={path}
             view="diff"
+            diffStyle={diffStyle}
             contents={deleted ? null : text}
             baseline={baseline.kind === "text" ? baseline.contents : null}
             onChange={(next) => setDraft(worktreePath, path, next)}

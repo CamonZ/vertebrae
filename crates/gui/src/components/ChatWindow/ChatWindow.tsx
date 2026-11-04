@@ -1,3 +1,4 @@
+import "./workspaceTabs.css";
 import { useBackgroundTask } from "../../background/useBackgroundTask";
 import type { BackgroundTask } from "../../background/types";
 import {
@@ -356,7 +357,7 @@ export function ChatWindow({
         <div
           role="group"
           aria-label="Chat view"
-          className="flex gap-3 border-b border-white/10 px-3 py-2 text-sm"
+          className="workspace-tabs chat-view-tabs"
         >
           <button
             type="button"

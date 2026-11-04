@@ -19,6 +19,9 @@ const state = vi.hoisted(() => ({
 
 vi.mock("../../bindings", () => ({
   commands: {
+    listComparisonChoices: vi
+      .fn()
+      .mockResolvedValue({ status: "ok", data: [] }),
     loadWorktreeChanges: state.load,
     listWorktreeDirectory: vi.fn(async () => ({
       status: "ok",
@@ -69,11 +72,24 @@ const file = (path: string) => ({
   old_path: null,
   status: "modified",
   marker: null,
+  totals: { additions: 1, deletions: 1, binary_files: 0 },
   patch: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+b\n`,
 });
 const loaded = (path: string) => ({
   status: "ok",
-  data: { files: [file(path)], base_branch: "master", base_unavailable: null },
+  data: {
+    files: [file(path)],
+    base_branch: "master",
+    base_unavailable: null,
+    comparison: {
+      base_commit: "base",
+      selected_base_commit: "base",
+      target_commit: "head",
+      working_tree: true,
+      merge_base: true,
+    },
+    totals: { additions: 1, deletions: 1, binary_files: 0 },
+  },
 });
 const finish = async (index: number) => {
   await act(async () =>

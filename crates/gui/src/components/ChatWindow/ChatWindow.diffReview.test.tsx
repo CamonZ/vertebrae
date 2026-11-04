@@ -120,17 +120,29 @@ vi.mock("../../bindings", async () => {
   const { withBuiltinProviders } = await import("../../test/localChatCatalog");
   return {
     commands: {
+      listComparisonChoices: vi
+        .fn()
+        .mockResolvedValue({ status: "ok", data: [] }),
       loadWorktreeChanges: vi.fn().mockImplementation(async () => ({
         status: "ok",
         data: {
           base_branch: null,
           base_unavailable: null,
+          comparison: {
+            base_commit: "base-sha",
+            selected_base_commit: "base-sha",
+            target_commit: "head-sha",
+            working_tree: true,
+            merge_base: true,
+          },
+          totals: { additions: 2, deletions: 2, binary_files: 0 },
           files: [
             {
               path: "f.ts",
               old_path: null,
               status: "modified",
               marker: null,
+              totals: { additions: 1, deletions: 1, binary_files: 0 },
               patch: ALL,
             },
           ],
@@ -435,12 +447,21 @@ describe("ChatWindow diff review comments", () => {
       data: {
         base_branch: null,
         base_unavailable: null,
+        comparison: {
+          base_commit: "base-sha",
+          selected_base_commit: "base-sha",
+          target_commit: "head-sha",
+          working_tree: true,
+          merge_base: true,
+        },
+        totals: { additions: 2, deletions: 2, binary_files: 0 },
         files: [
           {
             path: "f.ts",
             old_path: null,
             status: "modified",
             marker: null,
+            totals: { additions: 1, deletions: 1, binary_files: 0 },
             patch: moved,
           },
         ],

@@ -1,3 +1,4 @@
+import type { DiffPreferences } from "../../../utils/codeAppearance";
 import { useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
   CodeView,
@@ -27,6 +28,7 @@ export interface AllChangesViewProps {
   /** Scroll the shared viewport to this changed file. */
   jumpTarget: JumpTarget | null;
   onOpen(path: string): void;
+  diffStyle?: DiffPreferences["diffStyle"];
 }
 
 const FALLBACK_ATTRIBUTE = "data-changes-fallback";
@@ -42,6 +44,7 @@ export default function AllChangesView({
   parsedPatches,
   jumpTarget,
   onOpen,
+  diffStyle,
 }: AllChangesViewProps): ReactNode {
   const options = usePierreDiffOptions();
   const viewRef = useRef<CodeViewHandle<ReviewAnnotation, undefined>>(null);
@@ -130,6 +133,7 @@ export default function AllChangesView({
   const codeViewOptions = useMemo(
     () => ({
       ...options,
+      ...(diffStyle ? { diffStyle } : {}),
       stickyHeaders: true,
       ...(review.enabled
         ? {
@@ -148,7 +152,7 @@ export default function AllChangesView({
           }
         : {}),
     }),
-    [options, review.enabled, openComposer, itemPaths]
+    [options, diffStyle, review.enabled, openComposer, itemPaths]
   );
 
   // Bring a requested comment into view once per request.

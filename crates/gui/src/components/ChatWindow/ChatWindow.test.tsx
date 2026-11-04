@@ -34,9 +34,24 @@ vi.mock("../../bindings", async () => {
   const { withBuiltinProviders } = await import("../../test/localChatCatalog");
   return {
     commands: {
+      listComparisonChoices: vi
+        .fn()
+        .mockResolvedValue({ status: "ok", data: [] }),
       loadWorktreeChanges: vi.fn().mockResolvedValue({
         status: "ok",
-        data: { base_branch: null, base_unavailable: "No base", files: [] },
+        data: {
+          base_branch: null,
+          base_unavailable: "No base",
+          files: [],
+          comparison: {
+            base_commit: "base",
+            selected_base_commit: "base",
+            target_commit: "head",
+            working_tree: true,
+            merge_base: true,
+          },
+          totals: { additions: 0, deletions: 0, binary_files: 0 },
+        },
       }),
       listWorktreeDirectory: vi.fn().mockResolvedValue({
         status: "ok",
@@ -232,7 +247,7 @@ describe("ChatWindow", () => {
     await waitFor(() =>
       expect(mockedCommands.loadWorktreeChanges).toHaveBeenLastCalledWith(
         "/new-worktree",
-        true
+        { base: null, target: { kind: "working_tree" }, merge_base: true }
       )
     );
   });

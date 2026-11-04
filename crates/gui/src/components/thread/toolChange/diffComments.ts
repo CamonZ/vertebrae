@@ -29,6 +29,7 @@ import { parseWorktreeDelta } from "./worktreeDelta";
 /** The All Changes patch as last loaded, parsed. */
 export interface WorktreeSnapshot {
   wholeBranch: boolean;
+  comparisonIdentity?: string;
   files: readonly FilePatch[];
 }
 
@@ -264,7 +265,10 @@ export function reconcileWorktreeComments(
     const rebuilt = file
       ? captureHunk(file, comment.side, comment.endLine)
       : null;
-    const outdated = rebuilt !== comment.hunk;
+    const outdated =
+      rebuilt !== comment.hunk ||
+      (comment.home.comparisonIdentity !== undefined &&
+        comment.home.comparisonIdentity !== worktree.comparisonIdentity);
     if (outdated === comment.outdated) return comment;
     changed = true;
     return { ...comment, outdated };
