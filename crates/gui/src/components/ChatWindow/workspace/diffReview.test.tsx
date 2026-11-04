@@ -133,6 +133,7 @@ const worktreeFiles: WorktreeChange[] = [
     old_path: null,
     status: "modified",
     marker: null,
+    totals: { additions: 1, deletions: 1, binary_files: 0 },
     patch: ALL,
   },
 ];
@@ -346,6 +347,7 @@ describe("diff review across PatchFiles and AllChangesView", () => {
         old_path: null,
         status: "modified",
         marker: null,
+        totals: { additions: 1, deletions: 1, binary_files: 0 },
         patch: TWO,
       },
     ];

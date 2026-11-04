@@ -1,0 +1,54 @@
+/* Conversation, explorer modes and open files share one quiet tab treatment. */
+.workspace-tabs {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  border-bottom: 1px solid var(--color-line);
+  font-family: var(--font-sans);
+}
+
+.workspace-tabs > button,
+.workspace-tabs .changes-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font: 500 12px/1.4 var(--font-sans);
+  color: var(--color-fg-soft);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-tabs > button:hover:not(:disabled),
+.workspace-tabs .changes-tab:hover {
+  color: var(--color-fg);
+  background: var(--color-bg-hover);
+}
+
+.workspace-tabs > button[aria-pressed="true"],
+.workspace-tabs .changes-tab[aria-current="page"] {
+  border-bottom-color: var(--color-fg-mute);
+  color: var(--color-fg);
+}
+
+.workspace-tabs > button:focus-visible,
+.workspace-tabs .changes-tab:focus-visible {
+  outline: 2px solid var(--color-fg-mute);
+  outline-offset: -2px;
+}
+
+.workspace-tabs > button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-view-tabs {
+  padding: 0 12px;
+}

@@ -12,6 +12,7 @@ export type Body =
 export interface Baseline {
   /** Baseline selection, source path and changes generation it was read for. */
   key: string;
+  identity: string;
   body: Body;
 }
 
@@ -231,22 +232,26 @@ export async function loadBaseline(
   worktree: string,
   path: string,
   sourcePath: string,
-  wholeBranch: boolean,
+  commit: string,
   key: string
 ): Promise<void> {
   const document = documentOf(worktree, path);
   if (!document || document.baseline?.key === key) return;
-  const previous = document.baseline?.body;
-  // Re-reads keep showing the previous baseline until the new one lands.
+  const identity = JSON.stringify([commit, sourcePath]);
+  const previous =
+    document.baseline?.identity === identity
+      ? document.baseline.body
+      : undefined;
+  // Hide the previous side until the requested commit has been read.
   updateDocument(worktree, path, () => ({
-    baseline: { key, body: previous ?? { kind: "loading" } },
+    baseline: { key, identity, body: previous ?? { kind: "loading" } },
   }));
   let body: Body;
   try {
     const result = await commands.readWorktreeBaselineFile(
       worktree,
       sourcePath,
-      wholeBranch
+      commit
     );
     body =
       result.status === "ok"
@@ -263,8 +268,8 @@ export async function loadBaseline(
         (previous.kind === "text" && previous.revision === body.revision));
     // Remount the diff editor only when the baseline it shows changed.
     return unchanged
-      ? { baseline: { key, body } }
-      : { baseline: { key, body }, seed: current.seed + 1 };
+      ? { baseline: { key, identity, body } }
+      : { baseline: { key, identity, body }, seed: current.seed + 1 };
   });
 }
 

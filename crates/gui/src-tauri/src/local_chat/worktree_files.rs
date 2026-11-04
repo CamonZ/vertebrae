@@ -19,6 +19,7 @@ use std::path::{Component, Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
 use super::changes::baseline;
 use super::worktree_delta::git::{self, GitError};
 
@@ -287,15 +288,21 @@ pub(crate) fn read_file(worktree: &Path, path: &str) -> Result<FileBody, FilesEr
     })
 }
 
+#[cfg(test)]
+fn read_baseline(worktree: &Path, path: &str, whole_branch: bool) -> Result<FileBody, FilesError> {
+    let (_, commit) = baseline(worktree, whole_branch).map_err(FilesError::Git)?;
+    read_commit(worktree, path, &commit)
+}
+
 /// Read one file at the selected baseline: `HEAD`, or the branch merge-base.
-pub(crate) fn read_baseline(
+pub(crate) fn read_commit(
     worktree: &Path,
     path: &str,
-    whole_branch: bool,
+    commit: &str,
 ) -> Result<FileBody, FilesError> {
     let root = worktree_root(worktree)?;
     let path = relative(path)?;
-    let (_, commit) = baseline(&root, whole_branch).map_err(FilesError::Git)?;
+    let commit = super::changes::resolve_commit(&root, commit).map_err(FilesError::Git)?;
 
     let repo = git::repository(&root).map_err(FilesError::Git)?;
     let tree = repo

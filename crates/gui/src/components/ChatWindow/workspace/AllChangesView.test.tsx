@@ -14,6 +14,7 @@ import type { WorktreeChange } from "../../../bindings";
 
 const scrollTo = vi.fn();
 let renderedItems: readonly CodeViewDiffItem[] = [];
+let renderedDiffStyle: string | undefined;
 
 // CodeView needs real layout; this stand-in records its items and scrolls.
 vi.mock("@pierre/diffs/react", async (importOriginal) => {
@@ -23,6 +24,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
     CodeView: forwardRef(function CodeView(
       props: {
         items: readonly CodeViewDiffItem[];
+        options: { diffStyle?: string };
         renderHeaderMetadata(item: CodeViewDiffItem): ReactNode;
         renderCodeViewHeader?(): ReactNode;
         containerRef?: Ref<HTMLDivElement>;
@@ -31,6 +33,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
     ) {
       useImperativeHandle(ref, () => ({ scrollTo }));
       renderedItems = props.items;
+      renderedDiffStyle = props.options.diffStyle;
       return (
         <div ref={props.containerRef}>
           {props.renderCodeViewHeader?.()}
@@ -51,6 +54,7 @@ const files: WorktreeChange[] = [
     old_path: null,
     status: "modified",
     marker: null,
+    totals: { additions: 1, deletions: 1, binary_files: 0 },
     patch: patch("a.ts"),
   },
   {
@@ -58,6 +62,7 @@ const files: WorktreeChange[] = [
     old_path: null,
     status: "added",
     marker: "binary",
+    totals: { additions: 1, deletions: 1, binary_files: 0 },
     patch: "",
   },
   {
@@ -65,6 +70,7 @@ const files: WorktreeChange[] = [
     old_path: null,
     status: "modified",
     marker: null,
+    totals: { additions: 1, deletions: 1, binary_files: 0 },
     patch: "",
   },
 ];
@@ -140,3 +146,15 @@ function AllChangesView(props: Omit<AllChangesViewProps, "parsedPatches">) {
 
   return <AllChangesRenderer {...props} parsedPatches={parsedPatches} />;
 }
+
+it("passes a workspace layout change to Pierre while preserving prepared diff items", () => {
+  const props = { files, jumpTarget: null, onOpen: vi.fn() };
+  const { rerender } = render(
+    <AllChangesView {...props} diffStyle="unified" />
+  );
+  expect(renderedDiffStyle).toBe("unified");
+  const diff = renderedItems[0].fileDiff;
+  rerender(<AllChangesView {...props} diffStyle="split" />);
+  expect(renderedDiffStyle).toBe("split");
+  expect(renderedItems[0].fileDiff).toBe(diff);
+});

@@ -25,6 +25,9 @@ vi.mock("./workspace/useWorktreeWatch", () => ({
 vi.mock("../../bindings", () => ({
   commands: {
     loadWorktreeChanges: vi.fn(),
+    listComparisonChoices: vi
+      .fn()
+      .mockResolvedValue({ status: "ok", data: [] }),
     listWorktreeDirectory: vi.fn(),
     readWorktreeFile: vi.fn(),
     readWorktreeBaselineFile: vi.fn(),
@@ -33,8 +36,8 @@ vi.mock("../../bindings", () => ({
 }));
 // Pierre stand-ins: the editor captures its contents at mount like the real one.
 vi.mock("./workspace/AllChangesView", () => ({
-  default: ({ files, jumpTarget, onOpen }: AllChangesViewProps) => (
-    <div>
+  default: ({ files, jumpTarget, onOpen, diffStyle }: AllChangesViewProps) => (
+    <div data-testid="all-diffs" data-layout={diffStyle}>
       {files.map((file) => (
         <section key={file.path} aria-label={`Diff for ${file.path}`}>
           <pre>{file.marker ?? file.patch}</pre>
@@ -54,8 +57,9 @@ vi.mock("./workspace/DocumentEditor", () => ({
     contents,
     baseline,
     onChange,
+    diffStyle,
   }: DocumentEditorProps) => (
-    <div>
+    <div data-testid="document-editor" data-layout={diffStyle}>
       <p>
         {view} editor for {path}
       </p>
@@ -82,6 +86,14 @@ const save = vi.mocked(commands.saveWorktreeFile);
 const empty: Changes = {
   base_branch: "refs/heads/main",
   base_unavailable: null,
+  comparison: {
+    base_commit: "base-sha",
+    selected_base_commit: "base-sha",
+    target_commit: "head-sha",
+    working_tree: true,
+    merge_base: true,
+  },
+  totals: { additions: 2, deletions: 2, binary_files: 0 },
   files: [],
 };
 const modified: Changes = {
@@ -92,6 +104,7 @@ const modified: Changes = {
       old_path: null,
       status: "modified",
       marker: null,
+      totals: { additions: 1, deletions: 1, binary_files: 0 },
       patch:
         "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n",
     },
@@ -100,6 +113,7 @@ const modified: Changes = {
       old_path: null,
       status: "deleted",
       marker: null,
+      totals: { additions: 1, deletions: 1, binary_files: 0 },
       patch:
         "diff --git a/gone.txt b/gone.txt\n--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n",
     },
@@ -190,6 +204,15 @@ async function openChangedFile() {
   return view;
 }
 
+function selectComparison(control: HTMLElement, value: string) {
+  fireEvent.click(control);
+  const option = screen
+    .getAllByRole("option")
+    .find((item) => item.getAttribute("data-value") === value);
+  if (!option) throw new Error(`Missing comparison option: ${value}`);
+  fireEvent.click(option);
+}
+
 describe("WorktreeChanges", () => {
   it("defaults to the whole branch on open and refresh and can select Uncommitted", async () => {
     render(<WorktreeChanges worktreePath="/worktree" />);
@@ -202,15 +225,21 @@ describe("WorktreeChanges", () => {
       screen.getByRole("button", { name: "Refresh changes" })
     ).toBeDisabled();
     await screen.findByText("No changes against this baseline.");
-    expect(load).toHaveBeenCalledExactlyOnceWith("/worktree", true);
+    expect(load).toHaveBeenCalledExactlyOnceWith("/worktree", {
+      base: null,
+      target: { kind: "working_tree" },
+      merge_base: true,
+    });
     fireEvent.click(screen.getByRole("button", { name: "Refresh changes" }));
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
     await screen.findByText("No changes against this baseline.");
-    fireEvent.change(screen.getByLabelText("Changes baseline"), {
-      target: { value: "head" },
-    });
+    selectComparison(screen.getByLabelText("Comparison base"), "head");
     await waitFor(() =>
-      expect(load).toHaveBeenLastCalledWith("/worktree", false)
+      expect(load).toHaveBeenLastCalledWith("/worktree", {
+        base: { kind: "head" },
+        target: { kind: "working_tree" },
+        merge_base: false,
+      })
     );
   });
 
@@ -225,6 +254,7 @@ describe("WorktreeChanges", () => {
             old_path: "old",
             status: "renamed",
             marker: null,
+            totals: { additions: 1, deletions: 1, binary_files: 0 },
             patch:
               "diff --git a/old b/new\n--- a/old\n+++ b/new\n@@ -1 +1 @@\n-before\n+after\n",
           },
@@ -233,6 +263,7 @@ describe("WorktreeChanges", () => {
             old_path: null,
             status: "added",
             marker: "binary",
+            totals: { additions: 1, deletions: 1, binary_files: 0 },
             patch: "",
           },
         ],
@@ -271,8 +302,8 @@ describe("WorktreeChanges", () => {
   });
 
   it("keeps an unavailable whole-branch baseline distinct from empty success and permits recovery", async () => {
-    load.mockImplementation(async (_worktree, wholeBranch) =>
-      wholeBranch
+    load.mockImplementation(async (_worktree, request) =>
+      request.merge_base
         ? {
             status: "error",
             error: {
@@ -294,10 +325,10 @@ describe("WorktreeChanges", () => {
       "Whole-branch baseline is unavailable"
     );
     expect(screen.queryByRole("status", { name: "No changes" })).toBeNull();
-    const baseline = screen.getByRole("combobox", { name: "Changes baseline" });
-    expect(baseline).toHaveValue("branch");
+    const baseline = screen.getByRole("combobox", { name: "Comparison base" });
+    expect(baseline).toHaveValue("auto");
     expect(baseline).toBeEnabled();
-    fireEvent.change(baseline, { target: { value: "head" } });
+    selectComparison(baseline, "head");
     expect(
       await screen.findByRole("status", { name: "No changes" })
     ).toBeVisible();
@@ -307,21 +338,19 @@ describe("WorktreeChanges", () => {
   });
 
   it("shows committed branch changes by default even when Uncommitted is empty", async () => {
-    load.mockImplementation(async (_worktree, wholeBranch) => ({
+    load.mockImplementation(async (_worktree, request) => ({
       status: "ok",
-      data: wholeBranch ? modified : empty,
+      data: request.merge_base ? modified : empty,
     }));
     render(<WorktreeChanges worktreePath="/worktree" />);
     await screen.findByRole("region", { name: "Diff for src/app.ts" });
-    const baseline = screen.getByRole("combobox", { name: "Changes baseline" });
-    expect(baseline).toHaveValue("branch");
+    const baseline = screen.getByRole("combobox", { name: "Comparison base" });
+    expect(baseline).toHaveValue("auto");
     expect(
-      screen.getByRole("option", {
-        name: "Whole branch · merge-base with refs/heads/main",
-      })
+      screen.getByRole("combobox", { name: "Comparison base" })
     ).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "No changes" })).toBeNull();
-    fireEvent.change(baseline, { target: { value: "head" } });
+    selectComparison(baseline, "head");
     expect(
       await screen.findByRole("status", { name: "No changes" })
     ).toBeVisible();
@@ -329,24 +358,32 @@ describe("WorktreeChanges", () => {
       screen.queryByRole("region", { name: "Diff for src/app.ts" })
     ).toBeNull();
     expect(baseline).toBeEnabled();
-    fireEvent.change(baseline, { target: { value: "branch" } });
+    selectComparison(baseline, "auto");
     await screen.findByRole("region", { name: "Diff for src/app.ts" });
     expect(screen.queryByRole("status", { name: "No changes" })).toBeNull();
-    expect(load).toHaveBeenLastCalledWith("/worktree", true);
+    expect(load).toHaveBeenLastCalledWith("/worktree", {
+      base: null,
+      target: { kind: "working_tree" },
+      merge_base: true,
+    });
   });
 
   it("renders valid empty states for both baselines and responds to filesystem changes", async () => {
     render(<WorktreeChanges worktreePath="/worktree" />);
-    const baseline = screen.getByRole("combobox", { name: "Changes baseline" });
+    const baseline = screen.getByRole("combobox", { name: "Comparison base" });
     // The initial selection is valid before Git discovers the base branch.
-    expect(baseline).toHaveValue("branch");
+    expect(baseline).toHaveValue("auto");
     expect(
       await screen.findByRole("status", { name: "No changes" })
     ).toBeVisible();
     expect(screen.queryByRole("alert")).toBeNull();
-    fireEvent.change(baseline, { target: { value: "head" } });
+    selectComparison(baseline, "head");
     await waitFor(() =>
-      expect(load).toHaveBeenLastCalledWith("/worktree", false)
+      expect(load).toHaveBeenLastCalledWith("/worktree", {
+        base: { kind: "head" },
+        target: { kind: "working_tree" },
+        merge_base: false,
+      })
     );
     expect(
       await screen.findByRole("status", { name: "No changes" })
@@ -385,7 +422,11 @@ describe("WorktreeChanges", () => {
       resolveOld({ status: "error", error: { message: "stale error" } })
     );
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(load).toHaveBeenLastCalledWith("/new", true);
+    expect(load).toHaveBeenLastCalledWith("/new", {
+      base: null,
+      target: { kind: "working_tree" },
+      merge_base: true,
+    });
   });
 
   it("browses folders lazily with status decorations and opens full files", async () => {
@@ -470,7 +511,11 @@ describe("WorktreeChanges", () => {
         "unchanged line old"
       )
     );
-    expect(readBaseline).toHaveBeenCalledWith("/worktree", "src/app.ts", true);
+    expect(readBaseline).toHaveBeenCalledWith(
+      "/worktree",
+      "src/app.ts",
+      "base-sha"
+    );
     fireEvent.change(screen.getByRole("textbox", { name: "Edit src/app.ts" }), {
       target: { value: "draft\n" },
     });
@@ -718,4 +763,139 @@ describe("WorktreeChanges", () => {
     );
     expect(workspaces["/other"]?.documents ?? {}).toEqual({});
   });
+});
+
+it("resizes with the keyboard and restores the chosen width after collapse", async () => {
+  render(<WorktreeChanges worktreePath="/worktree" />);
+  await screen.findByLabelText("No changes");
+  const handle = screen.getByRole("separator", {
+    name: "Resize files sidebar",
+  });
+  expect(handle).toHaveAttribute("aria-valuenow", "240");
+  fireEvent.keyDown(handle, { key: "ArrowRight" });
+  expect(handle).toHaveAttribute("aria-valuenow", "250");
+  fireEvent.click(screen.getByRole("button", { name: "Hide files" }));
+  expect(screen.queryByRole("separator")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Show files" }));
+  expect(screen.getByRole("separator")).toHaveAttribute("aria-valuenow", "250");
+});
+
+it("shows uncapped backend totals and sends independently selected endpoints", async () => {
+  vi.mocked(commands.listComparisonChoices).mockResolvedValue({
+    status: "ok",
+    data: [
+      {
+        label: "feature-A",
+        endpoint: { kind: "ref", value: "refs/heads/feature-A" },
+      },
+      { label: "Linked B", endpoint: { kind: "worktree", value: "/linked B" } },
+    ],
+  });
+  load.mockResolvedValue({
+    status: "ok",
+    data: {
+      ...empty,
+      totals: { additions: 900000, deletions: 7, binary_files: 2 },
+    },
+  });
+  render(<WorktreeChanges worktreePath="/worktree" />);
+  await screen.findByText(/900000/);
+  const totals = screen.getByLabelText("Comparison totals");
+  expect(totals).toHaveTextContent("+900000");
+  expect(totals).toHaveTextContent("−7");
+  expect(totals).toHaveTextContent("2 binary");
+  expect(screen.queryByText("Comparison details")).not.toBeInTheDocument();
+  selectComparison(
+    screen.getByRole("combobox", { name: "Comparison base" }),
+    JSON.stringify({ kind: "ref", value: "refs/heads/feature-A" })
+  );
+  selectComparison(
+    screen.getByRole("combobox", { name: "Comparison target" }),
+    JSON.stringify({ kind: "worktree", value: "/linked B" })
+  );
+  await waitFor(() =>
+    expect(load).toHaveBeenLastCalledWith("/worktree", {
+      base: { kind: "ref", value: "refs/heads/feature-A" },
+      target: { kind: "worktree", value: "/linked B" },
+      merge_base: true,
+    })
+  );
+  expect(screen.getByRole("button", { name: "Files" })).toBeDisabled();
+});
+
+it("keeps a local draft while committed targets open read-only with pinned baselines", async () => {
+  load.mockImplementation(async (_path, request) => ({
+    status: "ok",
+    data: {
+      ...modified,
+      comparison: {
+        ...modified.comparison,
+        working_tree: request.target.kind === "working_tree",
+      },
+    },
+  }));
+  render(<WorktreeChanges worktreePath="/worktree" />);
+  await screen.findByLabelText("Diff for src/app.ts");
+  fireEvent.click(screen.getByRole("button", { name: "Open src/app.ts" }));
+  fireEvent.change(
+    await screen.findByRole("textbox", { name: "Edit src/app.ts" }),
+    { target: { value: "draft" } }
+  );
+  selectComparison(
+    screen.getByRole("combobox", { name: "Comparison target" }),
+    "head"
+  );
+  await screen.findByLabelText("Diff for src/app.ts");
+  fireEvent.click(screen.getByRole("button", { name: "Open src/app.ts" }));
+  await screen.findByLabelText("Historical document src/app.ts");
+  expect(
+    screen.queryByRole("button", { name: "Save" })
+  ).not.toBeInTheDocument();
+  expect(readBaseline).toHaveBeenCalledWith(
+    "/worktree",
+    "src/app.ts",
+    "head-sha"
+  );
+  selectComparison(
+    screen.getByRole("combobox", { name: "Comparison target" }),
+    "working"
+  );
+  expect(
+    await screen.findByRole("textbox", { name: "Edit src/app.ts" })
+  ).toHaveValue("draft");
+});
+
+it("offers only Base and Compare and switches diff layout without reloading Git or losing drafts", async () => {
+  load.mockResolvedValue({ status: "ok", data: modified });
+  render(<WorktreeChanges worktreePath="/worktree" />);
+  await screen.findByLabelText("Diff for src/app.ts");
+  expect(screen.getAllByRole("combobox")).toHaveLength(2);
+  const split = screen.getByRole("button", { name: "Split" });
+  fireEvent.click(split);
+  expect(split).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByTestId("all-diffs")).toHaveAttribute(
+    "data-layout",
+    "split"
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open src/app.ts" }));
+  const editor = await screen.findByRole("textbox", {
+    name: "Edit src/app.ts",
+  });
+  fireEvent.change(editor, {
+    target: { value: "draft through layout changes" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Unified" }));
+  expect(screen.getByTestId("document-editor")).toHaveAttribute(
+    "data-layout",
+    "unified"
+  );
+  expect(screen.getByRole("textbox", { name: "Edit src/app.ts" })).toBe(editor);
+  expect(editor).toHaveValue("draft through layout changes");
+  expect(screen.getByText("Unsaved")).toBeVisible();
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(
+    within(
+      screen.getByRole("navigation", { name: "Changed files" })
+    ).getAllByText("Open")
+  ).toHaveLength(2);
 });

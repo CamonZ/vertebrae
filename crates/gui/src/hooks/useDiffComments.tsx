@@ -118,12 +118,13 @@ export function useDiffComments(
   );
   const addComment = review?.addComment;
   const worktreeBranch = review?.worktree?.wholeBranch ?? false;
+  const comparisonIdentity = review?.worktree?.comparisonIdentity;
   const home: DiffCommentHome = useMemo(
     () =>
       toolUseId
         ? { kind: "tool_call", toolUseId, ...(toolName ? { toolName } : {}) }
-        : { kind: "worktree", wholeBranch: worktreeBranch },
-    [toolUseId, toolName, worktreeBranch]
+        : { kind: "worktree", wholeBranch: worktreeBranch, comparisonIdentity },
+    [toolUseId, toolName, worktreeBranch, comparisonIdentity]
   );
 
   const openComposer = useCallback(

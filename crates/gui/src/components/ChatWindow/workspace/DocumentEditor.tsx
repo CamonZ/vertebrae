@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import type { DiffPreferences } from "../../../utils/codeAppearance";
+import { useMemo, useState, type ReactNode } from "react";
 import { parseDiffFromFile, type FileContents } from "@pierre/diffs";
 import { Editor } from "@pierre/diffs/edit";
 import {
@@ -28,6 +29,8 @@ export interface DocumentEditorProps {
   /** Baseline contents for the diff; `null` when the file is new. */
   baseline: string | null;
   onChange(text: string): void;
+  readOnly?: boolean;
+  diffStyle?: DiffPreferences["diffStyle"];
 }
 
 /**
@@ -42,9 +45,16 @@ export default function DocumentEditor({
   contents,
   baseline,
   onChange,
+  readOnly = false,
+  diffStyle,
 }: DocumentEditorProps): ReactNode {
   const fileOptions = usePierreThemeOptions();
-  const diffOptions = usePierreDiffOptions();
+  const preferences = usePierreDiffOptions();
+  const diffOptions = useMemo(
+    () => ({ ...preferences, ...(diffStyle ? { diffStyle } : {}) }),
+    [preferences, diffStyle]
+  );
+
   // Captured at mount: later prop changes arrive through a remount.
   const [[file, fileDiff]] = useState(() => {
     const working: FileContents | null =
@@ -54,6 +64,7 @@ export default function DocumentEditor({
       baseline == null ? null : { name: path, contents: baseline };
     return [working, parseDiffFromFile(old, working)] as const;
   });
+
   return (
     <WorkerPoolContext.Provider value={diffWorkerPool}>
       <EditProvider createEditor={createEditor}>
@@ -61,7 +72,7 @@ export default function DocumentEditor({
           <FileDiff
             fileDiff={fileDiff}
             options={diffOptions}
-            edit={file != null}
+            edit={!readOnly && file != null}
             onEditChange={(event) => onChange(event.file.contents)}
             onEditComplete={() => "accept"}
           />
@@ -69,7 +80,7 @@ export default function DocumentEditor({
           <File
             file={file}
             options={fileOptions}
-            edit
+            edit={!readOnly}
             onEditChange={(event) => onChange(event.file.contents)}
             onEditComplete={() => "accept"}
           />

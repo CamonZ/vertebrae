@@ -22,7 +22,7 @@ export interface PendingTextComment extends TextSelectionAnchor {
 
 /** Where a diff comment was written. */
 export type DiffCommentHome =
-  | { kind: "worktree"; wholeBranch: boolean }
+  | { kind: "worktree"; wholeBranch: boolean; comparisonIdentity?: string }
   | {
       kind: "tool_call";
       /** Provider tool-call id of the recorded worktree patch. */

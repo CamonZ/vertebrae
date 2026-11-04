@@ -1069,9 +1069,17 @@ async unwatchWorktree(watchId: string) : Promise<Result<null, CommandError>> {
 /**
  * Read a worktree only when the chat changes view is opened or refreshed.
  */
-async loadWorktreeChanges(worktreePath: string, wholeBranch: boolean) : Promise<Result<WorktreeChanges, CommandError>> {
+async loadWorktreeChanges(worktreePath: string, request: ComparisonRequest) : Promise<Result<WorktreeChanges, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("load_worktree_changes", { worktreePath, wholeBranch }) };
+    return { status: "ok", data: await TAURI_INVOKE("load_worktree_changes", { worktreePath, request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listComparisonChoices(worktreePath: string) : Promise<Result<ComparisonChoice[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_comparison_choices", { worktreePath }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1102,9 +1110,9 @@ async readWorktreeFile(worktreePath: string, path: string) : Promise<Result<File
 /**
  * Read a worktree file at the selected changes baseline.
  */
-async readWorktreeBaselineFile(worktreePath: string, path: string, wholeBranch: boolean) : Promise<Result<FileBody, CommandError>> {
+async readWorktreeBaselineFile(worktreePath: string, path: string, commit: string) : Promise<Result<FileBody, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("read_worktree_baseline_file", { worktreePath, path, wholeBranch }) };
+    return { status: "ok", data: await TAURI_INVOKE("read_worktree_baseline_file", { worktreePath, path, commit }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1593,6 +1601,13 @@ description: string | null }
  * Error response type for commands - simple string wrapper with specta support
  */
 export type CommandError = { message: string }
+export type ComparisonChoice = { label: string; endpoint: ComparisonEndpoint }
+/**
+ * Endpoints resolve to commits once per request. Only WorkingTree includes dirty files.
+ */
+export type ComparisonEndpoint = { kind: "working_tree" } | { kind: "head" } | { kind: "ref"; value: string } | { kind: "worktree"; value: string }
+export type ComparisonRequest = { base: ComparisonEndpoint | null; target: ComparisonEndpoint; merge_base: boolean }
+export type ComparisonSnapshot = { base_commit: string; selected_base_commit: string; target_commit: string; working_tree: boolean; merge_base: boolean }
 /**
  * State of a single component (one of `vtb`, `vtb-daemon`, `vtb-gate`) on this machine.
  *
@@ -1700,6 +1715,7 @@ export type DaemonMetricsEvent = { connection_id: string; daemon_id: string; sch
 export type DaemonMutationResult = { connection_id: string; daemon: Daemon }
 export type DaemonNameUpdate = { kind: "unchanged" } | { kind: "clear" } | { kind: "set"; value: string }
 export type DecisionModelSettings = { enabled: boolean; provider: string; model: string; harness: string | null; validation_error: string | null }
+export type DiffTotals = { additions: number; deletions: number; binary_files: number }
 export type DirectoryEntry = { name: string;
 /**
  * Worktree-relative path with `/` separators.
@@ -3018,9 +3034,9 @@ workflow: Workflow;
  * Tasks associated with this workflow
  */
 tasks: Task[] }
-export type WorktreeChange = { path: string; old_path: string | null; status: FileStatus; patch: string; marker: MarkerReason | null }
+export type WorktreeChange = { path: string; old_path: string | null; status: FileStatus; patch: string; totals: DiffTotals; marker: MarkerReason | null }
 export type WorktreeChangedEvent = { watch_id: string }
-export type WorktreeChanges = { base_branch: string | null; base_unavailable: string | null; files: WorktreeChange[] }
+export type WorktreeChanges = { base_branch: string | null; base_unavailable: string | null; files: WorktreeChange[]; comparison: ComparisonSnapshot; totals: DiffTotals }
 
 /** tauri-specta globals **/
 
