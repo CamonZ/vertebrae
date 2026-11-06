@@ -114,22 +114,32 @@ describe("ChatMessages", () => {
 
   // --- Message rendering ---
 
-  it("enables copy-ID controls on rendered chat references without opening their panels", async () => {
-    const user = userEvent.setup();
-    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
-    const id = "860cde1b-9093-42ff-a19d-7453f3b7891b";
-    const messages: ChatMessage[] = [{
-      kind: "assistant",
-      text: `[Review this ticket](vtb://ticket/${id})`,
-      timestamp: "2024-01-01T12:00:00Z",
-    }];
-    render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
-    await user.click(screen.getByRole("button", { name: "Copy full ticket ID" }));
-    expect(writeText).toHaveBeenCalledExactlyOnceWith(id);
-    expect(useEntityPanelStore.getState().selection).toBeNull();
-    await user.click(screen.getByRole("link", { name: `Open ticket ${id}` }));
-    expect(useEntityPanelStore.getState().selection).toEqual({ type: "task", taskId: id });
-  });
+  it.each(["ticket", "task", "epic"])(
+    "enables copy-ID controls on rendered %s chat references without opening their panels",
+    async (type) => {
+      const user = userEvent.setup();
+      const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+      const id = "860cde1b-9093-42ff-a19d-7453f3b7891b";
+      const messages: ChatMessage[] = [{
+        kind: "assistant",
+        text: `[Review this ${type}](vtb://${type}/${id})`,
+        timestamp: "2024-01-01T12:00:00Z",
+      }];
+      render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
+      const link = screen.getByRole("link", { name: `Open ${type} ${id}` });
+      expect(link).toHaveTextContent(`Review this ${type}`);
+      expect(screen.getByTestId("vtb-entity-level-mark")).toHaveAttribute(
+        "data-level", type
+      );
+      await user.click(screen.getByRole("button", { name: `Copy full ${type} ID` }));
+      expect(writeText).toHaveBeenCalledExactlyOnceWith(id);
+      expect(useEntityPanelStore.getState().selection).toBeNull();
+      await user.click(link);
+      expect(useEntityPanelStore.getState().selection).toEqual({
+        type: "task", taskId: id,
+      });
+    }
+  );
 
   it("renders user messages", () => {
     const messages: ChatMessage[] = [

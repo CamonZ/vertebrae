@@ -49,7 +49,9 @@ export function VtbEntityLink({
   const copyEnabled = useContext(EntityCopyContext);
   const copyable =
     copyEnabled &&
-    (target.type === "ticket" ||
+    (target.type === "task" ||
+      target.type === "epic" ||
+      target.type === "ticket" ||
       target.type === "workflow" ||
       target.type === "step" ||
       target.type === "artifact");
