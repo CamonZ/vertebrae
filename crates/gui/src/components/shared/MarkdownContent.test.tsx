@@ -173,7 +173,7 @@ describe("MarkdownContent", () => {
   });
 
   describe("links", () => {
-    it.each(["ticket", "workflow", "step", "artifact"])(
+    it.each(["task", "epic", "ticket", "workflow", "step", "artifact"])(
       "copies the full %s target independently of Markdown label formatting",
       async (type) => {
         const id = "860cde1b-9093-42ff-a19d-7453f3b7891b";
@@ -203,12 +203,12 @@ describe("MarkdownContent", () => {
       }
     );
 
-    it("does not add entity copy controls to external links, prose, code, or other entity types", async () => {
+    it("does not add entity copy controls to external links, prose, code, or project references", async () => {
       render(
         <VtbEntityCopyProvider>
           <MarkdownContent
             text={
-              "[Docs](https://example.com) and `860cde1b` and 860cde1b\n\n```text\n[Ticket](vtb://ticket/full-id)\n```\n\n[Project](vtb://project/project-id) [Task](vtb://task/task-id) [Epic](vtb://epic/epic-id)"
+              "[Docs](https://example.com) and `860cde1b` and 860cde1b\n\n```text\n[Ticket](vtb://ticket/full-id)\n```\n\n[Project](vtb://project/project-id)"
             }
           />
         </VtbEntityCopyProvider>

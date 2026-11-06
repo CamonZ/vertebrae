@@ -5,7 +5,7 @@ import { VtbEntityCopyProvider, VtbEntityLink } from "./VtbEntityLink";
 import { parseVtbEntityHref } from "./vtbEntityLinkTarget";
 
 const ID = "860cde1b-9093-42ff-a19d-7453f3b7891b";
-const types = ["ticket", "workflow", "step", "artifact"] as const;
+const types = ["task", "epic", "ticket", "workflow", "step", "artifact"] as const;
 
 describe("chat entity references", () => {
   it.each(types)(
@@ -134,15 +134,35 @@ describe("chat entity references", () => {
     }
   });
 
-  it("leaves non-chat references without copy controls", () => {
+  it("leaves project references without copy controls in chat", () => {
     render(
-      <VtbEntityLink
-        target={parseVtbEntityHref(`vtb://ticket/${ID}`)!}
-        onOpen={vi.fn()}
-      >
-        Ticket
-      </VtbEntityLink>
+      <VtbEntityCopyProvider>
+        <VtbEntityLink
+          target={parseVtbEntityHref(`vtb://project/${ID}`)!}
+          onOpen={vi.fn()}
+        >
+          Project
+        </VtbEntityLink>
+      </VtbEntityCopyProvider>
     );
+    expect(
+      screen.getByRole("link", { name: `Open project ${ID}` })
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
+
+  it.each(types)(
+    "leaves non-chat %s references without copy controls",
+    (type) => {
+      render(
+        <VtbEntityLink
+          target={parseVtbEntityHref(`vtb://${type}/${ID}`)!}
+          onOpen={vi.fn()}
+        >
+          A title
+        </VtbEntityLink>
+      );
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    }
+  );
 });
