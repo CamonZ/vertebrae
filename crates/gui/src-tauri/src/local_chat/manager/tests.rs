@@ -149,6 +149,7 @@ fn create_input(
     backend_session_id: &str,
 ) -> CreateLocalChatSessionInput {
     CreateLocalChatSessionInput {
+        read_only: false,
         harness,
         backend_session_id: backend_session_id.to_string(),
         chat_session_id: "chat-1".to_string(),
@@ -427,6 +428,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
         claude_calls,
         vec![
             MockCall::Create(HarnessCreateSessionInput {
+                read_only: false,
                 backend_session_id: "backend-claude".to_string(),
                 working_dir: Some("/tmp/project".to_string()),
                 initial_prompt: Some("hello".to_string()),
@@ -454,6 +456,7 @@ async fn manager_routes_create_send_and_close_through_registry() {
         codex_calls,
         vec![
             MockCall::Create(HarnessCreateSessionInput {
+                read_only: false,
                 backend_session_id: "backend-codex".to_string(),
                 working_dir: Some("/tmp/project".to_string()),
                 initial_prompt: Some("hello".to_string()),

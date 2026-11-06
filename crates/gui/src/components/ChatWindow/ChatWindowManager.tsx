@@ -3,6 +3,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useChatStore } from "../../stores/chatStore";
@@ -644,6 +645,15 @@ export function ChatWindowManager({
     return paneId ? startFreshActiveSession(paneId) : Promise.resolve(false);
   }, [activePaneId, normalizedPaneLayout.panes, startFreshActiveSession]);
 
+  const changesToggles = useRef(new Map<string, () => void>());
+  const registerChangesToggle = useCallback(
+    (paneId: string, toggle: (() => void) | null) => {
+      if (toggle) changesToggles.current.set(paneId, toggle);
+      else changesToggles.current.delete(paneId);
+    },
+    []
+  );
+
   useChatKeyboardShortcuts({
     open,
     dispatch: {
@@ -662,6 +672,13 @@ export function ChatWindowManager({
       startFreshActiveSession: startFreshActiveSessionForKeyboard,
       toggleHistorySelector,
       toggleHistoryVisibility,
+      toggleChangesPanel: () => {
+        const paneId = activePaneId ?? normalizedPaneLayout.panes[0]?.id;
+        const toggle = paneId ? changesToggles.current.get(paneId) : undefined;
+        if (!toggle) return false;
+        toggle();
+        return true;
+      },
       toggleMaximized: toggleFromShortcut,
     },
     setShortcutsOpen,
@@ -773,6 +790,7 @@ export function ChatWindowManager({
             />
           )}
           <ChatPaneList
+            registerChangesToggle={registerChangesToggle}
             visiblePanes={visiblePanes}
             activePaneId={activePaneId}
             isMaximized={isMaximized}

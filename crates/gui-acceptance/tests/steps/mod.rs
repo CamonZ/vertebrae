@@ -11,3 +11,4 @@ pub mod streaming;
 
 pub mod colima;
 pub mod local_backend;
+pub mod selection_discussions;

@@ -12,6 +12,8 @@ interface ChatHeaderProps {
   onClosePanel?: () => void;
   onStartFresh?: () => void;
   onToggleHistory?: () => void;
+  onToggleChanges?: () => void;
+  changesOpen?: boolean;
   onToggleWide?: () => void;
   isWide?: boolean;
   onSplitPane?: () => void;
@@ -37,6 +39,7 @@ interface HeaderAction {
   disabled?: boolean;
   className?: string;
   testId?: string;
+  pressed?: boolean;
   icon: React.ReactNode;
 }
 
@@ -70,6 +73,8 @@ export function ChatHeader({
   onClosePanel,
   onStartFresh,
   onToggleHistory,
+  onToggleChanges,
+  changesOpen = false,
   onToggleWide,
   isWide = false,
   onSplitPane,
@@ -164,6 +169,23 @@ export function ChatHeader({
   );
 
   const actions: HeaderAction[] = [
+    {
+      key: "changes",
+      title: changesOpen
+        ? "Hide Changes panel (⌘⇧B when worktree has changes)"
+        : "Show Changes panel (⌘⇧B when worktree has changes)",
+      ariaLabel: "Changes",
+      onClick: onToggleChanges!,
+      show: !!onToggleChanges,
+      pressed: changesOpen,
+      testId: "local-chat-view-changes",
+      icon: (
+        <SvgIcon size="h-3.5 w-3.5">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M15 4v16M6 9h6M9 6v6M6 16h6" />
+        </SvgIcon>
+      ),
+    },
     {
       key: "fresh",
       title: "Start fresh local chat",
@@ -458,6 +480,10 @@ export function ChatHeader({
                 title={action.title}
                 aria-label={action.ariaLabel}
                 data-testid={action.testId}
+                aria-pressed={action.pressed}
+                aria-expanded={
+                  action.key === "changes" ? action.pressed : undefined
+                }
               >
                 {action.icon}
               </button>

@@ -36,6 +36,8 @@ export type DiffCommentHome =
  * patch, never to quoted text or file contents.
  */
 export interface PendingDiffComment {
+  /** Exact selected code for an explicit main-composer attachment. */
+  selectionCode?: string;
   kind: "diff";
   id: string;
   body: string;
@@ -183,10 +185,16 @@ function diffCommentEntry(comment: PendingDiffComment, number: number): string {
     `${number}. ${diffCommentHomeLabel(comment)} · ${diffCommentLocation(comment)} (${comment.side})`,
     comment.outdated ? " [outdated]" : "",
   ].join("");
+  const selectedCode =
+    comment.selectionCode === undefined
+      ? []
+      : [`Selected code snapshot: ${JSON.stringify(comment.selectionCode)}`];
+
   const lines = [
     `${fence}diff`,
     ...comment.hunk.split("\n"),
     fence,
+    ...selectedCode,
     `Comment: ${comment.body.trim()}`,
   ].flatMap((line) => line.split("\n"));
   return [heading, ...lines.map((line) => `${ENTRY_INDENT}${line}`)].join("\n");

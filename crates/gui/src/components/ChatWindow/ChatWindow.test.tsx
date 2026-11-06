@@ -218,7 +218,11 @@ describe("ChatWindow", () => {
     });
     const { container } = render(<ChatWindow sessionId="test-session" />);
     expect(mockedCommands.loadWorktreeChanges).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: "Chat view" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Conversation" })).toBeNull();
+
     const composer = screen.getByTestId("local-chat-composer");
+
     fireEvent.change(composer, { target: { value: "keep this draft" } });
     const conversation = screen.getByTestId("chat-messages-scroll");
 
@@ -231,8 +235,12 @@ describe("ChatWindow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await screen.findByText("No changes against this baseline.");
-    expect(composer).not.toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
+
+    expect(composer).toBeVisible();
+    expect(container.querySelector(".selection-discussions")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+
     expect(screen.getByTestId("local-chat-composer")).toBe(composer);
     expect(composer).toHaveValue("keep this draft");
     expect(conversation.scrollTop).toBe(123);
@@ -293,10 +301,12 @@ describe("ChatWindow", () => {
         },
       })
     );
-    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+
     const dialog = await screen.findByRole("dialog", {
       name: "Unsaved changes",
     });
+
     expect(dialog).toHaveTextContent("a.txt has unsaved changes.");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -304,11 +314,14 @@ describe("ChatWindow", () => {
       "aria-pressed",
       "true"
     );
-    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
-    expect(
-      screen.getByRole("button", { name: "Conversation" })
-    ).toHaveAttribute("aria-pressed", "true");
+
+    expect(screen.getByRole("button", { name: "Changes" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
     expect(
       useDocumentStore.getState().workspaces["/dirty-worktree"]?.documents[
         "a.txt"
@@ -319,7 +332,8 @@ describe("ChatWindow", () => {
   it("hides the changes toggle without an associated worktree", () => {
     useChatStore.setState({ sessions: { "test-session": createSession() } });
     render(<ChatWindow sessionId="test-session" />);
-    expect(screen.queryByRole("group", { name: "Chat view" })).toBeNull();
+
+    expect(screen.queryByRole("button", { name: "Changes" })).toBeNull();
   });
 
   it("returns null when session does not exist", () => {

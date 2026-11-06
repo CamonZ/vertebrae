@@ -112,6 +112,10 @@ pub struct LocalChatHarnessCatalog {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
 pub struct CreateLocalChatSessionInput {
+    /// A selection discussion has a permanently restricted runtime.
+    #[serde(default)]
+    #[specta(optional)]
+    pub read_only: bool,
     pub harness: LocalChatHarnessKind,
     pub backend_session_id: String,
     /// Persistent chat session this runtime serves; Vertebrae-owned
@@ -217,6 +221,7 @@ impl LocalChatProviderSelection {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HarnessCreateSessionInput {
+    pub(crate) read_only: bool,
     pub(crate) backend_session_id: String,
     pub(crate) working_dir: Option<String>,
     pub(crate) initial_prompt: Option<String>,
@@ -236,6 +241,7 @@ impl CreateLocalChatSessionInput {
         provider: Option<LocalChatProviderSelection>,
     ) -> HarnessCreateSessionInput {
         HarnessCreateSessionInput {
+            read_only: self.read_only,
             backend_session_id: self.backend_session_id,
             working_dir: self.working_dir,
             initial_prompt: self.initial_prompt,

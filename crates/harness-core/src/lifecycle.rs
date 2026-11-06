@@ -18,6 +18,10 @@ use crate::{
 /// `environment` field.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RequestConfig {
+    /// Constrain this runtime to discussion without filesystem writes or tool approvals.
+    /// The factory rejects adapters without support for this policy.
+    #[serde(default)]
+    pub read_only: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

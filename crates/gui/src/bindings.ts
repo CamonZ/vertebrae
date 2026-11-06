@@ -1642,7 +1642,11 @@ symlink_path: string;
  * avoid pestering users who already have `vtb` from `cargo install`.
  */
 on_path: boolean }
-export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backend_session_id: string;
+export type CreateLocalChatSessionInput = {
+/**
+ * A selection discussion has a permanently restricted runtime.
+ */
+read_only?: boolean; harness: LocalChatHarnessKind; backend_session_id: string;
 /**
  * Persistent chat session this runtime serves; Vertebrae-owned
  * records such as tool-call annotations are keyed by it.

@@ -21,6 +21,7 @@ export type ShortcutDispatchState = {
   toggleHistorySelector: () => boolean;
   toggleHistoryVisibility: () => void;
   toggleMaximized: () => void;
+  toggleChangesPanel: () => boolean;
 };
 
 interface UseChatKeyboardShortcutsOptions {
@@ -117,6 +118,18 @@ export function useChatKeyboardShortcuts({
 
         if (!event.repeat) current.toggleHistoryVisibility();
 
+        return;
+      }
+
+      if (
+        isLetterShortcutKey(event, "KeyB", "b") &&
+        event.shiftKey &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.isComposing
+      ) {
+        if (!event.repeat && current.toggleChangesPanel())
+          event.preventDefault();
         return;
       }
 

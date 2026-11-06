@@ -376,8 +376,9 @@ describe("diff review across PatchFiles and AllChangesView", () => {
       expect(lastFileDiff().options?.enableLineSelection).toBeUndefined();
     });
 
-    it("keeps the selection until the composer opens, then clears it", () => {
+    it("keeps a range highlighted while the comment composer is open", () => {
       renderTwo();
+
       const range = { start: 6, end: 7, side: "additions" };
       act(() =>
         (
@@ -402,7 +403,7 @@ describe("diff review across PatchFiles and AllChangesView", () => {
       );
       expect(
         (lastFileDiff() as Props & { selectedLines?: unknown }).selectedLines
-      ).toBeNull();
+      ).toEqual(range);
       expect(lastFileDiff().lineAnnotations).toEqual([
         expect.objectContaining({
           lineNumber: 7,
@@ -423,13 +424,23 @@ describe("diff review across PatchFiles and AllChangesView", () => {
       expect(screen.getAllByText(/f\.ts:6-7 \(new\)/)).toHaveLength(2);
     });
 
-    it("selects in All Changes and clears when the composer opens", () => {
+    it("keeps the All Changes selection while the composer is open", () => {
       renderTwo();
+
       const range = { start: 6, end: 7, side: "additions" };
       act(() => codeViewProps().onSelectedLinesChange?.({ id: "f.ts", range }));
       expect(codeViewProps().selectedLines).toEqual({ id: "f.ts", range });
       seen.range = range;
       fireEvent.click(screen.getByRole("button", { name: "gutter code view" }));
+
+      expect(codeViewProps().selectedLines).toEqual({ id: "f.ts", range });
+
+      fireEvent.change(
+        screen.getByRole("textbox", { name: "New diff comment" }),
+        { target: { value: "Keep this range" } }
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+
       expect(codeViewProps().selectedLines).toBeNull();
     });
 

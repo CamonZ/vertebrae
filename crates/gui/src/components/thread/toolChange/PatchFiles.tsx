@@ -60,7 +60,7 @@ export default function PatchFiles({
                 range: Parameters<typeof openComposer>[1]
               ) => openComposer(file.name, range),
               // Click, drag or shift-click line numbers to select a range,
-              // then press the gutter "+" to comment on all of it.
+              // then choose an explicit action for that selection.
               enableLineSelection: true,
               onLineSelectionEnd: (
                 range: Parameters<typeof openComposer>[1] | null
@@ -89,20 +89,22 @@ export default function PatchFiles({
   }
   return (
     <WorkerPoolContext.Provider value={diffWorkerPool}>
-      {files.map((file, i) => (
-        <FileDiff
-          key={`${i}:${file.prevName ?? ""}>${file.name}`}
-          fileDiff={file}
-          options={fileOptions[i]}
-          {...(reviewing
-            ? {
-                lineAnnotations: comments.annotationsFor(file.name),
-                selectedLines: selectedLinesFor(file.name),
-                renderAnnotation: comments.renderAnnotation,
-              }
-            : {})}
-        />
-      ))}
+      <div {...comments.keyboardProps}>
+        {files.map((file, i) => (
+          <FileDiff
+            key={`${i}:${file.prevName ?? ""}>${file.name}`}
+            fileDiff={file}
+            options={fileOptions[i]}
+            {...(reviewing
+              ? {
+                  lineAnnotations: comments.annotationsFor(file.name),
+                  selectedLines: selectedLinesFor(file.name),
+                  renderAnnotation: comments.renderAnnotation,
+                }
+              : {})}
+          />
+        ))}
+      </div>
     </WorkerPoolContext.Provider>
   );
 }

@@ -30,6 +30,7 @@ function makeDispatch(
     toggleHistorySelector: vi.fn(() => true),
     toggleHistoryVisibility: vi.fn(),
     toggleMaximized: vi.fn(),
+    toggleChangesPanel: vi.fn(() => true),
     ...overrides,
   };
 }
@@ -480,4 +481,43 @@ it("toggles the sidebar on Cmd+B and ignores repeats, composition, and extra mod
   }
 
   expect(dispatch.toggleHistoryVisibility).toHaveBeenCalledTimes(1);
+});
+
+describe("Changes panel shortcut", () => {
+  it("dispatches Cmd+Shift+B without toggling the history sidebar", () => {
+    const dispatch = makeDispatch();
+
+    renderShortcutHook(dispatch);
+
+    expect(
+      fireKey({ key: "B", code: "KeyB", metaKey: true, shiftKey: true })
+        .defaultPrevented
+    ).toBe(true);
+    expect(dispatch.toggleChangesPanel).toHaveBeenCalledOnce();
+    expect(dispatch.toggleHistoryVisibility).not.toHaveBeenCalled();
+  });
+
+  it("leaves the key alone without an eligible active conversation", () => {
+    const dispatch = makeDispatch({ toggleChangesPanel: vi.fn(() => false) });
+
+    renderShortcutHook(dispatch);
+
+    expect(
+      fireKey({ key: "B", metaKey: true, shiftKey: true }).defaultPrevented
+    ).toBe(false);
+  });
+
+  it.each([
+    { repeat: true },
+    { altKey: true },
+    { ctrlKey: true },
+    { isComposing: true },
+  ])("ignores repeats and extra modifiers %j", (extra) => {
+    const dispatch = makeDispatch();
+
+    renderShortcutHook(dispatch);
+    fireKey({ key: "B", metaKey: true, shiftKey: true, ...extra });
+
+    expect(dispatch.toggleChangesPanel).not.toHaveBeenCalled();
+  });
 });

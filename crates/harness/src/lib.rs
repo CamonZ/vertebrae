@@ -379,6 +379,17 @@ impl HarnessRuntimeFactory {
         resolved: ResolvedProvider,
         options: HarnessRuntimeOptions,
     ) -> Result<HarnessRuntimeInstance, HarnessError> {
+        if options.request_config.read_only
+            && !matches!(resolved.harness, StepHarness::Claude | StepHarness::Codex)
+        {
+            let message = format!(
+                "read-only discussion policy is unsupported by '{}'",
+                resolved.harness
+            );
+
+            return Err(HarnessError::Unsupported(message));
+        }
+
         vertebrae_core::validate_harness_agent_config(resolved.harness, &options.agent_config)
             .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
         if resolved.profile.is_some() && options.agent_config.codex_model_provider.is_some() {
@@ -585,6 +596,16 @@ impl HarnessRuntimeFactory {
         agent_config: &AgentConfig,
         request_config: &RequestConfig,
     ) -> Result<ClaudeRuntime, HarnessError> {
+        self.claude_provider_config(resolved, agent_config, request_config)
+            .map(ClaudeRuntime::new)
+    }
+
+    fn claude_provider_config(
+        &self,
+        resolved: &ResolvedProvider,
+        agent_config: &AgentConfig,
+        request_config: &RequestConfig,
+    ) -> Result<ClaudeProviderConfig, HarnessError> {
         let endpoint = match &resolved.profile {
             Some(profile) => Some(ClaudeProviderEndpoint {
                 base_url: profile.base_url.clone(),
@@ -654,13 +675,28 @@ impl HarnessRuntimeFactory {
             // path as the former lazy resolver. Provider-owned plugin roots
             // remain provider-specific flags and are not copied into the
             // persisted AgentConfig list.
-            if let Some(plugin_root) = &self.config.claude_managed_plugin_root {
+            if !request_config.read_only
+                && let Some(plugin_root) = &self.config.claude_managed_plugin_root
+            {
                 merge_plugin_root(&mut agent_config, plugin_root);
             }
         }
         agent_config.json_schema = None;
+
+        if request_config.read_only {
+            agent_config.plugin_dirs.clear();
+            agent_config.mcp_config.clear();
+            agent_config.tools.clear();
+            agent_config.allowed_tools.clear();
+            agent_config.agents = None;
+        }
+
         provider.prelude.args = agent_config.to_claude_cli_args();
-        Ok(ClaudeRuntime::new(provider))
+        if request_config.read_only {
+            provider.restrict_to_read_only();
+        }
+
+        Ok(provider)
     }
 
     fn build_codex(
@@ -693,7 +729,7 @@ impl HarnessRuntimeFactory {
             .permission_mode
             .as_ref()
             .or(self.config.default_permission_mode.as_ref());
-        let provider = CodexProviderConfig {
+        let mut provider = CodexProviderConfig {
             executable: self.config.openai_executable.clone(),
             search_path: self
                 .config
@@ -707,6 +743,10 @@ impl HarnessRuntimeFactory {
             installed_skills_roots: self.config.installed_skills_roots.clone(),
             ..CodexProviderConfig::default()
         };
+        if request_config.read_only {
+            provider.permission.restrict_to_read_only();
+        }
+
         if !self.config.provider_resolution_cached && provider.executable.is_some() {
             provider.resolve_executable()?;
         } else if provider.executable.is_none() {
@@ -1069,6 +1109,85 @@ mod tests {
             instance.request_config.model.as_deref(),
             Some(vertebrae_core::DEFAULT_TYPESAFE_MODEL)
         );
+    }
+
+    #[test]
+    fn read_only_claude_factory_does_not_load_managed_or_explicit_plugins() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = executable();
+        let managed_plugin_root = directory.path().join("managed");
+        let provider_plugin_root = directory.path().join("provider-plugin");
+        let factory_config = HarnessFactoryConfig {
+            anthropic_executable: Some(executable),
+            claude_managed_plugin_root: Some(managed_plugin_root),
+            claude_plugin_roots: vec![provider_plugin_root],
+            ..Default::default()
+        };
+        let factory = HarnessRuntimeFactory::new(factory_config);
+        let agent = AgentConfig {
+            plugin_dirs: vec!["/explicit-plugin".into()],
+            mcp_config: vec!["/explicit-mcp.json".into()],
+            tools: vec!["Edit".into()],
+            allowed_tools: vec!["Bash".into()],
+            ..Default::default()
+        };
+        let resolved = factory
+            .resolve_provider(Some(StepHarness::Claude), &agent)
+            .unwrap();
+
+        for read_only in [false, true] {
+            let working_directory = directory.path().to_path_buf();
+            let request = RequestConfig {
+                read_only,
+                working_directory: Some(working_directory),
+                ..Default::default()
+            };
+            let provider = factory
+                .claude_provider_config(&resolved, &agent, &request)
+                .unwrap();
+            let command = provider
+                .command_spec(
+                    vertebrae_harness_claude::ClaudeLaunchMode::Persistent { resume_id: None },
+                    &request,
+                )
+                .unwrap();
+
+            let has_plugin_dir = command.args.iter().any(|arg| arg == "--plugin-dir");
+            assert_eq!(has_plugin_dir, !read_only);
+
+            if read_only {
+                let has_ambient_config = command.args.iter().any(|arg| {
+                    arg.contains("explicit-plugin")
+                        || arg.contains("managed")
+                        || arg.contains("explicit-mcp.json")
+                });
+                let has_safe_mode = command.args.iter().any(|arg| arg == "--safe-mode");
+                let tools_flags = command.args.iter().filter(|arg| *arg == "--tools").count();
+                let has_allowed_tools = command.args.iter().any(|arg| arg == "--allowed-tools");
+
+                assert!(!has_ambient_config);
+                assert!(has_safe_mode);
+                assert_eq!(tools_flags, 1);
+                assert!(!has_allowed_tools);
+            }
+        }
+    }
+
+    #[test]
+    fn read_only_policy_rejects_unsupported_harnesses_before_launch() {
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig::default());
+        let request_config = RequestConfig {
+            read_only: true,
+            ..Default::default()
+        };
+        let options = HarnessRuntimeOptions {
+            agent_config: AgentConfig::default(),
+            request_config,
+        };
+
+        let result = factory.create_for_harness(Some(StepHarness::MistralVibe), options);
+
+        assert!(matches!(result, Err(HarnessError::Unsupported(_))));
     }
 
     #[test]

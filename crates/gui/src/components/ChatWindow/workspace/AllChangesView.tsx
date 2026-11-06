@@ -139,7 +139,7 @@ export default function AllChangesView({
         ? {
             enableGutterUtility: true,
             // Click, drag or shift-click line numbers to select a range,
-            // then press the gutter "+" to comment on all of it.
+            // then choose an explicit action for that selection.
             enableLineSelection: true,
             onGutterUtilityClick: (
               range: Parameters<typeof openComposer>[1],
@@ -208,60 +208,63 @@ export default function AllChangesView({
 
   return (
     <WorkerPoolContext.Provider value={diffWorkerPool}>
-      <CodeView
-        ref={viewRef}
-        containerRef={containerRef}
-        className="changes-code-view"
-        items={reviewItems}
-        options={codeViewOptions}
-        selectedLines={selectedLines}
-        onSelectedLinesChange={
-          review.enabled
-            ? (next) =>
-                onSelectionChange(
-                  next ? (itemPaths.get(next.id) ?? next.id) : "",
-                  next ? next.range : null
+      <div {...review.keyboardProps} className="flex min-h-0 flex-1 flex-col">
+        <CodeView
+          ref={viewRef}
+          containerRef={containerRef}
+          className="changes-code-view"
+          items={reviewItems}
+          options={codeViewOptions}
+          selectedLines={selectedLines}
+          onSelectedLinesChange={
+            review.enabled
+              ? (next) => {
+                  const path = next ? (itemPaths.get(next.id) ?? next.id) : "";
+                  const range = next ? next.range : null;
+
+                  onSelectionChange(path, range);
+                }
+              : undefined
+          }
+          renderAnnotation={
+            review.enabled
+              ? (...args: CodeViewAnnotationArgs<ReviewAnnotation>) =>
+                  review.renderAnnotation(args[0])
+              : undefined
+          }
+          renderHeaderMetadata={(item) => {
+            const path = itemPaths.get(item.id) ?? item.id;
+            return (
+              <button
+                type="button"
+                className="changes-open-button"
+                aria-label={`Open ${path}`}
+                onClick={() => onOpen(path)}
+              >
+                Open
+              </button>
+            );
+          }}
+          renderCodeViewHeader={
+            fallbacks.length > 0
+              ? () => (
+                  <div className="changes-fallbacks">
+                    {fallbacks.map(({ file, text }) => (
+                      <p
+                        key={file.path}
+                        className="changes-file-fallback"
+                        {...{ [FALLBACK_ATTRIBUTE]: file.path }}
+                      >
+                        <span className="font-mono">{file.path}</span>
+                        <span>{text}</span>
+                      </p>
+                    ))}
+                  </div>
                 )
-            : undefined
-        }
-        renderAnnotation={
-          review.enabled
-            ? (...args: CodeViewAnnotationArgs<ReviewAnnotation>) =>
-                review.renderAnnotation(args[0])
-            : undefined
-        }
-        renderHeaderMetadata={(item) => {
-          const path = itemPaths.get(item.id) ?? item.id;
-          return (
-            <button
-              type="button"
-              className="changes-open-button"
-              aria-label={`Open ${path}`}
-              onClick={() => onOpen(path)}
-            >
-              Open
-            </button>
-          );
-        }}
-        renderCodeViewHeader={
-          fallbacks.length > 0
-            ? () => (
-                <div className="changes-fallbacks">
-                  {fallbacks.map(({ file, text }) => (
-                    <p
-                      key={file.path}
-                      className="changes-file-fallback"
-                      {...{ [FALLBACK_ATTRIBUTE]: file.path }}
-                    >
-                      <span className="font-mono">{file.path}</span>
-                      <span>{text}</span>
-                    </p>
-                  ))}
-                </div>
-              )
-            : undefined
-        }
-      />
+              : undefined
+          }
+        />
+      </div>
     </WorkerPoolContext.Provider>
   );
 }

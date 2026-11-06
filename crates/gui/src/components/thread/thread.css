@@ -404,14 +404,17 @@
   gap: 6px;
 }
 .diff-comment-editor-actions {
+  flex-wrap: wrap;
   justify-content: flex-end;
   margin-top: 4px;
 }
 .diff-comment-actions button,
 .diff-comment-editor-actions button {
+  font: 400 12px/1.45 var(--font-sans);
+  background: transparent;
   border: 1px solid var(--color-line);
   border-radius: 4px;
-  padding: 1px 8px;
+  padding: 4px 8px;
   color: var(--color-fg-soft);
   cursor: pointer;
 }
@@ -438,8 +441,11 @@
   padding: 6px 8px;
   color: var(--color-fg);
 }
-.diff-comment-editor textarea:focus-visible {
-  outline: 2px solid var(--color-accent);
+.diff-comment-editor textarea:focus {
+  outline: none;
+  border-color: var(--color-line-strong);
+  box-shadow: 0 0 0 1px
+    color-mix(in oklch, var(--color-fg-mute) 28%, transparent);
 }
 
 /* Three disclosure levels: group, call preview, operation evidence and recorded data. */

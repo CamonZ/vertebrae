@@ -208,6 +208,7 @@ pub(crate) struct PermissionBridge {
     /// Gate chats by backend session ID. Their bound submission command is
     /// approved without prompting, whichever harness asks.
     gate_bindings: Arc<Mutex<HashMap<String, LocalChatGateBinding>>>,
+    read_only_sessions: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 #[cfg(unix)]
@@ -255,7 +256,22 @@ impl PermissionBridge {
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             pending_harness_controls: Arc::new(Mutex::new(HashMap::new())),
             gate_bindings: Arc::new(Mutex::new(HashMap::new())),
+            read_only_sessions: Arc::default(),
         }
+    }
+
+    pub(crate) fn bind_read_only(&self, session_id: &str) {
+        self.read_only_sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(session_id.to_owned());
+    }
+
+    fn is_read_only(&self, session_id: &str) -> bool {
+        self.read_only_sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(session_id)
     }
 
     /// Approve `session_id`'s submission for `gate` without prompting.
@@ -280,6 +296,13 @@ impl PermissionBridge {
         }
         bindings.insert(session_id.to_string(), gate);
         true
+    }
+
+    pub(crate) fn unbind_read_only(&self, session_id: &str) {
+        self.read_only_sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(session_id);
     }
 
     pub(crate) fn unbind_gate(&self, session_id: &str) {
@@ -339,6 +362,16 @@ impl PermissionBridge {
         app_handle: Option<tauri::AppHandle>,
         request: ControlRequestEnvelope,
     ) -> Result<ControlResolution, HarnessError> {
+        if self.is_read_only(backend_session_id) {
+            let decision = LocalPermissionDecision {
+                behavior: "deny".into(),
+                message: Some("Selection discussions are read only.".into()),
+                updated_input: None,
+            };
+
+            return local_decision_to_control_resolution(&request, decision);
+        }
+
         if requested_command(&request)
             .is_some_and(|command| self.gate_allows(backend_session_id, command))
         {
@@ -604,6 +637,21 @@ impl PermissionBridge {
                 return;
             }
         };
+
+        if self.is_read_only(&session_id) {
+            let decision = LocalPermissionDecision {
+                behavior: "deny".into(),
+                message: Some("Selection discussions are read only.".into()),
+                updated_input: None,
+            };
+            let result = Self::write_permission_socket_decision(&mut stream, &decision);
+
+            if let Err(error) = result {
+                log::warn!("Failed to deliver a read-only discussion permission denial: {error}");
+            }
+
+            return;
+        }
 
         if request.tool_name == "Bash"
             && request

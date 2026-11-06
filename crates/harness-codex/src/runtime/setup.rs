@@ -229,6 +229,12 @@ fn thread_params(
     }
     add_developer_instructions(&mut params, request_config);
     config.permission.apply_to_params(&mut params);
+    if request_config.read_only {
+        // thread/start/resume use `sandbox`; turn/start uses sandboxPolicy.
+        params["sandbox"] = json!("read-only");
+        params["ephemeral"] = json!(true);
+    }
+
     if let Some(thread_config) = thread_config(config, request_config) {
         params["config"] = thread_config;
     }
@@ -268,6 +274,35 @@ fn thread_config(
     request_config: &vertebrae_harness_core::RequestConfig,
 ) -> Option<Value> {
     let mut table = serde_json::Map::new();
+    if request_config.read_only {
+        table.insert("mcp_servers".into(), json!({}));
+        let features = json!({
+            "shell_tool": false,
+            "unified_exec": false,
+            "apps": false,
+            "enable_mcp_apps": false,
+            "codex_apps_mcp_2026_07_28": false,
+            "multi_agent": false,
+            "multi_agent_v2": false,
+            "computer_use": false,
+            "browser_use": false,
+            "browser_use_external": false,
+            "browser_use_full_cdp_access": false,
+            "browser_annotation_api": false,
+            "in_app_browser": false,
+            "code_mode": false,
+            "code_mode_host": false,
+            "code_mode_host_grpc": false,
+            "code_mode_tool_search": false,
+            "code_mode_only": false,
+            "code_mode_only_strict_3p_tools": false,
+            "code_mode_prewarm": false,
+            "deferred_executor": false,
+        });
+
+        table.insert("features".into(), features);
+    }
+
     if let Some(provider) = &config.custom_model_provider {
         table.insert(
             "model_providers".into(),
@@ -480,6 +515,43 @@ mod tests {
             },
         );
         assert_eq!(params["developerInstructions"], "reference contract");
+    }
+
+    #[test]
+    fn discussion_thread_uses_native_read_only_sandbox_and_no_mcp_or_shell() {
+        let mut config = CodexProviderConfig::default();
+        config.permission.restrict_to_read_only();
+
+        let request = vertebrae_harness_core::RequestConfig {
+            read_only: true,
+            ..Default::default()
+        };
+        let params = thread_params(&config, &request);
+
+        assert_eq!(params["sandbox"], "read-only");
+        assert_eq!(params["approvalPolicy"], "never");
+        assert_eq!(params["config"]["mcp_servers"], json!({}));
+        assert_eq!(params["config"]["features"]["shell_tool"], false);
+        assert_eq!(params["config"]["features"]["apps"], false);
+        assert_eq!(params["config"]["features"]["multi_agent"], false);
+
+        for feature in [
+            "computer_use",
+            "browser_use",
+            "browser_use_external",
+            "browser_use_full_cdp_access",
+            "in_app_browser",
+            "code_mode",
+            "code_mode_host",
+            "code_mode_host_grpc",
+            "code_mode_tool_search",
+            "deferred_executor",
+        ] {
+            assert_eq!(
+                params["config"]["features"][feature], false,
+                "discussion exposed {feature}"
+            );
+        }
     }
 
     #[test]

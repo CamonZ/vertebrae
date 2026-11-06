@@ -315,6 +315,9 @@ impl LocalChatSessionManager {
         // Bound before the harness starts: the initial turn may already
         // submit the gate's resolution, or run tools worth recording.
         let permission_bridge = runtime.permission_bridge();
+        if input.read_only {
+            permission_bridge.bind_read_only(&backend_session_id);
+        }
         if let Some(gate) = &input.gate {
             permission_bridge.bind_gate(&backend_session_id, gate.clone());
         }
@@ -348,6 +351,7 @@ impl LocalChatSessionManager {
             Ok(()) => Ok(()),
             Err(err) => {
                 permission_bridge.unbind_gate(&backend_session_id);
+                permission_bridge.unbind_read_only(&backend_session_id);
                 self.remove_registry_entry(&backend_session_id, harness_kind)
                     .await;
                 Err(err)
@@ -590,6 +594,7 @@ impl LocalChatSessionManager {
             self.permission_bridge
                 .fail_pending_permissions_for_session(session_id, permission_message);
             self.permission_bridge.unbind_gate(session_id);
+            self.permission_bridge.unbind_read_only(session_id);
         }
         for (_, recording) in self.lock_recordings().drain() {
             recording.tap.stop();
@@ -699,6 +704,7 @@ impl LocalChatSessionManager {
         {
             registry.remove(backend_session_id);
             self.permission_bridge.unbind_gate(backend_session_id);
+            self.permission_bridge.unbind_read_only(backend_session_id);
             self.stop_recording(backend_session_id);
         }
     }

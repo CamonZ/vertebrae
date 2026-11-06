@@ -258,6 +258,7 @@ fn test_adapter(session_id: &str) -> TestAdapter {
 
 fn input(session_id: &str, initial_prompt: Option<&str>) -> HarnessCreateSessionInput {
     HarnessCreateSessionInput {
+        read_only: false,
         backend_session_id: session_id.into(),
         working_dir: Some("/ignored/by/prepared/session".into()),
         initial_prompt: initial_prompt.map(str::to_owned),

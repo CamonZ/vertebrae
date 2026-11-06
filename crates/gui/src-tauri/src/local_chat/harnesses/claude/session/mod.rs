@@ -826,6 +826,7 @@ impl ClaudeSessionRuntime {
                     SessionMode::Resume(ProviderResumeId::new(id))
                 }),
             config: RequestConfig {
+                read_only: input.read_only,
                 verbosity: None,
                 working_directory: Some(working_dir),
                 model,

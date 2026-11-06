@@ -4,11 +4,13 @@ import {
   diffCommentLocation,
   type PendingDiffComment,
 } from "../../ChatWindow/assistantTextComments";
+import { InlineSelectionDiscussion } from "../../ChatWindow/SelectionDiscussionContext";
 import { DiffReviewContext, type DiffReviewFocus } from "./DiffReviewContext";
 
 /** Pierre annotation payload: comments (and a composer) at one diff line. */
 export interface ReviewAnnotation {
   commentIds: string[];
+  threadIds?: string[];
   /** A new comment is being written at this line. */
   draft: boolean;
 }
@@ -91,6 +93,7 @@ function CommentEditor({
   testIdPrefix,
   onSubmit,
   onCancel,
+  onSendToMain,
 }: {
   label: string;
   value: string;
@@ -99,6 +102,7 @@ function CommentEditor({
   testIdPrefix: string;
   onSubmit(): void;
   onCancel(): void;
+  onSendToMain?(): void;
 }): ReactNode {
   return (
     <div className="diff-comment-editor">
@@ -124,6 +128,11 @@ function CommentEditor({
         <button type="button" onClick={onCancel}>
           Cancel
         </button>
+        {onSendToMain && (
+          <button type="button" onClick={onSendToMain}>
+            Send to main chat
+          </button>
+        )}
         <button
           type="button"
           data-testid={`${testIdPrefix}-submit`}
@@ -142,18 +151,35 @@ export function DiffCommentThread({
   annotation,
   onSaveDraft,
   onCancelDraft,
+  onDiscussDraft,
 }: {
   annotation: ReviewAnnotation;
   onSaveDraft(body: string): void;
   onCancelDraft(): void;
+  onDiscussDraft?(body: string): void;
 }): ReactNode {
   const review = useContext(DiffReviewContext);
   const [draft, setDraft] = useState("");
   const comments = annotation.commentIds
     .map((id) => review?.comments.find((comment) => comment.id === id))
     .filter((comment): comment is PendingDiffComment => comment != null);
+  const submitDraft = () => {
+    const body = draft.trim();
+    const submit = onDiscussDraft ?? onSaveDraft;
+
+    submit(body);
+  };
+  const sendDraftToMain = () => {
+    const body = draft.trim();
+
+    onSaveDraft(body);
+  };
+
   return (
     <div className="diff-comment-thread">
+      {annotation.threadIds?.map((id) => (
+        <InlineSelectionDiscussion key={id} threadId={id} />
+      ))}
       {comments.map((comment) => (
         <CommentCard
           key={comment.id}
@@ -162,15 +188,18 @@ export function DiffCommentThread({
         />
       ))}
       {annotation.draft ? (
-        <CommentEditor
-          label="New diff comment"
-          value={draft}
-          onChange={setDraft}
-          submitLabel="Add comment"
-          testIdPrefix="diff-comment-draft"
-          onSubmit={() => onSaveDraft(draft.trim())}
-          onCancel={onCancelDraft}
-        />
+        <div role="dialog" aria-label="Comment on selected code">
+          <CommentEditor
+            label="New diff comment"
+            value={draft}
+            onChange={setDraft}
+            submitLabel={onDiscussDraft ? "Discuss inline" : "Add comment"}
+            testIdPrefix="diff-comment-draft"
+            onSubmit={submitDraft}
+            onSendToMain={onDiscussDraft ? sendDraftToMain : undefined}
+            onCancel={onCancelDraft}
+          />
+        </div>
       ) : null}
     </div>
   );

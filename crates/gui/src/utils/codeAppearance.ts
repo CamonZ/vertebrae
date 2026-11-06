@@ -193,6 +193,11 @@ export function pierreSelectionCSS(themeSelection: string | null): string {
   return `
 [data-code] { --diffs-editor-selection-bg: ${color}; }
 ::selection { background-color: ${color}; }
+/* Selection belongs to source lines, not their discussion/composer rows. */
+[data-line-annotation][data-selected-line],
+[data-gutter-buffer="annotation"][data-selected-line] {
+  background-color: var(--diffs-bg);
+}
 `;
 }
 

@@ -216,6 +216,9 @@
 .changes-file-open:hover,
 .changes-tab-close:hover,
 .changes-open-button:hover,
+.document-views button:hover:not(:disabled):not([aria-pressed="true"]),
+.document-save:hover:not(:disabled),
+.document-conflict button:hover:not(:disabled),
 .files-tree-row:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-fg) 5%, transparent);
   color: var(--color-fg);
