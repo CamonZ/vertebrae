@@ -7981,6 +7981,8 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
+ "unicode-segmentation",
+ "unicode-width",
  "uuid",
  "vertebrae-core",
  "vertebrae-sacrum-client",

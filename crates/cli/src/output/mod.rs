@@ -3,6 +3,8 @@
 //! Provides table formatting and display utilities for CLI output.
 
 use crate::commands::list::TaskSummary;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 use vertebrae_core::TaskRunSummary;
 
 /// Maximum width for the title column before truncation
@@ -11,15 +13,31 @@ const MAX_TITLE_WIDTH: usize = 30;
 /// Maximum width for the tags column before truncation
 const MAX_TAGS_WIDTH: usize = 20;
 
-/// Truncate a string to the specified maximum width, adding ellipsis if needed.
+/// Terminal cells under unicode-width's non-CJK policy (ambiguous characters are
+/// narrow). Actual rendering depends on the terminal/font; tabs, control codes,
+/// and ANSI escape sequences are not interpreted as terminal instructions.
+fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+/// Truncate to terminal cells without splitting extended grapheme clusters.
+/// Budgets of three cells or less retain a prefix without dots, as for ASCII.
 fn truncate(s: &str, max_width: usize) -> String {
-    if s.len() <= max_width {
-        s.to_string()
-    } else if max_width <= 3 {
-        s.chars().take(max_width).collect()
-    } else {
-        format!("{}...", &s[..max_width - 3])
+    if display_width(s) <= max_width {
+        return s.to_string();
     }
+
+    let suffix = if max_width > 3 { "..." } else { "" };
+    let budget = max_width - suffix.len();
+    let mut end = 0;
+    for (index, grapheme) in s.grapheme_indices(true) {
+        let next = index + grapheme.len();
+        if display_width(&s[..next]) > budget {
+            break;
+        }
+        end = next;
+    }
+    format!("{}{}", &s[..end], suffix)
 }
 
 /// Format the workflow position display from workflow_name and step_name.
@@ -76,131 +94,46 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         "ID", "Level", "Workflow", "Run", "Priority", "Title", "Tags", "[A]",
     ];
 
-    // Calculate column widths based on content
-    let id_width = tasks
+    // Render first so sizing and padding measure exactly the same cell content.
+    let rows: Vec<[String; 8]> = tasks
         .iter()
-        .map(|t| t.id.len())
-        .max()
-        .unwrap_or(0)
-        .max(headers[0].len());
-
-    let level_width = tasks
-        .iter()
-        .map(|t| t.level.len())
-        .max()
-        .unwrap_or(0)
-        .max(headers[1].len());
-
-    let workflow_width = tasks
-        .iter()
-        .map(|t| format_workflow_position_display(t).len())
-        .max()
-        .unwrap_or(0)
-        .max(headers[2].len());
-
-    let run_width = tasks
-        .iter()
-        .map(|t| format_run_state_display(t).len())
-        .max()
-        .unwrap_or(0)
-        .max(headers[3].len());
-
-    let priority_width = tasks
-        .iter()
-        .map(|t| t.priority.as_ref().map_or(1, |p| p.len()))
-        .max()
-        .unwrap_or(0)
-        .max(headers[4].len());
-
-    let title_width = tasks
-        .iter()
-        .map(|t| t.title.len().min(MAX_TITLE_WIDTH))
-        .max()
-        .unwrap_or(0)
-        .max(headers[5].len());
-
-    let tags_width = tasks
-        .iter()
-        .map(|t| format_tags(&t.tags).len().min(MAX_TAGS_WIDTH))
-        .max()
-        .unwrap_or(0)
-        .max(headers[6].len());
-
-    // Archived column is fixed width (3 chars for "[A]")
-    let archived_width = headers[7].len();
+        .map(|task| {
+            [
+                task.id.clone(),
+                task.level.clone(),
+                format_workflow_position_display(task),
+                format_run_state_display(task),
+                task.priority.clone().unwrap_or_else(|| "-".to_string()),
+                truncate(&task.title, MAX_TITLE_WIDTH),
+                truncate(&format_tags(&task.tags), MAX_TAGS_WIDTH),
+                format_archived_status(task.archived).to_string(),
+            ]
+        })
+        .collect();
+    let widths: [usize; 8] = std::array::from_fn(|column| {
+        rows.iter()
+            .map(|row| display_width(&row[column]))
+            .max()
+            .unwrap_or(0)
+            .max(display_width(headers[column]))
+    });
 
     let mut output = String::new();
-
-    // Header row
-    output.push_str(&format!(
-        "{:<id_w$}  {:<level_w$}  {:<workflow_w$}  {:<run_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<archived_w$}\n",
-        headers[0],
-        headers[1],
-        headers[2],
-        headers[3],
-        headers[4],
-        headers[5],
-        headers[6],
-        headers[7],
-        id_w = id_width,
-        level_w = level_width,
-        workflow_w = workflow_width,
-        run_w = run_width,
-        priority_w = priority_width,
-        title_w = title_width,
-        tags_w = tags_width,
-        archived_w = archived_width,
-    ));
-
-    // Separator row using Unicode box-drawing character
-    output.push_str(&format!(
-        "{:->id_w$}  {:->level_w$}  {:->workflow_w$}  {:->run_w$}  {:->priority_w$}  {:->title_w$}  {:->tags_w$}  {:->archived_w$}\n",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        id_w = id_width,
-        level_w = level_width,
-        workflow_w = workflow_width,
-        run_w = run_width,
-        priority_w = priority_width,
-        title_w = title_width,
-        tags_w = tags_width,
-        archived_w = archived_width,
-    ));
-
-    // Data rows
-    for task in tasks {
-        let priority_display = task.priority.as_deref().unwrap_or("-");
-        let title_display = truncate(&task.title, MAX_TITLE_WIDTH);
-        let tags_display = truncate(&format_tags(&task.tags), MAX_TAGS_WIDTH);
-        let archived_display = format_archived_status(task.archived);
-        let workflow_display = format_workflow_position_display(task);
-        let run_display = format_run_state_display(task);
-
-        output.push_str(&format!(
-            "{:<id_w$}  {:<level_w$}  {:<workflow_w$}  {:<run_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<archived_w$}\n",
-            task.id,
-            task.level,
-            workflow_display,
-            run_display,
-            priority_display,
-            title_display,
-            tags_display,
-            archived_display,
-            id_w = id_width,
-            level_w = level_width,
-            workflow_w = workflow_width,
-            run_w = run_width,
-            priority_w = priority_width,
-            title_w = title_width,
-            tags_w = tags_width,
-            archived_w = archived_width,
-        ));
+    let mut write_row = |cells: [&str; 8]| {
+        for (column, cell) in cells.iter().enumerate() {
+            if column > 0 {
+                output.push_str("  ");
+            }
+            output.push_str(cell);
+            output.push_str(&" ".repeat(widths[column] - display_width(cell)));
+        }
+        output.push('\n');
+    };
+    write_row(headers);
+    let separator: [String; 8] = widths.map(|width| "-".repeat(width));
+    write_row(separator.each_ref().map(String::as_str));
+    for row in &rows {
+        write_row(row.each_ref().map(String::as_str));
     }
 
     // Remove trailing newline
@@ -1331,3 +1264,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod unicode_tests;

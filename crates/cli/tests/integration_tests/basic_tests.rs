@@ -1266,3 +1266,41 @@ async fn test_mock_services_creation() {
     let tasks = services.tasks().list_tasks(&filter).await.unwrap();
     assert!(tasks.is_empty());
 }
+
+#[tokio::test]
+async fn unicode_list_commands_preserve_full_json_values() {
+    use clap::Parser;
+    let services = mock_services();
+    let title = "👩‍💻e\u{301}界".repeat(12);
+    let tags = vec!["é".repeat(25), "👍🏽".repeat(12)];
+    AddCommand {
+        title: title.clone(),
+        level: None,
+        description: None,
+        priority: None,
+        tags: tags.clone(),
+        parent: None,
+        depends_on: vec![],
+        workflow: None,
+        worktree: None,
+    }
+    .execute(&services)
+    .await
+    .unwrap();
+    for args in [
+        vec!["vtb", "--json", "list"],
+        vec!["vtb", "--json", "list", "--flat"],
+    ] {
+        let command = vertebrae_cli::CliArgs::parse_from(args).command.unwrap();
+        let CommandResult::Json(json) = command.execute_json(&services).await.unwrap() else {
+            panic!("list --json should return JSON output");
+        };
+        assert_eq!(json[0]["title"], title);
+        assert_eq!(json[0]["tags"], serde_json::json!(tags));
+        let CommandResult::Table(output) = command.execute(&services).await.unwrap() else {
+            panic!("list should return formatted output");
+        };
+        assert!(output.contains("..."));
+        assert!(!output.contains(&title));
+    }
+}
