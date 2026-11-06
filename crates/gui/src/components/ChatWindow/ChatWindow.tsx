@@ -609,6 +609,9 @@ export function ChatWindow({
         harness={chat.session.harness}
         providerId={chat.session.providerId ?? undefined}
         modelId={chat.session.selectedModelId}
+        reasoningEffort={chat.session.selectedReasoningEffort}
+        speedTier={chat.session.selectedSpeedTier}
+        personality={chat.session.selectedPersonality}
         onOpen={() => setChangesSession(sessionId)}
         onAttach={attachSelection}
       >

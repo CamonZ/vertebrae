@@ -872,7 +872,15 @@ fn normalized_request_config(
         None => {}
     }
     if request_config.reasoning_effort.is_none() {
-        request_config.reasoning_effort = agent_config.reasoning_effort.clone();
+        // Inherited workflow AgentConfig retains its existing policy. Explicit
+        // native RequestConfig options are validated by the selected adapter.
+        let inherited_effort = vertebrae_core::normalize_harness_reasoning_effort(
+            harness,
+            agent_config.reasoning_effort.as_deref(),
+        )
+        .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+
+        request_config.reasoning_effort = inherited_effort;
     }
     if request_config.speed_tier.is_none() {
         request_config.speed_tier = agent_config.speed_tier;
@@ -886,16 +894,21 @@ fn normalized_request_config(
     if request_config.output_schema.is_none() {
         request_config.output_schema = agent_config.json_schema.clone();
     }
-    request_config.reasoning_effort = vertebrae_core::normalize_harness_reasoning_effort(
-        harness,
-        request_config.reasoning_effort.as_deref(),
-    )
-    .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
-    request_config.personality = vertebrae_core::normalize_harness_personality(
-        harness,
-        request_config.personality.as_deref(),
-    )
-    .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+    if harness == StepHarness::Claude {
+        ClaudeProviderConfig::normalize_request_options(&mut request_config)?;
+    } else {
+        request_config.reasoning_effort = vertebrae_core::normalize_harness_reasoning_effort(
+            harness,
+            request_config.reasoning_effort.as_deref(),
+        )
+        .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+        request_config.personality = vertebrae_core::normalize_harness_personality(
+            harness,
+            request_config.personality.as_deref(),
+        )
+        .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
+    }
+
     request_config.verbosity =
         vertebrae_core::normalize_harness_verbosity(harness, request_config.verbosity)
             .map_err(|error| HarnessError::InvalidRequest(error.to_string()))?;
@@ -1581,6 +1594,41 @@ mod tests {
         assert_eq!(
             codex.request_config.reasoning_effort.as_deref(),
             Some("high")
+        );
+    }
+
+    #[test]
+    fn claude_native_request_options_reach_read_only_runtime_unchanged() {
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            anthropic_executable: Some(executable()),
+            search_path: Some(OsString::new()),
+            ..HarnessFactoryConfig::default()
+        });
+        let request_config = RequestConfig {
+            read_only: true,
+            model: Some("opus".into()),
+            reasoning_effort: Some(" HIGH ".into()),
+            speed_tier: Some(vertebrae_harness_core::SpeedTier::Fast),
+            personality: Some("Concise".into()),
+            ..RequestConfig::default()
+        };
+        let agent_config = AgentConfig::new().with_provider(ProviderId::anthropic());
+        let options = HarnessRuntimeOptions {
+            agent_config,
+            request_config,
+        };
+
+        let instance = factory
+            .create(options)
+            .expect("native Claude options must be supported");
+        let config = instance.request_config;
+
+        assert!(config.read_only);
+        assert_eq!(config.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(config.personality.as_deref(), Some("Concise"));
+        assert_eq!(
+            config.speed_tier,
+            Some(vertebrae_harness_core::SpeedTier::Fast)
         );
     }
 

@@ -26,6 +26,8 @@ pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
     ("claude-haiku-5-5", "Claude Haiku 5.5"),
 ];
 
+pub const CLAUDE_REASONING_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+
 pub(crate) fn claude_model_supports_fast_mode(model: &str) -> bool {
     matches!(model, "opus" | "claude-opus-5" | "claude-opus-4-8")
         || model.starts_with("claude-opus-5-")
@@ -281,6 +283,37 @@ impl fmt::Debug for ClaudeCommandSpec {
 }
 
 impl ClaudeProviderConfig {
+    /// Normalize native request options without applying workflow-step policy.
+    /// Output-style identifiers are provider-defined and retain their case.
+    pub fn normalize_request_options(request: &mut RequestConfig) -> Result<(), HarnessError> {
+        let effort = request
+            .reasoning_effort
+            .as_deref()
+            .map(|value| value.trim().to_ascii_lowercase());
+        let style = request
+            .personality
+            .as_deref()
+            .map(|value| value.trim().to_owned());
+
+        if let Some(effort) = effort.as_deref()
+            && !CLAUDE_REASONING_EFFORTS.contains(&effort)
+        {
+            return Err(HarnessError::InvalidRequest(format!(
+                "unsupported Claude reasoning effort: {effort}"
+            )));
+        }
+        if style.as_deref() == Some("") {
+            return Err(HarnessError::InvalidRequest(
+                "Claude output style must not be empty".into(),
+            ));
+        }
+
+        request.reasoning_effort = effort;
+        request.personality = style;
+
+        Ok(())
+    }
+
     /// Discussion runtimes expose no tools, including inherited MCP tools.
     pub fn restrict_to_read_only(&mut self) {
         let settings = json!({"disableAllHooks": true}).to_string();
@@ -349,23 +382,50 @@ impl ClaudeProviderConfig {
         }
         let program = self.resolve_executable()?;
         let mut args = Vec::new();
+        let mut settings = serde_json::Map::new();
+
         if let Some(personality) = request
             .personality
             .as_deref()
             .map(str::trim)
             .filter(|personality| !personality.is_empty())
         {
-            args.push("--settings".into());
-            args.push(json!({ "outputStyle": personality }).to_string());
+            settings.insert("outputStyle".into(), json!(personality));
         } else if let Some(path) = &self.prelude.settings_path {
             args.push("--settings".into());
             args.push(path.to_string_lossy().into_owned());
         }
+
         if let Some(speed_tier) = request.speed_tier {
-            args.push("--settings".into());
-            args.push(json!({"fastMode": speed_tier == SpeedTier::Fast}).to_string());
+            settings.insert("fastMode".into(), json!(speed_tier == SpeedTier::Fast));
         }
-        args.extend(self.prelude.args.clone());
+
+        // Keep native options and the enforced read-only settings together.
+        // Preserve prelude precedence without relying on repeated JSON flags.
+        let mut prelude_args = Vec::new();
+        let mut prelude = self.prelude.args.iter().peekable();
+
+        while let Some(argument) = prelude.next() {
+            if argument == "--settings"
+                && let Some(value) = prelude.peek()
+                && let Ok(Value::Object(values)) = serde_json::from_str(value)
+            {
+                settings.extend(values);
+                prelude.next();
+                continue;
+            }
+
+            prelude_args.push(argument.clone());
+        }
+
+        if !settings.is_empty() {
+            let encoded_settings = Value::Object(settings).to_string();
+
+            args.push("--settings".into());
+            args.push(encoded_settings);
+        }
+
+        args.extend(prelude_args);
         match mode {
             ClaudeLaunchMode::Persistent { .. }
             | ClaudeLaunchMode::PersistentNew { .. }
@@ -523,6 +583,76 @@ mod tests {
         ClaudeLaunchMode, ClaudeProviderConfig, ClaudeProviderEndpoint, DEFAULT_CLAUDE_MODELS,
         claude_model_supports_fast_mode,
     };
+
+    #[test]
+    fn request_options_preserve_style_case_and_validate_claude_effort() {
+        let mut request = RequestConfig {
+            reasoning_effort: Some(" HIGH ".into()),
+            personality: Some(" Concise ".into()),
+            ..RequestConfig::default()
+        };
+
+        ClaudeProviderConfig::normalize_request_options(&mut request)
+            .expect("valid native options");
+
+        assert_eq!(request.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(request.personality.as_deref(), Some("Concise"));
+
+        for invalid in ["", "minimal", "unknown"] {
+            let mut request = RequestConfig {
+                reasoning_effort: Some(invalid.into()),
+                ..RequestConfig::default()
+            };
+            let result = ClaudeProviderConfig::normalize_request_options(&mut request);
+
+            assert!(result.is_err(), "invalid effort must fail before launch");
+        }
+
+        let mut empty_style = RequestConfig {
+            personality: Some(" ".into()),
+            ..RequestConfig::default()
+        };
+        let result = ClaudeProviderConfig::normalize_request_options(&mut empty_style);
+
+        assert!(result.is_err(), "empty style must fail before launch");
+    }
+
+    #[test]
+    fn read_only_launch_combines_generation_options_and_hook_restrictions() {
+        let directory = tempdir().expect("temporary directory");
+        let executable = directory.path().join("claude");
+        File::create(&executable).expect("placeholder executable");
+
+        let mut config = ClaudeProviderConfig {
+            executable: Some(executable),
+            ..ClaudeProviderConfig::default()
+        };
+        let request = RequestConfig {
+            read_only: true,
+            personality: Some("Concise".into()),
+            speed_tier: Some(vertebrae_harness_core::SpeedTier::Fast),
+            ..RequestConfig::default()
+        };
+
+        config.restrict_to_read_only();
+
+        let mode = ClaudeLaunchMode::OneShot { prompt: "fixture" };
+        let spec = config.command_spec(mode, &request).expect("valid launch");
+        let settings: Vec<_> = spec
+            .args
+            .windows(2)
+            .filter(|pair| pair[0] == "--settings")
+            .map(|pair| serde_json::from_str::<serde_json::Value>(&pair[1]).expect("JSON settings"))
+            .collect();
+
+        assert_eq!(settings.len(), 1);
+        assert_eq!(settings[0]["outputStyle"], "Concise");
+        assert_eq!(settings[0]["fastMode"], true);
+        assert_eq!(settings[0]["disableAllHooks"], true);
+        let has_safe_mode = spec.args.iter().any(|arg| arg == "--safe-mode");
+
+        assert!(has_safe_mode);
+    }
 
     #[test]
     fn read_only_launch_removes_ambient_tools() {

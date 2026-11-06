@@ -181,6 +181,13 @@
   margin-top: 18px;
 }
 
+.selection-model-notice {
+  margin: 10px 0;
+  color: var(--color-fg-soft);
+  font: 400 12px/1.5 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
 .selection-mini-speaker {
   margin-bottom: 6px;
   color: var(--color-fg-mute);

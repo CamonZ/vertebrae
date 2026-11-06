@@ -58,3 +58,8 @@ export function discussionErrorMessage(error: unknown): string {
 export const SelectionDiscussionContext = createContext<DiscussionValue | null>(
   null
 );
+
+export const SelectionDiscussionModelContext = createContext<{
+  label: string;
+  error: string | null;
+} | null>(null);

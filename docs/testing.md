@@ -468,8 +468,9 @@ tears it down, including its database and temporary GUI node_modules volume.
 The cache overlay keeps Cargo downloads, compiled targets, Rust toolchains, and
 npm downloads in external Docker volumes. These survive runtime teardown.
 Local cache identity derives from the checkout path; GitHub-hosted CI supplies
-the run ID and attempt through `VTB_ACCEPTANCE_CACHE_KEY`. CI build caches last
-for that disposable job. The runner prints the resolved cache name.
+the run ID and attempt through `VTB_ACCEPTANCE_CACHE_KEY`. CI named volumes last
+for that disposable job; the job-private build directories described below can
+be restored across runs. The runner prints the resolved cache name.
 To benchmark an empty cache, supply a new key; reuse that key for warm runs.
 Only remove these named cache volumes when no run is using them.
 
@@ -514,27 +515,64 @@ and share a bounded deadline, including slow WebDriver requests. Failure
 screenshots are enabled by default; `GUI_ACCEPTANCE_SCREENSHOTS=all` restores
 per-action diagnostics. Mock delays that test cancellation remain intact.
 
-Local suite execution remains sequential by default. CI runs two CLI, two daemon,
-and four GUI feature shards on separate runners. Each job owns its checkout,
-Compose project/database, build-cache identity, GUI installation links, WebDriver,
-mock response path and diagnostics artifact. Builds remain sequential within each
-job; separate runners deliberately repeat compilation rather than concurrently
-mutating shared targets or staged binaries. Sharing a single build in the future
-requires distributing immutable artifacts before runtime jobs start.
+Local suite execution remains sequential by default. CI has one runtime build job
+per suite (CLI, daemon and GUI), followed by two CLI, six daemon and eight GUI
+shards. Producers compile the app/components, mocks and the suite's test executable
+once. The GUI bundle also carries its installed frontend dependencies. Each
+producer uploads a compressed runtime artifact; every shard in that suite downloads
+that same artifact and runs the compiled test executable directly. Shards do not
+invoke Cargo or npm install, and there is no compilation fallback for a missing or
+mismatched bundle. Colima retains its separate job and build path.
+
+Bundles contain only runtime executables, GUI dependencies and a manifest bound
+to the suite, source-content fingerprint, runner image and Docker platform. The
+runner checks that identity before starting a backend. A checkout changed during
+build is rejected. Producers create no database; shards own separate checkouts,
+Compose projects/databases, runtime homes, GUI/browser state, mocks and diagnostics.
+The required summary depends on both producers and shards, including build failures.
+Producer jobs must complete before the shard matrix starts, so total workflow time
+includes the build stage plus the longest shard; sharding cannot eliminate that
+critical path.
+
+Build once and run an individual shard locally:
+
+```bash
+VTB_ACCEPTANCE_OUTPUT="$PWD/test-output/gui-runtime" python3 scripts/acceptance.py gui --build-only
+python3 scripts/acceptance.py gui --prebuilt "$PWD/test-output/gui-runtime/runtime.tar.gz" --shard-index 1 --shard-count 8
+```
+
+CI restores/saves job-private Cargo, target and npm build caches only in producer
+jobs using `actions/cache`. `VTB_ACCEPTANCE_BUILD_CACHE_DIR` enables bind mounts
+for those caches. Cache keys include runner platform, suite, dependency/toolchain/
+image inputs and commit, with a compatible restore prefix. Separate jobs never
+write a shared target directory. Ordinary local runs retain named-volume caches
+and the original build-and-test path. Explicit cache directories are locked, as
+are the checkout and named-volume cache identity. Runtime databases and GUI
+node_modules volumes remain disposable; the producer's temporary dependency volume
+is removed after packaging.
+
+The target is roughly five minutes per shard, including artifact download, setup,
+tests and cleanup. The shared build stage and cold cache misses are additional
+workflow time. Confirm the target using subsequent hosted CI durations; local
+verification does not establish a five-minute hosted average.
 
 Run one partition explicitly (indexes are one-based):
 
 ```bash
-python3 scripts/acceptance.py gui --shard-index 1 --shard-count 4
+python3 scripts/acceptance.py gui --shard-index 1 --shard-count 8
 ```
 
-Feature paths are sorted recursively and distributed round-robin. Each feature
-belongs to exactly one shard, preserving scenario/feature setup and the GUI's
-serial browser lifecycle. Existing `@skip`, Colima and Podman filtering still
+Feature paths are discovered recursively. CLI files remain sorted and distributed
+round-robin. GUI and daemon files use deterministic largest-first assignment to
+the least-loaded shard, estimating work from step, scenario and table-row counts.
+Each feature belongs to exactly one shard, preserving scenario/feature setup and
+the GUI's serial browser lifecycle. Existing `@skip`, Colima and Podman filtering still
 applies within each partition; the Podman phase receives the same feature glob.
-Empty/invalid partitions fail before containers start. `shard-manifest.json`
-records the selected feature paths alongside the normal diagnostics. Partitions
-balance file counts, not measured duration, so one long feature can still dominate.
+Empty/invalid partitions fail before containers start. Generated globs retain
+braces even for a single feature, so globwalk does not treat an absolute
+filename as a traversal root and silently run zero scenarios. `shard-manifest.json`
+records the selected feature paths alongside the normal diagnostics. Source weights
+are estimates, not measured durations, so one long feature can still dominate.
 Adding features can rebalance partitions. Do not run shards concurrently in the
 same checkout/cache: the runner's exclusive locks remain enforced.
 

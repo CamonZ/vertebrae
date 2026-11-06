@@ -8,7 +8,11 @@ fi
 if [ "$(id -u)" -eq 0 ]; then
     # Assert absence on disk, not just a PATH that hides Docker binaries.
     test -z "$(find /usr /opt /bin /sbin -name docker -o -name docker-compose)"
-    test_binary=$(python3 -c 'import json; records=[json.loads(line) for line in open("/tmp/gui-acceptance-build.jsonl") if line.startswith("{")]; print(next(r["executable"] for r in records if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="gui_acceptance" and r.get("executable")))')
+    if [ -n "${VTB_ACCEPTANCE_TEST_BINARY:-}" ]; then
+        test_binary="$VTB_ACCEPTANCE_TEST_BINARY"
+    else
+        test_binary=$(python3 -c 'import json; records=[json.loads(line) for line in open("/tmp/gui-acceptance-build.jsonl") if line.startswith("{")]; print(next(r["executable"] for r in records if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="gui_acceptance" and r.get("executable")))')
+    fi
     install -d -o podmantest -g podmantest -m 0700 /run/user/1000
     install -d -o podmantest -g podmantest /home/podmantest/.local/share/vertebrae/bin /home/podmantest/.local/bin /app/test-output/podman
     for component in vtb vtb-daemon vtb-gate; do

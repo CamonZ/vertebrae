@@ -84,7 +84,69 @@ jobs:
           path: test-output/colima
           if-no-files-found: warn
 
+  acceptance-build:
+    name: Build acceptance ${{ matrix.suite }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [cli, daemon, gui]
+    steps:
+      - name: Checkout vertebrae
+        uses: actions/checkout@v4
+
+      - name: Check acceptance runner contracts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_acceptance*.py'
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      # Each job restores a private copy; shards never write a shared target.
+      # A successful shard saves the suite's identical build outputs for later runs.
+      - name: Restore and save acceptance build cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/acceptance-build-cache
+          key: acceptance-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.suite }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'docker/*test-runner.Dockerfile') }}-${{ github.sha }}
+          restore-keys: |
+            acceptance-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.suite }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'docker/*test-runner.Dockerfile') }}-
+
+      - name: Build suite runtime once
+        env:
+          VTB_ACCEPTANCE_BUILD_CACHE_DIR: ${{ runner.temp }}/acceptance-build-cache
+          VTB_ACCEPTANCE_CACHE_KEY: build-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suite }}
+          VTB_ACCEPTANCE_OUTPUT: ${{ github.workspace }}/test-output/acceptance-build
+        run: python3 scripts/acceptance.py ${{ matrix.suite }} --build-only
+
+      - name: Upload immutable suite runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-runtime-${{ matrix.suite }}-${{ github.sha }}
+          overwrite: true
+          path: test-output/acceptance-build/runtime.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-build-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-output/acceptance-build
+            !test-output/acceptance-build/runtime.tar.gz
+
   acceptance:
+    needs: [acceptance-build]
     name: Acceptance ${{ matrix.suite }} (${{ matrix.shard }}/${{ matrix.count }})
     timeout-minutes: 60
     strategy:
@@ -93,12 +155,20 @@ jobs:
         include:
           - {suite: cli, shard: 1, count: 2}
           - {suite: cli, shard: 2, count: 2}
-          - {suite: daemon, shard: 1, count: 2}
-          - {suite: daemon, shard: 2, count: 2}
-          - {suite: gui, shard: 1, count: 4}
-          - {suite: gui, shard: 2, count: 4}
-          - {suite: gui, shard: 3, count: 4}
-          - {suite: gui, shard: 4, count: 4}
+          - {suite: daemon, shard: 1, count: 6}
+          - {suite: daemon, shard: 2, count: 6}
+          - {suite: daemon, shard: 3, count: 6}
+          - {suite: daemon, shard: 4, count: 6}
+          - {suite: daemon, shard: 5, count: 6}
+          - {suite: daemon, shard: 6, count: 6}
+          - {suite: gui, shard: 1, count: 8}
+          - {suite: gui, shard: 2, count: 8}
+          - {suite: gui, shard: 3, count: 8}
+          - {suite: gui, shard: 4, count: 8}
+          - {suite: gui, shard: 5, count: 8}
+          - {suite: gui, shard: 6, count: 8}
+          - {suite: gui, shard: 7, count: 8}
+          - {suite: gui, shard: 8, count: 8}
     runs-on: ubuntu-24.04
     env:
       # Pin the source; bumping it also invalidates the image archive cache.
@@ -151,12 +221,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
 
+      - name: Download suite runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: acceptance-runtime-${{ matrix.suite }}-${{ github.sha }}
+          path: ${{ runner.temp }}/acceptance-runtime
+
       - name: Run acceptance suites
         env:
-          # Isolate build caches for this disposable GitHub-hosted job.
+          # Shards own disposable state and execute the immutable suite build.
           VTB_ACCEPTANCE_CACHE_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suite }}-${{ matrix.shard }}
           VTB_ACCEPTANCE_OUTPUT: ${{ github.workspace }}/test-output/acceptance
-        run: python3 scripts/acceptance.py ${{ matrix.suite }} --shard-index ${{ matrix.shard }} --shard-count ${{ matrix.count }}
+        run: python3 scripts/acceptance.py ${{ matrix.suite }} --prebuilt "${{ runner.temp }}/acceptance-runtime/runtime.tar.gz" --shard-index ${{ matrix.shard }} --shard-count ${{ matrix.count }}
 
       - name: Ensure acceptance resources are removed
         if: always()
@@ -175,10 +251,11 @@ jobs:
   acceptance-summary:
     name: Acceptance Tests
     if: always()
-    needs: [acceptance]
+    needs: [acceptance-build, acceptance]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every acceptance shard
         env:
+          BUILD_RESULT: ${{ needs.acceptance-build.result }}
           RESULT: ${{ needs.acceptance.result }}
-        run: test "$RESULT" = success
+        run: test "$BUILD_RESULT" = success && test "$RESULT" = success

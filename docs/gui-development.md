@@ -113,6 +113,35 @@ participate in the lock: edits are checked before activation, but an editor can
 still race the final filesystem replacement. Atomic visibility is provided;
 power-loss durability of the directory entry is not guaranteed.
 
+### Inline discussion model selection
+
+Settings → Diffs & code editor → Inline discussions follows the main conversation by default.
+The Diffs & code editor section groups code themes, diff presentation, file-link
+editor selection and inline discussions; Appearance retains the application theme.
+A dedicated configured provider/model can be saved independently of main chat
+settings, along with the reasoning effort and speed tier supported by that
+provider's harness and selected model. Selecting Custom model reveals provider,
+model, effort and speed together on a second row below Answer using. Dedicated
+personality/output-style preferences are discarded; follow mode continues to
+inherit the main conversation's style. Options use the shared
+catalog helpers. Model changes clear incompatible optional choices; stale saved
+choices block requests. Follow mode inherits the main conversation's model options.
+The permission policy stays read only and is not an editable model option.
+Native Claude request options are normalized by the adapter: effort values use
+its supported allowlist and output-style identifiers retain their case. Inline
+style, speed and hook restrictions share one JSON settings argument. This
+does not change the CLI workflow-step reasoning-effort policy. The comment dialog and anchored thread show the next reply's provider
+and model; an inherited unset model is resolved from the catalog default and
+sent explicitly. Unavailable providers, stale models and invalid saved choices
+block discussion requests with recovery instructions rather than switching
+providers. Provider catalogs refresh after a confirmed provider settings save.
+
+Each question captures its provider/model before asynchronous runtime setup.
+Changing settings leaves an outstanding reply on its captured runtime; the next
+question, including a follow-up in the same thread, uses the new setting with
+the original code snapshot and conversation history. Inline requests retain the
+native read-only policy and the mounted session/worktree's lifetime.
+
 ### Workflow step harness selection
 
 The Workflow Atlas authoring form (`WorkflowInspector.tsx`) sets a step's

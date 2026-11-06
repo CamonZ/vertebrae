@@ -1,3 +1,6 @@
+import { inlineDiscussionCatalog } from "../../test/inlineDiscussionCatalog";
+import { useUIStore } from "../../stores/uiStore";
+import { useProviderSettingsStore } from "../../stores/providerSettingsStore";
 import { SelectionDiscussionContext } from "./selectionDiscussionState";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
@@ -18,7 +21,7 @@ import type {
   LocalChatSessionEndEvent,
   LocalChatSessionErrorEvent,
 } from "../../bindings";
-import { commands } from "../../bindings";
+import { commands, events } from "../../bindings";
 import {
   SelectionDiscussionProvider,
   InlineSelectionDiscussion,
@@ -37,6 +40,7 @@ const transport = vi.hoisted(() => ({
 
 vi.mock("../../bindings", () => ({
   commands: {
+    getSupportedLocalChatHarnesses: vi.fn(),
     createLocalChatSession: vi.fn(async () => ({ status: "ok" })),
     closeLocalChatSession: vi.fn(async () => ({ status: "ok" })),
   },
@@ -115,16 +119,25 @@ function open() {
 }
 
 async function send(text = "Question") {
-  fireEvent.change(
-    screen.getByRole("textbox", { name: "Ask about selected code" }),
-    { target: { value: text } }
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Ask" }));
-  await waitFor(() =>
-    expect(commands.createLocalChatSession).toHaveBeenCalled()
-  );
+  const composer = screen.getByRole("textbox", {
+    name: "Ask about selected code",
+  });
+  const askButton = screen.getByRole("button", { name: "Ask" });
 
-  const calls = vi.mocked(commands.createLocalChatSession).mock.calls;
+  fireEvent.change(composer, { target: { value: text } });
+
+  await waitFor(() => {
+    expect(askButton).toBeEnabled();
+  });
+
+  fireEvent.click(askButton);
+
+  await waitFor(() => {
+    expect(commands.createLocalChatSession).toHaveBeenCalled();
+  });
+
+  const sessionCommand = vi.mocked(commands.createLocalChatSession);
+  const calls = sessionCommand.mock.calls;
   const request = calls.at(-1)![0];
 
   return request.backend_session_id;
@@ -150,6 +163,15 @@ function end(id: string, handler = transport.end) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useUIStore.setState({ inlineDiscussionPreference: { mode: "follow" } });
+
+  const catalogCommand = vi.mocked(commands.getSupportedLocalChatHarnesses);
+
+  catalogCommand.mockResolvedValue({
+    status: "ok",
+    data: inlineDiscussionCatalog,
+  });
+
   vi.mocked(commands.createLocalChatSession).mockResolvedValue({
     status: "ok",
     data: null,
@@ -373,12 +395,20 @@ it("opens a two-action dialog with + and renders questions and answers beneath t
     screen.getByRole("dialog", { name: "Comment on selected code" })
   ).toBeVisible();
   expect(screen.getByRole("button", { name: "Discuss inline" })).toBeDisabled();
+  await screen.findByText("Next reply: Anthropic · Sonnet (provider default)");
   expect(
     screen.getByRole("button", { name: "Send to main chat" })
   ).toBeEnabled();
 
   fireEvent.change(screen.getByRole("textbox", { name: "New diff comment" }), {
     target: { value: "Why selected?" },
+  });
+  await waitFor(() => {
+    const discussButton = screen.getByRole("button", {
+      name: "Discuss inline",
+    });
+
+    expect(discussButton).toBeEnabled();
   });
   fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
   await waitFor(() =>
@@ -469,6 +499,13 @@ it("keeps diff callbacks stable during streaming and announces only completed tu
   fireEvent.click(screen.getByRole("button", { name: "Add code comment" }));
   fireEvent.change(screen.getByRole("textbox", { name: "New diff comment" }), {
     target: { value: "Question" },
+  });
+  await waitFor(() => {
+    const discussButton = screen.getByRole("button", {
+      name: "Discuss inline",
+    });
+
+    expect(discussButton).toBeEnabled();
   });
   fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
   await waitFor(() =>
@@ -578,7 +615,7 @@ it("generated provider journeys observe command dispatch and retire responses ac
       }[] = [];
       const scope = () => `session-${session}:worktree-${worktree}`;
       const initialFixture = fixture(scope(), attach);
-      const view = render(initialFixture);
+      const view = await act(async () => render(initialFixture));
 
       try {
         // Exercise cancellation, follow-up and both identity boundaries in every case.
@@ -589,7 +626,7 @@ it("generated provider journeys observe command dispatch and retire responses ac
           const choice = Math.floor(encoded / 12);
 
           if (operation === 0) {
-            act(() => liveDiscussion.select(anchor));
+            await act(async () => liveDiscussion.select(anchor));
             selected = true;
           }
 
@@ -675,7 +712,7 @@ it("generated provider journeys observe command dispatch and retire responses ac
 
             generation++;
             const nextFixture = fixture(scope(), attach);
-            view.rerender(nextFixture);
+            await act(async () => view.rerender(nextFixture));
             facts = [];
             active = null;
             selected = false;
@@ -770,6 +807,13 @@ it("keeps the code highlight through dialog focus and clears it only on submissi
 
   expect(codeSelections.at(-1)).toEqual(expected);
 
+  await waitFor(() => {
+    const discussButton = screen.getByRole("button", {
+      name: "Discuss inline",
+    });
+
+    expect(discussButton).toBeEnabled();
+  });
   fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
 
   expect(codeSelections.at(-1)).toBeNull();
@@ -809,6 +853,13 @@ it("renders Markdown replies and highlights the source from the discussion heade
   fireEvent.click(screen.getByRole("button", { name: "Add code comment" }));
   fireEvent.change(screen.getByRole("textbox", { name: "New diff comment" }), {
     target: { value: "Explain this code" },
+  });
+  await waitFor(() => {
+    const discussButton = screen.getByRole("button", {
+      name: "Discuss inline",
+    });
+
+    expect(discussButton).toBeEnabled();
   });
   fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
   await waitFor(() =>
@@ -870,7 +921,7 @@ it("renders Markdown replies and highlights the source from the discussion heade
   expect(commands.createLocalChatSession).toHaveBeenCalledOnce();
 });
 
-it("restores each discussion's range when switching between two comments", () => {
+it("restores each discussion's range when switching between two comments", async () => {
   const files = parsePatch(
     "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n-old\n-other\n+first\n+second\n"
   );
@@ -929,6 +980,11 @@ it("restores each discussion's range when switching between two comments", () =>
         target: { value: `Question ${line}` },
       }
     );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Discuss inline" })
+      ).toBeEnabled()
+    );
     fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
   }
 
@@ -950,4 +1006,238 @@ it("restores each discussion's range when switching between two comments", () =>
   );
 
   expect(selected).toEqual({ start: 2, end: 2, side: "additions" });
+});
+
+it("captures dedicated choice per request and applies a settings change only to the follow-up", async () => {
+  const uiState = useUIStore.getState();
+  const dedicatedPreference = {
+    mode: "dedicated" as const,
+    providerId: "custom",
+    modelId: "dedicated",
+  };
+  const view = fixture();
+
+  uiState.setInlineDiscussionPreference(dedicatedPreference);
+  render(view);
+  open();
+
+  const id = await send();
+  const dedicatedRequest = expect.objectContaining({
+    harness: "codex",
+    provider_id: "custom",
+    model_id: "dedicated",
+    read_only: true,
+    working_dir: "/A",
+  });
+
+  expect(commands.createLocalChatSession).toHaveBeenLastCalledWith(
+    dedicatedRequest
+  );
+
+  act(() => uiState.setInlineDiscussionPreference({ mode: "follow" }));
+
+  const replyLabel = screen.getByText("Reply: Custom · Dedicated");
+  const nextReplyLabel = screen.getByText(
+    "Next reply: Anthropic · Sonnet (provider default)"
+  );
+
+  expect(replyLabel).toBeVisible();
+  expect(nextReplyLabel).toBeVisible();
+  expect(commands.createLocalChatSession).toHaveBeenCalledTimes(1);
+
+  act(() => {
+    transport.text?.({
+      payload: {
+        backend_session_id: id,
+        harness: "codex",
+        text: "Dedicated answer",
+        is_partial: false,
+        parent_tool_use_id: null,
+      },
+    });
+    end(id);
+  });
+
+  await send("Follow up after change");
+
+  const previousAnswer = expect.stringContaining("Dedicated answer");
+  const followUpRequest = expect.objectContaining({
+    harness: "claude",
+    provider_id: "anthropic",
+    model_id: "sonnet",
+    read_only: true,
+    initial_prompt: previousAnswer,
+  });
+
+  expect(commands.createLocalChatSession).toHaveBeenLastCalledWith(
+    followUpRequest
+  );
+});
+
+it.each([
+  { mode: "dedicated" as const, providerId: "removed", modelId: "dedicated" },
+  { mode: "dedicated" as const, providerId: "custom", modelId: "removed" },
+  { mode: "invalid" as const },
+])(
+  "blocks invalid saved choices without sending on another provider: %j",
+  async (preference) => {
+    const uiState = useUIStore.getState();
+    const view = fixture();
+
+    uiState.setInlineDiscussionPreference(preference);
+    render(view);
+    open();
+    await screen.findByText(
+      /Open Settings → Diffs & code editor → Inline discussions/
+    );
+
+    const composer = screen.getByRole("textbox", {
+      name: "Ask about selected code",
+    });
+    const askButton = screen.getByRole("button", { name: "Ask" });
+
+    fireEvent.change(composer, { target: { value: "Question" } });
+
+    expect(askButton).toBeDisabled();
+
+    act(() => liveDiscussion.send(liveDiscussion.activeId!, "Question"));
+
+    expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+  }
+);
+
+it("invalidates the catalog after provider settings change", async () => {
+  const component = fixture();
+  const view = render(component);
+
+  open();
+  await screen.findByText(/Next reply: Anthropic/);
+
+  const catalogCommand = vi.mocked(commands.getSupportedLocalChatHarnesses);
+  const removedProviderCatalog = { ...inlineDiscussionCatalog, providers: [] };
+  const providerSettings = useProviderSettingsStore.getState();
+
+  catalogCommand.mockResolvedValueOnce({
+    status: "ok",
+    data: removedProviderCatalog,
+  });
+  act(() => providerSettings.changed());
+  await screen.findByText(/Provider anthropic is unavailable or removed/);
+
+  expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+
+  view.unmount();
+});
+
+it("captures provider/model before listener setup even when settings change before native creation", async () => {
+  let registered!: (unlisten: () => void) => void;
+  const textListener = vi.mocked(events.localChatTextEvent.listen);
+
+  textListener.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        registered = resolve;
+      })
+  );
+
+  const uiState = useUIStore.getState();
+  const dedicatedPreference = {
+    mode: "dedicated" as const,
+    providerId: "custom",
+    modelId: "dedicated",
+  };
+  const view = fixture();
+
+  uiState.setInlineDiscussionPreference(dedicatedPreference);
+  render(view);
+  open();
+  await screen.findByText("Next reply: Custom · Dedicated");
+
+  act(() => liveDiscussion.send(liveDiscussion.activeId!, "Pending setup"));
+
+  expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+
+  act(() => uiState.setInlineDiscussionPreference({ mode: "follow" }));
+  await act(async () => registered(transport.unlisten));
+
+  const capturedRequest = expect.objectContaining({
+    harness: "codex",
+    provider_id: "custom",
+    model_id: "dedicated",
+    read_only: true,
+  });
+
+  expect(commands.createLocalChatSession).toHaveBeenLastCalledWith(
+    capturedRequest
+  );
+});
+
+it("shows catalog errors and retires a delayed catalog read after switching worktrees", async () => {
+  let complete!: (
+    value: Awaited<ReturnType<typeof commands.getSupportedLocalChatHarnesses>>
+  ) => void;
+  const catalogCommand = vi.mocked(commands.getSupportedLocalChatHarnesses);
+
+  catalogCommand.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      })
+  );
+
+  const initialComponent = fixture("A");
+  const nextComponent = fixture("B");
+  const view = render(initialComponent);
+
+  open();
+  view.rerender(nextComponent);
+  open();
+  await screen.findByText(/Next reply: Anthropic/);
+
+  const removedProviderCatalog = { ...inlineDiscussionCatalog, providers: [] };
+
+  await act(async () =>
+    complete({ status: "ok", data: removedProviderCatalog })
+  );
+
+  const nextReplyLabel = screen.getByText(/Next reply: Anthropic/);
+
+  expect(nextReplyLabel).toBeVisible();
+
+  const catalogError = new Error("catalog unavailable");
+  const providerSettings = useProviderSettingsStore.getState();
+
+  catalogCommand.mockRejectedValueOnce(catalogError);
+  act(() => providerSettings.changed());
+  await screen.findByText(/Could not load providers/);
+
+  expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+});
+
+it("sends custom effort and speed without applying a removed personality preference", async () => {
+  const ui = useUIStore.getState();
+  const preference = {
+    mode: "dedicated" as const,
+    providerId: "custom",
+    modelId: "dedicated",
+    reasoningEffort: "high",
+    speedTier: "fast",
+    personality: "friendly",
+  };
+  const component = fixture();
+
+  ui.setInlineDiscussionPreference(preference);
+  render(component);
+  open();
+  await send();
+
+  const request = expect.objectContaining({
+    read_only: true,
+    reasoning_effort: "high",
+    speed_tier: "fast",
+    personality: null,
+    permission_mode: null,
+  });
+
+  expect(commands.createLocalChatSession).toHaveBeenLastCalledWith(request);
 });

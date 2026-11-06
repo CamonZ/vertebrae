@@ -97,6 +97,11 @@ struct PendingTurn {
 #[async_trait]
 impl HarnessRuntime for ClaudeRuntime {
     async fn capabilities(&self) -> Result<HarnessCapabilities, HarnessError> {
+        let reasoning_efforts: BTreeSet<String> = crate::config::CLAUDE_REASONING_EFFORTS
+            .iter()
+            .map(|effort| (*effort).to_owned())
+            .collect();
+
         match self.config.resolve_executable() {
             Ok(_) => Ok(HarnessCapabilities {
                 provider: "anthropic".into(),
@@ -112,7 +117,7 @@ impl HarnessRuntime for ClaudeRuntime {
                     .map(|(id, label)| ModelCapability {
                         id: (*id).into(),
                         label: (*label).into(),
-                        reasoning_efforts: BTreeSet::new(),
+                        reasoning_efforts: reasoning_efforts.clone(),
                         supported_speed_tiers: claude_model_speed_tiers(id),
                         supports_personality: None,
                     })
