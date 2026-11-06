@@ -365,6 +365,7 @@ mod tests {
     #[test]
     fn harness_create_input_is_passed_directly_to_runtime() {
         let input = HarnessCreateSessionInput {
+            read_only: false,
             backend_session_id: "backend-1".to_string(),
             working_dir: Some("/tmp/project".to_string()),
             initial_prompt: Some("start".to_string()),

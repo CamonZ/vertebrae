@@ -358,7 +358,13 @@ pub async fn click_when_ready(
                 }
                 const rect = element.getBoundingClientRect();
                 const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
-                return !!hit && element.contains(hit);"#,
+                if (hit && element.contains(hit)) return true;
+
+                // Sticky diff headers can cover a target that nearest-edge
+                // scrolling considers visible. Center it, then recheck on the
+                // next probe; never click through an obstruction.
+                element.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+                return false;"#,
                 vec![serde_json::to_value(&element).expect("WebDriver element serializes")],
             ).await?;
             if ready.as_bool() != Some(true) {

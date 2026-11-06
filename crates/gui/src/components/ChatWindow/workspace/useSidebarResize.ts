@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 
+const CHANGES_SPLITTER_WIDTH = 2;
+
 export function sidebarBounds(container: number) {
   const max = Math.max(36, Math.min(560, container - 180));
   return { min: Math.min(180, max), max };
@@ -11,11 +13,13 @@ export function clampSidebar(width: number, container: number) {
 }
 
 /** Remember the desired width across collapse and temporary window shrink. */
-export function useSidebarResize() {
+export function useSidebarResize(
+  options: { initial?: number; side?: "left" | "right"; label?: string } = {}
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: number; x: number; width: number } | null>(null);
   const [available, setAvailable] = useState(800);
-  const [preferred, setPreferred] = useState(240);
+  const [preferred, setPreferred] = useState(options.initial ?? 240);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -30,12 +34,20 @@ export function useSidebarResize() {
     return () => observer.disconnect();
   }, []);
 
-  const width = clampSidebar(preferred, available);
-  const { min, max } = sidebarBounds(available);
+  // Keep only a small usable minimum; the splitter can use the full available width.
+  const { min, max } =
+    options.side === "right"
+      ? {
+          min: 180,
+          max: Math.max(180, available - 180 - CHANGES_SPLITTER_WIDTH),
+        }
+      : sidebarBounds(available);
+  const clamp = (value: number) => Math.min(max, Math.max(min, value));
+  const width = clamp(preferred);
   const handleProps: HTMLAttributes<HTMLDivElement> = {
     role: "separator",
     tabIndex: 0,
-    "aria-label": "Resize files sidebar",
+    "aria-label": options.label ?? "Resize files sidebar",
     "aria-orientation": "vertical",
     "aria-valuenow": width,
     "aria-valuemin": min,
@@ -44,16 +56,20 @@ export function useSidebarResize() {
       if (event.button !== 0) return;
 
       event.preventDefault();
+      event.currentTarget.focus();
       event.currentTarget.setPointerCapture(event.pointerId);
       drag.current = { id: event.pointerId, x: event.clientX, width };
     },
     onPointerMove(event) {
       const start = drag.current;
 
-      if (start && start.id === event.pointerId)
-        setPreferred(
-          clampSidebar(start.width + event.clientX - start.x, available)
-        );
+      if (!start || start.id !== event.pointerId) return;
+
+      const direction = options.side === "right" ? -1 : 1;
+      const delta = (event.clientX - start.x) * direction;
+      const nextWidth = clamp(start.width + delta);
+
+      setPreferred(nextWidth);
     },
     onPointerUp(event) {
       if (!drag.current || drag.current.id !== event.pointerId) return;
@@ -74,14 +90,16 @@ export function useSidebarResize() {
           : event.key === "End"
             ? max
             : event.key === "ArrowLeft"
-              ? width - 10
+              ? width - 10 * (options.side === "right" ? -1 : 1)
               : event.key === "ArrowRight"
-                ? width + 10
+                ? width + 10 * (options.side === "right" ? -1 : 1)
                 : null;
       if (next == null) return;
 
       event.preventDefault();
-      setPreferred(clampSidebar(next, available));
+
+      const nextWidth = clamp(next);
+      setPreferred(nextWidth);
     },
   };
 

@@ -281,6 +281,29 @@ impl fmt::Debug for ClaudeCommandSpec {
 }
 
 impl ClaudeProviderConfig {
+    /// Discussion runtimes expose no tools, including inherited MCP tools.
+    pub fn restrict_to_read_only(&mut self) {
+        let settings = json!({"disableAllHooks": true}).to_string();
+        let arguments = [
+            "--tools".into(),
+            "".into(),
+            "--strict-mcp-config".into(),
+            "--safe-mode".into(),
+            "--setting-sources".into(),
+            "".into(),
+            "--settings".into(),
+            settings,
+        ];
+
+        self.prelude.args.extend(arguments);
+        self.prelude.settings_path = None;
+        self.mcp_config = Some(json!({"mcpServers": {}}));
+        self.permission_prompt_tool = None;
+        self.plugin_roots.clear();
+        self.installed_skills_roots.clear();
+        self.agent_paths.clear();
+    }
+
     pub fn resolve_executable(&self) -> Result<PathBuf, HarnessError> {
         if let Some(path) = &self.executable {
             return validate_executable(path);
@@ -500,6 +523,38 @@ mod tests {
         ClaudeLaunchMode, ClaudeProviderConfig, ClaudeProviderEndpoint, DEFAULT_CLAUDE_MODELS,
         claude_model_supports_fast_mode,
     };
+
+    #[test]
+    fn read_only_launch_removes_ambient_tools() {
+        let mut config = ClaudeProviderConfig::default();
+        config.mcp_config =
+            Some(serde_json::json!({"mcpServers": {"write": {"command": "writer"}}}));
+        config.plugin_roots.push("/plugins".into());
+        config.installed_skills_roots.push("/skills".into());
+
+        config.restrict_to_read_only();
+
+        let has_empty_tools = config
+            .prelude
+            .args
+            .windows(2)
+            .any(|args| args == ["--tools", ""]);
+        let has_strict_mcp = config
+            .prelude
+            .args
+            .iter()
+            .any(|arg| arg == "--strict-mcp-config");
+
+        assert!(has_empty_tools);
+        assert!(has_strict_mcp);
+        assert_eq!(
+            config.mcp_config,
+            Some(serde_json::json!({"mcpServers": {}}))
+        );
+        assert!(config.plugin_roots.is_empty());
+        assert!(config.installed_skills_roots.is_empty());
+        assert!(config.permission_prompt_tool.is_none());
+    }
 
     #[test]
     fn default_model_catalog_includes_opus_5_5() {

@@ -1,4 +1,11 @@
+import { commands } from "../../bindings";
+import { useSidebarResize } from "./workspace/useSidebarResize";
 import "./workspaceTabs.css";
+import {
+  SelectionDiscussionProvider,
+  DiscussionSnapshot,
+} from "./SelectionDiscussionContext";
+import { type CodeSelection } from "./selectionDiscussions";
 import { useBackgroundTask } from "../../background/useBackgroundTask";
 import type { BackgroundTask } from "../../background/types";
 import {
@@ -57,6 +64,7 @@ const NO_CHAIN: never[] = [];
 const NO_COMMENTS: PendingComment[] = [];
 
 interface ChatWindowProps {
+  registerChangesToggle?: (toggle: (() => void) | null) => void;
   renderObserver?: (part: "transcript" | "composer") => void;
   sessionId: string;
   /** Closes the whole chat panel (the header's ✕). Provided by the manager. */
@@ -87,6 +95,7 @@ interface ChatWindowProps {
  * the message thread, and the composer footer with its context-utilization bar.
  */
 export function ChatWindow({
+  registerChangesToggle,
   sessionId,
   onClosePanel,
   onStartFresh,
@@ -102,6 +111,11 @@ export function ChatWindow({
   showProjectContext = false,
   renderObserver,
 }: ChatWindowProps) {
+  const panelResize = useSidebarResize({
+    initial: 560,
+    side: "right",
+    label: "Resize Changes panel",
+  });
   const [changesSession, setChangesSession] = useState<string | null>(null);
   // Dirty documents that block leaving the Changes view until resolved.
   const [leaving, setLeaving] = useState<string[] | null>(null);
@@ -135,20 +149,21 @@ export function ChatWindow({
   const loadOlderReplayMessages = useChatStore(
     (state) => state.loadOlderReplayMessages
   );
+  const scopeId = `${sessionId}:${association.record?.worktreePath ?? ""}`;
   const pendingComments =
-    pendingCommentState.sessionId === sessionId
+    pendingCommentState.sessionId === scopeId
       ? pendingCommentState.comments
       : NO_COMMENTS;
   const updatePendingComments = useCallback(
     (update: (comments: PendingComment[]) => PendingComment[]) => {
-      setPendingCommentState((current) => ({
-        sessionId,
-        comments: update(
-          current.sessionId === sessionId ? current.comments : []
-        ),
-      }));
+      setPendingCommentState((current) => {
+        const comments = current.sessionId === scopeId ? current.comments : [];
+        const updatedComments = update(comments);
+
+        return { sessionId: scopeId, comments: updatedComments };
+      });
     },
-    [sessionId]
+    [scopeId]
   );
   const handleAddComment = useCallback(
     (anchor: TextSelectionAnchor, body: string) => {
@@ -176,7 +191,7 @@ export function ChatWindow({
   );
   const handleWorktreeLoaded = useCallback(
     (snapshot: WorktreeSnapshot) => {
-      setWorktreeState({ sessionId, snapshot });
+      setWorktreeState({ sessionId: scopeId, snapshot });
       // A refresh, baseline change or moved HEAD may have changed the lines
       // All Changes comments were written on.
       updatePendingComments(
@@ -184,7 +199,7 @@ export function ChatWindow({
           reconcileWorktreeComments(comments, snapshot) as PendingComment[]
       );
     },
-    [sessionId, updatePendingComments]
+    [scopeId, updatePendingComments]
   );
   const handleUpdateComment = useCallback(
     (id: string, body: string) => {
@@ -242,7 +257,7 @@ export function ChatWindow({
   const toolChain = preparedChain.value ?? NO_CHAIN;
 
   const worktreeSnapshot =
-    worktreeState?.sessionId === sessionId ? worktreeState.snapshot : null;
+    worktreeState?.sessionId === scopeId ? worktreeState.snapshot : null;
   const placements = useMemo(
     () => computePlacements(pendingComments, toolChain, worktreeSnapshot),
     [pendingComments, toolChain, worktreeSnapshot]
@@ -273,6 +288,25 @@ export function ChatWindow({
     ]
   );
   const ownWorktreePath = association.record?.worktreePath;
+  const attachSelection = (
+    anchor: CodeSelection,
+    outdated = false,
+    body = ""
+  ) => {
+    const comment = createDiffComment({
+      home: anchor.home,
+      file: anchor.file,
+      span: anchor,
+      body,
+      id: `local-comment-${nextPendingCommentId++}`,
+    });
+    if (comment) {
+      const attachment = { ...comment, selectionCode: anchor.code, outdated };
+      updatePendingComments((comments) => [...comments, attachment]);
+    }
+
+    inputRef.current?.focus();
+  };
   const handleNavigateComment = useCallback(
     (id: string) => {
       const comment = pendingComments.find((candidate) => candidate.id === id);
@@ -314,10 +348,60 @@ export function ChatWindow({
     inputRef.current?.focus();
   }, [autoFocusComposer]);
 
-  if (!chat.session) return null;
-
   const worktreePath = association.record?.worktreePath;
   const showChanges = !!worktreePath && changesSession === sessionId;
+  const toggleChanges = useCallback(() => {
+    if (!worktreePath) return;
+
+    if (!showChanges) setChangesSession(sessionId);
+    else {
+      const dirty = dirtyPaths(worktreePath);
+      if (dirty.length) setLeaving(dirty);
+      else setChangesSession(null);
+    }
+  }, [worktreePath, showChanges, sessionId]);
+
+  useEffect(() => {
+    if (!registerChangesToggle || !worktreePath || !autoFocusComposer) return;
+
+    let current = true;
+    let pending = false;
+
+    registerChangesToggle(() => {
+      if (pending) return;
+
+      pending = true;
+
+      // Check this conversation's worktree on demand, including committed
+      // branch changes against the same default baseline as the Changes view.
+      const comparison = {
+        base: null,
+        target: { kind: "working_tree" as const },
+        merge_base: true,
+      };
+
+      void commands
+        .loadWorktreeChanges(worktreePath, comparison)
+        .then((result) => {
+          if (current && result.status === "ok" && result.data.files.length > 0)
+            toggleChanges();
+        })
+        .catch(() => {
+          // A failed check cannot establish that this worktree has changes.
+        })
+        .finally(() => {
+          pending = false;
+        });
+    });
+
+    return () => {
+      current = false;
+      registerChangesToggle(null);
+    };
+  }, [registerChangesToggle, worktreePath, autoFocusComposer, toggleChanges]);
+
+  if (!chat.session) return null;
+
   const isEmpty = chat.session.messages.length === 0;
 
   const content = (
@@ -336,6 +420,8 @@ export function ChatWindow({
         onClosePanel={onClosePanel}
         onStartFresh={onStartFresh}
         onToggleHistory={onToggleHistory}
+        changesOpen={showChanges}
+        onToggleChanges={worktreePath ? toggleChanges : undefined}
         onToggleWide={onToggleWide}
         isWide={isWide}
         onSplitPane={onSplitPane}
@@ -353,43 +439,26 @@ export function ChatWindow({
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
       />
-      {worktreePath && (
-        <div
-          role="group"
-          aria-label="Chat view"
-          className="workspace-tabs chat-view-tabs"
-        >
-          <button
-            type="button"
-            data-testid="local-chat-view-conversation"
-            aria-pressed={!showChanges}
-            onClick={() => {
-              const dirty = showChanges ? dirtyPaths(worktreePath) : [];
-              if (dirty.length > 0) setLeaving(dirty);
-              else setChangesSession(null);
-            }}
-          >
-            Conversation
-          </button>
-          <button
-            type="button"
-            data-testid="local-chat-view-changes"
-            aria-pressed={showChanges}
-            onClick={() => setChangesSession(sessionId)}
-          >
-            Changes
-          </button>
-        </div>
-      )}
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1">
+      <div
+        ref={panelResize.containerRef}
+        className="chat-with-changes min-h-0 flex-1"
+        data-changes-open={showChanges}
+      >
         {showChanges && (
-          <div className="flex min-h-0 flex-col" style={{ gridArea: "1 / 1" }}>
+          <aside
+            aria-label="Changes panel"
+            className="changes-side-panel"
+            style={{ flexBasis: panelResize.width }}
+          >
             <WorktreeChanges
               key={`${sessionId}:${worktreePath}`}
               worktreePath={worktreePath}
               onChangesLoaded={handleWorktreeLoaded}
             />
-          </div>
+          </aside>
+        )}
+        {showChanges && (
+          <div {...panelResize.handleProps} className="changes-resize-handle" />
         )}
         {worktreePath && (
           <UnsavedChangesDialog
@@ -420,13 +489,8 @@ export function ChatWindow({
           />
         )}
         <div
-          className="flex min-h-0 flex-col"
-          style={{
-            gridArea: "1 / 1",
-            visibility: showChanges ? "hidden" : "visible",
-          }}
-          aria-hidden={showChanges}
-          inert={showChanges}
+          className="main-conversation flex min-h-0 min-w-0 flex-col"
+          data-testid="main-conversation"
         >
           {gate && gateStatus && (
             <GateChatStatusBar stepName={gate.step_name} status={gateStatus} />
@@ -455,7 +519,7 @@ export function ChatWindow({
           >
             <ChatMessages
               sessionId={sessionId}
-              isVisible={!showChanges}
+              isVisible={true}
               projectPath={chat.session.projectPath}
               messages={chat.messages}
               assistantLabel={chat.assistantLabel}
@@ -539,7 +603,18 @@ export function ChatWindow({
   );
   return (
     <DiffReviewContext.Provider value={diffReview}>
-      {content}
+      <SelectionDiscussionProvider
+        key={`${sessionId}:${worktreePath ?? ""}`}
+        worktreePath={worktreePath ?? ""}
+        harness={chat.session.harness}
+        providerId={chat.session.providerId ?? undefined}
+        modelId={chat.session.selectedModelId}
+        onOpen={() => setChangesSession(sessionId)}
+        onAttach={attachSelection}
+      >
+        <DiscussionSnapshot snapshot={worktreeSnapshot} />
+        {content}
+      </SelectionDiscussionProvider>
     </DiffReviewContext.Provider>
   );
 }

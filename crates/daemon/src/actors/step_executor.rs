@@ -880,6 +880,7 @@ impl StepExecutor {
             .capabilities
             .configure_provider_harnesses(&mut factory_config);
         let request_config = RequestConfig {
+            read_only: false,
             working_directory: (!matches!(
                 resolved_harness,
                 StepHarness::Typesafe | StepHarness::MistralVibe

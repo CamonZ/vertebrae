@@ -865,3 +865,30 @@ fn bound_gate_submission_over_the_socket_is_approved_without_an_event() {
     assert!(bridge.pending_permissions.lock().unwrap().is_empty());
     drop(socket_guard);
 }
+
+#[tokio::test]
+async fn selection_discussions_deny_controls_without_a_ui_prompt() {
+    let bridge = PermissionBridge::new();
+    bridge.bind_read_only("discussion");
+
+    let request = harness_approval_request("read-only");
+    let resolution = bridge
+        .request_harness_control("discussion", None, request)
+        .await
+        .unwrap();
+
+    let message = resolution.message.unwrap();
+    let pending_controls = bridge.pending_harness_controls.lock().unwrap();
+    let has_pending_controls = !pending_controls.is_empty();
+    drop(pending_controls);
+
+    assert_eq!(resolution.decision, Some(ControlDecision::Deny));
+    assert!(message.contains("read only"));
+    assert!(!has_pending_controls);
+
+    bridge.unbind_gate("discussion");
+    assert!(bridge.is_read_only("discussion"));
+
+    bridge.unbind_read_only("discussion");
+    assert!(!bridge.is_read_only("discussion"));
+}

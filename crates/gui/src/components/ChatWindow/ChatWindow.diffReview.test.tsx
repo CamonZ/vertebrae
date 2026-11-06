@@ -345,7 +345,8 @@ describe("ChatWindow diff review comments", () => {
       screen.getByRole("textbox", { name: "New diff comment" }),
       { target: { value: "Why X?" } }
     );
-    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send to main chat" }));
+
     expect(screen.getByTestId("local-chat-pending-comments")).toHaveAttribute(
       "aria-label",
       "1 comments queued for your reply"
@@ -361,13 +362,13 @@ describe("ChatWindow diff review comments", () => {
       },
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     fireEvent.click(screen.getByTitle("Start session"));
     await waitFor(() =>
       expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
         expect.objectContaining({
           initial_prompt: expect.stringContaining(
-            "1. Tool call Edit f.ts · f.ts:6 (new)\n   ```diff\n   @@ -3,6 +3,7 @@\n    l3\n    l4\n    l5\n   +X\n   ```\n   Comment: Why X?"
+            '1. Tool call Edit f.ts · f.ts:6 (new)\n   ```diff\n   @@ -3,6 +3,7 @@\n    l3\n    l4\n    l5\n   +X\n   ```\n   Selected code snapshot: "X"\n   Comment: Why X?'
           ),
         })
       )
@@ -387,15 +388,18 @@ describe("ChatWindow diff review comments", () => {
     expect(seen.items[0].annotations).toEqual([]);
 
     // Line 6 of All Changes is the added X.
-    fireEvent.click(screen.getByRole("button", { name: "gutter code view" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "gutter code view" })
+    );
     fireEvent.change(
       screen.getByRole("textbox", { name: "New diff comment" }),
       { target: { value: "Rename X" } }
     );
-    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send to main chat" }));
+
     expect(seen.items[0].annotations).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await waitFor(() =>
       expect(
         (seen.fileDiff as unknown as { lineAnnotations: Annotated[] })
@@ -408,6 +412,7 @@ describe("ChatWindow diff review comments", () => {
         },
       ])
     );
+
     expect(screen.getByText("Rename X")).toBeTruthy();
 
     // The chip leads back to the All Changes comment.
@@ -429,12 +434,14 @@ describe("ChatWindow diff review comments", () => {
     fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
     fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await waitFor(() => expect(seen.items).toHaveLength(1));
-    fireEvent.click(screen.getByRole("button", { name: "gutter code view" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "gutter code view" })
+    );
     fireEvent.change(
       screen.getByRole("textbox", { name: "New diff comment" }),
       { target: { value: "Rename X" } }
     );
-    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send to main chat" }));
 
     // The agent moved things: the same file now has an extra line above X.
     const moved = filePatch({
@@ -471,8 +478,9 @@ describe("ChatWindow diff review comments", () => {
     await waitFor(() =>
       expect(screen.getByText("outdated")).toBeInTheDocument()
     );
-    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     fireEvent.click(screen.getByTestId("local-chat-comment-icon-1"));
+
     expect(screen.getByTestId("local-chat-comment-popover")).toHaveTextContent(
       "outdated"
     );
@@ -485,13 +493,16 @@ describe("ChatWindow diff review comments", () => {
     fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
     fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await waitFor(() => expect(seen.items).toHaveLength(1));
-    fireEvent.click(screen.getByRole("button", { name: "gutter code view" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "gutter code view" })
+    );
     fireEvent.change(
       screen.getByRole("textbox", { name: "New diff comment" }),
       { target: { value: "Rename X" } }
     );
-    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
-    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send to main chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+
     expect(seen.fileDiff).toBeNull();
 
     act(() =>
@@ -511,5 +522,139 @@ describe("ChatWindow diff review comments", () => {
           .lineAnnotations
       ).toEqual([expect.objectContaining({ side: "additions", lineNumber: 6 })])
     );
+  });
+});
+
+describe("Changes panel shortcut registration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it("only toggles Changes through the shortcut when its own worktree has changes", async () => {
+    seedSession();
+
+    let toggle: (() => void) | null = null;
+    const register = (next: (() => void) | null) => {
+      toggle = next;
+    };
+    const view = render(
+      <ChatWindow sessionId="test-session" registerChangesToggle={register} />
+    );
+
+    await waitFor(() => expect(toggle).not.toBeNull());
+
+    const request = {
+      base: null,
+      target: { kind: "working_tree" as const },
+      merge_base: true,
+    };
+    const changed = await mockedCommands.loadWorktreeChanges(
+      "/worktree",
+      request
+    );
+
+    if (changed.status !== "ok") throw new Error("expected changed fixture");
+
+    mockedCommands.loadWorktreeChanges.mockClear();
+    mockedCommands.loadWorktreeChanges.mockResolvedValueOnce({
+      status: "ok",
+      data: { ...changed.data, files: [] },
+    });
+    await act(async () => toggle?.());
+
+    expect(
+      screen.queryByRole("complementary", { name: "Changes panel" })
+    ).toBeNull();
+    expect(mockedCommands.loadWorktreeChanges).toHaveBeenCalledExactlyOnceWith(
+      "/worktree",
+      request
+    );
+
+    await act(async () => toggle?.());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("complementary", { name: "Changes panel" })
+      ).toBeVisible()
+    );
+    await act(async () => toggle?.());
+
+    expect(
+      screen.queryByRole("complementary", { name: "Changes panel" })
+    ).toBeNull();
+
+    view.unmount();
+
+    expect(toggle).toBeNull();
+  });
+
+  it("does not register the Changes shortcut for an inactive pane or unassociated conversation", async () => {
+    seedSession();
+
+    const register = vi.fn();
+    const view = render(
+      <ChatWindow
+        sessionId="test-session"
+        autoFocusComposer={false}
+        registerChangesToggle={register}
+      />
+    );
+
+    expect(register).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          "test-session": {
+            ...state.sessions["test-session"],
+            association: { ...association, worktreePath: null },
+          },
+        },
+      }));
+    });
+    view.rerender(
+      <ChatWindow sessionId="test-session" registerChangesToggle={register} />
+    );
+
+    expect(register).not.toHaveBeenCalled();
+  });
+
+  it("ignores a pending shortcut check after the active pane changes", async () => {
+    seedSession();
+
+    let toggle: (() => void) | null = null;
+    const register = (next: (() => void) | null) => {
+      toggle = next;
+    };
+    const view = render(
+      <ChatWindow sessionId="test-session" registerChangesToggle={register} />
+    );
+    const changed = await mockedCommands.loadWorktreeChanges("/worktree", {
+      base: null,
+      target: { kind: "working_tree" },
+      merge_base: true,
+    });
+    let finish!: (value: typeof changed) => void;
+
+    mockedCommands.loadWorktreeChanges.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    act(() => toggle?.());
+    view.rerender(
+      <ChatWindow
+        sessionId="test-session"
+        autoFocusComposer={false}
+        registerChangesToggle={register}
+      />
+    );
+    await act(async () => finish(changed));
+
+    expect(
+      screen.queryByRole("complementary", { name: "Changes panel" })
+    ).toBeNull();
   });
 });

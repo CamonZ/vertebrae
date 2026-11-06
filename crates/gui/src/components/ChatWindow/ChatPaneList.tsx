@@ -3,7 +3,13 @@ import { useChatStore } from "../../stores/chatStore";
 import type { ChatPane } from "../../stores/chatStore";
 import { ChatWindow } from "./ChatWindow";
 
+export type RegisterChangesToggle = (
+  paneId: string,
+  toggle: (() => void) | null
+) => void;
+
 interface ChatPaneListProps {
+  registerChangesToggle?: RegisterChangesToggle;
   visiblePanes: ChatPane[];
   activePaneId: string | null;
   isMaximized: boolean;
@@ -26,6 +32,7 @@ interface ChatPaneListProps {
  * selection on interaction.
  */
 export const ChatPaneList = memo(function ChatPaneList({
+  registerChangesToggle,
   visiblePanes,
   activePaneId,
   isMaximized,
@@ -67,6 +74,7 @@ export const ChatPaneList = memo(function ChatPaneList({
             unsplitPanes={unsplitPanes}
             projectLabelBySessionId={projectLabelBySessionId}
             renderObserver={renderObserver}
+            registerChangesToggle={registerChangesToggle}
           />
         );
       })}
@@ -75,6 +83,7 @@ export const ChatPaneList = memo(function ChatPaneList({
 });
 
 interface ChatPaneWindowProps {
+  registerChangesToggle?: RegisterChangesToggle;
   pane: ChatPane;
   paneIsActive: boolean;
   paneCount: number;
@@ -95,6 +104,7 @@ interface ChatPaneWindowProps {
 }
 
 const ChatPaneWindow = memo(function ChatPaneWindow({
+  registerChangesToggle,
   pane,
   paneIsActive,
   paneCount,
@@ -136,6 +146,11 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
     [closePane, pane.id]
   );
 
+  const registerToggle = useCallback(
+    (toggle: (() => void) | null) => registerChangesToggle?.(pane.id, toggle),
+    [pane.id, registerChangesToggle]
+  );
+
   if (label === undefined) return null;
   return (
     <section
@@ -170,6 +185,7 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
       <ChatWindow
         key={sessionId}
         sessionId={sessionId}
+        registerChangesToggle={registerToggle}
         onClosePanel={closeChatPanel}
         onStartFresh={onStartFresh}
         onToggleHistory={toggleHistorySelector}

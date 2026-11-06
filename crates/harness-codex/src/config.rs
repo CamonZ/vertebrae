@@ -18,6 +18,8 @@ use crate::CodexAppServerLauncher;
 /// the provider-neutral request contract.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CodexPermissionConfig {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub read_only: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_policy: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -30,7 +32,20 @@ pub struct CodexPermissionConfig {
     pub prefix_rules: Option<Value>,
 }
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 impl CodexPermissionConfig {
+    /// Lock discussion sessions to the native read-only sandbox, without escalation.
+    pub fn restrict_to_read_only(&mut self) {
+        self.read_only = true;
+        self.permissions = None;
+        self.approval_policy = Some("never".into());
+        self.approvals_reviewer = Some("user".into());
+        self.sandbox_policy = Some(json!({"type": "readOnly"}));
+    }
+
     pub fn apply_to_params(&self, params: &mut Value) {
         if let Some(value) = &self.approval_policy {
             params["approvalPolicy"] = json!(value);
@@ -55,6 +70,10 @@ impl CodexPermissionConfig {
     /// approval prompts in a workspace-write sandbox. Prefix rules derive
     /// from the session's disallowed tools and are kept.
     pub fn turn_override(&self, mode: &PermissionMode) -> Self {
+        if self.read_only {
+            return self.clone();
+        }
+
         let (approval_policy, approvals_reviewer, sandbox) = match mode {
             PermissionMode::Default | PermissionMode::AcceptEdits => {
                 ("on-request", "user", "workspaceWrite")
@@ -64,6 +83,7 @@ impl CodexPermissionConfig {
             PermissionMode::BypassPermissions => ("never", "user", "dangerFullAccess"),
         };
         Self {
+            read_only: false,
             approval_policy: Some(approval_policy.into()),
             approvals_reviewer: Some(approvals_reviewer.into()),
             permissions: None,
@@ -318,4 +338,37 @@ fn executable_name() -> &'static str {
 #[cfg(not(windows))]
 fn executable_name() -> &'static str {
     "codex"
+}
+
+#[cfg(test)]
+mod discussion_tests {
+    use super::*;
+
+    #[test]
+    fn default_permission_serialization_retains_the_existing_shape() {
+        let config = CodexPermissionConfig::default();
+        let serialized = serde_json::to_value(config).unwrap();
+
+        assert_eq!(serialized, json!({}));
+    }
+
+    #[test]
+    fn read_only_policy_cannot_be_escalated_by_a_turn() {
+        let mut permission = CodexPermissionConfig::default();
+        permission.restrict_to_read_only();
+
+        for mode in [
+            PermissionMode::BypassPermissions,
+            PermissionMode::Auto,
+            PermissionMode::AcceptEdits,
+        ] {
+            let locked = permission.turn_override(&mode);
+            let mut params = json!({});
+            locked.apply_to_params(&mut params);
+
+            assert_eq!(params["sandboxPolicy"], json!({"type": "readOnly"}));
+            assert_eq!(params["approvalPolicy"], "never");
+            assert!(params.get("permissions").is_none());
+        }
+    }
 }

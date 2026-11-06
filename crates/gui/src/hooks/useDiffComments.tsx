@@ -5,7 +5,17 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type HTMLAttributes,
 } from "react";
+import {
+  SelectionDiscussionActionsContext,
+  SelectionDiscussionAnchorsContext,
+  SelectionDiscussionSelectionContext,
+} from "../components/ChatWindow/selectionDiscussionState";
+import {
+  captureCodeSelection,
+  type CodeSelection,
+} from "../components/ChatWindow/selectionDiscussions";
 import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs";
 import {
   DiffCommentThread,
@@ -26,6 +36,8 @@ export type ReviewDiffAnnotation = DiffLineAnnotation<ReviewAnnotation>;
 interface Draft {
   path: string;
   span: LineSpan;
+  anchor: CodeSelection;
+  range: SelectedLineRange;
 }
 
 export interface DiffCommentsApi {
@@ -33,16 +45,17 @@ export interface DiffCommentsApi {
   enabled: boolean;
   /** Pierre annotations for one file, stable until its comments change. */
   annotationsFor(path: string): ReviewDiffAnnotation[];
-  /** Gutter "+" click or drag: open the composer for the selected lines. */
+  /** Explicit Comment action: open the composer for the selected lines. */
   openComposer(path: string, range: SelectedLineRange): void;
   /**
    * The user's line selection (click, drag or shift-click on line numbers) in
    * one file, for Pierre's controlled `selectedLines`; null when none. The
-   * selection is cleared once a composer opens.
+   * selection stays highlighted until the comment is submitted.
    */
   selectedLinesFor(path: string): SelectedLineRange | null;
   /** Pierre's selection-end notification for one file. */
   onSelectionChange(path: string, range: SelectedLineRange | null): void;
+  keyboardProps: HTMLAttributes<HTMLDivElement>;
   renderAnnotation(annotation: { metadata: ReviewAnnotation }): ReactNode;
 }
 
@@ -62,13 +75,16 @@ export function useDiffComments(
   toolName?: string
 ): DiffCommentsApi {
   const review = useContext(DiffReviewContext);
+  const discussion = useContext(SelectionDiscussionActionsContext);
+  const threadAnchors = useContext(SelectionDiscussionAnchorsContext);
+  const sharedSelection = useContext(SelectionDiscussionSelectionContext);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [selection, setSelection] = useState<{
     path: string;
     range: SelectedLineRange;
   } | null>(null);
   // Pierre reports the selection a gutter press completed right after the
-  // press itself; ignore that echo so the highlight does not linger.
+  // press itself; ignore that echo so the draft keeps its captured range.
   const ignoreSelection = useRef(false);
   const placements = review?.placements;
   const toolUseId = surface.kind === "tool_call" ? surface.toolUseId : null;
@@ -100,6 +116,20 @@ export function useDiffComments(
         placement.commentId
       );
     }
+    for (const thread of threadAnchors) {
+      const home = thread.anchor.home;
+      if (
+        home.kind !== surface.kind ||
+        (home.kind === "tool_call" && home.toolUseId !== toolUseId)
+      )
+        continue;
+      const metadata = at(
+        thread.anchor.path,
+        thread.anchor.side === "old" ? "deletions" : "additions",
+        thread.anchor.endLine
+      );
+      (metadata.threadIds ??= []).push(thread.id);
+    }
     if (draft) {
       at(
         draft.path,
@@ -110,7 +140,7 @@ export function useDiffComments(
     return new Map<string, ReviewDiffAnnotation[]>(
       [...byPath].map(([path, lines]) => [path, [...lines.values()]])
     );
-  }, [placements, surface.kind, toolUseId, draft]);
+  }, [placements, surface.kind, toolUseId, draft, threadAnchors]);
 
   const annotationsFor = useCallback(
     (path: string) => annotationsByPath.get(path) ?? NONE,
@@ -131,6 +161,7 @@ export function useDiffComments(
     (path: string, range: SelectedLineRange) => {
       const file = files.find((candidate) => canonicalPath(candidate) === path);
       if (!file) return;
+
       const span = resolveSelection(
         file,
         { side: range.side ?? "additions", line: range.start },
@@ -139,26 +170,34 @@ export function useDiffComments(
           line: range.end,
         }
       );
+
       ignoreSelection.current = true;
       setTimeout(() => {
         ignoreSelection.current = false;
       }, 0);
-      setSelection(null);
-      if (span) setDraft({ path, span });
+
+      setSelection({ path, range });
+      const anchor = captureCodeSelection(file, range, home);
+      if (span && anchor) {
+        setDraft({ path, span, anchor, range });
+        discussion?.select(anchor);
+      }
     },
-    [files]
+    [files, home, discussion]
   );
 
-  const selectedLinesFor = useCallback(
-    (path: string) => (selection?.path === path ? selection.range : null),
-    [selection]
-  );
   const onSelectionChange = useCallback(
     (path: string, range: SelectedLineRange | null) => {
-      if (ignoreSelection.current) return;
+      if (ignoreSelection.current || draft) return;
+
       setSelection(range ? { path, range } : null);
+      const file = files.find((file) => canonicalPath(file) === path);
+      const anchor =
+        file && range ? captureCodeSelection(file, range, home) : null;
+
+      discussion?.select(anchor);
     },
-    []
+    [files, home, discussion, draft]
   );
 
   const renderAnnotation = useCallback(
@@ -166,20 +205,129 @@ export function useDiffComments(
       <DiffCommentThread
         annotation={annotation.metadata}
         onCancelDraft={() => setDraft(null)}
+        onDiscussDraft={
+          discussion && draft
+            ? (body) => {
+                discussion.discuss(draft.anchor, body);
+                setSelection(null);
+                discussion.select(null);
+                setDraft(null);
+              }
+            : undefined
+        }
         onSaveDraft={(body) => {
-          if (!draft || !body) return;
-          const file = files.find(
-            (candidate) => canonicalPath(candidate) === draft.path
-          );
-          if (file) addComment?.({ home, file, span: draft.span, body });
+          if (!draft || (!body && !discussion)) return;
+
+          if (discussion) discussion.attach(draft.anchor, false, body);
+          else
+            addComment?.({
+              home: draft.anchor.home,
+              file: draft.anchor.file,
+              span: draft.span,
+              body,
+            });
+
+          setSelection(null);
+          discussion?.select(null);
           setDraft(null);
         }}
       />
     ),
-    [addComment, draft, files, home]
+    [addComment, draft, discussion]
   );
 
+  const selectedFile =
+    selection && files.find((file) => canonicalPath(file) === selection.path);
+  const anchor =
+    selectedFile && selection
+      ? captureCodeSelection(selectedFile, selection.range, home)
+      : null;
+  const sharedRange = useMemo<SelectedLineRange | null>(
+    () =>
+      sharedSelection
+        ? {
+            start: sharedSelection.startLine,
+            end: sharedSelection.endLine,
+            side: sharedSelection.side === "old" ? "deletions" : "additions",
+          }
+        : null,
+    [sharedSelection]
+  );
+
+  const selectedLinesFor = useCallback(
+    (path: string) => {
+      if (sharedSelection) {
+        const sameSurface =
+          sharedSelection.home.kind === surface.kind &&
+          (sharedSelection.home.kind !== "tool_call" ||
+            sharedSelection.home.toolUseId === toolUseId);
+        if (!sameSurface || sharedSelection.path !== path) return null;
+
+        if (
+          anchor?.path === path &&
+          anchor.side === sharedSelection.side &&
+          anchor.startLine === sharedSelection.startLine &&
+          anchor.endLine === sharedSelection.endLine
+        )
+          return selection!.range;
+
+        return sharedRange;
+      }
+
+      if (draft?.path === path) return draft.range;
+      return selection?.path === path ? selection.range : null;
+    },
+    [
+      draft,
+      sharedSelection,
+      surface.kind,
+      toolUseId,
+      anchor,
+      selection,
+      sharedRange,
+    ]
+  );
+
+  const keyboardProps: HTMLAttributes<HTMLDivElement> = {
+    tabIndex: review ? 0 : undefined,
+    role: "group",
+    "aria-label": "Code diff selection",
+    onKeyDown: (event) => {
+      if (
+        event.target !== event.currentTarget ||
+        !["ArrowDown", "ArrowUp"].includes(event.key)
+      )
+        return;
+      const file = selectedFile || files[0];
+      if (!file) return;
+      const side = selection?.range.side ?? "additions";
+      const lines = file.hunks
+        .flatMap((hunk) => hunk.rows)
+        .flatMap((row) => {
+          const line = side === "deletions" ? row.oldLine : row.newLine;
+          return line === null ? [] : [line];
+        });
+      if (!lines.length) return;
+      event.preventDefault();
+      const current = selection?.range.end;
+      const line =
+        current == null
+          ? lines[0]
+          : event.key === "ArrowDown"
+            ? (lines.find((line) => line > current) ?? current)
+            : ([...lines].reverse().find((line) => line < current) ?? current);
+      const path = canonicalPath(file);
+      const range = {
+        side,
+        start: event.shiftKey ? (selection?.range.start ?? line) : line,
+        end: line,
+      };
+
+      onSelectionChange(path, range);
+    },
+  };
   return {
+    keyboardProps,
     enabled: review !== null,
     annotationsFor,
     openComposer,

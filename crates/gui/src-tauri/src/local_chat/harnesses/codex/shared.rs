@@ -167,6 +167,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
             personality,
             input.gate.as_ref(),
         );
+        request.config.read_only = input.read_only;
         let adapter = Arc::new(
             LocalChatHarnessEventSink::new(
                 backend_session_id.clone(),

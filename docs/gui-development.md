@@ -734,8 +734,63 @@ The recorder releases its subscription on shutdown or worktree replacement.
 
 ## Diff review comments
 
-Users comment on lines of a worktree diff (the Pierre gutter "+", click or
-drag) in the inline tool-call diffs and in the Changes tab's All Changes view.
+The Changes icon in the conversation header toggles a resizable side panel
+beside the mounted conversation. There is no Conversation/Changes tab strip.
+The main composer draft and conversation scroll survive opening and closing it.
+The splitter can use the available window width without a fixed pixel or
+percentage cap, keeping only a 180px usable minimum for each surface. Narrower
+windows scroll horizontally rather than switching to exclusive views.
+Closing the panel retains the existing unsaved-document Save/Discard/Cancel gate.
+**⌘⇧B** toggles Changes for the active conversation only when its associated
+worktree has changed files against the default Changes baseline. The shortcut
+checks Git on demand, is inert without an associated worktree, and ignores a
+pending check if the pane, session, or worktree changes. It does not poll Git.
+
+Click, drag and shift-click select code passively in both inline tool-call diffs
+and All Changes. Focus the Code diff selection region and use Up/Down (Shift to
+extend) for keyboard selection. Press the gutter **+** to open a comment dialog
+anchored beneath the selected lines. The selected
+range remains highlighted while composing, including after focus moves into the
+input; submitting either action clears it. Cancelling keeps the selection.
+The dialog offers
+**Discuss inline** and **Send to main chat**. Discuss inline submits the question
+to a read-only thread rendered at that code anchor; questions, answers and
+follow-ups stay together in the diff.
+
+Assistant replies use the shared Markdown renderer, including lists, code and
+links. Clicking the discussion body or its file/range label highlights the
+original source range; the close icon collapses the discussion to its marker.
+The follow-up composer has a separated action row using the same compact button
+styles as the initial comment dialog. Reopening a discussion restores its source
+selection. Selection highlighting excludes the annotation and composer rows.
+
+Send to main chat attaches the original snapshot and dialog text to the main
+composer without sending. Selection and
+opening the dialog send no model request. The next explicit main send includes
+the attachment and the user's composer draft.
+
+Mini conversations are in memory for the mounted session/worktree. They survive
+panel close/reopen, but switching that identity or restarting the application
+retires them and cancels their listeners/requests. Each explicit mini question
+uses a restricted harness runtime and includes the original selection plus the
+thread history. Claude exposes no tools or MCP servers, omits managed and explicit
+plugin directories, and disables customization hooks for discussion launches.
+Codex uses a locked read-only sandbox and disables shell, apps, delegated agents,
+desktop/browser automation, and code-host execution, as well as overriding
+inherited MCP configuration.
+The permission bridge denies discussion approval requests. Implementation
+requests can be attached to the main composer. One thread is active at a time;
+collapsed diff markers reopen prior discussions. Changed patches mark anchors outdated without
+replacing their original code snapshots.
+
+Diff surfaces subscribe to stable discussion actions and anchor locations;
+streamed message state updates only the thread UI. Screen readers receive a
+terminal status announcement rather than every streamed chunk. Discussion errors
+show readable recovery messages; diagnostics retain the request ID and error
+category without logging selected code or provider payloads.
+
+Users can still comment on lines of a worktree diff through **Comment on selection**
+in the inline tool-call diffs and the Changes panel's All Changes view.
 Comments are pending comments in `ChatWindow` (the `kind: "diff"` variant of
 `PendingComment`), sent with the next message by `formatTextCommentsForReply`
 and cleared on send. They are in-memory only; the DocumentEditor diff has none.

@@ -12,6 +12,10 @@ export const CHAT_SHORTCUT_SECTIONS = [
       { keys: ["⌘", "⌥", "[ / ]"], label: "Previous/next project" },
       { keys: ["⌘", "F"], label: "Focus chat search" },
       { keys: ["⌘", "B"], label: "Show/hide chat sidebar" },
+      {
+        keys: ["⌘", "⇧", "B"],
+        label: "Show/hide Changes (worktree has changes)",
+      },
       { keys: ["Esc"], label: "Close hints or focused panel" },
     ],
   },

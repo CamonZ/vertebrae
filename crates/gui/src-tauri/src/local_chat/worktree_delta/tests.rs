@@ -1004,6 +1004,7 @@ fn input(
     worktree: Option<&Path>,
 ) -> CreateLocalChatSessionInput {
     CreateLocalChatSessionInput {
+        read_only: false,
         harness: LocalChatHarnessKind::Claude,
         backend_session_id: backend.into(),
         chat_session_id: chat.into(),

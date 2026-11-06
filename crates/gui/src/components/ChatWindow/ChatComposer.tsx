@@ -365,6 +365,12 @@ export function ChatComposer({
                 }
               }}
             >
+              {comment.kind === "diff" &&
+                comment.selectionCode !== undefined && (
+                  <span className="selection-chip-label">
+                    {diffCommentLocation(comment)}
+                  </span>
+                )}
               <svg
                 aria-hidden="true"
                 className="h-4 w-4"
