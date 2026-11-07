@@ -62,17 +62,36 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
       [ref]
     );
 
-    useLayoutEffect(() => {
+    const measurementRef = useRef<HTMLTextAreaElement | null>(null);
+    const resizeInput = useCallback(() => {
       const textarea = textareaRef.current;
-      if (!textarea) return;
-      textarea.style.height = "auto";
-      textarea.style.height = `${Math.min(
-        Math.max(textarea.scrollHeight, CHAT_INPUT_MIN_HEIGHT),
+      const measurement = measurementRef.current;
+      if (!textarea || !measurement) return;
+
+      // Measure outside layout. Resetting the focused input to "auto" can
+      // briefly enlarge the transcript viewport and clamp its scroll position,
+      // even on one line when WebKit rounds a fractional line height.
+      const contentHeight = measurement.scrollHeight;
+      const height = `${Math.min(
+        Math.max(contentHeight, CHAT_INPUT_MIN_HEIGHT),
         CHAT_INPUT_MAX_HEIGHT
       )}px`;
+      if (textarea.style.height !== height) textarea.style.height = height;
       textarea.style.overflowY =
-        textarea.scrollHeight > CHAT_INPUT_MAX_HEIGHT ? "auto" : "hidden";
-    }, [value]);
+        contentHeight > CHAT_INPUT_MAX_HEIGHT ? "auto" : "hidden";
+    }, []);
+
+    useLayoutEffect(resizeInput, [value, resizeInput]);
+
+    useLayoutEffect(() => {
+      const measurement = measurementRef.current;
+      if (!measurement || typeof ResizeObserver === "undefined") return;
+
+      // Panel resizing can rewrap a draft without changing its value.
+      const observer = new ResizeObserver(resizeInput);
+      observer.observe(measurement);
+      return () => observer.disconnect();
+    }, [resizeInput]);
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -113,6 +132,10 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
       </button>
     );
 
+    const textareaClassName = hasFooter
+      ? "block w-full resize-none rounded-t-lg bg-transparent px-3 py-2 text-sm leading-6 text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+      : "block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 text-sm leading-6 text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
+
     return (
       <div
         className="chat-input-shell relative rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg)]"
@@ -137,12 +160,29 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
             minHeight: CHAT_INPUT_MIN_HEIGHT,
             maxHeight: CHAT_INPUT_MAX_HEIGHT,
           }}
-          className={
-            hasFooter
-              ? "block w-full resize-none rounded-t-lg bg-transparent px-3 py-2 text-sm leading-6 text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-              : "block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 text-sm leading-6 text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-          }
+          className={textareaClassName}
         />
+        <textarea
+          ref={measurementRef}
+          value={value || placeholder || ""}
+          readOnly
+          tabIndex={-1}
+          aria-hidden="true"
+          rows={1}
+          className={textareaClassName}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            height: 0,
+            minHeight: 0,
+            maxHeight: "none",
+            overflow: "hidden",
+            visibility: "hidden",
+            pointerEvents: "none",
+          }}
+        />
+
         {hasFooter ? (
           <div className="flex min-h-9 items-center gap-2 border-t border-[var(--color-line)] px-2 py-1.5">
             <div className="min-w-0 flex-1">{footerLeft}</div>
