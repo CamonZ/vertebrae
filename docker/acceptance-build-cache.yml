@@ -1,0 +1,17 @@
+# Optional job-private bind mounts restored/saved by CI's actions/cache.
+# Only build inputs/outputs survive. Runtime homes, databases, fixtures and
+# node_modules retain the disposable ownership in the base/cache overlays.
+services:
+  test-runner:
+    volumes:
+      - ${VTB_ACCEPTANCE_BUILD_CACHE_DIR:?build cache directory required}/cargo:/cargo
+      - ${VTB_ACCEPTANCE_BUILD_CACHE_DIR:?build cache directory required}/target:/app/target
+  daemon-test-runner:
+    volumes:
+      - ${VTB_ACCEPTANCE_BUILD_CACHE_DIR:?build cache directory required}/cargo:/cargo
+      - ${VTB_ACCEPTANCE_BUILD_CACHE_DIR:?build cache directory required}/target:/app/target
+  gui-test-runner:
+    volumes:
+      - ${VTB_ACCEPTANCE_BUILD_CACHE_DIR:?build cache directory required}/cargo:/cargo
+      - ${VTB_ACCEPTANCE_BUILD_CACHE_DIR:?build cache directory required}/target:/app/target
+      - ${VTB_ACCEPTANCE_BUILD_CACHE_DIR:?build cache directory required}/npm:/npm-cache

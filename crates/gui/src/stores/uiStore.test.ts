@@ -6,6 +6,7 @@ describe("uiStore", () => {
   beforeEach(() => {
     // Reset store state before each test
     useUIStore.setState({
+      inlineDiscussionPreference: { mode: "follow" },
       theme: "system",
       thinkingIndicatorStyle: "classic",
       density: "auto",
@@ -124,6 +125,7 @@ describe("uiStore", () => {
       expect(persistCall).toBeDefined();
       const persisted = JSON.parse(persistCall![1]);
       expect(persisted.state).toEqual({
+        inlineDiscussionPreference: { mode: "follow" },
         theme: "system",
         thinkingIndicatorStyle: "futuristic",
         density: "auto",
@@ -246,4 +248,55 @@ describe("uiStore", () => {
       );
     });
   });
+});
+
+it("persists and rehydrates inline discussion choice without changing main chat defaults", async () => {
+  const dedicated = {
+    mode: "dedicated" as const,
+    providerId: "custom",
+    modelId: "dedicated",
+  };
+  const initialState = useUIStore.getState();
+
+  initialState.setInlineDiscussionPreference(dedicated);
+
+  const saved = localStorage.getItem("vertebrae-ui-storage")!;
+  const savedState = JSON.parse(saved).state;
+
+  expect(savedState.inlineDiscussionPreference).toEqual(dedicated);
+
+  useUIStore.setState({ inlineDiscussionPreference: { mode: "follow" } });
+  localStorage.setItem("vertebrae-ui-storage", saved);
+  await useUIStore.persist.rehydrate();
+
+  const restoredState = useUIStore.getState();
+
+  expect(restoredState.inlineDiscussionPreference).toEqual(dedicated);
+
+  const malformedState = {
+    state: {
+      inlineDiscussionPreference: { mode: "dedicated", providerId: "custom" },
+    },
+    version: 0,
+  };
+  const malformedStorage = JSON.stringify(malformedState);
+
+  localStorage.setItem("vertebrae-ui-storage", malformedStorage);
+  await useUIStore.persist.rehydrate();
+
+  const invalidState = useUIStore.getState();
+
+  expect(invalidState.inlineDiscussionPreference).toEqual({ mode: "invalid" });
+
+  const legacyStorage = JSON.stringify({
+    state: { theme: "dark" },
+    version: 0,
+  });
+
+  localStorage.setItem("vertebrae-ui-storage", legacyStorage);
+  await useUIStore.persist.rehydrate();
+
+  const legacyState = useUIStore.getState();
+
+  expect(legacyState.inlineDiscussionPreference).toEqual({ mode: "follow" });
 });

@@ -1,3 +1,4 @@
+import { InlineDiscussionSettings } from "../components/settings/InlineDiscussionSettings";
 import { useProviderSettingsStore } from "../stores/providerSettingsStore";
 import {
   SharedConfigSettings,
@@ -2083,7 +2084,12 @@ function UpdatesSection({
   );
 }
 
-type SettingsSection = "chat" | "appearance" | "updates" | ConfigSection;
+type SettingsSection =
+  | "chat"
+  | "appearance"
+  | "code_editor"
+  | "updates"
+  | ConfigSection;
 
 const SETTINGS_COPY: Record<
   SettingsSection,
@@ -2097,6 +2103,11 @@ const SETTINGS_COPY: Record<
   appearance: {
     title: "Appearance",
     description: "Choose how Vertebrae should look across the application.",
+  },
+  code_editor: {
+    title: "Diffs & code editor",
+    description:
+      "Configure code and diff presentation, file links and inline code discussions.",
   },
   updates: {
     title: "Updates",
@@ -2267,7 +2278,7 @@ export function SettingsPage({
   }, [providerSettingsRevision]);
 
   useEffect(() => {
-    if (activeSection !== "chat") return;
+    if (activeSection !== "code_editor") return;
 
     let cancelled = false;
     setExternalEditorsLoading(true);
@@ -2407,6 +2418,19 @@ export function SettingsPage({
           </button>
           <button
             type="button"
+            onClick={() => selectSection("code_editor")}
+            className={`mt-1 w-full rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${
+              activeSection === "code_editor"
+                ? "border-[var(--color-accent)] bg-[var(--color-bg-1)] text-[var(--color-fg)]"
+                : "border-transparent text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)]"
+            }`}
+            aria-current={activeSection === "code_editor" ? "page" : undefined}
+            data-testid="settings-nav-code-editor"
+          >
+            Diffs &amp; code editor
+          </button>
+          <button
+            type="button"
             onClick={() => selectSection("updates")}
             className={`mt-1 flex w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${
               activeSection === "updates"
@@ -2529,9 +2553,22 @@ export function SettingsPage({
                   ]}
                 />
               </SettingRow>
+            </div>
+          ) : activeSection === "code_editor" ? (
+            <>
               <CodeAppearanceSettings onSaved={() => setSavedFeedback(true)} />
               <DiffSettings onSaved={() => setSavedFeedback(true)} />
-            </div>
+              {fileLinkSettings}
+              <InlineDiscussionSettings
+                catalog={isLoading || error ? null : catalog}
+                onSaved={() => setSavedFeedback(true)}
+              />
+              {error && (
+                <p role="alert" data-testid="settings-error">
+                  {error}
+                </p>
+              )}
+            </>
           ) : activeSection === "updates" ? (
             <>
               <UpdateChannelSelector state={updateState} />
@@ -2592,8 +2629,8 @@ export function SettingsPage({
                   />
                 </SettingRow>
               </div>
-              {fileLinkSettings}
               <GateSteeringSettings onSaved={() => setSavedFeedback(true)} />
+
               {isLoading ? (
                 <div
                   className="mt-8 text-sm text-[var(--color-fg-mute)]"

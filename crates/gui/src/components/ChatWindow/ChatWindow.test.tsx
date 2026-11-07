@@ -1,3 +1,4 @@
+import { useUIStore } from "../../stores/uiStore";
 import { useProviderSettingsStore } from "../../stores/providerSettingsStore";
 import { withBuiltinProviders } from "../../test/localChatCatalog";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -194,12 +195,60 @@ describe("ChatWindow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    useUIStore.setState({ inlineDiscussionPreference: { mode: "follow" } });
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
       paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
     });
+  });
+
+  it("keeps main requests on their selected model when inline discussions have a dedicated provider", async () => {
+    const uiState = useUIStore.getState();
+    const dedicatedPreference = {
+      mode: "dedicated" as const,
+      providerId: "custom",
+      modelId: "dedicated",
+    };
+    const mainSession = createSession({
+      providerId: "anthropic",
+      selectedModelId: "opus",
+    });
+
+    uiState.setInlineDiscussionPreference(dedicatedPreference);
+    useChatStore.setState({ sessions: { "test-session": mainSession } });
+    render(<ChatWindow sessionId="test-session" />);
+
+    await waitFor(() => {
+      const modelPicker = screen.getByTestId("local-chat-model-picker");
+
+      expect(modelPicker).toHaveValue("opus");
+    });
+
+    const composer = screen.getByTestId("local-chat-composer");
+    const startButton = screen.getByTitle("Start session");
+
+    fireEvent.change(composer, { target: { value: "Main question" } });
+    fireEvent.click(startButton);
+
+    const mainRequest = expect.objectContaining({
+      harness: "claude",
+      model_id: "opus",
+      initial_prompt: "Main question",
+    });
+
+    await waitFor(() => {
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+        mainRequest
+      );
+    });
+
+    const currentSession = useChatStore.getState().sessions["test-session"];
+    const currentPreference = useUIStore.getState().inlineDiscussionPreference;
+
+    expect(currentSession.providerId).toBe("anthropic");
+    expect(currentPreference).toEqual(dedicatedPreference);
   });
 
   it("opens changes on demand and preserves the composer and transcript nodes", async () => {

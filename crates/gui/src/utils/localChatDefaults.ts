@@ -351,7 +351,7 @@ export function resolvePermissionDefault(
   return modes.find((mode) => mode.is_default)?.id ?? modes[0]?.id ?? null;
 }
 
-function reasoningEffortsForModel(
+export function reasoningEffortsForModel(
   info: Pick<LocalChatHarnessInfo, "models" | "reasoning_efforts">,
   modelId?: string | null
 ) {

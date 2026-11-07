@@ -6,10 +6,11 @@ import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import signal
 import subprocess
+import tarfile
 import tempfile
 import time
 import uuid
@@ -30,20 +31,79 @@ def cache_key(value):
     return f"vtb-acceptance-{slug}-{digest}"
 
 
+def feature_weight(path):
+    """Source-work estimate, not a measured duration: steps, scenarios and table rows."""
+    contents = path.read_text()
+    lines = contents.splitlines()
+    step_pattern = re.compile(r"(?:Given|When|Then|And|But|\*)\s")
+    scenario_pattern = re.compile(r"Scenario(?: Outline)?:")
+    steps = 0
+    scenarios = 0
+    table_rows = 0
+
+    for line in lines:
+        stripped = line.lstrip()
+
+        if step_pattern.match(stripped):
+            steps += 1
+        if scenario_pattern.match(stripped):
+            scenarios += 1
+        if stripped.startswith("|"):
+            table_rows += 1
+
+    weight = steps + scenarios * 5 + table_rows
+
+    return max(1, weight)
+
+
+def balanced_partitions(features, count):
+    weighted = [(feature_weight(path), path) for path in features]
+    ordered = sorted(weighted, key=lambda item: (-item[0], item[1]))
+    partitions = [[] for _ in range(count)]
+    loads = [0] * count
+    shard_indexes = range(count)
+
+    for weight, path in ordered:
+        index = min(shard_indexes, key=lambda candidate: (loads[candidate], candidate))
+
+        partitions[index].append(path)
+        loads[index] += weight
+
+    return [sorted(partition) for partition in partitions]
+
+
 def shard_features(suite, index, count):
-    """Stable file partition: every feature belongs to exactly one isolated job."""
+    """Deterministic whole-feature partitions, preserving every feature exactly once."""
     if not 1 <= index <= count:
         raise ValueError("shard index must be between 1 and shard count")
+
     crate = {"cli": "acceptance", "gui": "gui-acceptance", "daemon": "daemon-acceptance"}[suite]
     directory = ROOT / "crates" / crate / "tests/features"
-    features = sorted(directory.rglob("*.feature"))
-    selected = features[index - 1::count]
+    discovered = directory.rglob("*.feature")
+    features = sorted(discovered)
+
+    if count > len(features):
+        raise ValueError("empty acceptance shard; reduce shard count")
+
+    if suite in ("gui", "daemon"):
+        partitions = balanced_partitions(features, count)
+        selected = partitions[index - 1]
+    else:
+        selected = features[index - 1::count]
+
     if not selected:
         raise ValueError("empty acceptance shard; reduce shard count")
     names = [path.relative_to(directory).as_posix() for path in selected]
-    if any(not re.fullmatch(r"(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.feature", name) for name in names):
+    name_pattern = re.compile(r"(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.feature")
+    invalid_names = [name for name in names if not name_pattern.fullmatch(name)]
+
+    if invalid_names:
         raise ValueError("feature filename cannot be represented safely in the shard glob")
-    pattern = names[0] if len(names) == 1 else "{" + ",".join(names) + "}"
+    # globwalk treats a literal absolute filename as its traversal root and
+    # matches nothing. Braces keep even a singleton filename in the glob part.
+    glob_names = ",".join(names)
+    pattern = f"{{{glob_names}}}"
+
     return f"/app/crates/{crate}/tests/features/{pattern}", names
 
 
@@ -164,8 +224,151 @@ def cleanup(compose, env, output):
             signal.signal(sig, handler)
 
 
+def compose_command(env):
+    command = ["docker", "compose", "-f", "docker-compose.yml", "-f", "docker/acceptance-cache.yml"]
+
+    if env.get("VTB_ACCEPTANCE_BUILD_CACHE_DIR"):
+        command.extend(["-f", "docker/acceptance-build-cache.yml"])
+
+    return command
+
+
+def source_fingerprint():
+    command = ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
+    output = subprocess.check_output(command, cwd=ROOT)
+    decoded = output.decode()
+    entries = decoded.split("\0")
+    unique_names = set(entries) - {""}
+    names = sorted(unique_names)
+    digest = hashlib.sha256()
+
+    for name in names:
+        path = ROOT / name
+        if path.is_symlink():
+            contents = os.readlink(path).encode()
+        elif path.is_file():
+            contents = path.read_bytes()
+        else:
+            contents = b"<deleted>"
+
+        digest.update(name.encode())
+        digest.update(b"\0")
+        digest.update(contents)
+        digest.update(b"\0")
+
+    return digest.hexdigest()
+
+
+def validate_runtime(path, suite, env):
+    with tarfile.open(path, "r:gz") as archive:
+        for member in archive.getmembers():
+            name = PurePosixPath(member.name)
+            allowed = (str(name) in ("acceptance-runtime.json", "target", "target/debug")
+                       or str(name).startswith("target/debug/")
+                       or str(name) == "crates/gui/node_modules"
+                       or str(name).startswith("crates/gui/node_modules/"))
+
+            if name.is_absolute() or ".." in name.parts or not allowed:
+                raise ValueError(f"unexpected runtime archive member: {member.name}")
+
+        try:
+            manifest_file = archive.extractfile("acceptance-runtime.json")
+        except KeyError:
+            raise ValueError("runtime bundle has no manifest") from None
+        if manifest_file is None:
+            raise ValueError("runtime bundle has no manifest")
+        manifest = json.load(manifest_file)
+
+    expected = {"schema_version": 1, "suite": suite, "image": env[image_env(suite)],
+                "platform": docker_platform(env), "source": source_fingerprint()}
+
+    if manifest != expected:
+        raise ValueError("runtime bundle does not match this suite, checkout or runner image/platform; rebuild it")
+
+
+def build_runtime(suite, env, output):
+    fingerprint = source_fingerprint()
+    node_volume = f"{env['COMPOSE_PROJECT_NAME']}-build-node"
+    cache_directory = env.get("VTB_ACCEPTANCE_BUILD_CACHE_DIR")
+    mounts = ["-v", f"{ROOT}:/app", "-v", f"{output}:/app/test-output"]
+
+    for kind, target in [("cargo", "/cargo"), ("target", "/app/target"),
+                         ("rustup", "/usr/local/rustup"), ("npm", "/npm-cache")]:
+        if cache_directory and kind != "rustup":
+            directory = Path(cache_directory) / kind
+            directory.mkdir(parents=True, exist_ok=True)
+            source = str(directory)
+        else:
+            source = f"{env['VTB_ACCEPTANCE_CACHE_KEY']}-{kind}"
+            subprocess.run(["docker", "volume", "create", source], env=env, check=True,
+                           stdout=subprocess.DEVNULL)
+
+        mounts.extend(["-v", f"{source}:{target}"])
+
+    if suite == "gui":
+        mounts.extend(["-v", f"{node_volume}:/app/crates/gui/node_modules"])
+
+    build_container = f"{env['COMPOSE_PROJECT_NAME']}-build"
+    container = ["docker", "run", "--rm", "--name", build_container, "--entrypoint", "/bin/bash", "-w", "/app",
+                 "-e", "CARGO_HOME=/cargo", "-e", "npm_config_cache=/npm-cache",
+                 *mounts, env[image_env(suite)]]
+    status = prepare_images([suite], env, output)
+
+    try:
+        if status:
+            return status
+
+        status = run(container + ["/app/docker/acceptance-build.sh", suite], env, output, "build")
+        if status:
+            return status
+        if source_fingerprint() != fingerprint:
+            raise ValueError("checkout changed during the runtime build; rebuild before distributing it")
+
+        build_log = output / "build-tests.jsonl"
+        build_output = build_log.read_text()
+        lines = build_output.splitlines()
+        records = [json.loads(line) for line in lines]
+        test_name = {"gui": "gui_acceptance", "daemon": "daemon_acceptance", "cli": "acceptance"}[suite]
+        executables = [record["executable"] for record in records
+                       if record.get("reason") == "compiler-artifact"
+                       and record.get("target", {}).get("name") == test_name
+                       and record.get("executable")]
+        if len(executables) != 1:
+            raise ValueError("build did not produce exactly one acceptance test executable")
+
+        manifest = {"schema_version": 1, "suite": suite, "image": env[image_env(suite)],
+                    "platform": docker_platform(env), "source": fingerprint}
+        manifest_body = json.dumps(manifest)
+        manifest_file = output / "runtime-manifest.json"
+
+        manifest_file.write_text(manifest_body)
+
+        package_command = container + ["/app/docker/acceptance-pack.sh", suite, executables[0]]
+
+        return run(package_command, env, output, "package")
+    finally:
+        subprocess.run(["docker", "rm", "--force", build_container], env=env, check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        if suite == "gui":
+            subprocess.run(["docker", "volume", "rm", node_volume], env=env, check=False,
+                           stdout=subprocess.DEVNULL)
+
+
 def execute(suites, env, output):
-    compose = ["docker", "compose", "-f", "docker-compose.yml", "-f", "docker/acceptance-cache.yml"]
+    compose = compose_command(env)
+    cache_directory = env.get("VTB_ACCEPTANCE_BUILD_CACHE_DIR")
+
+    if cache_directory:
+        for kind in ("cargo", "target", "npm"):
+            directory = Path(cache_directory) / kind
+            directory.mkdir(parents=True, exist_ok=True)
+
+    prebuilt = env.get("VTB_ACCEPTANCE_PREBUILT_BUNDLE")
+
+    if prebuilt:
+        validate_runtime(prebuilt, suites[0], env)
+
     status = 0
     try:
         for kind in CACHE_TYPES:
@@ -180,7 +383,12 @@ def execute(suites, env, output):
             for suite in suites:
                 shard_env = (["-e", f"VTB_ACCEPTANCE_FEATURE_GLOB={env['VTB_ACCEPTANCE_FEATURE_GLOB']}"]
                              if env.get("VTB_ACCEPTANCE_FEATURE_GLOB") else [])
-                result = run(compose + ["run", "--rm", "--no-deps"] + shard_env + [SUITES[suite]], env, output, suite)
+                runtime_args = []
+
+                if prebuilt:
+                    runtime_args = ["-e", "VTB_ACCEPTANCE_PREBUILT=1", "-v", f"{prebuilt}:/acceptance-runtime.tar.gz:ro"]
+
+                result = run(compose + ["run", "--rm", "--no-deps"] + shard_env + runtime_args + [SUITES[suite]], env, output, suite)
                 status = status or result
     finally:
         # External build caches survive; database and GUI node_modules do not.
@@ -192,6 +400,8 @@ def execute(suites, env, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cleanup", action="store_true", help="Dispose a recorded run using VTB_ACCEPTANCE_OUTPUT")
+    parser.add_argument("--build-only", action="store_true", help="Build one suite runtime bundle without starting a backend")
+    parser.add_argument("--prebuilt", type=Path, help="Run shards from a matching runtime bundle, without compiling")
     parser.add_argument("--publish-images", action="store_true", help="Build and push unpublished runner images")
     # Older argparse versions validate the entire default list as one choice.
     # Validate supplied names separately and apply the default after parsing.
@@ -201,6 +411,10 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.shard_index <= args.shard_count:
         parser.error("shard index must be between 1 and shard count")
+    if args.build_only and (args.prebuilt or args.shard_count != 1 or args.cleanup or args.publish_images):
+        parser.error("--build-only cannot be combined with sharding, --prebuilt, --cleanup or --publish-images")
+    if (args.build_only or args.prebuilt) and len(args.suites) != 1:
+        parser.error("prebuilt runtime operations require exactly one suite")
     if args.shard_count > 1 and len(args.suites) != 1:
         parser.error("sharding requires exactly one suite")
     for suite in args.suites:
@@ -208,9 +422,16 @@ def main():
             parser.error(f"unknown suite {suite!r}; choose from {', '.join(SUITES)}")
     args.suites = args.suites or list(SUITES)
     env = os.environ.copy()
+
+    if args.prebuilt:
+        env["VTB_ACCEPTANCE_PREBUILT_BUNDLE"] = str(args.prebuilt.resolve())
     for suite in SUITES:
         env[image_env(suite)] = image_ref(suite, env.get("VTB_ACCEPTANCE_REGISTRY", IMAGE_REGISTRY))
     env["VTB_ACCEPTANCE_CACHE_KEY"] = cache_key(env.get("VTB_ACCEPTANCE_CACHE_KEY", str(ROOT)))
+    if env.get("VTB_ACCEPTANCE_BUILD_CACHE_DIR"):
+        cache_directory = Path(env["VTB_ACCEPTANCE_BUILD_CACHE_DIR"]).resolve()
+        env["VTB_ACCEPTANCE_BUILD_CACHE_DIR"] = str(cache_directory)
+
     env["COMPOSE_PROJECT_NAME"] = f"vtb-acceptance-{uuid.uuid4().hex[:12]}"
     output = Path(env.get("VTB_ACCEPTANCE_OUTPUT", ROOT / "test-output" / env["COMPOSE_PROJECT_NAME"])).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -224,6 +445,8 @@ def main():
         (output / "shard-manifest.json").write_text(json.dumps({"suite": args.suites[0],
             "index": args.shard_index, "count": args.shard_count, "features": features}, indent=2))
     context_file = output / "runner-context.json"
+    context_keys = ("COMPOSE_PROJECT_NAME", "VTB_ACCEPTANCE_CACHE_KEY", "VTB_ACCEPTANCE_OUTPUT",
+                    "VTB_ACCEPTANCE_BUILD_CACHE_DIR")
     if args.publish_images:
         return publish_images(env, output)
     if args.cleanup:
@@ -233,8 +456,7 @@ def main():
             print("No acceptance run was started; nothing to clean up")
             return 0
         context = json.loads(context_file.read_text())
-        env.update({key: context[key] for key in
-                    ("COMPOSE_PROJECT_NAME", "VTB_ACCEPTANCE_CACHE_KEY", "VTB_ACCEPTANCE_OUTPUT")})
+        env.update({key: context[key] for key in context_keys if key in context})
     print(f"Project: {env['COMPOSE_PROJECT_NAME']}\nCache: {env['VTB_ACCEPTANCE_CACHE_KEY']}\nOutput: {output}", flush=True)
 
     def interrupted(signum, _frame):
@@ -245,11 +467,21 @@ def main():
         # Lock both source staging paths and reusable compiled binaries.
         stack.enter_context(exclusive_lock(str(ROOT)))
         stack.enter_context(exclusive_lock(env["VTB_ACCEPTANCE_CACHE_KEY"]))
+
+        if env.get("VTB_ACCEPTANCE_BUILD_CACHE_DIR"):
+            build_cache_lock = exclusive_lock(env["VTB_ACCEPTANCE_BUILD_CACHE_DIR"])
+
+            stack.enter_context(build_cache_lock)
+
         if args.cleanup:
-            compose = ["docker", "compose", "-f", "docker-compose.yml", "-f", "docker/acceptance-cache.yml"]
+            compose = compose_command(env)
             return cleanup(compose, env, output)
-        context_file.write_text(json.dumps({key: env[key] for key in
-                               ("COMPOSE_PROJECT_NAME", "VTB_ACCEPTANCE_CACHE_KEY", "VTB_ACCEPTANCE_OUTPUT")}))
+        if args.build_only:
+            return build_runtime(args.suites[0], env, output)
+
+        context = {key: env[key] for key in context_keys if key in env}
+
+        context_file.write_text(json.dumps(context))
         return execute(args.suites, env, output)
 
 

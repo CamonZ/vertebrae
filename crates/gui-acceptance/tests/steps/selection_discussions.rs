@@ -266,11 +266,15 @@ async fn gesture(world: &mut GuiWorld, drag: bool, shift: bool) {
               '[data-column-number="2"][data-line-type="change-addition"]',
             );
 
-            node.scrollIntoView({{ block: "center" }});
+            node.scrollIntoView({{ block: "center", inline: "center", behavior: "instant" }});
 
             const rect = node.getBoundingClientRect();
-            const x = Math.round(rect.x + rect.width / 2);
-            const y = Math.round(rect.y + rect.height / 2);
+            const left = Math.max(0, rect.left);
+            const right = Math.min(window.innerWidth - 1, rect.right);
+            const top = Math.max(0, rect.top);
+            const bottom = Math.min(window.innerHeight - 21, rect.bottom);
+            const x = Math.round((left + right) / 2);
+            const y = Math.round((top + bottom) / 2);
 
             return [x, y];
         "#
@@ -520,8 +524,12 @@ async fn open_comment_dialog(world: &mut GuiWorld) {
               "[data-gutter-utility-slot] button",
             );
             const rect = node.getBoundingClientRect();
-            const x = Math.round(rect.x + rect.width / 2);
-            const y = Math.round(rect.y + rect.height / 2);
+            const left = Math.max(0, rect.left);
+            const right = Math.min(window.innerWidth - 1, rect.right);
+            const top = Math.max(0, rect.top);
+            const bottom = Math.min(window.innerHeight - 21, rect.bottom);
+            const x = Math.round((left + right) / 2);
+            const y = Math.round((top + bottom) / 2);
 
             return [x, y];
         "#
@@ -557,6 +565,21 @@ async fn open_comment_dialog(world: &mut GuiWorld) {
         dialog_open_script,
         vec![],
         Duration::from_secs(5),
+    )
+    .await;
+
+    let model_disclosure_script = r#"
+        const dialog = document.querySelector('[role=dialog][aria-label="Comment on selected code"]');
+
+        return dialog?.textContent.includes('Next reply: Anthropic · ');
+    "#;
+
+    gui_acceptance::wait_for_js(
+        &client,
+        "effective inline model disclosed before submission",
+        model_disclosure_script,
+        vec![],
+        Duration::from_secs(10),
     )
     .await;
 
@@ -609,13 +632,20 @@ async fn ask(world: &mut GuiWorld) {
         gui_acceptance::click_when_ready(&client, button_locator, "ask inline question").await;
 
         let expected_turns = index + 1;
-        gui_acceptance::wait_until(
+        let delivered = gui_acceptance::wait_until(
             "inline question reached the provider",
             Duration::from_secs(10),
             || async { Ok(discussion_prompts().len() == expected_turns) },
         )
-        .await
-        .unwrap();
+        .await;
+
+        if let Err(reason) = delivered {
+            let diagnostic_script = "return document.querySelector('[data-testid=selection-mini-thread]')?.textContent;";
+            let diagnostic = client.execute(diagnostic_script, vec![]).await;
+            let launches = harness_capture("invocations.jsonl");
+
+            panic!("{reason}; discussion: {diagnostic:?}; launches: {launches:?}");
+        }
 
         let discussion_completed_script = r#"
             const thread = document.querySelector("[data-testid=selection-mini-thread]");
@@ -769,6 +799,22 @@ async fn dirty(world: &mut GuiWorld) {
     let editor = client.active_element().await.unwrap();
     editor.send_keys("unsaved").await.unwrap();
 
+    let dirty_document_script = r#"
+        const documentView = document.querySelector('[aria-label="Document selection.ts"]');
+        const status = documentView?.querySelector('[role="status"]');
+
+        return status?.textContent.includes("Unsaved");
+    "#;
+
+    gui_acceptance::wait_for_js(
+        &client,
+        "document marked unsaved before closing Changes",
+        dirty_document_script,
+        vec![],
+        Duration::from_secs(5),
+    )
+    .await;
+
     gui_acceptance::click_when_ready(
         &client,
         Locator::Css("[data-testid=local-chat-view-changes]"),
@@ -812,4 +858,166 @@ async fn protected(world: &mut GuiWorld) {
     let result = client.execute(panel_open_script, vec![]).await.unwrap();
 
     assert_eq!(result, json!(true));
+}
+
+#[given("inline discussions use a dedicated model selected in Settings")]
+async fn dedicated_model(world: &mut GuiWorld) {
+    super::navigation::navigate_to(world, "/settings", "inline-model-settings").await;
+
+    let wd = world.webdriver.as_ref().unwrap().clone();
+    let client = wd.lock().await;
+
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[data-testid=settings-nav-code-editor]"),
+        "code editor settings",
+    )
+    .await;
+    let catalog_loaded_script = r#"
+        const option = document.querySelector('[aria-label="Inline discussion mode"] option[value=dedicated]');
+
+        return option?.disabled === false;
+    "#;
+
+    gui_acceptance::wait_for_js(
+        &client,
+        "inline provider catalog loaded",
+        catalog_loaded_script,
+        vec![],
+        Duration::from_secs(10),
+    )
+    .await;
+
+    let selections = [
+        ("Inline discussion mode", "dedicated"),
+        ("Inline discussion provider", "anthropic"),
+        ("Inline discussion model", "opus"),
+        ("Inline discussion reasoning effort", "high"),
+        ("Inline discussion speed tier", "fast"),
+    ];
+
+    for (label, value) in selections {
+        let selector = format!("[aria-label='{label}']");
+        let locator = Locator::Css(&selector);
+
+        gui_acceptance::select_when_ready(&client, locator, value).await;
+    }
+
+    let layout_script = r#"
+        const labels = ['provider', 'model', 'reasoning effort', 'speed tier'];
+        const boxes = labels.map(label => document.querySelector(`[aria-label="Inline discussion ${label}"]`).getBoundingClientRect());
+        const mode = document.querySelector('[aria-label="Inline discussion mode"]').getBoundingClientRect();
+        const aligned = boxes.every(box => Math.abs(box.top - boxes[0].top) < 1);
+        const ordered = boxes.every((box, index) => index === 0 || box.left > boxes[index - 1].left);
+        const personality = document.querySelector('[aria-label="Inline discussion personality"], [aria-label="Inline discussion output style"]');
+
+        return aligned && ordered && boxes[0].top > mode.bottom && !personality;
+    "#;
+
+    gui_acceptance::wait_for_js(
+        &client,
+        "four custom options on one row below Answer using",
+        layout_script,
+        vec![],
+        Duration::from_secs(5),
+    )
+    .await;
+    world.screenshot(&client, "inline-model-options-row").await;
+    client.refresh().await.unwrap();
+
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[data-testid=settings-nav-code-editor]"),
+        "restore code editor settings",
+    )
+    .await;
+
+    let restored_model_script = r#"
+        const picker = document.querySelector('[aria-label="Inline discussion model"]');
+
+        const effort = document.querySelector('[aria-label="Inline discussion reasoning effort"]');
+        const speed = document.querySelector('[aria-label="Inline discussion speed tier"]');
+        return picker?.value === 'opus' && effort?.value === 'high' && speed?.value === 'fast';
+    "#;
+
+    gui_acceptance::wait_for_js(
+        &client,
+        "dedicated inline model restored after reload",
+        restored_model_script,
+        vec![],
+        Duration::from_secs(10),
+    )
+    .await;
+}
+
+#[then("inline requests use the dedicated model disclosed before submission")]
+async fn dedicated_requests(world: &mut GuiWorld) {
+    let wd = world.webdriver.as_ref().unwrap().clone();
+    let client = wd.lock().await;
+    let disclosure_script = r#"
+        const thread = document.querySelector('[data-testid=selection-mini-thread]');
+
+        return thread?.textContent.includes('Next reply: Anthropic · Opus');
+    "#;
+
+    let disclosure = client.execute(disclosure_script, vec![]).await.unwrap();
+
+    assert_eq!(disclosure, json!(true));
+
+    let launches = harness_capture("invocations.jsonl");
+
+    assert_eq!(launches.len(), 2);
+
+    for launch in launches {
+        let args = launch.as_array().unwrap();
+        let uses_dedicated_model = args
+            .windows(2)
+            .any(|pair| pair[0] == "--model" && pair[1] == "opus");
+
+        assert!(uses_dedicated_model, "dedicated launch: {args:?}");
+        let uses_effort = args
+            .windows(2)
+            .any(|pair| pair[0] == "--effort" && pair[1] == "high");
+        let settings: Vec<Value> = args
+            .iter()
+            .filter_map(|arg| {
+                arg.as_str()
+                    .and_then(|text| serde_json::from_str(text).ok())
+            })
+            .collect();
+        let uses_fast = settings.iter().any(|setting| setting["fastMode"] == true);
+        let uses_custom_style = settings
+            .iter()
+            .any(|setting| setting.get("outputStyle").is_some());
+
+        assert!(
+            uses_effort && uses_fast && !uses_custom_style,
+            "dedicated options missing: {args:?}"
+        );
+    }
+}
+
+#[then("the main conversation still uses its original model")]
+async fn main_model_unchanged(_world: &mut GuiWorld) {
+    gui_acceptance::wait_until(
+        "main draft reaches the original runtime",
+        Duration::from_secs(10),
+        || async {
+            let turns = captured_turns();
+            let main_draft_delivered = turns.iter().any(|turn| {
+                turn.contains("Explain selected code before implementation")
+                    && !turn.contains("This is a read-only side discussion.")
+            });
+
+            Ok(main_draft_delivered)
+        },
+    )
+    .await
+    .unwrap();
+
+    let launches = harness_capture("invocations.jsonl");
+
+    // The original main runtime is already running when fixture capture resets.
+    // Sending its next turn must not create a new runtime with the inline model.
+    assert_eq!(launches.len(), 2, "main runtime was replaced: {launches:?}");
 }

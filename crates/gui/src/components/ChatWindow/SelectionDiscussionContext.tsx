@@ -1,3 +1,4 @@
+import { useDiscussionModel } from "../../hooks/useDiscussionModel";
 import { MarkdownContent } from "../shared/MarkdownContent";
 import {
   useCallback,
@@ -19,6 +20,7 @@ import {
 } from "./selectionDiscussions";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
 import {
+  SelectionDiscussionModelContext,
   SelectionDiscussionContext,
   SelectionDiscussionActionsContext,
   SelectionDiscussionAnchorsContext,
@@ -35,6 +37,9 @@ export function SelectionDiscussionProvider({
   harness,
   providerId,
   modelId,
+  reasoningEffort,
+  speedTier,
+  personality,
   onOpen,
   onAttach,
 }: {
@@ -43,6 +48,9 @@ export function SelectionDiscussionProvider({
   harness: LocalChatHarnessKind;
   providerId?: string;
   modelId?: string | null;
+  reasoningEffort?: string | null;
+  speedTier?: string | null;
+  personality?: string | null;
   onOpen(): void;
   onAttach(anchor: CodeSelection, outdated?: boolean, question?: string): void;
 }) {
@@ -51,6 +59,19 @@ export function SelectionDiscussionProvider({
     controller.subscribe,
     controller.getSnapshot
   );
+
+  const mainSelection = {
+    harness,
+    providerId,
+    modelId,
+    reasoningEffort,
+    speedTier,
+    personality,
+  };
+  const hasDiscussionContext =
+    state.selection !== null || state.threads.length > 0;
+  const choice = useDiscussionModel(mainSelection, hasDiscussionContext);
+
   const cleanups = useRef(new Map<string, () => void>());
   const callbacks = useRef({ onOpen, onAttach });
   callbacks.current = { onOpen, onAttach };
@@ -74,7 +95,10 @@ export function SelectionDiscussionProvider({
 
   const send = useCallback(
     async (id: string, text: string) => {
-      const thread = controller.begin(id, text);
+      // Snapshot the selected provider/model before any asynchronous setup.
+      if (choice.error !== null) return;
+
+      const thread = controller.begin(id, text, choice.label);
       if (!thread?.requestId) return;
 
       const requestId = thread.requestId;
@@ -108,7 +132,7 @@ export function SelectionDiscussionProvider({
 
         console.warn("Selection discussion failed", {
           requestId,
-          harness,
+          harness: choice.harness,
           category,
         });
         finish(message);
@@ -179,17 +203,18 @@ export function SelectionDiscussionProvider({
         const initialPrompt = discussionPrompt(thread);
         const sessionInput = {
           read_only: true,
-          harness,
+          harness: choice.harness,
           backend_session_id: requestId,
           chat_session_id: requestId,
           working_dir: worktreePath,
           initial_prompt: initialPrompt,
           provider_resume_id: null,
-          model_id: modelId ?? null,
-          reasoning_effort: null,
+          model_id: choice.modelId,
+          reasoning_effort: choice.reasoningEffort,
+          speed_tier: choice.speedTier,
           permission_mode: null,
-          personality: null,
-          provider_id: providerId,
+          personality: choice.personality,
+          provider_id: choice.providerId,
         };
         const result = await commands.createLocalChatSession(sessionInput);
 
@@ -204,7 +229,7 @@ export function SelectionDiscussionProvider({
         fail(error);
       }
     },
-    [controller, harness, modelId, providerId, worktreePath]
+    [controller, choice, worktreePath]
   );
 
   const actions = useMemo<DiscussionActions>(
@@ -242,17 +267,19 @@ export function SelectionDiscussionProvider({
   );
 
   return (
-    <SelectionDiscussionActionsContext.Provider value={actions}>
-      <SelectionDiscussionAnchorsContext.Provider
-        value={controller.getAnchors()}
-      >
-        <SelectionDiscussionSelectionContext.Provider value={state.selection}>
-          <SelectionDiscussionContext.Provider value={value}>
-            {children}
-          </SelectionDiscussionContext.Provider>
-        </SelectionDiscussionSelectionContext.Provider>
-      </SelectionDiscussionAnchorsContext.Provider>
-    </SelectionDiscussionActionsContext.Provider>
+    <SelectionDiscussionModelContext.Provider value={choice}>
+      <SelectionDiscussionActionsContext.Provider value={actions}>
+        <SelectionDiscussionAnchorsContext.Provider
+          value={controller.getAnchors()}
+        >
+          <SelectionDiscussionSelectionContext.Provider value={state.selection}>
+            <SelectionDiscussionContext.Provider value={value}>
+              {children}
+            </SelectionDiscussionContext.Provider>
+          </SelectionDiscussionSelectionContext.Provider>
+        </SelectionDiscussionAnchorsContext.Provider>
+      </SelectionDiscussionActionsContext.Provider>
+    </SelectionDiscussionModelContext.Provider>
   );
 }
 
@@ -285,6 +312,7 @@ function MiniThread({
   discussion: DiscussionValue;
 }) {
   const [question, setQuestion] = useState("");
+  const choice = useContext(SelectionDiscussionModelContext);
 
   return (
     <section
@@ -348,6 +376,10 @@ function MiniThread({
           </svg>
         </button>
       </header>
+      {thread.responder && (
+        <p className="selection-mini-speaker">Reply: {thread.responder}</p>
+      )}
+      <DiscussionModelNotice />
       <div className="selection-mini-messages">
         {thread.messages.map((message, index) => (
           <article
@@ -381,6 +413,7 @@ function MiniThread({
         className="diff-comment-editor selection-mini-composer"
         onSubmit={(event) => {
           event.preventDefault();
+          if (choice?.error) return;
           discussion.send(thread.id, question);
           setQuestion("");
         }}
@@ -409,7 +442,7 @@ function MiniThread({
           </button>
           <button
             type="submit"
-            disabled={!!thread.requestId || !question.trim()}
+            disabled={!!thread.requestId || !question.trim() || !!choice?.error}
           >
             Ask
           </button>
@@ -434,4 +467,20 @@ export function DiscussionSnapshot({
   }, [snapshot]);
 
   return null;
+}
+
+/** Shared by the initial comment dialog and each follow-up composer. */
+export function DiscussionModelNotice() {
+  const choice = useContext(SelectionDiscussionModelContext);
+
+  if (!choice) return null;
+
+  return (
+    <p
+      role={choice.error ? "alert" : undefined}
+      className="selection-model-notice"
+    >
+      {choice.error ?? `Next reply: ${choice.label}`}
+    </p>
+  );
 }

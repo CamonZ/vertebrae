@@ -29,6 +29,7 @@ export interface SelectionThread {
   requestId: string | null;
   error: string | null;
   announcement: string;
+  responder?: string;
 }
 
 export type ThreadAnchor = Pick<SelectionThread, "id" | "anchor">;
@@ -178,20 +179,24 @@ export class SelectionDiscussions {
     this.publish({ ...this.state, threads });
   }
 
-  begin(id: string, text: string): SelectionThread | null {
+  begin(id: string, text: string, responder?: string): SelectionThread | null {
     const thread = this.state.threads.find((thread) => thread.id === id);
+
     if (!thread || thread.requestId || !text.trim()) return null;
+
+    const requestId = crypto.randomUUID();
+    const message = { role: "user" as const, text: text.trim() };
+    const messages = [...thread.messages, message];
 
     const next = {
       ...thread,
-      requestId: crypto.randomUUID(),
+      requestId,
+      responder,
       error: null,
       announcement: "",
-      messages: [
-        ...thread.messages,
-        { role: "user" as const, text: text.trim() },
-      ],
+      messages,
     };
+
     this.update(id, () => next);
 
     return next;

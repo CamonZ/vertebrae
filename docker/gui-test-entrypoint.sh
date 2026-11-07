@@ -6,6 +6,7 @@ if [ -n "${VTB_ACCEPTANCE_FEATURE_GLOB:-}" ]; then
 fi
 source /app/docker/acceptance-timing.sh
 ACCEPTANCE_SUITE=gui
+source /app/docker/acceptance-runtime.sh
 cleanup() {
     for process_id in "${TAURI_DRIVER_PID:-}" "${VITE_PID:-}" "${XVFB_PID:-}"; do
         if [ -n "$process_id" ]; then
@@ -44,9 +45,13 @@ for i in $(seq 1 40); do
 done
 
 # Install frontend dependencies
-echo "==> Installing frontend dependencies..."
 cd /app/crates/gui
-acceptance_time npm-install npm ci --prefer-offline
+if [ "${VTB_ACCEPTANCE_PREBUILT:-0}" != 1 ]; then
+    echo "==> Installing frontend dependencies..."
+    acceptance_time npm-install npm ci --prefer-offline
+else
+    echo "==> Using frontend dependencies from the prebuilt runtime"
+fi
 
 # Start Vite dev server in the background — the debug Tauri binary connects to
 # localhost:1420 rather than serving embedded assets.
@@ -71,14 +76,17 @@ cd /app
 # Stage the vtb/vtb-daemon/vtb-gate sidecars before building the GUI: Tauri's build
 # script validates that every `externalBin` declared in tauri.conf.json exists
 # for the active target triple, so they must be present first.
-echo "==> Staging vtb/vtb-daemon/vtb-gate sidecars (debug)..."
-acceptance_time build-sidecars env SIDECAR_PROFILE=debug node /app/crates/gui/scripts/prepare-sidecars.mjs
+if [ "${VTB_ACCEPTANCE_PREBUILT:-0}" != 1 ]; then
+    echo "==> Staging vtb/vtb-daemon/vtb-gate sidecars (debug)..."
+    acceptance_time build-sidecars env SIDECAR_PROFILE=debug node /app/crates/gui/scripts/prepare-sidecars.mjs
 
-# Build the Tauri app and mock-claude (debug mode for speed). The sidecars
-# were already built by the sidecar staging step above.
-echo "==> Building Tauri app, mock Claude/Codex binaries..."
-acceptance_time build-gui env VERTEBRAE_BUNDLE_SIDECARS=1 cargo build --locked -p gui --bin gui --quiet
-acceptance_time build-mocks cargo build --locked -p daemon-acceptance --bin mock-claude --bin mock-codex --quiet
+    # Build the Tauri app and mock-claude (debug mode for speed). The sidecars
+    # were already built by the sidecar staging step above.
+    echo "==> Building Tauri app, mock Claude/Codex binaries..."
+    acceptance_time build-gui env VERTEBRAE_BUNDLE_SIDECARS=1 cargo build --locked -p gui --bin gui --quiet
+    acceptance_time build-mocks cargo build --locked -p daemon-acceptance --bin mock-claude --bin mock-codex --quiet
+
+fi
 
 # Install the component binaries that the GUI expects to find on a normal
 # machine. The files in data_bin are the managed install; ~/.local/bin contains
@@ -137,10 +145,17 @@ for i in $(seq 1 100); do
 done
 
 echo "==> Running GUI acceptance tests..."
-acceptance_time build-tests cargo test --locked -p gui-acceptance --test gui_acceptance --no-run --message-format=json > /tmp/gui-acceptance-build.jsonl
+if [ "${VTB_ACCEPTANCE_PREBUILT:-0}" != 1 ]; then
+    acceptance_time build-tests cargo test --locked -p gui-acceptance --test gui_acceptance --no-run --message-format=json > /tmp/gui-acceptance-build.jsonl
+fi
 status=0
 if [ "${GUI_ACCEPTANCE_PODMAN_ONLY:-0}" != 1 ]; then
-    acceptance_time scenarios cargo test --locked -p gui-acceptance --test gui_acceptance -- "${feature_args[@]}" "$@" || status=$?
+    if [ "${VTB_ACCEPTANCE_PREBUILT:-0}" = 1 ]; then
+        cd /app/crates/gui-acceptance
+        acceptance_time scenarios "$VTB_ACCEPTANCE_TEST_BINARY" "${feature_args[@]}" "$@" || status=$?
+    else
+        acceptance_time scenarios cargo test --locked -p gui-acceptance --test gui_acceptance -- "${feature_args[@]}" "$@" || status=$?
+    fi
 fi
 podman_status=0
 acceptance_time podman-scenarios /app/docker/gui-podman-entrypoint.sh || podman_status=$?

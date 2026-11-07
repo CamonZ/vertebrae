@@ -4,7 +4,11 @@ import {
   diffCommentLocation,
   type PendingDiffComment,
 } from "../../ChatWindow/assistantTextComments";
-import { InlineSelectionDiscussion } from "../../ChatWindow/SelectionDiscussionContext";
+import { SelectionDiscussionModelContext } from "../../ChatWindow/selectionDiscussionState";
+import {
+  DiscussionModelNotice,
+  InlineSelectionDiscussion,
+} from "../../ChatWindow/SelectionDiscussionContext";
 import { DiffReviewContext, type DiffReviewFocus } from "./DiffReviewContext";
 
 /** Pierre annotation payload: comments (and a composer) at one diff line. */
@@ -94,6 +98,7 @@ function CommentEditor({
   onSubmit,
   onCancel,
   onSendToMain,
+  disabled,
 }: {
   label: string;
   value: string;
@@ -103,6 +108,7 @@ function CommentEditor({
   onSubmit(): void;
   onCancel(): void;
   onSendToMain?(): void;
+  disabled?: boolean;
 }): ReactNode {
   return (
     <div className="diff-comment-editor">
@@ -118,7 +124,8 @@ function CommentEditor({
           else if (
             event.key === "Enter" &&
             (event.metaKey || event.ctrlKey) &&
-            value.trim()
+            value.trim() &&
+            !disabled
           ) {
             onSubmit();
           }
@@ -136,7 +143,7 @@ function CommentEditor({
         <button
           type="button"
           data-testid={`${testIdPrefix}-submit`}
-          disabled={!value.trim()}
+          disabled={!value.trim() || disabled}
           onClick={onSubmit}
         >
           {submitLabel}
@@ -159,6 +166,7 @@ export function DiffCommentThread({
   onDiscussDraft?(body: string): void;
 }): ReactNode {
   const review = useContext(DiffReviewContext);
+  const choice = useContext(SelectionDiscussionModelContext);
   const [draft, setDraft] = useState("");
   const comments = annotation.commentIds
     .map((id) => review?.comments.find((comment) => comment.id === id))
@@ -189,7 +197,9 @@ export function DiffCommentThread({
       ))}
       {annotation.draft ? (
         <div role="dialog" aria-label="Comment on selected code">
+          {onDiscussDraft && <DiscussionModelNotice />}
           <CommentEditor
+            disabled={!!onDiscussDraft && !!choice?.error}
             label="New diff comment"
             value={draft}
             onChange={setDraft}

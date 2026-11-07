@@ -1,3 +1,7 @@
+import {
+  readInlineDiscussionPreference,
+  type InlineDiscussionPreference,
+} from "../utils/inlineDiscussionModel";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
@@ -27,6 +31,7 @@ export type ThinkingIndicatorStyle = "classic" | "futuristic";
 export type DensityPreference = "auto" | "comfortable" | "default" | "compact";
 
 interface UIState {
+  inlineDiscussionPreference: InlineDiscussionPreference;
   /** Current theme preference */
   theme: Theme;
   /** Current assistant thinking indicator style */
@@ -50,6 +55,9 @@ interface UIState {
 }
 
 interface UIActions {
+  setInlineDiscussionPreference: (
+    preference: InlineDiscussionPreference
+  ) => void;
   /** Set the theme preference */
   setTheme: (theme: Theme) => void;
   /** Set the assistant thinking indicator style */
@@ -79,6 +87,9 @@ export type UIStore = UIState & UIActions;
 export const useUIStore = create<UIStore>()(
   persist(
     (set) => ({
+      inlineDiscussionPreference: { mode: "follow" },
+      setInlineDiscussionPreference: (inlineDiscussionPreference) =>
+        set({ inlineDiscussionPreference }),
       theme: "system",
       setTheme: (theme) => set({ theme }),
       thinkingIndicatorStyle: "classic",
@@ -117,6 +128,7 @@ export const useUIStore = create<UIStore>()(
       name: "vertebrae-ui-storage",
       // Only persist UI preferences, not transient state
       partialize: (state) => ({
+        inlineDiscussionPreference: state.inlineDiscussionPreference,
         theme: state.theme,
         thinkingIndicatorStyle: state.thinkingIndicatorStyle,
         density: state.density,
@@ -131,9 +143,14 @@ export const useUIStore = create<UIStore>()(
       // Fill in diff options added after the preferences were saved.
       merge: (persisted, current) => {
         const stored = (persisted ?? {}) as Partial<UIState>;
+        const inlineDiscussionPreference = readInlineDiscussionPreference(
+          stored.inlineDiscussionPreference
+        );
+
         return {
           ...current,
           ...stored,
+          inlineDiscussionPreference,
           diffPreferences: resolveDiffPreferences(stored.diffPreferences),
         };
       },

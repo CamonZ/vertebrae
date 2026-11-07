@@ -23,3 +23,13 @@ Feature: Discuss code beside the main conversation
     Then attachment alone sends no model request
     When I explicitly send the main draft
     Then the main request contains the selected code and question
+
+  Scenario: Dedicated inline model survives reload and leaves the main conversation unchanged
+    Given inline discussions use a dedicated model selected in Settings
+    And a Changes selection fixture is open beside a drafted main conversation
+    When I select fixture code with the real diff renderer
+    And I ask about that selection and follow up
+    Then both discussion requests contain the original selected code
+    And inline requests use the dedicated model disclosed before submission
+    When I explicitly send the main draft
+    Then the main conversation still uses its original model
