@@ -314,7 +314,55 @@ it.each(["touch", "scrollbar"])(
   }
 );
 
+it.each(["touch", "scrollbar"])(
+  "preserves a reading position when the final %s scroll arrives after release",
+  (input) => {
+    const b = browser();
+    b.settle();
+
+    if (input === "touch") fireEvent.touchStart(b.container);
+    else fireEvent.pointerDown(b.container);
+
+    b.container.scrollTop = 500; // Queue the user scroll until after release.
+    fireEvent.touchEnd(b.container);
+    fireEvent.pointerUp(b.container);
+    b.scroll();
+    b.geometry(1400);
+    b.settle();
+
+    expect(b.top).toBe(500);
+
+    b.unmount();
+  }
+);
+
 // Minimized Hegel counterexamples, retained as named regressions.
+it("follows after a near-bottom touch, viewport clamping and delayed scroll delivery", () => {
+  const b = browser(0, 100);
+  b.settle();
+
+  b.geometry(101);
+  b.update();
+  b.tick();
+  b.user(b.max() - 0.5, "touch");
+  expect(b.top).toBe(0.5);
+
+  b.geometry(101, 101); // Clamp to zero without delivering the scroll event.
+  expect(b.top).toBe(0);
+  b.geometry(126, 101);
+  b.update();
+  b.scroll(); // Deliver the clamped scroll after growth moved the bottom to 25.
+
+  b.hidden(false);
+  b.visibility(true);
+  b.settle();
+
+  expect(b.max()).toBe(25);
+  expect(b.top).toBe(25);
+
+  b.unmount();
+});
+
 it("ignores coalesced viewport clamping followed by streamed growth", () => {
   const b = browser();
   b.settle();

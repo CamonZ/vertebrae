@@ -705,6 +705,19 @@ export function ChatMessages({
       if (!activeScrollGestureRef.current) return;
 
       activeScrollGestureRef.current = false;
+
+      const container = messagesContainerRef.current;
+      if (
+        container &&
+        container.scrollHeight - container.clientHeight - container.scrollTop <=
+          BOTTOM_SCROLL_TOLERANCE_PX
+      ) {
+        // The gesture finished near the bottom. Its intent must not outlive it
+        // and turn a later viewport clamp into an upward user scroll. Read the
+        // current position because the final gesture scroll may still be queued.
+        userScrollRef.current = false;
+      }
+
       scheduleBottomFollow();
     };
 
