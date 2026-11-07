@@ -5,7 +5,9 @@ use crate::GuiWorld;
 use cucumber::{given, then, when};
 use fantoccini::{
     Locator,
-    actions::{InputSource, KeyAction, KeyActions, MouseActions, PointerAction},
+    actions::{
+        InputSource, KeyAction, KeyActions, MouseActions, PointerAction, WheelAction, WheelActions,
+    },
 };
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -209,18 +211,7 @@ async fn fixture(world: &mut GuiWorld) {
         .await
         .unwrap();
 
-    let capture_transcript_script = r#"
-            const transcript = document.querySelector("[data-testid=chat-messages-scroll]");
-
-            transcript.scrollTop = 20;
-            window.__selectionTranscript = transcript;
-            window.__selectionScroll = transcript.scrollTop;
-        "#;
-
-    client
-        .execute(capture_transcript_script, vec![])
-        .await
-        .unwrap();
+    scroll_into_earlier_history(&client).await;
 
     // The initial conversation is fixture setup. Observe only subsequent turns.
     for filename in ["stdin_turns.jsonl", "invocations.jsonl"] {
@@ -252,6 +243,127 @@ async fn fixture(world: &mut GuiWorld) {
         Duration::from_secs(15),
     )
     .await;
+}
+
+// Establish a real paused reading position before opening Changes. A bare
+// scrollTop assignment does not express user intent to the chat's follow policy.
+async fn scroll_into_earlier_history(client: &fantoccini::Client) {
+    let ready_script = r#"
+        const transcript = document.querySelector("[data-testid=chat-messages-scroll]");
+        const panel = transcript.closest(".hc-panel");
+        const animations = panel.getAnimations({ subtree: true });
+        const moving = animations.some(animation => {
+          const timing = animation.effect?.getComputedTiming();
+          const finite = Number.isFinite(timing?.endTime);
+
+          return animation.playState === "running" && finite;
+        });
+        const gap = transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop;
+
+        if (moving || transcript.scrollTop <= 100 || gap > 1) return false;
+
+        // Floating panels can extend beyond the viewport. Target only the
+        // visible intersection, and verify that the transcript receives input.
+        const rect = transcript.getBoundingClientRect();
+        const left = Math.max(0, rect.left) + 8;
+        const right = Math.min(window.innerWidth, rect.right) - 8;
+        const top = Math.max(0, rect.top) + 8;
+        const bottom = Math.min(window.innerHeight, rect.bottom) - 8;
+
+        if (right <= left || bottom <= top) return false;
+
+        const x = Math.floor((left + right) / 2);
+        const y = Math.floor((top + bottom) / 2);
+        const hit = document.elementFromPoint(x, y);
+
+        if (!hit || !transcript.contains(hit)) return false;
+
+        const delta = Math.floor(20 - transcript.scrollTop);
+        window.__selectionScrollTarget = { x, y, delta };
+        return true;
+    "#;
+
+    gui_acceptance::wait_for_js(
+        client,
+        "initial bottom-follow and visible transcript wheel target",
+        ready_script,
+        vec![],
+        Duration::from_secs(10),
+    )
+    .await;
+
+    let target_script = "return window.__selectionScrollTarget;";
+    let target = client.execute(target_script, vec![]).await.unwrap();
+    let x = target["x"]
+        .as_i64()
+        .expect("visible transcript x coordinate");
+    let y = target["y"]
+        .as_i64()
+        .expect("visible transcript y coordinate");
+    let delta_y = target["delta"].as_i64().expect("upward transcript delta");
+
+    let pointer_move = PointerAction::MoveTo {
+        duration: None,
+        x,
+        y,
+    };
+    let pointer = MouseActions::new("conversation-scroll-pointer".to_owned());
+    let pointer_actions = pointer.then(pointer_move);
+
+    client.perform_actions(pointer_actions).await.unwrap();
+
+    let scroll = WheelAction::Scroll {
+        duration: None,
+        x,
+        y,
+        delta_x: 0,
+        delta_y,
+    };
+    let wheel = WheelActions::new("read-earlier-conversation".to_owned());
+    let wheel_actions = wheel.then(scroll);
+
+    client.perform_actions(wheel_actions).await.unwrap();
+    client.release_actions().await.unwrap();
+
+    let capture_script = r#"
+        const done = arguments[arguments.length - 1];
+        const transcript = document.querySelector("[data-testid=chat-messages-scroll]");
+        const deadline = performance.now() + 10000;
+        let previous = null;
+        let stableFrames = 0;
+
+        function sample() {
+          const top = transcript.scrollTop;
+          const height = transcript.scrollHeight;
+          const viewport = transcript.clientHeight;
+          const gap = height - viewport - top;
+          const readingEarlier = top >= 0 && top < 100 && gap > 24;
+          const unchanged = previous && previous.top === top &&
+            previous.height === height && previous.viewport === viewport;
+
+          stableFrames = readingEarlier && unchanged ? stableFrames + 1 : 0;
+          previous = { top, height, viewport };
+
+          if (stableFrames >= 3) {
+            window.__selectionTranscript = transcript;
+            window.__selectionScroll = top;
+            done({ settled: true, ...previous });
+          } else if (performance.now() >= deadline) {
+            done({ settled: false, ...previous });
+          } else {
+            requestAnimationFrame(sample);
+          }
+        }
+
+        requestAnimationFrame(sample);
+    "#;
+    let captured = client.execute_async(capture_script, vec![]).await.unwrap();
+
+    assert_eq!(
+        captured["settled"],
+        json!(true),
+        "native upward scroll should settle in earlier history: {captured}"
+    );
 }
 
 async fn gesture(world: &mut GuiWorld, drag: bool, shift: bool) {

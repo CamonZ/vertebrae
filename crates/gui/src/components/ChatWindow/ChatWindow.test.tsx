@@ -279,6 +279,12 @@ describe("ChatWindow", () => {
       scrollHeight: { configurable: true, value: 1000 },
       clientHeight: { configurable: true, value: 500 },
     });
+
+    // Establish the bottom before deliberately scrolling into earlier history.
+    conversation.scrollTop = 500;
+    fireEvent.scroll(conversation);
+
+    fireEvent.wheel(conversation, { deltaY: -100 });
     conversation.scrollTop = 123;
     fireEvent.scroll(conversation);
 

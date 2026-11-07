@@ -773,6 +773,9 @@ describe("ChatMessages", () => {
       clientHeight: { configurable: true, value: 100 },
       scrollHeight: { configurable: true, value: 1_000 },
     });
+    act(() => vi.advanceTimersByTime(32));
+
+    fireEvent.wheel(container, { deltaY: -100 });
     container.scrollTop = 200;
     fireEvent.scroll(container);
 
