@@ -116,13 +116,6 @@ export function ChatEmptyState({
   );
 }
 
-function isNearBottom(element: HTMLElement): boolean {
-  return (
-    element.scrollHeight - element.scrollTop - element.clientHeight <=
-    BOTTOM_SCROLL_TOLERANCE_PX
-  );
-}
-
 type ChatRenderItem =
   | { kind: "thread"; key: string; thread: ThreadModel }
   | {
@@ -375,12 +368,16 @@ export function ChatMessages({
         !visibleRef.current ||
         document.hidden ||
         !keepAtBottomRef.current ||
+        activeScrollGestureRef.current ||
         prependAnchorRef.current
       )
         return;
 
       // The browser clamps this write. Do not force a full-transcript height read.
       container.scrollTop = BOTTOM_SCROLL_TARGET_PX;
+      lastScrollTopRef.current = container.scrollTop;
+
+      if (!activeScrollGestureRef.current) userScrollRef.current = false;
     }, 32);
   }, []);
 
@@ -393,6 +390,17 @@ export function ChatMessages({
   } | null>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
   const keepAtBottomRef = useRef(true);
+  const lastScrollTopRef = useRef<number | null>(null);
+  const userScrollRef = useRef(false);
+  const activeScrollGestureRef = useRef(false);
+
+  const beginUserScroll = useCallback(() => {
+    userScrollRef.current = true;
+
+    if (bottomFollowTimerRef.current !== null)
+      clearTimeout(bottomFollowTimerRef.current);
+    bottomFollowTimerRef.current = null;
+  }, []);
   const [projectRoots, setProjectRoots] = useState<readonly string[]>(
     projectPath ? [projectPath] : []
   );
@@ -497,20 +505,26 @@ export function ChatMessages({
     ) {
       return;
     }
-    prependAnchorRef.current = {
+    const anchor = {
       messages,
       scrollHeight: container.scrollHeight,
       scrollTop: container.scrollTop,
     };
+    prependAnchorRef.current = anchor;
     keepAtBottomRef.current = false;
+
     void onLoadOlderMessages().then((applied) => {
+      if (prependAnchorRef.current !== anchor) return;
+
       if (!applied) {
         prependAnchorRef.current = null;
         return;
       }
+
       requestAnimationFrame(() => {
-        const anchor = prependAnchorRef.current;
-        if (anchor?.messages === latestMessagesRef.current) {
+        if (prependAnchorRef.current !== anchor) return;
+
+        if (anchor.messages === latestMessagesRef.current) {
           prependAnchorRef.current = null;
         }
       });
@@ -593,11 +607,18 @@ export function ChatMessages({
 
   useLayoutEffect(() => {
     keepAtBottomRef.current = true;
+    userScrollRef.current = false;
+    activeScrollGestureRef.current = false;
+    lastScrollTopRef.current = messagesContainerRef.current?.scrollTop ?? null;
     prependAnchorRef.current = null;
 
     if (bottomFollowTimerRef.current !== null)
       clearTimeout(bottomFollowTimerRef.current);
     bottomFollowTimerRef.current = null;
+
+    return () => {
+      prependAnchorRef.current = null;
+    };
   }, [sessionId]);
 
   // Keep streaming updates inside this scroll container. Calling
@@ -620,6 +641,7 @@ export function ChatMessages({
       }
       container.scrollTop =
         anchor.scrollTop + (container.scrollHeight - anchor.scrollHeight);
+      lastScrollTopRef.current = container.scrollTop;
       prependAnchorRef.current = null;
       return;
     }
@@ -638,8 +660,12 @@ export function ChatMessages({
     if (!isVisible) return;
 
     const content = contentRef.current;
+    const container = messagesContainerRef.current;
+    let disposed = false;
 
     const resized = () => {
+      if (disposed) return;
+
       const anchor = prependAnchorRef.current;
       const container = messagesContainerRef.current;
 
@@ -657,17 +683,39 @@ export function ChatMessages({
         : null;
 
     if (content) observer?.observe(content);
+    if (container) observer?.observe(container);
+
     document.addEventListener("visibilitychange", scheduleBottomFollow);
     scheduleBottomFollow();
 
     return () => {
+      disposed = true;
+
       observer?.disconnect();
       document.removeEventListener("visibilitychange", scheduleBottomFollow);
+
       if (bottomFollowTimerRef.current !== null)
         clearTimeout(bottomFollowTimerRef.current);
       bottomFollowTimerRef.current = null;
     };
   }, [sessionId, isVisible, scheduleBottomFollow]);
+
+  useEffect(() => {
+    const endGesture = () => {
+      if (!activeScrollGestureRef.current) return;
+
+      activeScrollGestureRef.current = false;
+      scheduleBottomFollow();
+    };
+
+    const events = ["pointerup", "pointercancel", "touchend", "touchcancel"];
+    for (const event of events) document.addEventListener(event, endGesture);
+
+    return () => {
+      for (const event of events)
+        document.removeEventListener(event, endGesture);
+    };
+  }, [sessionId, scheduleBottomFollow]);
 
   useEffect(() => {
     const handleScrollToSpawn = (event: Event) => {
@@ -678,9 +726,14 @@ export function ChatMessages({
         }>
       ).detail;
       if (detail?.sessionId !== sessionId || !detail.spawnId) return;
-      messageRefs.current
-        .get(detail.spawnId)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      const target = messageRefs.current.get(detail.spawnId);
+      if (!target) return;
+
+      beginUserScroll();
+      keepAtBottomRef.current = false;
+
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
     };
     window.addEventListener(
       LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT,
@@ -691,7 +744,7 @@ export function ChatMessages({
         LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT,
         handleScrollToSpawn
       );
-  }, [sessionId]);
+  }, [sessionId, beginUserScroll]);
 
   return (
     <VtbEntityCopyProvider>
@@ -703,12 +756,78 @@ export function ChatMessages({
           ref={messagesContainerRef}
           className="min-h-0 flex-1 overflow-y-auto p-4"
           data-testid="chat-messages-scroll"
+          onWheel={(event) => {
+            if (event.deltaY < 0) beginUserScroll();
+          }}
+          onTouchStart={() => {
+            activeScrollGestureRef.current = true;
+
+            beginUserScroll();
+          }}
+          onPointerDown={(event) => {
+            // Scrollbar drags target the scroller; clicks in messages do not.
+            if (event.target === event.currentTarget) {
+              activeScrollGestureRef.current = true;
+
+              beginUserScroll();
+            }
+          }}
+          onKeyDown={(event) => {
+            const target = event.target as HTMLElement;
+            const editableTarget = target.closest(
+              "input, textarea, [contenteditable=true]"
+            );
+
+            if (editableTarget) return;
+
+            const upwardKeys = ["ArrowUp", "PageUp", "Home"];
+            const isUpwardKey = upwardKeys.includes(event.key);
+            const isReversePage = event.key === " " && event.shiftKey;
+
+            if (isUpwardKey || isReversePage) beginUserScroll();
+          }}
           onMouseUp={updateTextSelection}
           onKeyUp={updateTextSelection}
           onScroll={() => {
             const container = messagesContainerRef.current;
             if (container) {
-              keepAtBottomRef.current = isNearBottom(container);
+              const scrollRange =
+                container.scrollHeight - container.clientHeight;
+              const max = Math.max(0, scrollRange);
+
+              // Normalize elastic overscroll and compare against the current
+              // range: shrink/clamping and bottom rebound are not user scrolls.
+              const boundedTop = Math.min(container.scrollTop, max);
+              const top = Math.max(0, boundedTop);
+              const previous = lastScrollTopRef.current;
+              const boundedPrevious =
+                previous === null ? null : Math.min(previous, max);
+              const nearBottom = max - top <= BOTTOM_SCROLL_TOLERANCE_PX;
+
+              if (
+                nearBottom &&
+                (keepAtBottomRef.current ||
+                  boundedPrevious === null ||
+                  top > boundedPrevious)
+              ) {
+                keepAtBottomRef.current = true;
+                if (!activeScrollGestureRef.current)
+                  userScrollRef.current = false;
+                scheduleBottomFollow();
+              } else if (
+                !nearBottom &&
+                userScrollRef.current &&
+                (boundedPrevious === null || top < boundedPrevious)
+              ) {
+                keepAtBottomRef.current = false;
+
+                if (bottomFollowTimerRef.current !== null)
+                  clearTimeout(bottomFollowTimerRef.current);
+                bottomFollowTimerRef.current = null;
+              }
+
+              lastScrollTopRef.current = top;
+
               const anchor = prependAnchorRef.current;
               if (anchor) {
                 anchor.scrollHeight = container.scrollHeight;
