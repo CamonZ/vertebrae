@@ -1,3 +1,4 @@
+import { commands } from "../../bindings";
 import {
   useCallback,
   useEffect,
@@ -291,6 +292,11 @@ export function ChatWindowManager({
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null
   );
+  const [hasBrowsedProject, setHasBrowsedProject] = useState(false);
+  const selectHistoryProject = useCallback((projectId: string) => {
+    setHasBrowsedProject(true);
+    setSelectedProjectId(projectId);
+  }, []);
   const selectedProject = selectedLocalChatProject(
     historyProjectGroups,
     selectedProjectId,
@@ -343,11 +349,11 @@ export function ChatWindowManager({
       const next =
         (Math.max(0, index) + offset + historyProjectGroups.length) %
         historyProjectGroups.length;
-      setSelectedProjectId(historyProjectGroups[next].id);
+      selectHistoryProject(historyProjectGroups[next].id);
 
       return true;
     },
-    [historyProjectGroups, isMaximized, selectedProject]
+    [historyProjectGroups, isMaximized, selectedProject, selectHistoryProject]
   );
 
   const {
@@ -640,10 +646,54 @@ export function ChatWindowManager({
     ]
   );
 
-  const startFreshActiveSessionForKeyboard = useCallback(() => {
+  const startFreshActiveSessionForKeyboard = useCallback(async () => {
     const paneId = activePaneId ?? normalizedPaneLayout.panes[0]?.id;
-    return paneId ? startFreshActiveSession(paneId) : Promise.resolve(false);
-  }, [activePaneId, normalizedPaneLayout.panes, startFreshActiveSession]);
+    if (!paneId) return false;
+
+    // Capture the browsed project and pane before validating its directory.
+    const project =
+      isMaximized && hasBrowsedProject && selectedProjectId
+        ? historyProjectGroups.find((group) => group.id === selectedProjectId)
+        : null;
+    if (!project) return startFreshActiveSession(paneId);
+
+    const unavailable = `Cannot start a chat in ${project.label}: project directory unavailable. Restore the directory or update the saved project path.`;
+    try {
+      const projectPath = normalizeProjectPath(project.projectPath);
+      if (!projectPath) throw new Error(unavailable);
+      const roots = await commands.getLocalFileRoots(projectPath);
+      if (roots.status !== "ok") throw new Error(unavailable);
+      if (
+        !useChatStore
+          .getState()
+          .paneLayout.panes.some((pane) => pane.id === paneId)
+      ) {
+        return false;
+      }
+      const sessionId = openProjectSession("New Chat", projectPath);
+      setDeleteError(null);
+      return bindPaneToSession(paneId, sessionId);
+    } catch {
+      if (
+        useChatStore
+          .getState()
+          .paneLayout.panes.some((pane) => pane.id === paneId)
+      ) {
+        setDeleteError(unavailable);
+      }
+      return false;
+    }
+  }, [
+    activePaneId,
+    normalizedPaneLayout.panes,
+    isMaximized,
+    selectedProjectId,
+    hasBrowsedProject,
+    historyProjectGroups,
+    startFreshActiveSession,
+    openProjectSession,
+    bindPaneToSession,
+  ]);
 
   const changesToggles = useRef(new Map<string, () => void>());
   const registerChangesToggle = useCallback(
@@ -763,7 +813,7 @@ export function ChatWindowManager({
               searchQuery={sessionQuery}
               onSearchQueryChange={setSessionQuery}
               selectedProjectId={selectedProject?.id ?? null}
-              onSelectProject={setSelectedProjectId}
+              onSelectProject={selectHistoryProject}
               revealSession={revealSession}
               sessionGroups={historyProjectGroups}
               excludedProviderThreadIds={childProviderThreadIds}

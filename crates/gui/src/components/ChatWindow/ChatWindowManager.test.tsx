@@ -216,6 +216,10 @@ describe("ChatWindowManager", () => {
       status: "ok",
       data: "/test/project",
     });
+    vi.mocked(commands.getLocalFileRoots).mockResolvedValue({
+      status: "ok",
+      data: ["/test/project"],
+    });
     vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
       status: "ok",
       data: "/test/project",
@@ -2755,6 +2759,189 @@ describe("ChatWindowManager", () => {
       label: "New Chat",
       projectPath: "/test/project",
     });
+  });
+
+  function freshChatShortcut() {
+    fireEvent.keyDown(window, {
+      key: "Dead",
+      code: "KeyN",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+  }
+
+  async function browseBeta() {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    await user.click(
+      await screen.findByRole("button", { name: "old-project" })
+    );
+    return user;
+  }
+
+  it.each([
+    [false, "history"],
+    [true, "history"],
+    [false, "empty-project"],
+    [true, "empty-project"],
+    [false, "reusable"],
+    [true, "reusable"],
+  ])(
+    "targets the browsed project (collapsed=%s, Beta=%s) and preserves split history",
+    async (collapsed, betaState) => {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 1200,
+      });
+      const alpha = useChatStore
+        .getState()
+        .openSession("Alpha", "/test/project");
+      const active = useChatStore
+        .getState()
+        .startFreshSessionInNewPane("Alpha second", "/test/project");
+      if (betaState !== "empty-project") {
+        createPersistedHistorySession(
+          "beta",
+          "Beta conversation",
+          "/old/project",
+          "2026-01-01T00:00:00Z",
+          betaState === "reusable" ? { messages: [], title: null } : {}
+        );
+      }
+      render(<ChatWindowManager />);
+      const user = await browseBeta();
+      if (collapsed)
+        await user.click(screen.getByRole("button", { name: "Projects" }));
+      const targetPane = useChatStore.getState().paneLayout.activePaneId;
+      freshChatShortcut();
+      await waitFor(() =>
+        expect(useChatStore.getState().activeSessionId).not.toBe(active)
+      );
+      const state = useChatStore.getState();
+      const fresh = state.activeSessionId!;
+      expect(state.sessions[fresh].projectPath).toBe("/old/project");
+      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+        alpha,
+        fresh,
+      ]);
+      expect(state.paneLayout.activePaneId).toBe(targetPane);
+      expect(state.sessions[active]).toBeDefined();
+      expect(state.sessions[alpha]).toBeDefined();
+      expect(commands.getLocalFileRoots).toHaveBeenCalledWith("/old/project");
+      if (betaState === "reusable") expect(fresh).toBe("beta");
+    }
+  );
+
+  it.each(["error", "throw"])(
+    "refuses an unavailable selected directory (%s) without creating a chat elsewhere",
+    async (failure) => {
+      const alpha = useChatStore
+        .getState()
+        .openSession("Alpha", "/test/project");
+      render(<ChatWindowManager />);
+      await browseBeta();
+      const before = Object.keys(useChatStore.getState().sessions);
+      if (failure === "error")
+        vi.mocked(commands.getLocalFileRoots).mockResolvedValue({
+          status: "error",
+          error: { message: "Missing directory" },
+        });
+      if (failure === "throw")
+        vi.mocked(commands.getLocalFileRoots).mockRejectedValue(
+          new Error("Missing directory")
+        );
+      freshChatShortcut();
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Restore the directory or update the saved project path"
+      );
+      expect(Object.keys(useChatStore.getState().sessions)).toEqual(before);
+      expect(useChatStore.getState().activeSessionId).toBe(alpha);
+    }
+  );
+
+  it("reports a selected project with no known path instead of falling back", async () => {
+    const user = userEvent.setup();
+    const alpha = useChatStore.getState().openSession("Alpha", "/test/project");
+    createPersistedHistorySession(
+      "unknown",
+      "Unmapped chat",
+      null,
+      "2026-01-01T00:00:00Z"
+    );
+    render(<ChatWindowManager />);
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Unknown project" })
+    );
+    const before = Object.keys(useChatStore.getState().sessions);
+    freshChatShortcut();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "project directory unavailable"
+    );
+    expect(Object.keys(useChatStore.getState().sessions)).toEqual(before);
+    expect(useChatStore.getState().activeSessionId).toBe(alpha);
+  });
+
+  it("keeps the captured project when browsing changes during directory validation", async () => {
+    useChatStore.getState().openSession("Alpha", "/test/project");
+    render(<ChatWindowManager />);
+    const user = await browseBeta();
+    let resolve!: (
+      result: Awaited<ReturnType<typeof commands.getLocalFileRoots>>
+    ) => void;
+    vi.mocked(commands.getLocalFileRoots).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    freshChatShortcut();
+    await user.click(screen.getByRole("button", { name: "new-project" }));
+    await act(async () => {
+      resolve({ status: "ok", data: ["/old/project"] });
+    });
+    const state = useChatStore.getState();
+    expect(state.sessions[state.activeSessionId!].projectPath).toBe(
+      "/old/project"
+    );
+    expect(screen.getByRole("button", { name: "new-project" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  });
+
+  it("does not create a chat or rebind a removed pane after directory validation", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const alpha = useChatStore.getState().openSession("Alpha", "/test/project");
+    useChatStore
+      .getState()
+      .startFreshSessionInNewPane("Alpha second", "/test/project");
+    render(<ChatWindowManager />);
+    await browseBeta();
+    const before = Object.keys(useChatStore.getState().sessions);
+    const paneId = useChatStore.getState().paneLayout.activePaneId!;
+    let resolve!: (
+      result: Awaited<ReturnType<typeof commands.getLocalFileRoots>>
+    ) => void;
+    vi.mocked(commands.getLocalFileRoots).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    freshChatShortcut();
+    act(() => useChatStore.getState().closePane(paneId));
+    await act(async () => {
+      resolve({ status: "ok", data: ["/old/project"] });
+    });
+    expect(Object.keys(useChatStore.getState().sessions)).toEqual(before);
+    expect(
+      useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
+    ).toEqual([alpha]);
   });
 
   it("uses shifted session shortcuts against the active split pane", async () => {

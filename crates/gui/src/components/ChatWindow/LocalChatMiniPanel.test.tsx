@@ -169,6 +169,48 @@ function DeletingPanel() {
   );
 }
 
+describe("Projects disclosure", () => {
+  it("preserves selection, hides project controls from navigation, and toggles by pointer and keyboard", async () => {
+    const user = userEvent.setup();
+    render(
+      <ControlledPanel
+        sessionGroups={[
+          makeGroup("alpha", "Alpha", [makeSession("alpha-chat")]),
+          makeGroup("beta", "Beta", [makeSession("beta-chat")]),
+        ]}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: "Beta" }));
+    const toggle = screen.getByRole("button", {
+      name: "Projects",
+    });
+    const list = screen.getByTestId("local-chat-project-scroll-region");
+    expect(toggle).toHaveAttribute("aria-controls", list.id);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent("Beta");
+    expect(toggle).toHaveAccessibleDescription("Beta");
+    expect(list).not.toBeVisible();
+    expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull();
+    await user.tab();
+    expect(
+      screen.getByRole("searchbox", { name: "Search local chats" })
+    ).toHaveFocus();
+    await user.type(screen.getByRole("searchbox"), "beta");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    toggle.focus();
+    await user.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Beta" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    await user.keyboard(" ");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+});
+
 describe("LocalChatMiniPanel search", () => {
   it("renders one project-scoped plus action per group and dispatches group metadata", async () => {
     const user = userEvent.setup();

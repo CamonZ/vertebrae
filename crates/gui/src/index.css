@@ -3038,6 +3038,31 @@ html.light ::selection {
 .hc-panel .hc-mini-history-sessions {
   flex: 1 1 68%;
 }
+.hc-panel .hc-mini-history-projects[data-collapsed] {
+  flex: 0 0 auto;
+}
+.hc-panel .hc-mini-history-projects-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.hc-panel .hc-mini-history-projects-toggle .hc-mini-history-project-label {
+  margin-left: auto;
+  text-transform: none;
+}
+.hc-panel .hc-mini-history-projects-toggle:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+.hc-panel .hc-mini-history-list[hidden] {
+  display: none;
+}
 .hc-panel .hc-mini-history-group-title[data-selected] {
   background: var(--bg-4);
   color: var(--fg);
