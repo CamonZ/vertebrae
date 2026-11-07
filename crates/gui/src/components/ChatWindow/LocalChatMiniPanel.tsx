@@ -1,4 +1,12 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { LocalChatHarnessKind } from "../../bindings";
 import type { ThinkingIndicatorStyle } from "../../stores/uiStore";
@@ -73,11 +81,13 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   onStartProjectChat,
   onDelete,
 }: LocalChatMiniPanelProps) {
+  const [projectsExpanded, setProjectsExpanded] = useState(true);
+  const projectListId = useId();
   const selectedProjectButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     selectedProjectButtonRef.current?.scrollIntoView?.({ block: "nearest" });
-  }, [selectedProjectId]);
+  }, [selectedProjectId, projectsExpanded]);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const selectedProject = sessionGroups.find(
@@ -225,7 +235,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 
       if (
         target.closest(
-          "[data-mini-delete], [data-mini-history-toggle], [data-mini-project-chat], [data-mini-project-select], .hc-mini-history-agent, .conversation-associations"
+          "[data-mini-projects-toggle], [data-mini-delete], [data-mini-history-toggle], [data-mini-project-chat], [data-mini-project-select], .hc-mini-history-agent, .conversation-associations"
         )
       ) {
         return;
@@ -320,11 +330,44 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
       tabIndex={-1}
       onKeyDown={handleHistoryKeyDown}
     >
-      <section className="hc-mini-history-projects" aria-label="Chat projects">
-        <h2 className="hc-mini-history-head">Projects</h2>
+      <section
+        className="hc-mini-history-projects"
+        data-collapsed={!projectsExpanded || undefined}
+        aria-label="Chat projects"
+      >
+        <h2 className="hc-mini-history-head">
+          <button
+            type="button"
+            className="hc-mini-history-projects-toggle"
+            data-mini-projects-toggle
+            aria-label="Projects"
+            aria-expanded={projectsExpanded}
+            aria-controls={projectListId}
+            aria-describedby={
+              !projectsExpanded && selectedProject
+                ? `${projectListId}-selection`
+                : undefined
+            }
+            onClick={() => setProjectsExpanded((expanded) => !expanded)}
+          >
+            <span aria-hidden="true">{projectsExpanded ? "▾" : "▸"}</span>
+            <span>Projects</span>
+            {!projectsExpanded && selectedProject && (
+              <span
+                id={`${projectListId}-selection`}
+                className="hc-mini-history-project-label"
+                title={selectedProject.label}
+              >
+                {selectedProject.label}
+              </span>
+            )}
+          </button>
+        </h2>
 
         <div
           className="hc-mini-history-list"
+          id={projectListId}
+          hidden={!projectsExpanded}
           data-testid="local-chat-project-scroll-region"
         >
           {sessionGroups.map((group) => {
