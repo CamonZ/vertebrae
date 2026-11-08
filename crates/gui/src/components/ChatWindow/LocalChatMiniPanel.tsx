@@ -8,16 +8,19 @@ import {
   useState,
 } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 import type { LocalChatHarnessKind } from "../../bindings";
 import type { ThinkingIndicatorStyle } from "../../stores/uiStore";
 import {
   filterLocalChatSessionGroups,
-  groupLocalChatSessionsByTicket,
+  groupLocalChatSessionsByHierarchy,
+  flattenLocalChatTicketGroups,
+  type LocalChatTicketGroup,
   localChatSessionDisplayTitle,
   normalizeLocalChatSessionQuery,
   type LocalChatSessionGroup,
 } from "../../utils/localChatSessionGroups";
-import { useLocalChatCompletedSessions } from "../../hooks/useLocalChatCompletedSessions";
+import { useLocalChatSessionMetadata } from "../../hooks/useLocalChatCompletedSessions";
 import { formatRelative } from "../../utils/formatRelative";
 import { harnessDisplayName } from "./chatHelpers";
 import { Toggle } from "../Toggle";
@@ -99,7 +102,8 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   // Sidebar-only, mount-scoped preference. Filtering never closes a pane or
   // stops runtime work. An explicit reveal opts back into completed history.
   const [showCompleted, setShowCompleted] = useState(false);
-  const completedSessionIds = useLocalChatCompletedSessions(selectedProject);
+  const { tasks, completedSessionIds } =
+    useLocalChatSessionMetadata(selectedProject);
   const revealPreference = useRef(revealSession);
 
   useEffect(() => {
@@ -133,19 +137,18 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     matchingSessionItems.length - sessionItems.length;
 
   const ticketGroups = useMemo(
-    () => groupLocalChatSessionsByTicket(sessionItems),
-    [sessionItems]
+    () => groupLocalChatSessionsByHierarchy(sessionItems, tasks),
+    [sessionItems, tasks]
   );
 
-  const groupedSessionIds = useMemo(
-    () =>
-      new Set(
-        ticketGroups
-          .filter((group) => group.ticketId)
-          .flatMap((group) => group.sessions.map((session) => session.id))
-      ),
-    [ticketGroups]
-  );
+  const groupedSessionIds = useMemo(() => {
+    const flattenedGroups = flattenLocalChatTicketGroups(ticketGroups);
+    const entityGroups = flattenedGroups.filter((group) => group.ticketId);
+    const groupedSessions = entityGroups.flatMap((group) => group.sessions);
+    const sessionIds = groupedSessions.map((session) => session.id);
+
+    return new Set(sessionIds);
+  }, [ticketGroups]);
 
   // Accordion preferences live only for this mounted sidebar, keyed by project + ticket.
   const [expandedTickets, setExpandedTickets] = useState<Set<string>>(
@@ -183,27 +186,51 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 
   // A previous reveal must not reopen a group when the sidebar mounts again.
   const handledReveal = useRef(revealSession);
+  const revealedGroupPath = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!revealSession || handledReveal.current === revealSession) return;
+    if (
+      !revealSession ||
+      (handledReveal.current === revealSession &&
+        revealedGroupPath.current === null)
+    )
+      return;
 
-    const group = ticketGroups.find((group) =>
-      group.sessions.some((session) => session.id === revealSession.sessionId)
-    );
+    const pathToSession = (
+      groups: LocalChatTicketGroup[]
+    ): LocalChatTicketGroup[] => {
+      for (const group of groups) {
+        if (
+          group.sessions.some(
+            (session) => session.id === revealSession.sessionId
+          )
+        )
+          return [group];
 
-    if (!group) return;
+        const children = pathToSession(group.children ?? []);
+
+        if (children.length) return [group, ...children];
+      }
+
+      return [];
+    };
+    const path = pathToSession(ticketGroups);
+
+    if (!path.length) return;
+
+    const pathIds = path.map((group) => group.id);
+    const signature = JSON.stringify(pathIds);
+    if (
+      handledReveal.current === revealSession &&
+      revealedGroupPath.current === signature
+    )
+      return;
 
     handledReveal.current = revealSession;
-    const key = ticketKey(group.id);
+    revealedGroupPath.current = signature;
+    const pathKeys = pathIds.map(ticketKey);
 
-    setExpandedTickets((current) => {
-      if (current.has(key)) return current;
-
-      const next = new Set(current);
-      next.add(key);
-
-      return next;
-    });
+    setExpandedTickets((current) => new Set([...current, ...pathKeys]));
   }, [revealSession, ticketGroups, ticketKey]);
 
   useEffect(() => {
@@ -271,13 +298,17 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
         return;
       }
 
-      const sessionItems = ticketGroups.flatMap((group) =>
-        !hasSearchQuery &&
-        group.ticketId &&
-        !expandedTickets.has(ticketKey(group.id))
-          ? []
-          : group.sessions
-      );
+      const visibleSessions = (
+        groups: LocalChatTicketGroup[]
+      ): LocalChatSessionSummary[] =>
+        groups.flatMap((group) =>
+          !hasSearchQuery &&
+          group.ticketId &&
+          !expandedTickets.has(ticketKey(group.id))
+            ? []
+            : [...visibleSessions(group.children ?? []), ...group.sessions]
+        );
+      const sessionItems = visibleSessions(ticketGroups);
 
       if (sessionItems.length === 0) return;
 
@@ -549,6 +580,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
             >
               <SessionGroupList
                 sessionGroups={ticketGroups}
+                getChildGroups={(group) => group.children ?? []}
                 activeSessionId={activeSessionId}
                 renderGroup={(group, rows) => {
                   if (!group.ticketId) {
@@ -568,6 +600,13 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 
                   const expanded =
                     hasSearchQuery || expandedTickets.has(ticketKey(group.id));
+                  const descendantGroups = flattenLocalChatTicketGroups([
+                    group,
+                  ]);
+                  const conversationCount = descendantGroups.reduce(
+                    (count, child) => count + child.sessions.length,
+                    0
+                  );
                   const rowsId = `local-chat-ticket-${encodeURIComponent(selectedProjectId ?? "")}-${encodeURIComponent(group.id)}`;
 
                   return (
@@ -616,7 +655,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                             className="hc-mini-history-ticket-count"
                             aria-hidden="true"
                           >
-                            {group.sessions.length}
+                            {conversationCount}
                           </span>
                         </button>
                       </h3>

@@ -8,6 +8,8 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { createMockTask } from "../../test/test-utils";
+import type { Task } from "../../bindings";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 import {
   selectedLocalChatProject,
@@ -22,11 +24,14 @@ import type { LocalChatSessionActivity } from "./LocalChatMiniPanel";
 import type { SpawnOutlineItem } from "./sessionListUtils";
 
 const { completionState } = vi.hoisted(() => ({
-  completionState: { ids: new Set<string>() },
+  completionState: { ids: new Set<string>(), tasks: new Map<string, Task>() },
 }));
 
 vi.mock("../../hooks/useLocalChatCompletedSessions", () => ({
-  useLocalChatCompletedSessions: () => completionState.ids,
+  useLocalChatSessionMetadata: () => ({
+    completedSessionIds: completionState.ids,
+    tasks: completionState.tasks,
+  }),
 }));
 
 function makeSession(
@@ -1483,4 +1488,277 @@ describe("completed conversation filtering", () => {
       completionState.ids = new Set();
     }
   });
+});
+
+describe("entity hierarchy browsing", () => {
+  const row = (id: string, entity: string) =>
+    makeSession(id, { association: { ticketId: entity, ticketTitle: entity } });
+
+  const hierarchy = () => {
+    const epic = createMockTask({ id: "epic", title: "Epic", level: "epic" });
+    const ticket = createMockTask({
+      id: "ticket",
+      title: "Ticket",
+      level: "ticket",
+      parent_id: "epic",
+    });
+    const task = createMockTask({
+      id: "task",
+      title: "Task",
+      level: "task",
+      parent_id: "ticket",
+    });
+    const sibling = createMockTask({
+      id: "sibling",
+      title: "Sibling",
+      level: "ticket",
+      parent_id: "epic",
+    });
+
+    return new Map([
+      ["epic", epic],
+      ["ticket", ticket],
+      ["task", task],
+      ["sibling", sibling],
+    ]);
+  };
+
+  it.each([false, true])(
+    "nests single children and siblings without parent conversations (siblings=%s)",
+    (siblings) => {
+      completionState.tasks = hierarchy();
+
+      const sessions = [row("child", "task")];
+      if (siblings) sessions.push(row("sibling-chat", "sibling"));
+
+      const group = makeGroup("current", "Project", sessions);
+
+      try {
+        render(<ControlledPanel sessionGroups={[group]} />);
+
+        const epicToggle = screen.getByRole("button", { name: "Epic" });
+
+        fireEvent.click(epicToggle);
+
+        const epic = screen.getByRole("region", { name: "Epic conversations" });
+        const epicQueries = within(epic);
+        const ticketToggle = epicQueries.getByRole("button", {
+          name: "Ticket",
+        });
+
+        fireEvent.click(ticketToggle);
+
+        const ticket = epicQueries.getByRole("region", {
+          name: "Ticket conversations",
+        });
+        const ticketQueries = within(ticket);
+        const taskToggle = ticketQueries.getByRole("button", { name: "Task" });
+
+        fireEvent.click(taskToggle);
+
+        const childChat = ticketQueries.getByRole("button", {
+          name: /Load local chat child/,
+        });
+
+        expect(childChat).toBeInTheDocument();
+
+        if (siblings) {
+          const siblingToggle = epicQueries.getByRole("button", {
+            name: "Sibling",
+          });
+
+          expect(siblingToggle).toBeInTheDocument();
+        }
+      } finally {
+        completionState.tasks = new Map();
+      }
+    }
+  );
+
+  it("orders nested child rows before direct parent rows, navigates that order, and reveals all ancestors", async () => {
+    completionState.tasks = hierarchy();
+
+    const onSelect = vi.fn();
+    const sessions = [
+      row("epic-chat", "epic"),
+      row("ticket-chat", "ticket"),
+      row("task-chat", "task"),
+    ];
+    const group = makeGroup("current", "Project", sessions);
+    const groups = [group];
+
+    try {
+      const view = render(
+        <ControlledPanel sessionGroups={groups} onSelect={onSelect} />
+      );
+
+      view.rerender(
+        <ControlledPanel
+          sessionGroups={groups}
+          onSelect={onSelect}
+          revealSession={{ sessionId: "task-chat", revision: 1 }}
+        />
+      );
+
+      const revealedChat = await screen.findByRole("button", {
+        name: /Load local chat task-chat/,
+      });
+      const rows = screen.getAllByRole("button", { name: /^Load local chat/ });
+      const titles = rows.map((node) => node.textContent);
+
+      expect(revealedChat).toBeInTheDocument();
+      expect(titles).toEqual(["task-chat", "ticket-chat", "epic-chat"]);
+
+      fireEvent.focus(rows[0]);
+      fireEvent.keyDown(rows[0], { key: "ArrowDown" });
+
+      expect(rows[1]).toHaveFocus();
+
+      const search = screen.getByRole("searchbox");
+
+      fireEvent.change(search, { target: { value: "task-chat" } });
+
+      const matchingChat = screen.getByRole("button", {
+        name: /Load local chat task-chat/,
+      });
+
+      expect(matchingChat).toBeInTheDocument();
+    } finally {
+      completionState.tasks = new Map();
+    }
+  });
+
+  it("retains completed parents around visible children and prunes empty branches on toggle", async () => {
+    completionState.tasks = hierarchy();
+    completionState.ids = new Set(["epic-chat", "ticket-chat", "sibling-chat"]);
+
+    const sessions = [
+      row("epic-chat", "epic"),
+      row("ticket-chat", "ticket"),
+      row("sibling-chat", "sibling"),
+      row("task-chat", "task"),
+      makeSession("general"),
+    ];
+    const group = makeGroup("current", "Project", sessions);
+
+    try {
+      render(<ControlledPanel sessionGroups={[group]} />);
+
+      const epicToggle = screen.getByRole("button", { name: "Epic" });
+
+      fireEvent.click(epicToggle);
+
+      const ticketToggle = screen.getByRole("button", { name: "Ticket" });
+
+      fireEvent.click(ticketToggle);
+
+      const taskToggle = screen.getByRole("button", { name: "Task" });
+
+      fireEvent.click(taskToggle);
+
+      const hiddenSibling = screen.queryByRole("button", { name: "Sibling" });
+      const visibleTask = screen.getByRole("button", {
+        name: /Load local chat task-chat/,
+      });
+
+      expect(hiddenSibling).not.toBeInTheDocument();
+      expect(visibleTask).toBeInTheDocument();
+
+      const completedToggle = screen.getByRole("switch", {
+        name: "Show completed",
+      });
+
+      await userEvent.click(completedToggle);
+
+      const siblingToggle = screen.getByRole("button", { name: "Sibling" });
+
+      fireEvent.click(siblingToggle);
+
+      const restoredRows = screen.getAllByRole("button", {
+        name: /^Load local chat/,
+      });
+      const restoredTitles = restoredRows.map((node) => node.textContent);
+
+      expect(restoredTitles).toEqual([
+        "task-chat",
+        "ticket-chat",
+        "sibling-chat",
+        "epic-chat",
+        "general",
+      ]);
+
+      await userEvent.click(completedToggle);
+
+      const removedSibling = screen.queryByRole("button", { name: "Sibling" });
+      const generalChat = screen.getByRole("button", {
+        name: /Load local chat general/,
+      });
+      const remainingTask = screen.getByRole("button", {
+        name: /Load local chat task-chat/,
+      });
+
+      expect(removedSibling).not.toBeInTheDocument();
+      expect(generalChat).toBeInTheDocument();
+      expect(remainingTask).toBeInTheDocument();
+    } finally {
+      completionState.tasks = new Map();
+      completionState.ids = new Set();
+    }
+  });
+});
+
+it("keeps a revealed conversation visible as parent metadata arrives, while allowing later collapse", async () => {
+  const target = makeSession("target", {
+    association: { ticketId: "task", ticketTitle: "Task" },
+  });
+  const group = makeGroup("current", "Project", [target]);
+  const groups = [group];
+  const view = render(<ControlledPanel sessionGroups={groups} />);
+  const revealSession = { sessionId: "target", revision: 1 };
+
+  view.rerender(
+    <ControlledPanel sessionGroups={groups} revealSession={revealSession} />
+  );
+
+  const initiallyRevealedChat = await screen.findByRole("button", {
+    name: /Load local chat target/,
+  });
+
+  expect(initiallyRevealedChat).toBeInTheDocument();
+
+  const task = createMockTask({
+    id: "task",
+    title: "Task",
+    parent_id: "parent",
+  });
+  const parent = createMockTask({
+    id: "parent",
+    title: "Parent",
+    level: "ticket",
+  });
+
+  completionState.tasks = new Map([
+    ["task", task],
+    ["parent", parent],
+  ]);
+
+  try {
+    view.rerender(
+      <ControlledPanel sessionGroups={groups} revealSession={revealSession} />
+    );
+
+    const revealedChat = await screen.findByRole("button", {
+      name: /Load local chat target/,
+    });
+    const parentToggle = screen.getByRole("button", { name: "Parent" });
+
+    expect(revealedChat).toBeInTheDocument();
+    expect(parentToggle).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(parentToggle);
+
+    expect(parentToggle).toHaveAttribute("aria-expanded", "false");
+  } finally {
+    completionState.tasks = new Map();
+  }
 });

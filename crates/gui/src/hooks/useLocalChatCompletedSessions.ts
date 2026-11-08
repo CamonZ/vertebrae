@@ -88,77 +88,123 @@ function useCachedTasks(generation: number, enabled: boolean) {
  * refreshes other saved projects, whose channels are not subscribed. Missing
  * metadata stays visible.
  */
-export function useLocalChatCompletedSessions(group?: LocalChatSessionGroup) {
+export function useLocalChatSessionMetadata(group?: LocalChatSessionGroup) {
   const generation = useProjectScopeGeneration();
   const sessions = group?.allSessions ?? group?.sessions ?? [];
 
-  const taskIds = [
-    ...new Set((group?.projectId ? sessions : []).map(localChatSessionTaskId)),
-  ].filter((id): id is string => id !== null);
+  const associatedSessions = group?.projectId ? sessions : [];
+  const associatedTaskIds = associatedSessions.map(localChatSessionTaskId);
+  const uniqueTaskIds = [...new Set(associatedTaskIds)];
+  const taskIds = uniqueTaskIds.filter((id): id is string => id !== null);
 
   const cachedTasks = useCachedTasks(
     generation,
     group?.isCurrentProject === true
   );
-  const missingTaskIds = taskIds.filter((id) => !cachedTasks.has(id));
+  const direct = useResolvedTasks(taskIds, cachedTasks, generation, group);
 
-  const queries = useQueries(
-    {
-      queries: missingTaskIds.map((id) => {
-        const queryKey = group?.isCurrentProject
-          ? queryKeys.tasks.detail(generation, id)
-          : queryKeys.localChatCompletion(generation, group!.projectId!, id);
+  const parentIds = (tasks: ReadonlyMap<string, Task>) => {
+    const taskRecords = [...tasks.values()];
+    const ids = taskRecords.flatMap((task) =>
+      task.parent_id ? [task.parent_id] : []
+    );
 
-        return {
-          queryKey,
-          queryFn: async () => {
-            const baseline = queryClient.getQueryData<Task>(queryKey);
+    return [...new Set(ids)];
+  };
 
-            const fetched = await unwrapCommand(commands.getTask(id));
-
-            const current = queryClient.getQueryData<Task>(queryKey);
-            // A newer realtime projection wins over an in-flight snapshot.
-            if (
-              current &&
-              current !== baseline &&
-              (!current.updated_at ||
-                !fetched.updated_at ||
-                Date.parse(current.updated_at) >=
-                  Date.parse(fetched.updated_at))
-            ) {
-              return current;
-            }
-
-            return fetched;
-          },
-
-          refetchInterval: group?.isCurrentProject ? (false as const) : 30_000,
-          // Foreign projects have no live channel; refresh on revisiting them.
-          refetchOnMount: group?.isCurrentProject
-            ? (false as const)
-            : ("always" as const),
-        };
-      }),
-    },
-    queryClient
+  const directParentIds = parentIds(direct);
+  const parents = useResolvedTasks(
+    directParentIds,
+    cachedTasks,
+    generation,
+    group
   );
 
-  const completedTasks = new Set([
-    ...[...cachedTasks.values()]
-      .filter((task) => task.completed_at)
-      .map((task) => task.id),
-    ...queries.flatMap((query) =>
-      !query.isError && query.data?.completed_at ? [query.data.id] : []
-    ),
-  ]);
-
-  return new Set(
-    sessions
-      .filter((session) => {
-        const taskId = localChatSessionTaskId(session);
-
-        return taskId !== null && completedTasks.has(taskId);
-      })
-      .map((session) => session.id)
+  // A task can have a ticket parent and epic grandparent. No new root fetches
+  // are needed beyond these two ancestor levels in the entity hierarchy.
+  const grandparentIds = parentIds(parents);
+  const grandparents = useResolvedTasks(
+    grandparentIds,
+    cachedTasks,
+    generation,
+    group
   );
+  const tasks = new Map([...direct, ...parents, ...grandparents]);
+
+  const completedTaskRecords = [...tasks.values()].filter(
+    (task) => task.completed_at
+  );
+  const completedTaskIds = completedTaskRecords.map((task) => task.id);
+  const completedTasks = new Set(completedTaskIds);
+
+  const completedSessions = sessions.filter((session) => {
+    const taskId = localChatSessionTaskId(session);
+
+    return taskId !== null && completedTasks.has(taskId);
+  });
+  const completedIds = completedSessions.map((session) => session.id);
+  const completedSessionIds = new Set(completedIds);
+
+  return { tasks, completedSessionIds };
+}
+
+function useResolvedTasks(
+  ids: string[],
+  cachedTasks: ReadonlyMap<string, Task>,
+  generation: number,
+  group?: LocalChatSessionGroup
+) {
+  const missingTaskIds = ids.filter((id) => !cachedTasks.has(id));
+
+  const taskQueries = missingTaskIds.map((id) => {
+    const queryKey = group?.isCurrentProject
+      ? queryKeys.tasks.detail(generation, id)
+      : queryKeys.localChatCompletion(generation, group!.projectId!, id);
+
+    return {
+      queryKey,
+      queryFn: async () => {
+        const baseline = queryClient.getQueryData<Task>(queryKey);
+
+        const request = commands.getTask(id);
+        const fetched = await unwrapCommand(request);
+
+        const current = queryClient.getQueryData<Task>(queryKey);
+
+        // A newer realtime projection wins over an in-flight snapshot.
+        if (
+          current &&
+          current !== baseline &&
+          (!current.updated_at ||
+            !fetched.updated_at ||
+            Date.parse(current.updated_at) >= Date.parse(fetched.updated_at))
+        ) {
+          return current;
+        }
+
+        return fetched;
+      },
+
+      refetchInterval: group?.isCurrentProject ? (false as const) : 30_000,
+      // Foreign projects have no live channel; refresh on revisiting them.
+      refetchOnMount: group?.isCurrentProject
+        ? (false as const)
+        : ("always" as const),
+    };
+  });
+
+  const queries = useQueries({ queries: taskQueries }, queryClient);
+
+  const cachedRecords = [...cachedTasks].filter(([id]) => ids.includes(id));
+  const fetchedRecords = queries.flatMap((query): [string, Task][] =>
+    !query.isError && query.data ? [[query.data.id, query.data]] : []
+  );
+
+  return new Map([...cachedRecords, ...fetchedRecords]);
+}
+
+export function useLocalChatCompletedSessions(group?: LocalChatSessionGroup) {
+  const metadata = useLocalChatSessionMetadata(group);
+
+  return metadata.completedSessionIds;
 }
