@@ -683,12 +683,13 @@ async fn open_comment_dialog(world: &mut GuiWorld) {
     let model_disclosure_script = r#"
         const dialog = document.querySelector('[role=dialog][aria-label="Comment on selected code"]');
 
-        return dialog?.textContent.includes('Next reply: Anthropic · ');
+        return dialog && !dialog.querySelector('[role=alert]') &&
+          !dialog.textContent.includes('Next reply:');
     "#;
 
     gui_acceptance::wait_for_js(
         &client,
-        "effective inline model disclosed before submission",
+        "inline catalog ready without routine model labels",
         model_disclosure_script,
         vec![],
         Duration::from_secs(10),
@@ -1062,14 +1063,14 @@ async fn dedicated_model(world: &mut GuiWorld) {
     .await;
 }
 
-#[then("inline requests use the dedicated model disclosed before submission")]
+#[then("inline requests use the dedicated model without routine labels")]
 async fn dedicated_requests(world: &mut GuiWorld) {
     let wd = world.webdriver.as_ref().unwrap().clone();
     let client = wd.lock().await;
     let disclosure_script = r#"
         const thread = document.querySelector('[data-testid=selection-mini-thread]');
 
-        return thread?.textContent.includes('Next reply: Anthropic · Opus');
+        return thread && !/Next reply:|Reply:|Anthropic|Opus/.test(thread.textContent);
     "#;
 
     let disclosure = client.execute(disclosure_script, vec![]).await.unwrap();
@@ -1132,4 +1133,396 @@ async fn main_model_unchanged(_world: &mut GuiWorld) {
     // The original main runtime is already running when fixture capture resets.
     // Sending its next turn must not create a new runtime with the inline model.
     assert_eq!(launches.len(), 2, "main runtime was replaced: {launches:?}");
+}
+
+/// Control only the session transport so waiting, text takeover and failure have
+/// explicit milestones. Selection, composers, Markdown, theme CSS and geometry
+/// use the real renderer. No production fixture hook is needed.
+#[then("inline discussion bubbles and pending feedback render correctly across themes and widths")]
+async fn themed_layout(world: &mut GuiWorld) {
+    let wd = world.webdriver.as_ref().unwrap().clone();
+    let client = wd.lock().await;
+    let setup_timeout = Duration::from_secs(5);
+    let request_timeout = Duration::from_secs(10);
+
+    client.set_window_rect(0, 0, 1280, 1024).await.unwrap();
+
+    let widen_button = Locator::Css("[aria-label='Widen chat panel']");
+
+    if let Ok(button) = client.find(widen_button).await {
+        gui_acceptance::wait_actionable(&button).await;
+        button.click().await.unwrap();
+    }
+
+    let hide_files_button = Locator::Css("[aria-label='Hide files']");
+
+    if let Ok(button) = client.find(hide_files_button).await {
+        gui_acceptance::wait_actionable(&button).await;
+        button.click().await.unwrap();
+    }
+
+    let geometry_settled = r#"
+        const panel = document.querySelector('.hc-panel');
+        const bounds = panel.getBoundingClientRect();
+        const animations = panel.getAnimations({ subtree: true });
+        const moving = animations.some(animation => {
+          const timing = animation.effect?.getComputedTiming();
+          const finite = Number.isFinite(timing?.endTime);
+
+          return animation.playState === 'running' && finite;
+        });
+
+        return bounds.width > 1000 && !moving;
+    "#;
+
+    gui_acceptance::wait_for_js(
+        &client,
+        "expanded panel geometry settled",
+        geometry_settled,
+        vec![],
+        setup_timeout,
+    )
+    .await;
+    drop(client);
+
+    gesture(world, false, false).await;
+    open_comment_dialog(world).await;
+
+    let client = wd.lock().await;
+    let install = r#"
+        const done = arguments[arguments.length - 1];
+        const bindingsImport = import('/src/bindings.ts');
+        const storeImport = import('/src/stores/uiStore.ts');
+
+        Promise.all([bindingsImport, storeImport]).then(([{ commands }, { useUIStore }]) => {
+          const uiState = useUIStore.getState();
+          const state = {
+            commands,
+            uiStore: useUIStore,
+            previousTheme: uiState.theme,
+            create: commands.createLocalChatSession,
+            close: commands.closeLocalChatSession,
+            original: window.__TAURI_INTERNALS__.invoke,
+            turns: [],
+          };
+
+          window.__inlineTransport = state;
+
+          commands.createLocalChatSession = input => {
+            if (!input.read_only) return state.create(input);
+
+            return new Promise((resolve, reject) => {
+              state.turns.push({ input, resolve, reject });
+            });
+          };
+
+          commands.closeLocalChatSession = id => {
+            const inlineSession = state.turns.some(turn => turn.input.backend_session_id === id);
+
+            if (inlineSession) {
+              return Promise.resolve({ status: 'ok', data: null });
+            }
+
+            return state.close(id);
+          };
+
+          const style = document.createElement('style');
+
+          style.id = 'inline-freeze-animations';
+          style.textContent = `
+            .selection-mini-thread *,
+            .selection-mini-thread *::before {
+              animation: none !important;
+              transition: none !important;
+            }
+          `;
+          document.head.append(style);
+          done(true);
+        }).catch(error => {
+          const message = String(error);
+
+          done(message);
+        });
+    "#;
+    let installed = client.execute_async(install, vec![]).await.unwrap();
+
+    assert_eq!(installed, json!(true));
+
+    let questions = [
+        "Initial question\nwith multiple lines",
+        "Follow-up\nwithaverylongunbrokentokenthatmustwrapwithoutanyhorizontaloverflowinthecardatnarrowwidths123456789012345678901234567890",
+    ];
+
+    for (index, question) in questions.into_iter().enumerate() {
+        let selector = if index == 0 {
+            "[data-testid=diff-comment-draft-input]"
+        } else {
+            "[aria-label='Ask about selected code']"
+        };
+        let input_locator = Locator::Css(selector);
+        let input = client.find(input_locator).await.unwrap();
+
+        type_inline_question(&client, &input, question).await;
+
+        let button = if index == 0 { "Discuss inline" } else { "Ask" };
+        let xpath = format!("//button[normalize-space(.)='{button}']");
+        let button_locator = Locator::XPath(&xpath);
+
+        gui_acceptance::click_when_ready(&client, button_locator, "controlled inline ask").await;
+
+        let waiting = r#"
+            const thread = document.querySelector('[data-testid=selection-mini-thread]');
+            const questions = thread?.querySelectorAll('.selection-mini-question');
+            const question = questions?.[arguments[0] - 1];
+            const indicator = thread?.querySelector('[data-testid=thinking-indicator]');
+            const turnCount = window.__inlineTransport.turns.length;
+
+            return turnCount === arguments[0] &&
+              question?.textContent === arguments[1] && !!indicator;
+        "#;
+        let expected_question = vec![json!(index + 1), json!(question)];
+
+        gui_acceptance::wait_for_js(
+            &client,
+            "visible pending turn after listener setup",
+            waiting,
+            expected_question,
+            request_timeout,
+        )
+        .await;
+
+        let mut colors = Vec::new();
+
+        for theme in ["dark", "light"] {
+            for width in [440, 280] {
+                let metrics = inline_layout_metrics(&client, theme, width, true).await;
+
+                assert_eq!(metrics["pass"], json!(true), "{theme}/{width}: {metrics}");
+                println!("Inline pending layout turn {index}, {theme}/{width}: {metrics}");
+
+                if index == 1 {
+                    assert_eq!(
+                        metrics["historyScrollable"],
+                        json!(true),
+                        "follow-up must exercise scrollable history"
+                    );
+                }
+
+                let background = metrics["background"].clone();
+                let screenshot = format!("inline-{index}-{theme}-{width}-pending");
+
+                colors.push(background);
+                world.screenshot(&client, &screenshot).await;
+            }
+        }
+
+        assert_ne!(
+            colors[0], colors[2],
+            "theme must change computed bubble color"
+        );
+
+        let respond = r#"
+            const done = arguments[arguments.length - 1];
+            const turn = window.__inlineTransport.turns.at(-1);
+            const history = '- Preserved history\n'.repeat(16);
+            const text = '**Markdown answer**\n\n' + history;
+            const payload = {
+              backend_session_id: turn.input.backend_session_id,
+              harness: 'claude',
+              text,
+              is_partial: true,
+              is_root: true,
+              parent_tool_use_id: null,
+            };
+            const event = { event: 'local-chat-text-event', payload };
+
+            turn.resolve({ status: 'ok', data: null });
+
+            window.__inlineTransport.original('plugin:event|emit', event)
+              .then(() => done(true))
+              .catch(error => {
+                const message = String(error);
+
+                done(message);
+              });
+        "#;
+        let responded = client.execute_async(respond, vec![]).await.unwrap();
+
+        assert_eq!(responded, json!(true));
+
+        let text_takeover = r#"
+            const thread = document.querySelector('[data-testid=selection-mini-thread]');
+            const indicator = thread.querySelector('[data-testid=thinking-indicator]');
+            const replies = thread.querySelectorAll('.is-assistant strong');
+
+            return !indicator && replies.length === arguments[0];
+        "#;
+        let expected_replies = vec![json!(index + 1)];
+
+        gui_acceptance::wait_for_js(
+            &client,
+            "Markdown replaces waiting indicator",
+            text_takeover,
+            expected_replies,
+            setup_timeout,
+        )
+        .await;
+
+        // Cancelling a streamed turn permits the next controlled follow-up.
+        let cancel_button = Locator::XPath("//button[normalize-space(.)='Cancel response']");
+
+        gui_acceptance::click_when_ready(&client, cancel_button, "finish controlled turn").await;
+    }
+
+    // Measure completed history as well, including assistant alignment/Markdown.
+    for theme in ["dark", "light"] {
+        for width in [440, 280] {
+            let metrics = inline_layout_metrics(&client, theme, width, false).await;
+
+            assert_eq!(metrics["pass"], json!(true), "{theme}/{width}: {metrics}");
+            println!("Inline history layout {theme}/{width}: {metrics}");
+
+            let screenshot = format!("inline-{theme}-{width}-history");
+
+            world.screenshot(&client, &screenshot).await;
+        }
+    }
+
+    let input_locator = Locator::Css("[aria-label='Ask about selected code']");
+    let input = client.find(input_locator).await.unwrap();
+
+    type_inline_question(&client, &input, "Show an\nactionable error").await;
+
+    let ask_button = Locator::XPath("//button[normalize-space(.)='Ask']");
+
+    gui_acceptance::click_when_ready(&client, ask_button, "error fixture ask").await;
+    gui_acceptance::wait_for_js(
+        &client,
+        "error turn setup",
+        "return window.__inlineTransport.turns.length === 3;",
+        vec![],
+        setup_timeout,
+    )
+    .await;
+
+    let reject_turn = r#"
+        const turn = window.__inlineTransport.turns.at(-1);
+
+        turn.reject('session unavailable');
+
+        return true;
+    "#;
+
+    client.execute(reject_turn, vec![]).await.unwrap();
+
+    let failure_visible = r#"
+        const thread = document.querySelector('[data-testid=selection-mini-thread]');
+        const alert = thread.querySelector('[role=alert]');
+        const indicator = thread.querySelector('[data-testid=thinking-indicator]');
+
+        return !!alert && !indicator;
+    "#;
+
+    gui_acceptance::wait_for_js(
+        &client,
+        "failure clears indicator",
+        failure_visible,
+        vec![],
+        setup_timeout,
+    )
+    .await;
+
+    for theme in ["dark", "light"] {
+        let metrics = inline_layout_metrics(&client, theme, 280, false).await;
+
+        assert_eq!(metrics["pass"], json!(true), "error {theme}: {metrics}");
+
+        let screenshot = format!("inline-{theme}-error");
+
+        world.screenshot(&client, &screenshot).await;
+    }
+
+    let cleanup = r#"
+        const state = window.__inlineTransport;
+        const uiState = state.uiStore.getState();
+        const frozenAnimations = document.querySelector('#inline-freeze-animations');
+
+        state.commands.createLocalChatSession = state.create;
+        state.commands.closeLocalChatSession = state.close;
+        uiState.setTheme(state.previousTheme);
+
+        delete window.__inlineTransport;
+        frozenAnimations.remove();
+
+        return true;
+    "#;
+
+    client.execute(cleanup, vec![]).await.unwrap();
+}
+
+async fn inline_layout_metrics(
+    client: &fantoccini::Client,
+    theme: &str,
+    width: u32,
+    pending: bool,
+) -> Value {
+    let measurement_script = include_str!("selection_discussion_layout.js");
+    let frame_script = r#"
+        const done = arguments[arguments.length - 1];
+        const [theme, width, pending] = arguments;
+        const uiState = window.__inlineTransport.uiStore.getState();
+
+        function afterTwoFrames(callback) {
+          function afterFirstFrame() {
+            requestAnimationFrame(callback);
+          }
+
+          requestAnimationFrame(afterFirstFrame);
+        }
+
+        function measureAfterThemePaint() {
+          function readMetrics() {
+            __MEASURE_LAYOUT__
+          }
+
+          const result = readMetrics(theme, width, pending);
+
+          function finishAfterLayoutPaint() {
+            done(result);
+          }
+
+          afterTwoFrames(finishAfterLayoutPaint);
+        }
+
+        uiState.setTheme(theme);
+        afterTwoFrames(measureAfterThemePaint);
+    "#;
+    let script = frame_script.replace("__MEASURE_LAYOUT__", measurement_script);
+    let arguments = vec![json!(theme), json!(width), json!(pending)];
+
+    client.execute_async(&script, arguments).await.unwrap()
+}
+
+async fn type_inline_question(
+    client: &fantoccini::Client,
+    input: &fantoccini::elements::Element,
+    text: &str,
+) {
+    let lines = text.split('\n');
+
+    for (index, line) in lines.enumerate() {
+        if index > 0 {
+            let input_source = "inline-newline".to_owned();
+            let keys = KeyActions::new(input_source)
+                .then(KeyAction::Down { value: '\u{e008}' })
+                .then(KeyAction::Down { value: '\u{e007}' })
+                .then(KeyAction::Up { value: '\u{e007}' })
+                .then(KeyAction::Up { value: '\u{e008}' });
+
+            client.perform_actions(keys).await.unwrap();
+            client.release_actions().await.unwrap();
+        }
+
+        input.send_keys(line).await.unwrap();
+    }
 }

@@ -15,7 +15,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { useContext } from "react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type {
   LocalChatTextEvent,
   LocalChatSessionEndEvent,
@@ -163,7 +163,11 @@ function end(id: string, handler = transport.end) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useUIStore.setState({ inlineDiscussionPreference: { mode: "follow" } });
+
+  useUIStore.setState({
+    inlineDiscussionPreference: { mode: "follow" },
+    thinkingIndicatorStyle: "classic",
+  });
 
   const catalogCommand = vi.mocked(commands.getSupportedLocalChatHarnesses);
 
@@ -172,7 +176,9 @@ beforeEach(() => {
     data: inlineDiscussionCatalog,
   });
 
-  vi.mocked(commands.createLocalChatSession).mockResolvedValue({
+  const createSession = vi.mocked(commands.createLocalChatSession);
+
+  createSession.mockResolvedValue({
     status: "ok",
     data: null,
   });
@@ -251,8 +257,18 @@ it("cancels during creation and closes a runtime that appears late", async () =>
   open();
 
   const id = await send();
+  const pendingIndicator = screen.getByTestId("thinking-indicator");
 
-  fireEvent.click(screen.getByText("Cancel response"));
+  expect(pendingIndicator).toBeVisible();
+
+  const cancelButton = screen.getByText("Cancel response");
+
+  fireEvent.click(cancelButton);
+
+  const cancelledIndicator = screen.queryByTestId("thinking-indicator");
+
+  expect(cancelledIndicator).toBeNull();
+
   act(() =>
     transport.text?.({
       payload: {
@@ -269,7 +285,10 @@ it("cancels during creation and closes a runtime that appears late", async () =>
 
   await act(async () => complete({ status: "ok", data: null }));
 
+  const finishedIndicator = screen.queryByTestId("thinking-indicator");
+
   expect(commands.closeLocalChatSession).toHaveBeenCalledWith(id);
+  expect(finishedIndicator).toBeNull();
 });
 
 it("retires scope listeners and ignores success and errors from another worktree", async () => {
@@ -378,80 +397,145 @@ function codeFixture(onAttach = vi.fn(), onOpen = vi.fn()) {
   );
 }
 
-it("opens a two-action dialog with + and renders questions and answers beneath the code", async () => {
-  const onOpen = vi.fn();
-  const onAttach = vi.fn();
-  const view = codeFixture(onAttach, onOpen);
+it.each([
+  ["dark", "follow"],
+  ["dark", "dedicated"],
+  ["light", "follow"],
+  ["light", "dedicated"],
+] as const)(
+  "opens a %s %s composer without model labels and renders questions beneath code",
+  async (theme, mode) => {
+    const inlineDiscussionPreference =
+      mode === "follow"
+        ? { mode }
+        : { mode, providerId: "custom", modelId: "dedicated" };
 
-  render(view);
-  fireEvent.click(screen.getByText("Select code"));
+    document.documentElement.classList.toggle("light", theme === "light");
+    useUIStore.setState({ inlineDiscussionPreference });
 
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+    const onOpen = vi.fn();
+    const onAttach = vi.fn();
+    const component = codeFixture(onAttach, onOpen);
 
-  fireEvent.click(screen.getByRole("button", { name: "Add code comment" }));
+    render(component);
 
-  expect(
-    screen.getByRole("dialog", { name: "Comment on selected code" })
-  ).toBeVisible();
-  expect(screen.getByRole("button", { name: "Discuss inline" })).toBeDisabled();
-  await screen.findByText("Next reply: Anthropic · Sonnet (provider default)");
-  expect(
-    screen.getByRole("button", { name: "Send to main chat" })
-  ).toBeEnabled();
+    const selectButton = screen.getByText("Select code");
 
-  fireEvent.change(screen.getByRole("textbox", { name: "New diff comment" }), {
-    target: { value: "Why selected?" },
-  });
-  await waitFor(() => {
+    fireEvent.click(selectButton);
+
+    const unopenedDialog = screen.queryByRole("dialog");
+
+    expect(unopenedDialog).toBeNull();
+    expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+
+    const addCommentButton = screen.getByRole("button", {
+      name: "Add code comment",
+    });
+
+    fireEvent.click(addCommentButton);
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Comment on selected code",
+    });
+    const initialDiscussButton = screen.getByRole("button", {
+      name: "Discuss inline",
+    });
+
+    expect(dialog).toBeVisible();
+    expect(initialDiscussButton).toBeDisabled();
+
+    await waitFor(() => {
+      const alert = screen.queryByRole("alert");
+
+      expect(alert).toBeNull();
+    });
+
+    const initialModelLabel = screen.queryByText(
+      /Next reply:|Reply:|Anthropic|Custom · Dedicated/
+    );
+    const attachButton = screen.getByRole("button", {
+      name: "Send to main chat",
+    });
+
+    expect(initialModelLabel).toBeNull();
+    expect(attachButton).toBeEnabled();
+
+    const questionInput = screen.getByRole("textbox", {
+      name: "New diff comment",
+    });
+
+    fireEvent.change(questionInput, { target: { value: "Why selected?" } });
+
+    await waitFor(() => {
+      const discussButton = screen.getByRole("button", {
+        name: "Discuss inline",
+      });
+
+      expect(discussButton).toBeEnabled();
+    });
+
     const discussButton = screen.getByRole("button", {
       name: "Discuss inline",
     });
 
-    expect(discussButton).toBeEnabled();
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
-  await waitFor(() =>
-    expect(commands.createLocalChatSession).toHaveBeenCalledOnce()
-  );
+    fireEvent.click(discussButton);
 
-  const request = vi.mocked(commands.createLocalChatSession).mock.calls[0][0];
-  const id = request.backend_session_id;
-
-  act(() => {
-    transport.text?.({
-      payload: {
-        backend_session_id: id,
-        harness: "claude",
-        text: "Inline answer",
-        is_partial: false,
-        parent_tool_use_id: null,
-      },
+    await waitFor(() => {
+      expect(commands.createLocalChatSession).toHaveBeenCalledOnce();
     });
-    end(id);
-  });
 
-  expect(screen.queryByRole("dialog")).toBeNull();
+    const createSession = vi.mocked(commands.createLocalChatSession);
+    const request = createSession.mock.calls[0][0];
+    const id = request.backend_session_id;
 
-  const thread = screen.getByTestId("selection-mini-thread");
+    act(() => {
+      transport.text?.({
+        payload: {
+          backend_session_id: id,
+          harness: "claude",
+          text: "Inline answer",
+          is_partial: false,
+          parent_tool_use_id: null,
+        },
+      });
+      end(id);
+    });
 
-  expect(screen.getByTestId("code-fixture")).toContainElement(thread);
-  expect(thread).toHaveTextContent("Why selected?");
-  expect(thread).toHaveTextContent("Inline answer");
-  expect(onOpen).not.toHaveBeenCalled();
+    const closedDialog = screen.queryByRole("dialog");
+    const codeBlock = screen.getByTestId("code-fixture");
+    const thread = screen.getByTestId("selection-mini-thread");
+    const threadModelLabel = screen.queryByText(
+      /Next reply:|Reply:|Anthropic|Custom · Dedicated/
+    );
 
-  fireEvent.click(screen.getByRole("button", { name: "Close discussion" }));
+    expect(closedDialog).toBeNull();
+    expect(codeBlock).toContainElement(thread);
+    expect(thread).toHaveTextContent("Why selected?");
+    expect(thread).toHaveTextContent("Inline answer");
+    expect(threadModelLabel).toBeNull();
+    expect(onOpen).not.toHaveBeenCalled();
 
-  expect(screen.queryByTestId("selection-mini-thread")).toBeNull();
+    const closeButton = screen.getByRole("button", {
+      name: "Close discussion",
+    });
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "Reopen selection discussion" })
-  );
+    fireEvent.click(closeButton);
 
-  expect(screen.getByTestId("selection-mini-thread")).toHaveTextContent(
-    "Inline answer"
-  );
-});
+    const closedThread = screen.queryByTestId("selection-mini-thread");
+
+    expect(closedThread).toBeNull();
+
+    const reopenButton = screen.getByRole("button", {
+      name: "Reopen selection discussion",
+    });
+
+    fireEvent.click(reopenButton);
+
+    const reopenedThread = screen.getByTestId("selection-mini-thread");
+
+    expect(reopenedThread).toHaveTextContent("Inline answer");
+  }
+);
 
 it("sends the dialog question and snapshot to the main composer without dispatching", () => {
   const attach = vi.fn();
@@ -1036,13 +1120,9 @@ it("captures dedicated choice per request and applies a settings change only to 
 
   act(() => uiState.setInlineDiscussionPreference({ mode: "follow" }));
 
-  const replyLabel = screen.getByText("Reply: Custom · Dedicated");
-  const nextReplyLabel = screen.getByText(
-    "Next reply: Anthropic · Sonnet (provider default)"
-  );
+  const modelLabel = screen.queryByText(/Reply:|Next reply:/);
 
-  expect(replyLabel).toBeVisible();
-  expect(nextReplyLabel).toBeVisible();
+  expect(modelLabel).toBeNull();
   expect(commands.createLocalChatSession).toHaveBeenCalledTimes(1);
 
   act(() => {
@@ -1111,7 +1191,11 @@ it("invalidates the catalog after provider settings change", async () => {
   const view = render(component);
 
   open();
-  await screen.findByText(/Next reply: Anthropic/);
+  await waitFor(() => {
+    const alert = screen.queryByRole("alert");
+
+    expect(alert).toBeNull();
+  });
 
   const catalogCommand = vi.mocked(commands.getSupportedLocalChatHarnesses);
   const removedProviderCatalog = { ...inlineDiscussionCatalog, providers: [] };
@@ -1151,7 +1235,11 @@ it("captures provider/model before listener setup even when settings change befo
   uiState.setInlineDiscussionPreference(dedicatedPreference);
   render(view);
   open();
-  await screen.findByText("Next reply: Custom · Dedicated");
+  await waitFor(() => {
+    const alert = screen.queryByRole("alert");
+
+    expect(alert).toBeNull();
+  });
 
   act(() => liveDiscussion.send(liveDiscussion.activeId!, "Pending setup"));
 
@@ -1192,7 +1280,11 @@ it("shows catalog errors and retires a delayed catalog read after switching work
   open();
   view.rerender(nextComponent);
   open();
-  await screen.findByText(/Next reply: Anthropic/);
+  await waitFor(() => {
+    const alert = screen.queryByRole("alert");
+
+    expect(alert).toBeNull();
+  });
 
   const removedProviderCatalog = { ...inlineDiscussionCatalog, providers: [] };
 
@@ -1200,9 +1292,11 @@ it("shows catalog errors and retires a delayed catalog read after switching work
     complete({ status: "ok", data: removedProviderCatalog })
   );
 
-  const nextReplyLabel = screen.getByText(/Next reply: Anthropic/);
+  const alert = screen.queryByRole("alert");
+  const modelLabel = screen.queryByText(/Next reply:/);
 
-  expect(nextReplyLabel).toBeVisible();
+  expect(alert).toBeNull();
+  expect(modelLabel).toBeNull();
 
   const catalogError = new Error("catalog unavailable");
   const providerSettings = useProviderSettingsStore.getState();
@@ -1241,3 +1335,406 @@ it("sends custom effort and speed without applying a removed personality prefere
 
   expect(commands.createLocalChatSession).toHaveBeenLastCalledWith(request);
 });
+
+afterEach(() => {
+  document.documentElement.classList.remove("light", "dark");
+});
+
+it.each(["dark", "light"])(
+  "preserves bubbles, Markdown and pending state across live %s theme changes",
+  async (theme) => {
+    document.documentElement.classList.toggle("light", theme === "light");
+
+    const component = fixture();
+
+    render(component);
+    open();
+
+    const id = await send("First line\nSecond line");
+    const initialQuestion = screen.getByText("First line", { exact: false });
+    const initialMessage = initialQuestion.closest("article");
+    const initialIndicator = screen.getByTestId("thinking-indicator");
+
+    expect(initialMessage).toHaveClass("is-user");
+    expect(initialIndicator).toBeVisible();
+
+    act(() => {
+      transport.text?.({
+        payload: {
+          backend_session_id: id,
+          harness: "claude",
+          text: "**Bold answer**",
+          is_partial: true,
+          parent_tool_use_id: null,
+        },
+      });
+      end(id);
+    });
+
+    const answer = screen.getByText("Bold answer");
+    const indicatorAfterReply = screen.queryByTestId("thinking-indicator");
+
+    expect(answer.tagName).toBe("STRONG");
+    expect(indicatorAfterReply).toBeNull();
+
+    const longText = "long".repeat(80);
+    const followUpQuestion = `Follow-up\n${longText}`;
+    const followUp = await send(followUpQuestion);
+
+    act(() => {
+      document.documentElement.classList.toggle("light", theme !== "light");
+    });
+
+    const retainedAnswer = screen.getByText("Bold answer");
+    const followUpIndicator = screen.getByTestId("thinking-indicator");
+    const followUpText = screen.getByText(/Follow-up/);
+    const followUpMessage = followUpText.closest("article");
+    const pendingRequest = liveDiscussion.threads[0].requestId;
+
+    expect(retainedAnswer).toBeVisible();
+    expect(followUpIndicator).toBeVisible();
+    expect(followUpMessage).toHaveClass("is-user");
+    expect(pendingRequest).toBe(followUp);
+
+    const closeButton = screen.getByRole("button", {
+      name: "Close discussion",
+    });
+
+    fireEvent.click(closeButton);
+
+    const reopenButton = screen.getByRole("button", {
+      name: "Reopen selection discussion",
+    });
+
+    fireEvent.click(reopenButton);
+
+    const reopenedIndicator = screen.getByTestId("thinking-indicator");
+    const modelLabel = screen.queryByText(/Reply:|Next reply:/);
+
+    expect(reopenedIndicator).toBeVisible();
+    expect(modelLabel).toBeNull();
+
+    act(() => end(followUp));
+
+    const finishedIndicator = screen.queryByTestId("thinking-indicator");
+
+    expect(finishedIndicator).toBeNull();
+  }
+);
+
+it.each([
+  ["classic", false],
+  ["classic", true],
+  ["futuristic", false],
+  ["futuristic", true],
+] as const)(
+  "shows %s thinking through deferred setup with previous history=%s",
+  async (style, history) => {
+    useUIStore.setState({ thinkingIndicatorStyle: style });
+
+    const component = fixture();
+
+    render(component);
+    open();
+
+    if (history) {
+      const first = await send();
+
+      act(() => {
+        transport.text?.({
+          payload: {
+            backend_session_id: first,
+            harness: "claude",
+            text: "Earlier answer",
+            is_partial: false,
+            parent_tool_use_id: null,
+          },
+        });
+        end(first);
+      });
+    }
+
+    await waitFor(() => {
+      const alert = screen.queryByRole("alert");
+
+      expect(alert).toBeNull();
+    });
+
+    let register!: (cleanup: () => void) => void;
+    const textListener = vi.mocked(events.localChatTextEvent.listen);
+
+    textListener.mockImplementationOnce((handler) => {
+      transport.text = (event) =>
+        handler({ event: "local-chat-text-event", id: 0, ...event });
+
+      return new Promise((resolve) => {
+        register = resolve;
+      });
+    });
+
+    let complete!: (
+      value: Awaited<ReturnType<typeof commands.createLocalChatSession>>
+    ) => void;
+    const createSession = vi.mocked(commands.createLocalChatSession);
+
+    createSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        })
+    );
+
+    const threadId = liveDiscussion.activeId!;
+
+    act(() => liveDiscussion.send(threadId, "Waiting follow-up"));
+
+    const initialIndicator = screen.getByTestId("thinking-indicator");
+    const previousRequests = history ? 1 : 0;
+
+    expect(initialIndicator).toHaveAttribute("data-style", style);
+    expect(commands.createLocalChatSession).toHaveBeenCalledTimes(
+      previousRequests
+    );
+
+    await act(async () => register(transport.unlisten));
+
+    const registeredIndicator = screen.getByTestId("thinking-indicator");
+
+    expect(registeredIndicator).toBeVisible();
+
+    await act(async () => complete({ status: "ok", data: null }));
+
+    const id = liveDiscussion.threads[0].requestId!;
+
+    act(() =>
+      transport.text?.({
+        payload: {
+          backend_session_id: id,
+          harness: "claude",
+          text: "",
+          is_partial: true,
+          parent_tool_use_id: null,
+        },
+      })
+    );
+
+    const emptyTextIndicator = screen.getByTestId("thinking-indicator");
+
+    expect(emptyTextIndicator).toBeVisible();
+
+    act(() =>
+      transport.text?.({
+        payload: {
+          backend_session_id: id,
+          harness: "claude",
+          text: "Now streaming",
+          is_partial: true,
+          parent_tool_use_id: null,
+        },
+      })
+    );
+
+    const streamingIndicator = screen.queryByTestId("thinking-indicator");
+
+    expect(streamingIndicator).toBeNull();
+
+    act(() => end(id));
+  }
+);
+
+it.each(["end", "rejection", "error", "cancel", "unmount"])(
+  "clears pending UI on %s and ignores retired events",
+  async (terminal) => {
+    const component = fixture();
+    const view = render(component);
+
+    open();
+
+    if (terminal === "rejection") {
+      const setupError = new Error("setup failure");
+      const createSession = vi.mocked(commands.createLocalChatSession);
+
+      createSession.mockRejectedValueOnce(setupError);
+    }
+
+    const id = await send();
+    const lateText = transport.text;
+
+    if (terminal !== "rejection") {
+      const pendingIndicator = screen.getByTestId("thinking-indicator");
+
+      expect(pendingIndicator).toBeVisible();
+    }
+
+    if (terminal === "end") act(() => end(id));
+
+    if (terminal === "error") {
+      act(() =>
+        transport.error?.({
+          payload: {
+            backend_session_id: id,
+            harness: "claude",
+            error: "session failure",
+            is_root: true,
+          },
+        })
+      );
+    }
+
+    if (terminal === "cancel") {
+      const cancelButton = screen.getByRole("button", {
+        name: "Cancel response",
+      });
+
+      fireEvent.click(cancelButton);
+    }
+
+    if (terminal === "unmount") {
+      const nextComponent = fixture("B");
+
+      view.rerender(nextComponent);
+      open();
+    }
+
+    await waitFor(() => {
+      const indicator = screen.queryByTestId("thinking-indicator");
+
+      expect(indicator).toBeNull();
+    });
+
+    act(() =>
+      lateText?.({
+        payload: {
+          backend_session_id: id,
+          harness: "claude",
+          text: "Retired reply",
+          is_partial: true,
+          parent_tool_use_id: null,
+        },
+      })
+    );
+
+    const retiredReply = screen.queryByText("Retired reply");
+
+    expect(retiredReply).toBeNull();
+  }
+);
+
+it.each(["cancel", "unmount", "listener rejection"])(
+  "retires the initial thinking indicator during listener setup: %s",
+  async (terminal) => {
+    let resolve!: (cleanup: () => void) => void;
+    let reject!: (error: Error) => void;
+    const textListener = vi.mocked(events.localChatTextEvent.listen);
+
+    textListener.mockImplementationOnce(
+      () =>
+        new Promise((yes, no) => {
+          resolve = yes;
+          reject = no;
+        })
+    );
+
+    const component = fixture();
+    const view = render(component);
+
+    open();
+
+    await waitFor(() => {
+      const alert = screen.queryByRole("alert");
+
+      expect(alert).toBeNull();
+    });
+
+    const threadId = liveDiscussion.activeId!;
+
+    act(() => liveDiscussion.send(threadId, "Initial pending question"));
+
+    const initialIndicator = screen.getByTestId("thinking-indicator");
+
+    expect(initialIndicator).toBeVisible();
+    expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+
+    if (terminal === "cancel") {
+      const cancelButton = screen.getByRole("button", {
+        name: "Cancel response",
+      });
+
+      fireEvent.click(cancelButton);
+    }
+
+    if (terminal === "unmount") {
+      const nextComponent = fixture("B");
+
+      view.rerender(nextComponent);
+      open();
+    }
+
+    await act(async () => {
+      if (terminal === "listener rejection") {
+        const listenerError = new Error("listener unavailable");
+
+        reject(listenerError);
+      } else {
+        resolve(transport.unlisten);
+      }
+    });
+
+    const finishedIndicator = screen.queryByTestId("thinking-indicator");
+    const expectedUnlisteners = terminal === "listener rejection" ? 2 : 3;
+
+    expect(finishedIndicator).toBeNull();
+    expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+    expect(transport.unlisten).toHaveBeenCalledTimes(expectedUnlisteners);
+  }
+);
+
+it.each(["dark", "light"])(
+  "retains actionable configuration alerts in the initial %s composer",
+  async (theme) => {
+    document.documentElement.classList.toggle("light", theme === "light");
+    useUIStore.setState({
+      inlineDiscussionPreference: {
+        mode: "dedicated",
+        providerId: "removed",
+        modelId: "removed",
+      },
+    });
+
+    const component = codeFixture();
+
+    render(component);
+
+    const selectButton = screen.getByText("Select code");
+
+    fireEvent.click(selectButton);
+
+    const addCommentButton = screen.getByRole("button", {
+      name: "Add code comment",
+    });
+
+    fireEvent.click(addCommentButton);
+
+    await screen.findByRole("alert");
+    await screen.findByText(
+      /Open Settings → Diffs & code editor → Inline discussions/
+    );
+
+    const questionInput = screen.getByRole("textbox", {
+      name: "New diff comment",
+    });
+
+    fireEvent.change(questionInput, { target: { value: "Question" } });
+
+    const discussButton = screen.getByRole("button", {
+      name: "Discuss inline",
+    });
+    const attachButton = screen.getByRole("button", {
+      name: "Send to main chat",
+    });
+
+    expect(discussButton).toBeDisabled();
+    expect(attachButton).toBeEnabled();
+    expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+  }
+);

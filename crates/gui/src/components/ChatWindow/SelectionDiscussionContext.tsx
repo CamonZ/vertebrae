@@ -1,3 +1,5 @@
+import { useUIStore } from "../../stores/uiStore";
+import { ThinkingIndicator } from "./ThinkingIndicator";
 import { useDiscussionModel } from "../../hooks/useDiscussionModel";
 import { MarkdownContent } from "../shared/MarkdownContent";
 import {
@@ -312,7 +314,13 @@ function MiniThread({
   discussion: DiscussionValue;
 }) {
   const [question, setQuestion] = useState("");
+  const thinkingStyle = useUIStore((state) => state.thinkingIndicatorStyle);
   const choice = useContext(SelectionDiscussionModelContext);
+
+  const lastMessage = thread.messages.at(-1);
+  const waiting =
+    !!thread.requestId &&
+    (lastMessage?.role !== "assistant" || !lastMessage.text);
 
   return (
     <section
@@ -376,9 +384,6 @@ function MiniThread({
           </svg>
         </button>
       </header>
-      {thread.responder && (
-        <p className="selection-mini-speaker">Reply: {thread.responder}</p>
-      )}
       <DiscussionModelNotice />
       <div className="selection-mini-messages">
         {thread.messages.map((message, index) => (
@@ -400,6 +405,11 @@ function MiniThread({
           </article>
         ))}
       </div>
+      {waiting && (
+        <div className="selection-mini-thinking">
+          <ThinkingIndicator style={thinkingStyle} />
+        </div>
+      )}
       <p
         className="sr-only"
         role="status"
@@ -473,14 +483,11 @@ export function DiscussionSnapshot({
 export function DiscussionModelNotice() {
   const choice = useContext(SelectionDiscussionModelContext);
 
-  if (!choice) return null;
+  if (!choice?.error) return null;
 
   return (
-    <p
-      role={choice.error ? "alert" : undefined}
-      className="selection-model-notice"
-    >
-      {choice.error ?? `Next reply: ${choice.label}`}
+    <p role="alert" className="selection-model-notice">
+      {choice.error}
     </p>
   );
 }
