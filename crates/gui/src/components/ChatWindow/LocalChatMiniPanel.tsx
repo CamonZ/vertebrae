@@ -20,6 +20,7 @@ import {
 import { useLocalChatCompletedSessions } from "../../hooks/useLocalChatCompletedSessions";
 import { formatRelative } from "../../utils/formatRelative";
 import { harnessDisplayName } from "./chatHelpers";
+import { Toggle } from "../Toggle";
 import { SearchInput } from "../molecules/SearchInput";
 import { scrollToSpawn, type SpawnOutlineItem } from "./sessionListUtils";
 import { SessionGroupList } from "./SessionGroupList";
@@ -484,17 +485,17 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
           </div>
         </div>
 
-        <label
+        <div
           className="hc-mini-history-completed-toggle"
           data-mini-history-toggle
         >
-          <input
-            type="checkbox"
+          <span>Show completed</span>
+          <Toggle
             checked={showCompleted}
-            onChange={(event) => setShowCompleted(event.target.checked)}
+            onChange={setShowCompleted}
+            label="Show completed"
           />
-          Show completed
-        </label>
+        </div>
 
         <div
           data-testid="local-chat-history-drawer"
@@ -580,7 +581,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                           className="hc-mini-history-ticket-toggle hc-mini-history-toggle"
                           data-mini-history-toggle
                           aria-label={group.label}
-                          title={`${group.label} · ${group.ticketId}`}
+                          title={`${group.entityLevel ? `${group.entityLevel}: ` : ""}${group.label} · ${group.ticketId}`}
                           aria-expanded={expanded}
                           aria-controls={rowsId}
                           onClick={() => toggleTicket(group.id)}
@@ -608,7 +609,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                           <span className="hc-mini-history-ticket-label">
                             {group.label !== group.ticketId
                               ? group.label
-                              : "Ticket"}
+                              : (group.entityLevel ?? "Ticket")}
                           </span>
 
                           <span
@@ -641,6 +642,9 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                       <div
                         className="hc-mini-history-row"
                         data-active={isActive || undefined}
+                        data-completed={
+                          completedSessionIds.has(session.id) || undefined
+                        }
                         data-activity={activityBySessionId?.get(session.id)}
                       >
                         <div className="hc-mini-history-entry">
@@ -661,9 +665,6 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                             aria-current={isActive ? "true" : undefined}
                           >
                             <span className="label">{title}</span>
-                            {completedSessionIds.has(session.id) && (
-                              <span className="meta">Completed</span>
-                            )}
                           </button>
 
                           <div className="hc-mini-history-secondary">
@@ -681,6 +682,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 
                               <ConversationAssociations
                                 session={session}
+                                completed={completedSessionIds.has(session.id)}
                                 hideTicket={groupedSessionIds.has(session.id)}
                               />
 

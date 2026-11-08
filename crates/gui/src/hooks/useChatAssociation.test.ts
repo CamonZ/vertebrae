@@ -5,6 +5,7 @@ import { useChatStore, type ChatMessage } from "../stores/chatStore";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import {
   noteRecordingTarget,
+  readRecord,
   useChatAssociation,
   useChatAssociationDriver,
 } from "./useChatAssociation";
@@ -12,6 +13,7 @@ import {
 vi.mock("../bindings", () => ({
   commands: {
     resolveChatAssociation: vi.fn(),
+    resolveChatAssociationEntity: vi.fn(),
     getCurrentProjectPath: vi.fn(),
     setLocalChatRecordingWorktree: vi.fn(),
   },
@@ -19,7 +21,11 @@ vi.mock("../bindings", () => ({
 vi.mock("../stores/projectScopedStores", () => ({
   getProjectScopeGeneration: vi.fn(() => 0),
 }));
-const TICKET = { id: "f6f6bf5e-2ca1-4e50-bcfa-9e08944eaa78", title: "Retry" };
+const TICKET = {
+  id: "f6f6bf5e-2ca1-4e50-bcfa-9e08944eaa78",
+  title: "Retry",
+  level: "ticket" as const,
+};
 vi.mock("../utils/chatAssociation/candidates", () => ({
   cachedAssociationCandidates: () => [TICKET],
 }));
@@ -31,6 +37,7 @@ const useDriven = (sessionId: string) => {
   useChatAssociationDriver(sessionId);
   return useChatAssociation(sessionId);
 };
+
 const reply = (data: object) =>
   resolve.mockResolvedValueOnce({
     status: "ok",
@@ -49,6 +56,7 @@ const user = (text: string, n: number): ChatMessage => ({
   text,
   timestamp: at(n),
 });
+
 const tool = (input: string, n: number): ChatMessage => ({
   kind: "tool_call",
   toolName: "Bash",
@@ -56,6 +64,7 @@ const tool = (input: string, n: number): ChatMessage => ({
   input,
   timestamp: at(n),
 });
+
 const toolResult = (result: string, n: number): ChatMessage => ({
   kind: "tool_result",
   toolId: `t${n}`,
@@ -63,11 +72,13 @@ const toolResult = (result: string, n: number): ChatMessage => ({
   isError: false,
   timestamp: at(n),
 });
-const SELECT = { selection: { kind: "ticket", ...TICKET } };
+
+const SELECT = { selection: { kind: "entity", ...TICKET } };
 /** A project ticket the UI cache does not hold. */
 const UNCACHED = {
   id: "f17de40f-4496-4d22-8edf-9c2192f4e860",
   title: "Explicit association intents",
+  level: "task" as const,
 };
 /** An existing worktree whose directory and branch omit any ticket short ID. */
 const scratch = { path: "/p/../scratch", branch: "experiment/retry" };
@@ -82,6 +93,7 @@ const bound = (extra: object = {}) => ({
   recentWorktrees: [],
   ...extra,
 });
+
 const main = { path: "/p", branch: "master" };
 const created = {
   path: "/p/.claude/worktrees/f6f6bf5e-codex-retry-status",
@@ -107,6 +119,7 @@ function seed(
       patch(id, { associationDiagnostic: value }),
   } as never);
 }
+
 const setRuntime = (value: object) =>
   act(() =>
     useChatStore.setState((s) => ({
@@ -128,7 +141,12 @@ const push = (message: ChatMessage) =>
 
 describe("useChatAssociation", () => {
   beforeEach(() => {
+    vi.mocked(commands.resolveChatAssociationEntity).mockResolvedValue({
+      status: "ok",
+      data: TICKET,
+    });
     vi.clearAllMocks();
+    resolve.mockReset();
     vi.mocked(getProjectScopeGeneration).mockReturnValue(0);
     setTarget.mockResolvedValue({ status: "ok", data: null } as never);
     vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
@@ -147,15 +165,17 @@ describe("useChatAssociation", () => {
     ]);
     const { result } = renderHook(() => useDriven("s1"));
     await waitFor(() => expect(result.current.record.ticketId).toBe(TICKET.id));
+
     expect(result.current.record.awaitingWorktree).toEqual(["/p"]);
     expect(resolve.mock.calls[0][0]).toMatchObject({
-      ticket_id: null,
+      entity: null,
       worktree_path: null,
     });
 
     reply({ worktrees: [main] }); // inspecting the main checkout is not the new worktree
     push(tool("vtb show f6f6bf5e", 2));
     await waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
+
     expect(result.current.record.worktreePath).toBeNull();
 
     reply({ worktrees: [created] });
@@ -168,6 +188,7 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(result.current.record.worktreePath).toBe(created.path)
     );
+
     expect(result.current.record.awaitingWorktree).toBeNull();
 
     // Once bound, user messages are still checked; tool events are not.
@@ -177,12 +198,14 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(result.current.record.lastProcessedAt).toBe(at(5))
     );
+
     expect(resolve).toHaveBeenCalledTimes(4);
     expect(resolve.mock.calls[3][0]).toMatchObject({
       event_kind: "user",
-      ticket_id: TICKET.id,
+      entity: TICKET,
       worktree_path: created.path,
     });
+
     expect(result.current.record.worktreePath).toBe(created.path);
   });
 
@@ -193,6 +216,7 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(result.current.record.recentWorktrees).toEqual([created])
     );
+
     expect(result.current.record.worktreePath).toBeNull();
 
     reply(SELECT);
@@ -209,11 +233,13 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(result.current.diagnostic).toBe("Decision request timed out.")
     );
+
     expect(result.current.record.lastProcessedAt).toBe(at(1));
 
     reply(SELECT);
     push(user("implement f6f6bf5e", 2));
     await waitFor(() => expect(result.current.record.ticketId).toBe(TICKET.id));
+
     expect(result.current.diagnostic).toBeNull();
   });
 
@@ -222,6 +248,7 @@ describe("useChatAssociation", () => {
     seed([user("implement f6f6bf5e", 1)]);
     renderHook(() => useDriven("s1"));
     await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1));
+
     expect(resolve.mock.calls[0][0].candidate_project_root).toBe("/p");
   });
 
@@ -245,6 +272,7 @@ describe("useChatAssociation", () => {
       },
     } as never);
     await waitFor(() => expect(resolve).toHaveBeenCalledTimes(3));
+
     expect(result.current.record.ticketId).toBeNull();
   });
 
@@ -260,6 +288,7 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(result.current.record.lastProcessedAt).toBe(at(2))
     );
+
     expect(result.current.record.worktreePath).toBeNull();
     expect(result.current.record.awaitingWorktree).toEqual(["/p"]);
   });
@@ -298,6 +327,7 @@ describe("useChatAssociation", () => {
         } as never)
       );
       await waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
+
       expect(result.current.record.ticketId).toBeNull();
     }
   );
@@ -310,11 +340,13 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(first.result.current.record.processedAtCount).toBe(2)
     );
+
     expect(first.result.current.record.recentWorktrees).toEqual([created]);
     first.unmount();
 
     const again = renderHook(() => useDriven("s1"));
     await act(async () => undefined);
+
     expect(resolve).toHaveBeenCalledTimes(2);
     expect(again.result.current.record.recentWorktrees).toEqual([created]);
   });
@@ -337,6 +369,7 @@ describe("useChatAssociation", () => {
     );
     const { result } = renderHook(() => useDriven("s1"));
     await act(async () => undefined);
+
     expect(setTarget).not.toHaveBeenCalled();
 
     push(tool(`ls ${created.path}`, 1));
@@ -350,6 +383,7 @@ describe("useChatAssociation", () => {
         created.branch
       )
     );
+
     expect(setTarget).toHaveBeenCalledTimes(1);
   });
 
@@ -368,6 +402,7 @@ describe("useChatAssociation", () => {
     seed([], bound, { backendSessionId: "local-s1-branch", lifecycle: "idle" });
     renderHook(() => useDriven("s1"));
     await act(async () => undefined);
+
     expect(setTarget).not.toHaveBeenCalled();
     act(() =>
       useChatStore
@@ -397,6 +432,7 @@ describe("useChatAssociation", () => {
     seed([], bound, { backendSessionId: "local-s1-2", lifecycle: "starting" });
     renderHook(() => useDriven("s1"));
     await act(async () => undefined);
+
     expect(setTarget).not.toHaveBeenCalled();
 
     setRuntime({ lifecycle: "idle" });
@@ -455,18 +491,20 @@ describe("useChatAssociation", () => {
       backendSessionId: "local-s1-4",
       lifecycle: "idle",
     });
+
     const { result } = renderHook(() => useDriven("s1"));
 
     await waitFor(() =>
       expect(result.current.diagnostic).toBe("IPC unavailable")
     );
+
     expect(result.current.record.worktreePath).toBe(created.path);
     expect(result.current.record.lastProcessedAt).toBe(at(1));
     expect(setTarget).not.toHaveBeenCalled();
   });
 
   it("binds a ticket absent from the cache by its resolved ID and title", async () => {
-    reply({ selection: { kind: "ticket", ...UNCACHED } });
+    reply({ selection: { kind: "entity", ...UNCACHED } });
     seed([
       user(
         `Let’s tie this conversation with the following ticket ${UNCACHED.id.slice(0, 8)}`,
@@ -477,6 +515,7 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(result.current.record.ticketId).toBe(UNCACHED.id)
     );
+
     expect(result.current.record.ticketTitle).toBe(UNCACHED.title);
     expect(result.current.record.worktreePath).toBeNull();
     expect(result.current.record.awaitingWorktree).toBeNull();
@@ -494,6 +533,7 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(first.result.current.record.worktreePath).toBe(scratch.path)
     );
+
     expect(first.result.current.record.branch).toBe(scratch.branch);
     expect(first.result.current.record.ticketId).toBeNull();
     first.unmount();
@@ -501,6 +541,7 @@ describe("useChatAssociation", () => {
     // Reopened/resumed: the persisted record is reused without a new request.
     const again = renderHook(() => useDriven("s1"));
     await act(async () => undefined);
+
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(again.result.current.record).toMatchObject({
       worktreePath: scratch.path,
@@ -518,11 +559,12 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(again.result.current.record.ticketId).toBe(TICKET.id)
     );
+
     expect(again.result.current.record.worktreePath).toBe(scratch.path);
   });
 
   it("rebinds an explicit new ticket and drops the previous ticket's worktree", async () => {
-    reply({ selection: { kind: "ticket", ...UNCACHED } });
+    reply({ selection: { kind: "entity", ...UNCACHED } });
     seed(
       [
         user(
@@ -536,10 +578,12 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(result.current.record.ticketId).toBe(UNCACHED.id)
     );
+
     expect(resolve.mock.calls[0][0]).toMatchObject({
-      ticket_id: TICKET.id,
+      entity: TICKET,
       worktree_path: created.path,
     });
+
     expect(result.current.record.worktreePath).toBeNull();
     expect(result.current.record.branch).toBeNull();
 
@@ -559,6 +603,7 @@ describe("useChatAssociation", () => {
     await waitFor(() =>
       expect(result.current.record.lastProcessedAt).toBe(at(3))
     );
+
     expect(result.current.record).toMatchObject({
       ticketId: TICKET.id,
       worktreePath: scratch.path,
@@ -580,6 +625,7 @@ describe("useChatAssociation", () => {
     );
     const { result } = renderHook(() => useDriven("s1"));
     await waitFor(() => expect(result.current.diagnostic).toBe(reason));
+
     expect(result.current.record).toMatchObject({
       ticketId: TICKET.id,
       worktreePath: created.path,
@@ -594,13 +640,14 @@ describe("useChatAssociation", () => {
     const { result } = renderHook(() => useDriven("s1"));
     await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1));
 
-    act(() => result.current.correct(TICKET.id.slice(0, 8)));
-    reply({});
+    await act(async () => {
+      await result.current.correct(TICKET.id.slice(0, 8));
+    });
     await act(async () =>
       release({
         status: "ok",
         data: {
-          selection: { kind: "ticket", ...UNCACHED },
+          selection: { kind: "entity", ...UNCACHED },
           worktree: scratch,
           worktrees: [],
           create_worktree: false,
@@ -608,9 +655,17 @@ describe("useChatAssociation", () => {
         },
       } as never)
     );
-    await waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
+
+    expect(resolve).toHaveBeenCalledTimes(1);
     expect(result.current.record.ticketId).toBe(TICKET.id);
     expect(result.current.record.worktreePath).toBeNull();
+    reply({ worktrees: [created] });
+    push(tool(`ls ${created.path}`, 2));
+    await waitFor(() =>
+      expect(result.current.record.worktreePath).toBe(created.path)
+    );
+
+    expect(resolve).toHaveBeenCalledTimes(2);
   });
 
   it("lets a window correct the record the global driver keeps", async () => {
@@ -622,11 +677,107 @@ describe("useChatAssociation", () => {
       expect(view.result.current.record.recentWorktrees).toEqual([created])
     );
 
-    act(() => view.result.current.correct("f6f6bf5e"));
+    await act(async () => {
+      await view.result.current.correct("f6f6bf5e");
+    });
 
     expect(view.result.current.record.ticketId).toBe(TICKET.id);
     expect(view.result.current.record.worktreePath).toBe(created.path);
     expect(view.result.current.diagnostic).toBeNull();
     driver.unmount();
+  });
+  it.each(["epic", "ticket", "task"] as const)(
+    "persists and sends %s association metadata",
+    async (level) => {
+      const entity = { ...UNCACHED, level };
+      reply({ selection: { kind: "entity", ...entity } });
+      seed([user(`Discuss ${entity.id}`, 1)]);
+      const { result } = renderHook(() => useDriven("s1"));
+      await waitFor(() =>
+        expect(result.current.record.entityLevel).toBe(level)
+      );
+
+      expect(
+        readRecord(JSON.parse(JSON.stringify(result.current.record)))
+      ).toMatchObject({
+        ticketId: entity.id,
+        ticketTitle: entity.title,
+        entityLevel: level,
+      });
+      reply({});
+      push(user("create a worktree", 2));
+      await waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
+
+      expect(resolve.mock.calls[1][0].entity).toEqual(entity);
+    }
+  );
+
+  it("loads legacy ticket records with all worktree and processing state intact", () => {
+    const legacy = bound({
+      awaitingWorktree: ["/p"],
+      recentWorktrees: [scratch],
+      lastProcessedAt: at(1),
+    });
+
+    expect(readRecord(JSON.parse(JSON.stringify(legacy)))).toEqual(legacy);
+  });
+
+  it.each(["epic", "ticket", "task"] as const)(
+    "corrects to an uncached %s in the conversation project",
+    async (level) => {
+      seed([], bound());
+      const { result } = renderHook(() => useChatAssociation("s1"));
+      vi.mocked(commands.resolveChatAssociationEntity).mockResolvedValueOnce({
+        status: "ok",
+        data: { ...UNCACHED, level },
+      });
+      await act(async () => {
+        await result.current.correct(UNCACHED.id.slice(0, 8));
+      });
+
+      expect(commands.resolveChatAssociationEntity).toHaveBeenCalledWith(
+        "/p",
+        UNCACHED.id.slice(0, 8)
+      );
+
+      expect(result.current.record).toMatchObject({
+        ticketId: UNCACHED.id,
+        entityLevel: level,
+        ticketTitle: UNCACHED.title,
+        worktreePath: null,
+        branch: null,
+        awaitingWorktree: null,
+      });
+    }
+  );
+
+  it("keeps the record when manual lookup fails and retires older corrections", async () => {
+    seed([], bound());
+    const { result } = renderHook(() => useChatAssociation("s1"));
+    vi.mocked(commands.resolveChatAssociationEntity).mockResolvedValueOnce({
+      status: "error",
+      error: { message: "Unknown or ambiguous entity" },
+    });
+    await expect(result.current.correct("deadbeef")).rejects.toThrow(
+      "Unknown or ambiguous"
+    );
+
+    expect(result.current.record).toEqual(bound());
+    let release!: (value: never) => void;
+    vi.mocked(commands.resolveChatAssociationEntity).mockReturnValueOnce(
+      new Promise((r) => {
+        release = r;
+      })
+    );
+    const old = result.current.correct(UNCACHED.id);
+    await act(async () => {
+      await result.current.correct("");
+    });
+    await act(async () => {
+      release({ status: "ok", data: { ...UNCACHED, level: "epic" } } as never);
+      await old;
+    });
+
+    expect(result.current.record.ticketId).toBeNull();
   });
 });

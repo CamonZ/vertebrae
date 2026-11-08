@@ -3087,10 +3087,46 @@ html.light ::selection {
 .hc-panel .hc-mini-history-completed-toggle {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
   gap: var(--s-2);
   padding: var(--s-2) var(--s-3);
   color: var(--fg-mute);
   font-size: var(--text-11);
+}
+.app-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 16px;
+  padding: 2px;
+  border: 1px solid color-mix(in oklch, var(--fg) 20%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--fg) 5%, transparent);
+  cursor: pointer;
+}
+.app-toggle {
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.app-toggle > span {
+  transition: transform 140ms ease, background-color 140ms ease;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fg-mute);
+}
+.app-toggle[aria-checked="true"] {
+  background: color-mix(in oklch, var(--fg) 18%, transparent);
+  border-color: color-mix(in oklch, var(--fg) 35%, transparent);
+}
+.app-toggle[aria-checked="true"] > span {
+  transform: translateX(10px);
+  background: var(--fg);
+}
+.app-toggle:focus-visible {
+  outline: 2px solid var(--fg-mute);
+  outline-offset: 3px;
 }
 .hc-panel .hc-mini-history-body {
   min-width: 0;
@@ -4443,4 +4479,35 @@ html.light ::selection {
    the positioning context / kind carrier — the left ember line was removed. */
 .kindspine {
   position: relative;
+}
+
+@keyframes completed-conversation-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.hc-panel .hc-mini-history-row[data-completed] {
+  animation: completed-conversation-appear 140ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-toggle,
+  .app-toggle > span {
+    transition: none;
+  }
+  .hc-panel .hc-mini-history-row[data-completed] {
+    animation: none;
+  }
+}
+
+.app-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.app-toggle[data-active-color="primary"] { --toggle-color: var(--accent); }
+.app-toggle[data-active-color="warning"] { --toggle-color: var(--warn); }
+.app-toggle[data-active-color="success"] { --toggle-color: var(--ok); }
+.app-toggle[data-active-color="error"] { --toggle-color: var(--err); }
+.app-toggle[data-active-color="info"] { --toggle-color: var(--info); }
+.app-toggle[data-active-color]:not([data-active-color="neutral"])[aria-checked="true"] {
+  background: color-mix(in oklch, var(--toggle-color) 22%, transparent);
+  border-color: var(--toggle-color);
 }

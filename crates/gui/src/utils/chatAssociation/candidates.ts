@@ -1,18 +1,19 @@
-import type { AssociationTicket, Step, Task } from "../../bindings";
+import type { AssociationEntity, Step, Task } from "../../bindings";
 import { queryClient } from "../../query/queryClient";
 import { queryKeys } from "../../query/queryKeys";
 import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 
-/** Use existing cached tickets only. Reading candidates never starts a query. */
+/** Use existing cached entities only. Reading candidates never starts a query. */
 export function cachedAssociationCandidates(
   generation: number
-): AssociationTicket[] {
+): AssociationEntity[] {
   if (generation !== getProjectScopeGeneration()) return [];
 
   const tasks = new Map<string, Task>();
   const lists = queryClient.getQueriesData<Task[]>({
     queryKey: queryKeys.tasks.lists(generation),
   });
+
   const details = queryClient.getQueriesData<Task>({
     queryKey: queryKeys.tasks.details(generation),
   });
@@ -22,6 +23,7 @@ export function cachedAssociationCandidates(
       tasks.set(task.id, task);
     }
   }
+
   for (const [, task] of details) {
     if (task) {
       tasks.set(task.id, task);
@@ -29,16 +31,19 @@ export function cachedAssociationCandidates(
   }
 
   return [...tasks.values()]
-    .filter((task) => isEligibleTicket(task, generation))
+    .filter((task) => isEligibleEntity(task, generation))
     .map((task) => ({
       id: task.id,
       title: task.title.slice(0, 160),
+      level: task.level,
     }));
 }
 
-function isEligibleTicket(task: Task, generation: number): boolean {
-  if (task.level !== "ticket" || task.archived || task.completed_at)
-    return false;
+function isEligibleEntity(
+  task: Task,
+  generation: number
+): task is Task & { level: AssociationEntity["level"] } {
+  if (!task.level || task.archived || task.completed_at) return false;
 
   const step = task.current_step_id
     ? queryClient.getQueryData<Step>(

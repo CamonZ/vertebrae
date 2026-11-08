@@ -10,13 +10,13 @@ export function ChatAssociation({
 }: {
   record: AssociationRecord;
   diagnostic: string | null;
-  onCorrect: (ticketId: string) => void;
+  onCorrect: (ticketId: string) => void | Promise<void>;
 }) {
   const details = useRef<HTMLDetailsElement>(null);
   const summary = useRef<HTMLElement>(null);
   const [ticket, setTicket] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const label = record.ticketId ? record.ticketId.slice(0, 8) : "No ticket";
+  const label = record.ticketId ? record.ticketId.slice(0, 8) : "No entity";
   return (
     <details
       className="chat-association"
@@ -31,7 +31,7 @@ export function ChatAssociation({
       <summary
         ref={summary}
         aria-label={`Conversation context: ${label}`}
-        title="Conversation details and ticket correction"
+        title="Conversation details and association correction"
       >
         <Icon size="sm">
           <circle cx="12" cy="12" r="9" />
@@ -40,11 +40,14 @@ export function ChatAssociation({
       </summary>
       <div className="association-popover">
         {record.ticketId ? (
-          <a href={`vtb://ticket/${record.ticketId}`}>
-            {record.ticketTitle} · {record.ticketId}
+          <a
+            href={`vtb://${record.entityLevel ?? "ticket"}/${record.ticketId}`}
+          >
+            {record.entityLevel ?? "ticket"}: {record.ticketTitle} ·{" "}
+            {record.ticketId}
           </a>
         ) : (
-          <p>No active ticket established yet.</p>
+          <p>No active epic, ticket or task established yet.</p>
         )}
         <p className="association-path">
           {record.worktreePath
@@ -55,10 +58,10 @@ export function ChatAssociation({
         </p>
         {diagnostic && <p role="status">{diagnostic}</p>}
         <form
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault();
             try {
-              onCorrect(ticket);
+              await onCorrect(ticket);
               setError(null);
             } catch (reason) {
               setError(
@@ -68,7 +71,7 @@ export function ChatAssociation({
           }}
         >
           <label>
-            Ticket ID
+            Epic, ticket or task ID
             <input
               className="input"
               value={ticket}
@@ -78,7 +81,7 @@ export function ChatAssociation({
           </label>
           {error && <p role="alert">{error}</p>}
           <button type="submit" className="btn btn--ghost">
-            Set ticket
+            Set association
           </button>
         </form>
       </div>

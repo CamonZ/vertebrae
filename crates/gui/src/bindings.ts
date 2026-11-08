@@ -890,6 +890,18 @@ async resolveChatAssociation(input: AssociationInput) : Promise<Result<Associati
 }
 },
 /**
+ * Manual correction uses the same project-scoped eligible-entity lookup,
+ * without asking the decision model to reinterpret the user's exact ID.
+ */
+async resolveChatAssociationEntity(projectRoot: string, id: string) : Promise<Result<AssociationEntity, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resolve_chat_association_entity", { projectRoot, id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Uses the configured decision role only. Disabled/unavailable models leave
  * commands unclassified. No transcript, result, or worktree delta is supplied.
  */
@@ -1541,16 +1553,17 @@ export type ArtifactChangedEvent = { artifact_id: string; task_id: string | null
  * Versioned provenance carried by an artifact attachment projection.
  */
 export type ArtifactLinkMetadata = { version: number; content_kind: string; format: string; origin: string; presentation: string; extensions: JsonValue }
+export type AssociationEntity = { id: string; title: string; level: TaskLevel }
 export type AssociationEventKind = "user" | "tool"
 export type AssociationInput = { attempt_id: string | null; project_root: string; event_kind: AssociationEventKind; text: string;
 /**
- * Eligible tickets read from the React Query cache (user events only).
+ * Eligible entities read from the React Query cache (user events only).
  */
-candidates: AssociationTicket[]; candidate_project_root: string | null;
+candidates: AssociationEntity[]; candidate_project_root: string | null;
 /**
  * Current association; only its missing parts are asked about.
  */
-ticket_id: string | null; worktree_path: string | null }
+entity: AssociationEntity | null; worktree_path: string | null }
 export type AssociationResult = { selection: AssociationSelection;
 /**
  * An existing project worktree the user explicitly tied to the conversation.
@@ -1570,8 +1583,7 @@ create_worktree: boolean;
  * resolve; nothing is guessed and the rest of the result still applies.
  */
 diagnostic: string | null }
-export type AssociationSelection = { kind: "keep" } | { kind: "unknown" } | { kind: "ticket"; id: string; title: string }
-export type AssociationTicket = { id: string; title: string }
+export type AssociationSelection = { kind: "keep" } | { kind: "unknown" } | { kind: "entity"; id: string; title: string; level: TaskLevel }
 export type AssociationWorktree = { path: string; branch: string | null }
 /**
  * Code reference - file location reference

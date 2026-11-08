@@ -23,20 +23,24 @@ describe("association candidates from existing server cache", () => {
       ...task,
       title: "Updated title",
     });
+
     expect(cachedAssociationCandidates(generation)).toEqual([
-      { id: task.id, title: "Updated title" },
+      { id: task.id, title: "Updated title", level: "ticket" },
     ]);
+
     expect(fetch).not.toHaveBeenCalled();
   });
   it("does not fetch when the cache is empty or the scope changed", () => {
     const generation = getProjectScopeGeneration();
+
     expect(cachedAssociationCandidates(generation)).toEqual([]);
     queryClient.setQueryData(queryKeys.tasks.list(generation + 1, null), [
       createMockTask(),
     ]);
+
     expect(cachedAssociationCandidates(generation + 1)).toEqual([]);
   });
-  it("excludes archived, completed, non-ticket and finished-step rows", () => {
+  it("excludes archived, completed, finished-step rows", () => {
     const generation = getProjectScopeGeneration();
     const tasks = [
       createMockTask({ id: "active", level: "ticket" }),
@@ -60,8 +64,29 @@ describe("association candidates from existing server cache", () => {
       queryKeys.steps.byId(generation, "finished-step"),
       createMockStep({ id: "finished-step", step_type: "finish" })
     );
+
     expect(
       cachedAssociationCandidates(generation).map((ticket) => ticket.id)
-    ).toEqual(["active"]);
+    ).toEqual(["active", "epic"]);
   });
+  it.each(["epic", "ticket", "task"] as const)(
+    "uses the same eligibility rules for %s",
+    (level) => {
+      const generation = getProjectScopeGeneration();
+      queryClient.setQueryData(queryKeys.tasks.list(generation, null), [
+        createMockTask({ id: "eligible", level }),
+        createMockTask({ id: "archived", level, archived: true }),
+        createMockTask({
+          id: "completed",
+          level,
+          completed_at: "2026-11-08T00:00:00Z",
+        }),
+        createMockTask({ id: "finish", level, step_type: "finish" }),
+      ]);
+
+      expect(cachedAssociationCandidates(generation)).toEqual([
+        { id: "eligible", title: expect.any(String), level },
+      ]);
+    }
+  );
 });

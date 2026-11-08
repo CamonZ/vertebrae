@@ -14,6 +14,7 @@ const association = {
   awaitingWorktree: null,
   recentWorktrees: [],
 };
+
 const session = {
   id: "row",
   association,
@@ -41,9 +42,11 @@ describe("conversation association row", () => {
           }}
         />
       );
+
       expect(screen.queryByRole("img", { name: /^Ticket:/ }) !== null).toBe(
         ticket
       );
+
       expect(screen.queryByRole("img", { name: /^Worktree:/ }) !== null).toBe(
         worktree
       );
@@ -57,11 +60,13 @@ describe("conversation association row", () => {
     const icon = screen.getByRole("img", { name: /^Worktree:/ });
     fireEvent.focus(icon);
     const tooltip = screen.getByRole("tooltip");
+
     expect(tooltip).toHaveTextContent(`${association.worktreePath} (feature)`);
     expect(container).not.toContainElement(tooltip);
     expect(tooltip).toHaveClass("z-[100]");
     expect(icon).toHaveAttribute("aria-describedby", tooltip.id);
     fireEvent.keyDown(icon, { key: "Escape" });
+
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
@@ -69,7 +74,9 @@ describe("conversation association row", () => {
     useChatStore.setState({
       localSessionSummaries: { row: { ...session, association: null } },
     });
+
     const { rerender } = render(<ConversationAssociations session={session} />);
+
     expect(
       screen.queryByRole("img", { name: /^Ticket:/ })
     ).not.toBeInTheDocument();
@@ -85,6 +92,7 @@ describe("conversation association row", () => {
       },
     });
     rerender(<ConversationAssociations session={session} />);
+
     expect(screen.getByRole("img", { name: /^Ticket:/ })).toHaveAccessibleName(
       /Corrected ticket/
     );
@@ -93,10 +101,31 @@ describe("conversation association row", () => {
         session={{ ...session, id: "other", association: null }}
       />
     );
+
     expect(
       screen.queryByRole("img", { name: /^Ticket:/ })
     ).not.toBeInTheDocument();
+
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
+  it.each(["epic", "ticket", "task"] as const)(
+    "identifies the associated %s in its tooltip",
+    (level) => {
+      render(
+        <ConversationAssociations
+          session={{
+            ...session,
+            association: { ...association, entityLevel: level },
+          }}
+        />
+      );
+
+      expect(
+        screen.getByRole("img", {
+          name: new RegExp(`^${level.replace(/^./, (c) => c.toUpperCase())}:`),
+        })
+      ).toHaveAccessibleName(new RegExp(association.ticketId));
+    }
+  );
 });
