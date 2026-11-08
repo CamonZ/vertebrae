@@ -3084,6 +3084,14 @@ html.light ::selection {
   text-transform: uppercase;
   color: var(--fg-mute);
 }
+.hc-panel .hc-mini-history-completed-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  color: var(--fg-mute);
+  font-size: var(--text-11);
+}
 .hc-panel .hc-mini-history-body {
   min-width: 0;
   min-height: 0;
