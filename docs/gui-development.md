@@ -202,6 +202,27 @@ After changing the Rust Tauri types, regenerate bindings with
 `npm run generate:types` and keep `src/bindings.ts` limited to the reviewed
 contract changes.
 
+### Completed conversations in local chat history
+
+The maximized chat sidebar hides conversations associated with a ticket or task
+whose canonical `completed_at` is set. General chats and conversations whose task
+metadata is missing or unavailable remain visible. **Show completed** restores
+these rows with a Completed label; its preference lasts for the mounted sidebar.
+Search and keyboard navigation operate on the visible rows, and empty ticket
+groups disappear. A filtered-empty view offers Show completed.
+
+Completion changes only history visibility: an open conversation remains mounted
+and a running conversation continues. Explicitly revealing a conversation enables
+Show completed and expands its ticket group. Current-project completion changes
+follow the shared task cache's realtime updates. Existing project-scoped task
+lists and details supply completion immediately; only missing associations need
+individual task reads. List summaries are not inserted into full-detail cache
+entries. Other saved projects use
+separate project/generation-scoped completion queries, refresh on revisit, and
+poll every 30 seconds while selected because their project channels are not
+subscribed. These reads use task UUIDs without switching the backend project.
+Unknown-project chats stay visible without fetching task metadata.
+
 ### Local Chat Harnesses (`src-tauri/src/local_chat/`)
 
 Local chat owns session lifecycle and UI options; it owns no provider wire

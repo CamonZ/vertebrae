@@ -21,6 +21,14 @@ import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import type { LocalChatSessionActivity } from "./LocalChatMiniPanel";
 import type { SpawnOutlineItem } from "./sessionListUtils";
 
+const { completionState } = vi.hoisted(() => ({
+  completionState: { ids: new Set<string>() },
+}));
+
+vi.mock("../../hooks/useLocalChatCompletedSessions", () => ({
+  useLocalChatCompletedSessions: () => completionState.ids,
+}));
+
 function makeSession(
   id: string,
   overrides: Partial<LocalChatSessionSummary> = {}
@@ -1240,4 +1248,117 @@ it("renders unassociated chats together after every ticket group", () => {
   expect(
     within(other).getAllByRole("button", { name: /^Load local chat/ })
   ).toHaveLength(2);
+});
+
+describe("completed conversation filtering", () => {
+  const completed = makeSession("finished", {
+    association: { ticketId: "done-ticket" },
+  });
+  const open = makeSession("open", {
+    association: { ticketId: "open-ticket" },
+  });
+  const general = makeSession("general");
+  const groups = [
+    makeGroup("current", "Current project", [completed, open, general]),
+  ];
+
+  it("hides completed groups, preserves general chats, and toggles them back", async () => {
+    completionState.ids = new Set(["finished"]);
+
+    try {
+      render(<ControlledPanel sessionGroups={groups} />);
+
+      expect(
+        screen.queryByRole("button", { name: "done-ticket" })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /Load local chat general/ })
+      ).toBeInTheDocument();
+
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Show completed" })
+      );
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "done-ticket" })
+      );
+
+      expect(screen.getByText("Completed")).toBeInTheDocument();
+
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Show completed" })
+      );
+
+      expect(screen.queryByText("Completed")).not.toBeInTheDocument();
+    } finally {
+      completionState.ids = new Set();
+    }
+  });
+
+  it("refreshes visibility without changing the active conversation and offers an empty recovery", async () => {
+    const onlyCompleted = [
+      makeGroup("current", "Current project", [completed]),
+    ];
+    const onSelect = vi.fn();
+
+    const view = render(
+      <ControlledPanel sessionGroups={onlyCompleted} onSelect={onSelect} />
+    );
+
+    expect(
+      screen.getByRole("button", { name: "done-ticket" })
+    ).toBeInTheDocument();
+
+    completionState.ids = new Set(["finished"]);
+
+    try {
+      view.rerender(
+        <ControlledPanel sessionGroups={onlyCompleted} onSelect={onSelect} />
+      );
+
+      expect(screen.getByRole("status")).toHaveTextContent("No active chats");
+      expect(onSelect).not.toHaveBeenCalled();
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "Show completed" })
+      );
+
+      expect(
+        screen.getByRole("button", { name: "done-ticket" })
+      ).toBeInTheDocument();
+    } finally {
+      completionState.ids = new Set();
+    }
+  });
+
+  it("reveals completed work explicitly and keeps hidden rows out of keyboard navigation", async () => {
+    completionState.ids = new Set(["finished"]);
+    const onSelect = vi.fn();
+
+    try {
+      const view = render(
+        <ControlledPanel sessionGroups={groups} onSelect={onSelect} />
+      );
+
+      const search = screen.getByRole("searchbox", {
+        name: "Search local chats",
+      });
+
+      fireEvent.keyDown(search, { key: "ArrowDown" });
+
+      expect(onSelect).toHaveBeenLastCalledWith("general");
+
+      view.rerender(
+        <ControlledPanel
+          sessionGroups={groups}
+          onSelect={onSelect}
+          revealSession={{ sessionId: "finished", revision: 1 }}
+        />
+      );
+
+      expect(await screen.findByText("Completed")).toBeInTheDocument();
+    } finally {
+      completionState.ids = new Set();
+    }
+  });
 });

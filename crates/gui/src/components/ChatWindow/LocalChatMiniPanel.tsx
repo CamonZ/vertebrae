@@ -17,6 +17,7 @@ import {
   normalizeLocalChatSessionQuery,
   type LocalChatSessionGroup,
 } from "../../utils/localChatSessionGroups";
+import { useLocalChatCompletedSessions } from "../../hooks/useLocalChatCompletedSessions";
 import { formatRelative } from "../../utils/formatRelative";
 import { harnessDisplayName } from "./chatHelpers";
 import { SearchInput } from "../molecules/SearchInput";
@@ -94,6 +95,19 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     (group) => group.id === selectedProjectId
   );
 
+  // Sidebar-only, mount-scoped preference. Filtering never closes a pane or
+  // stops runtime work. An explicit reveal opts back into completed history.
+  const [showCompleted, setShowCompleted] = useState(false);
+  const completedSessionIds = useLocalChatCompletedSessions(selectedProject);
+  const revealPreference = useRef(revealSession);
+
+  useEffect(() => {
+    if (!revealSession || revealPreference.current === revealSession) return;
+
+    revealPreference.current = revealSession;
+    setShowCompleted(true);
+  }, [revealSession]);
+
   const matchingGroups = useMemo(
     () =>
       filterLocalChatSessionGroups(
@@ -104,11 +118,18 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     [selectedProject, searchQuery, excludedProviderThreadIds]
   );
 
-  const sessionItems = useMemo(
+  const matchingSessionItems = useMemo(
     () =>
       matchingGroups.flatMap((group) => group.allSessions ?? group.sessions),
     [matchingGroups]
   );
+
+  const sessionItems = matchingSessionItems.filter(
+    (session) => showCompleted || !completedSessionIds.has(session.id)
+  );
+
+  const hiddenCompletedCount =
+    matchingSessionItems.length - sessionItems.length;
 
   const ticketGroups = useMemo(
     () => groupLocalChatSessionsByTicket(sessionItems),
@@ -463,6 +484,18 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
           </div>
         </div>
 
+        <label
+          className="hc-mini-history-completed-toggle"
+          data-mini-history-toggle
+        >
+          <input
+            type="checkbox"
+            checked={showCompleted}
+            onChange={(event) => setShowCompleted(event.target.checked)}
+          />
+          Show completed
+        </label>
+
         <div
           data-testid="local-chat-history-drawer"
           className="hc-mini-history-body"
@@ -490,9 +523,23 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
               role="status"
               aria-live="polite"
             >
-              {hasSearchQuery && (selectedProject?.sessions.length ?? 0) > 0
-                ? `No local chats match “${searchQuery.trim()}”.`
-                : "No local chats yet."}
+              {hiddenCompletedCount > 0 ? (
+                <>
+                  No active chats{hasSearchQuery ? " match your search" : ""}.
+                  <button
+                    type="button"
+                    data-mini-history-toggle
+                    onClick={() => setShowCompleted(true)}
+                  >
+                    Show completed
+                  </button>
+                </>
+              ) : hasSearchQuery &&
+                (selectedProject?.sessions.length ?? 0) > 0 ? (
+                `No local chats match “${searchQuery.trim()}”.`
+              ) : (
+                "No local chats yet."
+              )}
             </div>
           ) : (
             <div
@@ -614,6 +661,9 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                             aria-current={isActive ? "true" : undefined}
                           >
                             <span className="label">{title}</span>
+                            {completedSessionIds.has(session.id) && (
+                              <span className="meta">Completed</span>
+                            )}
                           </button>
 
                           <div className="hc-mini-history-secondary">

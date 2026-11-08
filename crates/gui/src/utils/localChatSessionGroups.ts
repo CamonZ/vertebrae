@@ -266,6 +266,24 @@ export function groupLocalChatSessionsByProject(
     });
 }
 
+/** Associations use ticketId for both ticket and task UUIDs. */
+export function localChatSessionTaskId(
+  session: LocalChatSessionSummary
+): string | null {
+  const association = session.association;
+
+  if (
+    !association ||
+    typeof association !== "object" ||
+    Array.isArray(association)
+  )
+    return null;
+
+  return typeof association.ticketId === "string" && association.ticketId.trim()
+    ? association.ticketId
+    : null;
+}
+
 export interface LocalChatTicketGroup {
   id: string;
   ticketId: string | null;

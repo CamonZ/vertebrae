@@ -41,6 +41,17 @@ export const queryKeys = {
     detail: (generation: number, id: string) =>
       [...queryKeys.tasks.details(generation), id] as const,
   },
+  localChatCompletion: (
+    generation: number,
+    projectId: string,
+    taskId: string
+  ) =>
+    [
+      ...queryKeys.project(generation),
+      "localChatCompletion",
+      projectId,
+      taskId,
+    ] as const,
   artifacts: {
     all: (generation: number) =>
       [...queryKeys.project(generation), "artifacts"] as const,
