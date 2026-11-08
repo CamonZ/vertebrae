@@ -6,9 +6,15 @@ import type { ChatPane, ChatPaneLayout } from "../stores/chatStore";
 export const MIN_SPLIT_PANE_WIDTH = 360;
 /** Width of the mini-history column that runs alongside split panes. */
 export const MINI_HISTORY_WIDTH = 272;
+/** Shared separator hit target, included in split and history constraints. */
+export const PANE_SEPARATOR_WIDTH = 8;
 
 export function minSplitLayoutWidth(paneCount: number): number {
-  return MINI_HISTORY_WIDTH + MIN_SPLIT_PANE_WIDTH * paneCount;
+  const paneWidth = MIN_SPLIT_PANE_WIDTH * paneCount;
+  const separatorCount = Math.max(0, paneCount - 1);
+  const separatorWidth = separatorCount * PANE_SEPARATOR_WIDTH;
+
+  return MINI_HISTORY_WIDTH + paneWidth + separatorWidth;
 }
 
 interface UseChatPaneManagementOptions {

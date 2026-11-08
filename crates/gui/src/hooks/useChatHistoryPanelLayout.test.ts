@@ -72,15 +72,23 @@ describe("useChatHistoryPanelLayout", () => {
   });
 
   it("limits the sidebar by the number of visible 360px chat panes", () => {
-    expect(maxHistoryWidthForLayout(1040, 1)).toBe(MAX_HISTORY_WIDTH);
-    expect(maxHistoryWidthForLayout(1040, 2)).toBe(320);
-    expect(maxHistoryWidthForLayout(1040, 3)).toBe(MIN_HISTORY_WIDTH);
+    const singlePaneLimit = maxHistoryWidthForLayout(1040, 1);
+    const twoPaneLimit = maxHistoryWidthForLayout(1040, 2);
+    const threePaneLimit = maxHistoryWidthForLayout(1040, 3);
+
+    expect(singlePaneLimit).toBe(MAX_HISTORY_WIDTH);
+    expect(twoPaneLimit).toBe(312);
+    expect(threePaneLimit).toBe(MIN_HISTORY_WIDTH);
   });
 
   it("clamps the effective width when the viewport or split layout shrinks", () => {
-    expect(clampHistoryWidthForLayout(400, 700, 1)).toBe(340);
-    expect(clampHistoryWidthForLayout(400, 1000, 2)).toBe(280);
-    expect(clampHistoryWidthForLayout(200, 1200, 1)).toBe(MIN_HISTORY_WIDTH);
+    const singlePaneWidth = clampHistoryWidthForLayout(400, 700, 1);
+    const twoPaneWidth = clampHistoryWidthForLayout(400, 1000, 2);
+    const minimumWidth = clampHistoryWidthForLayout(200, 1200, 1);
+
+    expect(singlePaneWidth).toBe(340);
+    expect(twoPaneWidth).toBe(272);
+    expect(minimumWidth).toBe(MIN_HISTORY_WIDTH);
   });
 });
 

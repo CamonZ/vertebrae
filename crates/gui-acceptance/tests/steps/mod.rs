@@ -14,3 +14,5 @@ pub mod local_backend;
 pub mod selection_discussions;
 
 pub mod local_chat_hierarchy;
+
+pub mod chat_pane_resize;

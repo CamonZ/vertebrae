@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { MIN_SPLIT_PANE_WIDTH } from "./useChatPaneManagement";
+import {
+  MIN_SPLIT_PANE_WIDTH,
+  PANE_SEPARATOR_WIDTH,
+} from "./useChatPaneManagement";
 
 export const HISTORY_WIDTH_STORAGE_KEY = "chat-window-manager-history-width";
 export const MIN_HISTORY_WIDTH = 272;
@@ -21,11 +24,14 @@ export function maxHistoryWidthForLayout(
   renderedPanelWidth: number,
   paneCount: number
 ): number {
-  const safePaneCount = Number.isFinite(paneCount)
-    ? Math.max(1, Math.floor(paneCount))
+  const integralPaneCount = Number.isFinite(paneCount)
+    ? Math.floor(paneCount)
     : 1;
+  const safePaneCount = Math.max(1, integralPaneCount);
+  const paneWidth = safePaneCount * MIN_SPLIT_PANE_WIDTH;
+  const separatorWidth = (safePaneCount - 1) * PANE_SEPARATOR_WIDTH;
   const availableWidth = Number.isFinite(renderedPanelWidth)
-    ? renderedPanelWidth - safePaneCount * MIN_SPLIT_PANE_WIDTH
+    ? renderedPanelWidth - paneWidth - separatorWidth
     : Number.NaN;
 
   return clampHistoryWidth(availableWidth);
