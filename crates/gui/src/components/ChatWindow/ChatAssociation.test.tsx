@@ -26,12 +26,15 @@ describe("ChatAssociation", () => {
     );
     const trigger = screen.getByLabelText("Conversation context: 97a3edab");
     await u.click(trigger);
+
     expect(screen.getByText("/project/tree-97a3edab (feature)")).toBeVisible();
     expect(
       screen.getByText(/Implement associations · 97a3edab-5e4a/)
     ).toBeVisible();
+
     expect(screen.getByRole("status")).toHaveTextContent("Model offline");
-    await u.type(screen.getByLabelText("Ticket ID"), "{Escape}");
+    await u.type(screen.getByLabelText("Epic, ticket or task ID"), "{Escape}");
+
     expect(trigger.closest("details")).not.toHaveAttribute("open");
     expect(trigger).toHaveFocus();
   });
@@ -49,9 +52,26 @@ describe("ChatAssociation", () => {
       />
     );
     await u.click(screen.getByLabelText("Conversation context: 97a3edab"));
-    await u.type(screen.getByLabelText("Ticket ID"), "deadbeef");
-    await u.click(screen.getByRole("button", { name: "Set ticket" }));
+    await u.type(screen.getByLabelText("Epic, ticket or task ID"), "deadbeef");
+    await u.click(screen.getByRole("button", { name: "Set association" }));
+
     expect(onCorrect).toHaveBeenCalledWith("deadbeef");
     expect(screen.getByRole("alert")).toHaveTextContent("Unknown ticket");
   });
+  it.each(["epic", "ticket", "task"] as const)(
+    "links the associated %s with its typed URI",
+    (level) => {
+      render(
+        <ChatAssociation
+          record={{ ...record, entityLevel: level }}
+          diagnostic={null}
+          onCorrect={vi.fn()}
+        />
+      );
+
+      expect(
+        screen.getByText(new RegExp(`${level}: Implement associations`))
+      ).toHaveAttribute("href", `vtb://${level}/${record.ticketId}`);
+    }
+  );
 });

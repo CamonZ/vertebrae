@@ -1,6 +1,6 @@
-//! Explicit ticket and worktree references in a user message. Only tickets of
+//! Explicit entity and worktree references in a user message. Only entities of
 //! the conversation's project and its real Git worktrees can be named.
-use super::{AssociationTicket, AssociationWorktree};
+use super::{AssociationEntity, AssociationWorktree};
 use async_trait::async_trait;
 use std::path::Path;
 
@@ -13,11 +13,11 @@ pub(super) enum Named<T> {
     Unresolved(String),
 }
 
-/// Project-scoped ticket lookup by an 8-character ID prefix.
+/// Project-scoped entity lookup by a full UUID or 8+ character ID prefix.
 #[async_trait]
-pub(super) trait TicketLookup: Send + Sync {
-    /// The project's single ticket with this ID prefix; `None` when absent or ambiguous.
-    async fn by_prefix(&self, prefix: &str) -> Result<Option<AssociationTicket>, ()>;
+pub(super) trait EntityLookup: Send + Sync {
+    /// The project's single entity with this ID prefix; `None` when absent or ambiguous.
+    async fn by_prefix(&self, prefix: &str) -> Result<Option<AssociationEntity>, ()>;
 }
 
 /// True when `token` is an 8+ character prefix of a hyphenated UUID.
@@ -31,8 +31,8 @@ fn is_id_prefix(token: &str) -> bool {
         })
 }
 
-/// Distinct lowercase ticket ID references (full UUIDs or 8+ character prefixes).
-pub(super) fn ticket_tokens(message: &str) -> Vec<String> {
+/// Distinct lowercase entity ID references (full UUIDs or 8+ character prefixes).
+pub(super) fn entity_tokens(message: &str) -> Vec<String> {
     let mut tokens: Vec<String> = vec![];
     for token in message
         .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
@@ -50,48 +50,48 @@ pub(super) fn mentions_worktree(message: &str) -> bool {
     message.to_lowercase().contains("worktree")
 }
 
-/// The single ticket a message names by ID, from the cache or else the project.
-pub(super) async fn named_ticket(
+/// The single entity a message names by ID, within the conversation project.
+pub(super) async fn named_entity(
     message: &str,
-    candidates: &[AssociationTicket],
-    lookup: &dyn TicketLookup,
-) -> Named<AssociationTicket> {
-    let tokens = ticket_tokens(message);
-    let mut found: Vec<AssociationTicket> = vec![];
+    lookup: &dyn EntityLookup,
+) -> Named<AssociationEntity> {
+    let tokens = entity_tokens(message);
+    if tokens.len() > 4 {
+        return Named::Unresolved(
+            "The message names too many IDs; name one entity to associate.".into(),
+        );
+    }
+
+    let mut found: Vec<AssociationEntity> = vec![];
     let mut unresolved = vec![];
     for token in tokens.iter().take(4) {
-        let cached: Vec<_> = candidates
-            .iter()
-            .filter(|t| t.id.to_lowercase().starts_with(token.as_str()))
-            .collect();
-        let ticket = match cached.as_slice() {
-            [one] => Some((*one).clone()),
-            [] => match lookup.by_prefix(&token[..8]).await {
-                // An 8-character match must still match the whole reference.
-                Ok(ticket) => ticket.filter(|t| t.id.to_lowercase().starts_with(token.as_str())),
-                Err(()) => {
-                    return Named::Unresolved(format!(
-                        "Could not look up ticket {token}; the association was kept."
-                    ))
-                }
-            },
-            _ => None,
+        // The cache may contain only one of several matching project records.
+        // Resolve the entire reference in the owning project before selecting.
+        let entity = match lookup.by_prefix(token).await {
+            Ok(entity) => entity.filter(|t| t.id.to_lowercase().starts_with(token.as_str())),
+            Err(()) => {
+                return Named::Unresolved(format!(
+                    "Could not look up entity {token}; the association was kept."
+                ))
+            }
         };
-        match ticket {
-            Some(ticket) if !found.iter().any(|f| f.id == ticket.id) => found.push(ticket),
+
+        match entity {
+            Some(entity) if !found.iter().any(|f| f.id == entity.id) => found.push(entity),
             Some(_) => (),
             None => unresolved.push(token.as_str()),
         }
     }
+
     match (found.len(), unresolved.is_empty()) {
         (1, true) => Named::One(found.remove(0)),
         (0, true) => Named::Nothing,
         (_, false) => Named::Unresolved(format!(
-            "No single ticket in this project matches {}. Use its full ID or a unique 8-character short ID.",
+            "No single entity in this project matches {}. Use its full ID or a unique 8-character short ID.",
             unresolved.join(", ")
         )),
         _ => Named::Unresolved(
-            "The message names several tickets; name one to associate.".into(),
+            "The message names several entities; name one to associate.".into(),
         ),
     }
 }
@@ -114,6 +114,7 @@ pub(super) fn named_worktree(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
     };
+
     let mut found: Vec<&AssociationWorktree> = vec![];
     let tokens = message
         .split(|c: char| {
@@ -141,12 +142,14 @@ pub(super) fn named_worktree(
                             == 1)
             }
         });
+
         for worktree in matches {
             if !found.contains(&worktree) {
                 found.push(worktree);
             }
         }
     }
+
     match found.as_slice() {
         [] => Named::Nothing,
         [one] => Named::One((*one).clone()),
@@ -161,95 +164,94 @@ pub(super) mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// A project's tickets, as the project-scoped backend would resolve them.
-    pub(in super::super) struct ProjectTickets {
-        pub tickets: Vec<AssociationTicket>,
+    /// A project's entities, as the project-scoped backend would resolve them.
+    pub(in super::super) struct ProjectEntities {
+        pub entities: Vec<AssociationEntity>,
         pub fail: bool,
         pub asked: Mutex<Vec<String>>,
     }
-    impl ProjectTickets {
-        pub fn new(tickets: Vec<AssociationTicket>) -> Self {
+
+    impl ProjectEntities {
+        pub fn new(entities: Vec<AssociationEntity>) -> Self {
             Self {
-                tickets,
+                entities,
                 fail: false,
                 asked: Mutex::new(vec![]),
             }
         }
     }
     #[async_trait]
-    impl TicketLookup for ProjectTickets {
-        async fn by_prefix(&self, prefix: &str) -> Result<Option<AssociationTicket>, ()> {
+    impl EntityLookup for ProjectEntities {
+        async fn by_prefix(&self, prefix: &str) -> Result<Option<AssociationEntity>, ()> {
             self.asked.lock().unwrap().push(prefix.into());
             if self.fail {
                 return Err(());
             }
-            let mut matches = self.tickets.iter().filter(|t| t.id.starts_with(prefix));
+
+            let mut matches = self.entities.iter().filter(|t| t.id.starts_with(prefix));
             Ok(match (matches.next(), matches.next()) {
-                (Some(ticket), None) => Some(ticket.clone()),
+                (Some(entity), None) => Some(entity.clone()),
                 _ => None,
             })
         }
     }
 
-    fn ticket(id: &str) -> AssociationTicket {
-        AssociationTicket {
+    fn entity(id: &str) -> AssociationEntity {
+        AssociationEntity {
             id: id.into(),
-            title: format!("Ticket {}", &id[..8]),
+            title: format!("Entity {}", &id[..8]),
+            level: crate::types::TaskLevel::Ticket,
         }
     }
+
     const CACHED: &str = "f6f6bf5e-2ca1-4e50-bcfa-9e08944eaa78";
     const UNCACHED: &str = "f17de40f-4496-4d22-8edf-9c2192f4e860";
 
     #[test]
-    fn ticket_tokens_accept_full_ids_and_short_ids_only() {
+    fn entity_tokens_accept_full_ids_and_short_ids_only() {
         assert_eq!(
-            ticket_tokens(&format!("look at {UNCACHED}, then F6F6BF5E.")),
+            entity_tokens(&format!("look at {UNCACHED}, then F6F6BF5E.")),
             [UNCACHED, "f6f6bf5e"]
         );
-        assert!(ticket_tokens("commit 470c1274abcdef0123 and f6f6bf5 or deadbee").is_empty());
-        assert!(ticket_tokens("worktree vertebrae-f17de40f").is_empty());
-        assert_eq!(ticket_tokens("f17de40f f17de40f-"), ["f17de40f"]);
+
+        assert!(entity_tokens("commit 470c1274abcdef0123 and f6f6bf5 or deadbee").is_empty());
+        assert!(entity_tokens("worktree vertebrae-f17de40f").is_empty());
+        assert_eq!(entity_tokens("f17de40f f17de40f-"), ["f17de40f"]);
     }
 
     #[tokio::test]
-    async fn full_and_short_ids_select_the_same_ticket_in_or_out_of_the_cache() {
-        let project = ProjectTickets::new(vec![ticket(CACHED), ticket(UNCACHED)]);
-        let cache = [ticket(CACHED)];
+    async fn full_and_short_ids_select_the_same_project_entity() {
+        let project = ProjectEntities::new(vec![entity(CACHED), entity(UNCACHED)]);
         for id in [CACHED, &CACHED[..8], UNCACHED, &UNCACHED[..8]] {
             let expected = if id.starts_with("f6") {
                 CACHED
             } else {
                 UNCACHED
             };
+
             for message in [
                 format!("Let’s look at {id}, then let’s create a worktree for it and implement it there"),
-                format!("Create a worktree for the following ticket {id}"),
-                format!("Let’s tie this conversation with the following ticket {id}"),
+                format!("Create a worktree for the following entity {id}"),
+                format!("Let’s tie this conversation with the following entity {id}"),
             ] {
                 assert_eq!(
-                    named_ticket(&message, &cache, &project).await,
-                    Named::One(ticket(expected)),
+                    named_entity(&message, &project).await,
+                    Named::One(entity(expected)),
                     "{message}"
                 );
             }
         }
-        // Cached tickets never reach the backend.
-        assert!(project
-            .asked
-            .lock()
-            .unwrap()
-            .iter()
-            .all(|p| p == "f17de40f"));
+        assert!(!project.asked.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn unknown_foreign_or_ambiguous_ids_are_unresolved() {
-        let project = ProjectTickets::new(vec![
-            ticket(CACHED),
-            ticket("97a3edab-5e4a-40a8-b580-19708657a222"),
-            ticket("97a3edab-0000-40a8-b580-19708657a222"),
+        let project = ProjectEntities::new(vec![
+            entity(CACHED),
+            entity("97a3edab-5e4a-40a8-b580-19708657a222"),
+            entity("97a3edab-0000-40a8-b580-19708657a222"),
         ]);
-        // Same short ID as a project ticket, but a different (foreign) full ID.
+        // Same short ID as a project entity, but a different (foreign) full ID.
         let foreign = "f6f6bf5e-0000-4000-8000-000000000000";
         for message in [
             format!("tie this to {foreign}"),
@@ -257,27 +259,23 @@ pub(super) mod tests {
             "tie this to 97a3edab".into(),
         ] {
             assert!(
-                matches!(
-                    named_ticket(&message, &[], &project).await,
-                    Named::Unresolved(_)
-                ),
+                matches!(named_entity(&message, &project).await, Named::Unresolved(_)),
                 "{message}"
             );
         }
         assert!(matches!(
-            named_ticket("compare f6f6bf5e and 97a3edab-5e4a", &[], &project).await,
+            named_entity("compare f6f6bf5e and 97a3edab-5e4a", &project).await,
             Named::Unresolved(_)
         ));
-        assert_eq!(
-            named_ticket("no reference", &[], &project).await,
-            Named::Nothing
-        );
-        let down = ProjectTickets {
+
+        assert_eq!(named_entity("no reference", &project).await, Named::Nothing);
+        let down = ProjectEntities {
             fail: true,
-            ..ProjectTickets::new(vec![])
+            ..ProjectEntities::new(vec![])
         };
+
         assert!(matches!(
-            named_ticket("tie this to f17de40f", &[], &down).await,
+            named_entity("tie this to f17de40f", &down).await,
             Named::Unresolved(_)
         ));
     }
@@ -291,22 +289,27 @@ pub(super) mod tests {
             std::fs::create_dir_all(&path).unwrap();
             path.to_string_lossy().into_owned()
         };
+
         let main = AssociationWorktree {
             path: dir("main"),
             branch: Some("master".into()),
         };
+
         let spike = AssociationWorktree {
             path: dir("scratch"),
             branch: Some("experiment/retry".into()),
         };
+
         let twin_a = AssociationWorktree {
             path: dir("a/twin"),
             branch: None,
         };
+
         let twin_b = AssociationWorktree {
             path: dir("b/twin"),
             branch: None,
         };
+
         let inventory = [main.clone(), spike.clone(), twin_a.clone(), twin_b];
         let named = |message: &str| named_worktree(message, &inventory);
         for message in [
@@ -329,10 +332,41 @@ pub(super) mod tests {
             named("use scratch or master"),
             Named::Unresolved(_)
         ));
+
         assert_eq!(named("use /elsewhere/scratch"), Named::Nothing);
         assert_eq!(
             named("tie this conversation with the worktree"),
             Named::Nothing
         );
+    }
+
+    #[tokio::test]
+    async fn every_level_resolves_full_and_short_ids() {
+        for level in [
+            crate::types::TaskLevel::Epic,
+            crate::types::TaskLevel::Ticket,
+            crate::types::TaskLevel::Task,
+        ] {
+            let mut entity = entity(UNCACHED);
+            entity.level = level;
+            let project = ProjectEntities::new(vec![entity.clone()]);
+            for id in [UNCACHED, &UNCACHED[..8]] {
+                assert_eq!(named_entity(id, &project).await, Named::One(entity.clone()));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn ambiguous_short_ids_require_a_full_id() {
+        let one = entity(CACHED);
+        let two = entity("f6f6bf5e-0000-4000-8000-000000000000");
+        let project = ProjectEntities::new(vec![one.clone(), two]);
+
+        assert!(matches!(
+            named_entity(&CACHED[..8], &project).await,
+            Named::Unresolved(_)
+        ));
+
+        assert_eq!(named_entity(CACHED, &project).await, Named::One(one));
     }
 }

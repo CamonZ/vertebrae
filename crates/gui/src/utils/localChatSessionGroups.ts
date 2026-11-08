@@ -170,6 +170,7 @@ function buildProjectLookup(
     const normalizedPath = normalizeProjectPath(project.path);
     if (normalizedPath) lookup.set(normalizedPath, project);
   }
+
   return lookup;
 }
 
@@ -253,6 +254,7 @@ export function groupLocalChatSessionsByProject(
       if (a.isCurrentProject !== b.isCurrentProject) {
         return a.isCurrentProject ? -1 : 1;
       }
+
       if (a.isFallback !== b.isFallback) return a.isFallback ? 1 : -1;
 
       const aNewest = a.sessions[0];
@@ -266,7 +268,7 @@ export function groupLocalChatSessionsByProject(
     });
 }
 
-/** Associations use ticketId for both ticket and task UUIDs. */
+/** The legacy ticketId field holds epic, ticket and task UUIDs. */
 export function localChatSessionTaskId(
   session: LocalChatSessionSummary
 ): string | null {
@@ -287,6 +289,7 @@ export function localChatSessionTaskId(
 export interface LocalChatTicketGroup {
   id: string;
   ticketId: string | null;
+  entityLevel?: "epic" | "task";
   label: string;
   sessions: LocalChatSessionSummary[];
 }
@@ -318,6 +321,9 @@ export function groupLocalChatSessionsByTicket(
       id,
       label: ticketId ? title || ticketId : "Other chats",
       ticketId,
+      ...(record?.entityLevel === "epic" || record?.entityLevel === "task"
+        ? { entityLevel: record.entityLevel }
+        : {}),
       sessions: [],
     };
 

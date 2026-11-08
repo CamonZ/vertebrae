@@ -207,7 +207,7 @@ contract changes.
 The maximized chat sidebar hides conversations associated with a ticket or task
 whose canonical `completed_at` is set. General chats and conversations whose task
 metadata is missing or unavailable remain visible. **Show completed** restores
-these rows with a Completed label; its preference lasts for the mounted sidebar.
+these rows with a completion check icon beside their association icons; its preference lasts for the mounted sidebar.
 Search and keyboard navigation operate on the visible rows, and empty ticket
 groups disappear. A filtered-empty view offers Show completed.
 

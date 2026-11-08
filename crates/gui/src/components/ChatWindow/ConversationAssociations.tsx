@@ -9,9 +9,11 @@ import "./chatAssociation.css";
 export function ConversationAssociations({
   session,
   hideTicket = false,
+  completed = false,
 }: {
   session: LocalChatSessionSummary;
   hideTicket?: boolean;
+  completed?: boolean;
 }) {
   const liveSession = useChatStore(
     (state) => state.localSessionSummaries[session.id]
@@ -19,7 +21,7 @@ export function ConversationAssociations({
 
   const record = readRecord((liveSession ?? session).association);
   const ticket = record.ticketId
-    ? `Ticket: ${record.ticketId}${record.ticketTitle ? ` · ${record.ticketTitle}` : ""}`
+    ? `${(record.entityLevel ?? "ticket").replace(/^./, (c) => c.toUpperCase())}: ${record.ticketId}${record.ticketTitle ? ` · ${record.ticketTitle}` : ""}`
     : null;
   const worktree = record.worktreePath
     ? `Worktree: ${record.worktreePath}${record.branch ? ` (${record.branch})` : ""}`
@@ -40,6 +42,17 @@ export function ConversationAssociations({
             <Icon size="xs">
               <path d="M4 5h16v5a2 2 0 000 4v5H4v-5a2 2 0 000-4V5Z" />
               <path d="M9 5v14" />
+            </Icon>
+          </span>
+        </Tooltip>
+      )}
+
+      {completed && (
+        <Tooltip portal label="Completed" placement="right">
+          <span tabIndex={0} role="img" aria-label="Completed conversation">
+            <Icon size="xs">
+              <circle cx="12" cy="12" r="9" />
+              <path d="m8 12 3 3 5-6" />
             </Icon>
           </span>
         </Tooltip>

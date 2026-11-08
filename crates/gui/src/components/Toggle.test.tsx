@@ -18,56 +18,65 @@ describe("Toggle", () => {
     it("renders as a switch button", () => {
       render(<Toggle {...defaultProps} />);
       const toggle = screen.getByRole("switch");
+
       expect(toggle).toBeInTheDocument();
     });
 
     it("has correct aria-label", () => {
       render(<Toggle {...defaultProps} label="Enable feature" />);
+
       expect(screen.getByLabelText("Enable feature")).toBeInTheDocument();
     });
 
     it("shows unchecked state when checked is false", () => {
       render(<Toggle {...defaultProps} checked={false} />);
       const toggle = screen.getByRole("switch");
+
       expect(toggle).toHaveAttribute("aria-checked", "false");
     });
 
     it("shows checked state when checked is true", () => {
       render(<Toggle {...defaultProps} checked={true} />);
       const toggle = screen.getByRole("switch");
+
       expect(toggle).toHaveAttribute("aria-checked", "true");
     });
   });
 
   describe("colors", () => {
-    it("uses primary color by default when checked", () => {
+    it("uses neutral color by default when checked", () => {
       render(<Toggle {...defaultProps} checked={true} />);
       const toggle = screen.getByRole("switch");
-      expect(toggle.className).toContain("bg-accent");
+
+      expect(toggle).toHaveAttribute("data-active-color", "neutral");
     });
 
     it("uses warning color when activeColor is warning", () => {
       render(<Toggle {...defaultProps} checked={true} activeColor="warning" />);
       const toggle = screen.getByRole("switch");
-      expect(toggle.className).toContain("bg-warn");
+
+      expect(toggle).toHaveAttribute("data-active-color", "warning");
     });
 
     it("uses success color when activeColor is success", () => {
       render(<Toggle {...defaultProps} checked={true} activeColor="success" />);
       const toggle = screen.getByRole("switch");
-      expect(toggle.className).toContain("bg-ok");
+
+      expect(toggle).toHaveAttribute("data-active-color", "success");
     });
 
     it("uses error color when activeColor is error", () => {
       render(<Toggle {...defaultProps} checked={true} activeColor="error" />);
       const toggle = screen.getByRole("switch");
-      expect(toggle.className).toContain("bg-err");
+
+      expect(toggle).toHaveAttribute("data-active-color", "error");
     });
 
-    it("uses tertiary background when unchecked", () => {
+    it("keeps the neutral variant when unchecked", () => {
       render(<Toggle {...defaultProps} checked={false} />);
       const toggle = screen.getByRole("switch");
-      expect(toggle.className).toContain("bg-bg-2");
+
+      expect(toggle).toHaveAttribute("data-active-color", "neutral");
     });
   });
 
@@ -104,6 +113,7 @@ describe("Toggle", () => {
     it("shows disabled styling when disabled", () => {
       render(<Toggle {...defaultProps} disabled />);
       const toggle = screen.getByRole("switch");
+
       expect(toggle).toBeDisabled();
     });
   });
