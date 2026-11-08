@@ -13,6 +13,7 @@ interface SessionListGroup {
 interface SessionGroupListProps<Group extends SessionListGroup> {
   sessionGroups: Group[];
   activeSessionId: string;
+  getChildGroups?: (group: Group) => Group[];
   /** Render a single session row. The list keys rows by session id. */
   renderRow: (
     session: LocalChatSessionSummary,
@@ -33,6 +34,7 @@ export function SessionGroupList<Group extends SessionListGroup>({
   activeSessionId,
   renderRow,
   renderGroup,
+  getChildGroups,
 }: SessionGroupListProps<Group>) {
   return (
     <>
@@ -44,6 +46,22 @@ export function SessionGroupList<Group extends SessionListGroup>({
             })}
           </Fragment>
         ));
+
+        const children = getChildGroups?.(group) ?? [];
+
+        if (children.length) {
+          rows.unshift(
+            <SessionGroupList
+              key="child-groups"
+              sessionGroups={children}
+              activeSessionId={activeSessionId}
+              getChildGroups={getChildGroups}
+              renderRow={renderRow}
+              renderGroup={renderGroup}
+            />
+          );
+        }
+
         return <Fragment key={group.id}>{renderGroup(group, rows)}</Fragment>;
       })}
     </>

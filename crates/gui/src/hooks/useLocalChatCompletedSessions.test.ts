@@ -8,7 +8,10 @@ import {
 } from "../stores/projectScopedStores";
 import { createMockTask } from "../test/test-utils";
 import type { LocalChatSessionGroup } from "../utils/localChatSessionGroups";
-import { useLocalChatCompletedSessions } from "./useLocalChatCompletedSessions";
+import {
+  useLocalChatCompletedSessions,
+  useLocalChatSessionMetadata,
+} from "./useLocalChatCompletedSessions";
 
 vi.mock("../bindings", () => ({ commands: { getTask: vi.fn() } }));
 
@@ -399,4 +402,32 @@ describe("local chat completion metadata", () => {
     expect(result.current.size).toBe(0);
     expect(commands.getTask).not.toHaveBeenCalled();
   });
+});
+
+it("resolves uncached parents and grandparents without inheriting their completion", async () => {
+  vi.mocked(commands.getTask).mockImplementation(async (id) => {
+    const parentId = id === "task" ? "ticket" : id === "ticket" ? "epic" : null;
+    const completedAt = id === "task" ? null : "2026-01-02";
+    const task = createMockTask({
+      id,
+      parent_id: parentId,
+      completed_at: completedAt,
+    });
+
+    return { status: "ok", data: task };
+  });
+
+  const project = group();
+  const sessions = project.sessions.slice(1, 2);
+  const selected = { ...project, sessions };
+  const { result } = renderHook(() => useLocalChatSessionMetadata(selected));
+
+  await waitFor(() => {
+    const taskIds = [...result.current.tasks.keys()].sort();
+
+    expect(taskIds).toEqual(["epic", "task", "ticket"]);
+  });
+
+  expect(result.current.completedSessionIds.size).toBe(0);
+  expect(commands.getTask).toHaveBeenCalledTimes(3);
 });

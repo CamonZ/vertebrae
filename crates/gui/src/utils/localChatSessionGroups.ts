@@ -1,4 +1,4 @@
-import type { SavedProject } from "../bindings";
+import type { SavedProject, Task } from "../bindings";
 import type { LocalChatSessionSummary } from "./localChatPersistence";
 import {
   compareLocalChatSessionRecency,
@@ -292,6 +292,7 @@ export interface LocalChatTicketGroup {
   entityLevel?: "epic" | "task";
   label: string;
   sessions: LocalChatSessionSummary[];
+  children?: LocalChatTicketGroup[];
 }
 
 /** Preserve recency within groups and collect unassociated chats after tickets. */
@@ -338,6 +339,99 @@ export function groupLocalChatSessionsByTicket(
   groups.delete("ungrouped");
 
   return [...groups.values(), ...(ungrouped ? [ungrouped] : [])];
+}
+
+/** Build only ancestors of visible rows, preserving first-seen sibling recency.
+ * Missing metadata leaves a UUID-labelled ancestor; cycles stop at the last
+ * valid edge so no conversation can disappear into an unreachable group.
+ * Inputs must belong to one project (as selected by the project grouping).
+ */
+export function groupLocalChatSessionsByHierarchy(
+  sessions: LocalChatSessionSummary[],
+  tasks: ReadonlyMap<string, Pick<Task, "id" | "title" | "level" | "parent_id">>
+): LocalChatTicketGroup[] {
+  const groups = new Map<string, LocalChatTicketGroup>();
+  const parentById = new Map<string, string>();
+  const direct = groupLocalChatSessionsByTicket(sessions);
+
+  for (const group of direct) groups.set(group.id, { ...group, children: [] });
+
+  for (const group of direct) {
+    let id = group.ticketId;
+    const visited = new Set<string>();
+
+    while (id) {
+      visited.add(id);
+
+      const metadata = tasks.get(id);
+      const node = groups.get(`ticket:${id}`)!;
+
+      if (metadata) {
+        node.label = metadata.title.trim() || node.label;
+
+        if (metadata.level === "epic" || metadata.level === "task")
+          node.entityLevel = metadata.level;
+        else delete node.entityLevel;
+      }
+
+      const parentId = metadata?.parent_id;
+      if (!parentId || visited.has(parentId)) break;
+
+      const parentGroupId = `ticket:${parentId}`;
+
+      if (!groups.has(parentGroupId)) {
+        groups.set(parentGroupId, {
+          id: parentGroupId,
+          ticketId: parentId,
+          label: parentId,
+          sessions: [],
+          children: [],
+        });
+      }
+
+      // Detect edges already established by another starting entity as well.
+      let ancestor: string | undefined = parentId;
+      const chain = new Set([id]);
+
+      while (ancestor && !chain.has(ancestor)) {
+        chain.add(ancestor);
+        ancestor = parentById.get(ancestor);
+      }
+
+      if (ancestor) break;
+
+      parentById.set(id, parentId);
+      id = parentId;
+    }
+  }
+
+  const roots: LocalChatTicketGroup[] = [];
+
+  for (const group of groups.values()) {
+    const parentId = group.ticketId && parentById.get(group.ticketId);
+
+    if (parentId) {
+      const parent = groups.get(`ticket:${parentId}`)!;
+
+      parent.children!.push(group);
+    } else if (group.ticketId) {
+      roots.push(group);
+    }
+  }
+
+  const other = groups.get("ungrouped");
+
+  return [...roots, ...(other ? [other] : [])];
+}
+
+/** Preorder groups; consumers render each group's children before its rows. */
+export function flattenLocalChatTicketGroups(
+  groups: LocalChatTicketGroup[]
+): LocalChatTicketGroup[] {
+  return groups.flatMap((group) => [
+    group,
+    ...flattenLocalChatTicketGroups(group.children ?? []),
+  ]);
 }
 
 export function selectedLocalChatProject(
