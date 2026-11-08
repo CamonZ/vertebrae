@@ -1,3 +1,5 @@
+import { isStatechartMetadata } from "./statechart";
+import { StatechartPreview } from "./StatechartPreview";
 import type { CSSProperties } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -62,6 +64,11 @@ function RawArtifactBody({
  */
 export function ArtifactPreviewBody({ artifact }: ArtifactPreviewBodyProps) {
   const metadata = artifact.metadata;
+
+  if (isStatechartMetadata(metadata)) {
+    return <StatechartPreview body={artifact.body} />;
+  }
+
   if (!metadata) {
     return (
       <RawArtifactBody

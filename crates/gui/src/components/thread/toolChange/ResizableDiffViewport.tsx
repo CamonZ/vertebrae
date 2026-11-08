@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
+import { InlineResizeHandle } from "../../shared/InlineResizeHandle";
 import { useNearViewport } from "../../../hooks/useNearViewport";
 
 export const DEFAULT_DIFF_HEIGHT = 360;
@@ -45,7 +46,7 @@ export function ResizableDiffViewport({
     return () => observer.disconnect();
   }, [gated]);
 
-  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+  const onPointerDown = (event: PointerEvent<HTMLSpanElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -53,17 +54,17 @@ export function ResizableDiffViewport({
     drag.current = { startY: event.clientY, base: rendered || limit };
     setResizing(true);
   };
-  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+  const onPointerMove = (event: PointerEvent<HTMLSpanElement>) => {
     if (!drag.current) return;
     setLimit(clamp(drag.current.base + event.clientY - drag.current.startY));
   };
-  const endDrag = (event: PointerEvent<HTMLDivElement>) => {
+  const endDrag = (event: PointerEvent<HTMLSpanElement>) => {
     if (!drag.current) return;
     drag.current = null;
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     setResizing(false);
   };
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLSpanElement>) => {
     const delta =
       event.key === "ArrowDown"
         ? KEY_STEP
@@ -88,17 +89,12 @@ export function ResizableDiffViewport({
       >
         {gated ? placeholder(limit) : children}
       </div>
-      <div
-        className="evdiff-handle"
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize diff"
-        aria-valuenow={limit}
-        aria-valuemin={MIN_DIFF_HEIGHT}
-        aria-valuemax={MAX_DIFF_HEIGHT}
-        tabIndex={0}
-        title="Drag to resize"
-        {...(resizing ? { "data-resizing": "" } : {})}
+      <InlineResizeHandle
+        label="Resize diff"
+        value={limit}
+        minimum={MIN_DIFF_HEIGHT}
+        maximum={MAX_DIFF_HEIGHT}
+        resizing={resizing}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}

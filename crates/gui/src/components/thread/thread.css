@@ -242,10 +242,6 @@
 .evdiff-plain { margin: 0; padding: 0 var(--s-2); font-family: var(--mono); font-size: 13px; line-height: 20px; white-space: pre; overflow: hidden; color: var(--fg-soft); }
 .evdiff-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
 .evdiff-scroll::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-xs); }
-.evdiff-handle { position: relative; height: 10px; border-top: 1px solid var(--line); background: var(--bg-2); cursor: ns-resize; touch-action: none; }
-.evdiff-handle::after { content: ""; position: absolute; left: 50%; top: 3px; width: 32px; height: 3px; margin-left: -16px; border-radius: 2px; background: var(--line-strong); transition: background var(--t-fast) var(--ease); }
-.evdiff-handle:hover::after, .evdiff-handle[data-resizing]::after, .evdiff-handle:focus-visible::after { background: var(--accent); }
-.evdiff-handle:focus-visible { outline: none; }
 
 /* live activity — compact provider telemetry, not durable prose */
 .evrow--activity .evbody { min-width: 0; }

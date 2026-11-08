@@ -6,6 +6,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { ArtifactEntityEmbed } from "./ArtifactEntityEmbed";
 import { useInRouterContext, useNavigate } from "react-router-dom";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import { CopyIdButton } from "./EntityId";
@@ -180,9 +181,16 @@ export function VtbEntityMarkdownLink({
   target,
   children,
 }: Omit<VtbEntityLinkProps, "onOpen">) {
-  return useInRouterContext() ? (
+  const routed = useInRouterContext();
+  const link = routed ? (
     <RoutedVtbEntityLink target={target}>{children}</RoutedVtbEntityLink>
   ) : (
     <BrowserVtbEntityLink target={target}>{children}</BrowserVtbEntityLink>
+  );
+
+  return target.type === "artifact" ? (
+    <ArtifactEntityEmbed id={target.id}>{link}</ArtifactEntityEmbed>
+  ) : (
+    link
   );
 }
