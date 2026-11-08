@@ -903,7 +903,7 @@ describe("ChatWindowManager", () => {
   it("clamps the history sidebar when a second pane consumes the available width", async () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
-      value: 1064,
+      value: 1072,
     });
     localStorage.setItem(HISTORY_WIDTH_STORAGE_KEY, "400");
     const user = userEvent.setup();
@@ -913,7 +913,7 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
     const handle = screen.getByTestId("chat-history-resize-handle");
-    expect(handle).toHaveAttribute("aria-valuemax", "632");
+    expect(handle).toHaveAttribute("aria-valuemax", "640");
     expect(screen.getByTestId("local-chat-mini-panel")).toHaveAttribute(
       "data-sidebar-width",
       "400"
@@ -1528,7 +1528,7 @@ describe("ChatWindowManager", () => {
   it("keeps the sidebar bounds and pane minimum width through split and viewport changes", async () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
-      value: 1064,
+      value: 1072,
     });
     localStorage.setItem(HISTORY_WIDTH_STORAGE_KEY, "400");
     const user = userEvent.setup();
@@ -1561,12 +1561,14 @@ describe("ChatWindowManager", () => {
     expect(screen.getByTestId("local-chat-history-scroll-region")).toHaveClass(
       "hc-mini-history-list"
     );
-    for (const pane of screen.getAllByTestId("chat-pane")) {
+    const panes = screen.getAllByTestId("chat-pane");
+
+    for (const pane of panes) {
       expect(pane).toHaveClass("hc-chat-pane");
     }
-    expect(screen.getAllByTestId("chat-pane")[0].parentElement).toHaveClass(
-      "hc-chat-panes"
-    );
+
+    const paneContainer = panes[0].parentElement?.parentElement;
+    expect(paneContainer).toHaveClass("hc-chat-panes");
 
     Object.defineProperty(window, "innerWidth", {
       configurable: true,

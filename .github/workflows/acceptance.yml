@@ -86,7 +86,8 @@ jobs:
 
   acceptance-build:
     name: Build acceptance ${{ matrix.suite }}
-    runs-on: ubuntu-24.04
+    # Keep fork pull requests on GitHub-hosted runners.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -94,10 +95,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [cli, daemon, gui]
+        include:
+          - {suite: cli, runner: ubuntu-24.04}
+          - {suite: daemon, runner: ubuntu-24.04}
+          - {suite: gui, runner: homelab}
     steps:
       - name: Checkout vertebrae
         uses: actions/checkout@v4
+
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@54042514f505b273907334ae2b9cdbb9a0213c1a # v2.4.0
+        with:
+          version: v2.38.2
+
+      - name: Verify Docker Compose
+        run: docker compose version
 
       - name: Check acceptance runner contracts
         run: python3 -m unittest discover -s scripts/tests -p 'test_acceptance*.py'
@@ -153,23 +165,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {suite: cli, shard: 1, count: 2}
-          - {suite: cli, shard: 2, count: 2}
-          - {suite: daemon, shard: 1, count: 6}
-          - {suite: daemon, shard: 2, count: 6}
-          - {suite: daemon, shard: 3, count: 6}
-          - {suite: daemon, shard: 4, count: 6}
-          - {suite: daemon, shard: 5, count: 6}
-          - {suite: daemon, shard: 6, count: 6}
-          - {suite: gui, shard: 1, count: 8}
-          - {suite: gui, shard: 2, count: 8}
-          - {suite: gui, shard: 3, count: 8}
-          - {suite: gui, shard: 4, count: 8}
-          - {suite: gui, shard: 5, count: 8}
-          - {suite: gui, shard: 6, count: 8}
-          - {suite: gui, shard: 7, count: 8}
-          - {suite: gui, shard: 8, count: 8}
-    runs-on: ubuntu-24.04
+          - {suite: cli, shard: 1, count: 2, runner: ubuntu-24.04}
+          - {suite: cli, shard: 2, count: 2, runner: homelab}
+          - {suite: daemon, shard: 1, count: 6, runner: ubuntu-24.04}
+          - {suite: daemon, shard: 2, count: 6, runner: homelab}
+          - {suite: daemon, shard: 3, count: 6, runner: ubuntu-24.04}
+          - {suite: daemon, shard: 4, count: 6, runner: homelab}
+          - {suite: daemon, shard: 5, count: 6, runner: ubuntu-24.04}
+          - {suite: daemon, shard: 6, count: 6, runner: ubuntu-24.04}
+          - {suite: gui, shard: 1, count: 8, runner: ubuntu-24.04}
+          - {suite: gui, shard: 2, count: 8, runner: homelab}
+          - {suite: gui, shard: 3, count: 8, runner: ubuntu-24.04}
+          - {suite: gui, shard: 4, count: 8, runner: homelab}
+          - {suite: gui, shard: 5, count: 8, runner: ubuntu-24.04}
+          - {suite: gui, shard: 6, count: 8, runner: ubuntu-24.04}
+          - {suite: gui, shard: 7, count: 8, runner: ubuntu-24.04}
+          - {suite: gui, shard: 8, count: 8, runner: homelab}
+    # Keep fork pull requests on GitHub-hosted runners.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || matrix.runner }}
     env:
       # Pin the source; bumping it also invalidates the image archive cache.
       POSTGRES_IMAGE_SOURCE: public.ecr.aws/docker/library/postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
@@ -182,6 +195,11 @@ jobs:
     steps:
       - name: Checkout vertebrae
         uses: actions/checkout@v4
+
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@54042514f505b273907334ae2b9cdbb9a0213c1a # v2.4.0
+        with:
+          version: v2.38.2
 
       - name: Verify Docker Compose
         run: docker compose version

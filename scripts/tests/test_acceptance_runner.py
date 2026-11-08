@@ -48,14 +48,50 @@ class RunnerTests(unittest.TestCase):
     def test_ci_matrix_matches_the_covered_shards(self):
         workflow = runner.ROOT / ".github/workflows/acceptance.yml"
         contents = workflow.read_text()
-        entries = re.findall(r"\{suite: (\w+), shard: (\d+), count: (\d+)\}", contents)
-        actual = {(suite, int(index), int(count)) for suite, index, count in entries}
+        entry_pattern = r"\{suite: (\w+), shard: (\d+), count: (\d+), runner: ([\w.-]+)\}"
+        entries = re.findall(entry_pattern, contents)
+        actual = {(suite, int(index), int(count)) for suite, index, count, _ in entries}
         expected = {(suite, index, count)
                     for suite, count in [("cli", 2), ("daemon", 6), ("gui", 8)]
                     for index in range(1, count + 1)}
 
         self.assertEqual(actual, expected)
         self.assertEqual(len(entries), len(expected))
+
+        homelab_shards = {
+            (suite, int(index))
+            for suite, index, _, host in entries
+            if host == "homelab"
+        }
+        expected_homelab_shards = {
+            ("cli", 2),
+            ("daemon", 2),
+            ("daemon", 4),
+            ("gui", 2),
+            ("gui", 4),
+            ("gui", 8),
+        }
+        hosts = {host for _, _, _, host in entries}
+
+        self.assertEqual(homelab_shards, expected_homelab_shards)
+        self.assertEqual(hosts, {"ubuntu-24.04", "homelab"})
+
+        acceptance_section = contents.split("  acceptance:\n", 1)[1]
+        shard_job = acceptance_section.split("  acceptance-summary:\n", 1)[0]
+        shard_lines = shard_job.splitlines()
+        routing_lines = [line.strip() for line in shard_lines if line.strip().startswith("runs-on:")]
+
+        self.assertEqual(len(routing_lines), 1)
+
+        routing = routing_lines[0]
+        expected_routing = (
+            "runs-on: ${{ github.event_name == 'pull_request' && "
+            "github.event.pull_request.head.repo.full_name != github.repository && "
+            "'ubuntu-24.04' || matrix.runner }}"
+        )
+
+        self.assertEqual(routing, expected_routing)
+        self.assertNotIn("max-parallel:", shard_job)
 
     def test_weighted_partition_separates_large_features_and_is_deterministic(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -168,13 +204,43 @@ class RunnerTests(unittest.TestCase):
         shards = workflow.split("  acceptance:", 1)[1].split("  acceptance-summary:", 1)[0]
         artifact_name = "acceptance-runtime-${{ matrix.suite }}-${{ github.sha }}"
 
-        self.assertIn("suite: [cli, daemon, gui]", build)
+        build_entries = re.findall(r"\{suite: (\w+), runner: ([\w.-]+)\}", build)
+        expected_builds = {
+            ("cli", "ubuntu-24.04"),
+            ("daemon", "ubuntu-24.04"),
+            ("gui", "homelab"),
+        }
+
+        self.assertEqual(set(build_entries), expected_builds)
+        self.assertEqual(len(build_entries), len(expected_builds))
         self.assertIn("--build-only", build)
         self.assertIn(artifact_name, build)
         self.assertIn(artifact_name, shards)
         self.assertIn("needs: [acceptance-build]", shards)
         self.assertIn("--prebuilt", shards)
         self.assertNotIn("Restore and save acceptance build cache", shards)
+
+    def test_ci_bootstraps_compose_before_building_or_running_suites(self):
+        workflow_path = runner.ROOT / ".github/workflows/acceptance.yml"
+        workflow = workflow_path.read_text()
+        build_section = workflow.split("  acceptance-build:\n", 1)[1]
+        build = build_section.split("  acceptance:\n", 1)[0]
+        shard_section = workflow.split("  acceptance:\n", 1)[1]
+        shards = shard_section.split("  acceptance-summary:\n", 1)[0]
+
+        operations = [(build, "Build suite runtime once"), (shards, "Run acceptance suites")]
+
+        for job, operation in operations:
+            setup_position = job.index("name: Set up Docker Compose")
+            verify_position = job.index("name: Verify Docker Compose")
+            operation_position = job.index("name: " + operation)
+
+            self.assertLess(setup_position, verify_position)
+            self.assertLess(verify_position, operation_position)
+            self.assertIn("docker/setup-compose-action@54042514f505b273907334ae2b9cdbb9a0213c1a", job)
+            self.assertIn("version: v2.38.2", job)
+            self.assertIn("github.event.pull_request.head.repo.full_name != github.repository", job)
+            self.assertIn("'ubuntu-24.04' || matrix.runner", job)
 
     def test_nested_features_are_not_silently_omitted(self):
         with tempfile.TemporaryDirectory() as tmp:

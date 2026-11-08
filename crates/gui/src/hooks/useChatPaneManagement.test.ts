@@ -134,8 +134,8 @@ describe("useChatPaneManagement", () => {
 
     it("canAddSplitPane is true when width is sufficient and panes < MAX", () => {
       const { result } = setupMaximized([pane1], "p1");
-      // MINI_HISTORY_WIDTH(272) + MIN_SPLIT_PANE_WIDTH(360)*2 = 992
-      // renderedPanelWidth=1000 >= 992, so should be true
+      // History (272) + two panes (720) + separator (8) = 1000.
+      // Exact minimum geometry is eligible.
       expect(result.current.canAddSplitPane).toBe(true);
     });
 

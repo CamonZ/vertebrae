@@ -2625,10 +2625,36 @@ html.light ::selection {
   flex-basis: 360px;
   min-width: 360px;
 }
-.hc-panel[data-maximized] .hc-chat-pane + .hc-chat-pane {
-  /* Keep split-pane boundaries quiet; keyboard focus still uses the inset
-     focus-visible treatment below. */
-  border-left: 1px solid var(--line-strong);
+.hc-panel .hc-chat-pane-slot {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+.hc-panel .hc-pane-resize-handle {
+  flex: 0 0 8px;
+  position: relative;
+  cursor: ew-resize;
+  touch-action: none;
+  outline: none;
+}
+.hc-panel .hc-pane-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--line-strong);
+}
+.hc-panel .hc-pane-resize-handle:hover::after,
+.hc-panel .hc-pane-resize-handle[data-resizing]::after,
+.hc-panel .hc-pane-resize-handle:focus-visible::after {
+  background: var(--fg-mute);
+}
+.hc-panel .hc-pane-resize-handle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 .hc-panel[data-maximized] .hc-chat-pane:focus-visible {
   box-shadow: inset 0 0 0 1px

@@ -1,7 +1,21 @@
-import { memo, useCallback } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useId,
+} from "react";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatPane } from "../../stores/chatStore";
 import { ChatWindow } from "./ChatWindow";
+import {
+  allocatePaneWidths,
+  resizePanePair,
+  type PaneWidths,
+} from "./chatPaneWidths";
+import { ChatPaneResizeHandle } from "./ChatPaneResizeHandle";
 
 export type RegisterChangesToggle = (
   paneId: string,
@@ -48,34 +62,109 @@ export const ChatPaneList = memo(function ChatPaneList({
   projectLabelBySessionId,
   renderObserver,
 }: ChatPaneListProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const domId = useId();
+
   const paneCount = visiblePanes.length;
+  const ids = visiblePanes.map((pane) => pane.id);
+  const split = isMaximized && paneCount > 1;
+  const configuration = split ? JSON.stringify(ids) : "single";
+
+  const [allocation, setAllocation] = useState<{
+    configuration: string;
+    preferred: PaneWidths;
+  }>({ configuration, preferred: {} });
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  // A new split configuration starts equal; session/title/focus changes retain it.
+  if (allocation.configuration !== configuration) {
+    setAllocation({ configuration, preferred: {} });
+  }
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const measure = () => setContainerWidth(container.clientWidth);
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const preferred =
+    allocation.configuration === configuration ? allocation.preferred : {};
+  const widths = allocatePaneWidths(ids, containerWidth, preferred);
+  const layoutKey = `${configuration}:${containerWidth}`;
 
   return (
-    <div className="hc-chat-panes">
+    <div className="hc-chat-panes" ref={containerRef}>
       {visiblePanes.map((pane, index) => {
         const paneIsActive = pane.id === activePaneId;
+        const paneWidth = widths[pane.id];
+        const paneStyle = split ? { flex: `0 0 ${paneWidth}px` } : undefined;
+
+        const previousIndex = index - 1;
+        const previousPaneId = ids[previousIndex];
+        const leftWidth = widths[previousPaneId];
+        const separatorLabel = `Resize chat panes ${index} and ${index + 1}`;
+        const separatorControls = `${domId}-${previousIndex} ${domId}-${index}`;
+
+        const resizePair = (delta: number) => {
+          const nextPreferred = resizePanePair(
+            widths,
+            previousPaneId,
+            pane.id,
+            delta
+          );
+
+          if (nextPreferred !== widths) {
+            setAllocation({ configuration, preferred: nextPreferred });
+          }
+        };
+
         return (
-          <ChatPaneWindow
-            key={pane.id}
-            pane={pane}
-            paneIsActive={paneIsActive}
-            paneCount={paneCount}
-            sessionId={pane.sessionId}
-            index={index}
-            focusPane={focusPane}
-            closePane={closePane}
-            closeChatPanel={closeChatPanel}
-            toggleHistorySelector={toggleHistorySelector}
-            toggleMaximized={toggleMaximized}
-            startFreshActiveSession={startFreshActiveSession}
-            splitWithFreshSession={splitWithFreshSession}
-            isMaximized={isMaximized}
-            canAddSplitPane={canAddSplitPane}
-            unsplitPanes={unsplitPanes}
-            projectLabelBySessionId={projectLabelBySessionId}
-            renderObserver={renderObserver}
-            registerChangesToggle={registerChangesToggle}
-          />
+          <Fragment key={pane.id}>
+            {split && index > 0 && (
+              <ChatPaneResizeHandle
+                label={separatorLabel}
+                controls={separatorControls}
+                leftWidth={leftWidth}
+                rightWidth={paneWidth}
+                layoutKey={layoutKey}
+                onResize={resizePair}
+              />
+            )}
+            <div
+              className="hc-chat-pane-slot"
+              id={`${domId}-${index}`}
+              data-pane-id={pane.id}
+              style={paneStyle}
+            >
+              <ChatPaneWindow
+                pane={pane}
+                paneIsActive={paneIsActive}
+                paneCount={paneCount}
+                sessionId={pane.sessionId}
+                index={index}
+                focusPane={focusPane}
+                closePane={closePane}
+                closeChatPanel={closeChatPanel}
+                toggleHistorySelector={toggleHistorySelector}
+                toggleMaximized={toggleMaximized}
+                startFreshActiveSession={startFreshActiveSession}
+                splitWithFreshSession={splitWithFreshSession}
+                isMaximized={isMaximized}
+                canAddSplitPane={canAddSplitPane}
+                unsplitPanes={unsplitPanes}
+                projectLabelBySessionId={projectLabelBySessionId}
+                renderObserver={renderObserver}
+                registerChangesToggle={registerChangesToggle}
+              />
+            </div>
+          </Fragment>
         );
       })}
     </div>

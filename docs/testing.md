@@ -524,6 +524,26 @@ that same artifact and runs the compiled test executable directly. Shards do not
 invoke Cargo or npm install, and there is no compilation fallback for a missing or
 mismatched bundle. Colima retains its separate job and build path.
 
+Acceptance execution uses both GitHub-hosted runners and the Linux x64 `homelab`
+scale set. CLI shard 2, daemon shards 2 and 4, and GUI shards 2, 4 and 8 target
+`homelab`; the other ten execution shards remain on `ubuntu-24.04`. GUI shard 6,
+which includes the rootless Podman backend scenarios, runs on GitHub-hosted runners. The GUI
+runtime producer also targets `homelab`; CLI/daemon producers, Colima, and the
+summary remain on GitHub-hosted runners. Fork pull requests use GitHub-hosted
+runners for every build and shard. There is no matrix-wide concurrency cap:
+the home-lab scale set limits its own jobs without throttling GitHub-hosted shards.
+
+Both runtime producers and execution shards install Docker Compose v2.38.2
+before verifying it. This matches the existing GitHub-hosted runner version and
+provides the missing CLI plugin in the ARC runner container; the DinD sidecar
+provides its separate Docker daemon.
+
+The home-lab runners use a privileged Docker-in-Docker daemon per disposable
+runner pod, with shared ephemeral workspace paths for the runner and daemon.
+Its Docker cache volumes are discarded with that daemon rather than retained
+on the node's host Docker engine. Keep the runtime platform checks: the current
+GitHub-built bundles require a Linux amd64 Docker engine on the consuming runner.
+
 Bundles contain only runtime executables, GUI dependencies and a manifest bound
 to the suite, source-content fingerprint, runner image and Docker platform. The
 runner checks that identity before starting a backend. A checkout changed during
