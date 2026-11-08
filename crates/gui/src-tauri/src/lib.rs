@@ -91,6 +91,7 @@ fn create_builder() -> Builder {
             commands::get_task,
             // Artifact read commands
             commands::list_project_artifacts,
+            commands::list_artifact_presentations,
             commands::list_task_artifacts,
             commands::list_project_notifications,
             commands::mark_notifications_read,

@@ -26,6 +26,8 @@ sub-index. Links are relative to the file that contains them.
   Load when: `{{ ... }}` syntax, prompt variables, `step_config_render_failed`, empty values in a rendered prompt.
 - [Artifacts](artifacts.md): persisting step output and reading results.
   Load when: "where is the result", `persistence_options`, `vtb artifact`, attaching output to a ticket.
+- [Statechart artifacts](statecharts.md): authoring a machine definition, saving and attaching it, and rendering its artifact link in chat.
+  Load when: explaining a development workflow as a statechart, authoring a statechart artifact, or embedding one in chat.
 - [Running](running/index.md): TaskRuns, concurrency, retries and recovery.
   Load when: starting or stopping a run, `max_concurrency`, run status, `retry_exhausted`, resuming a stuck task.
 - [Debugging](debugging/index.md): failure strings mapped to causes and fixes, logs and outcomes.

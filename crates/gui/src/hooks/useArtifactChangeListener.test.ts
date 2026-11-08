@@ -53,6 +53,8 @@ describe("useArtifactChangeListener", () => {
     const queryKey = queryKeys.artifacts.project(generation);
     const initial = artifact();
     queryClient.setQueryData(queryKey, [initial]);
+    const presentationKey = queryKeys.artifacts.presentations(generation);
+    queryClient.setQueryData(presentationKey, [initial]);
     renderHook(() => useArtifactChangeListener());
     await waitFor(() => expect(listen).toHaveBeenCalledOnce());
 
@@ -68,12 +70,15 @@ describe("useArtifactChangeListener", () => {
         },
       });
     });
-    expect(
-      queryClient.getQueryData<Artifact[]>(
-        queryKey
-      )
-    ).toEqual([initial]);
-    expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true);
+    const cachedArtifacts = queryClient.getQueryData<Artifact[]>(queryKey);
+    const projectInvalidated =
+      queryClient.getQueryState(queryKey)?.isInvalidated;
+    const presentationsInvalidated =
+      queryClient.getQueryState(presentationKey)?.isInvalidated;
+
+    expect(cachedArtifacts).toEqual([initial]);
+    expect(projectInvalidated).toBe(true);
+    expect(presentationsInvalidated).toBe(true);
 
     act(() => {
       handler?.({
@@ -85,9 +90,9 @@ describe("useArtifactChangeListener", () => {
         },
       });
     });
-    expect(
-      queryClient.getQueryData(queryKey)
-    ).toEqual([]);
+    const artifactsAfterDeletion = queryClient.getQueryData(queryKey);
+
+    expect(artifactsAfterDeletion).toEqual([]);
   });
 
   it("ignores a delayed event from a previous project generation", async () => {

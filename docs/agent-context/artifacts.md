@@ -57,3 +57,7 @@ that rebuilds those dependencies.
 
 ## Related
 [Output schemas](workflows/steps/llm_inference/output-schemas.md) · [Multi-workflow factory](recipes/multi-workflow-factory.md)
+
+For declarative workflow diagrams rendered inline from artifact links, see
+[Statechart artifacts](statecharts.md) for the supported JSON format, metadata
+and complete save/attach example.

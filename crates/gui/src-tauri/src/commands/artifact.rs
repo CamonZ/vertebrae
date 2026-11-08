@@ -40,6 +40,89 @@ pub async fn list_task_artifacts(
         .map_err(Into::into)
 }
 
+/// Read-only presentation projections for artifact entity links. Root artifact
+/// reads have no attachment metadata, and Project.artifacts omits task links.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_artifact_presentations(
+    state: State<'_, AppState>,
+) -> Result<Vec<Artifact>, CommandError> {
+    use std::collections::HashSet;
+    use vertebrae_sacrum_client::api_types::ArtifactResponse;
+
+    #[derive(Deserialize)]
+    struct Subject {
+        artifacts: Vec<ArtifactResponse>,
+    }
+
+    #[derive(Deserialize)]
+    struct TaskSubject {
+        id: String,
+        artifacts: Vec<ArtifactResponse>,
+    }
+
+    #[derive(Deserialize)]
+    struct Presentations {
+        project: Subject,
+        tasks: Vec<TaskSubject>,
+    }
+
+    // Capture one client/project before the await. The frontend independently
+    // retires this result when its initiating project generation changes.
+    let client = state
+        .sacrum_client
+        .read()
+        .await
+        .clone()
+        .ok_or_else(CommandError::no_project_selected)?;
+    let project_id = client.project_id();
+    let variables = json!({ "project_id": project_id });
+
+    let query = format!(
+        r#"
+        query ArtifactPresentations($project_id: Uuid4!) {{
+            project(id: $project_id) {{ artifacts {{ ...ArtifactFields }} }}
+            tasks(project_id: $project_id, include_archived: true) {{
+                id artifacts {{ ...ArtifactFields }}
+            }}
+        }}
+        {}"#,
+        vertebrae_sacrum_client::queries::artifacts::ARTIFACT_FIELDS
+    );
+
+    let mut data: Presentations =
+        client
+            .execute_compound(&query, variables)
+            .await
+            .map_err(|error| CommandError {
+                message: error.to_string(),
+            })?;
+
+    // Presentation belongs to an attachment. Prefer the explicit project
+    // projection, then task UUID order, independent of backend list ordering.
+    data.tasks.sort_by(|a, b| a.id.cmp(&b.id));
+    let task_artifacts = data.tasks.into_iter().flat_map(|task| task.artifacts);
+    let artifacts = data.project.artifacts.into_iter().chain(task_artifacts);
+    let mut seen = HashSet::new();
+
+    artifacts
+        .filter(|artifact| {
+            let artifact_id = artifact.id.clone();
+
+            seen.insert(artifact_id)
+        })
+        .map(|mut artifact| {
+            // Membership was established by the two project-scoped associations.
+            let owning_project = project_id.to_string();
+            artifact.project_id = Some(owning_project);
+
+            let converted = artifact.into_artifact();
+
+            converted.map(Into::into).map_err(Into::into)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +160,137 @@ mod tests {
     async fn project_artifacts_require_a_selected_project() {
         let app = build_app_without_services();
         assert_no_project_error(list_project_artifacts(app.state()).await);
+    }
+
+    #[tokio::test]
+    async fn presentations_require_a_selected_project() {
+        let app = build_app_without_services();
+        let state = app.state();
+
+        let result = list_artifact_presentations(state).await;
+
+        assert_no_project_error(result);
+    }
+
+    #[tokio::test]
+    async fn presentations_resolve_project_and_archived_task_attachments_in_one_scope() {
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let project_id = "33333333-3333-4333-8333-333333333333";
+        let project_artifact_id = "11111111-1111-4111-8111-111111111111";
+        let task_artifact_id = "22222222-2222-4222-8222-222222222222";
+        let item = |id: &str, body: &str| {
+            let metadata = json!({
+                "version": 1,
+                "content_kind": "statechart",
+                "format": "json",
+                "origin": "test",
+                "presentation": "rendered",
+                "extensions": {}
+            });
+
+            json!({
+                "id": id,
+                "filename": "chart.json",
+                "body": body,
+                "metadata": metadata
+            })
+        };
+
+        let project_artifact = item(project_artifact_id, "project");
+        let later_task_artifact = item(task_artifact_id, "later task");
+        let ignored_task_artifact = item(project_artifact_id, "ignored task");
+        let first_task_artifact = item(task_artifact_id, "first task");
+        let project = json!({ "artifacts": [project_artifact] });
+        let later_task = json!({
+            "id": "z",
+            "artifacts": [later_task_artifact, ignored_task_artifact]
+        });
+        let first_task = json!({ "id": "a", "artifacts": [first_task_artifact] });
+        let response = json!({
+            "data": { "project": project, "tasks": [later_task, first_task] }
+        });
+        let response_template = ResponseTemplate::new(200).set_body_json(response);
+
+        let post = method("POST");
+        let graphql = path("/graphql");
+        let archived_tasks = body_string_contains("include_archived: true");
+        let operation = body_string_contains("ArtifactPresentations");
+
+        Mock::given(post)
+            .and(graphql)
+            .and(archived_tasks)
+            .and(operation)
+            .respond_with(response_template)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let app = build_app_without_services();
+        let state = app.state::<AppState>();
+        let endpoint = server.uri();
+        let config = vertebrae_sacrum_client::SacrumConfig::new(
+            endpoint,
+            "test-token".into(),
+            project_id.into(),
+        );
+        let client = vertebrae_sacrum_client::GraphqlClient::new(config);
+        let shared_client = std::sync::Arc::new(client);
+
+        *state.sacrum_client.write().await = Some(shared_client);
+
+        let result = list_artifact_presentations(state).await.unwrap();
+        let correct_project = result
+            .iter()
+            .all(|artifact| artifact.project_id.as_deref() == Some(project_id));
+        let task_metadata = result[1].metadata.as_ref().unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].body, "project");
+        assert_eq!(result[1].body, "first task");
+        assert!(correct_project);
+        assert_eq!(task_metadata.content_kind, "statechart");
+
+        let requests = server.received_requests().await.unwrap();
+        let request_body = &requests[0].body;
+        let request: serde_json::Value = serde_json::from_slice(request_body).unwrap();
+        let expected_variables = json!({ "project_id": project_id });
+
+        assert_eq!(request["variables"], expected_variables);
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn presentations_surface_backend_failures_without_success_shaped_empty_data() {
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let post = wiremock::matchers::method("POST");
+        let response = ResponseTemplate::new(500);
+
+        Mock::given(post)
+            .respond_with(response)
+            .mount(&server)
+            .await;
+
+        let app = build_app_without_services();
+        let state = app.state::<AppState>();
+        let endpoint = server.uri();
+        let config = vertebrae_sacrum_client::SacrumConfig::new(
+            endpoint,
+            "test-token".into(),
+            "33333333-3333-4333-8333-333333333333".into(),
+        );
+        let client = vertebrae_sacrum_client::GraphqlClient::new(config);
+        let shared_client = std::sync::Arc::new(client);
+
+        *state.sacrum_client.write().await = Some(shared_client);
+
+        let result = list_artifact_presentations(state).await;
+
+        assert!(result.is_err());
     }
 
     #[tokio::test]

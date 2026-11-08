@@ -228,6 +228,18 @@ async listProjectArtifacts() : Promise<Result<Artifact[], CommandError>> {
 }
 },
 /**
+ * Read-only presentation projections for artifact entity links. Root artifact
+ * reads have no attachment metadata, and Project.artifacts omits task links.
+ */
+async listArtifactPresentations() : Promise<Result<Artifact[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_artifact_presentations") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List artifact files attached to one task.
  */
 async listTaskArtifacts(taskId: string) : Promise<Result<Artifact[], CommandError>> {
