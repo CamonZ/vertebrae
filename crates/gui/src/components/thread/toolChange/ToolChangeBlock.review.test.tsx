@@ -20,11 +20,15 @@ vi.mock("../../../hooks/useNearViewport", () => ({
 
 vi.mock("@pierre/diffs/react", async () => {
   const { createContext } = await import("react");
+
   return {
     WorkerPoolContext: createContext(undefined),
-    FileDiff: ({ lineAnnotations }: { lineAnnotations?: unknown[] }) => {
+    CodeView: ({ items }: { items: { annotations?: unknown[] }[] }) => {
+      const lineAnnotations = items[0]?.annotations;
+
       annotations.mounts += 1;
       annotations.seen.push(lineAnnotations);
+
       return <div data-testid="patch-diff" />;
     },
   };
