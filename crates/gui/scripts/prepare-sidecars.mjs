@@ -5,6 +5,9 @@
 // `crates/gui/src-tauri/binaries/<bin>-<target-triple>` using the naming
 // convention Tauri's `externalBin` expects.
 //
+// CI: SIDECAR_PREBUILT_DIR stages outputs from the current release matrix job
+// without running Cargo. Missing prebuilt outputs fail rather than rebuilding.
+//
 // Profile: defaults to `release`. Set SIDECAR_PROFILE=debug to build and
 // stage debug binaries instead — used by the GUI acceptance Docker build,
 // which compiles everything in debug for speed.
@@ -16,6 +19,7 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -228,6 +232,29 @@ function stageBinaries(profile, target, suffix) {
   writeFileSync(profileMarkerPath(target), `${profile}\n`);
 }
 
+// CI builds all three components once before Tauri. An explicit prebuilt
+// directory is a strict contract: missing outputs fail instead of rebuilding.
+function stagePrebuiltBinaries(profile, target, sourceDir, dir = stagingDir) {
+  if (profile !== "release") {
+    throw new Error("prebuilt sidecars require the release profile");
+  }
+  const sources = BINARIES.map(({ binName }) => {
+    const path = join(sourceDir, `${binName}${exeSuffix(target)}`);
+    if (!existsSync(path) || !statSync(path).isFile()) {
+      throw new Error(`missing prebuilt sidecar: ${path}`);
+    }
+    return { binName, path };
+  });
+  mkdirSync(dir, { recursive: true });
+  for (const { binName, path } of sources) {
+    const destination = stagedPath(binName, target, exeSuffix(target), dir);
+    copyFileSync(path, destination);
+    chmodSync(destination, 0o755);
+    console.log(`[prepare-sidecars] staged prebuilt ${path} -> ${destination}`);
+  }
+  writeFileSync(profileMarkerPath(target, dir), `${profile}\n`);
+}
+
 function main() {
   const profile = profileFromArgs();
   const target = detectTargetTriple();
@@ -243,6 +270,11 @@ function main() {
 
   const suffix = exeSuffix(target);
   cleanStaleSidecars(target);
+
+  if (process.env.SIDECAR_PREBUILT_DIR) {
+    stagePrebuiltBinaries(profile, target, resolve(process.env.SIDECAR_PREBUILT_DIR));
+    return;
+  }
 
   if (
     stagedBinariesPresent(target, suffix) &&
@@ -269,6 +301,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
 }
 
 export {
+  stagePrebuiltBinaries,
   cleanStaleSidecars,
   needsRebuild,
   profileFromArgs,
