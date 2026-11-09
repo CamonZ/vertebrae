@@ -487,6 +487,19 @@ and from PRs that change image inputs with
 `VTB_ACCEPTANCE_REGISTRY` to use another registry. If a Dockerfile starts to
 `COPY` files, include them in `image_ref()` in `scripts/acceptance.py`.
 
+The backend image defaults to `ghcr.io/camonz/sacrum:master`. To test an
+unmerged Sacrum branch, build its checkout under a local tag and select it with
+`SACRUM_IMAGE` for that run only; the shared `master` tag stays untouched:
+
+```bash
+docker build -t sacrum:local <sacrum-checkout>
+SACRUM_IMAGE=sacrum:local python3 scripts/acceptance.py daemon
+```
+
+`SACRUM_IMAGE` applies to both the `sacrum` and `seeder` services, so the
+seeder always evaluates against the schema the server migrated. Direct
+`docker compose` commands honor it too.
+
 The runner uses nonblocking Unix file locks on both the checkout and cache
 identity. A second run that would modify the same staged sidecars, frontend
 files, or compiled binaries fails with a clear message. Independent worktrees
