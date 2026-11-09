@@ -8,15 +8,24 @@ import {
   type LocalChatSessionGroup,
 } from "../utils/localChatSessionGroups";
 
-/** Observe existing task records without copying list summaries into detail keys. */
-function useCachedTasks(generation: number, enabled: boolean) {
+/**
+ * Own the latest observed task metadata for this mounted project scope. Inactive
+ * source queries may be collected; removal or refresh errors are not canonical
+ * task updates. Keep summaries out of full-detail keys.
+ */
+function useCachedTasks(
+  generation: number,
+  enabled: boolean,
+  projectId?: string | null
+) {
   const store = useMemo(() => {
     let snapshot = new Map<string, Task>();
+    const records = new Map<string, { task: Task; fetchedAt: number }>();
     const prefix = queryKeys.tasks.all(generation);
 
     return {
       subscribe: (notify: () => void) => {
-        if (!enabled) return () => {};
+        if (!enabled || !projectId) return () => {};
 
         return queryClient.getQueryCache().subscribe((event) => {
           const key = event.query.queryKey;
@@ -33,9 +42,8 @@ function useCachedTasks(generation: number, enabled: boolean) {
         });
       },
       getSnapshot: () => {
-        if (!enabled) return snapshot;
+        if (!enabled || !projectId) return snapshot;
 
-        const records = new Map<string, { task: Task; fetchedAt: number }>();
         const remember = (task: Task, fetchedAt: number) => {
           const previous = records.get(task.id);
           const updatedAt = Date.parse(task.updated_at ?? "") || fetchedAt;
@@ -52,12 +60,12 @@ function useCachedTasks(generation: number, enabled: boolean) {
           }
         };
 
-        for (const query of queryClient
-          .getQueryCache()
-          .findAll({ queryKey: prefix })) {
-          if (query.state.status === "error") continue;
+        const cache = queryClient.getQueryCache();
+        const taskQueries = cache.findAll({ queryKey: prefix });
 
+        for (const query of taskQueries) {
           const data = query.state.data;
+
           if (query.queryKey[3] === "list" && Array.isArray(data)) {
             for (const task of data as Task[])
               remember(task, query.state.dataUpdatedAt);
@@ -66,7 +74,11 @@ function useCachedTasks(generation: number, enabled: boolean) {
           }
         }
 
-        const next = new Map([...records].map(([id, { task }]) => [id, task]));
+        const entries = [...records].map(
+          ([id, { task }]) => [id, task] as const
+        );
+        const next = new Map(entries);
+
         const unchanged =
           next.size === snapshot.size &&
           [...next].every(([id, task]) => snapshot.get(id) === task);
@@ -76,7 +88,7 @@ function useCachedTasks(generation: number, enabled: boolean) {
         return snapshot;
       },
     };
-  }, [generation, enabled]);
+  }, [generation, enabled, projectId]);
 
   return useSyncExternalStore(store.subscribe, store.getSnapshot);
 }
@@ -99,7 +111,8 @@ export function useLocalChatSessionMetadata(group?: LocalChatSessionGroup) {
 
   const cachedTasks = useCachedTasks(
     generation,
-    group?.isCurrentProject === true
+    group?.isCurrentProject === true,
+    group?.projectId
   );
   const direct = useResolvedTasks(taskIds, cachedTasks, generation, group);
 
@@ -197,7 +210,7 @@ function useResolvedTasks(
 
   const cachedRecords = [...cachedTasks].filter(([id]) => ids.includes(id));
   const fetchedRecords = queries.flatMap((query): [string, Task][] =>
-    !query.isError && query.data ? [[query.data.id, query.data]] : []
+    query.data ? [[query.data.id, query.data]] : []
   );
 
   return new Map([...cachedRecords, ...fetchedRecords]);
