@@ -30,6 +30,11 @@ Feature: Discuss code beside the main conversation
     When I select fixture code with the real diff renderer
     And I ask about that selection and follow up
     Then both discussion requests contain the original selected code
-    And inline requests use the dedicated model disclosed before submission
+    And inline requests use the dedicated model without routine labels
     When I explicitly send the main draft
     Then the main conversation still uses its original model
+
+  Scenario: Inline discussion layout and pending feedback follow both themes
+    Given a Changes selection fixture is open beside a drafted main conversation
+    When I select fixture code with the real diff renderer
+    Then inline discussion bubbles and pending feedback render correctly across themes and widths

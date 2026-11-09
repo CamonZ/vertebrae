@@ -134,7 +134,7 @@
   padding: 3px 7px;
   border: 1px solid var(--color-line);
   border-radius: 5px;
-  color: var(--color-fg-mute);
+  color: var(--color-fg-soft);
   font: 500 10px/1.4 var(--font-sans);
   white-space: nowrap;
 }
@@ -177,7 +177,8 @@
   overflow-wrap: anywhere;
 }
 
-.selection-mini-message + .selection-mini-message {
+.selection-mini-message + .selection-mini-message,
+.selection-mini-thinking {
   margin-top: 18px;
 }
 
@@ -190,19 +191,45 @@
 
 .selection-mini-speaker {
   margin-bottom: 6px;
-  color: var(--color-fg-mute);
+  color: var(--color-fg-soft);
   font: 600 10px/1.4 var(--font-sans);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
+.selection-mini-message {
+  min-width: 0;
+  text-align: left;
+}
+
+.selection-mini-message.is-user {
+  width: fit-content;
+  max-width: 85%;
+  margin-left: auto;
+}
+
+.selection-mini-message.is-user .selection-mini-speaker {
+  text-align: right;
+}
+
+.selection-mini-thinking .text-sm {
+  font: inherit;
+  color: var(--color-fg-soft);
+}
+
+.selection-mini-thread [role="alert"] {
+  color: var(--color-fg);
+  overflow-wrap: anywhere;
+}
+
 .selection-mini-question {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 6px;
-  background: var(--color-bg-2);
+  border-radius: 12px 12px 3px 12px;
+  background: var(--color-bg-3);
   color: var(--color-fg);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .selection-mini-message .markdown-content p,
@@ -242,7 +269,7 @@
 }
 
 .selection-mini-composer textarea::placeholder {
-  color: var(--color-fg-mute);
+  color: var(--color-fg-soft);
 }
 
 .selection-mini-actions {

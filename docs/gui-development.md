@@ -130,9 +130,14 @@ The permission policy stays read only and is not an editable model option.
 Native Claude request options are normalized by the adapter: effort values use
 its supported allowlist and output-style identifiers retain their case. Inline
 style, speed and hook restrictions share one JSON settings argument. This
-does not change the CLI workflow-step reasoning-effort policy. The comment dialog and anchored thread show the next reply's provider
-and model; an inherited unset model is resolved from the catalog default and
-sent explicitly. Unavailable providers, stale models and invalid saved choices
+does not change the CLI workflow-step reasoning-effort policy. The comment
+dialog and anchored thread omit routine provider/model labels;
+an inherited unset model is resolved from the catalog default and sent explicitly.
+User questions appear in right-aligned themed bubbles; assistant replies retain
+left-aligned Markdown. Each pending turn shows the shared thinking indicator
+using the Appearance preference, including asynchronous setup and follow-ups,
+until response text arrives or the request terminates. Unavailable providers,
+stale models and invalid saved choices
 block discussion requests with recovery instructions rather than switching
 providers. Provider catalogs refresh after a confirmed provider settings save.
 
