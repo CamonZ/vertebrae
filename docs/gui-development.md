@@ -211,7 +211,7 @@ contract changes.
 
 The maximized chat sidebar hides conversations associated with a ticket or task
 whose canonical `completed_at` is set. General chats and conversations whose task
-metadata is missing or unavailable remain visible. **Show completed** restores
+metadata has never been available remain visible. **Show completed** restores
 these rows with a completion check icon beside their association icons; its preference lasts for the mounted sidebar.
 Search and keyboard navigation operate on the visible rows, and empty ticket
 groups disappear. A filtered-empty view offers Show completed.
@@ -221,10 +221,17 @@ and a running conversation continues. Explicitly revealing a conversation enable
 Show completed and expands its ticket group. Current-project completion changes
 follow the shared task cache's realtime updates. Existing project-scoped task
 lists and details supply completion immediately; only missing associations need
-individual task reads. List summaries are not inserted into full-detail cache
+individual task reads. While the current project is selected, the mounted sidebar
+retains the newest observed metadata through source-query garbage collection and
+refresh failures. Successful canonical updates, including reopening, replace older
+metadata by `updated_at` (with fetch time breaking ties). Navigation to another
+project or a project-generation reset retires this retained snapshot.
+List summaries are not inserted into full-detail cache
 entries. Other saved projects use
 separate project/generation-scoped completion queries, refresh on revisit, and
-poll every 30 seconds while selected because their project channels are not
+poll every 30 seconds while selected. Pending or failed background refreshes keep
+the last successful metadata; a first-ever failed read leaves the chat visible.
+Foreign projects poll because their project channels are not
 subscribed. These reads use task UUIDs without switching the backend project.
 Unknown-project chats stay visible without fetching task metadata.
 

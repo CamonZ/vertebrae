@@ -57,6 +57,97 @@ beforeEach(() => {
 });
 
 describe("local chat completion metadata", () => {
+  it.each(["list", "detail"])(
+    "owns known completion after %s source eviction without refetch churn",
+    async (source) => {
+      vi.useFakeTimers();
+
+      try {
+        const generation = getProjectScopeGeneration();
+        const key = queryKeys.tasks.list(generation, {
+          levels: ["ticket"],
+          step_names: null,
+          tags: null,
+          root_only: null,
+          children_of: null,
+          search: null,
+          workflow_id: null,
+          step_id: null,
+        });
+        const task = createMockTask({
+          id: "ticket",
+          completed_at: "2026-01-02",
+          updated_at: "2026-01-02",
+        });
+
+        if (source === "list") {
+          queryClient.setQueryData(key, [task]);
+        } else {
+          vi.mocked(commands.getTask).mockResolvedValue({
+            status: "ok",
+            data: task,
+          });
+        }
+
+        const project = group();
+        const sessions = project.sessions.slice(0, 1);
+        const single = { ...project, sessions };
+        const { result, unmount } = renderHook(() =>
+          useLocalChatCompletedSessions(single)
+        );
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10);
+        });
+
+        expect(result.current.has("chat-0")).toBe(true);
+
+        const calls = vi.mocked(commands.getTask).mock.calls.length;
+        const pendingRead = new Promise<never>(() => {});
+
+        vi.mocked(commands.getTask).mockReturnValue(pendingRead);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(300_010);
+        });
+
+        expect(result.current.has("chat-0")).toBe(true);
+
+        const sourceKey =
+          source === "list"
+            ? key
+            : queryKeys.tasks.detail(generation, "ticket");
+
+        act(() =>
+          queryClient.removeQueries({ queryKey: sourceKey, exact: true })
+        );
+
+        expect(result.current.has("chat-0")).toBe(true);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(600_010);
+        });
+
+        expect(result.current.has("chat-0")).toBe(true);
+        expect(commands.getTask).toHaveBeenCalledTimes(calls);
+
+        const reopened = createMockTask({
+          id: "ticket",
+          completed_at: null,
+          updated_at: "2026-01-03",
+        });
+
+        act(() => upsertTaskInQueryCache(reopened));
+
+        expect(result.current.size).toBe(0);
+
+        unmount();
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it("uses cached list completion immediately without fetching task details", () => {
     const generation = getProjectScopeGeneration();
     queryClient.setQueryData(queryKeys.tasks.list(generation, null), [
@@ -339,15 +430,13 @@ describe("local chat completion metadata", () => {
     ).toBeUndefined();
   });
 
-  it("refreshes other-project completion periodically and fails open on unavailable metadata", async () => {
+  it("retains known foreign completion through pending and failed refreshes", async () => {
     vi.useFakeTimers();
 
     try {
-      const foreign = {
-        ...group("b", false),
-        sessions: group("b", false).sessions.slice(0, 1),
-      };
-
+      const project = group("b", false);
+      const sessions = project.sessions.slice(0, 1);
+      const foreign = { ...project, sessions };
       const { result, unmount } = renderHook(() =>
         useLocalChatCompletedSessions(foreign)
       );
@@ -358,9 +447,11 @@ describe("local chat completion metadata", () => {
 
       expect(result.current.has("chat-0")).toBe(true);
 
+      const reopened = createMockTask({ id: "ticket", completed_at: null });
+
       vi.mocked(commands.getTask).mockResolvedValue({
         status: "ok",
-        data: createMockTask({ id: "ticket", completed_at: null }),
+        data: reopened,
       });
 
       await act(async () => {
@@ -369,9 +460,14 @@ describe("local chat completion metadata", () => {
 
       expect(result.current.size).toBe(0);
 
+      const completed = createMockTask({
+        id: "ticket",
+        completed_at: "2026-01-02",
+      });
+
       vi.mocked(commands.getTask).mockResolvedValue({
         status: "ok",
-        data: createMockTask({ id: "ticket", completed_at: "2026-01-02" }),
+        data: completed,
       });
 
       await act(async () => {
@@ -380,7 +476,43 @@ describe("local chat completion metadata", () => {
 
       expect(result.current.has("chat-0")).toBe(true);
 
-      vi.mocked(commands.getTask).mockRejectedValue(new Error("Offline"));
+      let rejectRefresh!: (reason: Error) => void;
+      const pendingRefresh = new Promise<never>((_, reject) => {
+        rejectRefresh = reject;
+      });
+
+      vi.mocked(commands.getTask).mockReturnValue(pendingRefresh);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_010);
+      });
+
+      expect(result.current.has("chat-0")).toBe(true);
+
+      const offlineError = new Error("Offline");
+
+      await act(async () => {
+        rejectRefresh(offlineError);
+        await vi.advanceTimersByTimeAsync(10);
+      });
+
+      expect(result.current.has("chat-0")).toBe(true);
+
+      vi.mocked(commands.getTask).mockResolvedValue({
+        status: "ok",
+        data: completed,
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_010);
+      });
+
+      expect(result.current.has("chat-0")).toBe(true);
+
+      vi.mocked(commands.getTask).mockResolvedValue({
+        status: "ok",
+        data: reopened,
+      });
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(30_010);
@@ -392,6 +524,152 @@ describe("local chat completion metadata", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps initial foreign read failures visible", async () => {
+    const offlineError = new Error("Offline");
+
+    vi.mocked(commands.getTask).mockRejectedValue(offlineError);
+
+    const project = group("b", false);
+    const sessions = project.sessions.slice(0, 1);
+    const selected = { ...project, sessions };
+    const generation = getProjectScopeGeneration();
+    const key = queryKeys.localChatCompletion(generation, "b", "ticket");
+    const { result } = renderHook(() =>
+      useLocalChatCompletedSessions(selected)
+    );
+
+    await waitFor(() => {
+      const state = queryClient.getQueryState(key);
+
+      expect(state?.status).toBe("error");
+    });
+
+    expect(result.current.size).toBe(0);
+  });
+
+  it("retains stale current-project data when a background refresh fails", async () => {
+    const generation = getProjectScopeGeneration();
+    const key = queryKeys.tasks.detail(generation, "ticket");
+    const completed = createMockTask({
+      id: "ticket",
+      completed_at: "2026-01-02",
+    });
+
+    queryClient.setQueryData(key, completed);
+
+    const project = group();
+    const sessions = project.sessions.slice(0, 1);
+    const selected = { ...project, sessions };
+    const { result } = renderHook(() =>
+      useLocalChatCompletedSessions(selected)
+    );
+    const offlineError = new Error("Offline");
+
+    await act(async () => {
+      await queryClient
+        .fetchQuery({
+          queryKey: key,
+          staleTime: 0,
+          queryFn: () => Promise.reject(offlineError),
+        })
+        .catch(() => {});
+    });
+
+    expect(result.current.has("chat-0")).toBe(true);
+  });
+
+  it("keeps a newer realtime reopening over an older pending completion read", async () => {
+    let resolve!: (value: { status: "ok"; data: Task }) => void;
+    const pendingRead = new Promise<{ status: "ok"; data: Task }>((done) => {
+      resolve = done;
+    });
+
+    vi.mocked(commands.getTask).mockReturnValue(pendingRead);
+
+    const project = group();
+    const sessions = project.sessions.slice(0, 1);
+    const selected = { ...project, sessions };
+    const generation = getProjectScopeGeneration();
+    const key = queryKeys.tasks.detail(generation, "ticket");
+    const { result } = renderHook(() =>
+      useLocalChatCompletedSessions(selected)
+    );
+    const reopened = createMockTask({
+      id: "ticket",
+      completed_at: null,
+      updated_at: "2026-01-03",
+    });
+
+    act(() => upsertTaskInQueryCache(reopened));
+
+    const completed = createMockTask({
+      id: "ticket",
+      completed_at: "2026-01-02",
+      updated_at: "2026-01-02",
+    });
+
+    await act(async () => resolve({ status: "ok", data: completed }));
+
+    const cachedTask = queryClient.getQueryData<Task>(key);
+
+    expect(result.current.size).toBe(0);
+    expect(cachedTask?.completed_at).toBeNull();
+  });
+
+  it("retires retained completion and delayed responses across projects and generations with identical IDs", async () => {
+    const pending: Array<(value: { status: "ok"; data: Task }) => void> = [];
+
+    vi.mocked(commands.getTask).mockImplementation(() => {
+      const request = new Promise<{ status: "ok"; data: Task }>((done) => {
+        pending.push(done);
+      });
+
+      return request;
+    });
+
+    const project = group();
+    const sessions = project.sessions.slice(0, 1);
+    const selected = { ...project, sessions };
+    const generation = getProjectScopeGeneration();
+    const key = queryKeys.tasks.list(generation, null);
+    const completed = createMockTask({
+      id: "ticket",
+      completed_at: "2026-01-02",
+    });
+    const reopened = createMockTask({ id: "ticket", completed_at: null });
+
+    queryClient.setQueryData(key, [completed]);
+
+    const { result, rerender } = renderHook(
+      ({ selected }) => useLocalChatCompletedSessions(selected),
+      { initialProps: { selected } }
+    );
+
+    expect(result.current.has("chat-0")).toBe(true);
+
+    const foreign = { ...selected, projectId: "b", isCurrentProject: false };
+
+    rerender({ selected: foreign });
+
+    expect(result.current.size).toBe(0);
+
+    act(() => {
+      resetProjectScopedStores();
+      rerender({ selected });
+    });
+
+    expect(result.current.size).toBe(0);
+
+    await act(async () => pending[0]({ status: "ok", data: completed }));
+
+    expect(result.current.size).toBe(0);
+
+    await act(async () => pending[1]({ status: "ok", data: reopened }));
+
+    expect(result.current.size).toBe(0);
+    expect(commands.getTask).toHaveBeenCalledTimes(2);
   });
 
   it("does not fetch metadata for unknown project chats", () => {
