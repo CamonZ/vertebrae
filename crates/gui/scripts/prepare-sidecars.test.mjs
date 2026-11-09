@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
+  readFileSync,
+  realpathSync,
+  statSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -11,6 +16,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
+  stagePrebuiltBinaries,
   cleanStaleSidecars,
   needsRebuild,
   profileFromArgs,
@@ -125,4 +131,49 @@ test("needsRebuild compares source and staged sidecar mtimes", (t) => {
   }
   writeFileSync(profileMarkerPath(target, stagingDir), "release\n");
   assert.equal(needsRebuild(profile, target, suffix, dirs), true);
+});
+
+test("prebuilt hook stages identical executable bytes without invoking Cargo", (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "vertebrae-prebuilt-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const scriptDir = join(root, "crates/gui/scripts");
+  mkdirSync(scriptDir, { recursive: true });
+  const script = join(scriptDir, "prepare-sidecars.mjs");
+  copyFileSync(new URL("./prepare-sidecars.mjs", import.meta.url), script);
+  for (const target of ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]) {
+    const sourceDir = join(root, "target", target, "release");
+    mkdirSync(sourceDir, { recursive: true });
+    for (const name of ["vtb", "vtb-daemon", "vtb-gate"]) {
+      writeFileSync(join(sourceDir, name), `${target}:${name}:release-identity`);
+    }
+    const result = spawnSync(process.execPath, [script], {
+      // Neither Cargo nor rustc can be used by the prebuilt branch.
+      env: { PATH: join(root, "no-tools"), TAURI_ENV_TARGET_TRIPLE: target, SIDECAR_PREBUILT_DIR: sourceDir },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /cargo build/);
+    for (const name of ["vtb", "vtb-daemon", "vtb-gate"]) {
+      const staged = join(root, "crates/gui/src-tauri/binaries", `${name}-${target}`);
+      assert.deepEqual(readFileSync(staged), readFileSync(join(sourceDir, name)));
+      assert.equal(statSync(staged).mode & 0o777, 0o755);
+    }
+    // A missing prebuilt component must fail instead of silently compiling.
+    rmSync(join(sourceDir, "vtb-gate"));
+    const missing = spawnSync(process.execPath, [script], {
+      env: { PATH: join(root, "no-tools"), TAURI_ENV_TARGET_TRIPLE: target, SIDECAR_PREBUILT_DIR: sourceDir },
+      encoding: "utf8",
+    });
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /missing prebuilt sidecar/);
+  }
+});
+
+test("prebuilt staging rejects debug profile and incomplete sets", (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "vertebrae-prebuilt-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const target = "aarch64-apple-darwin";
+  const staging = join(root, "staging");
+  assert.throws(() => stagePrebuiltBinaries("debug", target, root, staging), /release profile/);
+  assert.throws(() => stagePrebuiltBinaries("release", target, root, staging), /missing prebuilt/);
 });

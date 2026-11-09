@@ -7,7 +7,7 @@ set -euo pipefail
 : "${UPDATE_BUILD:?UPDATE_BUILD is required}"
 
 release_assets_dir="${RELEASE_ASSETS_DIR:-release-assets}"
-cargo build --release --target "$TARGET" -p vertebrae-cli -p vertebrae-daemon -p vtb-gate
+cargo build --locked --release --target "$TARGET" -p vertebrae-cli -p vertebrae-daemon -p vtb-gate
 mkdir -p "$release_assets_dir"
 
 for component in "vtb:vtb" "vtb-daemon:vtb-daemon" "vtb-gate:vtb-gate"; do
