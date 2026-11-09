@@ -9,9 +9,10 @@ import { useChatStore, type ChatMessage } from "../../stores/chatStore";
 
 vi.mock("@pierre/diffs/react", async () => {
   const { createContext } = await import("react");
+
   return {
     WorkerPoolContext: createContext(undefined),
-    FileDiff: () => <div data-testid="patch-diff" />,
+    CodeView: () => <div data-testid="patch-diff" />,
   };
 });
 

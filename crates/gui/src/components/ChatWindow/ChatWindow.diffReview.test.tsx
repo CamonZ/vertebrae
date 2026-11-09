@@ -86,9 +86,22 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
       ref
     ) {
       useImperativeHandle(ref, () => ({ scrollTo: vi.fn() }));
-      seen.items = props.items;
+
+      const inline = !props.renderHeaderMetadata;
+      const firstItem = props.items[0];
+
+      if (inline) {
+        seen.fileDiff = {
+          fileDiff: firstItem?.fileDiff,
+          lineAnnotations: firstItem?.annotations,
+          options: props.options,
+        };
+      } else {
+        seen.items = props.items;
+      }
+
       return (
-        <div data-testid="code-view">
+        <div data-testid={inline ? "file-diff" : "code-view"}>
           {props.items.map((item) => (
             <div key={item.id}>
               <button
@@ -100,7 +113,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
                   )
                 }
               >
-                gutter code view
+                {inline ? "gutter file diff" : "gutter code view"}
               </button>
               {item.annotations?.map((annotation) => (
                 <div key={annotation.lineNumber}>

@@ -7,6 +7,7 @@ import { diffWorkerPool } from "./diffWorkerPool";
 import { useBackgroundTask } from "../../../background/useBackgroundTask";
 import type { BackgroundTask } from "../../../background/types";
 import { preparePatches } from "./preparePatches";
+import { InlinePatchView } from "./InlinePatchView";
 import { PlainPatch } from "./PlainPatch";
 
 const NO_REVIEW_FILES: ReturnType<
@@ -27,9 +28,12 @@ export interface PatchReview {
 export default function PatchFiles({
   patch,
   review,
+  maxHeight,
 }: {
   patch: string;
   review?: PatchReview;
+  /** Supplied by the inline frame; CodeView owns scrolling within this ceiling. */
+  maxHeight?: number;
 }): ReactNode {
   const options = usePierreDiffOptions();
   const wantsReview = review !== undefined;
@@ -71,7 +75,9 @@ export default function PatchFiles({
     [files, options, reviewing, openComposer, onSelectionChange]
   );
 
-  if (prepared.pending) return <PlainPatch patches={[patch]} />;
+  if (prepared.pending) {
+    return <PlainPatch patches={[patch]} limit={maxHeight} />;
+  }
 
   if (prepared.error) {
     return (
@@ -87,6 +93,21 @@ export default function PatchFiles({
   if (!files) {
     return <div className="evtool-sum">Diff could not be displayed</div>;
   }
+
+  if (maxHeight !== undefined) {
+    return (
+      <WorkerPoolContext.Provider value={diffWorkerPool}>
+        <InlinePatchView
+          files={files}
+          comments={comments}
+          reviewing={reviewing}
+          toolUseId={review?.toolUseId}
+          maxHeight={maxHeight}
+        />
+      </WorkerPoolContext.Provider>
+    );
+  }
+
   return (
     <WorkerPoolContext.Provider value={diffWorkerPool}>
       <div {...comments.keyboardProps}>

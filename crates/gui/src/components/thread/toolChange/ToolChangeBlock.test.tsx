@@ -8,10 +8,21 @@ import { PlainPatch } from "./ToolChangeBlock";
 
 vi.mock("@pierre/diffs/react", async () => {
   const { createContext } = await import("react");
+
   return {
     WorkerPoolContext: createContext(undefined),
-    FileDiff: ({ fileDiff }: { fileDiff: { name: string } }) => (
-      <div data-testid="patch-diff">{fileDiff.name}</div>
+    CodeView: ({
+      items,
+    }: {
+      items: { id: string; fileDiff: { name: string } }[];
+    }) => (
+      <>
+        {items.map((item) => (
+          <div key={item.id} data-testid="patch-diff">
+            {item.fileDiff.name}
+          </div>
+        ))}
+      </>
     ),
   };
 });

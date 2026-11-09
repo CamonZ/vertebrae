@@ -23,8 +23,11 @@ const clamp = (value: number) =>
 export function ResizableDiffViewport({
   children,
   placeholder,
+  virtualized = false,
 }: {
-  children: ReactNode;
+  children: ReactNode | ((limit: number) => ReactNode);
+  /** The child renderer owns the inline scroll root. */
+  virtualized?: boolean;
   /** Receives the current height ceiling so it lays out no more than fits. */
   placeholder?: (limit: number) => ReactNode;
 }): ReactNode {
@@ -76,18 +79,31 @@ export function ResizableDiffViewport({
     setLimit((value) => clamp(value + delta));
   };
 
+  let content: ReactNode;
+  if (gated) {
+    content = placeholder(limit);
+  } else if (typeof children === "function") {
+    content = children(limit);
+  } else {
+    content = children;
+  }
+
+  const viewportClassName = virtualized ? "evdiff-frame" : "evdiff-scroll";
+  const placeholderHeight =
+    gated && renderedHeight ? renderedHeight : undefined;
+
   return (
     <div className="evdiff">
       <div
         ref={viewportRef}
-        className="evdiff-scroll"
+        className={viewportClassName}
         data-testid="diff-viewport"
         style={{
           maxHeight: limit,
-          ...(gated && renderedHeight ? { height: renderedHeight } : {}),
+          height: placeholderHeight,
         }}
       >
-        {gated ? placeholder(limit) : children}
+        {content}
       </div>
       <InlineResizeHandle
         label="Resize diff"

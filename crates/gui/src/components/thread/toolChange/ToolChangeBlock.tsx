@@ -28,15 +28,22 @@ function InlineDiffs({
   patches: string[];
   review?: { toolUseId: string; toolName?: string };
 }): ReactNode {
+  const combinedPatch = patches.join("\n");
+
   return (
     <ResizableDiffViewport
+      virtualized
       placeholder={(limit) => <PlainPatch patches={patches} limit={limit} />}
     >
-      <Suspense fallback={<PlainPatch patches={patches} />}>
-        {patches.map((patch, i) => (
-          <LazyPatchFiles key={i} patch={patch} review={review} />
-        ))}
-      </Suspense>
+      {(limit) => (
+        <Suspense fallback={<PlainPatch patches={patches} limit={limit} />}>
+          <LazyPatchFiles
+            patch={combinedPatch}
+            review={review}
+            maxHeight={limit}
+          />
+        </Suspense>
+      )}
     </ResizableDiffViewport>
   );
 }
