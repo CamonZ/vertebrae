@@ -203,7 +203,7 @@ export function WelcomeInstallPage() {
 
         {error && (
           <div
-            className="mb-4 rounded-lg border border-red-500/50 bg-red-500/10 p-3 text-center text-red-400"
+            className="mb-4 rounded-lg border border-err bg-err-wash p-3 text-center text-err"
             data-testid="welcome-error"
           >
             {error}
@@ -221,7 +221,7 @@ export function WelcomeInstallPage() {
 
         {phase === "success" && (
           <div
-            className="mb-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-center text-emerald-300"
+            className="mb-4 rounded-lg border border-ok bg-ok-wash p-3 text-center text-ok-fg"
             data-testid="welcome-success"
           >
             Install complete. Continuing...
@@ -240,7 +240,7 @@ export function WelcomeInstallPage() {
           <button
             onClick={handleInstall}
             disabled={installButtonDisabled || nothingToInstall}
-            className="rounded-lg bg-accent px-4 py-2 font-medium text-bg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="action-primary rounded-lg px-4 py-2 font-medium"
             data-testid="welcome-install"
           >
             {phase === "installing" ? "Installing..." : "Install"}
@@ -294,7 +294,7 @@ function ComponentRow({
           <span className="font-medium text-fg">{label}</span>
           {needsRefresh && (
             <span
-              className="rounded bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300"
+              className="rounded bg-accent-wash px-2 py-0.5 text-xs text-accent"
               data-testid={`${testId}-needs-refresh`}
             >
               update available
@@ -302,7 +302,7 @@ function ComponentRow({
           )}
           {!needsRefresh && alreadyInstalled && (
             <span
-              className="rounded bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300"
+              className="rounded bg-ok-wash px-2 py-0.5 text-xs text-ok-fg"
               data-testid={`${testId}-already-installed`}
             >
               already installed

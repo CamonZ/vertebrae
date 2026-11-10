@@ -24,15 +24,13 @@ afterEach(() => {
 });
 
 describe("Header (Hearth v2 AppTopBar)", () => {
-  it("renders the serif italic Vertebrae brand wordmark with an ember dot", () => {
+  it("renders the serif italic Vertebrae brand wordmark without a decorative dot", () => {
     render(<Header />);
 
     const brand = screen.getByTestId("topbar-brand");
     expect(brand.textContent).toBe("Vertebrae");
 
-    const ember = screen.getByTestId("topbar-brand-ember");
-    expect(brand).toContainElement(ember);
-    expect(ember).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByTestId("topbar-brand-ember")).not.toBeInTheDocument();
   });
 
   it("renders the project › page breadcrumb from the store + current project", () => {

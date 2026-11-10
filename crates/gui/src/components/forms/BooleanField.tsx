@@ -125,7 +125,7 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
       ${baseClasses}
       ${sizeClasses[size]}
       ${value
-        ? "bg-accent text-white"
+        ? "bg-accent text-on-primary"
         : "bg-bg-2 text-fg-soft"}
       ${disabled
         ? "opacity-50 cursor-not-allowed"
@@ -145,7 +145,7 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
         flex items-center gap-2 px-4 py-2 text-sm font-medium
         border border-border rounded-md
         ${value
-          ? "bg-accent text-white border-accent"
+          ? "bg-accent text-on-primary border-accent"
           : "bg-bg text-fg"}
         ${disabled
           ? "opacity-50 cursor-not-allowed bg-bg-1"
@@ -182,7 +182,7 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
                     inline-flex items-center justify-center w-4 h-4
                     border border-border rounded
                     ${value
-                      ? "bg-accent text-white border-accent"
+                      ? "bg-accent text-on-primary border-accent"
                       : "bg-bg text-fg"}
                   `}
                 >

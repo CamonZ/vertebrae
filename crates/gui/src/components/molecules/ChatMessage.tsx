@@ -16,7 +16,7 @@ interface ChatMessageProps {
 
 const roleClasses: Record<ChatRole, string> = {
   user:
-    "ml-auto bg-[var(--color-bg-2)] text-[var(--color-fg)] border-[var(--color-line)]",
+    "ml-auto bg-[var(--color-user-message-bg)] text-[var(--color-user-message-fg)] border-[var(--color-user-message-border)] border-r-[3px]",
   assistant:
     "mr-auto bg-[var(--color-bg-2)] text-[var(--color-fg)] border-[var(--color-line)]",
   system:

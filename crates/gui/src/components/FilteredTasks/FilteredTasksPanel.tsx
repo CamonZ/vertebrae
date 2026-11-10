@@ -132,7 +132,7 @@ function CreateTaskForm({
           </button>
           <button
             type="submit"
-            className="rounded-lg bg-accent px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-accent/90 disabled:opacity-50"
+            className="action-primary rounded-lg px-3 py-1 text-xs font-medium"
             disabled={isSubmitting || !title.trim()}
           >
             {isSubmitting ? "Creating..." : "Create"}

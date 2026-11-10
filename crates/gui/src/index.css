@@ -5,8 +5,8 @@
 @import "tailwindcss";
 
 /* =============================================================================
-   VERTEBRAE · HEARTH — Neutral dark identity
-   Warm neutral accent on charcoal surfaces, serif moments via Newsreader, mono
+   VERTEBRAE · HEARTH — Mulberry and rose identity
+   Rose quartz accent on charcoal surfaces, serif moments via Newsreader, mono
    via JetBrains.
    Seven step types: llm_inference / structured_inference / route /
    human_input / wait_children / stop / finish.
@@ -58,12 +58,30 @@
   --color-border: var(--color-line);
   --color-border-focus: var(--color-line-strong);
 
-  /* Accent — the existing warm neutral text ramp, shared by both vocabularies. */
-  --color-accent: #b8b5af;
-  --color-accent-deep: #f4f1ec;
-  --color-accent-mute: #6f6c66;
-  --color-accent-wash: #1f1f1f;
-  --color-accent-glow: rgba(244, 241, 236, 0.12);
+  /* Rose quartz on charcoal; mulberry on cream in .light. Selection surfaces
+     stay neutral, with the accent reserved for markers and small washes. */
+  --color-accent: #dda7c7;
+  --color-accent-deep: #eac1d9;
+  --color-accent-mute: #c28bae;
+  --color-accent-wash: #2d2029;
+  --color-accent-glow: rgba(221, 167, 199, 0.08);
+
+  /* Action roles keep filled controls readable independently of surface/text
+     tokens. Both the legacy .btn and shared React controls consume these. */
+  --color-primary: var(--color-accent);
+  --color-primary-hover: var(--color-accent-deep);
+  --color-primary-pressed: #c28bae;
+  --color-on-primary: #0a0a0a;
+  --color-disabled-bg: #1f1f1f;
+  --color-disabled-fg: #b8b5af;
+  --color-disabled-border: #2a2a2a;
+
+  /* User turns have their own reading surface, distinct from neutral replies
+     and primary action fills. Shared by main and inline conversations. */
+  --color-user-message-bg: #070707;
+  --color-user-message-fg: #f4f1ec;
+  --color-user-message-border: #080808;
+  --color-user-message-label: #b8b5af;
 
   /* Status — four semantic states, each with a wash background variant */
   --color-ok: oklch(0.78 0.15 145);
@@ -74,6 +92,9 @@
   --color-err-wash: oklch(0.32 0.12 25);
   --color-info: oklch(0.78 0.13 220);
   --color-info-wash: oklch(0.32 0.1 220);
+  /* Readable text on status washes; distinct from decorative status marks. */
+  --color-ok-fg: var(--color-ok);
+  --color-warn-fg: var(--color-warn);
 
   /* Step kinds, each with bar / wash / fg variants.
      bar  = top accent strip on a step node
@@ -396,12 +417,21 @@
   --color-line-soft: #e9e3d3;
   --color-line-strong: #b9b09c;
 
-  /* Accent — the light theme's warm neutral text ramp. */
-  --color-accent: #3a3a44;
-  --color-accent-deep: #1a1a20;
-  --color-accent-mute: #66665e;
-  --color-accent-wash: #e9e3d3;
-  --color-accent-glow: rgba(26, 26, 32, 0.10);
+  /* Mulberry gives controls emphasis without tinting the paper surfaces. */
+  --color-accent: #854568;
+  --color-accent-deep: #713a58;
+  --color-accent-mute: #854568;
+  --color-accent-wash: #f0e3e9;
+  --color-accent-glow: rgba(133, 69, 104, 0.08);
+  --color-primary-pressed: #5f304a;
+  --color-on-primary: #faf6ec;
+  --color-disabled-bg: #e9e3d3;
+  --color-disabled-fg: #66665e;
+  --color-disabled-border: #b9b09c;
+  --color-user-message-bg: #efede8;
+  --color-user-message-fg: #1a1a20;
+  --color-user-message-border: #b9b09c;
+  --color-user-message-label: #52524c;
 
   --color-ok: oklch(0.5 0.15 145);
   --color-ok-wash: oklch(0.92 0.05 145);
@@ -411,6 +441,8 @@
   --color-err-wash: oklch(0.93 0.05 25);
   --color-info: oklch(0.48 0.13 220);
   --color-info-wash: oklch(0.93 0.04 220);
+  --color-ok-fg: oklch(0.45 0.13 145);
+  --color-warn-fg: oklch(0.48 0.13 70);
 
   --color-step-llm: oklch(0.52 0.18 285);
   --color-step-llm-wash: oklch(0.93 0.05 285);
@@ -501,11 +533,23 @@ body {
     cursor: pointer;
   }
 
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--color-accent);
+  }
+
   button:disabled,
   [aria-disabled="true"],
   [role="button"][aria-disabled="true"] {
     cursor: not-allowed;
   }
+}
+
+/* A full-strength keyboard outline also covers legacy utility-only controls.
+   Component-specific focus treatments can still refine this base rule. */
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* Text selection shares the neutral selected surface and readable foreground. */
@@ -1688,13 +1732,46 @@ html.light ::selection {
     0 0 0 4px var(--color-accent);
 }
 
+/* Shared action treatment for native, legacy and React controls. Keep these
+   rules outside utility layers so disabled/pressed states win over utilities. */
+.action-primary,
 .btn--primary {
-  background-color: var(--color-accent);
-  color: var(--color-bg);
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+  transition:
+    background-color var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast);
 }
 
-.btn--primary:hover {
-  background-color: var(--color-accent-deep);
+.action-primary:enabled:hover,
+.btn--primary:enabled:hover {
+  background-color: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.action-primary:enabled:active,
+.btn--primary:enabled:active {
+  background-color: var(--color-primary-pressed);
+  border-color: var(--color-primary-pressed);
+}
+
+.action-primary:focus-visible,
+.btn--primary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.action-primary:disabled,
+.btn--primary:disabled {
+  background-color: var(--color-disabled-bg);
+  border-color: var(--color-disabled-border);
+  color: var(--color-disabled-fg);
+  opacity: 1;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 .btn--ghost {
@@ -1742,6 +1819,11 @@ html.light ::selection {
 .input:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* =============================================================================
@@ -2590,7 +2672,7 @@ html.light ::selection {
   background: var(--fg-mute);
 }
 .hc-panel .hc-history-resize-handle:focus-visible {
-  outline: 1px solid color-mix(in oklch, var(--accent) 62%, transparent);
+  outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 .hc-panel .hc-chat-panes {
@@ -2652,13 +2734,11 @@ html.light ::selection {
   outline-offset: -1px;
 }
 .hc-panel[data-maximized] .hc-chat-pane:focus-visible {
-  box-shadow: inset 0 0 0 1px
-    color-mix(in oklch, var(--accent) 58%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
-/* The active chat input uses a quiet neutral state. Accent orange is reserved
-   for actions and status signals, so selecting a pane does not look like an
-   error or warning. */
+/* Keep the composer surface neutral; its focus outline identifies the active
+   input without tinting the conversation. */
 .chat-input-shell {
   background-color: color-mix(in oklch, var(--color-fg) 4%, var(--color-bg));
   transition:
@@ -2666,11 +2746,14 @@ html.light ::selection {
     background-color var(--t-fast, 120ms) var(--ease, ease),
     box-shadow var(--t-fast, 120ms) var(--ease, ease);
 }
+.chat-input-shell textarea:focus-visible {
+  outline: none;
+}
+
 .chat-input-shell:focus-within {
-  border-color: var(--color-line-strong);
+  border-color: var(--color-accent);
   background-color: var(--color-bg);
-  box-shadow: 0 0 0 1px
-    color-mix(in oklch, var(--color-fg-mute) 28%, transparent);
+  box-shadow: none;
 }
 
 /* Side-panel "drill" open: the panel slides from its anchored screen edge in
@@ -2977,8 +3060,9 @@ html.light ::selection {
 .hc-panel .hc-speed-picker select:focus-visible,
 .hc-panel .hc-provider-picker select:focus-visible,
 .hc-panel .hc-permission-picker select:focus-visible {
-  border-color: var(--line-strong);
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--fg-mute) 28%, transparent);
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .hc-panel .hc-model-picker select:disabled,
 .hc-panel .hc-effort-picker select:disabled,
@@ -3508,7 +3592,7 @@ html.light ::selection {
   color: var(--fg);
 }
 .hc-panel .hc-mini-history-agent:focus-visible {
-  outline: 1px solid color-mix(in oklch, var(--accent) 62%, transparent);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 .hc-panel .hc-mini-history-agent .label,
@@ -4183,22 +4267,16 @@ html.light ::selection {
   background: transparent;
 }
 
-/* Header block: title + crumb + hero status sit on one accent-tinted band with
-   a gradient accent line at the bottom (docs/design tasks-v2.html
-   `.t-detail-head`, which contains the hero). The wash fades from accent at the
-   title down through the hero. */
+/* Title, crumb and hero status share a neutral header band. Keep the reading
+   surface quiet; selection and primary actions carry the accent. */
 .tasks-v2-detail-shell .t-detail-head {
   position: relative;
   flex-shrink: 0;
   border-bottom: 1px solid var(--line);
-  background: linear-gradient(
-    to bottom,
-    color-mix(in oklch, var(--accent-wash) 25%, var(--bg-1)),
-    var(--bg-1)
-  );
+  background: var(--bg-1);
 }
 
-/* Accent gradient line riding the bottom border, below the hero. */
+/* Neutral divider below the hero. */
 .tasks-v2-detail-shell .t-detail-head::after {
   content: "";
   position: absolute;
