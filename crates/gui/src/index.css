@@ -6,7 +6,7 @@
 
 /* =============================================================================
    VERTEBRAE · HEARTH — Neutral dark identity
-   Copper accent on neutral charcoal surfaces, serif moments via Newsreader, mono
+   Warm neutral accent on charcoal surfaces, serif moments via Newsreader, mono
    via JetBrains.
    Seven step types: llm_inference / structured_inference / route /
    human_input / wait_children / stop / finish.
@@ -37,8 +37,7 @@
      a background TO a color-mix() value; a legacy sRGB hex animates cleanly. */
   --row-hover: #0e0e0e;
 
-  /* Neutral selected surface. Persistent selection is a value change; copper
-     remains reserved for the indicator, active-run, and focus signals. */
+  /* Persistent selection uses a raised neutral surface and an accent indicator. */
   --color-selection: #1f1f1f;
 
   /* Text — off-white neutrals, five steps to ghost. */
@@ -59,14 +58,12 @@
   --color-border: var(--color-line);
   --color-border-focus: var(--color-line-strong);
 
-  /* Accent — one copper, four stops, anchored at 40° hue (oklch) */
-  --color-accent: oklch(0.74 0.18 40);
-  --color-accent-deep: oklch(0.58 0.18 35);
-  --color-accent-mute: oklch(0.52 0.12 38);
-  /* Subtle ember tint for intentional accent surfaces such as badges and chips;
-     ordinary selection uses --color-selection instead. */
-  --color-accent-wash: oklch(0.22 0.03 38);
-  --color-accent-glow: rgba(230, 130, 80, 0.22);
+  /* Accent — the existing warm neutral text ramp, shared by both vocabularies. */
+  --color-accent: #b8b5af;
+  --color-accent-deep: #f4f1ec;
+  --color-accent-mute: #6f6c66;
+  --color-accent-wash: #1f1f1f;
+  --color-accent-glow: rgba(244, 241, 236, 0.12);
 
   /* Status — four semantic states, each with a wash background variant */
   --color-ok: oklch(0.78 0.15 145);
@@ -387,7 +384,7 @@
   --color-bg-2: #e9e3d3;
   --color-bg-3: #dcd4c1;
   --color-bg-4: #cac0a8;
-  --color-selection: oklch(0.95 0.03 50);
+  --color-selection: #e9e3d3;
 
   --color-fg: #1a1a20;
   --color-fg-soft: #3a3a44;
@@ -399,15 +396,12 @@
   --color-line-soft: #e9e3d3;
   --color-line-strong: #b9b09c;
 
-  /* Accent — ember orange: bright enough for cream text to read on,
-     dark enough to use as fg. Matches docs/design/tokens.css light ramp. */
-  --color-accent: oklch(0.62 0.18 48);
-  --color-accent-deep: oklch(0.48 0.18 40);
-  --color-accent-mute: oklch(0.76 0.12 50);
-  /* Light-theme counterpart — design's light `--accent-wash`: a pale cream-ember
-     tint (was incorrectly duplicating the dark value). */
-  --color-accent-wash: oklch(0.95 0.03 50);
-  --color-accent-glow: rgba(220, 110, 50, 0.22);
+  /* Accent — the light theme's warm neutral text ramp. */
+  --color-accent: #3a3a44;
+  --color-accent-deep: #1a1a20;
+  --color-accent-mute: #66665e;
+  --color-accent-wash: #e9e3d3;
+  --color-accent-glow: rgba(26, 26, 32, 0.10);
 
   --color-ok: oklch(0.5 0.15 145);
   --color-ok-wash: oklch(0.92 0.05 145);
@@ -514,14 +508,14 @@ body {
   }
 }
 
-/* Selection styling — muted copper in both themes, with readable foreground. */
+/* Text selection shares the neutral selected surface and readable foreground. */
 ::selection {
-  background-color: var(--color-accent-mute);
+  background-color: var(--color-selection);
   color: var(--color-fg);
 }
 
 html.light ::selection {
-  background-color: var(--color-accent-mute);
+  background-color: var(--color-selection);
   color: var(--color-fg);
 }
 
@@ -1600,7 +1594,8 @@ html.light ::selection {
   background-color: var(--color-bg-hover);
 }
 
-.data-row--selected {
+.data-row--selected,
+.data-row--selected:hover {
   background-color: var(--color-selection);
   border-left: 2px solid var(--color-accent);
 }
