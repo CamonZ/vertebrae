@@ -13,6 +13,10 @@ pub const GUI_BINARY: &str = "/app/target/debug/gui";
 /// processes, so responses can contain IDs created during the scenario.
 pub const MOCK_CHAT_RESPONSE_FILE: &str = "/mocks/gui-acceptance-chat-response.txt";
 
+/// Optional stream-json fixture the mock Claude process plays for each
+/// non-envelope turn instead of [`MOCK_CHAT_RESPONSE_FILE`]'s text reply.
+pub const MOCK_CHAT_TURN_FIXTURE_FILE: &str = "/mocks/gui-acceptance-chat-turn.jsonl";
+
 /// `MOCK_CAPTURE_DIR` of the harness processes the GUI launches, exported by
 /// `docker/gui-test-entrypoint.sh` before tauri-driver starts: mock Claude
 /// appends each launch's argv to `invocations.jsonl` and mock Codex each
@@ -79,6 +83,10 @@ async fn create_webdriver() -> Arc<Mutex<Client>> {
     app_env.insert(
         "MOCK_STDIN_ASSISTANT_MESSAGE_FILE".to_string(),
         serde_json::Value::String(MOCK_CHAT_RESPONSE_FILE.to_string()),
+    );
+    app_env.insert(
+        "MOCK_STDIN_TURN_FIXTURE_FILE".to_string(),
+        serde_json::Value::String(MOCK_CHAT_TURN_FIXTURE_FILE.to_string()),
     );
     if let Ok(vtb_gate_path) = std::env::var("VTB_GATE_PATH") {
         app_env.insert(

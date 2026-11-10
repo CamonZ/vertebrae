@@ -231,8 +231,9 @@ fn thread_params(
     config.permission.apply_to_params(&mut params);
     if request_config.read_only {
         // thread/start/resume use `sandbox`; turn/start uses sandboxPolicy.
+        // The thread is persisted so a discussion can resume it after the
+        // App Server process ends.
         params["sandbox"] = json!("read-only");
-        params["ephemeral"] = json!(true);
     }
 
     if let Some(thread_config) = thread_config(config, request_config) {
@@ -276,8 +277,11 @@ fn thread_config(
     let mut table = serde_json::Map::new();
     if request_config.read_only {
         table.insert("mcp_servers".into(), json!({}));
+        // The shell tool is how Codex reads files. The native read-only
+        // sandbox, with approvals disabled, rejects every write or network
+        // access it attempts; other tool families stay off.
         let features = json!({
-            "shell_tool": false,
+            "shell_tool": true,
             "unified_exec": false,
             "apps": false,
             "enable_mcp_apps": false,
@@ -518,7 +522,7 @@ mod tests {
     }
 
     #[test]
-    fn discussion_thread_uses_native_read_only_sandbox_and_no_mcp_or_shell() {
+    fn discussion_thread_reads_files_only_inside_the_native_read_only_sandbox() {
         let mut config = CodexProviderConfig::default();
         config.permission.restrict_to_read_only();
 
@@ -526,32 +530,55 @@ mod tests {
             read_only: true,
             ..Default::default()
         };
-        let params = thread_params(&config, &request);
+        let mut params = thread_params(&config, &request);
+        // The inherited tool PATH depends on the host; it is not policy.
+        params["config"]
+            .as_object_mut()
+            .expect("thread config")
+            .remove("shell_environment_policy");
 
-        assert_eq!(params["sandbox"], "read-only");
-        assert_eq!(params["approvalPolicy"], "never");
-        assert_eq!(params["config"]["mcp_servers"], json!({}));
-        assert_eq!(params["config"]["features"]["shell_tool"], false);
-        assert_eq!(params["config"]["features"]["apps"], false);
-        assert_eq!(params["config"]["features"]["multi_agent"], false);
-
-        for feature in [
-            "computer_use",
-            "browser_use",
-            "browser_use_external",
-            "browser_use_full_cdp_access",
-            "in_app_browser",
-            "code_mode",
-            "code_mode_host",
-            "code_mode_host_grpc",
-            "code_mode_tool_search",
-            "deferred_executor",
-        ] {
-            assert_eq!(
-                params["config"]["features"][feature], false,
-                "discussion exposed {feature}"
-            );
-        }
+        // Launch oracle: literal expected thread/start parameters.
+        assert_eq!(
+            params,
+            json!({
+                "approvalPolicy": "never",
+                "approvalsReviewer": "user",
+                "sandboxPolicy": {"type": "readOnly"},
+                "sandbox": "read-only",
+                "config": {
+                    "mcp_servers": {},
+                    "features": {
+                        "shell_tool": true,
+                        "unified_exec": false,
+                        "apps": false,
+                        "enable_mcp_apps": false,
+                        "codex_apps_mcp_2026_07_28": false,
+                        "multi_agent": false,
+                        "multi_agent_v2": false,
+                        "computer_use": false,
+                        "browser_use": false,
+                        "browser_use_external": false,
+                        "browser_use_full_cdp_access": false,
+                        "browser_annotation_api": false,
+                        "in_app_browser": false,
+                        "code_mode": false,
+                        "code_mode_host": false,
+                        "code_mode_host_grpc": false,
+                        "code_mode_tool_search": false,
+                        "code_mode_only": false,
+                        "code_mode_only_strict_3p_tools": false,
+                        "code_mode_prewarm": false,
+                        "deferred_executor": false,
+                    },
+                },
+            })
+        );
+        // A turn can never escalate the read-only thread.
+        let turn = config
+            .permission
+            .turn_override(&vertebrae_harness_core::PermissionMode::BypassPermissions);
+        assert_eq!(turn.sandbox_policy, Some(json!({"type": "readOnly"})));
+        assert_eq!(turn.approval_policy.as_deref(), Some("never"));
     }
 
     #[test]

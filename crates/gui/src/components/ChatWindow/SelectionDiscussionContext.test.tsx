@@ -20,8 +20,18 @@ import type {
   LocalChatTextEvent,
   LocalChatSessionEndEvent,
   LocalChatSessionErrorEvent,
+  LocalChatSessionInitEvent,
+  LocalChatToolCallEvent,
+  LocalChatToolResultEvent,
+  LocalChatTurnStartedEvent,
 } from "../../bindings";
-import { commands, events } from "../../bindings";
+import { commands } from "../../bindings";
+import { useChatStore } from "../../stores/chatStore";
+import { flushPendingLocalChatText } from "../../utils/localChatTextBatch";
+import {
+  resetLocalChatTurnRoutingForTests,
+  useLocalChatEventRouter,
+} from "../../hooks/useLocalChatEventRouter";
 import {
   SelectionDiscussionProvider,
   InlineSelectionDiscussion,
@@ -35,39 +45,56 @@ const transport = vi.hoisted(() => ({
   error: null as
     | ((event: { payload: LocalChatSessionErrorEvent }) => void)
     | null,
+  toolCall: null as
+    | ((event: { payload: LocalChatToolCallEvent }) => void)
+    | null,
+  toolResult: null as
+    | ((event: { payload: LocalChatToolResultEvent }) => void)
+    | null,
+  init: null as
+    | ((event: { payload: LocalChatSessionInitEvent }) => void)
+    | null,
+  started: null as
+    | ((event: { payload: LocalChatTurnStartedEvent }) => void)
+    | null,
   unlisten: vi.fn(),
 }));
 
-vi.mock("../../bindings", () => ({
-  commands: {
-    getSupportedLocalChatHarnesses: vi.fn(),
-    createLocalChatSession: vi.fn(async () => ({ status: "ok" })),
-    closeLocalChatSession: vi.fn(async () => ({ status: "ok" })),
-  },
-  events: {
-    localChatTextEvent: {
-      listen: vi.fn(async (handler: typeof transport.text) => {
-        transport.text = handler;
+vi.mock("../../bindings", () => {
+  const listener = (key?: keyof typeof transport) => ({
+    listen: vi.fn(async (handler: never) => {
+      if (key) (transport as Record<string, unknown>)[key] = handler;
 
-        return transport.unlisten;
-      }),
-    },
-    localChatSessionEndEvent: {
-      listen: vi.fn(async (handler: typeof transport.end) => {
-        transport.end = handler;
+      return transport.unlisten;
+    }),
+  });
 
-        return transport.unlisten;
-      }),
+  return {
+    commands: {
+      getSupportedLocalChatHarnesses: vi.fn(),
+      createLocalChatSession: vi.fn(async () => ({ status: "ok" })),
+      sendLocalChatMessage: vi.fn(async () => ({ status: "ok", data: null })),
+      interruptLocalChatTurn: vi.fn(async () => ({ status: "ok", data: null })),
+      closeLocalChatSession: vi.fn(async () => ({ status: "ok" })),
     },
-    localChatSessionErrorEvent: {
-      listen: vi.fn(async (handler: typeof transport.error) => {
-        transport.error = handler;
-
-        return transport.unlisten;
-      }),
+    events: {
+      localChatTextEvent: listener("text"),
+      localChatSessionEndEvent: listener("end"),
+      localChatSessionErrorEvent: listener("error"),
+      localChatToolCallEvent: listener("toolCall"),
+      localChatToolResultEvent: listener("toolResult"),
+      localChatSessionInitEvent: listener("init"),
+      localChatTurnStartedEvent: listener("started"),
+      localChatSessionTitleEvent: listener(),
+      localChatSessionUsageEvent: listener(),
+      localChatFileChangeEvent: listener(),
+      permissionRequestEvent: listener(),
+      localChatSessionWarningEvent: listener(),
+      localChatCompactionEvent: listener(),
+      localChatAnnotationEvent: listener(),
     },
-  },
-}));
+  };
+});
 
 const fixturePatch =
   "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+selected\n";
@@ -99,6 +126,30 @@ function Controls() {
   );
 }
 
+/** The thread's screen-reader turn status. */
+function announcement() {
+  const status = document.querySelector(
+    "[data-testid='selection-mini-thread'] p.sr-only[role='status']"
+  );
+
+  expect(status).not.toBeNull();
+  return status!;
+}
+
+/** Discussion sessions in the chat store. */
+function discussionSessions() {
+  return Object.values(useChatStore.getState().sessions).filter(
+    (session) => session.discussion
+  );
+}
+
+// The app's always-mounted router delivers harness events to chat sessions.
+function Router() {
+  useLocalChatEventRouter();
+
+  return null;
+}
+
 function fixture(scope = "A", onAttach = vi.fn()) {
   return (
     <SelectionDiscussionProvider
@@ -110,6 +161,26 @@ function fixture(scope = "A", onAttach = vi.fn()) {
     >
       <Controls />
     </SelectionDiscussionProvider>
+  );
+}
+
+// The harness reports a new provider turn id for every turn it starts.
+const turnIds = new Map<string, string>();
+let turnSequence = 0;
+
+function startTurn(backend: string) {
+  const turn_id = `turn-${++turnSequence}`;
+
+  turnIds.set(backend, turn_id);
+  act(() =>
+    transport.started?.({
+      payload: {
+        backend_session_id: backend,
+        harness: "claude",
+        turn_id,
+        is_root: true,
+      },
+    })
   );
 }
 
@@ -130,26 +201,42 @@ async function send(text = "Question") {
     expect(askButton).toBeEnabled();
   });
 
+  const sends = vi.mocked(commands.sendLocalChatMessage).mock.calls.length;
+  const creates = vi.mocked(commands.createLocalChatSession).mock.calls.length;
+
   fireEvent.click(askButton);
 
   await waitFor(() => {
-    expect(commands.createLocalChatSession).toHaveBeenCalled();
+    const sent = vi.mocked(commands.sendLocalChatMessage).mock.calls.length;
+    const made = vi.mocked(commands.createLocalChatSession).mock.calls.length;
+
+    expect(sent + made).toBeGreaterThan(sends + creates);
   });
 
-  const sessionCommand = vi.mocked(commands.createLocalChatSession);
-  const calls = sessionCommand.mock.calls;
-  const request = calls.at(-1)![0];
+  const sent = vi.mocked(commands.sendLocalChatMessage).mock.calls;
+  const backend =
+    sent.length > sends
+      ? sent.at(-1)![0]
+      : vi.mocked(commands.createLocalChatSession).mock.calls.at(-1)![0]
+          .backend_session_id;
 
-  return request.backend_session_id;
+  startTurn(backend);
+
+  return backend;
 }
 
-function end(id: string, handler = transport.end) {
+function end(
+  id: string,
+  handler = transport.end,
+  completion_status = "completed"
+) {
   handler?.({
     payload: {
       backend_session_id: id,
       harness: "claude",
-      turn_id: "turn",
+      turn_id: turnIds.get(id) ?? "turn",
       is_root: true,
+      completion_status,
       duration_ms: 1,
       cost_usd: 0,
       num_turns: 1,
@@ -163,6 +250,9 @@ function end(id: string, handler = transport.end) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useChatStore.getState().reset();
+  resetLocalChatTurnRoutingForTests();
+  render(<Router />);
 
   useUIStore.setState({
     inlineDiscussionPreference: { mode: "follow" },
@@ -232,17 +322,22 @@ it("selection, opening a thread and attaching are passive; explicit asks capture
 
   expect(screen.getByText("Full answer", { exact: false })).toBeVisible();
 
-  await send("Follow up");
+  const followUpId = await send("Follow up");
 
-  const calls = vi.mocked(commands.createLocalChatSession).mock.calls;
-  const followUpRequest = calls.at(-1)![0];
-  const followUpPrompt = followUpRequest.initial_prompt;
-
-  expect(followUpPrompt).toContain("Full answer");
-  expect(followUpPrompt).toContain('"code":"selected"');
+  // The follow-up is a new turn in the same session: one launch, one send,
+  // and a payload with only the question.
+  expect(followUpId).toBe(id);
+  expect(commands.createLocalChatSession).toHaveBeenCalledOnce();
+  expect(commands.sendLocalChatMessage).toHaveBeenCalledOnce();
+  expect(commands.sendLocalChatMessage).toHaveBeenLastCalledWith(
+    id,
+    "Follow up",
+    expect.objectContaining({ model_id: expect.any(String) })
+  );
+  expect(commands.closeLocalChatSession).not.toHaveBeenCalled();
 });
 
-it("cancels during creation and closes a runtime that appears late", async () => {
+it("cancels during creation and interrupts only the first turn of a runtime that appears late", async () => {
   let complete!: (
     value: Awaited<ReturnType<typeof commands.createLocalChatSession>>
   ) => void;
@@ -257,41 +352,72 @@ it("cancels during creation and closes a runtime that appears late", async () =>
   open();
 
   const id = await send();
-  const pendingIndicator = screen.getByTestId("thinking-indicator");
 
-  expect(pendingIndicator).toBeVisible();
+  expect(screen.getByTestId("thinking-indicator")).toBeVisible();
 
-  const cancelButton = screen.getByText("Cancel response");
+  fireEvent.click(screen.getByText("Cancel response"));
 
-  fireEvent.click(cancelButton);
-
-  const cancelledIndicator = screen.queryByTestId("thinking-indicator");
-
-  expect(cancelledIndicator).toBeNull();
-
-  act(() =>
-    transport.text?.({
-      payload: {
-        backend_session_id: id,
-        harness: "claude",
-        text: "late answer",
-        is_partial: false,
-        parent_tool_use_id: null,
-      },
-    })
-  );
-
-  expect(screen.queryByText("late answer", { exact: false })).toBeNull();
+  // Nothing to interrupt until the process exists.
+  expect(screen.getByText("Stopping...")).toBeInTheDocument();
+  expect(commands.interruptLocalChatTurn).not.toHaveBeenCalled();
 
   await act(async () => complete({ status: "ok", data: null }));
 
-  const finishedIndicator = screen.queryByTestId("thinking-indicator");
+  expect(commands.interruptLocalChatTurn).toHaveBeenCalledWith(id);
+  expect(commands.closeLocalChatSession).not.toHaveBeenCalled();
 
-  expect(commands.closeLocalChatSession).toHaveBeenCalledWith(id);
-  expect(finishedIndicator).toBeNull();
+  act(() => end(id, transport.end, "interrupted"));
+
+  expect(screen.queryByTestId("thinking-indicator")).toBeNull();
+
+  // The session survives the cancel: the follow-up continues it.
+  const followUp = await send("After cancel");
+
+  expect(followUp).toBe(id);
+  expect(commands.createLocalChatSession).toHaveBeenCalledOnce();
 });
 
-it("retires scope listeners and ignores success and errors from another worktree", async () => {
+it("cancel interrupts the in-flight turn of a live session without closing it", async () => {
+  render(fixture());
+  open();
+
+  const id = await send();
+  const text = (text: string) =>
+    act(() => {
+      transport.text?.({
+        payload: {
+          backend_session_id: id,
+          harness: "claude",
+          text,
+          turn_id: turnIds.get(id),
+          is_root: true,
+          is_partial: false,
+          parent_tool_use_id: null,
+        },
+      });
+      flushPendingLocalChatText();
+    });
+
+  fireEvent.click(screen.getByText("Cancel response"));
+
+  expect(commands.interruptLocalChatTurn).toHaveBeenCalledWith(id);
+  expect(commands.closeLocalChatSession).not.toHaveBeenCalled();
+  expect(screen.getByText("Stopping...")).toBeInTheDocument();
+
+  // Output the provider produced before it stopped stays, as in the main chat.
+  text("interrupted tail");
+  expect(screen.getByText("interrupted tail")).toBeInTheDocument();
+
+  act(() => end(id, transport.end, "interrupted"));
+
+  expect(screen.queryByTestId("thinking-indicator")).toBeNull();
+  expect(announcement()).toHaveTextContent("Reply cancelled.");
+  expect(await send("Next")).toBe(id);
+  expect(commands.createLocalChatSession).toHaveBeenCalledTimes(1);
+  expect(commands.closeLocalChatSession).not.toHaveBeenCalled();
+});
+
+it("switching worktree discards the discussion session and ignores its late events", async () => {
   const view = render(fixture());
 
   open();
@@ -325,7 +451,7 @@ it("retires scope listeners and ignores success and errors from another worktree
 
   expect(screen.queryByTestId("selection-mini-thread")).toBeNull();
   expect(screen.queryByText(/wrong scope|old failure/)).toBeNull();
-  expect(transport.unlisten).toHaveBeenCalledTimes(3);
+  expect(discussionSessions()).toEqual([]);
 });
 
 const selectionCallbacks: ReturnType<
@@ -598,11 +724,13 @@ it("keeps diff callbacks stable during streaming and announces only completed tu
 
   const request = vi.mocked(commands.createLocalChatSession).mock.calls[0][0];
   const id = request.backend_session_id;
+
+  startTurn(id);
   const callback = selectionCallbacks.at(-1);
   const renders = selectionCallbacks.length;
 
   for (const text of ["First ", "second ", "third"]) {
-    act(() =>
+    act(() => {
       transport.text?.({
         payload: {
           backend_session_id: id,
@@ -611,12 +739,13 @@ it("keeps diff callbacks stable during streaming and announces only completed tu
           is_partial: true,
           parent_tool_use_id: null,
         },
-      })
-    );
+      });
+      flushPendingLocalChatText();
+    });
 
     expect(selectionCallbacks.length).toBe(renders);
     expect(selectionCallbacks.at(-1)).toBe(callback);
-    expect(screen.getByRole("status").textContent).toBe("");
+    expect(announcement().textContent).toBe("");
   }
 
   const liveAnnouncement = screen
@@ -627,87 +756,102 @@ it("keeps diff callbacks stable during streaming and announces only completed tu
 
   act(() => end(id));
 
-  expect(screen.getByRole("status")).toHaveTextContent("Reply complete.");
+  expect(announcement()).toHaveTextContent("Reply complete.");
   expect(selectionCallbacks.length).toBe(renders);
 });
 
-it("shows a readable failure and logs only its category and request correlation", async () => {
-  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-
+it("renders a start failure like the main chat and starts afresh on the next ask", async () => {
   vi.mocked(commands.createLocalChatSession).mockResolvedValueOnce({
     status: "error",
-    error: { StartFailed: "credential-123 raw backend detail" },
+    error: { StartFailed: "provider unavailable" },
   });
 
-  try {
-    render(fixture());
-    open();
-    await send();
+  render(fixture());
+  open();
+  const failed = await send();
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Could not start the discussion. Check your provider settings and try again."
-    );
-    expect(screen.queryByText(/credential-123|StartFailed/)).toBeNull();
-    const requestIdMatcher = expect.any(String);
-    const diagnosticMatcher = expect.objectContaining({
-      category: "StartFailed",
-      harness: "claude",
-      requestId: requestIdMatcher,
-    });
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Discussion failed.")
+  );
+  expect(screen.getByTestId("selection-mini-thread")).toHaveTextContent(
+    "provider unavailable"
+  );
+  expect(announcement()).toHaveTextContent("Discussion failed.");
 
-    expect(warning).toHaveBeenCalledWith(
-      "Selection discussion failed",
-      diagnosticMatcher
-    );
-    expect(JSON.stringify(warning.mock.calls)).not.toContain("credential-123");
-  } finally {
-    warning.mockRestore();
-  }
+  // Nothing holds the conversation yet, so the retry carries the anchor again.
+  const retry = await send("Again");
+  const request = vi.mocked(commands.createLocalChatSession).mock.calls[1][0];
+
+  expect(retry).not.toBe(failed);
+  expect(request.initial_prompt).toContain("Context: ");
+  expect(request.initial_prompt).toContain("Question: Again");
+  expect(discussionSessions()).toHaveLength(1);
 });
 
 it("generated provider journeys observe command dispatch and retire responses across identities", async () => {
   await hegel.testAsync(
     async (tc) => {
-      vi.mocked(commands.createLocalChatSession).mockClear();
+      for (const command of [
+        commands.createLocalChatSession,
+        commands.sendLocalChatMessage,
+        commands.interruptLocalChatTurn,
+        commands.closeLocalChatSession,
+      ])
+        vi.mocked(command).mockClear();
 
-      const operationGenerator = gs.integers({ minValue: 0, maxValue: 131 });
-      const sequenceGenerator = gs.arrays(operationGenerator, {
-        minSize: 1,
-        maxSize: 45,
-      });
-      const sequence = tc.draw(sequenceGenerator);
+      const sequence = tc.draw(
+        gs.arrays(gs.integers({ minValue: 0, maxValue: 168 }), {
+          minSize: 1,
+          maxSize: 45,
+        })
+      );
       const attach = vi.fn();
       let session = 0;
       let worktree = 0;
       let generation = 0;
       let selected = false;
       let active: number | null = null;
-      let expectedRequests = 0;
-      let expectedAttachments = 0;
+      const expected = {
+        creates: 0,
+        sends: 0,
+        interrupts: 0,
+        closes: 0,
+        attachments: 0,
+      };
+      type State = "none" | "live" | "in_flight" | "stopping" | "closed";
+      // Facts only: the model shares no routing with the provider.
       let facts: {
         id: string;
-        request: string | null;
-        text: string[];
+        backend: string | null;
+        state: State;
+        resumeId: string | null;
+        rows: number;
         outdated: boolean;
       }[] = [];
-      const requests: {
+      const processes: {
         generation: number;
         thread: number;
-        id: string;
-        text: typeof transport.text;
-        end: typeof transport.end;
+        backend: string;
       }[] = [];
       const scope = () => `session-${session}:worktree-${worktree}`;
-      const initialFixture = fixture(scope(), attach);
-      const view = await act(async () => render(initialFixture));
+      const view = await act(async () => render(fixture(scope(), attach)));
+      const settleInactive = () => {
+        facts.forEach((fact, index) => {
+          if (index !== active && fact.state === "live") {
+            fact.state = "closed";
+            expected.closes++;
+          }
+        });
+      };
 
       try {
-        // Exercise cancellation, follow-up and both identity boundaries in every case.
-        const prefix = [0, 1, 2, 3, 11, 21, 7, 0, 1, 2, 8, 9, 0, 1, 2];
+        // Cancellation, follow-up, resume and both identity boundaries.
+        const prefix = [0, 1, 2, 11, 3, 2, 9, 12, 2, 7, 0, 1, 2, 8, 0, 1, 2];
 
         for (const encoded of [...prefix, ...sequence]) {
-          const operation = encoded % 12;
-          const choice = Math.floor(encoded / 12);
+          const operation = encoded % 13;
+          const choice = Math.floor(encoded / 13);
+          const current = active === null ? null : facts[active];
 
           if (operation === 0) {
             await act(async () => liveDiscussion.select(anchor));
@@ -715,64 +859,83 @@ it("generated provider journeys observe command dispatch and retire responses ac
           }
 
           if (operation === 1) {
-            act(() => liveDiscussion.ask());
+            await act(async () => liveDiscussion.ask());
 
             if (selected) {
               active = facts.length;
               facts.push({
                 id: liveDiscussion.threads.at(-1)!.id,
-                request: null,
-                text: [],
+                backend: null,
+                state: "none",
+                resumeId: null,
+                rows: 0,
                 outdated: false,
               });
             }
           }
 
-          if ((operation === 2 || operation === 11) && active !== null) {
-            const fact = facts[active];
-            const shouldDispatch = fact.request === null;
-            const question = operation === 2 ? "question" : "follow up";
+          if (operation === 2 && current) {
+            await act(async () => liveDiscussion.send(current.id, "question"));
 
-            await act(async () => liveDiscussion.send(fact.id, question));
+            if (current.state !== "in_flight" && current.state !== "stopping") {
+              current.rows++;
+              if (current.state === "live") {
+                expected.sends++;
+                expect(
+                  vi.mocked(commands.sendLocalChatMessage).mock.calls.at(-1)
+                ).toEqual([
+                  current.backend,
+                  expect.any(String),
+                  expect.anything(),
+                ]);
+                expect(
+                  vi.mocked(commands.sendLocalChatMessage).mock.calls.at(-1)![1]
+                ).not.toContain('"code"');
+              } else {
+                expected.creates++;
+                const input = vi
+                  .mocked(commands.createLocalChatSession)
+                  .mock.calls.at(-1)![0];
+                const resumes =
+                  current.state === "closed" && current.resumeId !== null;
 
-            if (shouldDispatch) {
-              expectedRequests++;
-              fact.text.push(question);
-
-              const calls = vi.mocked(commands.createLocalChatSession).mock
-                .calls;
-              const input = calls.at(-1)![0];
-
-              expect(input).toMatchObject({
-                read_only: true,
-                working_dir: `/${scope()}`,
-              });
-              expect(input.initial_prompt).toContain('"code":"selected"');
-
-              fact.request = input.backend_session_id;
-              requests.push({
-                generation,
-                thread: active,
-                id: input.backend_session_id,
-                text: transport.text,
-                end: transport.end,
-              });
+                expect(input).toMatchObject({
+                  read_only: true,
+                  working_dir: `/${scope()}`,
+                  provider_resume_id: resumes ? current.resumeId : null,
+                });
+                if (resumes)
+                  expect(input.initial_prompt).not.toContain('"code"');
+                else
+                  expect(input.initial_prompt).toContain('"code":"selected"');
+                current.backend = input.backend_session_id;
+                processes.push({
+                  generation,
+                  thread: active!,
+                  backend: input.backend_session_id,
+                });
+              }
+              current.state = "in_flight";
+              startTurn(current.backend!);
             }
           }
 
-          if (operation === 3 && active !== null) {
-            act(() => liveDiscussion.cancel(facts[active!].id));
-            facts[active].request = null;
+          if (operation === 3 && current) {
+            await act(async () => liveDiscussion.cancel(current.id));
+            if (current.state === "in_flight") {
+              expected.interrupts++;
+              current.state = "stopping";
+            }
           }
 
           if (operation === 4 && facts.length) {
             active = choice % facts.length;
-            act(() => liveDiscussion.reopen(facts[active!].id));
+            await act(async () => liveDiscussion.reopen(facts[active!].id));
             selected = true;
           }
 
           if (operation === 5) {
-            act(() => liveDiscussion.reopen(null));
+            await act(async () => liveDiscussion.reopen(null));
             active = null;
           }
 
@@ -794,78 +957,143 @@ it("generated provider journeys observe command dispatch and retire responses ac
             if (operation === 7) session++;
             else worktree++;
 
+            // Unmounting the provider closes every live process.
+            for (const fact of facts)
+              if (fact.state !== "none" && fact.state !== "closed")
+                expected.closes++;
             generation++;
-            const nextFixture = fixture(scope(), attach);
-            await act(async () => view.rerender(nextFixture));
+            await act(async () => view.rerender(fixture(scope(), attach)));
             facts = [];
             active = null;
             selected = false;
           }
 
-          if (operation === 9 && requests.length) {
-            const request = requests[choice % requests.length];
+          if (operation === 9 && processes.length) {
+            const process = processes[choice % processes.length];
             const fact =
-              request.generation === generation
-                ? facts[request.thread]
+              process.generation === generation
+                ? facts[process.thread]
                 : undefined;
-            const accepted = fact?.request === request.id;
+            const current = fact?.backend === process.backend;
+            const accepted =
+              current &&
+              (fact!.state === "in_flight" || fact!.state === "stopping");
 
-            act(() => {
-              request.text?.({
-                payload: {
-                  backend_session_id: request.id,
-                  harness: "claude",
-                  text: "deterministic answer",
-                  is_partial: false,
-                  parent_tool_use_id: null,
-                },
+            // A settled turn of the current process is the router's concern;
+            // the model checks the in-flight turn and stale processes.
+            if (accepted || !current)
+              await act(async () => {
+                transport.text?.({
+                  payload: {
+                    backend_session_id: process.backend,
+                    harness: "claude",
+                    text: "deterministic answer",
+                    turn_id: turnIds.get(process.backend),
+                    is_root: true,
+                    is_partial: false,
+                    parent_tool_use_id: null,
+                  },
+                });
+                end(process.backend);
               });
-              end(request.id, request.end);
-            });
 
             if (accepted) {
-              fact!.text.push("deterministic answer");
-              fact!.request = null;
+              fact!.rows++;
+              fact!.state = "live";
             }
           }
 
           if (operation === 10 && selected) {
             act(() => liveDiscussion.attach(anchor));
-            expectedAttachments++;
+            expected.attachments++;
           }
 
+          if (operation === 11 && current?.backend) {
+            await act(async () =>
+              transport.init?.({
+                payload: {
+                  backend_session_id: current.backend!,
+                  harness: "claude",
+                  provider_resume_id: `provider-${current.id}`,
+                  model: "sonnet",
+                  tools: ["Read", "Grep", "Glob"],
+                },
+              })
+            );
+            if (current.state !== "none" && current.state !== "closed")
+              current.resumeId = `provider-${current.id}`;
+          }
+
+          if (operation === 12 && current?.backend) {
+            // The process exits; the next follow-up resumes the conversation.
+            await act(async () =>
+              transport.error?.({
+                payload: {
+                  backend_session_id: current.backend!,
+                  harness: "claude",
+                  error: "process exited",
+                  is_root: true,
+                },
+              })
+            );
+            if (current.state !== "none" && current.state !== "closed") {
+              current.state = "closed";
+              current.rows++;
+            }
+          }
+
+          settleInactive();
+
           expect(commands.createLocalChatSession).toHaveBeenCalledTimes(
-            expectedRequests
+            expected.creates
           );
-          expect(attach).toHaveBeenCalledTimes(expectedAttachments);
+          expect(commands.sendLocalChatMessage).toHaveBeenCalledTimes(
+            expected.sends
+          );
+          expect(commands.interruptLocalChatTurn).toHaveBeenCalledTimes(
+            expected.interrupts
+          );
+          expect(commands.closeLocalChatSession).toHaveBeenCalledTimes(
+            expected.closes
+          );
+          expect(attach).toHaveBeenCalledTimes(expected.attachments);
           expect(liveDiscussion.selection !== null).toBe(selected);
           expect(liveDiscussion.activeId).toBe(
             active === null ? null : facts[active].id
           );
-          const observedThreads = liveDiscussion.threads.map((thread) => {
-            const text = thread.messages.map((message) => message.text);
+          const { sessions } = useChatStore.getState();
 
-            return {
-              code: thread.anchor.code,
-              waiting: thread.requestId !== null,
-              outdated: thread.outdated,
-              text,
-            };
-          });
-          const expectedThreads = facts.map((fact) => ({
-            code: "selected",
-            waiting: fact.request !== null,
-            outdated: fact.outdated,
-            text: fact.text,
-          }));
+          expect(
+            liveDiscussion.threads.map((thread) => {
+              const session = thread.sessionId
+                ? sessions[thread.sessionId]
+                : undefined;
 
-          expect(observedThreads).toEqual(expectedThreads);
+              return {
+                code: thread.anchor.code,
+                waiting: !!session?.activeTurn,
+                live: !!session?.backendSessionId,
+                outdated: thread.outdated,
+                rows: session?.messages.length ?? 0,
+              };
+            })
+          ).toEqual(
+            facts.map((fact) => ({
+              code: "selected",
+              waiting: fact.state === "in_flight" || fact.state === "stopping",
+              live: fact.state !== "none" && fact.state !== "closed",
+              outdated: fact.outdated,
+              rows: fact.rows,
+            }))
+          );
+          // Discussions never reach the chat history or persistence.
+          expect(useChatStore.getState().localSessionSummaries).toEqual({});
         }
       } finally {
         view.unmount();
       }
     },
-    { seed: 0x0cd1b402, testCases: 40 }
+    { seed: 0x8640ee9e, testCases: 40 }
   );
 });
 
@@ -1138,19 +1366,58 @@ it("captures dedicated choice per request and applies a settings change only to 
     end(id);
   });
 
-  await send("Follow up after change");
+  const followUp = await send("Follow up after change");
 
-  const previousAnswer = expect.stringContaining("Dedicated answer");
+  // A different harness cannot continue the conversation: the old process
+  // closes and a fresh one starts from the anchor, never a replayed answer.
   const followUpRequest = expect.objectContaining({
     harness: "claude",
     provider_id: "anthropic",
     model_id: "sonnet",
     read_only: true,
-    initial_prompt: previousAnswer,
+    provider_resume_id: null,
   });
+  const prompt = vi
+    .mocked(commands.createLocalChatSession)
+    .mock.calls.at(-1)![0].initial_prompt;
 
+  expect(followUp).not.toBe(id);
+  expect(commands.closeLocalChatSession).toHaveBeenCalledWith(id);
   expect(commands.createLocalChatSession).toHaveBeenLastCalledWith(
     followUpRequest
+  );
+  expect(prompt).toContain('"code":"selected"');
+  expect(prompt).not.toContain("Dedicated answer");
+  expect(commands.sendLocalChatMessage).not.toHaveBeenCalled();
+});
+
+it("applies a changed model to a follow-up in the same session as turn settings", async () => {
+  const uiState = useUIStore.getState();
+
+  render(fixture());
+  open();
+
+  const id = await send();
+
+  act(() => end(id));
+  act(() =>
+    uiState.setInlineDiscussionPreference({
+      mode: "dedicated",
+      providerId: "anthropic",
+      modelId: "opus",
+    })
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Ask" })).toBeDefined()
+  );
+
+  const followUp = await send("Next");
+
+  expect(followUp).toBe(id);
+  expect(commands.sendLocalChatMessage).toHaveBeenLastCalledWith(
+    id,
+    "Next",
+    expect.objectContaining({ model_id: "opus" })
   );
 });
 
@@ -1213,50 +1480,31 @@ it("invalidates the catalog after provider settings change", async () => {
   view.unmount();
 });
 
-it("captures provider/model before listener setup even when settings change before native creation", async () => {
-  let registered!: (unlisten: () => void) => void;
-  const textListener = vi.mocked(events.localChatTextEvent.listen);
-
-  textListener.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        registered = resolve;
-      })
-  );
-
+it("captures the provider and model when the question is asked", async () => {
   const uiState = useUIStore.getState();
-  const dedicatedPreference = {
-    mode: "dedicated" as const,
+
+  uiState.setInlineDiscussionPreference({
+    mode: "dedicated",
     providerId: "custom",
     modelId: "dedicated",
-  };
-  const view = fixture();
-
-  uiState.setInlineDiscussionPreference(dedicatedPreference);
-  render(view);
+  });
+  render(fixture());
   open();
-  await waitFor(() => {
-    const alert = screen.queryByRole("alert");
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 
-    expect(alert).toBeNull();
-  });
-
-  act(() => liveDiscussion.send(liveDiscussion.activeId!, "Pending setup"));
-
-  expect(commands.createLocalChatSession).not.toHaveBeenCalled();
-
+  await act(async () =>
+    liveDiscussion.send(liveDiscussion.activeId!, "Which provider?")
+  );
   act(() => uiState.setInlineDiscussionPreference({ mode: "follow" }));
-  await act(async () => registered(transport.unlisten));
 
-  const capturedRequest = expect.objectContaining({
-    harness: "codex",
-    provider_id: "custom",
-    model_id: "dedicated",
-    read_only: true,
-  });
-
+  expect(commands.createLocalChatSession).toHaveBeenCalledOnce();
   expect(commands.createLocalChatSession).toHaveBeenLastCalledWith(
-    capturedRequest
+    expect.objectContaining({
+      harness: "codex",
+      provider_id: "custom",
+      model_id: "dedicated",
+      read_only: true,
+    })
   );
 });
 
@@ -1330,7 +1578,8 @@ it("sends custom effort and speed without applying a removed personality prefere
     reasoning_effort: "high",
     speed_tier: "fast",
     personality: null,
-    permission_mode: null,
+    // The harness's read-only policy owns permissions for discussions.
+    permission_mode: "default",
   });
 
   expect(commands.createLocalChatSession).toHaveBeenLastCalledWith(request);
@@ -1352,10 +1601,10 @@ it.each(["dark", "light"])(
 
     const id = await send("First line\nSecond line");
     const initialQuestion = screen.getByText("First line", { exact: false });
-    const initialMessage = initialQuestion.closest("article");
+    const initialMessage = initialQuestion.closest(".evrow");
     const initialIndicator = screen.getByTestId("thinking-indicator");
 
-    expect(initialMessage).toHaveClass("is-user");
+    expect(initialMessage).toHaveClass("evrow--user");
     expect(initialIndicator).toBeVisible();
 
     act(() => {
@@ -1388,13 +1637,14 @@ it.each(["dark", "light"])(
     const retainedAnswer = screen.getByText("Bold answer");
     const followUpIndicator = screen.getByTestId("thinking-indicator");
     const followUpText = screen.getByText(/Follow-up/);
-    const followUpMessage = followUpText.closest("article");
-    const pendingRequest = liveDiscussion.threads[0].requestId;
+    const followUpMessage = followUpText.closest(".evrow");
+    const pendingTurn = discussionSessions()[0].activeTurn;
 
     expect(retainedAnswer).toBeVisible();
     expect(followUpIndicator).toBeVisible();
-    expect(followUpMessage).toHaveClass("is-user");
-    expect(pendingRequest).toBe(followUp);
+    expect(followUpMessage).toHaveClass("evrow--user");
+    expect(pendingTurn).not.toBeNull();
+    expect(followUp).toBe(id);
 
     const closeButton = screen.getByRole("button", {
       name: "Close discussion",
@@ -1428,13 +1678,11 @@ it.each([
   ["futuristic", false],
   ["futuristic", true],
 ] as const)(
-  "shows %s thinking through deferred setup with previous history=%s",
+  "shows %s thinking for the whole turn with previous history=%s",
   async (style, history) => {
     useUIStore.setState({ thinkingIndicatorStyle: style });
 
-    const component = fixture();
-
-    render(component);
+    render(fixture());
     open();
 
     if (history) {
@@ -1446,6 +1694,8 @@ it.each([
             backend_session_id: first,
             harness: "claude",
             text: "Earlier answer",
+            turn_id: turnIds.get(first),
+            is_root: true,
             is_partial: false,
             parent_tool_use_id: null,
           },
@@ -1454,91 +1704,58 @@ it.each([
       });
     }
 
-    await waitFor(() => {
-      const alert = screen.queryByRole("alert");
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 
-      expect(alert).toBeNull();
-    });
-
-    let register!: (cleanup: () => void) => void;
-    const textListener = vi.mocked(events.localChatTextEvent.listen);
-
-    textListener.mockImplementationOnce((handler) => {
-      transport.text = (event) =>
-        handler({ event: "local-chat-text-event", id: 0, ...event });
-
-      return new Promise((resolve) => {
-        register = resolve;
+    let complete!: (value: { status: "ok"; data: null }) => void;
+    const deferred = () =>
+      new Promise<{ status: "ok"; data: null }>((resolve) => {
+        complete = resolve;
       });
-    });
 
-    let complete!: (
-      value: Awaited<ReturnType<typeof commands.createLocalChatSession>>
-    ) => void;
-    const createSession = vi.mocked(commands.createLocalChatSession);
-
-    createSession.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          complete = resolve;
-        })
-    );
+    if (history)
+      vi.mocked(commands.sendLocalChatMessage).mockImplementationOnce(deferred);
+    else
+      vi.mocked(commands.createLocalChatSession).mockImplementationOnce(
+        deferred
+      );
 
     const threadId = liveDiscussion.activeId!;
 
     act(() => liveDiscussion.send(threadId, "Waiting follow-up"));
 
-    const initialIndicator = screen.getByTestId("thinking-indicator");
-    const previousRequests = history ? 1 : 0;
-
-    expect(initialIndicator).toHaveAttribute("data-style", style);
-    expect(commands.createLocalChatSession).toHaveBeenCalledTimes(
-      previousRequests
+    expect(screen.getByTestId("thinking-indicator")).toHaveAttribute(
+      "data-style",
+      style
     );
-
-    await act(async () => register(transport.unlisten));
-
-    const registeredIndicator = screen.getByTestId("thinking-indicator");
-
-    expect(registeredIndicator).toBeVisible();
 
     await act(async () => complete({ status: "ok", data: null }));
 
-    const id = liveDiscussion.threads[0].requestId!;
+    const id = discussionSessions()[0].backendSessionId!;
 
-    act(() =>
-      transport.text?.({
-        payload: {
-          backend_session_id: id,
-          harness: "claude",
-          text: "",
-          is_partial: true,
-          parent_tool_use_id: null,
-        },
-      })
-    );
+    expect(commands.createLocalChatSession).toHaveBeenCalledOnce();
+    startTurn(id);
 
-    const emptyTextIndicator = screen.getByTestId("thinking-indicator");
-
-    expect(emptyTextIndicator).toBeVisible();
-
-    act(() =>
+    act(() => {
       transport.text?.({
         payload: {
           backend_session_id: id,
           harness: "claude",
           text: "Now streaming",
+          turn_id: turnIds.get(id),
+          is_root: true,
           is_partial: true,
           parent_tool_use_id: null,
         },
-      })
-    );
+      });
+      flushPendingLocalChatText();
+    });
 
-    const streamingIndicator = screen.queryByTestId("thinking-indicator");
-
-    expect(streamingIndicator).toBeNull();
+    // As in the main chat, the indicator stays for the whole turn.
+    expect(screen.getByTestId("thinking-indicator")).toBeVisible();
 
     act(() => end(id));
+
+    expect(screen.queryByTestId("thinking-indicator")).toBeNull();
   }
 );
 
@@ -1587,6 +1804,7 @@ it.each(["end", "rejection", "error", "cancel", "unmount"])(
       });
 
       fireEvent.click(cancelButton);
+      act(() => end(id, transport.end, "interrupted"));
     }
 
     if (terminal === "unmount") {
@@ -1608,6 +1826,8 @@ it.each(["end", "rejection", "error", "cancel", "unmount"])(
           backend_session_id: id,
           harness: "claude",
           text: "Retired reply",
+          turn_id: turnIds.get(id),
+          is_root: true,
           is_partial: true,
           parent_tool_use_id: null,
         },
@@ -1617,75 +1837,6 @@ it.each(["end", "rejection", "error", "cancel", "unmount"])(
     const retiredReply = screen.queryByText("Retired reply");
 
     expect(retiredReply).toBeNull();
-  }
-);
-
-it.each(["cancel", "unmount", "listener rejection"])(
-  "retires the initial thinking indicator during listener setup: %s",
-  async (terminal) => {
-    let resolve!: (cleanup: () => void) => void;
-    let reject!: (error: Error) => void;
-    const textListener = vi.mocked(events.localChatTextEvent.listen);
-
-    textListener.mockImplementationOnce(
-      () =>
-        new Promise((yes, no) => {
-          resolve = yes;
-          reject = no;
-        })
-    );
-
-    const component = fixture();
-    const view = render(component);
-
-    open();
-
-    await waitFor(() => {
-      const alert = screen.queryByRole("alert");
-
-      expect(alert).toBeNull();
-    });
-
-    const threadId = liveDiscussion.activeId!;
-
-    act(() => liveDiscussion.send(threadId, "Initial pending question"));
-
-    const initialIndicator = screen.getByTestId("thinking-indicator");
-
-    expect(initialIndicator).toBeVisible();
-    expect(commands.createLocalChatSession).not.toHaveBeenCalled();
-
-    if (terminal === "cancel") {
-      const cancelButton = screen.getByRole("button", {
-        name: "Cancel response",
-      });
-
-      fireEvent.click(cancelButton);
-    }
-
-    if (terminal === "unmount") {
-      const nextComponent = fixture("B");
-
-      view.rerender(nextComponent);
-      open();
-    }
-
-    await act(async () => {
-      if (terminal === "listener rejection") {
-        const listenerError = new Error("listener unavailable");
-
-        reject(listenerError);
-      } else {
-        resolve(transport.unlisten);
-      }
-    });
-
-    const finishedIndicator = screen.queryByTestId("thinking-indicator");
-    const expectedUnlisteners = terminal === "listener rejection" ? 2 : 3;
-
-    expect(finishedIndicator).toBeNull();
-    expect(commands.createLocalChatSession).not.toHaveBeenCalled();
-    expect(transport.unlisten).toHaveBeenCalledTimes(expectedUnlisteners);
   }
 );
 
@@ -1738,3 +1889,99 @@ it.each(["dark", "light"])(
     expect(commands.createLocalChatSession).not.toHaveBeenCalled();
   }
 );
+
+it("renders a discussion's tool calls, results and errors with the main chat's Thread rows", async () => {
+  const view = render(fixture());
+
+  open();
+
+  const id = await send("Please explain what this file does");
+
+  act(() => {
+    transport.toolCall?.({
+      payload: {
+        backend_session_id: id,
+        harness: "claude",
+        tool_id: "read-1",
+        tool_name: "Read",
+        input: JSON.stringify({ file_path: "/A/a" }),
+        parent_tool_use_id: null,
+      },
+    });
+    transport.toolResult?.({
+      payload: {
+        backend_session_id: id,
+        harness: "claude",
+        tool_id: "read-1",
+        result: "selected",
+        is_error: false,
+        parent_tool_use_id: null,
+      },
+    });
+    transport.text?.({
+      payload: {
+        backend_session_id: id,
+        harness: "claude",
+        text: "The file holds one line.",
+        is_partial: false,
+        parent_tool_use_id: null,
+      },
+    });
+    // Another process's tool call never reaches this thread.
+    transport.toolCall?.({
+      payload: {
+        backend_session_id: "foreign",
+        harness: "claude",
+        tool_id: "write-1",
+        tool_name: "Write",
+        input: "{}",
+        parent_tool_use_id: null,
+      },
+    });
+    end(id);
+  });
+
+  const thread = screen.getByTestId("selection-mini-thread");
+  const messages = thread.querySelector(".selection-mini-messages")!;
+  // A real tool call is a tool row (grouped like the main chat), never prose.
+  const group = messages.querySelector(".tool-activity-summary")!;
+
+  expect(group).toHaveTextContent("1 call");
+  expect(messages.querySelector(".evrow--agent")).toHaveTextContent(
+    "The file holds one line."
+  );
+  expect(messages.textContent).not.toMatch(
+    /<invoke|tool_use|"file_path"|Write/
+  );
+
+
+  fireEvent.click(group);
+
+  const calls = [...messages.querySelectorAll(".tool-activity-call")];
+
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toHaveAttribute("data-evt", "read-1");
+
+  fireEvent.click(calls[0].querySelector("button")!);
+
+  // The raw call and its recorded result render inside the tool row.
+  expect(calls[0]).toHaveTextContent("/A/a");
+  expect(calls[0]).toHaveTextContent("selected");
+
+  act(() =>
+    transport.error?.({
+      payload: {
+        backend_session_id: id,
+        harness: "claude",
+        error: "provider overloaded",
+        is_root: true,
+      },
+    })
+  );
+
+  expect(
+    thread.querySelector(".selection-mini-messages .evrow--error")
+  ).toHaveTextContent("provider overloaded");
+
+  view.unmount();
+});

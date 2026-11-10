@@ -28,6 +28,16 @@ pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
 
 pub const CLAUDE_REASONING_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
+/// Claude tools a read-only discussion may use: they inspect files under the
+/// working directory and never change state.
+pub const CLAUDE_READ_ONLY_TOOLS: &[&str] = &["Read", "Grep", "Glob"];
+
+/// Whether `tool_name` is exactly one of [`CLAUDE_READ_ONLY_TOOLS`]. Names are
+/// matched verbatim: case or whitespace variants are different tools.
+pub fn is_claude_read_only_tool(tool_name: &str) -> bool {
+    CLAUDE_READ_ONLY_TOOLS.contains(&tool_name)
+}
+
 pub(crate) fn claude_model_supports_fast_mode(model: &str) -> bool {
     matches!(model, "opus" | "claude-opus-5" | "claude-opus-4-8")
         || model.starts_with("claude-opus-5-")
@@ -314,12 +324,15 @@ impl ClaudeProviderConfig {
         Ok(())
     }
 
-    /// Discussion runtimes expose no tools, including inherited MCP tools.
+    /// Discussion runtimes expose only [`CLAUDE_READ_ONLY_TOOLS`]: no
+    /// mutating built-ins, no MCP servers, plugins, skills, agents or hooks.
+    /// Without a permission prompt tool, Claude denies any request that needs
+    /// approval, so reads stay inside the working directory.
     pub fn restrict_to_read_only(&mut self) {
         let settings = json!({"disableAllHooks": true}).to_string();
         let arguments = [
             "--tools".into(),
-            "".into(),
+            CLAUDE_READ_ONLY_TOOLS.join(","),
             "--strict-mcp-config".into(),
             "--safe-mode".into(),
             "--setting-sources".into(),
@@ -332,6 +345,7 @@ impl ClaudeProviderConfig {
         self.prelude.settings_path = None;
         self.mcp_config = Some(json!({"mcpServers": {}}));
         self.permission_prompt_tool = None;
+        self.permission_mode = Some(ClaudePermissionMode::Default);
         self.plugin_roots.clear();
         self.installed_skills_roots.clear();
         self.agent_paths.clear();
@@ -438,10 +452,13 @@ impl ClaudeProviderConfig {
                     "stream-json".into(),
                     "--verbose".into(),
                     "--include-partial-messages".into(),
-                    // Make bypass selectable on a later turn without enabling
-                    // it until the user explicitly requests that mode.
-                    "--allow-dangerously-skip-permissions".into(),
                 ]);
+                // Make bypass selectable on a later turn without enabling it
+                // until the user explicitly requests that mode. Read-only
+                // sessions can never switch to it.
+                if !request.read_only {
+                    args.push("--allow-dangerously-skip-permissions".into());
+                }
             }
             ClaudeLaunchMode::OneShot { .. } => {}
         }
@@ -654,36 +671,122 @@ mod tests {
         assert!(has_safe_mode);
     }
 
-    #[test]
-    fn read_only_launch_removes_ambient_tools() {
-        let mut config = ClaudeProviderConfig::default();
-        config.mcp_config =
-            Some(serde_json::json!({"mcpServers": {"write": {"command": "writer"}}}));
+    fn read_only_spec(mode: ClaudeLaunchMode<'_>) -> Vec<String> {
+        let directory = tempdir().expect("temporary directory");
+        let executable = directory.path().join("claude");
+        File::create(&executable).expect("placeholder executable");
+        let mut config = ClaudeProviderConfig {
+            executable: Some(executable),
+            mcp_config: Some(serde_json::json!({"mcpServers": {"write": {"command": "writer"}}})),
+            permission_prompt_tool: Some("mcp__vtb-gate__permission_prompt".into()),
+            permission_mode: Some(super::ClaudePermissionMode::BypassPermissions),
+            ..ClaudeProviderConfig::default()
+        };
         config.plugin_roots.push("/plugins".into());
         config.installed_skills_roots.push("/skills".into());
-
+        config.agent_paths.push("/agents/reviewer.md".into());
         config.restrict_to_read_only();
+        let request = RequestConfig {
+            read_only: true,
+            ..RequestConfig::default()
+        };
 
-        let has_empty_tools = config
-            .prelude
+        config
+            .command_spec(mode, &request)
+            .expect("valid launch")
             .args
-            .windows(2)
-            .any(|args| args == ["--tools", ""]);
-        let has_strict_mcp = config
-            .prelude
-            .args
-            .iter()
-            .any(|arg| arg == "--strict-mcp-config");
+    }
 
-        assert!(has_empty_tools);
-        assert!(has_strict_mcp);
-        assert_eq!(
-            config.mcp_config,
-            Some(serde_json::json!({"mcpServers": {}}))
+    fn flag_values<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
+        args.windows(2)
+            .filter(|pair| pair[0] == flag)
+            .map(|pair| pair[1].as_str())
+            .collect()
+    }
+
+    #[test]
+    fn read_only_tool_set_is_exactly_read_grep_glob() {
+        assert_eq!(super::CLAUDE_READ_ONLY_TOOLS, ["Read", "Grep", "Glob"]);
+        for tool in ["Read", "Grep", "Glob"] {
+            assert!(super::is_claude_read_only_tool(tool), "{tool}");
+        }
+        for tool in [
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "NotebookEdit",
+            "Bash",
+            "mcp__vtb-gate__permission_prompt",
+            "read",
+            " Read",
+            "Read ",
+            "",
+        ] {
+            assert!(!super::is_claude_read_only_tool(tool), "{tool:?}");
+        }
+    }
+
+    #[test]
+    fn read_only_persistent_launch_exposes_only_read_tools() {
+        for mode in [
+            ClaudeLaunchMode::Persistent { resume_id: None },
+            ClaudeLaunchMode::PersistentNew {
+                session_id: "discussion",
+            },
+        ] {
+            let args = read_only_spec(mode);
+
+            assert_eq!(flag_values(&args, "--tools"), ["Read,Grep,Glob"]);
+            assert!(flag_values(&args, "--allowedTools").is_empty());
+            assert!(flag_values(&args, "--allowed-tools").is_empty());
+            assert_eq!(flag_values(&args, "--mcp-config"), [r#"{"mcpServers":{}}"#]);
+            assert_eq!(flag_values(&args, "--permission-mode"), ["default"]);
+            assert_eq!(flag_values(&args, "--input-format"), ["stream-json"]);
+            assert_eq!(flag_values(&args, "--output-format"), ["stream-json"]);
+            for absent in [
+                "--plugin-dir",
+                "--agent",
+                "--permission-prompt-tool",
+                "--allow-dangerously-skip-permissions",
+                "--dangerously-skip-permissions",
+            ] {
+                assert!(!args.iter().any(|arg| arg == absent), "{absent}");
+            }
+            for flag in ["--strict-mcp-config", "--safe-mode"] {
+                assert!(args.iter().any(|arg| arg == flag), "{flag}");
+            }
+            for tool in ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"] {
+                assert!(
+                    !args
+                        .iter()
+                        .any(|arg| arg.split(',').any(|item| item == tool)),
+                    "read-only launch exposed {tool}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn writable_persistent_launch_keeps_bypass_selectable() {
+        let directory = tempdir().expect("temporary directory");
+        let executable = directory.path().join("claude");
+        File::create(&executable).expect("placeholder executable");
+        let config = ClaudeProviderConfig {
+            executable: Some(executable),
+            ..ClaudeProviderConfig::default()
+        };
+        let spec = config
+            .command_spec(
+                ClaudeLaunchMode::Persistent { resume_id: None },
+                &RequestConfig::default(),
+            )
+            .expect("valid launch");
+
+        assert!(
+            spec.args
+                .iter()
+                .any(|arg| arg == "--allow-dangerously-skip-permissions")
         );
-        assert!(config.plugin_roots.is_empty());
-        assert!(config.installed_skills_roots.is_empty());
-        assert!(config.permission_prompt_tool.is_none());
     }
 
     #[test]

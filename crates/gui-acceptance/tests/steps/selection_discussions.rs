@@ -48,12 +48,39 @@ fn captured_turns() -> Vec<String> {
         .collect()
 }
 
+/// The main conversation's drafted question; every other captured turn in
+/// these scenarios belongs to an inline discussion.
+const MAIN_DRAFT: &str = "Explain selected code before implementation";
+
 fn discussion_prompts() -> Vec<String> {
     let turns = captured_turns();
 
     turns
         .into_iter()
-        .filter(|turn| turn.contains("This is a read-only side discussion."))
+        .filter(|turn| !turn.contains(MAIN_DRAFT))
+        .collect()
+}
+
+/// Launches of the restricted discussion runtime.
+fn discussion_launches() -> Vec<Vec<String>> {
+    harness_capture("invocations.jsonl")
+        .into_iter()
+        .filter_map(|invocation| {
+            let args: Vec<String> = invocation
+                .as_array()?
+                .iter()
+                .filter_map(|arg| arg.as_str().map(ToOwned::to_owned))
+                .collect();
+
+            args.iter().any(|arg| arg == "--safe-mode").then_some(args)
+        })
+        .collect()
+}
+
+fn flag_values<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
+    args.windows(2)
+        .filter(|pair| pair[0] == flag)
+        .map(|pair| pair[1].as_str())
         .collect()
 }
 
@@ -762,7 +789,7 @@ async fn ask(world: &mut GuiWorld) {
 
         let discussion_completed_script = r#"
             const thread = document.querySelector("[data-testid=selection-mini-thread]");
-            const replies = thread?.querySelectorAll(".selection-mini-message.is-assistant");
+            const replies = thread?.querySelectorAll(".selection-mini-messages .evrow--agent");
             const status = thread?.querySelector('[role="status"]');
             const expectedReplies = arguments[0];
 
@@ -785,7 +812,7 @@ async fn ask(world: &mut GuiWorld) {
     }
 }
 
-#[then("both discussion requests contain the original selected code")]
+#[then("the discussion is one read-only session whose follow-up carries only the question")]
 async fn discussion_context(_world: &mut GuiWorld) {
     let prompts = discussion_prompts();
 
@@ -795,32 +822,24 @@ async fn discussion_context(_world: &mut GuiWorld) {
         "captured discussion prompts: {prompts:#?}"
     );
 
-    for prompt in &prompts {
-        assert!(
-            prompt.contains("const selected = 42;"),
-            "unexpected code: {prompt}"
-        );
-    }
+    let first = &prompts[0];
 
-    let follow_up = &prompts[1];
     assert!(
-        follow_up.contains("Why this value?"),
-        "missing history: {follow_up}"
+        first.starts_with("Context: {")
+            && first.contains("const selected = 42;")
+            && first.contains("Why this value?"),
+        "first turn must carry the anchor and question: {first}"
     );
 
-    let invocations = harness_capture("invocations.jsonl");
-    let read_only_launches = invocations
-        .iter()
-        .filter(|invocation| {
-            let args = invocation.as_array().expect("provider argv");
+    // The follow-up is a new turn in the same session, not a replay.
+    assert_eq!(prompts[1], "Explain more", "follow-up turn: {}", prompts[1]);
 
-            args.iter().any(|arg| arg == "--safe-mode")
-        })
-        .count();
+    let launches = discussion_launches();
 
     assert_eq!(
-        read_only_launches, 2,
-        "inline sessions must use the restricted launch policy"
+        launches.len(),
+        1,
+        "a thread must launch one restricted runtime: {launches:#?}"
     );
 }
 
@@ -1079,7 +1098,8 @@ async fn dedicated_requests(world: &mut GuiWorld) {
 
     let launches = harness_capture("invocations.jsonl");
 
-    assert_eq!(launches.len(), 2);
+    // Both turns ran in the one dedicated discussion runtime.
+    assert_eq!(launches.len(), 1, "dedicated launches: {launches:?}");
 
     for launch in launches {
         let args = launch.as_array().unwrap();
@@ -1117,10 +1137,9 @@ async fn main_model_unchanged(_world: &mut GuiWorld) {
         Duration::from_secs(10),
         || async {
             let turns = captured_turns();
-            let main_draft_delivered = turns.iter().any(|turn| {
-                turn.contains("Explain selected code before implementation")
-                    && !turn.contains("This is a read-only side discussion.")
-            });
+            let main_draft_delivered = turns
+                .iter()
+                .any(|turn| turn.contains(MAIN_DRAFT) && !turn.starts_with("Context: {"));
 
             Ok(main_draft_delivered)
         },
@@ -1132,13 +1151,156 @@ async fn main_model_unchanged(_world: &mut GuiWorld) {
 
     // The original main runtime is already running when fixture capture resets.
     // Sending its next turn must not create a new runtime with the inline model.
-    assert_eq!(launches.len(), 2, "main runtime was replaced: {launches:?}");
+    assert_eq!(launches.len(), 1, "main runtime was replaced: {launches:?}");
+}
+
+/// Claude stream-json records for one discussion turn: a Read of the selected
+/// file, its result, and the answer. Synthetic; the session id is rewritten.
+const READ_TOOL_TURN: &str = concat!(
+    r#"{"type":"assistant","session_id":"fixture","message":{"id":"msg_read","role":"assistant","model":"claude-sonnet-4","usage":{"input_tokens":12,"output_tokens":3},"content":[{"type":"tool_use","id":"toolu_read_selection","name":"Read","input":{"file_path":"selection.ts"}}]}}"#,
+    "\n",
+    r#"{"type":"user","session_id":"fixture","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_read_selection","content":"const first = 1;\nconst selected = 42;\nconst third = 3;\n"}]}}"#,
+    "\n",
+    r#"{"type":"assistant","session_id":"fixture","message":{"id":"msg_answer","role":"assistant","model":"claude-sonnet-4","usage":{"input_tokens":30,"output_tokens":9},"content":[{"type":"text","text":"The file declares three constants; the selected line sets selected to 42."}]}}"#,
+    "\n",
+    r#"{"type":"result","subtype":"success","session_id":"fixture","duration_ms":25,"total_cost_usd":0.0,"is_error":false,"result":"done","num_turns":1}"#,
+    "\n",
+);
+
+#[given("the inline discussion agent reads the selected file with the Read tool")]
+async fn read_tool_fixture(_world: &mut GuiWorld) {
+    std::fs::write(gui_acceptance::MOCK_CHAT_TURN_FIXTURE_FILE, READ_TOOL_TURN).unwrap();
+}
+
+#[when("I ask the discussion to explain the selected file")]
+async fn ask_to_explain(world: &mut GuiWorld) {
+    open_comment_dialog(world).await;
+
+    let wd = world.webdriver.as_ref().unwrap().clone();
+    let client = wd.lock().await;
+    let input = client
+        .find(Locator::Css("[data-testid=diff-comment-draft-input]"))
+        .await
+        .unwrap();
+
+    input
+        .send_keys("Please explain what this file does")
+        .await
+        .unwrap();
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath("//button[normalize-space(.)='Discuss inline']"),
+        "ask inline question",
+    )
+    .await;
+
+    let answered = r#"
+        const thread = document.querySelector("[data-testid=selection-mini-thread]");
+        const status = thread?.querySelector('[role="status"]');
+
+        return !!thread &&
+          thread.textContent.includes("The file declares three constants") &&
+          status?.textContent === "Reply complete.";
+    "#;
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+
+    loop {
+        if client.execute(answered, vec![]).await.unwrap() == json!(true) {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            let thread = client
+                .execute(
+                    "return document.querySelector('[data-testid=selection-mini-thread]')?.innerText;",
+                    vec![],
+                )
+                .await;
+
+            panic!(
+                "inline discussion did not answer after reading the file; thread: {thread:?}; turns: {:?}; launches: {:?}",
+                captured_turns(),
+                discussion_launches(),
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[then("the Read tool call renders in the inline thread like the main chat")]
+async fn read_tool_rendered(world: &mut GuiWorld) {
+    let wd = world.webdriver.as_ref().unwrap().clone();
+    let client = wd.lock().await;
+    let rendered = r#"
+        const thread = document.querySelector("[data-testid=selection-mini-thread]");
+        const messages = thread.querySelector(".selection-mini-messages");
+        const transcript = messages.querySelector(".evlog.evlog--bare .thread");
+        const tools = messages.querySelectorAll(".tool-activity-group, .evtool");
+        const agents = [...messages.querySelectorAll(".evrow--agent")];
+        const prose = agents.map(row => row.textContent).join("\n");
+
+        return {
+          sharedRenderer: !!transcript,
+          toolRows: tools.length,
+          answer: prose.includes("The file declares three constants"),
+          rawToolMarkup: /tool_use|<invoke|toolu_read_selection|"file_path"/.test(prose),
+          askedForPaste: /paste/i.test(prose),
+        };
+    "#;
+    let result = client.execute(rendered, vec![]).await.unwrap();
+
+    assert_eq!(
+        result,
+        json!({
+            "sharedRenderer": true,
+            "toolRows": 1,
+            "answer": true,
+            "rawToolMarkup": false,
+            "askedForPaste": false,
+        }),
+        "inline thread rendering: {result}"
+    );
+    world.screenshot(&client, "inline-read-tool").await;
+}
+
+#[then("the discussion launch exposes only read-only tools")]
+async fn read_only_launch(_world: &mut GuiWorld) {
+    let launches = discussion_launches();
+
+    assert_eq!(launches.len(), 1, "discussion launches: {launches:#?}");
+
+    let args = &launches[0];
+
+    assert_eq!(flag_values(args, "--tools"), ["Read,Grep,Glob"], "{args:?}");
+    assert_eq!(
+        flag_values(args, "--mcp-config"),
+        [r#"{"mcpServers":{}}"#],
+        "{args:?}"
+    );
+    assert_eq!(
+        flag_values(args, "--permission-mode"),
+        ["default"],
+        "{args:?}"
+    );
+    for absent in [
+        "--plugin-dir",
+        "--permission-prompt-tool",
+        "--allow-dangerously-skip-permissions",
+    ] {
+        assert!(!args.iter().any(|arg| arg == absent), "{absent}: {args:?}");
+    }
+    for tool in ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"] {
+        let exposed = args
+            .iter()
+            .any(|arg| arg.split(',').any(|item| item == tool));
+
+        assert!(!exposed, "read-only launch exposed {tool}: {args:?}");
+    }
 }
 
 /// Control only the session transport so waiting, text takeover and failure have
 /// explicit milestones. Selection, composers, Markdown, theme CSS and geometry
 /// use the real renderer. No production fixture hook is needed.
-#[then("inline discussion bubbles and pending feedback render correctly across themes and widths")]
+#[then("inline discussion rows and pending feedback render correctly across themes and widths")]
 async fn themed_layout(world: &mut GuiWorld) {
     let wd = world.webdriver.as_ref().unwrap().clone();
     let client = wd.lock().await;
@@ -1201,6 +1363,8 @@ async fn themed_layout(world: &mut GuiWorld) {
             uiStore: useUIStore,
             previousTheme: uiState.theme,
             create: commands.createLocalChatSession,
+            send: commands.sendLocalChatMessage,
+            interrupt: commands.interruptLocalChatTurn,
             close: commands.closeLocalChatSession,
             original: window.__TAURI_INTERNALS__.invoke,
             turns: [],
@@ -1216,10 +1380,22 @@ async fn themed_layout(world: &mut GuiWorld) {
             });
           };
 
-          commands.closeLocalChatSession = id => {
-            const inlineSession = state.turns.some(turn => turn.input.backend_session_id === id);
+          const inline = id => state.turns.some(turn => turn.input.backend_session_id === id);
 
-            if (inlineSession) {
+          // Follow-ups are turns sent into the live inline session.
+          commands.sendLocalChatMessage = (id, content, settings) => {
+            if (!inline(id)) return state.send(id, content, settings);
+
+            return new Promise((resolve, reject) => {
+              state.turns.push({ input: { backend_session_id: id, content }, resolve, reject });
+            });
+          };
+
+          commands.interruptLocalChatTurn = id =>
+            inline(id) ? Promise.resolve({ status: 'ok', data: null }) : state.interrupt(id);
+
+          commands.closeLocalChatSession = id => {
+            if (inline(id)) {
               return Promise.resolve({ status: 'ok', data: null });
             }
 
@@ -1272,19 +1448,20 @@ async fn themed_layout(world: &mut GuiWorld) {
 
         let waiting = r#"
             const thread = document.querySelector('[data-testid=selection-mini-thread]');
-            const questions = thread?.querySelectorAll('.selection-mini-question');
+            const questions = thread?.querySelectorAll('.evrow--user .ev-text');
             const question = questions?.[arguments[0] - 1];
             const indicator = thread?.querySelector('[data-testid=thinking-indicator]');
             const turnCount = window.__inlineTransport.turns.length;
+            const words = text => text.replace(/\s+/g, ' ').trim();
 
-            return turnCount === arguments[0] &&
-              question?.textContent === arguments[1] && !!indicator;
+            return turnCount === arguments[0] && !!question &&
+              words(question.textContent) === words(arguments[1]) && !!indicator;
         "#;
         let expected_question = vec![json!(index + 1), json!(question)];
 
         gui_acceptance::wait_for_js(
             &client,
-            "visible pending turn after listener setup",
+            "visible pending turn",
             waiting,
             expected_question,
             request_timeout,
@@ -1318,7 +1495,7 @@ async fn themed_layout(world: &mut GuiWorld) {
 
         assert_ne!(
             colors[0], colors[2],
-            "theme must change computed bubble color"
+            "theme must change the computed transcript color"
         );
 
         let respond = r#"
@@ -1326,19 +1503,32 @@ async fn themed_layout(world: &mut GuiWorld) {
             const turn = window.__inlineTransport.turns.at(-1);
             const history = '- Preserved history\n'.repeat(16);
             const text = '**Markdown answer**\n\n' + history;
+            const backend_session_id = turn.input.backend_session_id;
+            const turn_id = `inline-turn-${window.__inlineTransport.turns.length}`;
+            const emit = (event, payload) =>
+              window.__inlineTransport.original('plugin:event|emit', { event, payload });
             const payload = {
-              backend_session_id: turn.input.backend_session_id,
+              backend_session_id,
               harness: 'claude',
               text,
-              is_partial: true,
+              turn_id,
+              // A completed item renders as Markdown, as in the main chat;
+              // the turn stays in flight until it is cancelled below.
+              is_partial: false,
               is_root: true,
               parent_tool_use_id: null,
             };
-            const event = { event: 'local-chat-text-event', payload };
 
+            window.__inlineTransport.turnId = turn_id;
             turn.resolve({ status: 'ok', data: null });
 
-            window.__inlineTransport.original('plugin:event|emit', event)
+            emit('local-chat-turn-started-event', {
+              backend_session_id,
+              harness: 'claude',
+              turn_id,
+              is_root: true,
+            })
+              .then(() => emit('local-chat-text-event', payload))
               .then(() => done(true))
               .catch(error => {
                 const message = String(error);
@@ -1352,16 +1542,15 @@ async fn themed_layout(world: &mut GuiWorld) {
 
         let text_takeover = r#"
             const thread = document.querySelector('[data-testid=selection-mini-thread]');
-            const indicator = thread.querySelector('[data-testid=thinking-indicator]');
-            const replies = thread.querySelectorAll('.is-assistant strong');
+            const replies = thread.querySelectorAll('.evrow--agent strong');
 
-            return !indicator && replies.length === arguments[0];
+            return replies.length === arguments[0];
         "#;
         let expected_replies = vec![json!(index + 1)];
 
         gui_acceptance::wait_for_js(
             &client,
-            "Markdown replaces waiting indicator",
+            "Markdown reply renders in the thread",
             text_takeover,
             expected_replies,
             setup_timeout,
@@ -1372,6 +1561,43 @@ async fn themed_layout(world: &mut GuiWorld) {
         let cancel_button = Locator::XPath("//button[normalize-space(.)='Cancel response']");
 
         gui_acceptance::click_when_ready(&client, cancel_button, "finish controlled turn").await;
+
+        // The provider reports the interrupted turn, which settles it.
+        let interrupted = r#"
+            const done = arguments[arguments.length - 1];
+            const state = window.__inlineTransport;
+            const turn = state.turns.at(-1);
+            const payload = {
+              backend_session_id: turn.input.backend_session_id,
+              harness: 'claude',
+              turn_id: state.turnId,
+              is_root: true,
+              duration_ms: 1,
+              cost_usd: 0,
+              num_turns: 1,
+              result: '',
+              is_error: false,
+              context_tokens: 0,
+              context_window: 0,
+              completion_status: 'interrupted',
+            };
+            const event = { event: 'local-chat-session-end-event', payload };
+
+            state.original('plugin:event|emit', event)
+              .then(() => done(true))
+              .catch(error => done(String(error)));
+        "#;
+        let ended = client.execute_async(interrupted, vec![]).await.unwrap();
+
+        assert_eq!(ended, json!(true));
+        gui_acceptance::wait_for_js(
+            &client,
+            "interrupted turn settles",
+            "return !document.querySelector('[data-testid=selection-mini-thread] [data-testid=thinking-indicator]');",
+            vec![],
+            setup_timeout,
+        )
+        .await;
     }
 
     // Measure completed history as well, including assistant alignment/Markdown.
@@ -1448,6 +1674,8 @@ async fn themed_layout(world: &mut GuiWorld) {
         const frozenAnimations = document.querySelector('#inline-freeze-animations');
 
         state.commands.createLocalChatSession = state.create;
+        state.commands.sendLocalChatMessage = state.send;
+        state.commands.interruptLocalChatTurn = state.interrupt;
         state.commands.closeLocalChatSession = state.close;
         uiState.setTheme(state.previousTheme);
 

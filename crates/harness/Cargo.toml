@@ -17,6 +17,7 @@ vertebrae-harness-typesafe = { path = "../harness-typesafe" }
 vertebrae-harness-mistral-vibe = { path = "../harness-mistral-vibe" }
 
 [dev-dependencies]
+hegeltest = "0.50.3"
 json-patch = "3"
 tempfile = "3"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "signal", "time"] }

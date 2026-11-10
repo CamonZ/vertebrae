@@ -557,6 +557,7 @@ async fn main() {
                 world.scenario_timing =
                     Some(gui_acceptance::Timing::new("scenario", &scenario_name));
                 let _ = std::fs::remove_file(gui_acceptance::MOCK_CHAT_RESPONSE_FILE);
+                let _ = std::fs::remove_file(gui_acceptance::MOCK_CHAT_TURN_FIXTURE_FILE);
                 let _ = std::fs::remove_dir_all(gui_acceptance::HARNESS_CAPTURE_DIR);
                 world.feature_slug = slugify(&feature_name);
                 world.scenario_slug = slugify(&scenario_name);
@@ -585,6 +586,7 @@ async fn main() {
                 .unwrap_or_else(|| scenario.name.clone());
             Box::pin(async move {
                 let _ = std::fs::remove_file(gui_acceptance::MOCK_CHAT_RESPONSE_FILE);
+                let _ = std::fs::remove_file(gui_acceptance::MOCK_CHAT_TURN_FIXTURE_FILE);
                 let _cleanup_timing = gui_acceptance::Timing::new("cleanup", &scenario_name);
                 if prefix == "F" {
                     // Covers every step and before-hook failure, including assertions

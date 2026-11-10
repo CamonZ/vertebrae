@@ -1,7 +1,6 @@
 import { useUIStore } from "../../stores/uiStore";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { useDiscussionModel } from "../../hooks/useDiscussionModel";
-import { MarkdownContent } from "../shared/MarkdownContent";
 import {
   useCallback,
   useContext,
@@ -12,23 +11,33 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { commands, events, type LocalChatHarnessKind } from "../../bindings";
+import { commands, type LocalChatHarnessKind } from "../../bindings";
+import {
+  getLocalChatLifecycle,
+  isLocalChatLifecycleBusy,
+  useChatStore,
+  type ActiveChatTurn,
+} from "../../stores/chatStore";
+import {
+  currentBackendSessionId,
+  doCloseSession,
+} from "../../hooks/useLocalChat";
+import { deliverLocalChatTurn } from "../../hooks/useLocalChatEventRouter";
 import {
   SelectionDiscussions,
-  discussionPrompt,
+  discussionTurn,
   selectionLabel,
   type CodeSelection,
   type DiscussionState,
 } from "./selectionDiscussions";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
+import { ChatTranscript } from "./ChatMessages";
 import {
   SelectionDiscussionModelContext,
   SelectionDiscussionContext,
   SelectionDiscussionActionsContext,
   SelectionDiscussionAnchorsContext,
   SelectionDiscussionSelectionContext,
-  discussionErrorCategory,
-  discussionErrorMessage,
   type DiscussionActions,
   type DiscussionValue,
 } from "./selectionDiscussionState";
@@ -74,23 +83,62 @@ export function SelectionDiscussionProvider({
     state.selection !== null || state.threads.length > 0;
   const choice = useDiscussionModel(mainSelection, hasDiscussionContext);
 
-  const cleanups = useRef(new Map<string, () => void>());
   const callbacks = useRef({ onOpen, onAttach });
   callbacks.current = { onOpen, onAttach };
 
+  // Only the active thread keeps an idle process; a collapsed thread closes
+  // it once its reply settles and resumes the conversation on the next ask.
   useEffect(() => {
-    const requests = cleanups.current;
+    const closing = new Set<string>();
+    const closeInactive = () => {
+      const { sessions } = useChatStore.getState();
+      const { threads, activeId } = controller.getSnapshot();
 
-    return () => {
-      for (const cleanup of requests.values()) cleanup();
-      requests.clear();
+      for (const thread of threads) {
+        const session = thread.sessionId && sessions[thread.sessionId];
+
+        if (
+          thread.id !== activeId &&
+          session &&
+          session.backendSessionId &&
+          getLocalChatLifecycle(session) === "idle" &&
+          !closing.has(session.backendSessionId)
+        ) {
+          // Closing writes to the store, which re-enters this subscription.
+          const backendSessionId = session.backendSessionId;
+
+          closing.add(backendSessionId);
+          void closeProcess(session.id, backendSessionId).finally(() =>
+            closing.delete(backendSessionId)
+          );
+        }
+      }
     };
-  }, []);
+    const unsubscribe = [
+      controller.subscribe(closeInactive),
+      useChatStore.subscribe(closeInactive),
+    ];
 
-  const cancel = useCallback(
-    (id: string) => {
-      controller.cancel(id);
-      cleanups.current.get(id)?.();
+    closeInactive();
+    return () => unsubscribe.forEach((unsubscribe) => unsubscribe());
+  }, [controller]);
+
+  // Discussions live as long as the provider: unmounting (a session or
+  // worktree switch) closes their processes and discards their sessions.
+  useEffect(
+    () => () => {
+      const store = useChatStore.getState();
+
+      for (const thread of controller.getSnapshot().threads) {
+        const session = thread.sessionId && store.sessions[thread.sessionId];
+        if (!session) continue;
+
+        if (session.backendSessionId)
+          void commands
+            .closeLocalChatSession(session.backendSessionId)
+            .catch(() => {});
+        store.closeSession(session.id);
+      }
     },
     [controller]
   );
@@ -98,140 +146,82 @@ export function SelectionDiscussionProvider({
   const send = useCallback(
     async (id: string, text: string) => {
       // Snapshot the selected provider/model before any asynchronous setup.
-      if (choice.error !== null) return;
+      const thread = controller.thread(id);
+      const question = text.trim();
+      if (choice.error !== null || !thread || !question) return;
 
-      const thread = controller.begin(id, text, choice.label);
-      if (!thread?.requestId) return;
+      const store = useChatStore.getState();
+      let session = thread.sessionId
+        ? store.sessions[thread.sessionId]
+        : undefined;
+      // One turn at a time, and never into a process that is closing.
+      if (
+        session &&
+        (session.activeTurn ||
+          isLocalChatLifecycleBusy(getLocalChatLifecycle(session)))
+      )
+        return;
 
-      const requestId = thread.requestId;
-      let retired = false;
-      let created = false;
-      const unlisteners: (() => void)[] = [];
-
-      const cleanup = () => {
-        if (retired) return;
-
-        retired = true;
-        const listeners = unlisteners.splice(0);
-        listeners.forEach((unlisten) => unlisten());
-        cleanups.current.delete(id);
-        if (created)
-          void commands.closeLocalChatSession(requestId).catch(() => {});
-      };
-      cleanups.current.set(id, cleanup);
-
-      const finish = (error: string | null = null) => {
-        if (!retired) controller.finish(id, requestId, error);
-        cleanup();
-      };
-
-      const fail = (error: unknown) => {
-        if (retired) return;
-
-        // Keep provider payloads and selected code out of diagnostics.
-        const category = discussionErrorCategory(error);
-        const message = discussionErrorMessage(error);
-
-        console.warn("Selection discussion failed", {
-          requestId,
-          harness: choice.harness,
-          category,
-        });
-        finish(message);
-      };
-
-      try {
-        const textListener = events.localChatTextEvent.listen(({ payload }) => {
-          if (
-            !retired &&
-            payload.backend_session_id === requestId &&
-            payload.is_root !== false &&
-            !payload.parent_tool_use_id
-          )
-            controller.receive(id, requestId, payload.text, payload.is_partial);
-        });
-
-        const endListener = events.localChatSessionEndEvent.listen(
-          ({ payload }) => {
-            if (
-              payload.backend_session_id === requestId &&
-              payload.is_root !== false
-            ) {
-              const snapshot = controller.getSnapshot();
-              const current = snapshot.threads.find(
-                (thread) => thread.id === id
-              );
-
-              if (
-                !retired &&
-                payload.result &&
-                current?.messages.at(-1)?.role === "user"
-              )
-                controller.receive(id, requestId, payload.result, false);
-              const error = payload.is_error ? "Discussion failed." : null;
-              finish(error);
-            }
-          }
-        );
-
-        const errorListener = events.localChatSessionErrorEvent.listen(
-          ({ payload }) => {
-            if (
-              payload.backend_session_id === requestId &&
-              payload.is_root !== false
-            )
-              fail(payload.error);
-          }
-        );
-
-        const registrations = await Promise.allSettled([
-          textListener,
-          endListener,
-          errorListener,
-        ]);
-
-        for (const result of registrations)
-          if (result.status === "fulfilled") {
-            if (retired) result.value();
-            else unlisteners.push(result.value);
-          }
-
-        const failure = registrations.find(
-          (result) => result.status === "rejected"
-        );
-        if (failure?.status === "rejected") throw failure.reason;
-        if (retired) return;
-
-        const initialPrompt = discussionPrompt(thread);
-        const sessionInput = {
-          read_only: true,
-          harness: choice.harness,
-          backend_session_id: requestId,
-          chat_session_id: requestId,
-          working_dir: worktreePath,
-          initial_prompt: initialPrompt,
-          provider_resume_id: null,
-          model_id: choice.modelId,
-          reasoning_effort: choice.reasoningEffort,
-          speed_tier: choice.speedTier,
-          permission_mode: null,
-          personality: choice.personality,
-          provider_id: choice.providerId,
-        };
-        const result = await commands.createLocalChatSession(sessionInput);
-
-        created = result.status === "ok";
-        if (retired && created) {
-          void commands.closeLocalChatSession(requestId).catch(() => {});
-          return;
-        }
-
-        if (result.status === "error") fail(result.error);
-      } catch (error) {
-        fail(error);
+      // A conversation cannot move to another provider: start a new one.
+      if (
+        session &&
+        (session.harness !== choice.harness ||
+          (session.providerId ?? null) !== (choice.providerId ?? null))
+      ) {
+        if (session.backendSessionId)
+          void commands
+            .closeLocalChatSession(session.backendSessionId)
+            .catch(() => {});
+        store.closeSession(session.id);
+        session = undefined;
       }
+
+      const sessionId =
+        session?.id ??
+        store.openDiscussionSession({
+          harness: choice.harness,
+          providerId: choice.providerId,
+          projectPath: worktreePath,
+        });
+      store.setSessionSelectedModel(sessionId, choice.modelId);
+      store.setSessionReasoningEffort(sessionId, choice.reasoningEffort);
+      store.setSessionSpeedTier(sessionId, choice.speedTier);
+      store.setSessionPersonality(sessionId, choice.personality);
+
+      const continues =
+        !!session && (!!session.backendSessionId || !!session.providerResumeId);
+      const turn = discussionTurn(thread, continues, question);
+
+      controller.sent(id, sessionId, turn.notesOutdated);
+      store.addMessage(sessionId, {
+        kind: "user",
+        text: question,
+        timestamp: new Date().toISOString(),
+      });
+      await deliverLocalChatTurn(sessionId, turn.payload);
+
+      // Cancelled while the process started: stop its turn now it exists.
+      const started = useChatStore.getState().sessions[sessionId];
+      if (started?.activeTurn?.phase === "stopping" && started.backendSessionId)
+        void interrupt(sessionId, started.backendSessionId);
     },
     [controller, choice, worktreePath]
+  );
+
+  const cancel = useCallback(
+    (id: string) => {
+      const sessionId = controller.thread(id)?.sessionId;
+      const store = useChatStore.getState();
+      const session = sessionId ? store.sessions[sessionId] : undefined;
+      if (!session || !store.markActiveTurnStopping(session.id)) return;
+
+      // A process still starting is interrupted once its creation returns.
+      const lifecycle = getLocalChatLifecycle(session);
+      if (lifecycle === "starting" || lifecycle === "resuming") return;
+      if (session.backendSessionId)
+        void interrupt(session.id, session.backendSessionId);
+    },
+    [controller]
   );
 
   const actions = useMemo<DiscussionActions>(
@@ -249,8 +239,7 @@ export function SelectionDiscussionProvider({
       attach: (...args) => callbacks.current.onAttach(...args),
       reopen: (id) => {
         controller.reopen(id);
-        const snapshot = controller.getSnapshot();
-        const thread = snapshot.threads.find((thread) => thread.id === id);
+        const thread = id ? controller.thread(id) : undefined;
 
         if (thread?.anchor.home.kind === "worktree") callbacks.current.onOpen();
       },
@@ -285,6 +274,30 @@ export function SelectionDiscussionProvider({
   );
 }
 
+/** Interrupt the in-flight turn; the process and conversation stay live. */
+async function interrupt(sessionId: string, backendSessionId: string) {
+  const localId =
+    useChatStore.getState().sessions[sessionId]?.activeTurn?.localId;
+  const result = await commands
+    .interruptLocalChatTurn(backendSessionId)
+    .catch(() => null);
+
+  if (result?.status !== "ok" && localId)
+    useChatStore.getState().restoreActiveTurn(sessionId, localId);
+}
+
+/** Close an idle process, keeping the session so the next ask resumes it. */
+function closeProcess(sessionId: string, backendSessionId: string) {
+  const store = useChatStore.getState();
+
+  return doCloseSession(backendSessionId, sessionId, {
+    markSessionClosed: (id) => store.setSessionLifecycle(id, "idle"),
+    setSessionLifecycle: store.setSessionLifecycle,
+    setBackendSessionId: store.setBackendSessionId,
+    getBackendSessionId: currentBackendSessionId,
+  });
+}
+
 /** Rendered in the diff annotation at the thread's anchor, never in a footer. */
 export function InlineSelectionDiscussion({ threadId }: { threadId: string }) {
   const discussion = useContext(SelectionDiscussionContext);
@@ -316,11 +329,13 @@ function MiniThread({
   const [question, setQuestion] = useState("");
   const thinkingStyle = useUIStore((state) => state.thinkingIndicatorStyle);
   const choice = useContext(SelectionDiscussionModelContext);
+  const session = useChatStore((state) =>
+    thread.sessionId ? state.sessions[thread.sessionId] : undefined
+  );
 
-  const lastMessage = thread.messages.at(-1);
-  const waiting =
-    !!thread.requestId &&
-    (lastMessage?.role !== "assistant" || !lastMessage.text);
+  const activeTurn = session?.activeTurn ?? null;
+  const failed = getLocalChatLifecycle(session) === "error";
+  const announcement = useTurnAnnouncement(activeTurn, failed);
 
   return (
     <section
@@ -386,28 +401,23 @@ function MiniThread({
       </header>
       <DiscussionModelNotice />
       <div className="selection-mini-messages">
-        {thread.messages.map((message, index) => (
-          <article
-            key={index}
-            className={`selection-mini-message is-${message.role}`}
-          >
-            <div className="selection-mini-speaker">
-              {message.role === "user" ? "You" : "Assistant"}
-            </div>
-            {message.role === "assistant" ? (
-              <MarkdownContent
-                text={message.text}
-                projectPath={discussion.projectPath}
-              />
-            ) : (
-              <p className="selection-mini-question">{message.text}</p>
-            )}
-          </article>
-        ))}
+        {session && (
+          <ChatTranscript
+            sessionId={session.id}
+            messages={session.messages}
+            // Discussions show no model labels; the composer owns that choice.
+            assistantLabel="Assistant"
+            isActive={!!session.backendSessionId}
+            streamingAssistant={session.streamingAssistant ?? null}
+          />
+        )}
       </div>
-      {waiting && (
+      {activeTurn && (
         <div className="selection-mini-thinking">
-          <ThinkingIndicator style={thinkingStyle} />
+          <ThinkingIndicator
+            label={activeTurn.phase === "stopping" ? "Stopping..." : undefined}
+            style={thinkingStyle}
+          />
         </div>
       )}
       <p
@@ -416,9 +426,9 @@ function MiniThread({
         aria-live="polite"
         aria-atomic="true"
       >
-        {thread.announcement}
+        {announcement}
       </p>
-      {thread.error && <p role="alert">{thread.error}</p>}
+      {failed && <p role="alert">Discussion failed.</p>}
       <form
         className="diff-comment-editor selection-mini-composer"
         onSubmit={(event) => {
@@ -436,8 +446,12 @@ function MiniThread({
           placeholder="Ask a follow-up question…"
         />
         <div className="diff-comment-editor-actions selection-mini-actions">
-          {thread.requestId && (
-            <button type="button" onClick={() => discussion.cancel(thread.id)}>
+          {activeTurn && (
+            <button
+              type="button"
+              disabled={activeTurn.phase === "stopping"}
+              onClick={() => discussion.cancel(thread.id)}
+            >
               Cancel response
             </button>
           )}
@@ -452,7 +466,7 @@ function MiniThread({
           </button>
           <button
             type="submit"
-            disabled={!!thread.requestId || !question.trim() || !!choice?.error}
+            disabled={!!activeTurn || !question.trim() || !!choice?.error}
           >
             Ask
           </button>
@@ -460,6 +474,32 @@ function MiniThread({
       </form>
     </section>
   );
+}
+
+/** Screen-reader status for the end of each turn. */
+function useTurnAnnouncement(
+  activeTurn: ActiveChatTurn | null,
+  failed: boolean
+): string {
+  const [announcement, setAnnouncement] = useState("");
+  const previous = useRef(activeTurn);
+
+  useEffect(() => {
+    const ended = previous.current;
+    previous.current = activeTurn;
+
+    if (activeTurn) setAnnouncement("");
+    else if (ended)
+      setAnnouncement(
+        failed
+          ? "Discussion failed."
+          : ended.phase === "stopping"
+            ? "Reply cancelled."
+            : "Reply complete."
+      );
+  }, [activeTurn, failed]);
+
+  return announcement;
 }
 
 /** Runs with the review snapshot rather than re-reading files for a thread. */

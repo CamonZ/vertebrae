@@ -234,6 +234,7 @@ export function titleInferenceTranscript(messages: ChatMessage[]): {
 
 function shouldInferSessionTitle(session: ChatSession, userMessages: string[]) {
   return (
+    !session.discussion &&
     userMessages.length > 0 &&
     userMessages.length <= MAX_TITLE_USER_MESSAGES &&
     !session.title?.trim() &&
@@ -825,6 +826,7 @@ export async function doStartSession(
       permission_mode: permissionMode,
       personality,
       ...(session.providerId ? { provider_id: session.providerId } : {}),
+      ...(session.discussion ? { read_only: true } : {}),
       // A gate that no longer waits would fail validation; the chat resumes
       // unbound and re-entry rebinds it live.
       ...(session.gate && gateChatAcceptsSubmission(session.gateStatus)

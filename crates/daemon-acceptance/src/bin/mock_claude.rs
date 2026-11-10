@@ -23,6 +23,9 @@
 //! records echo the launch's conversation id (`--session-id`, else the
 //! `--resume` target) as their `session_id`, and an envelope's `next_file`
 //! scripts later runs of the same step (see `daemon_acceptance::scripted_turn`).
+//! When `MOCK_STDIN_TURN_FIXTURE_FILE` names a non-empty stream-json fixture,
+//! a non-envelope turn plays it instead of the text reply, which lets GUI
+//! scenarios script tool calls and results.
 //! An envelope with `discard_session` forgets its conversation after the turn;
 //! like Claude, a later launch resuming or forking it reports
 //! `No conversation found with session ID: <id>` and exits 1 before reading
@@ -242,6 +245,22 @@ fn run_stdin_stream_json(args: &[String]) -> ExitCode {
             }
             continue;
         }
+        if let Some(fixture) = stdin_turn_fixture() {
+            let session_id = launch_session_id(args);
+
+            if !initialized {
+                write_json_line(serde_json::json!({
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": session_id,
+                    "model": "claude-sonnet-4",
+                    "tools": []
+                }));
+                initialized = true;
+            }
+            stream_session_lines(&fixture, &session_id);
+            continue;
+        }
         let session_id = session_id_from_input(&message)
             .or_else(|| std::env::var("VTB_CLAUDE_SESSION_ID").ok())
             .unwrap_or_else(|| "mock-gui-session".to_string());
@@ -336,6 +355,23 @@ fn run_stdin_stream_json(args: &[String]) -> ExitCode {
     }
 
     ExitCode::from(0)
+}
+
+/// The scripted stream-json turn a GUI scenario installed, if any.
+/// Like the text reply, it falls back to the shared mock output directory,
+/// which GUI child processes inherit.
+fn stdin_turn_fixture() -> Option<PathBuf> {
+    let path = std::env::var_os("MOCK_STDIN_TURN_FIXTURE_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("MOCK_OUTPUT_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/mocks"))
+                .join("gui-acceptance-chat-turn.jsonl")
+        });
+    let scripted = std::fs::metadata(&path).is_ok_and(|metadata| metadata.len() > 0);
+
+    scripted.then_some(path)
 }
 
 /// Plays `envelope` as one stream-json turn. Claude declares the conversation

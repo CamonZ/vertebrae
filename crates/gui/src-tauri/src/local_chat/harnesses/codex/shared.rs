@@ -11,9 +11,9 @@ use vertebrae_harness_core::{
 
 use crate::helpers::{build_augmented_path_from, find_codex_binary_with_shell_environment};
 use crate::local_chat::{
-    session_developer_instructions, HarnessCreateSessionInput, LocalChatEvent,
-    LocalChatGateBinding, LocalChatHarness, LocalChatHarnessInfo, LocalChatHarnessKind,
-    LocalChatProviderSelection, LocalChatRuntime, LocalChatSessionError,
+    discussion_developer_instructions, session_developer_instructions, HarnessCreateSessionInput,
+    LocalChatEvent, LocalChatGateBinding, LocalChatHarness, LocalChatHarnessInfo,
+    LocalChatHarnessKind, LocalChatProviderSelection, LocalChatRuntime, LocalChatSessionError,
     LocalChatSessionErrorEvent, LocalChatTurnSettings,
 };
 use crate::shell_environment::{user_shell_environment, ShellEnvironment};
@@ -168,6 +168,9 @@ impl LocalChatHarness for CodexLocalChatHarness {
             input.gate.as_ref(),
         );
         request.config.read_only = input.read_only;
+        if input.read_only {
+            request.config.developer_instructions = Some(discussion_developer_instructions());
+        }
         let adapter = Arc::new(
             LocalChatHarnessEventSink::new(
                 backend_session_id.clone(),
@@ -303,6 +306,24 @@ impl LocalChatHarness for CodexLocalChatHarness {
                 };
                 Err(LocalChatSessionError::CompactionFailed(message))
             }
+        }
+    }
+
+    async fn interrupt_turn(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError> {
+        let session = self
+            .sessions
+            .read()
+            .await
+            .get(backend_session_id)
+            .cloned()
+            .ok_or_else(|| LocalChatSessionError::SessionNotFound(backend_session_id.into()))?;
+        let turn = session.active_turn.lock().await.clone();
+        match turn {
+            Some(turn) => turn
+                .interrupt()
+                .await
+                .map_err(|error| LocalChatSessionError::SendFailed(error.to_string())),
+            None => Ok(()),
         }
     }
 

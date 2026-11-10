@@ -363,11 +363,7 @@ impl PermissionBridge {
         request: ControlRequestEnvelope,
     ) -> Result<ControlResolution, HarnessError> {
         if self.is_read_only(backend_session_id) {
-            let decision = LocalPermissionDecision {
-                behavior: "deny".into(),
-                message: Some("Selection discussions are read only.".into()),
-                updated_input: None,
-            };
+            let decision = read_only_decision(read_only_control_tool(&request));
 
             return local_decision_to_control_resolution(&request, decision);
         }
@@ -375,7 +371,7 @@ impl PermissionBridge {
         if requested_command(&request)
             .is_some_and(|command| self.gate_allows(backend_session_id, command))
         {
-            return local_decision_to_control_resolution(&request, gate_submission_decision(None));
+            return local_decision_to_control_resolution(&request, allow_decision(None));
         }
         let app_handle = app_handle.ok_or_else(|| {
             HarnessError::Control("Tauri app handle is unavailable for a control request".into())
@@ -639,15 +635,11 @@ impl PermissionBridge {
         };
 
         if self.is_read_only(&session_id) {
-            let decision = LocalPermissionDecision {
-                behavior: "deny".into(),
-                message: Some("Selection discussions are read only.".into()),
-                updated_input: None,
-            };
+            let decision = read_only_decision(Some(&request.tool_name));
             let result = Self::write_permission_socket_decision(&mut stream, &decision);
 
             if let Err(error) = result {
-                log::warn!("Failed to deliver a read-only discussion permission denial: {error}");
+                log::warn!("Failed to deliver a read-only discussion permission decision: {error}");
             }
 
             return;
@@ -660,7 +652,7 @@ impl PermissionBridge {
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|command| self.gate_allows(&session_id, command))
         {
-            let decision = gate_submission_decision(Some(request.input));
+            let decision = allow_decision(Some(request.input));
             if let Err(err) = Self::write_permission_socket_decision(&mut stream, &decision) {
                 log::warn!("Failed to approve gate submission over the permission socket: {err}");
             }
@@ -1048,11 +1040,54 @@ fn validate_harness_question_decision(
     Ok(())
 }
 
-fn gate_submission_decision(updated_input: Option<serde_json::Value>) -> LocalPermissionDecision {
+/// An approval, optionally replacing the tool input.
+fn allow_decision(updated_input: Option<serde_json::Value>) -> LocalPermissionDecision {
     LocalPermissionDecision {
         behavior: "allow".to_string(),
         message: None,
         updated_input,
+    }
+}
+
+pub(crate) const READ_ONLY_DENIAL: &str = "Selection discussions are read only.";
+
+/// A read-only session approves exactly the harness adapters' read-only tool
+/// set, without prompting, and denies everything else.
+fn read_only_decision(tool_name: Option<&str>) -> LocalPermissionDecision {
+    if tool_name.is_some_and(vertebrae_harness::read_only_tool_permitted) {
+        return allow_decision(None);
+    }
+
+    LocalPermissionDecision {
+        behavior: "deny".into(),
+        message: Some(READ_ONLY_DENIAL.into()),
+        updated_input: None,
+    }
+}
+
+/// The tool a read-only session's control asks for. Only a generic tool
+/// approval can name a read-only tool: command, file, network and grant
+/// requests are mutating or widening by category.
+fn read_only_control_tool(request: &ControlRequestEnvelope) -> Option<&str> {
+    let ControlRequest::Approval(approval) = &request.request else {
+        return None;
+    };
+    if approval.category != ApprovalCategory::AdditionalPermission {
+        return None;
+    }
+    let presented = request
+        .presentation
+        .as_ref()
+        .and_then(|presentation| presentation.tool_name.as_deref());
+    let detailed = approval
+        .details
+        .as_ref()
+        .and_then(|details| details.get("tool_name"))
+        .and_then(serde_json::Value::as_str);
+
+    match (presented, detailed) {
+        (Some(presented), Some(detailed)) if presented != detailed => None,
+        (presented, detailed) => presented.or(detailed),
     }
 }
 

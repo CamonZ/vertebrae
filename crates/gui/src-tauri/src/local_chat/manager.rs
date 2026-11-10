@@ -531,6 +531,22 @@ impl LocalChatSessionManager {
         result
     }
 
+    /// Interrupt the in-flight turn of a live session without closing it.
+    pub async fn interrupt_turn(
+        &self,
+        backend_session_id: &str,
+    ) -> Result<(), LocalChatSessionError> {
+        let _lifecycle = self.lifecycle_gate.read().await;
+        let harness_kind = self.registry_harness(backend_session_id).await?;
+        let harness = self.harness(harness_kind)?;
+        let result = harness.interrupt_turn(backend_session_id).await;
+        if matches!(result, Err(LocalChatSessionError::SessionNotFound(_))) {
+            self.remove_registry_entry(backend_session_id, harness_kind)
+                .await;
+        }
+        result
+    }
+
     pub async fn has_session(&self, backend_session_id: &str) -> bool {
         let _lifecycle = self.lifecycle_gate.read().await;
         let Ok(harness_kind) = self.registry_harness(backend_session_id).await else {

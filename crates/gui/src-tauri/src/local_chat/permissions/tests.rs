@@ -866,29 +866,246 @@ fn bound_gate_submission_over_the_socket_is_approved_without_an_event() {
     drop(socket_guard);
 }
 
+fn claude_tool_control(id: &str, tool_name: &str) -> ControlRequestEnvelope {
+    let category = match tool_name {
+        "Bash" | "Shell" => vertebrae_harness_core::ApprovalCategory::CommandExecution,
+        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
+            vertebrae_harness_core::ApprovalCategory::FileChange
+        }
+        "WebFetch" | "WebSearch" => vertebrae_harness_core::ApprovalCategory::NetworkAccess,
+        _ => vertebrae_harness_core::ApprovalCategory::AdditionalPermission,
+    };
+    ControlRequestEnvelope {
+        request_id: vertebrae_harness_core::ControlRequestId::new(id),
+        session_id: None,
+        turn_id: None,
+        thread_id: None,
+        is_root: Some(true),
+        request: ControlRequest::Approval(vertebrae_harness_core::ApprovalRequest {
+            category,
+            title: format!("Allow Claude to use {tool_name}?"),
+            details: Some(serde_json::json!({
+                "subtype": "can_use_tool",
+                "tool_name": tool_name,
+                "input": {"file_path": "/A/src/lib.rs"}
+            })),
+            modification_supported: true,
+        }),
+        presentation: Some(vertebrae_harness_core::ControlPresentation {
+            tool_name: Some(tool_name.into()),
+            ..Default::default()
+        }),
+        timeout_ms: None,
+        automatic_resolution: None,
+    }
+}
+
+/// Permission oracle: literal tool calls and the decision a read-only
+/// discussion must reach for each, written independently of the policy.
+const READ_ONLY_ORACLE: &[(&str, &str)] = &[
+    ("Read", "allow"),
+    ("Grep", "allow"),
+    ("Glob", "allow"),
+    ("Write", "deny"),
+    ("Edit", "deny"),
+    ("MultiEdit", "deny"),
+    ("NotebookEdit", "deny"),
+    ("Bash", "deny"),
+    ("WebFetch", "deny"),
+    ("WebSearch", "deny"),
+    ("Task", "deny"),
+    ("TodoWrite", "deny"),
+    ("mcp__vtb-gate__permission_prompt", "deny"),
+    ("mcp__filesystem__read_file", "deny"),
+    ("read", "deny"),
+    (" Read", "deny"),
+];
+
 #[tokio::test]
-async fn selection_discussions_deny_controls_without_a_ui_prompt() {
+async fn read_only_controls_follow_the_permission_oracle_without_a_ui_prompt() {
     let bridge = PermissionBridge::new();
     bridge.bind_read_only("discussion");
 
-    let request = harness_approval_request("read-only");
-    let resolution = bridge
-        .request_harness_control("discussion", None, request)
-        .await
-        .unwrap();
+    for (index, (tool, expected)) in READ_ONLY_ORACLE.iter().enumerate() {
+        let request = claude_tool_control(&format!("oracle-{index}"), tool);
+        let resolution = bridge
+            .request_harness_control("discussion", None, request)
+            .await
+            .unwrap();
 
-    let message = resolution.message.unwrap();
-    let pending_controls = bridge.pending_harness_controls.lock().unwrap();
-    let has_pending_controls = !pending_controls.is_empty();
-    drop(pending_controls);
+        if *expected == "allow" {
+            assert_eq!(
+                resolution.decision,
+                Some(ControlDecision::AllowOnce),
+                "{tool}"
+            );
+            assert_eq!(resolution.message, None, "{tool}");
+        } else {
+            assert_eq!(resolution.decision, Some(ControlDecision::Deny), "{tool:?}");
+            assert_eq!(
+                resolution.message.as_deref(),
+                Some("Selection discussions are read only."),
+                "{tool:?}"
+            );
+        }
+    }
+    assert!(bridge.pending_harness_controls.lock().unwrap().is_empty());
+}
 
-    assert_eq!(resolution.decision, Some(ControlDecision::Deny));
-    assert!(message.contains("read only"));
-    assert!(!has_pending_controls);
+#[tokio::test]
+async fn read_only_controls_deny_commands_and_mismatched_tool_names() {
+    let bridge = PermissionBridge::new();
+    bridge.bind_read_only("discussion");
 
+    let command = harness_approval_request("command");
+    let mut mismatched = claude_tool_control("mismatched", "Read");
+    if let ControlRequest::Approval(approval) = &mut mismatched.request {
+        approval.details = Some(serde_json::json!({"tool_name": "Write"}));
+    }
+    let question = ControlRequestEnvelope {
+        request: ControlRequest::UserQuestion { questions: vec![] },
+        ..claude_tool_control("question", "AskUserQuestion")
+    };
+
+    for request in [command, mismatched, question] {
+        let resolution = bridge
+            .request_harness_control("discussion", None, request)
+            .await
+            .unwrap();
+        assert_eq!(resolution.decision, Some(ControlDecision::Deny));
+    }
+}
+
+#[tokio::test]
+async fn unbinding_read_only_on_close_restores_prompting() {
+    let bridge = PermissionBridge::new();
+    bridge.bind_read_only("discussion");
     bridge.unbind_gate("discussion");
     assert!(bridge.is_read_only("discussion"));
 
     bridge.unbind_read_only("discussion");
+
     assert!(!bridge.is_read_only("discussion"));
+    // Without a read-only binding (and no app handle), a Read control is
+    // no longer auto-approved; it would need the UI prompt.
+    let result = bridge
+        .request_harness_control("discussion", None, claude_tool_control("after", "Read"))
+        .await;
+    assert!(result.is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn read_only_socket_requests_follow_the_permission_oracle_without_an_event() {
+    use std::io::{BufRead, Write};
+    use std::os::unix::net::UnixStream;
+    use tauri::Listener;
+
+    let bridge = PermissionBridge::new();
+    let app = tauri::test::mock_app();
+    let app_handle = app.handle().clone();
+    let (event_tx, event_rx) = std::sync::mpsc::channel();
+    app_handle.listen("permission-request-event", move |event| {
+        event_tx.send(event.payload().to_string()).unwrap();
+    });
+    let session_id = format!("discussion-{}", std::process::id());
+    bridge.bind_read_only(&session_id);
+    let socket_guard = bridge.start_socket(&session_id, app_handle).unwrap();
+
+    for (index, (tool, expected)) in READ_ONLY_ORACLE.iter().enumerate() {
+        let mut stream = UnixStream::connect(socket_guard.path()).unwrap();
+        let request = serde_json::json!({
+            "request_id": format!("socket-{index}"),
+            "tool_name": tool,
+            "tool_use_id": format!("tool-{index}"),
+            "input": {"file_path": "/A/src/lib.rs"}
+        });
+        writeln!(stream, "{request}").unwrap();
+        let mut response = String::new();
+        std::io::BufReader::new(stream)
+            .read_line(&mut response)
+            .unwrap();
+        let decision: LocalPermissionDecision = serde_json::from_str(response.trim()).unwrap();
+
+        assert_eq!(decision.behavior, *expected, "{tool:?}");
+        if *expected == "deny" {
+            assert_eq!(
+                decision.message.as_deref(),
+                Some("Selection discussions are read only.")
+            );
+        }
+    }
+    assert!(event_rx
+        .recv_timeout(std::time::Duration::from_millis(200))
+        .is_err());
+    assert!(bridge.pending_permissions.lock().unwrap().is_empty());
+    drop(socket_guard);
+}
+
+/// Read-only tool policy: a read-only session allows a generated tool call
+/// iff its name is in the adapters' read-only set; a writable session still
+/// needs a UI prompt for the same call.
+#[hegel::test]
+fn read_only_policy_allows_exactly_the_read_only_set(tc: hegel::TestCase) {
+    use hegel::generators as gs;
+
+    let known = [
+        "Read",
+        "Grep",
+        "Glob",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "NotebookEdit",
+        "Bash",
+        "WebFetch",
+        "Task",
+        "AskUserQuestion",
+        "mcp__vtb-gate__permission_prompt",
+        "mcp__fs__read",
+        "READ",
+        "read ",
+        "\tGlob",
+    ];
+    let tool: String = if tc.draw(gs::booleans()) {
+        tc.draw(gs::sampled_from(&known[..])).to_string()
+    } else {
+        tc.draw(gs::text().max_size(24))
+    };
+    tc.note(&format!("tool={tool:?}"));
+    let expected = matches!(tool.as_str(), "Read" | "Grep" | "Glob");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let bridge = PermissionBridge::new();
+    bridge.bind_read_only("discussion");
+
+    let resolution = runtime
+        .block_on(bridge.request_harness_control(
+            "discussion",
+            None,
+            claude_tool_control("generated", &tool),
+        ))
+        .unwrap();
+    let decided = read_only_decision(Some(&tool));
+
+    assert_eq!(
+        resolution.decision == Some(ControlDecision::AllowOnce),
+        expected
+    );
+    assert_eq!(decided.behavior == "allow", expected);
+    if tool.starts_with("mcp__")
+        || ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"].contains(&tool.as_str())
+    {
+        assert_eq!(resolution.decision, Some(ControlDecision::Deny));
+    }
+
+    // A writable session keeps prompting: without an app handle it errors
+    // instead of answering on its own.
+    let writable = runtime.block_on(bridge.request_harness_control(
+        "main-chat",
+        None,
+        claude_tool_control("writable", &tool),
+    ));
+    assert!(writable.is_err());
 }

@@ -160,6 +160,7 @@ fn create_builder() -> Builder {
             commands::refresh_local_chat_session_gate,
             commands::send_local_chat_message,
             commands::compact_local_chat_session,
+            commands::interrupt_local_chat_turn,
             commands::close_local_chat_session,
             commands::set_local_chat_recording_worktree,
             commands::infer_local_chat_session_title,

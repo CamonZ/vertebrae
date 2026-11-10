@@ -452,6 +452,8 @@ export function routeLocalChatSessionEndEvent(
   });
 
   const store = useChatStore.getState();
+  const closing =
+    getLocalChatLifecycle(store.sessions[sessionId]) === "closing";
   store.settleActiveTurn(sessionId, payload.turn_id);
   store.setSessionCompaction(sessionId, false);
   store.markPendingUserQuestionsUnavailable(sessionId);
@@ -464,6 +466,9 @@ export function routeLocalChatSessionEndEvent(
     store.interruptStreamingAssistant,
     store.completeAssistantMessage
   );
+  // A stop that interrupted the turn without closing the process ends here;
+  // a closing stop settles the lifecycle when the close returns.
+  if (wasStopping && !closing) store.setSessionLifecycle(sessionId, "idle");
   if (!wasStopping) void flushNextQueuedMessage(sessionId);
 
   return true;
@@ -618,6 +623,18 @@ export async function flushNextQueuedMessage(
   const content = initial.shiftQueuedMessage(sessionId);
   if (!content) return false;
 
+  return deliverLocalChatTurn(sessionId, content);
+}
+
+/**
+ * Deliver `content` as the next turn of a session whose user message is
+ * already in the transcript: into the live process, or by starting one that
+ * resumes the provider conversation.
+ */
+export async function deliverLocalChatTurn(
+  sessionId: string,
+  content: string
+): Promise<boolean> {
   const store = useChatStore.getState();
   const latestSession = store.sessions[sessionId];
   if (!latestSession) return false;

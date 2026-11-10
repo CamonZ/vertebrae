@@ -31,30 +31,6 @@ export const SelectionDiscussionAnchorsContext = createContext<
 export const SelectionDiscussionSelectionContext =
   createContext<CodeSelection | null>(null);
 
-export function discussionErrorCategory(error: unknown): string {
-  if (error && typeof error === "object") {
-    return Object.keys(error)[0] ?? "unknown";
-  }
-
-  return "transport";
-}
-
-export function discussionErrorMessage(error: unknown): string {
-  switch (discussionErrorCategory(error)) {
-    case "UnavailableHarness":
-      return "The selected AI provider is unavailable. Check your provider settings and try again.";
-    case "StartFailed":
-    case "SpawnFailed":
-      return "Could not start the discussion. Check your provider settings and try again.";
-    case "SessionNotFound":
-      return "The discussion session ended. Ask again to start a new reply.";
-    case "SendFailed":
-      return "Could not send your question. Please try again.";
-    default:
-      return "The discussion could not complete. Please try again.";
-  }
-}
-
 export const SelectionDiscussionContext = createContext<DiscussionValue | null>(
   null
 );
