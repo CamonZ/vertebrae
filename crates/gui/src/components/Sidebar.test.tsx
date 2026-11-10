@@ -36,11 +36,6 @@ vi.mock("../hooks/useLocalChat", () => ({
   useOpenChat: () => vi.fn(),
 }));
 
-const mockUseWebSocketStatus = vi.fn();
-vi.mock("../hooks/useWebSocketStatus", () => ({
-  useWebSocketStatus: () => mockUseWebSocketStatus(),
-}));
-
 function LocationDisplay() {
   const loc = useLocation();
   return <div data-testid="loc">{loc.pathname}</div>;
@@ -50,7 +45,6 @@ describe("Sidebar Traces nav", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
-    mockUseWebSocketStatus.mockReturnValue("connected");
     mockGetCurrentProject.mockResolvedValue({ status: "ok", data: null });
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSetCurrentProject.mockResolvedValue({ status: "ok", data: null });
@@ -169,7 +163,6 @@ describe("Sidebar project switcher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
-    mockUseWebSocketStatus.mockReturnValue("connected");
     // A project is loaded so the avatar (and switcher) renders.
     mockGetCurrentProject.mockResolvedValue({
       status: "ok",
@@ -406,11 +399,10 @@ describe("Sidebar project switcher", () => {
   });
 });
 
-describe("Sidebar rail connection readout", () => {
+describe("Sidebar rail chrome", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
-    mockUseWebSocketStatus.mockReturnValue("connected");
     mockGetCurrentProject.mockResolvedValue({ status: "ok", data: null });
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
   });
@@ -423,47 +415,11 @@ describe("Sidebar rail connection readout", () => {
     );
   }
 
-  const cases = [
-    { status: "connected", label: "connected", name: "Connected", token: "ok" },
-    {
-      status: "connecting",
-      label: "connecting",
-      name: "Connecting",
-      token: "warn",
-    },
-    {
-      status: "reconnecting",
-      label: "connecting",
-      name: "Reconnecting",
-      token: "warn",
-    },
-    {
-      status: "disconnected",
-      label: "disconnected",
-      name: "Disconnected",
-      token: "err",
-    },
-  ] as const;
-
-  for (const { status, label, name, token } of cases) {
-    it(`renders the ${status} state with the ${token} token, glow, and label`, () => {
-      mockUseWebSocketStatus.mockReturnValue(status);
-      renderSidebar();
-
-      const readout = screen.getByRole("status", {
-        name: `WebSocket: ${name}`,
-      });
-      expect(readout).toHaveTextContent(label);
-      expect(readout).toHaveAttribute("aria-label", `WebSocket: ${name}`);
-      expect(readout).toHaveAttribute("title", `WebSocket: ${name}`);
-
-      const dot = screen.getByTestId("rail-connection-dot");
-      expect(dot).toHaveAttribute("data-status-token", token);
-      expect(dot.className).not.toMatch(
-        /bg-(red|green|amber|yellow|emerald|orange)-\d/
-      );
-    });
-  }
+  it("omits the rail connection label and dot", () => {
+    renderSidebar();
+    expect(screen.queryByTestId("rail-connection-status")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("rail-connection-dot")).not.toBeInTheDocument();
+  });
 
   it("drops the app icon but keeps the single design separator above the nav", () => {
     renderSidebar();

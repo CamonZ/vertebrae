@@ -112,8 +112,8 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
         aria-label={buttonAriaLabel}
         className={
           hasFooter
-            ? "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-1)] hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--color-fg-mute)]"
-            : "absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-1)] hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--color-fg-mute)]"
+            ? "action-primary flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
+            : "action-primary absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md"
         }
       >
         <svg

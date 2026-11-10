@@ -9,10 +9,6 @@ import { resetProjectScopedStores } from "../stores";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Tooltip } from "./atoms/Tooltip";
 import { Icon } from "./atoms/Icon";
-import {
-  useWebSocketStatus,
-  type WebSocketStatus,
-} from "../hooks/useWebSocketStatus";
 import { useGuiUpdateStore } from "../stores/guiUpdateStore";
 import { useShellStore } from "../stores/shellStore";
 import { useChatStore } from "../stores/chatStore";
@@ -73,7 +69,7 @@ function NavItem({
                 <span
                   aria-hidden
                   data-testid={`sidebar-nav-${id}-badge`}
-                  className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-[var(--color-err)] shadow-[0_0_4px_var(--color-err)]"
+                  className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_4px_var(--color-accent-glow)]"
                 />
               )}
             </span>
@@ -339,67 +335,6 @@ function ProjectPopover({
           ? "Adding project…"
           : "Add project…"}
       </button>
-    </div>
-  );
-}
-
-function railStatusConfig(status: WebSocketStatus): {
-  dot: string;
-  glow: string;
-  label: string;
-  name: string;
-  token: "ok" | "warn" | "err";
-} {
-  switch (status) {
-    case "connected":
-      return {
-        dot: "bg-[var(--color-ok)]",
-        glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-ok)_60%,transparent)]",
-        label: "connected",
-        name: "Connected",
-        token: "ok",
-      };
-    case "connecting":
-    case "reconnecting":
-      return {
-        dot: "bg-[var(--color-warn)]",
-        glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-warn)_60%,transparent)]",
-        label: "connecting",
-        name: status === "reconnecting" ? "Reconnecting" : "Connecting",
-        token: "warn",
-      };
-    case "disconnected":
-    default:
-      return {
-        dot: "bg-[var(--color-err)]",
-        glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-err)_60%,transparent)]",
-        label: "disconnected",
-        name: "Disconnected",
-        token: "err",
-      };
-  }
-}
-
-function RailConnectionStatus() {
-  const status = useWebSocketStatus();
-  const config = railStatusConfig(status);
-  const accessibleName = `WebSocket: ${config.name}`;
-
-  return (
-    <div
-      role="status"
-      title={accessibleName}
-      aria-label={accessibleName}
-      data-testid="rail-connection-status"
-      className="mt-auto flex flex-col items-center gap-1.5 pb-1.5 font-mono text-[length:var(--text-9)] uppercase tracking-[0.08em] text-[var(--color-fg-faint)] [writing-mode:vertical-rl] rotate-180"
-    >
-      <span
-        aria-hidden
-        data-testid="rail-connection-dot"
-        data-status-token={config.token}
-        className={`h-1.5 w-1.5 rounded-full [writing-mode:horizontal-tb] rotate-180 ${config.dot} ${config.glow}`}
-      />
-      <span>{config.label}</span>
     </div>
   );
 }
@@ -732,7 +667,6 @@ export function Sidebar() {
           withDot={hasAvailableGuiUpdate}
         />
       </div>
-      <RailConnectionStatus />
     </aside>
   );
 }

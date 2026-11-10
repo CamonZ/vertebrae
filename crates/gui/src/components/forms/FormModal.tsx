@@ -313,9 +313,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                 disabled={isSubmitting}
                 className={`
                   px-4 py-2 text-sm font-medium rounded-md border border-transparent
-                  ${isSubmitting
-                    ? 'bg-accent/80 cursor-not-allowed'
-                    : 'bg-accent hover:bg-accent/90 text-white cursor-pointer'}
+                  action-primary
                   transition-colors flex items-center gap-2
                 `}
               >

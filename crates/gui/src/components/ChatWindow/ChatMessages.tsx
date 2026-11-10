@@ -1058,7 +1058,7 @@ export function ChatMessages({
                     <button
                       type="button"
                       data-testid="local-chat-save-comment"
-                      className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      className="action-primary rounded-md px-2 py-1 text-xs font-medium"
                       disabled={!commentDraft.trim()}
                       onClick={submitCommentDraft}
                     >

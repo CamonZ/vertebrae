@@ -18,11 +18,6 @@ function BrandMark() {
       className="pointer-events-none flex shrink-0 items-center gap-[5px] font-serif text-base italic leading-none tracking-tight text-[var(--color-fg)]"
     >
       Vertebrae
-      <span
-        aria-hidden
-        data-testid="topbar-brand-ember"
-        className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_6px_var(--color-accent-glow)]"
-      />
     </span>
   );
 }

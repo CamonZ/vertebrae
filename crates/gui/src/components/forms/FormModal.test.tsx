@@ -167,8 +167,8 @@ describe("FormModal", () => {
 
       const submitButton = screen.getByRole("button", { name: /submit/i });
       expect(submitButton).toBeDisabled();
-      expect(submitButton).toHaveClass("bg-accent/80");
-      expect(submitButton).toHaveClass("cursor-not-allowed");
+      fireEvent.click(submitButton);
+      expect(handleSubmit).not.toHaveBeenCalled();
     });
 
     it("shows loading spinner on submit button when isSubmitting=true", () => {
