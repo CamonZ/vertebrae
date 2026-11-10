@@ -1235,6 +1235,28 @@ describe("doStartSession", () => {
     );
   });
 
+  it("starts a discussion read-only and never infers its title", async () => {
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setSessionTitleCandidate: vi.fn(),
+    };
+
+    await doStartSession(
+      // An automatic label would otherwise infer a title.
+      makeSession({ label: "New Chat", discussion: true }),
+      SESSION_ID,
+      deps,
+      "Why is this here?"
+    );
+
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+      expect.objectContaining({ read_only: true })
+    );
+    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
+  });
+
   it("calls createLocalChatSession with working directory", async () => {
     const deps = {
       setBackendSessionId: vi.fn(),

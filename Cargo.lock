@@ -8050,6 +8050,7 @@ dependencies = [
 name = "vertebrae-harness"
 version = "0.1.0"
 dependencies = [
+ "hegeltest",
  "json-patch",
  "serde_json",
  "tempfile",

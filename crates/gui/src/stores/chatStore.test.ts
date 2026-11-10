@@ -10,6 +10,7 @@ import {
 import { commands } from "../bindings";
 import { routeLocalChatTextEvent } from "../hooks/useLocalChatEventRouter";
 import { doRegenerateSessionTitle } from "../hooks/useLocalChat";
+import { associationDriverSessionIds } from "../utils/chatAssociation/driverSessions";
 
 describe("chatStore", () => {
   beforeEach(() => {
@@ -1519,6 +1520,67 @@ describe("chatStore", () => {
     });
   });
 
+  describe("openDiscussionSession", () => {
+    const open = () =>
+      useChatStore.getState().openDiscussionSession({
+        harness: "codex",
+        providerId: "custom",
+        projectPath: "/repo",
+      });
+
+    it("adds a hidden discussion that is never persisted, listed or reused", () => {
+      const id = open();
+      const store = useChatStore.getState();
+
+      expect(store.sessions[id]).toMatchObject({
+        discussion: true,
+        harness: "codex",
+        providerId: "custom",
+        projectPath: "/repo",
+      });
+      expect(store.activeSessionId).toBeNull();
+      expect(store.paneLayout.panes).toEqual([]);
+
+      store.addMessage(id, {
+        kind: "user",
+        text: "Why?",
+        timestamp: "2026-11-10T00:00:00.000Z",
+      });
+      void persistLocalChatSession(useChatStore.getState().sessions[id]);
+
+      expect(loadPersistedLocalChatSession(id)).toBeNull();
+      expect(useChatStore.getState().localSessionSummaries).toEqual({});
+      expect(useChatStore.getState().listLocalSessions("/repo")).toEqual([]);
+
+      // Opening a chat for the same project never picks the discussion.
+      expect(useChatStore.getState().openSession("Chat", "/repo")).not.toBe(id);
+      expect(
+        useChatStore.getState().openProjectSession("Chat", "/repo")
+      ).not.toBe(id);
+    });
+
+    it("never becomes the active chat and is discarded by closeSession", () => {
+      const chat = useChatStore.getState().openSession("Chat", "/repo");
+      const id = open();
+
+      useChatStore.getState().closeSession(chat);
+
+      expect(useChatStore.getState().activeSessionId).toBeNull();
+
+      useChatStore.getState().closeSession(id);
+
+      expect(useChatStore.getState().sessions[id]).toBeUndefined();
+    });
+
+    it("drives no chat association", () => {
+      const id = open();
+
+      useChatStore.getState().setBackendSessionId(id, "backend");
+
+      expect(associationDriverSessionIds(useChatStore.getState())).toEqual([]);
+    });
+  });
+
   describe("openProjectSession", () => {
     it("creates and focuses a project-scoped session in the active pane", () => {
       const existing = useChatStore
@@ -2113,13 +2175,11 @@ describe("chatStore", () => {
         status: "ok",
         data: [],
       });
-      const child = await useChatStore
-        .getState()
-        .selectProviderThreadSession({
-          harness: "claude",
-          providerResumeId: "child",
-          projectPath: "/repo",
-        });
+      const child = await useChatStore.getState().selectProviderThreadSession({
+        harness: "claude",
+        providerResumeId: "child",
+        projectPath: "/repo",
+      });
       expect(child).not.toBeNull();
       await useChatStore.getState().deleteLocalSession(child!);
       resolve({

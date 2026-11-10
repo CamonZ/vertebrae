@@ -986,6 +986,17 @@ async compactLocalChatSession(backendSessionId: string) : Promise<Result<null, L
 }
 },
 /**
+ * Interrupt a local chat session's in-flight turn; the session stays open.
+ */
+async interruptLocalChatTurn(backendSessionId: string) : Promise<Result<null, LocalChatSessionError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("interrupt_local_chat_turn", { backendSessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Close a provider-neutral local chat session.
  */
 async closeLocalChatSession(backendSessionId: string) : Promise<Result<null, LocalChatSessionError>> {

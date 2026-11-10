@@ -316,6 +316,15 @@ pub struct HarnessRuntimeFactory {
 mod decision_model;
 pub use decision_model::ResolvedDecisionModel;
 
+/// Whether a read-only discussion may approve a provider tool request named
+/// `tool_name`. Each adapter owns its read-only set: Claude exposes
+/// [`vertebrae_harness_claude::CLAUDE_READ_ONLY_TOOLS`]; Codex reads files
+/// inside its native read-only sandbox and never asks for approval, so it
+/// contributes nothing to approve. Names match verbatim.
+pub fn read_only_tool_permitted(tool_name: &str) -> bool {
+    vertebrae_harness_claude::is_claude_read_only_tool(tool_name)
+}
+
 impl HarnessRuntimeFactory {
     pub fn new(config: HarnessFactoryConfig) -> Self {
         Self { config }
@@ -689,6 +698,7 @@ impl HarnessRuntimeFactory {
             agent_config.tools.clear();
             agent_config.allowed_tools.clear();
             agent_config.agents = None;
+            agent_config.permission_mode = None;
         }
 
         provider.prelude.args = agent_config.to_claude_cli_args();
@@ -1175,15 +1185,156 @@ mod tests {
                         || arg.contains("explicit-mcp.json")
                 });
                 let has_safe_mode = command.args.iter().any(|arg| arg == "--safe-mode");
-                let tools_flags = command.args.iter().filter(|arg| *arg == "--tools").count();
                 let has_allowed_tools = command.args.iter().any(|arg| arg == "--allowed-tools");
 
                 assert!(!has_ambient_config);
                 assert!(has_safe_mode);
-                assert_eq!(tools_flags, 1);
+                assert_eq!(flag_values(&command.args, "--tools"), ["Read,Grep,Glob"]);
                 assert!(!has_allowed_tools);
             }
         }
+    }
+
+    fn flag_values<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
+        args.windows(2)
+            .filter(|pair| pair[0] == flag)
+            .map(|pair| pair[1].as_str())
+            .collect()
+    }
+
+    #[test]
+    fn read_only_tool_permission_follows_the_adapter_read_only_set() {
+        for tool in ["Read", "Grep", "Glob"] {
+            assert!(read_only_tool_permitted(tool), "{tool}");
+        }
+        for tool in [
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "NotebookEdit",
+            "Bash",
+            "Shell",
+            "WebFetch",
+            "mcp__vtb-gate__permission_prompt",
+            "glob",
+        ] {
+            assert!(!read_only_tool_permitted(tool), "{tool}");
+        }
+    }
+
+    /// Launch policy: caller-supplied agent options can never widen the
+    /// read-only Claude launch.
+    #[hegel::test]
+    fn read_only_claude_launch_policy_holds_for_generated_agent_configs(tc: hegel::TestCase) {
+        use hegel::generators as gs;
+
+        let tool_names = [
+            "Read",
+            "Grep",
+            "Glob",
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "NotebookEdit",
+            "Bash",
+            "WebFetch",
+            "mcp__writer__write",
+            "Task",
+            "read",
+        ];
+        let tools = |tc: &hegel::TestCase| -> Vec<String> {
+            tc.draw(gs::vecs(gs::sampled_from(&tool_names[..])).max_size(4))
+                .into_iter()
+                .map(String::from)
+                .collect()
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let mut agent = AgentConfig {
+            tools: tools(&tc),
+            allowed_tools: tools(&tc),
+            disallowed_tools: tools(&tc),
+            ..Default::default()
+        };
+        if tc.draw(gs::booleans()) {
+            agent.plugin_dirs.push("/explicit-plugin".into());
+        }
+        if tc.draw(gs::booleans()) {
+            agent.mcp_config.push("/explicit-mcp.json".into());
+        }
+        agent.permission_mode = tc.draw(gs::optional(gs::sampled_from(
+            &[
+                PermissionMode::Default,
+                PermissionMode::AcceptEdits,
+                PermissionMode::BypassPermissions,
+                PermissionMode::DontAsk,
+                PermissionMode::Plan,
+                PermissionMode::Auto,
+            ][..],
+        )));
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            anthropic_executable: Some(executable()),
+            claude_managed_plugin_root: Some(directory.path().join("managed")),
+            claude_plugin_roots: vec![directory.path().join("provider-plugin")],
+            claude_permission_prompt_tool: Some("mcp__vtb-gate__permission_prompt".into()),
+            claude_mcp_config: Some(json!({"mcpServers": {"vtb-gate": {"command": "gate"}}})),
+            default_permission_mode: tc
+                .draw(gs::optional(gs::just(PermissionMode::BypassPermissions))),
+            ..Default::default()
+        });
+        let resolved = factory
+            .resolve_provider(Some(StepHarness::Claude), &agent)
+            .unwrap();
+        let request = RequestConfig {
+            read_only: true,
+            working_directory: Some(directory.path().to_path_buf()),
+            model: tc
+                .draw(gs::optional(gs::sampled_from(&["opus", "sonnet"][..])))
+                .map(String::from),
+            reasoning_effort: tc
+                .draw(gs::optional(gs::sampled_from(&["low", "high"][..])))
+                .map(String::from),
+            speed_tier: tc.draw(gs::optional(gs::sampled_from(
+                &[
+                    vertebrae_harness_core::SpeedTier::Default,
+                    vertebrae_harness_core::SpeedTier::Fast,
+                ][..],
+            ))),
+            personality: tc
+                .draw(gs::optional(gs::sampled_from(
+                    &["Concise", "Explanatory"][..],
+                )))
+                .map(String::from),
+            ..Default::default()
+        };
+        let provider = factory
+            .claude_provider_config(&resolved, &agent, &request)
+            .unwrap();
+        let resume = tc.draw(gs::booleans());
+        let mode = if resume {
+            vertebrae_harness_claude::ClaudeLaunchMode::Persistent {
+                resume_id: Some("resume"),
+            }
+        } else {
+            vertebrae_harness_claude::ClaudeLaunchMode::PersistentNew {
+                session_id: "discussion",
+            }
+        };
+        let args = provider.command_spec(mode, &request).unwrap().args;
+
+        assert_eq!(flag_values(&args, "--tools"), ["Read,Grep,Glob"]);
+        assert_eq!(flag_values(&args, "--mcp-config"), [r#"{"mcpServers":{}}"#]);
+        assert_eq!(flag_values(&args, "--permission-mode"), ["default"]);
+        for absent in [
+            "--allowed-tools",
+            "--plugin-dir",
+            "--agent",
+            "--agents",
+            "--permission-prompt-tool",
+            "--allow-dangerously-skip-permissions",
+        ] {
+            assert!(!args.iter().any(|arg| arg == absent), "{absent}: {args:?}");
+        }
+        assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
     }
 
     #[test]

@@ -390,5 +390,9 @@ pub(crate) trait LocalChatHarness: Send + Sync {
 
     async fn close_session(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError>;
 
+    /// Interrupt the session's in-flight turn, keeping the session open for
+    /// later turns. Succeeds without effect when no turn is running.
+    async fn interrupt_turn(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError>;
+
     async fn has_session(&self, backend_session_id: &str) -> bool;
 }

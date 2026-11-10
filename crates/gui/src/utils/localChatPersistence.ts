@@ -776,6 +776,9 @@ export function findPersistedDefaultEmptyLocalChatSession(
 export function persistLocalChatSession(
   session: ChatSession
 ): Promise<boolean> {
+  // A selection discussion lives only as long as its inline thread.
+  if (session.discussion) return Promise.resolve(true);
+
   const sessions = readSessions();
   const serialized = serializeSession(session, sessions[session.id]);
   if (isDisposableClosedLocalChatSession(session)) {

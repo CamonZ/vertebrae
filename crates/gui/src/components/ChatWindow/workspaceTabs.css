@@ -177,7 +177,7 @@
   overflow-wrap: anywhere;
 }
 
-.selection-mini-message + .selection-mini-message,
+/* The transcript renders through the main chat's Thread rows. */
 .selection-mini-thinking {
   margin-top: 18px;
 }
@@ -189,29 +189,6 @@
   overflow-wrap: anywhere;
 }
 
-.selection-mini-speaker {
-  margin-bottom: 6px;
-  color: var(--color-fg-soft);
-  font: 600 10px/1.4 var(--font-sans);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.selection-mini-message {
-  min-width: 0;
-  text-align: left;
-}
-
-.selection-mini-message.is-user {
-  width: fit-content;
-  max-width: 85%;
-  margin-left: auto;
-}
-
-.selection-mini-message.is-user .selection-mini-speaker {
-  text-align: right;
-}
-
 .selection-mini-thinking .text-sm {
   font: inherit;
   color: var(--color-fg-soft);
@@ -220,36 +197,6 @@
 .selection-mini-thread [role="alert"] {
   color: var(--color-fg);
   overflow-wrap: anywhere;
-}
-
-.selection-mini-question {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 12px 12px 3px 12px;
-  background: var(--color-bg-3);
-  color: var(--color-fg);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.selection-mini-message .markdown-content p,
-.selection-mini-message .markdown-content ul,
-.selection-mini-message .markdown-content ol {
-  font-size: inherit;
-  line-height: 1.6;
-}
-
-.selection-mini-message .markdown-content > :first-child {
-  margin-top: 0;
-}
-
-.selection-mini-message .markdown-content > :last-child {
-  margin-bottom: 0;
-}
-
-.selection-mini-message pre {
-  max-width: 100%;
-  overflow: auto;
 }
 
 .selection-mini-thread .selection-mini-composer {

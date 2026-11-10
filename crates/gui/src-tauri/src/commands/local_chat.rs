@@ -432,6 +432,20 @@ pub async fn compact_local_chat_session(
         .await
 }
 
+/// Interrupt a local chat session's in-flight turn; the session stays open.
+#[tauri::command]
+#[specta::specta]
+pub async fn interrupt_local_chat_turn(
+    local_chat_manager: State<'_, LocalChatSessionManager>,
+    backend_session_id: String,
+) -> Result<(), LocalChatSessionError> {
+    log::info!(
+        "interrupt_local_chat_turn called: backend_session_id={}",
+        backend_session_id
+    );
+    local_chat_manager.interrupt_turn(&backend_session_id).await
+}
+
 /// Close a provider-neutral local chat session.
 #[tauri::command]
 #[specta::specta]

@@ -21,6 +21,9 @@ enum MockCall {
     Close {
         backend_session_id: String,
     },
+    Interrupt {
+        backend_session_id: String,
+    },
 }
 
 #[derive(Clone)]
@@ -136,6 +139,16 @@ impl LocalChatHarness for MockHarness {
         if let Some(error) = self.fail_close.clone() {
             return Err(error);
         }
+        Ok(())
+    }
+
+    async fn interrupt_turn(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError> {
+        self.calls
+            .lock()
+            .expect("mock calls lock poisoned")
+            .push(MockCall::Interrupt {
+                backend_session_id: backend_session_id.to_string(),
+            });
         Ok(())
     }
 
@@ -475,6 +488,43 @@ async fn manager_routes_create_send_and_close_through_registry() {
             },
         ]
     );
+}
+
+#[tokio::test]
+async fn interrupt_routes_to_the_owning_harness_and_keeps_the_session() {
+    let claude = MockHarness::new(LocalChatHarnessKind::Claude);
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![Arc::new(claude.clone())]);
+    let mut input = create_input(LocalChatHarnessKind::Claude, "discussion");
+    input.read_only = true;
+    manager
+        .create_session_with_runtime(input, LocalChatRuntime::inert_for_tests())
+        .await
+        .expect("create");
+
+    manager
+        .interrupt_turn("discussion")
+        .await
+        .expect("interrupt routes");
+    manager
+        .send_message("discussion", "follow-up", LocalChatTurnSettings::default())
+        .await
+        .expect("the session survives an interrupt");
+
+    let calls = claude.calls();
+    assert!(matches!(
+        &calls[1..],
+        [
+            MockCall::Interrupt { backend_session_id },
+            MockCall::Send { content, .. },
+        ] if backend_session_id == "discussion" && content == "follow-up"
+    ));
+    assert!(!calls
+        .iter()
+        .any(|call| matches!(call, MockCall::Close { .. })));
+    assert!(matches!(
+        manager.interrupt_turn("missing").await,
+        Err(LocalChatSessionError::SessionNotFound(_))
+    ));
 }
 
 #[tokio::test]

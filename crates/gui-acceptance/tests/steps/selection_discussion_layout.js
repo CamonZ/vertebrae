@@ -54,38 +54,30 @@ const contrast = (foreground, background) => {
   return (lighter + 0.05) / (darker + 0.05);
 };
 
-const userMessages = [...messages.querySelectorAll(".is-user")];
+// Rows come from the main chat's Thread renderer; they must stay legible and
+// inside the inline card at every width.
+const userMessages = [...messages.querySelectorAll(".evrow--user")];
 const bubbles = userMessages.map((message) => {
-  const bubble = message.querySelector(".selection-mini-question");
-  const rect = bubble.getBoundingClientRect();
-  const style = getComputedStyle(bubble);
-  const lineHeight = parseFloat(style.lineHeight);
-
-  const rightAligned = Math.abs(rect.right - messageAreaRight) < 2;
-  const hasLineBreak = bubble.textContent.includes("\n");
-  const multiline = hasLineBreak && rect.height > lineHeight * 2;
-  const textContrast = contrast(style.color, style.backgroundColor);
+  const text = message.querySelector(".ev-text");
+  const style = getComputedStyle(text);
+  const textContrast = contrast(style.color, threadBackground);
 
   return {
-    right: rightAligned,
-    inset: rect.left > bounds.left + 10,
-    constrained: rect.width <= messages.clientWidth * 0.85 + 1,
-    wraps: bubble.scrollWidth <= bubble.clientWidth + 1,
-    multiline,
+    inside: message.getBoundingClientRect().right <= messageAreaRight + 1,
+    wraps: text.scrollWidth <= text.clientWidth + 1,
     contrast: textContrast,
-    background: style.backgroundColor,
-    distinct: style.backgroundColor !== threadBackground,
-    whitespace: style.whiteSpace === "pre-wrap",
+    background: style.color,
   };
 });
 
-const assistantMessages = [...messages.querySelectorAll(".is-assistant")];
+const assistantMessages = [...messages.querySelectorAll(".evrow--agent")];
 const assistants = assistantMessages.map((message) => {
   const rect = message.getBoundingClientRect();
-  const leftAligned = Math.abs(rect.left - bounds.left) < 2;
+  const inside =
+    rect.left >= bounds.left - 1 && rect.right <= messageAreaRight + 1;
   const markdown = message.querySelector("strong, ul");
 
-  return leftAligned && !!markdown;
+  return inside && !!markdown;
 });
 
 const alert = thread.querySelector('[role="alert"]');
@@ -181,15 +173,7 @@ const noOverflow =
 const pendingMatches =
   expectedPending === undefined || pending === expectedPending;
 const bubblesPass = bubbles.every(
-  (bubble) =>
-    bubble.right &&
-    bubble.inset &&
-    bubble.constrained &&
-    bubble.wraps &&
-    bubble.multiline &&
-    bubble.contrast >= 4.5 &&
-    bubble.distinct &&
-    bubble.whitespace,
+  (bubble) => bubble.inside && bubble.wraps && bubble.contrast >= 4.5,
 );
 const assistantsPass = assistants.every(Boolean);
 const hasModelLabels = /Next reply:|Reply:/.test(thread.textContent);

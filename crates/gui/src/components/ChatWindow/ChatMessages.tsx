@@ -236,7 +236,7 @@ interface HistoricalChatItemsProps {
   items: readonly ChatRenderItem[];
   sessionId: string;
   isActive: boolean;
-  registerRef: (id: string, element: HTMLElement | null) => void;
+  registerRef?: (id: string, element: HTMLElement | null) => void;
   resolveUserQuestion: (sessionId: string, requestId: string) => void;
   markUserQuestionUnavailable: (sessionId: string, requestId: string) => void;
 }
@@ -279,6 +279,138 @@ const HistoricalChatItems = memo(function HistoricalChatItems({
     )
   );
 });
+
+/**
+ * A session's transcript rows: settled history, live assistant text and the
+ * streaming tail. Shared by the chat panel and inline selection discussions.
+ */
+export function ChatTranscript({
+  sessionId,
+  messages,
+  assistantLabel,
+  gate,
+  isActive,
+  streamingAssistant,
+  registerRef,
+}: {
+  sessionId: string;
+  messages: readonly ChatMessage[];
+  assistantLabel: string;
+  gate?: LocalChatGateBinding | null;
+  isActive: boolean;
+  streamingAssistant: StreamingAssistantMessage | null;
+  registerRef?: (id: string, element: HTMLElement | null) => void;
+}) {
+  const resolveUserQuestion = useChatStore(
+    (state) => state.resolveUserQuestion
+  );
+  const markUserQuestionUnavailable = useChatStore(
+    (state) => state.markUserQuestionUnavailable
+  );
+  // This state lives above individual rows so future virtualization can
+  // unmount/remount them without discarding the user's expansion choices.
+  const [expandedToolIds, setExpandedToolIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  const [fullContentToolIds, setFullContentToolIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const toggleTool = useCallback((toolId: string) => {
+    setExpandedToolIds((current) => {
+      const next = new Set(current);
+      if (next.has(toolId)) next.delete(toolId);
+      else next.add(toolId);
+      return next;
+    });
+  }, []);
+  const toggleFullContent = useCallback((toolId: string) => {
+    setFullContentToolIds((current) => {
+      const next = new Set(current);
+      if (next.has(toolId)) next.delete(toolId);
+      else next.add(toolId);
+      return next;
+    });
+  }, []);
+  const renderItems = useMemo(
+    () =>
+      buildChatRenderItems(
+        sessionId,
+        messages,
+        assistantLabel,
+        gate,
+        expandedToolIds,
+        toggleTool,
+        fullContentToolIds,
+        toggleFullContent
+      ),
+    [
+      sessionId,
+      assistantLabel,
+      gate,
+      expandedToolIds,
+      fullContentToolIds,
+      messages,
+      toggleFullContent,
+      toggleTool,
+    ]
+  );
+  const streamingTail = useMemo(() => {
+    if (!streamingAssistant) return null;
+    const last = messages[messages.length - 1];
+    if (
+      last?.kind === "assistant" &&
+      last.isPartial &&
+      !last.parentToolUseId &&
+      last.text === streamingAssistant.text
+    ) {
+      return null;
+    }
+    return chatMessagesToThread(
+      [
+        {
+          kind: "assistant" as const,
+          text: streamingAssistant.text,
+          timestamp: streamingAssistant.timestamp,
+          isPartial: true,
+          lifecycle: "streaming",
+          ...(streamingAssistant.itemId
+            ? { itemId: streamingAssistant.itemId }
+            : {}),
+        },
+      ],
+      { assistantLabel }
+    );
+  }, [assistantLabel, messages, streamingAssistant]);
+
+  return (
+    <>
+      <HistoricalChatItems
+        items={renderItems}
+        sessionId={sessionId}
+        isActive={isActive}
+        registerRef={registerRef}
+        resolveUserQuestion={resolveUserQuestion}
+        markUserQuestionUnavailable={markUserQuestionUnavailable}
+      />
+      {streamingTail && (
+        <div data-testid="chat-streaming-tail">
+          <ChatSessionContext.Provider value={sessionId}>
+            <EventLog mode="bare">
+              <Thread
+                thread={streamingTail}
+                depth={0}
+                mode="bare"
+                reveal="shallow"
+                showHead={false}
+                interactive
+              />
+            </EventLog>
+          </ChatSessionContext.Provider>
+        </div>
+      )}
+    </>
+  );
+}
 
 interface ChatMessagesProps {
   sessionId: string;
@@ -326,14 +458,8 @@ export function ChatMessages({
   onAddComment = () => undefined,
   footer = null,
 }: ChatMessagesProps) {
-  const resolveUserQuestion = useChatStore(
-    (state) => state.resolveUserQuestion
-  );
   const retryHistory = useChatStore(
     (state) => state.refreshProviderThreadSession
-  );
-  const markUserQuestionUnavailable = useChatStore(
-    (state) => state.markUserQuestionUnavailable
   );
   const thinkingIndicatorStyle = useUIStore(
     (state) => state.thinkingIndicatorStyle
@@ -404,14 +530,6 @@ export function ChatMessages({
   const [projectRoots, setProjectRoots] = useState<readonly string[]>(
     projectPath ? [projectPath] : []
   );
-  // This state lives above individual rows so future virtualization can
-  // unmount/remount them without discarding the user's expansion choices.
-  const [expandedToolIds, setExpandedToolIds] = useState<ReadonlySet<string>>(
-    () => new Set()
-  );
-  const [fullContentToolIds, setFullContentToolIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
   const [selectionAction, setSelectionAction] = useState<{
     anchor: TextSelectionAnchor;
     top: number;
@@ -419,22 +537,6 @@ export function ChatMessages({
   } | null>(null);
   const [commentEditorOpen, setCommentEditorOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
-  const toggleTool = useCallback((toolId: string) => {
-    setExpandedToolIds((current) => {
-      const next = new Set(current);
-      if (next.has(toolId)) next.delete(toolId);
-      else next.add(toolId);
-      return next;
-    });
-  }, []);
-  const toggleFullContent = useCallback((toolId: string) => {
-    setFullContentToolIds((current) => {
-      const next = new Set(current);
-      if (next.has(toolId)) next.delete(toolId);
-      else next.add(toolId);
-      return next;
-    });
-  }, []);
   const updateTextSelection = useCallback(() => {
     if (commentEditorOpen) {
       return;
@@ -553,57 +655,6 @@ export function ChatMessages({
       cancelled = true;
     };
   }, [projectPath]);
-
-  const renderItems = useMemo(
-    () =>
-      buildChatRenderItems(
-        sessionId,
-        messages,
-        assistantLabel,
-        gate,
-        expandedToolIds,
-        toggleTool,
-        fullContentToolIds,
-        toggleFullContent
-      ),
-    [
-      sessionId,
-      assistantLabel,
-      gate,
-      expandedToolIds,
-      fullContentToolIds,
-      messages,
-      toggleFullContent,
-      toggleTool,
-    ]
-  );
-  const streamingTail = useMemo(() => {
-    if (!streamingAssistant) return null;
-    const last = messages[messages.length - 1];
-    if (
-      last?.kind === "assistant" &&
-      last.isPartial &&
-      !last.parentToolUseId &&
-      last.text === streamingAssistant.text
-    ) {
-      return null;
-    }
-    return chatMessagesToThread(
-      [
-        {
-          kind: "assistant" as const,
-          text: streamingAssistant.text,
-          timestamp: streamingAssistant.timestamp,
-          isPartial: true,
-          lifecycle: "streaming",
-          ...(streamingAssistant.itemId
-            ? { itemId: streamingAssistant.itemId }
-            : {}),
-        },
-      ],
-      { assistantLabel }
-    );
-  }, [assistantLabel, messages, streamingAssistant]);
 
   useLayoutEffect(() => {
     keepAtBottomRef.current = true;
@@ -886,30 +937,15 @@ export function ChatMessages({
                 </button>
               </div>
             )}
-            <HistoricalChatItems
-              items={renderItems}
+            <ChatTranscript
               sessionId={sessionId}
+              messages={messages}
+              assistantLabel={assistantLabel}
+              gate={gate}
               isActive={isActive}
+              streamingAssistant={streamingAssistant}
               registerRef={registerMessageRef}
-              resolveUserQuestion={resolveUserQuestion}
-              markUserQuestionUnavailable={markUserQuestionUnavailable}
             />
-            {streamingTail && (
-              <div data-testid="chat-streaming-tail">
-                <ChatSessionContext.Provider value={sessionId}>
-                  <EventLog mode="bare">
-                    <Thread
-                      thread={streamingTail}
-                      depth={0}
-                      mode="bare"
-                      reveal="shallow"
-                      showHead={false}
-                      interactive
-                    />
-                  </EventLog>
-                </ChatSessionContext.Provider>
-              </div>
-            )}
             {isWaiting && (
               <ThinkingIndicator
                 label={activityLabel ?? undefined}

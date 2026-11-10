@@ -986,6 +986,10 @@ impl LocalChatHarness for IdleHarness {
         Ok(())
     }
 
+    async fn interrupt_turn(&self, _: &str) -> Result<(), LocalChatSessionError> {
+        Ok(())
+    }
+
     async fn has_session(&self, _: &str) -> bool {
         true
     }

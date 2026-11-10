@@ -33,10 +33,10 @@ use crate::local_chat::harnesses::claude::args::{
 };
 use crate::local_chat::harnesses::shared::core_permission_mode;
 use crate::local_chat::{
-    session_developer_instructions, HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink,
-    LocalChatHarnessKind, LocalChatPersonalityOption, LocalChatProviderSelection, LocalChatRuntime,
-    LocalChatSessionError, LocalChatSessionErrorEvent, LocalChatSessionWarningEvent,
-    LocalChatTurnSettings,
+    discussion_developer_instructions, session_developer_instructions, HarnessCreateSessionInput,
+    LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind, LocalChatPersonalityOption,
+    LocalChatProviderSelection, LocalChatRuntime, LocalChatSessionError,
+    LocalChatSessionErrorEvent, LocalChatSessionWarningEvent, LocalChatTurnSettings,
 };
 use crate::shell_environment::{user_shell_environment, ShellEnvironment};
 use crate::telemetry;
@@ -833,7 +833,11 @@ impl ClaudeSessionRuntime {
                 reasoning_effort: input.reasoning_effort.clone(),
                 speed_tier: input.speed_tier.as_deref().and_then(SpeedTier::parse),
                 personality,
-                developer_instructions: Some(session_developer_instructions(input.gate.as_ref())),
+                developer_instructions: Some(if input.read_only {
+                    discussion_developer_instructions()
+                } else {
+                    session_developer_instructions(input.gate.as_ref())
+                }),
                 ..RequestConfig::default()
             },
         };
@@ -1068,6 +1072,28 @@ impl ClaudeSessionRuntime {
         };
         closing_session.finish().await;
         result
+    }
+
+    pub(crate) async fn interrupt_turn(
+        &self,
+        session_id: &str,
+    ) -> Result<(), LocalChatSessionError> {
+        let active_turn = self
+            .sessions
+            .read()
+            .await
+            .active
+            .get(session_id)
+            .map(|session| session.active_turn.clone())
+            .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
+        let turn = active_turn
+            .lock()
+            .map_err(|_| LocalChatSessionError::SendFailed("Claude turn state is poisoned".into()))?
+            .clone();
+        match turn {
+            Some(turn) => turn.interrupt().await.map_err(send_error),
+            None => Ok(()),
+        }
     }
 
     pub(crate) async fn has_session(&self, session_id: &str) -> bool {

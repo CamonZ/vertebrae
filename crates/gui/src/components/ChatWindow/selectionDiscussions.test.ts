@@ -4,7 +4,7 @@ import * as gs from "@hegeldev/hegel/generators";
 import { parsePatch } from "../thread/toolChange/diffLineMapper";
 import {
   captureCodeSelection,
-  discussionPrompt,
+  discussionTurn,
   SelectionDiscussions,
 } from "./selectionDiscussions";
 import { createDiffComment } from "../thread/toolChange/diffComments";
@@ -64,6 +64,16 @@ function anchor(index = 0) {
   return captureCodeSelection(file, fixture.range, home)!;
 }
 
+/** A controller with one thread on `selected`. */
+function threadOn(selected = anchor()) {
+  const controller = new SelectionDiscussions();
+
+  controller.select(selected);
+  const id = controller.ask()!;
+
+  return { controller, id, thread: () => controller.thread(id)! };
+}
+
 describe("selection context oracle", () => {
   for (const [index, fixture] of fixtures.entries())
     it(`captures exact outbound context ${index}`, () => {
@@ -71,15 +81,10 @@ describe("selection context oracle", () => {
 
       expect(selected).toMatchObject(fixture.expected);
 
-      const controller = new SelectionDiscussions();
-
-      controller.select(selected);
-
-      const id = controller.ask()!;
-      const turn = controller.begin(id, "Explain this")!;
-      const prompt = discussionPrompt(turn);
-      const contextSection = prompt.split("Context: ")[1];
-      const contextJson = contextSection.split("\nConversation:")[0];
+      const { thread } = threadOn(selected);
+      const turn = discussionTurn(thread(), false, "Explain this");
+      const contextSection = turn.payload.split("Context: ")[1];
+      const contextJson = contextSection.split("\nQuestion:")[0];
       const context = JSON.parse(contextJson);
 
       expect(context).toEqual({ ...fixture.expected, outdated: false });
@@ -102,75 +107,76 @@ describe("selection context oracle", () => {
       );
       expect(message).toContain("My question");
     });
+});
 
-  it("retains the original snapshot through edits and follow-ups", () => {
-    const controller = new SelectionDiscussions();
+describe("turn oracle", () => {
+  // Literal payloads, written by hand rather than derived from production.
+  const first =
+    'Context: {"path":"src/a.ts","side":"new","startLine":5,"endLine":6,"code":"new\\nlast","outdated":false}\nQuestion: Please explain what this file does';
+  const second = "what does the function below that line do?";
+  const third =
+    "Note: the selected code has changed since this discussion started, so the original snapshot may be outdated.\n\nIs it still correct?";
+  const fourth = "Thanks";
+  const edited = {
+    wholeBranch: true,
+    comparisonIdentity: "base",
+    files: [parsePatch(fixtures[0].patch.replace("+new", "+changed"))[0]],
+  };
 
-    controller.select(anchor());
+  it("sends the anchor once and only the question on later turns", () => {
+    const { controller, id, thread } = threadOn();
+    const payloads: string[] = [];
+    const turn = (question: string) => {
+      const continues = payloads.length > 0;
+      const next = discussionTurn(thread(), continues, question);
 
-    const id = controller.ask()!;
-    const first = controller.begin(id, "Why?")!;
+      controller.sent(id, "session-1", next.notesOutdated);
+      payloads.push(next.payload);
+    };
 
-    controller.receive(id, first.requestId!, "Because", false);
-    controller.finish(id, first.requestId!);
+    turn("Please explain what this file does");
+    turn(second);
+    controller.reconcile(edited);
+    turn("Is it still correct?");
+    turn(fourth);
 
-    const changedPatch = fixtures[0].patch.replace("+new", "+changed");
-    const file = parsePatch(changedPatch)[0];
+    expect(payloads).toEqual([first, second, third, fourth]);
+    expect(thread().sessionId).toBe("session-1");
+  });
 
-    controller.reconcile({
-      wholeBranch: true,
-      comparisonIdentity: "base",
-      files: [file],
-    });
+  it("a new conversation carries the anchor and its outdated flag", () => {
+    const { controller, id, thread } = threadOn();
 
-    const next = controller.begin(id, "Explain more")!;
+    controller.reconcile(edited);
+    const next = discussionTurn(thread(), false, "Why?");
+    controller.sent(id, "session-2", next.notesOutdated);
 
-    expect(next.outdated).toBe(true);
-    expect(next.anchor.code).toBe("new\nlast");
-    expect(discussionPrompt(next)).toContain('"code":"new\\nlast"');
-    expect(next.messages.map((message) => message.text)).toEqual([
-      "Why?",
-      "Because",
-      "Explain more",
-    ]);
-
-    controller.cancel(id);
-    controller.receive(id, next.requestId!, "late", false);
-
-    const snapshot = controller.getSnapshot();
-    const lastMessage = snapshot.threads[0].messages.at(-1)?.text;
-
-    expect(lastMessage).toBe("Explain more");
+    expect(next.payload).toContain('"outdated":true');
+    expect(next.payload).toContain("Question: Why?");
+    // The context said so; follow-ups add no note.
+    expect(discussionTurn(thread(), true, "More").payload).toBe("More");
   });
 });
 
 it("generated discussion state machine agrees with an independent observable model", () =>
   hegel.test(
     (tc) => {
-      const operationGenerator = gs.integers({ minValue: 0, maxValue: 10 });
-      const sequenceGenerator = gs.arrays(operationGenerator, {
-        minSize: 1,
-        maxSize: 80,
-      });
-      const sequence = tc.draw(sequenceGenerator);
+      const sequence = tc.draw(
+        gs.arrays(gs.integers({ minValue: 0, maxValue: 8 }), {
+          minSize: 1,
+          maxSize: 80,
+        })
+      );
       let controller = new SelectionDiscussions();
-      // Reference model records facts rather than reproducing the reducer or line mapper.
+      // Facts only: the model shares no logic with the controller.
       let selected = false;
       let active: number | null = null;
       let ids: string[] = [];
       let facts: {
-        original: string;
-        waiting: boolean;
         outdated: boolean;
-        text: string[];
-        request: string | null;
+        noted: boolean;
+        session: string | null;
       }[] = [];
-      const oldRequests: {
-        controller: SelectionDiscussions;
-        id: string;
-        request: string;
-      }[] = [];
-      let replayIndex = 0;
 
       for (const operation of sequence) {
         if (operation === 0) {
@@ -182,41 +188,34 @@ it("generated discussion state machine agrees with an independent observable mod
           const id = controller.ask();
 
           if (selected) {
-            expect(id).not.toBeNull();
-
             ids.push(id!);
-            facts.push({
-              original: "new\nlast",
-              waiting: false,
-              outdated: false,
-              text: [],
-              request: null,
-            });
+            facts.push({ outdated: false, noted: false, session: null });
             active = facts.length - 1;
           } else expect(id).toBeNull();
         }
 
-        if (operation === 2 && active !== null) {
-          const result = controller.begin(ids[active], "question");
+        if ((operation === 2 || operation === 3) && active !== null) {
+          // 2 continues the conversation; 3 starts a new one.
+          const fact = facts[active];
+          const continues = operation === 2 && fact.session !== null;
+          const next = discussionTurn(
+            controller.thread(ids[active])!,
+            continues,
+            "question"
+          );
+          const session = continues ? fact.session! : `session-${active}`;
 
-          if (facts[active].waiting) expect(result).toBeNull();
-          else {
-            expect(result).not.toBeNull();
+          controller.sent(ids[active], session, next.notesOutdated);
 
-            facts[active].waiting = true;
-            facts[active].text.push("question");
-            facts[active].request = result!.requestId;
-            oldRequests.push({
-              controller,
-              id: ids[active],
-              request: result!.requestId!,
-            });
-          }
-        }
-
-        if (operation === 3 && active !== null) {
-          controller.cancel(ids[active]);
-          facts[active].waiting = false;
+          if (!continues) {
+            expect(next.payload).toContain('"code":"new\\nlast"');
+            expect(next.payload).toContain(`"outdated":${fact.outdated}`);
+            fact.noted ||= fact.outdated;
+          } else if (fact.outdated && !fact.noted) {
+            expect(next.payload).toMatch(/^Note: .*\n\nquestion$/);
+            fact.noted = true;
+          } else expect(next.payload).toBe("question");
+          fact.session = session;
         }
 
         if (operation === 4 && facts.length) {
@@ -241,8 +240,8 @@ it("generated discussion state machine agrees with an independent observable mod
           });
         }
 
-        if (operation === 7 || operation === 8) {
-          // session or worktree switch retires the whole owner
+        if (operation === 7) {
+          // A session or worktree switch replaces the whole owner.
           controller = new SelectionDiscussions();
           ids = [];
           facts = [];
@@ -250,53 +249,26 @@ it("generated discussion state machine agrees with an independent observable mod
           selected = false;
         }
 
-        if (operation === 9 && oldRequests.length) {
-          const old = oldRequests[replayIndex++ % oldRequests.length];
-
-          old.controller.receive(old.id, old.request, "answer", false);
-          old.controller.finish(old.id, old.request);
-
-          const index = ids.indexOf(old.id);
-
-          if (
-            old.controller === controller &&
-            index >= 0 &&
-            facts[index].waiting &&
-            facts[index].request === old.request
-          ) {
-            facts[index].text.push("answer");
-            facts[index].waiting = false;
-          }
-        }
-
-        if (operation === 10)
-          expect(controller.getSnapshot().selection).toEqual(
-            selected ? anchor() : null
-          );
-
         const state = controller.getSnapshot();
 
         expect(state.selection !== null).toBe(selected);
         expect(state.activeId).toBe(active === null ? null : ids[active]);
-        const observedThreads = state.threads.map((thread) => {
-          const text = thread.messages.map((message) => message.text);
-
-          return {
-            original: thread.anchor.code,
-            waiting: thread.requestId !== null,
+        expect(
+          state.threads.map((thread) => ({
+            code: thread.anchor.code,
             outdated: thread.outdated,
-            text,
-          };
-        });
-        const expectedThreads = facts.map((fact) => ({
-          original: fact.original,
-          waiting: fact.waiting,
-          outdated: fact.outdated,
-          text: fact.text,
-        }));
-
-        expect(observedThreads).toEqual(expectedThreads);
+            noted: thread.outdatedNoted,
+            session: thread.sessionId,
+          }))
+        ).toEqual(
+          facts.map((fact) => ({
+            code: "new\nlast",
+            outdated: fact.outdated,
+            noted: fact.noted,
+            session: fact.session,
+          }))
+        );
       }
     },
-    { seed: 0x0cd1b401 }
+    { seed: 0x8640ee9e }
   ));

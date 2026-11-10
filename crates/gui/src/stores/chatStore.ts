@@ -421,6 +421,11 @@ export interface ChatSession {
   liveAssistantMessages?: LiveAssistantMessages;
   /** Runtime-only progressive provider transcript replay state. */
   providerReplay?: ProviderReplayState;
+  /**
+   * Runtime-only read-only selection discussion. It runs through the local
+   * chat lifecycle but is never persisted, listed, reused or opened in a pane.
+   */
+  discussion?: boolean;
   /** Runtime-only Vertebrae annotations keyed by provider tool id, then kind. */
   toolAnnotations?: ToolAnnotations;
   /** Runtime-only token of the annotation load allowed to write this session. */
@@ -488,6 +493,12 @@ interface ChatStoreActions {
   openSession: (label: string, projectPath?: string | null) => string;
   /** Open a project chat, reusing only an eligible empty session. */
   openProjectSession: (label: string, projectPath: string) => string;
+  /** Add a hidden read-only discussion session; `closeSession` discards it. */
+  openDiscussionSession: (input: {
+    harness: LocalChatHarnessKind;
+    providerId?: string | null;
+    projectPath: string;
+  }) => string;
   /** Close a chat session */
   closeSession: (sessionId: string) => void;
   /** Focus a chat session tab */
@@ -927,11 +938,17 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
   };
 }
 
+/** An open chat the user can see, list or reopen, unlike a discussion. */
+function isConversationSession(session: ChatSession): boolean {
+  return session.status === "open" && !session.discussion;
+}
+
 function localSessionSummaryFor(
   session: ChatSession
 ): LocalChatSessionSummary | null {
   if (
     session.status !== "open" ||
+    session.discussion ||
     isDisposableClosedLocalChatSession(session)
   ) {
     return null;
@@ -991,7 +1008,7 @@ function findReusableDefaultEmptySession(
     Object.values(sessions)
       .filter(
         (session) =>
-          session.status === "open" &&
+          isConversationSession(session) &&
           isDefaultEmptyLocalChatSession(session) &&
           projectPathMatches(session.projectPath, projectPath)
       )
@@ -1057,7 +1074,7 @@ function findMatchingSession(
     Object.values(sessions)
       .filter(
         (session) =>
-          session.status === "open" &&
+          isConversationSession(session) &&
           projectPathMatches(session.projectPath, projectPath)
       )
       .sort(compareLocalChatSessionRecency)[0]?.id ?? null
@@ -1066,7 +1083,7 @@ function findMatchingSession(
 
 function isEligibleEmptyProjectSession(session: ChatSession): boolean {
   return (
-    session.status === "open" &&
+    isConversationSession(session) &&
     !session.providerResumeId?.trim() &&
     session.messages.length === 0 &&
     (session.messageCount ?? 0) === 0
@@ -1091,7 +1108,7 @@ function findEligibleEmptyProjectSession(
 function latestSessionId(sessions: Record<string, ChatSession>): string | null {
   return (
     Object.values(sessions)
-      .filter((session) => session.status === "open")
+      .filter(isConversationSession)
       .sort(compareLocalChatSessionRecency)[0]?.id ?? null
   );
 }
@@ -1956,6 +1973,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
       });
 
       return id;
+    },
+
+    openDiscussionSession: ({ harness, providerId, projectPath }) => {
+      const session: ChatSession = {
+        ...createLocalSession("Selection discussion", projectPath),
+        harness,
+        providerId: providerId ?? null,
+        discussion: true,
+      };
+
+      set((state) => ({
+        sessions: { ...state.sessions, [session.id]: session },
+      }));
+      return session.id;
     },
 
     openProjectSession: (label, projectPath) => {

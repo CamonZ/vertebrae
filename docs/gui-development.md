@@ -819,8 +819,13 @@ The dialog offers
 to a read-only thread rendered at that code anchor; questions, answers and
 follow-ups stay together in the diff.
 
-Assistant replies use the shared Markdown renderer, including lists, code and
-links. Clicking the discussion body or its file/range label highlights the
+Each thread's conversation is a hidden chat-store session (`discussion: true`)
+driven by the local chat lifecycle: the global event router streams its events,
+and the thread renders the session with the main chat's `ChatTranscript`, so
+prose, tool calls and results, and errors look as they do in the main
+conversation. Discussion sessions are never persisted, summarized into history,
+reused by chat openers, titled or used for chat association. Clicking the
+discussion body or its file/range label highlights the
 original source range; the close icon collapses the discussion to its marker.
 The follow-up composer has a separated action row using the same compact button
 styles as the initial comment dialog. Reopening a discussion restores its source
@@ -833,17 +838,32 @@ the attachment and the user's composer draft.
 
 Mini conversations are in memory for the mounted session/worktree. They survive
 panel close/reopen, but switching that identity or restarting the application
-retires them and cancels their listeners/requests. Each explicit mini question
-uses a restricted harness runtime and includes the original selection plus the
-thread history. Claude exposes no tools or MCP servers, omits managed and explicit
-plugin directories, and disables customization hooks for discussion launches.
-Codex uses a locked read-only sandbox and disables shell, apps, delegated agents,
-desktop/browser automation, and code-host execution, as well as overriding
-inherited MCP configuration.
-The permission bridge denies discussion approval requests. Implementation
-requests can be attached to the main composer. One thread is active at a time;
-collapsed diff markers reopen prior discussions. Changed patches mark anchors outdated without
-replacing their original code snapshots.
+retires them and closes their sessions. Each thread owns one read-only harness
+session: the first question starts it with the anchor (path, side, line range,
+selected snapshot, outdated flag) as JSON context, and follow-ups are new turns
+in that session carrying only the question, plus a one-time note once the
+anchor becomes outdated. The read-only policy is the session's developer
+instructions. Cancel marks the turn stopping and interrupts it without closing
+the process; the turn settles when the provider reports it interrupted.
+Only the active thread keeps an idle session; a collapsed thread's session
+closes once its reply settles, and its next question resumes the provider
+conversation by its resume id (or restarts it with the anchor when the
+provider never reported one). Changing the discussion harness or provider
+starts a fresh session from the anchor; transcripts are never replayed.
+
+Discussion sessions can read the worktree but not change it. Claude launches
+with only `Read`, `Grep` and `Glob` (`--tools`), an empty strict MCP
+configuration, no plugin, skill or agent directories, hooks disabled and the
+default permission mode, without the option to bypass permissions later; it has
+no permission prompt tool, so reads outside the working directory are refused.
+Codex runs its shell tool inside the native read-only sandbox with approvals
+disabled and keeps apps, delegated agents, desktop/browser automation,
+code-host execution and inherited MCP servers off. The permission bridge
+approves exactly the adapters' read-only tool set for discussion sessions and
+denies everything else with "Selection discussions are read only.".
+Implementation requests can be attached to the main composer. One thread is
+active at a time; collapsed diff markers reopen prior discussions. Changed
+patches mark anchors outdated without replacing their original code snapshots.
 
 Diff surfaces subscribe to stable discussion actions and anchor locations;
 streamed message state updates only the thread UI. Screen readers receive a
