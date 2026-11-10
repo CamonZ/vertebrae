@@ -27,22 +27,22 @@ function ruleFor(selector) {
   return match[1];
 }
 
-test("dark selection uses the muted copper accent with readable text", () => {
+test("dark selection uses the neutral selected surface with readable text", () => {
   const darkSelection = ruleFor("::selection");
 
   assert.match(
     darkSelection,
-    /background-color:\s*var\(--color-accent-mute\);/
+    /background-color:\s*var\(--color-selection\);/
   );
   assert.match(darkSelection, /color:\s*var\(--color-fg\);/);
 });
 
-test("light selection uses the muted copper accent with readable foreground text", () => {
+test("light selection uses the neutral selected surface with readable foreground text", () => {
   const lightSelection = ruleFor("html.light ::selection");
 
   assert.match(
     lightSelection,
-    /background-color:\s*var\(--color-accent-mute\);/
+    /background-color:\s*var\(--color-selection\);/
   );
   assert.match(lightSelection, /color:\s*var\(--color-fg\);/);
 });
