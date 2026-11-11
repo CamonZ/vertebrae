@@ -104,7 +104,9 @@ export function leaveToTarget(
   const activation = key === " " || key === "Spacebar" || key === "Enter";
   if (
     activation &&
-    target.closest("button, a[href], [role='button'], [role='radio']") !== null
+    target.closest(
+      "button, summary, a[href], [role='button'], [role='radio']"
+    ) !== null
   )
     return true;
   const nav = key.startsWith("Arrow") || key === "Home" || key === "End";

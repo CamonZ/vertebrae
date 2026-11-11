@@ -1,3 +1,8 @@
+import {
+  EvidenceNavigationContext,
+  type SourceLocation,
+} from "../shared/EvidenceNavigationContext";
+import type { JumpTarget } from "./workspace/AllChangesView";
 import { commands } from "../../bindings";
 import { useSidebarResize } from "./workspace/useSidebarResize";
 import "./workspaceTabs.css";
@@ -287,6 +292,25 @@ export function ChatWindow({
       handleRemoveComment,
     ]
   );
+  const [evidenceJump, setEvidenceJump] = useState<{
+    sessionId: string;
+    worktreePath: string;
+    target: JumpTarget;
+  } | null>(null);
+  const openEvidence = useCallback(
+    (location: SourceLocation) => {
+      const path = association.record?.worktreePath;
+      if (!path) return;
+      activate(path, null);
+      setChangesSession(sessionId);
+      setEvidenceJump((previous) => ({
+        sessionId,
+        worktreePath: path,
+        target: { ...location, nonce: (previous?.target.nonce ?? 0) + 1 },
+      }));
+    },
+    [association.record?.worktreePath, sessionId]
+  );
   const ownWorktreePath = association.record?.worktreePath;
   const attachSelection = (
     anchor: CodeSelection,
@@ -454,6 +478,12 @@ export function ChatWindow({
               key={`${sessionId}:${worktreePath}`}
               worktreePath={worktreePath}
               onChangesLoaded={handleWorktreeLoaded}
+              sourceJump={
+                evidenceJump?.sessionId === sessionId &&
+                evidenceJump.worktreePath === worktreePath
+                  ? evidenceJump.target
+                  : null
+              }
             />
           </aside>
         )}
@@ -602,22 +632,26 @@ export function ChatWindow({
     </div>
   );
   return (
-    <DiffReviewContext.Provider value={diffReview}>
-      <SelectionDiscussionProvider
-        key={`${sessionId}:${worktreePath ?? ""}`}
-        worktreePath={worktreePath ?? ""}
-        harness={chat.session.harness}
-        providerId={chat.session.providerId ?? undefined}
-        modelId={chat.session.selectedModelId}
-        reasoningEffort={chat.session.selectedReasoningEffort}
-        speedTier={chat.session.selectedSpeedTier}
-        personality={chat.session.selectedPersonality}
-        onOpen={() => setChangesSession(sessionId)}
-        onAttach={attachSelection}
-      >
-        <DiscussionSnapshot snapshot={worktreeSnapshot} />
-        {content}
-      </SelectionDiscussionProvider>
-    </DiffReviewContext.Provider>
+    <EvidenceNavigationContext.Provider
+      value={ownWorktreePath ? openEvidence : undefined}
+    >
+      <DiffReviewContext.Provider value={diffReview}>
+        <SelectionDiscussionProvider
+          key={`${sessionId}:${worktreePath ?? ""}`}
+          worktreePath={worktreePath ?? ""}
+          harness={chat.session.harness}
+          providerId={chat.session.providerId ?? undefined}
+          modelId={chat.session.selectedModelId}
+          reasoningEffort={chat.session.selectedReasoningEffort}
+          speedTier={chat.session.selectedSpeedTier}
+          personality={chat.session.selectedPersonality}
+          onOpen={() => setChangesSession(sessionId)}
+          onAttach={attachSelection}
+        >
+          <DiscussionSnapshot snapshot={worktreeSnapshot} />
+          {content}
+        </SelectionDiscussionProvider>
+      </DiffReviewContext.Provider>
+    </EvidenceNavigationContext.Provider>
   );
 }

@@ -74,8 +74,10 @@ type SidebarMode = "changes" | "files";
 export function WorktreeChanges({
   worktreePath,
   onChangesLoaded,
+  sourceJump,
 }: {
   worktreePath: string;
+  sourceJump?: JumpTarget | null;
   /** Called with the parsed All Changes patch after every successful load. */
   onChangesLoaded?: (snapshot: WorktreeSnapshot) => void;
 }) {
@@ -123,6 +125,21 @@ export function WorktreeChanges({
   const [mode, setMode] = useState<SidebarMode>("changes");
   const [activePath, setActivePath] = useState<string | null>(null);
   const [jumpTarget, setJumpTarget] = useState<JumpTarget | null>(null);
+  const appliedSourceJump = useRef<JumpTarget | null>(null);
+  // Publish a new external request in this render, before switching from an
+  // open document can mount the viewport with the previous request.
+  const effectiveJumpTarget =
+    sourceJump && sourceJump !== appliedSourceJump.current
+      ? sourceJump
+      : jumpTarget;
+  useEffect(() => {
+    if (!sourceJump) return;
+    appliedSourceJump.current = sourceJump;
+    setActivePath(sourceJump.path);
+    setHistoricalPath(null);
+    activate(worktreePath, null);
+    setJumpTarget(sourceJump);
+  }, [sourceJump, worktreePath]);
   const [treeToken, setTreeToken] = useState(0);
   const [closing, setClosing] = useState<string | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
@@ -285,10 +302,11 @@ export function WorktreeChanges({
     [files]
   );
 
+  const nextLocalJump = useRef(0);
   const jumpToFile = (path: string) => {
     setActivePath(path);
     activate(worktreePath, null);
-    setJumpTarget((current) => ({ path, nonce: (current?.nonce ?? 0) + 1 }));
+    setJumpTarget({ path, nonce: --nextLocalJump.current });
   };
 
   const open = (path: string, view: "file" | "diff") => {
@@ -339,7 +357,7 @@ export function WorktreeChanges({
             key={JSON.stringify([worktreePath, comparisonRequest])}
             files={state.data.files}
             parsedPatches={state.parsed}
-            jumpTarget={jumpTarget}
+            jumpTarget={effectiveJumpTarget}
             onOpen={(path) => open(path, "diff")}
             diffStyle={diffStyle}
           />
@@ -436,7 +454,7 @@ export function WorktreeChanges({
           onClick={() => {
             setRefresh((value) => ({
               count: value.count + 1,
-              background: false,
+              background: true,
             }));
             setTreeToken((value) => value + 1);
           }}
@@ -457,6 +475,14 @@ export function WorktreeChanges({
           </svg>
         </button>
       </div>
+      {jumpTarget &&
+        state.status === "ready" &&
+        !files.some((file) => file.path === jumpTarget.path) && (
+          <p role="status">
+            {jumpTarget.path} has no diff against this baseline. Choose another
+            comparison to inspect its changes.
+          </p>
+        )}
       {choicesError && (
         <p role="status">
           Comparison choices unavailable: {choicesError}. Refresh to retry.

@@ -1,3 +1,4 @@
+import { useDocumentStore } from "./workspace/documentStore";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   act,
@@ -30,6 +31,7 @@ interface Annotated {
   metadata: unknown;
 }
 const seen = vi.hoisted(() => ({
+  scroll: vi.fn(),
   fileDiff: null as Record<string, unknown> | null,
   items: [] as Array<{ id: string; annotations?: Annotated[] }>,
 }));
@@ -85,7 +87,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
       },
       ref
     ) {
-      useImperativeHandle(ref, () => ({ scrollTo: vi.fn() }));
+      useImperativeHandle(ref, () => ({ scrollTo: seen.scroll }));
 
       const inline = !props.renderCustomHeader;
       const firstItem = props.items[0];
@@ -104,6 +106,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
         <div data-testid={inline ? "file-diff" : "code-view"}>
           {props.items.map((item) => (
             <div key={item.id}>
+              {props.renderCustomHeader?.(item)}
               <button
                 type="button"
                 onClick={() =>
@@ -345,6 +348,361 @@ describe("ChatWindow diff review comments", () => {
     });
   });
 
+  it("opens Changes from a flow evidence ref with its line range", async () => {
+    const spec = {
+      version: 1,
+      parts: [
+        {
+          id: "client",
+          kind: "client",
+          label: "Client",
+          attachments: [{ kind: "ref", path: "f.ts", line: 6, endLine: 8 }],
+        },
+      ],
+      story: [{ caption: "Evidence", steps: [] }],
+    };
+    useChatStore.setState({
+      sessions: {
+        "test-session": createSession({
+          association,
+          messages: [
+            {
+              kind: "assistant",
+              text: "```flow\n" + JSON.stringify(spec) + "\n```",
+              timestamp: "2024-01-01T12:00:00Z",
+            },
+          ],
+        }),
+      },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+    const player = await screen.findByTestId("flow-player");
+    fireEvent.keyDown(player.querySelector("g[data-part-id='client']")!, {
+      key: "Enter",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "f.ts:6–8" }));
+    expect(
+      await screen.findByRole("complementary", { name: "Changes panel" })
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(seen.scroll).toHaveBeenCalledWith({
+        type: "line",
+        id: "f.ts",
+        lineNumber: 6,
+        side: "additions",
+        align: "center",
+      })
+    );
+  });
+
+  it("matches the conversation navigation model through scope and document changes", async () => {
+    const messages: ChatSession["messages"] = [
+      {
+        kind: "assistant",
+        timestamp: "2024-01-01T12:00:00Z",
+        text:
+          "```flow\n" +
+          JSON.stringify({
+            version: 1,
+            parts: [
+              {
+                id: "client",
+                kind: "client",
+                attachments: [
+                  { kind: "ref", path: "f.ts", line: 6, endLine: 8 },
+                  {
+                    kind: "diff",
+                    path: "f.ts",
+                    patch: ALL,
+                    line: 9,
+                    endLine: 10,
+                    side: "old",
+                  },
+                ],
+              },
+            ],
+          }) +
+          "\n```",
+      },
+    ];
+    useChatStore.setState({
+      sessions: {
+        a: createSession({ id: "a", association, messages }),
+        b: createSession({
+          id: "b",
+          association: { ...association, worktreePath: "/other" },
+          messages,
+        }),
+      },
+      activeSessionId: "a",
+      panelOpen: true,
+    });
+    const priorDocuments = useDocumentStore.getState().workspaces;
+    let session = "a";
+    let worktree = "/worktree";
+    const worktrees: Record<string, string> = { a: "/worktree", b: "/other" };
+    let openOwner: string | null = null;
+    let request: { session: string; worktree: string; line: number } | null =
+      null;
+    let expectedScrollCount = 0;
+    const view = render(<ChatWindow sessionId={session} />);
+    type Action =
+      | "ref"
+      | "diff"
+      | "fold"
+      | "refresh"
+      | "toggle"
+      | "session"
+      | "worktree"
+      | "document";
+    const actions: Action[] = [
+      "ref",
+      "fold",
+      "refresh",
+      "ref",
+      "toggle",
+      "toggle",
+      "session",
+      "diff",
+      "worktree",
+      "refresh",
+      "ref",
+      "document",
+      "diff",
+      "session",
+      "ref",
+      "toggle",
+      "session",
+      "diff",
+    ];
+    try {
+      for (const action of actions) {
+        if (action === "ref" || action === "diff") {
+          const line = action === "ref" ? 6 : 9;
+          openOwner = session;
+          request = { session, worktree, line };
+          expectedScrollCount++;
+          const player = await screen.findByTestId("flow-player");
+          if (!screen.queryByTestId("flow-part-inspector"))
+            fireEvent.keyDown(
+              player.querySelector("g[data-part-id='client']")!,
+              { key: "Enter" }
+            );
+          fireEvent.click(
+            screen.getByRole("button", {
+              name: action === "ref" ? "f.ts:6–8" : "f.ts:9–10",
+            })
+          );
+        } else if (action === "toggle") {
+          const opening: boolean = openOwner !== session;
+          openOwner = opening ? session : null;
+          if (
+            opening &&
+            request?.session === session &&
+            request.worktree === worktree
+          )
+            expectedScrollCount++;
+          fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+        } else if (action === "session") {
+          session = session === "a" ? "b" : "a";
+          worktree = worktrees[session];
+          view.rerender(<ChatWindow sessionId={session} />);
+        } else if (action === "worktree") {
+          worktree = "/replacement";
+          worktrees[session] = worktree;
+          act(() =>
+            useChatStore.setState((state) => ({
+              sessions: {
+                ...state.sessions,
+                [session]: {
+                  ...state.sessions[session],
+                  association: { ...association, worktreePath: worktree },
+                },
+              },
+            }))
+          );
+        } else if (action === "fold") {
+          fireEvent.click(
+            await screen.findByRole("button", { name: "Toggle diff for f.ts" })
+          );
+        } else if (action === "refresh") {
+          const count = mockedCommands.loadWorktreeChanges.mock.calls.length;
+          fireEvent.click(
+            screen.getByRole("button", { name: "Refresh changes" })
+          );
+          await waitFor(() =>
+            expect(
+              mockedCommands.loadWorktreeChanges.mock.calls.length
+            ).toBeGreaterThan(count)
+          );
+        } else {
+          act(() =>
+            useDocumentStore.setState({
+              workspaces: {
+                [worktree]: {
+                  order: ["document.bin"],
+                  active: "document.bin",
+                  documents: {
+                    "document.bin": {
+                      path: "document.bin",
+                      disk: { kind: "binary" },
+                      draft: null,
+                      seed: 0,
+                      view: "file",
+                      baseline: null,
+                      conflict: null,
+                      saving: false,
+                      saveError: null,
+                      loadToken: 0,
+                    },
+                  },
+                },
+              },
+            })
+          );
+        }
+        const open = openOwner === session;
+        if (open && action !== "document")
+          await screen.findByRole("button", { name: "Refresh changes" });
+        await act(async () => {});
+        expect(
+          screen.queryByRole("complementary", { name: "Changes panel" }) !==
+            null,
+          action
+        ).toBe(open);
+        await waitFor(() =>
+          expect(seen.scroll, action).toHaveBeenCalledTimes(expectedScrollCount)
+        );
+        if (action === "ref" || action === "diff") {
+          expect(seen.scroll).toHaveBeenLastCalledWith({
+            type: "line",
+            id: "f.ts",
+            lineNumber: request!.line,
+            side: action === "ref" ? "additions" : "deletions",
+            align: "center",
+          });
+          expect(
+            useDocumentStore.getState().workspaces[worktree]?.active ?? null
+          ).toBeNull();
+          expect(mockedCommands.loadWorktreeChanges).toHaveBeenCalledWith(
+            worktree,
+            expect.anything()
+          );
+        }
+      }
+    } finally {
+      view.unmount();
+      useDocumentStore.setState({ workspaces: priorDocuments });
+    }
+  });
+
+  it.each(["session", "worktree"] as const)(
+    "discards a pending evidence load after a %s switch",
+    async (scope) => {
+      const result = await mockedCommands.loadWorktreeChanges("/worktree", {
+        base: null,
+        target: { kind: "working_tree" },
+        merge_base: true,
+      });
+      mockedCommands.loadWorktreeChanges.mockClear();
+      let finish!: (value: typeof result) => void;
+      mockedCommands.loadWorktreeChanges.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+      const messages: ChatSession["messages"] = [
+        {
+          kind: "assistant",
+          timestamp: "2024-01-01T12:00:00Z",
+          text:
+            "```flow\n" +
+            JSON.stringify({
+              version: 1,
+              parts: [
+                {
+                  id: "client",
+                  kind: "client",
+                  attachments: [
+                    { kind: "ref", path: "f.ts", line: 6, endLine: 8 },
+                  ],
+                },
+              ],
+            }) +
+            "\n```",
+        },
+      ];
+      useChatStore.setState({
+        sessions: {
+          a: createSession({ id: "a", association, messages }),
+          b: createSession({
+            id: "b",
+            association: { ...association, worktreePath: "/other" },
+            messages,
+          }),
+        },
+        activeSessionId: "a",
+        panelOpen: true,
+      });
+      const view = render(<ChatWindow sessionId="a" />);
+      const activateRef = async () => {
+        const player = await screen.findByTestId("flow-player");
+        if (!screen.queryByTestId("flow-part-inspector"))
+          fireEvent.keyDown(player.querySelector("g[data-part-id='client']")!, {
+            key: "Enter",
+          });
+        fireEvent.click(screen.getByRole("button", { name: "f.ts:6–8" }));
+      };
+      try {
+        await activateRef();
+        await waitFor(() =>
+          expect(mockedCommands.loadWorktreeChanges).toHaveBeenCalledTimes(1)
+        );
+        if (scope === "session") view.rerender(<ChatWindow sessionId="b" />);
+        else {
+          act(() =>
+            useChatStore.setState((state) => ({
+              sessions: {
+                ...state.sessions,
+                a: {
+                  ...state.sessions.a,
+                  association: { ...association, worktreePath: "/replacement" },
+                },
+              },
+            }))
+          );
+          await screen.findByRole("button", { name: "Toggle diff for f.ts" });
+        }
+        // Resolve the retired load only after the new scope has mounted.
+        await act(async () => finish(result));
+        expect(seen.scroll).not.toHaveBeenCalled();
+        if (scope === "session")
+          expect(
+            screen.queryByRole("complementary", { name: "Changes panel" })
+          ).toBeNull();
+        await activateRef();
+        await waitFor(() =>
+          expect(seen.scroll).toHaveBeenCalledExactlyOnceWith({
+            type: "line",
+            id: "f.ts",
+            lineNumber: 6,
+            side: "additions",
+            align: "center",
+          })
+        );
+        expect(mockedCommands.loadWorktreeChanges).toHaveBeenLastCalledWith(
+          scope === "session" ? "/other" : "/replacement",
+          expect.anything()
+        );
+      } finally {
+        view.unmount();
+      }
+    }
+  );
+
   it("shares a tool-call comment with All Changes, then sends and clears it", async () => {
     seedSession();
     render(<ChatWindow sessionId="test-session" />);
@@ -367,13 +725,15 @@ describe("ChatWindow diff review comments", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     await waitFor(() => expect(seen.items).toHaveLength(1));
-    expect(seen.items[0].annotations).toEqual([
-      {
-        side: "additions",
-        lineNumber: 6,
-        metadata: { commentIds: [expect.any(String)], draft: false },
-      },
-    ]);
+    await waitFor(() =>
+      expect(seen.items[0].annotations).toEqual([
+        {
+          side: "additions",
+          lineNumber: 6,
+          metadata: { commentIds: [expect.any(String)], draft: false },
+        },
+      ])
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     fireEvent.click(screen.getByTitle("Start session"));

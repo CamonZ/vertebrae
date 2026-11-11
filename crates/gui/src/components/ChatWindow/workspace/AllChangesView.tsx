@@ -1,3 +1,4 @@
+import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
 import type { DiffPreferences } from "../../../utils/codeAppearance";
 import {
   useContext,
@@ -23,8 +24,7 @@ import type { BackgroundOutputs } from "../../../background/types";
 import { MARKER_TEXT } from "../../thread/toolChange/worktreeDelta";
 import { diffWorkerPool } from "../../thread/toolChange/diffWorkerPool";
 
-export interface JumpTarget {
-  path: string;
+export interface JumpTarget extends SourceLocation {
   /** Distinguishes repeated jumps to the same file. */
   nonce: number;
 }
@@ -167,6 +167,25 @@ export default function AllChangesView({
       ? { id: selectedPath, range: selectedLinesFor(selectedPath)! }
       : null
     : undefined;
+  const [dismissedEvidence, setDismissedEvidence] = useState<number | null>(
+    null
+  );
+  const evidenceSelection =
+    jumpTarget?.line !== undefined &&
+    dismissedEvidence !== jumpTarget.nonce &&
+    itemPaths.has(jumpTarget.path)
+      ? {
+          id: jumpTarget.path,
+          range: {
+            start: jumpTarget.line,
+            end: jumpTarget.endLine ?? jumpTarget.line,
+            side:
+              jumpTarget.side === "old"
+                ? ("deletions" as const)
+                : ("additions" as const),
+          },
+        }
+      : null;
   const codeViewOptions = useMemo(
     () => ({
       ...options,
@@ -238,9 +257,19 @@ export default function AllChangesView({
       );
       return;
     }
-    handledJump.current = jumpTarget.nonce;
     if (itemPaths.has(path)) {
-      viewRef.current?.scrollTo({ type: "item", id: path, align: "start" });
+      handledJump.current = jumpTarget.nonce;
+      viewRef.current?.scrollTo(
+        jumpTarget.line !== undefined
+          ? {
+              type: "line",
+              id: path,
+              lineNumber: jumpTarget.line,
+              side: jumpTarget.side === "old" ? "deletions" : "additions",
+              align: "center",
+            }
+          : { type: "item", id: path, align: "start" }
+      );
       return;
     }
     const container = containerRef.current;
@@ -248,6 +277,7 @@ export default function AllChangesView({
       `[${FALLBACK_ATTRIBUTE}="${CSS.escape(path)}"]`
     );
     if (container && target) {
+      handledJump.current = jumpTarget.nonce;
       const top =
         target.getBoundingClientRect().top -
         container.getBoundingClientRect().top +
@@ -265,13 +295,14 @@ export default function AllChangesView({
           className="changes-code-view"
           items={reviewItems}
           options={codeViewOptions}
-          selectedLines={selectedLines}
+          selectedLines={selectedLines ?? evidenceSelection}
           onSelectedLinesChange={
             review.enabled
               ? (next) => {
                   const path = next ? (itemPaths.get(next.id) ?? next.id) : "";
                   const range = next ? next.range : null;
 
+                  setDismissedEvidence(jumpTarget?.nonce ?? null);
                   onSelectionChange(path, range);
                 }
               : undefined

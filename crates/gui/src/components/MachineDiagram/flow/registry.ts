@@ -21,6 +21,8 @@ import {
   type TimelineMarker,
 } from "../timeline";
 import { own, type Fields } from "./fields";
+import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
+import type { AttachmentSpec } from "./spec";
 import type { ArrangementName, TokenKind } from "./spec";
 
 export type PortDirection = "in" | "out" | "both";
@@ -194,7 +196,16 @@ export class PartRegistry {
   }
 }
 
+export interface AttachmentRenderContext {
+  openSource?: (location: SourceLocation) => void;
+}
+
 export interface AttachmentKindDef {
+  /** Panel content; common evidence labels are supplied by the host. */
+  render?(
+    attachment: AttachmentSpec,
+    context: AttachmentRenderContext
+  ): ReactNode;
   readonly kind: string;
   readonly description: string;
   readonly fields: Fields;

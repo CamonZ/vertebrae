@@ -5,6 +5,7 @@
  * attachment also carries `status` (verified | inferred) and `source`
  * (scenario | trace), checked by the validator for all kinds.
  */
+import { attachmentRenderers } from "./attachmentRenderers";
 import type { Fields } from "./fields";
 import type { AttachmentKindDef, AttachmentRegistry } from "./registry";
 
@@ -27,7 +28,7 @@ export const ATTACHMENT_COMMON_FIELDS: Fields = {
   },
 };
 
-const lineRange: AttachmentKindDef["check"] = (body, path) =>
+const lineRange: NonNullable<AttachmentKindDef["check"]> = (body, path) =>
   typeof body.line === "number" &&
   typeof body.endLine === "number" &&
   body.endLine < body.line
@@ -58,18 +59,24 @@ export const BUILTIN_ATTACHMENTS: readonly AttachmentKindDef[] = [
     fields: {
       path: { type: "string" },
       patch: { type: "string", description: "unified diff text" },
+      line: { type: "integer", min: 1 },
+      endLine: { type: "integer", min: 1 },
+      side: { type: "string", enum: ["old", "new"], default: "new" },
       base: { type: "string" },
       head: { type: "string" },
     },
-    check: (body, path) =>
-      body.patch === undefined && body.base === undefined
+    check: (body, path) => [
+      ...lineRange(body, path),
+      ...(body.patch === undefined && body.base === undefined
         ? [{ path, message: "a diff needs a patch or a base/head range" }]
-        : [],
+        : []),
+    ],
   },
   {
     kind: "formula",
     description: "a formula and the value it gives",
     fields: {
+      unit: { type: "string" },
       expression: { type: "string", required: true },
       result: { type: "json" },
     },
@@ -143,5 +150,6 @@ export const BUILTIN_ATTACHMENTS: readonly AttachmentKindDef[] = [
 ];
 
 export function registerBuiltinAttachments(r: AttachmentRegistry): void {
-  for (const def of BUILTIN_ATTACHMENTS) r.register(def);
+  for (const def of BUILTIN_ATTACHMENTS)
+    r.register({ ...def, render: attachmentRenderers[def.kind] });
 }
