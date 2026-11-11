@@ -50,7 +50,8 @@ describe("registered flow mechanisms", () => {
         ...part.querySelectorAll<SVGElement>("[style]"),
       ])
         e.setAttribute("style", e.style.cssText);
-      expect(elements.length).toBeGreaterThan(1);
+      // A trace at rest is only its frame; its spans appear as steps record them.
+      expect(elements.length).toBeGreaterThan(kind === "trace" ? 0 : 1);
       expect(
         part.innerHTML.startsWith(elements.map((e) => e.outerHTML).join(""))
       ).toBe(true);

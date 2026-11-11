@@ -211,7 +211,7 @@ describe("validation errors name the spec path", () => {
     const s = base();
     s.parts[1].kind = "wroker";
     expect(errorsOf(s)).toContain(
-      'parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); registered: aggregator, boundary, client, event rail, guard, joiner, pipeline, pool, router, session, source, splitter, transform, worker'
+      'parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); registered: aggregator, alert, approval, boundary, circuit breaker, client, event rail, guard, joiner, metric, pipeline, pool, queue, rate limiter, retry, router, session, source, splitter, timeout, trace, transform, worker'
     );
   });
 
@@ -219,7 +219,7 @@ describe("validation errors name the spec path", () => {
     const s = base();
     s.story[0].steps[1].verb = "drain";
     expect(errorsOf(s)).toContain(
-      'story[0].steps[1].verb: worker "w" does not react to verb "drain"; its verbs: cancel, fail, finish, stage; "drain" is a verb of: pool'
+      'story[0].steps[1].verb: worker "w" does not react to verb "drain"; its verbs: cancel, fail, finish, stage; "drain" is a verb of: pool, queue'
     );
     s.story[0].steps[1].verb = "decide";
     expect(errorsOf(s)).toContain(
@@ -476,7 +476,7 @@ describe("registries: extend without changing the compiler", () => {
     const plain = createFlowRegistry();
     plain.attachments.register(registry.attachments.get("metric snapshot")!);
     expect(errorsOf(s, plain)).toEqual([
-      'parts[1].kind: unknown part kind "test lamp"; registered: aggregator, boundary, client, event rail, guard, joiner, pipeline, pool, router, session, source, splitter, transform, worker',
+      'parts[1].kind: unknown part kind "test lamp"; registered: aggregator, alert, approval, boundary, circuit breaker, client, event rail, guard, joiner, metric, pipeline, pool, queue, rate limiter, retry, router, session, source, splitter, timeout, trace, transform, worker',
     ]);
     // The generated JSON Schema includes the new kinds.
     const schema = JSON.stringify(flowSpecJsonSchema(registry));
@@ -581,17 +581,26 @@ describe("compiler features", () => {
     };
     expect(schema.$defs.part.properties.kind.enum).toEqual([
       "aggregator",
+      "alert",
+      "approval",
       "boundary",
+      "circuit breaker",
       "client",
       "event rail",
       "guard",
       "joiner",
+      "metric",
       "pipeline",
       "pool",
+      "queue",
+      "rate limiter",
+      "retry",
       "router",
       "session",
       "source",
       "splitter",
+      "timeout",
+      "trace",
       "transform",
       "worker",
     ]);

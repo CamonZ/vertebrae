@@ -5,7 +5,10 @@
  * after the card seats, then the card leaves allow E or deny S.
  */
 import type { PartKindDef } from "../registry";
-import { Y, centred, sideGates } from "./common";
+import { sideGates } from "./common";
+
+/** The guard's rail sits at 195, not the 200 centre (gallery). */
+const Y = 195;
 
 const ports = {
   in: { side: "W", x: 220, y: Y, direction: "in", tokens: ["request"] },
@@ -13,7 +16,7 @@ const ports = {
   deny: {
     side: "S",
     x: 320,
-    y: 275,
+    y: 270,
     direction: "out",
     tokens: ["result", "request"],
     dashed: true,
@@ -32,8 +35,8 @@ export const guardPart: PartKindDef<GuardProps, { decisions: number }> = {
   job: "allows or denies",
   family: "policy",
   footprint: "S",
-  bb: centred(200, 150),
-  status: { x: 320, y: 318 },
+  bb: [220, 120, 200, 150],
+  status: { x: 470, y: 300 },
   props: {
     allow: { type: "string[]", default: [] },
     reason: { type: "string", default: "not allowed" },
@@ -85,7 +88,7 @@ export const guardPart: PartKindDef<GuardProps, { decisions: number }> = {
               : [
                   [
                     [320, Y],
-                    [320, 275],
+                    [320, 270],
                   ],
                   decided,
                   0.4,

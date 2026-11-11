@@ -10,8 +10,8 @@ import { Y, sideGates } from "./common";
 
 const tokens = ["event", "result", "request", "signal"] as const;
 const ports = {
-  in: { side: "W", x: 35, y: Y, direction: "in", tokens },
-  out: { side: "E", x: 605, y: Y, direction: "out", tokens },
+  in: { side: "W", x: 40, y: Y, direction: "in", tokens },
+  out: { side: "E", x: 610, y: Y, direction: "out", tokens },
 } as const satisfies PartKindDef["ports"];
 
 export const eventRailPart: PartKindDef<
@@ -22,8 +22,8 @@ export const eventRailPart: PartKindDef<
   job: "ordered facts",
   family: "messaging and flow control",
   footprint: "L",
-  bb: [35, 170, 570, 60],
-  status: { x: 320, y: 268 },
+  bb: [40, 170, 570, 60],
+  status: { x: 200, y: 150, align: "left" },
   ports,
   gates: () => sideGates(ports),
   init: () => ({ events: 0 }),
@@ -50,8 +50,8 @@ export const eventRailPart: PartKindDef<
             [
               [
                 [
-                  [35, Y],
-                  [605, Y],
+                  [40, Y],
+                  [610, Y],
                 ],
                 t,
                 0.6,
@@ -67,7 +67,7 @@ export const eventRailPart: PartKindDef<
           out.card(
             dot(
               [
-                [35, Y],
+                [40, Y],
                 [320, Y],
               ],
               t,

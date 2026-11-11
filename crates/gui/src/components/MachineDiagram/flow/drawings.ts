@@ -210,4 +210,183 @@ export const FLOW_DRAWINGS = {
       region: typeof p.props.region === "string" ? p.props.region : undefined,
     });
   },
+  queue: (t, p) => {
+    const deliveries = p.steps.filter((s) =>
+      ["drain", "retry"].includes(s.verb)
+    );
+    const dead = p.steps.some((s) => s.verb === "fail");
+    return MACHINE_PARTS.queue.draw(t, {
+      cap: Number(p.props.slots ?? 5),
+      cons:
+        deliveries.length || dead
+          ? deliveries.map(
+              (s) => [s.t + 0.6, s.verb === "retry" ? "red" : "green"] as const
+            )
+          : null,
+      dlq: dead,
+    });
+  },
+  "event rail": (t, p) => {
+    const sends = p.steps.filter((s) => s.verb === "send");
+    const wait = p.steps.find((s) => s.verb === "wait");
+    const resume =
+      wait && p.steps.find((s) => s.verb === "resume" && s.t > wait.t);
+    const last = sends.at(-1);
+    return MACHINE_PARTS["event rail"].draw(t, {
+      dots: sends.map((s) => {
+        const role = s.args.role;
+        return [
+          s.t + 0.3,
+          role === "amber" ? "ring" : role === "dim" ? "delta" : "msg",
+          s.t + 1.2,
+        ] as const;
+      }),
+      done: last ? last.t + 0.7 : null,
+      fail: sends.some((s) => s.args.role === "red"),
+      resume:
+        wait && resume
+          ? {
+              arr: sends.map((s) => s.t + 0.3),
+              rd: sends.map((s) =>
+                s.t > wait.t && s.t < resume.t ? resume.t + 0.5 : s.t + 0.3
+              ),
+              cut: [wait.t, resume.t],
+            }
+          : null,
+    });
+  },
+  retry: (t, p) => {
+    const state = p.state as {
+      lamps: [number, "red" | "green"][];
+      rings: [number, number][];
+    };
+    return MACHINE_PARTS.retry.draw(t, {
+      lamps: state.lamps,
+      rings: state.rings,
+    });
+  },
+  timeout: (t, p) => {
+    const state = p.state as {
+      fuse: {
+        from: number;
+        to: number | null;
+        role: "green" | "red" | null;
+      } | null;
+      callee: [number, number | null] | null;
+    };
+    const end = p.timeline.period + 1;
+    const fuse = state.fuse;
+    const stop = fuse ? (fuse.to ?? end) : end;
+    return MACHINE_PARTS.timeout.draw(t, {
+      dl: fuse
+        ? [fuse.from, fuse.from + Number(p.props.budget ?? 2) * 1.1]
+        : [end, end + 1],
+      ring: fuse
+        ? [fuse.from, stop, fuse.role ?? "red"]
+        : [end, end + 1, "red"],
+      stop,
+      svc: state.callee ? [state.callee[0], state.callee[1] ?? end] : null,
+      fail: fuse?.role === "red",
+      period: p.timeline.period,
+    });
+  },
+  "rate limiter": (t, p) => {
+    const state = p.state as {
+      spent: (number | null)[];
+      refilled: (number | null)[];
+    };
+    const cap = Number(p.props.tokens ?? 4);
+    const never = p.timeline.period + 1;
+    return MACHINE_PARTS["rate limiter"].draw(t, {
+      tok: [0, 1, 2, 3].map((i) => [
+        0,
+        i >= cap ? 0 : (state.spent[i] ?? never),
+        state.refilled[i] ?? never,
+      ]),
+      period: p.timeline.period,
+    });
+  },
+  "circuit breaker": (t, p) => {
+    const state = p.state as {
+      fails: number[];
+      open: [number, number | null] | null;
+      half: [number, number | null] | null;
+      cool: [number, number] | null;
+      trial: number | null;
+    };
+    const never = p.timeline.period + 1;
+    return MACHINE_PARTS["circuit breaker"].draw(t, {
+      fails: state.fails.map((a) => a + 0.1).slice(0, 3),
+      open: state.open
+        ? [state.open[0], state.open[1] ?? never]
+        : [never, never + 1],
+      half: state.half ? [state.half[0], state.half[1] ?? never] : null,
+      cool: state.cool ?? [never, never + 1],
+      trial: state.trial ?? never,
+      fail: p.steps.at(-1)?.verb === "fail" && state.open !== null,
+    });
+  },
+  guard: (t, p) =>
+    MACHINE_PARTS.guard.draw(t, {
+      rings: p.steps
+        .filter((s) => s.verb === "decide")
+        .map(
+          (s) =>
+            [
+              s.t + 0.4,
+              s.t + 0.85,
+              s.outcome.role === "red" ? "red" : "green",
+            ] as const
+        ),
+    }),
+  approval: (t, p) => {
+    const state = p.state as {
+      waitFrom: number | null;
+      end: number | null;
+      lift: number | null;
+      failed: boolean;
+      expired: boolean;
+    };
+    const never = p.timeline.period + 1;
+    const from = state.waitFrom ?? never;
+    return MACHINE_PARTS.approval.draw(t, {
+      wait: [from, state.end ?? never],
+      lift: state.lift != null ? [state.lift, never] : [never, never],
+      ring:
+        state.expired && state.end != null ? [from, state.end, "red"] : null,
+      fail: state.failed,
+    });
+  },
+  metric: (t, p) => {
+    const state = p.state as {
+      ev: number[];
+      val: [number, string, "dim" | "ink" | "amber" | "red"][];
+    };
+    return MACHINE_PARTS.metric.draw(t, {
+      ev: state.ev,
+      val: state.val,
+      period: p.timeline.period,
+    });
+  },
+  trace: (t, p) => {
+    const state = p.state as {
+      spans: [number, number, number, number, string][];
+      cursor: [number, number] | null;
+    };
+    return MACHINE_PARTS.trace.draw(t, {
+      sp: state.spans,
+      fail: p.steps.some(
+        (s) => s.verb === "finish" && s.args.outcome === "error"
+      ),
+      cursor: state.cursor ?? [0.6, 3.7],
+    });
+  },
+  alert: (t, p) => {
+    const state = p.state as { fire: number | null; ack: number | null };
+    return MACHINE_PARTS.alert.draw(t, {
+      fire: state.fire ?? p.timeline.period + 1,
+      ack: state.ack,
+      fail: p.steps.some((s) => s.verb === "escalate"),
+    });
+  },
 } satisfies Record<keyof typeof MACHINE_PARTS, Drawing>;

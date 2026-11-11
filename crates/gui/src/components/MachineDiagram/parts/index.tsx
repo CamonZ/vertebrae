@@ -12,6 +12,17 @@ import {
   type UniversalState,
 } from "../universalStates";
 import { aggregatorMachine } from "./aggregator";
+import { alertMachine } from "./alert";
+import { approvalMachine } from "./approval";
+import { circuitBreakerMachine } from "./circuitBreaker";
+import { eventRailMachine } from "./eventRail";
+import { guardMachine } from "./guard";
+import { metricMachine } from "./metric";
+import { queueMachine } from "./queue";
+import { rateLimiterMachine } from "./rateLimiter";
+import { retryMachine } from "./retry";
+import { timeoutMachine } from "./timeout";
+import { traceMachine } from "./trace";
 import { boundaryMachine } from "./boundary";
 import { clientMachine } from "./client";
 import { joinerMachine } from "./joiner";
@@ -27,6 +38,17 @@ import type { MachinePartDef } from "./types";
 export type { MachinePartDef, PartScenario } from "./types";
 export {
   aggregatorMachine,
+  alertMachine,
+  approvalMachine,
+  circuitBreakerMachine,
+  eventRailMachine,
+  guardMachine,
+  metricMachine,
+  queueMachine,
+  rateLimiterMachine,
+  retryMachine,
+  timeoutMachine,
+  traceMachine,
   boundaryMachine,
   clientMachine,
   joinerMachine,
@@ -51,7 +73,18 @@ export const MACHINE_PARTS = {
   aggregator: aggregatorMachine,
   pipeline: pipelineMachine,
   pool: poolMachine,
+  queue: queueMachine,
+  "event rail": eventRailMachine,
+  retry: retryMachine,
+  timeout: timeoutMachine,
+  "rate limiter": rateLimiterMachine,
+  "circuit breaker": circuitBreakerMachine,
+  guard: guardMachine,
+  approval: approvalMachine,
   boundary: boundaryMachine,
+  metric: metricMachine,
+  trace: traceMachine,
+  alert: alertMachine,
 } as const;
 
 export type MachinePartName = keyof typeof MACHINE_PARTS;

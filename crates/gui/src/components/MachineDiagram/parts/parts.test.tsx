@@ -57,7 +57,18 @@ const STORY_VERBS: Record<string, readonly string[]> = {
   aggregator: ["fail", "flush", "record", "reduce"],
   pipeline: ["cancel", "fail", "finish", "stage"],
   pool: ["close", "drain", "release", "spawn", "wait"],
+  queue: ["drain", "fail", "retry", "send", "wait"],
+  "event rail": ["observe", "resume", "send", "wait"],
+  retry: ["fail", "retry", "send", "wait"],
+  timeout: ["cancel", "expire", "tick", "wait"],
+  "rate limiter": ["fail", "refill", "send", "wait"],
+  "circuit breaker": ["fail", "probe", "reset", "send", "trip"],
+  guard: ["decide", "fail", "validate"],
+  approval: ["approve", "expire", "reject", "wait"],
   boundary: ["close", "cross", "fail", "spawn"],
+  metric: ["fail", "measure", "observe"],
+  trace: ["finish", "span", "stage"],
+  alert: ["acknowledge", "escalate", "notify"],
 };
 
 function Cell({
@@ -178,8 +189,13 @@ describe.each(PARTS)("%s", (name, def) => {
       expect(el.querySelector("tspan")).toBeNull();
       expect(el.textContent).toHaveLength(1);
     }
-    expect(container.querySelectorAll(".md-box").length).toBeGreaterThan(0);
-    expect(container.querySelectorAll(".md-rail").length).toBeGreaterThan(0);
+    // A frame or a rail identifies every part; the event rail is all rail and
+    // the trace (no ports) is all frame.
+    const frames = container.querySelectorAll(".md-box").length;
+    const rails = container.querySelectorAll(".md-rail").length;
+    expect(frames + rails).toBeGreaterThan(0);
+    if (name !== "event rail") expect(frames).toBeGreaterThan(0);
+    if (name !== "trace") expect(rails).toBeGreaterThan(0);
   });
 
   it("is registered in the flow-spec registry with the catalogue geometry and verbs", () => {
@@ -375,5 +391,147 @@ story:
 `;
     expect(notes(compile(spec(false)), "r")).toContain("no route · 404");
     expect(notes(compile(spec(true)), "r")).toContain("no match → fallback");
+  });
+});
+
+const MESSAGING = `
+version: 1
+parts:
+  - { id: q, kind: queue, props: { slots: 2 } }
+  - { id: rt, kind: retry }
+  - { id: to, kind: timeout, props: { budget: 2 } }
+  - { id: rl, kind: rate limiter, props: { tokens: 2 } }
+  - { id: cb, kind: circuit breaker, props: { threshold: 2 } }
+  - { id: g, kind: guard, props: { allow: [read], reason: read only } }
+  - { id: ap, kind: approval }
+  - { id: m, kind: metric }
+  - { id: tr, kind: trace }
+  - { id: al, kind: alert }
+  - { id: er, kind: event rail }
+cards:
+  - { id: j1, token: request, label: job 1 }
+  - { id: j2, token: request, label: job 2 }
+  - { id: j3, token: request, label: job 3 }
+  - { id: r1, token: request, label: retry job }
+  - { id: t1, token: request, label: call }
+  - { id: l1, token: request, label: req 1 }
+  - { id: l2, token: request, label: req 2 }
+  - { id: l3, token: request, label: req 3 }
+  - { id: c1, token: request, label: call }
+  - { id: g1, token: request, label: write }
+  - { id: a1, token: request, label: deploy }
+  - { id: s1, token: event, label: sample }
+  - { id: e1, token: event, label: errors > 5 }
+story:
+  - caption: a queue takes two jobs, rejects a third, delivers one and sends one to the dead letter
+    steps:
+      - { verb: send, part: q, card: j1 }
+      - { verb: send, part: q, card: j2 }
+      - { verb: send, part: q, card: j3 }
+      - { verb: drain, part: q, card: j1 }
+      - { verb: fail, part: q, card: j2 }
+  - caption: retry backs off then succeeds; a timeout answers; a bucket empties and a 429 follows
+    steps:
+      - { verb: send, part: rt, card: r1 }
+      - { verb: wait, part: rt }
+      - { verb: send, part: rt, card: r1, args: { outcome: ok } }
+      - { verb: wait, part: to, card: t1 }
+      - { verb: tick, part: to, args: { answer: true } }
+      - { verb: send, part: rl, card: l1 }
+      - { verb: send, part: rl, card: l2 }
+      - { verb: fail, part: rl, card: l3 }
+  - caption: a breaker opens and a trial closes it; a guard denies and a person approves
+    steps:
+      - { verb: fail, part: cb }
+      - { verb: fail, part: cb }
+      - { verb: send, part: cb, card: c1 }
+      - { verb: trip, part: cb }
+      - { verb: probe, part: cb }
+      - { verb: reset, part: cb }
+      - { verb: decide, part: g, card: g1, args: { subject: write } }
+      - { verb: wait, part: ap, card: a1 }
+      - { verb: approve, part: ap, card: a1 }
+  - caption: samples count past the limit, spans nest, an alert pages and escalates
+    steps:
+      - { verb: measure, part: m, card: s1, args: { by: 30 } }
+      - { verb: measure, part: m, args: { by: 30 } }
+      - { verb: observe, part: m }
+      - { verb: stage, part: tr, args: { name: request } }
+      - { verb: span, part: tr, args: { name: query } }
+      - { verb: finish, part: tr, args: { outcome: error } }
+      - { verb: notify, part: al, card: e1 }
+      - { verb: escalate, part: al }
+      - { verb: send, part: er, args: { event: tool started, role: amber } }
+      - { verb: wait, part: er }
+      - { verb: resume, part: er, args: { from: 1 } }
+`;
+
+describe("messaging, policy and observability parts in a flow spec", () => {
+  it("compiles a spec using every new part kind with the catalogue status lines", () => {
+    const d = compile(MESSAGING);
+    expect(notes(d, "q")).toEqual(
+      expect.arrayContaining([
+        "1 waiting",
+        "2 waiting",
+        "full · job 3 rejected",
+        "job 1 delivered",
+        "→ dead letter",
+      ])
+    );
+    expect(notes(d, "rt")).toEqual(
+      expect.arrayContaining([
+        "attempt 1",
+        "failed · backing off",
+        "attempt 2",
+        "ok on attempt 2",
+      ])
+    );
+    expect(notes(d, "to")).toEqual(
+      expect.arrayContaining(["waiting · 2 s budget", "answered in time"])
+    );
+    expect(notes(d, "rl")).toEqual(
+      expect.arrayContaining(["1 tokens", "empty", "rejected · 429"])
+    );
+    expect(notes(d, "cb")).toEqual(
+      expect.arrayContaining([
+        "1 failure",
+        "2 failures · open",
+        "open · fail fast",
+        "half-open · one trial",
+        "trial ok · closed",
+      ])
+    );
+    expect(notes(d, "g")).toContain("deny · read only");
+    expect(notes(d, "ap")).toEqual(
+      expect.arrayContaining(["waiting for a person", "approved"])
+    );
+    expect(notes(d, "m")).toEqual(
+      expect.arrayContaining(["counting", "over limit"])
+    );
+    expect(notes(d, "tr")).toEqual(
+      expect.arrayContaining(["recording", "slow · query failed"])
+    );
+    expect(notes(d, "al")).toEqual(
+      expect.arrayContaining(["firing", "no ack · escalating"])
+    );
+    expect(notes(d, "er")).toEqual(
+      expect.arrayContaining([
+        "tool started",
+        "disconnected",
+        "reconnect · from #1",
+        "caught up",
+      ])
+    );
+  });
+
+  it("a full queue rejects, and the rest of the queue moves forward when one is delivered", () => {
+    const d = compile(MESSAGING);
+    const q = d.parts.find((p) => p.id === "q")!;
+    expect(
+      q.timeline.cards.some((c) => c.tags.some((t) => t.text === "job 3"))
+    ).toBe(true);
+    expect(
+      notes(d, "q").filter((n) => n === "full · job 3 rejected")
+    ).toHaveLength(1);
   });
 });
